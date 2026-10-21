@@ -13,27 +13,6 @@ packages:
     - dmls
     - claudine-cli
 human_review: false
-message_to_agent: |-
-    Phase 5 settled the worksheet's two verify questions. Number-declared values
-    (`phase`, `total_phases`) reach `==` as numbers after schema coercion, even when
-    quoted or passed on the CLI; this is pinned by
-    `strict_equality_composition::a_number_declared_value_compares_as_a_number_after_coercion`.
-    Boolean flags read through `frontmatter()` stay YAML booleans. Every such site is kept.
-    Rewritten in Phase 5: `prompts/code-comment-quality.md` (now
-    `!is_empty(ctx.current_packages)`, because `ctx.package` does not exist), the
-    `ctx.today != ''` examples in the claudine skill (`hook-actions.md`) and in
-    `configuring-actions.md`, the claudine `lifecycle.md` guard list, and three
-    claudine runner tests that had become vacuous.
-    Phase 6 still owns all darkmatter equality prose: `interpolation.md:90-93`
-    (the "6" auto-convert note and its malformed `color || blue == "blue"`
-    example, in one bullet), `lsp/features.md:45`, `darkmatter-expressions.md`,
-    `schemas/definition.md:2596`, `transclusion-design.md:374`,
-    `expression-engine.md`, and `.claude/skills/darkmatter/expressions.md`.
-    `just test-prompts` has two failures that predate this fix: root prompts
-    validated without arguments fail on missing required properties, and the
-    claudine test `shipped_implement_plan_prepares_with_unset_optional_commit_message`
-    fails because the live `implement-plan.md` declares `commit_message: ""`
-    (added 2026-10-15). Don't treat either as a regression.
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/compose/expression/equality.rs
     - darkmatter/lib/src/markdown/compose/expression/mod.rs
@@ -82,6 +61,60 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/claudine/hook-actions.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/expression-engine.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/transclusion/transclusion-design.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/compose.md
+source_code:
+    - darkmatter/lib/src/markdown/compose/expression/equality.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/semantics.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/tests/l1/expression_strict_equality.rs
+    - darkmatter/lib/tests/l1/expression_type_scope.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/tests/l1/shell_template_body_guards.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/strict_equality_composition.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/common/type_scope_cases.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - claudine/lib/src/composition/looping/expression/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/scope_site_conformance.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - claudine/lib/src/dispatch/runner/tests.rs
+    - claudine/lib/src/dispatch/expression.rs
+    - claudine/cli/tests/l1/implement_plan_commit_message.rs
+    - claudine/cli/tests/l1/sequence_grammar_matrix.rs
+    - prompts/code-comment-quality.md
+documentation:
+    - darkmatter/dmls/docs/diagnostics.md
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - .claude/skills/claudine/hook-actions.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/expression-engine.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/transclusion/transclusion-design.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/compose.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-10-20-strict-equality (6 phases)
@@ -732,3 +765,58 @@ The copies' pre-existing drift from the live prompt is recorded in Phase 4. No o
 - Gate-skip check: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` gives `packages: ['claudine', 'claudine-cli', 'darkmatter', 'dmls', 'test-toolkit']` and `change_class: package`, so the gates were required and were run.
 - No cross-OS check: no path, process, or platform logic changed.
 - Skill: the darkmatter skill needed no change in this phase. Its equality prose is Phase 6's. The claudine skill example was migrated (above).
+
+## Phase 6
+
+- Started 2026-10-20. This phase rewrites the current docs and skills that taught text equality, then runs the final gate.
+
+### Documentation rewritten
+
+| File | Change |
+| --- | --- |
+| `darkmatter/docs/topics/darkmatter-expressions.md` | "Equality and Inequality" rewritten: strict rule, runtime types, a result table (strict type pairs, `5 == 5.0`, case/whitespace, `null`, recursive arrays and objects, key order, missing key vs `null`), rules for missing values, exact numbers and large integers, schema coercion first, and errors not becoming inequality; a migration table ("choose the check by what you mean"); explicit conversions `5 == number("5")` and `('' + x) == ('' + y)`. "Numeric Comparisons" now states that ordering still coerces (`5 <= "5"` and `5 >= "5"` hold while `5 == "5"` is false). "Guard forms" table: separate rows for `x == null`, `x != null`, `x == literal`, `x != literal`/`x != ''`, `x == y` (finite sets including `boolean` and `null`), `x == []`/`{…}`; the paragraph below explains why `x != ''` is not a presence check. "Nullable directive targets": `log != ''` moved from the guard list to the non-guard list. "Truthiness": the `flag == 'true'` advice now distinguishes boolean and string flags. |
+| `darkmatter/docs/topics/expression-engine.md` | Added one paragraph on equality's part in narrowing (`x != null` proves presence, `x != ''` does not). |
+| `darkmatter/docs/inline/interpolation.md` | The "Comparison Switch" bullet: removed the claim that "6" auto-converts for every comparison and that unconvertible numeric comparisons resolve to `false` (the code converts them to `0`); it now says equality is strict, ordering converts, and shows `number(...)`. The malformed `color \|\| blue == "blue"` example is now `(color \|\| "blue") == "blue" ? … : …`. |
+| `darkmatter/docs/inline/preflight-checks.md` | Added `when="x != ''"` to the "`MissingValue`" row of the guard table. |
+| `darkmatter/docs/lsp/features.md` | The comparison row: "Numeric strings auto-coerce" → strict `==`/`!=`, ordering coerces. |
+| `darkmatter/docs/topics/schemas/definition.md` | The subtype row "a number or boolean `literal(…)` vs any `enum(…)`": dropped "even when `==` would compare them equal", which is no longer true. |
+| `darkmatter/docs/transclusion/transclusion-design.md` | Semantics item 2: "compare normalized scalar strings" → strict equality. |
+
+Every example added to the docs was composed with the worktree `md` from a scratch document and gave the documented result: the color example (`red` → "nice choice!", missing → "blue (how original)"), `5 == number("5")` true, `5 == "5"` false, `5 <= "5"` and `5 >= "5"` true, `('' + missing) == ('' + '')` true, `missing == null` true, `missing != ''` true, `{a: 1, b: null} == {b: null, a: 1.0}` true, `{a: null} == {}` false, `[1, null] == [1.0, null]` true, `0 == -0` true.
+
+### Skills
+
+- `.claude/skills/darkmatter/expressions.md`: the type-scope paragraph no longer says `==`/`!=` narrow "by `scalar_string` text with the both-null rule". It names `equality.rs::values_equal` as the one comparison shared by the evaluator and the analyzer, states the `null` rule and that `x != ''` is not presence, and warns not to compare `Value`s with Rust `==` or rendered text for an expression comparison.
+- `.claude/skills/darkmatter/compose.md`: "Numeric strings auto-convert for comparisons" → strict equality, ordering converts.
+
+### Inspected and unchanged
+
+- READMEs (`darkmatter/lib`, `darkmatter/cli`, `darkmatter/dmls`, `claudine/cli`, `claudine/lib`): every comparison example is string-to-string (`tool_name == 'Bash'`), so its result is unchanged.
+- `darkmatter/dmls/docs/diagnostics.md` (fixed in Phase 4), `darkmatter/dmls/docs/hover.md`, `claudine/docs/topics/flow-control/lifecycle.md` (fixed in Phase 5), and `claudine/docs/topics/flow-control/sequences.md` (links to the guard page): already correct.
+- `darkmatter/docs/inline/interpolation.md` undeclared-property table (`x != null ? x : b`): correct under strict equality.
+- `claudine/docs/schemas/partials/functions.yaml` `contains` "comparing rendered text": `contains` is out of scope and its behavior did not change.
+- `.claude/skills/darkmatter/compose.md:1119` `scalar_string`: describes interpolation rendering, which is unchanged.
+
+### Scope discipline
+
+The fix's commits (`b59ba28e0`, `455eb05e4`) and this phase's working tree touch no `.github/`, `Cargo.toml`, justfile, nextest configuration, or `environments.json`. No test tier, CI cell, benchmark, or OS-specific code was added. JSON Schema `const`/`enum` validation, Rust comparisons, the grammar, truthiness, arithmetic, ordering, and rendering are unchanged.
+
+### Requirement-to-test mapping
+
+This phase changed documentation and skill files only. It added no behavior, so it needed no new tests. The behaviors the docs now describe are pinned by earlier phases' tests: `expression_strict_equality` (Phase 2, the result table), `expression_type_scope` and `scope_site_conformance` (Phase 3, the guard-forms table), `directive_target_analysis`, `shell_template_body_guards`, the DMLS `expression_scopes` tests (Phase 4, `x != ''` vs `x != null` for targets, placeholders, and hover), and `strict_equality_composition` (Phases 4–5, composition and schema coercion before `==`). Each new doc example was also composed by hand (above).
+
+### Gates
+
+- `darkmatter/` `just test`: **10482/10482 passed** (10 skipped), first run, no reruns. Phase 5 reported 10799. `just test` reports what it ran, and this run had no failures.
+- `darkmatter/` `just lint`: clean, including the zed-dmls wasm check.
+- `claudine/` `just test`: **10606/10606 passed** (9 skipped, 53 slow), first run.
+- `claudine/` `just lint`: clean.
+- `just check-tier-coverage darkmatter` and `claudine`: 0 stranded.
+- `just test-prompts` (root, opt-in): `claudine-cli` prompts 87/87, `shipped_implement` L2 3/3, `darkmatter` prompts 10/10. Two failures predate this fix, as Phase 5 recorded: (1) root prompts validated without arguments fail on missing required properties (`spec`, `base`, `report`, `review`) and on file defaults that do not resolve (`invalid-reference`); none of these prompts was changed by this fix; (2) `claudine` `shipped_implement_plan_prepares_with_unset_optional_commit_message` fails because the live `implement-plan.md` declares `commit_message: ""` (2026-10-15).
+- Gate-skip check: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` gives `packages: ['claudine-cli', 'darkmatter', 'dmls']` and `change_class: package`, because tests read these docs. The gates were required and were run.
+- Downstream: claudine is the only consumer, and its full suite ran (above).
+- No cross-OS check. This phase changed no code.
+
+### Acceptance (spec) status
+
+1–5 were met by Phases 2–5, and their tests pass in this phase's gates. 6: the migration audit is recorded (Phases 1 and 5), and the docs and skills are updated (this phase). Prompt corpus checks stay opt-in. 7: the `darkmatter` and `claudine` `just test`/`just lint` gates and `just test-prompts` were run, with the results above. No new tier, CI cell, benchmark, or OS-specific behavior was added.

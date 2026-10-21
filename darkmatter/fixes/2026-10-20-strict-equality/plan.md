@@ -61,6 +61,60 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/claudine/hook-actions.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/expression-engine.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/transclusion/transclusion-design.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/compose.md
+source_code:
+    - darkmatter/lib/src/markdown/compose/expression/equality.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/semantics.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/tests/l1/expression_strict_equality.rs
+    - darkmatter/lib/tests/l1/expression_type_scope.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/tests/l1/shell_template_body_guards.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/strict_equality_composition.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/common/type_scope_cases.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - claudine/lib/src/composition/looping/expression/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/scope_site_conformance.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - claudine/lib/src/dispatch/runner/tests.rs
+    - claudine/lib/src/dispatch/expression.rs
+    - claudine/cli/tests/l1/implement_plan_commit_message.rs
+    - claudine/cli/tests/l1/sequence_grammar_matrix.rs
+    - prompts/code-comment-quality.md
+documentation:
+    - darkmatter/dmls/docs/diagnostics.md
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - .claude/skills/claudine/hook-actions.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/expression-engine.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/transclusion/transclusion-design.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/compose.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Plan — Strict equality for `==` and `!=`
@@ -429,7 +483,7 @@ READMEs stay overviews.
 
 ### Wave 9 — Documentation (concurrent)
 
-- [ ] **Expression reference update**
+- [x] **Expression reference update**
     - `darkmatter/docs/topics/darkmatter-expressions.md`: rewrite the
       "Equality and Inequality" section and the "What a Guard Proves" table
       for strict equality; update nullable-target examples; add strict type
@@ -437,22 +491,22 @@ READMEs stay overviews.
       `('' + x) == ('' + y)`), the changed presence checks, and the explicit
       distinction that ordering still coerces (`5 <= "5"` and `5 >= "5"` both
       hold while `5 == "5"` is false).
-- [ ] **Engine guide update**
+- [x] **Engine guide update**
     - `darkmatter/docs/topics/expression-engine.md`: align its type-aware
       narrowing narrative and any equality mentions with the new guard facts.
-- [ ] **Skill page update**
+- [x] **Skill page update**
     - `.claude/skills/darkmatter/expressions.md` (the "Equality follows the
       evaluator" paragraph and guard description) and any affected preflight,
       Claudine lifecycle/sequence, and DMLS hover pages that teach the former
       rules.
-- [ ] **README sweep**
+- [x] **README sweep**
     - Check the darkmatter (and claudine, where relevant) READMEs for examples
       presenting changed behavior; update them, keeping detailed rules in the
       topic pages.
 
 ### Wave 10 — Final verification gate
 
-- [ ] **Full gate**
+- [x] **Full gate**
     - Run `just test` and `just lint` in `darkmatter/` and `claudine/`, and
       the affected opt-in prompt checks locally (`just test-prompts`).
     - Confirm scope discipline: no new CI matrix cell, terminal/browser tier,

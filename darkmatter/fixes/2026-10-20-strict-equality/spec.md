@@ -25,7 +25,8 @@ $schema:
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-10-20
-review_iterations: 0
+review_iterations: 1
+completed: true
 created: 2026-10-20
 owner: Ken Snyder <ken@ken.net>
 packages:
@@ -34,6 +35,8 @@ packages:
 related:
     - 2026-10-16-type-narrowing
     - 2026-10-28-schema-enhancements
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Strict equality for `==` and `!=`
