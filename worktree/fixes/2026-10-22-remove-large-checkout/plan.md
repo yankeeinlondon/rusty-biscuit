@@ -65,6 +65,81 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/worktree/lifecycle.md
     - .claude/skills/worktree/remove.md
+source_files_during_phase_4:
+    - worktree/cli/src/commands/remove/recovery.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/env.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/cli/tests/remove_recovery_report.rs
+    - worktree/cli/tests/snapshots/remove_recovery_report__a_stop_whose_checks_both_ran_out_of_time.snap
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/worktree/testing.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - worktree/docs/cli/remove.md
+    - worktree/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/observation.md
+source_code:
+    - sniff/lib/src/filesystem/space.rs
+    - sniff/lib/src/filesystem/mod.rs
+    - sniff/lib/src/performance/counters.rs
+    - sniff/lib/src/filesystem/query/tree.rs
+    - sniff/lib/src/filesystem/query/report.rs
+    - sniff/lib/src/filesystem/query/options.rs
+    - sniff/lib/src/filesystem/query/mod.rs
+    - sniff/lib/src/filesystem/query/matching.rs
+    - sniff/lib/src/filesystem/query/win32.rs
+    - sniff/lib/src/filesystem/query/win32_paths.rs
+    - sniff/lib/src/filesystem/query/tests.rs
+    - sniff/lib/src/filesystem/git/changed_paths_tests.rs
+    - sniff/cli/src/output/filesystem/query.rs
+    - sniff/cli/tests/l1/filesystem_query.rs
+    - worktree/lib/src/remove/observation/deletion.rs
+    - worktree/lib/src/remove/observation/deletion/plan.rs
+    - worktree/lib/src/remove/observation/deletion/tests.rs
+    - worktree/lib/src/remove/observation/inventory.rs
+    - worktree/lib/src/remove/observation/fsevents/tests.rs
+    - worktree/lib/src/remove/observation/inotify/tests.rs
+    - worktree/lib/src/remove/observation/read_directory_changes/tests.rs
+    - worktree/lib/src/remove/recovery/journal.rs
+    - worktree/lib/src/remove/recovery/mod.rs
+    - worktree/lib/src/remove/recovery/space.rs
+    - worktree/lib/src/remove/recovery/store.rs
+    - worktree/lib/src/remove/recovery/store/tests.rs
+    - worktree/lib/src/remove/usage.rs
+    - worktree/lib/src/remove/usage/tests.rs
+    - worktree/lib/src/remove/lifecycle.rs
+    - worktree/lib/src/remove/lifecycle/resume.rs
+    - worktree/lib/src/remove/lifecycle/tests.rs
+    - worktree/lib/src/remove/lifecycle/tests/large_checkout.rs
+    - worktree/lib/src/remove/lifecycle/tests/resume_consent.rs
+    - worktree/lib/src/remove/lifecycle/tests/startup_warning.rs
+    - worktree/lib/src/remove/outcome.rs
+    - worktree/lib/src/remove/quarantine/unregister/tests.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/tests/remove_usage_refusal.rs
+    - worktree/cli/src/commands/remove/recovery.rs
+    - worktree/cli/src/env.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/cli/tests/remove_recovery_report.rs
+    - worktree/cli/tests/snapshots/remove_recovery_report__a_stop_whose_checks_both_ran_out_of_time.snap
+documentation:
+    - sniff/docs/topics/filesystem-query.md
+    - sniff/docs/cli/filesystem_query.md
+    - sniff/docs/topics/available-space.md
+    - worktree/docs/cli/remove.md
+    - worktree/README.md
+    - .claude/skills/sniff/SKILL.md
+    - .claude/skills/worktree/lifecycle.md
+    - .claude/skills/worktree/remove.md
+    - .claude/skills/worktree/testing.md
+    - .claude/skills/worktree/observation.md
+completed_phase: 5
+implemented: true
 ---
 
 # Plan: `wt remove` of a built checkout finishes in one run
@@ -90,23 +165,23 @@ Four changes, spread over three package areas (`sniff`, `worktree` lib,
 
 Done means every item below holds:
 
-- [ ] A synthetic inventory whose batch bound exceeds 64 MiB streams through a
+- [x] A synthetic inventory whose batch bound exceeds 64 MiB streams through a
   counting sink with no `LimitReached`, and emitted bytes stay within the bound.
-- [ ] Replaying all batches with worst-case `ExternallyAbsent` results fits the
+- [x] Replaying all batches with worst-case `ExternallyAbsent` results fits the
   bound exactly, and a one-byte-smaller limit rejects the final reservation.
-- [ ] An insufficient or unavailable space reading refuses with exit 4 before
+- [x] An insufficient or unavailable space reading refuses with exit 4 before
   the move (first attempt) or before archive and replacement (retry), leaving
   checkout, registration, branch, and earlier evidence intact.
-- [ ] `query_path_usage` with a supplied index performs zero tree walks and
+- [x] `query_path_usage` with a supplied index performs zero tree walks and
   reaches process enumeration; the walked and supplied indexes of the same tree
   find the same holders and hard-link aliases.
-- [ ] Version 4 and 5 pending removals and old Sniff reports still load, with
+- [x] Version 4 and 5 pending removals and old Sniff reports still load, with
   provenance `unknown` for old Sniff reports.
-- [ ] The stop message prints identical current-attempt notes once.
-- [ ] `just test` and `just lint` are green in `sniff/`, `worktree/`; docs and
+- [x] The stop message prints identical current-attempt notes once.
+- [x] `just test` and `just lint` are green in `sniff/`, `worktree/`; docs and
   skills listed in the spec are updated; CI evidence for all four OS
   environments follows the repo's existing rules.
-- [ ] The 500,000-entry acceptance case is run on a disposable built checkout
+- [x] The 500,000-entry acceptance case is run on a disposable built checkout
   if one is available (not a mandatory L1 fixture).
 
 Work stays at L1 (≤5 s per test, no terminal or browser windows). Per repo rules:
@@ -354,18 +429,18 @@ differ, `unwrap_or_default()`, `.ok()` on parses.
 
 ## Phase 4: CLI stop message
 
-- [ ] **Merge identical notes** in `worktree/cli/src/commands/remove/recovery.rs`
+- [x] **Merge identical notes** in `worktree/cli/src/commands/remove/recovery.rs`
     - Compare the rendered coverage notes (not whole reports) of the current
       attempt's preflight and moved-path diagnostic; if equal, print once and
       say it applies to both paths, with before/after timing explicit.
     - Never merge earlier-attempt notes, failed-query messages, or holder
       evidence; all runs stay in the saved report.
     - Use `biscuit-terminal` components (`Prose`, lists).
-- [ ] **Render the internal-limit wording** (Ruling 7).
-- [ ] **Tests**: integration test (snapshots belong in an integration test, not
+- [x] **Render the internal-limit wording** (Ruling 7).
+- [x] **Tests**: integration test (snapshots belong in an integration test, not
   shared unit tests): identical notes once with both contexts; different notes
   separately; earlier attempts/failed queries/holders uncollapsed.
-- [ ] Checkpoint: `cd worktree && just test && just lint`; one spawned-CLI
+- [x] Checkpoint: `cd worktree && just test && just lint`; one spawned-CLI
   wiring case for the space refusal (exit 4, message names path, needed and
   available), no focus-stealing windows.
 
@@ -377,16 +452,16 @@ Doc tasks may run concurrently (no code dependencies); write each from the
 perspective of a developer new to the repo, per CLAUDE.md. Docs state behavior,
 never name this fix.
 
-- [ ] `worktree/docs/cli/remove.md`: no journal ceiling; free-space refusal and
+- [x] `worktree/docs/cli/remove.md`: no journal ceiling; free-space refusal and
   message; usage-check coverage on large checkouts; one summary when matching.
-- [ ] `worktree/README.md`: brief note on built checkouts, link to remove topic.
-- [ ] `.claude/skills/worktree/remove.md` and `lifecycle.md`: computed journal
+- [x] `worktree/README.md`: brief note on built checkouts, link to remove topic.
+- [x] `.claude/skills/worktree/remove.md` and `lifecycle.md`: computed journal
   limit and the inventory passed to the usage check.
-- [ ] `.claude/skills/sniff/`: when to supply your own tree index.
-- [ ] `docs/dependencies.md`: only if crates changed (not expected).
-- [ ] Drift pass: `///` and `//!` docs and comments on every symbol whose
+- [x] `.claude/skills/sniff/`: when to supply your own tree index.
+- [x] `docs/dependencies.md`: only if crates changed (not expected).
+- [x] Drift pass: `///` and `//!` docs and comments on every symbol whose
   behavior changed (journal, store, usage, deletion engine, TreeIndex).
-- [ ] **Final verification**
+- [x] **Final verification**
     - `just test` and `just lint` in `sniff/`, `worktree/`; `just test-l2` where
       the area has relevant L2 tests; review `just ci-local --plan` before any
       push; cross-platform evidence follows existing CI and the `os` skill.

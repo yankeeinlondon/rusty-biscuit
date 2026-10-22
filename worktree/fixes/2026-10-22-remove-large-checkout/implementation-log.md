@@ -34,13 +34,6 @@ docs_created_during_phase_2:
     - sniff/docs/topics/available-space.md
 skills_files_updated_during_phase_2:
     - .claude/skills/sniff/SKILL.md
-human_review: false
-message_to_agent: |-
-    Phase 3 is in "## Phase 3" of this log. Facts Phase 4 (CLI stop message) depends on:
-    (1) Ruling 7 is already applied in the library: JournalWriteError::LimitReached now displays "wt reached an internal limit of its deletion journal; a retry continues" (no byte count). The stop message prints that Display through Stop::Journal; Phase 4 only needs a test that the rendered stop message shows it.
-    (2) The space refusal is Refusal::Store(StoreError::InsufficientSpace { path, needed, available }) or StoreError::SpaceUnknown { path, needed, reason }, both exit 4 (ExitClass::Blocked). Their Display already names the store path, the bytes needed, and the bytes available (or the reason). The CLI's Environment passes space: &NativeSpace. For the spawned-CLI wiring case there is no CLI seam to fake a low reading; either add a test-only environment hook to the CLI or prove the exit-4 rendering in-process with refusal_markup-style rendering of a Refusal built from those variants.
-    (3) UsageSource::query and check_usage take an Option<&Arc<TreeIndex>>. Preflight runs carry index_provenance "supplied"; diagnostic runs after a stop are walked ("walked"). Phase 4's "identical notes" comparison should compare rendered coverage notes, which may now differ only by the tree_identity coverage reason ("supplied" says the query did not read the descendants), so a preflight note and a diagnostic note can legitimately differ on that line.
-    (4) The 64 MiB regression test uses control-character names (six-byte JSON escapes) to stay near 1.4 s in debug builds; debug serde_json escapes at about 50 MB/s, so do not grow it.
 source_files_during_phase_3:
     - worktree/lib/src/remove/observation/deletion.rs
     - worktree/lib/src/remove/observation/deletion/plan.rs
@@ -71,6 +64,97 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/worktree/lifecycle.md
     - .claude/skills/worktree/remove.md
+source_files_during_phase_4:
+    - worktree/cli/src/commands/remove/recovery.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/env.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/cli/tests/remove_recovery_report.rs
+    - worktree/cli/tests/snapshots/remove_recovery_report__a_stop_whose_checks_both_ran_out_of_time.snap
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/worktree/testing.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - worktree/docs/cli/remove.md
+    - worktree/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/observation.md
+source_code:
+    - sniff/lib/src/filesystem/space.rs
+    - sniff/lib/src/filesystem/mod.rs
+    - sniff/lib/src/performance/counters.rs
+    - sniff/lib/src/filesystem/query/tree.rs
+    - sniff/lib/src/filesystem/query/report.rs
+    - sniff/lib/src/filesystem/query/options.rs
+    - sniff/lib/src/filesystem/query/mod.rs
+    - sniff/lib/src/filesystem/query/matching.rs
+    - sniff/lib/src/filesystem/query/win32.rs
+    - sniff/lib/src/filesystem/query/win32_paths.rs
+    - sniff/lib/src/filesystem/query/tests.rs
+    - sniff/lib/src/filesystem/git/changed_paths_tests.rs
+    - sniff/cli/src/output/filesystem/query.rs
+    - sniff/cli/tests/l1/filesystem_query.rs
+    - worktree/lib/src/remove/observation/deletion.rs
+    - worktree/lib/src/remove/observation/deletion/plan.rs
+    - worktree/lib/src/remove/observation/deletion/tests.rs
+    - worktree/lib/src/remove/observation/inventory.rs
+    - worktree/lib/src/remove/observation/fsevents/tests.rs
+    - worktree/lib/src/remove/observation/inotify/tests.rs
+    - worktree/lib/src/remove/observation/read_directory_changes/tests.rs
+    - worktree/lib/src/remove/recovery/journal.rs
+    - worktree/lib/src/remove/recovery/mod.rs
+    - worktree/lib/src/remove/recovery/space.rs
+    - worktree/lib/src/remove/recovery/store.rs
+    - worktree/lib/src/remove/recovery/store/tests.rs
+    - worktree/lib/src/remove/usage.rs
+    - worktree/lib/src/remove/usage/tests.rs
+    - worktree/lib/src/remove/lifecycle.rs
+    - worktree/lib/src/remove/lifecycle/resume.rs
+    - worktree/lib/src/remove/lifecycle/tests.rs
+    - worktree/lib/src/remove/lifecycle/tests/large_checkout.rs
+    - worktree/lib/src/remove/lifecycle/tests/resume_consent.rs
+    - worktree/lib/src/remove/lifecycle/tests/startup_warning.rs
+    - worktree/lib/src/remove/outcome.rs
+    - worktree/lib/src/remove/quarantine/unregister/tests.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/tests/remove_usage_refusal.rs
+    - worktree/cli/src/commands/remove/recovery.rs
+    - worktree/cli/src/env.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/cli/tests/remove_recovery_report.rs
+    - worktree/cli/tests/snapshots/remove_recovery_report__a_stop_whose_checks_both_ran_out_of_time.snap
+documentation:
+    - sniff/docs/topics/filesystem-query.md
+    - sniff/docs/cli/filesystem_query.md
+    - sniff/docs/topics/available-space.md
+    - worktree/docs/cli/remove.md
+    - worktree/README.md
+    - .claude/skills/sniff/SKILL.md
+    - .claude/skills/worktree/lifecycle.md
+    - .claude/skills/worktree/remove.md
+    - .claude/skills/worktree/testing.md
+    - .claude/skills/worktree/observation.md
+completed_phase: 5
+implemented: true
+human_review: true
+human_review_items:
+    - |-
+      **A 500,000-entry removal still does not finish in one run on macOS, for a different reason.**
+
+      This fix removed the journal's size limit, and a test run proved it: the journal grew to 265 MB with no stop. But in three runs on a disposable 500,000-file checkout, every `wt remove` stopped partway because macOS's file-change service (fseventsd) dropped notifications while `wt` was deleting at full speed. `wt` correctly treats missed notifications as "I can no longer prove nothing else wrote here" and stops safely; a retry continues. The faster release build stopped *sooner* (after 130,500 files), close to where the old journal limit used to stop removals, so this problem was hidden behind the one just fixed. The host was moderately busy with other builds, which may make it worse, but it reproduced every time.
+
+      It matters before this fix is treated as closed, because the spec's headline outcome ("one run removes a 500,000-entry checkout") is not yet met on macOS. The four changes this spec asked for are done and tested.
+
+      Options:
+
+      - **A. Close this fix as is, and open a new fix spec for deletion pacing under FSEvents** (for example: wait for the watcher to catch up more often than every 2,048 entries, or slow deletion when the system reports it is falling behind). *Pros:* keeps this change focused and reviewable; the new problem gets its own analysis and measurements. *Cons:* built checkouts on macOS still need a retry or two until the follow-up lands.
+      - **B. Keep this fix open and add a phase that changes the deletion engine's pacing.** *Pros:* the headline outcome is met in one change. *Cons:* widens a finished, tested change into the observation engine, which has its own spec history (`2026-10-18-remove-observation-under-load`) and needs its own design work.
+      - **C. Accept the stop as designed and only document it.** *Pros:* no code. *Cons:* big removals on macOS keep needing several runs, which is the user pain this spec set out to remove.
+
+      **Recommendation: A.** The stop is safe and resumable, the cause sits in a different component, and it needs measurement (how often to drain, what the system reports when it falls behind) that doesn't belong in a docs phase. The run details are in the implementation log, under "500,000-entry acceptance run".
 ---
 
 # Implementation Log for 2026-10-22-remove-large-checkout (5 phases)
@@ -579,3 +663,219 @@ never counts against the limit. It now takes about 1.4 s.
   describe changed (journal limit, space check, `Environment.space`, and the
   `UsageSource` and `check_usage` signatures).
 - The 500,000-entry acceptance case is Phase 5's task.
+
+## Phase 4
+
+All work is in `worktree-cli`. It was done in this session without
+subagents: the change is one renderer, one test seam, and their tests.
+
+### What changed
+
+- `cli/src/commands/remove/recovery.rs`: `discovery_lines` now asks the new
+  `shared_note` for this attempt's last `Preflight` run and its first
+  `Diagnostic` run of the moved directory (`report.quarantine.path`). When
+  both are `DiscoveryResult::Report`s, neither lists a process, and their
+  rendered `coverage_note`s are the same text, the two print as one line:
+  `<context>, and again after the stop at <moved path> (two separate checks
+  with the same limits): <note>`, where `<context>` is "Before the move" or,
+  on a retry, "Before deleting from the moved directory". Only rendered notes
+  are compared (the reports' times and paths always differ). An earlier
+  attempt's check, a failed query, a check that found a process, a check of
+  another path, and different notes keep their own lines. The saved report is
+  not touched; rendering only reads it. Output stays Prose markup, as every
+  builder in this module already uses. The module's `//!` summary now
+  mentions the merge.
+- **Ruling 7** needed no code here: Phase 3 had already changed
+  `JournalWriteError::LimitReached`'s `Display`, and the stop message prints
+  `report.errors` through `first_line` and the headline. A test now pins it.
+- `cli/src/env.rs`: `TEST_AVAILABLE_SPACE_VAR` (`WT_TEST_AVAILABLE_SPACE_BYTES`)
+  and `test_available_space()`, debug builds only, following the pattern of
+  `TEST_WAIT_BUDGET_VAR`. A value that is not a whole number of bytes panics,
+  so a mistyped override cannot pass silently; `0` is allowed.
+- `cli/src/commands/remove/mod.rs`: `space_source()` returns a debug-only
+  `FixedSpace` when the variable is set, otherwise `NativeSpace`. This is
+  the CLI seam Phase 3's message said was missing; no real filesystem can be
+  made to report a chosen free-space figure.
+
+### Requirement-to-test mapping
+
+Rendering tests are L1, F2 at the CLI rendering boundary (library values
+rendered by the CLI's real builders, with Prose as the terminal renders it
+for the snapshot). The space refusal is L1, F3 for wiring: the real `wt`
+binary, a real temporary repository, and only the free-space reading
+replaced.
+
+| Requirement | Test(s) in `worktree/cli/tests/` |
+| --- | --- |
+| Identical current-attempt notes print once, naming both checks, with before/after timing explicit; every limited shape (partial, unavailable, unsupported) plus the reported "ran out of time" note; rendering leaves both runs in the report | `remove_recovery_report.rs::identical_notes_before_the_move_and_after_the_stop_print_once` |
+| A retry's "before deleting from the moved directory" check merges the same way | `a_retrys_identical_notes_print_once` |
+| The reported incident as rendered: one discovery line with the exact sentence from the spec, and the journal-limit headline | `a_stop_whose_checks_both_ran_out_of_time` (new snapshot) |
+| Different notes; a diagnostic of the original path; an earlier attempt's check; two failed queries with the same message; a diagnostic that found a process with the same coverage: none merge | `other_discovery_lines_are_never_merged` |
+| Different notes keep both lines (existing test, now pairing differently limited shapes since identical shapes now merge) | `a_stop_names_the_limits_of_each_process_check` |
+| `LimitReached` renders as `wt`'s internal limit with "a retry continues" and no byte count | `a_journal_limit_stop_is_an_internal_limit` (built from `Stop::Journal(JournalWriteError::LimitReached { .. })`, the value the lifecycle stores) |
+| Spawned CLI: too little space → exit 4, "Nothing was removed", names the store (`…/.git/wt-removal`), 100 bytes available and the bytes needed (> 100); checkout, branch and registration intact; nothing pending; only the lock directory in the store | `remove.rs::too_little_space_for_the_journal_refuses_before_the_move` |
+| The seam reads only whole bytes, in debug builds | `env::tests::the_test_available_space_is_read_only_when_set_to_whole_bytes` |
+
+Regression check: against the old `discovery_lines`, the merge tests fail
+(two lines, the note twice, no "two separate checks"). The spawned test
+fails without the seam (the removal would succeed with exit 0).
+
+Input robustness: this phase adds no file or configuration reader. The new
+environment variable's shapes (absent, `0`, a number, empty, negative,
+fractional, suffixed, padded) are covered by the env unit test.
+
+No terminal or browser window is opened by any of these tests.
+
+### Gates and other runs
+
+- `cd worktree && just test`: 1621 passed, 15 skipped, 0 failed (about 30 s).
+  `just lint`: clean (run again after the last test edit).
+  `just check-tier-coverage worktree`: 0 stranded.
+- `just cross-check worktree-cli --os windows`: 662 passed, 43 skipped. Run
+  because the spawned test reads a path `wt` prints; its needle accepts
+  either separator, and it does not compare a canonicalized full path
+  (macOS `/private`, Windows `\\?\`).
+- Dependents: no package depends on `worktree-cli`.
+- Scope check from the repository root:
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  gives `packages: [worktree-cli, test-toolkit, darkmatter]`,
+  `change_class: package`, so the gates were required, and they were run.
+  `darkmatter` and `test-toolkit` are listed because of the skill page edit:
+  darkmatter's `shipped_schema_corpus` tests read the repository's Markdown
+  (run: 8 passed), and test-toolkit gets only a lint row
+  (`archive-path-guard`), which reads no Rust here and was not run.
+
+### Skipped or pre-existing
+
+- Nothing was skipped. No pre-existing failure was seen.
+- Linux and WSL2 were not cross-checked locally; nothing here is specific to
+  them, and CI covers both.
+- User docs (`worktree/docs/cli/remove.md`, README) are Phase 5's tasks and
+  were not edited. The worktree skill's `testing.md` gained the new seam and
+  where stop-message rendering is tested.
+
+## Phase 5
+
+Documentation and final verification. Done in this session without
+subagents: two user-doc edits and a drift pass do not split usefully.
+
+### What changed
+
+- `worktree/docs/cli/remove.md`:
+    - new section **Large, built checkouts** (under *Deleting the checkout*):
+      the journal is sized per attempt from the entry list and has no fixed
+      ceiling (reaching it is a `wt` defect, with the stop wording); the
+      free-space check before the move, where it reads
+      (`.git/wt-removal/`), what it counts on a first run and on a retry, the
+      exit-4 message, the retry's "stopped before deleting more of" form, and
+      its two limits (freed space is not credited; a reading is not a
+      reservation); the usage check reusing the list, `index_provenance`
+      (`supplied`, `walked` for checks after a stop, `unknown` before
+      `report_version` 6), and that this is faster but not complete;
+    - the stop-report bullets now describe the one merged line, with an
+      example and every case that never merges;
+    - *What `wt remove` refuses to move* now names the free-space refusal
+      (exit 4) and links the new section.
+- `worktree/README.md`: one sub-bullet under `wt remove` for built checkouts,
+  linking `docs/cli/remove.md#large-built-checkouts`.
+- `.claude/skills/worktree/observation.md`: the FSEvents drops seen in the
+  acceptance run below, beside the drain-interval note.
+- Otherwise no skill edit was needed. `.claude/skills/worktree/remove.md` and
+  `lifecycle.md` already state the computed journal limit, the space check
+  and the index handoff (Phase 3); `.claude/skills/sniff/SKILL.md` already
+  says when a library should supply its own index (Phase 2). Each was read
+  against the code in this phase.
+- `docs/dependencies.md`: unchanged; no `Cargo.toml` or `Cargo.lock` changed
+  in any phase (`git diff --stat 70bd0f42a -- '*Cargo.toml' Cargo.lock` is
+  empty).
+- `worktree/docs/performance-testing.md` was **not** given
+  `WT_TEST_AVAILABLE_SPACE_BYTES`: that page lists the seams that shorten
+  timing (`WT_TEST_WAIT_BUDGET_MS`, `WT_TEST_REFRESH_DEADLINE_MS`), and the
+  free-space seam is not a timing seam. It is documented in the worktree
+  skill's `testing.md`.
+
+### Drift pass
+
+Read the `///`/`//!` docs of every symbol whose behavior changed:
+`journal` module docs, `JournalSize`, `journal_size`, `JournalWriter::start`,
+`limit`, `begin_batch`, `LimitReached`; `RecoveryStore::begin`/`reopen`;
+`UsageSource::query`, `SniffUsage`, `check_usage`;
+`DeletionInventory::tree_index`; the deletion engine's `//!`;
+`REPORT_VERSION`; Sniff's `PathUsageOptions::with_tree_index` and
+`TreeIndex`. All match the code. The only remaining "64 MiB" outside
+`fixes/` is the docblock of the test that proves the former ceiling is gone,
+which names it on purpose. No drift was found, so no comment changed.
+
+### Gates
+
+- Scope check from the repository root after all edits:
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [worktree-cli, test-toolkit, darkmatter]`,
+  `change_class: package` (Phase 4's code is still uncommitted). Gates run:
+- `cd worktree && just test`: 1621 passed, 15 skipped, 0 failed.
+  `just lint`: clean. `just check-tier-coverage worktree`: 0 stranded.
+- L2: `BISCUIT_TEST_REQUIRED_BACKENDS=tmux cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_remove)'`:
+  11 passed (tmux panes; no window takes focus).
+- `cd sniff && just test`: 3491 passed, 33 skipped. `just lint`: clean.
+- Dependents: darkmatter's `shipped_schema_corpus` tests read the repo's
+  Markdown: 8 passed. No package depends on `worktree` or `worktree-cli`.
+- No cross-OS check: this phase changed only Markdown.
+
+### 500,000-entry acceptance run (macOS)
+
+A disposable checkout was built for this: a fresh repository under `/tmp`, a
+worktree on branch `feat/built` with no commits of its own, and 500,000 empty
+files in 2,000 directories under an ignored `target/`, with paths as long as
+the incident's (`target/aarch64-apple-darwin/debug/incremental/…/s-…/0vvm….o`).
+`wt remove built` ran with `CI=1` and stdin from `/dev/null`. Both
+repositories were deleted afterward.
+
+| Build | Run | Result |
+| --- | --- | --- |
+| debug | first | exit 1 after 45 s; 204,750 deleted, 297,258 left |
+| debug | retry | exit 1 after 60 s; 310,500 deleted in total, 191,508 left |
+| release | first (fresh checkout) | exit 1 after 22 s; 130,500 deleted, 371,508 left |
+
+What this proves for this fix:
+
+- **The journal limit is gone.** The debug run's `journal.jsonl` was
+  265,150,300 bytes, four times the former 64 MiB, and no run stopped on the
+  journal. The report was `report_version` 6.
+- **The usage check reused the inventory.** The preflight's Sniff report
+  says `index_provenance: supplied` and reached the process checks ("open
+  handles and working directories were only partly read", not "ran out of
+  time"); the diagnostic after the stop says `walked` and ran out of time
+  walking the leftovers, as specified.
+- **The merged discovery line** rendered in a real run (the retry printed
+  "Before deleting from the moved directory, and again after the stop at …
+  (two separate checks with the same limits): …").
+- The retry continued from the earlier attempt without asking anything.
+
+What it does **not** show: **one run did not remove the checkout.** Every
+run stopped with lost change-watching coverage during deletion:
+`fs_events_dropped`, flags `user_dropped` + `must_scan_sub_dirs` (0x3),
+`entries_since_drain: 2250`, `longest_round_trip_ms: 1007`. Deleting at full
+speed overruns fseventsd's queue for `wt`'s stream, and `wt` treats the
+dropped notifications as lost coverage, which is correct. The release build
+deletes faster and stopped sooner (130,500 entries, close to where the old
+journal ceiling used to stop removals, ~136,000), so this is not a
+debug-build artifact. The host was under moderate load from other sessions
+(load average about 13 on 16 cores, plus DaisyDisk scanning), which may make
+fseventsd fall behind sooner, but the drop reproduced on all three runs at
+the same point after a check. Until now the journal ceiling hid this
+obstacle. It belongs to the observation engine (drain cadence or
+backpressure), not to this spec's four changes, so it was not changed in
+this phase; it is raised in `human_review_items`. Not run on Linux, Windows
+or WSL2 (the plan's Ruling 8 schedules none).
+
+### Skipped or pre-existing
+
+- Nothing in the gates was skipped, and no test failed.
+- A release build warns that `TEST_AVAILABLE_SPACE_VAR` is never used. This
+  is a pre-existing pattern: `TEST_WAIT_BUDGET_VAR` and
+  `TEST_REFRESH_DEADLINE_VAR` give the same warning, because these `pub`
+  constants are read only under `cfg(debug_assertions)` in the binary
+  target. `just lint` (dev profile) is clean. Left as is, because fixing it
+  means changing all three seams.
+- The spec's `status` was not changed and the spec was not moved; the
+  terminal state is "implementation complete, ready for review".

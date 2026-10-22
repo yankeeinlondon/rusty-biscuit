@@ -24,10 +24,11 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: "2026-10-22"
 review_iterations: 0
-implemented: false
+implemented: true
 related:
     - 2026-10-05-graceful-file-contention
     - 2026-10-18-remove-observation-under-load
+implemented_by: "claude/opus"
 ---
 
 # `wt remove` cannot finish a built checkout in one run
