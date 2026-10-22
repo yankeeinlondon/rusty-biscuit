@@ -68,6 +68,8 @@ pub const API_CLIENT_METHODS: &[&str] = &[
     "api_key",
     "env_order",
     "cross_origin",
+    "max_frame_bytes",
+    "graphql_url",
     "pre_response_json",
     "mutate_response",
     "build",

@@ -10,7 +10,8 @@ use super::auth::{EndpointConfig, auth_config, auth_config_tokens, endpoint_conf
 ///
 /// Settings equal to the runtime's defaults (no authentication, the
 /// same-origin policy, no extra secret names, no request-id header) are left
-/// out. Endpoint replacements are always emitted, including same-origin,
+/// out, and so is `.graphql(..)` for an API without a GraphQL surface.
+/// Endpoint replacements are always emitted, including same-origin,
 /// because their API default may differ; an endpoint without its own
 /// authentication emits nothing for it.
 pub(super) fn generate_definition(api: &RestApi) -> TokenStream {
@@ -45,6 +46,7 @@ pub(super) fn generate_definition(api: &RestApi) -> TokenStream {
         .request_id_header
         .as_ref()
         .map(|header| quote! { .request_id_header(#header) });
+    let graphql = crate::codegen::graphql::address_rules(api);
 
     quote! {
         schematic_runtime::ApiDefinition::new(Self::BASE_URL)
@@ -54,6 +56,7 @@ pub(super) fn generate_definition(api: &RestApi) -> TokenStream {
             #(#endpoint_auth)*
             #secret_names
             #request_id_header
+            #graphql
     }
 }
 

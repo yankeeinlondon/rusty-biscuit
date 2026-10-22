@@ -264,7 +264,7 @@ impl fmt::Display for NoDeclaredError {
 
 impl std::error::Error for NoDeclaredError {}
 
-impl ErrorBody for NoDeclaredError {
+impl<A> ErrorBody<A> for NoDeclaredError {
     const DECLARED: bool = false;
 
     fn decode_body(_: usize, _: &[u8]) -> Option<Self> {

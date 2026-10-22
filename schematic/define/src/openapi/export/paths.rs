@@ -29,7 +29,7 @@ pub(super) fn map_paths(
     let mut declarations: IndexMap<String, Vec<(RestMethod, Vec<Parameter>)>> = IndexMap::new();
 
     for endpoint in &api.endpoints {
-        let mut operation = map_operation(endpoint, options)?;
+        let mut operation = map_operation(api, endpoint, options)?;
         operation.security = endpoint_security(endpoint, security_schemes);
 
         // A reserved-expansion marker (`{+name}`) is a runtime encoding hint;
@@ -178,6 +178,7 @@ fn share_path_parameters(item: &mut PathItem, operations: &[(RestMethod, Vec<Par
 ///
 /// Path parameters and `security` are added by [`map_paths`].
 pub(super) fn map_operation(
+    api: &crate::types::RestApi,
     endpoint: &Endpoint,
     options: &ExportOptions,
 ) -> Result<Operation, OpenApiError> {
@@ -186,7 +187,8 @@ pub(super) fn map_operation(
         .as_ref()
         .map(|req| map_request_body(req).map(ReferenceOr::Item)).transpose()?;
 
-    let responses = map_responses(&endpoint.response)?;
+    let shapes = endpoint.success_shapes();
+    let responses = map_responses(&shapes, &api.effective_errors(endpoint))?;
 
     let mut extensions = IndexMap::new();
     if !options.skip_extensions {
@@ -196,6 +198,13 @@ pub(super) fn map_operation(
             headers: endpoint.headers.clone(),
             rate_limit: endpoint.rate_limit.clone(),
             retry_guidance: endpoint.retry_guidance.clone(),
+            // `response` already says everything about a lone plain shape.
+            success: match shapes.as_slice() {
+                [only] if only.legacy_response().is_some() => vec![],
+                _ => shapes.clone(),
+            },
+            errors: endpoint.errors.clone(),
+            no_declared_errors: endpoint.no_declared_errors,
         };
         extensions.insert("x-schematic".to_string(), op_ext.into());
     }

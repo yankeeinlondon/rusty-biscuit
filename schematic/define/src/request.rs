@@ -693,7 +693,7 @@ mod tests {
             headers: vec![],
             endpoints: vec![
                 // JSON endpoint
-                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false, shapes_preview: vec![],
                     id: "CreateFolder".to_string(),
                     method: RestMethod::Post,
                     path: "/folders".to_string(),
@@ -705,7 +705,7 @@ mod tests {
                     cross_origin: None, pagination: None,
                 },
                 // FormData endpoint with file upload
-                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false, shapes_preview: vec![],
                     id: "UploadFile".to_string(),
                     method: RestMethod::Post,
                     path: "/folders/{folder_id}/files".to_string(),
@@ -723,7 +723,7 @@ mod tests {
                     cross_origin: None, pagination: None,
                 },
                 // GET endpoint with no request body
-                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false, shapes_preview: vec![],
                     id: "ListFiles".to_string(),
                     method: RestMethod::Get,
                     path: "/folders/{folder_id}/files".to_string(),
@@ -735,7 +735,7 @@ mod tests {
                     cross_origin: None, pagination: None,
                 },
                 // Binary download
-                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false, shapes_preview: vec![],
                     id: "DownloadFile".to_string(),
                     method: RestMethod::Get,
                     path: "/files/{file_id}/content".to_string(),

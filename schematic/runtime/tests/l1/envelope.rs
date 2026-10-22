@@ -14,6 +14,8 @@ use schematic_runtime::{
 };
 use url::Url;
 
+use crate::support::TestApi;
+
 const SENTINEL: &str = "SENTINEL-7f3a9c";
 
 /// A declared error body, as a later definition will declare one.
@@ -22,7 +24,7 @@ struct ProviderError {
     message: String,
 }
 
-impl ErrorBody for ProviderError {
+impl ErrorBody<TestApi> for ProviderError {
     fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
         let message = std::str::from_utf8(body).ok()?.strip_prefix("error: ")?;
         Some(Self { message: message.to_string() })
@@ -237,14 +239,14 @@ fn transport_error_text_shows_the_redacted_url_and_no_secret() {
 #[test]
 fn an_endpoint_without_a_declared_error_reports_undeclared_failures() {
     // Read through a bound, as the runtime classifies replies.
-    fn declares<E: ErrorBody>() -> bool {
+    fn declares<E: ErrorBody<TestApi>>() -> bool {
         E::DECLARED
     }
     assert!(!declares::<NoDeclaredError>());
-    assert_eq!(NoDeclaredError::decode_body(0, b"{\"message\":\"nope\"}"), None);
+    assert_eq!(<NoDeclaredError as ErrorBody<TestApi>>::decode_body(0, b"{\"message\":\"nope\"}"), None);
     assert!(declares::<ProviderError>());
     assert_eq!(
-        ProviderError::decode_body(0, b"error: quota"),
+        <ProviderError as ErrorBody<TestApi>>::decode_body(0, b"error: quota"),
         Some(ProviderError { message: "quota".to_string() })
     );
 

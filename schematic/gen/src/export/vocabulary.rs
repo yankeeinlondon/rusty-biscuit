@@ -17,12 +17,32 @@ use crate::export::auth::policy_alternatives;
 /// - Postman: a replacement policy with more than one alternative (a request
 ///   holds one auth), and a JSON body or response naming a composed
 ///   (`oneOf`/`anyOf`/`allOf`) component.
+/// - Both: each GraphQL operation, which neither output carries (R42).
 pub(crate) fn diagnostics(api: &RestApi, output: Output) -> Vec<ValidationDiagnostic> {
-    match output {
+    let mut diagnostics = match output {
         Output::OpenApi => openapi_diagnostics(api),
         Output::Postman => postman_diagnostics(api),
-        _ => Vec::new(),
-    }
+        _ => return Vec::new(),
+    };
+    diagnostics.extend(graphql_skips(api, output));
+    diagnostics
+}
+
+fn graphql_skips(api: &RestApi, output: Output) -> Vec<ValidationDiagnostic> {
+    let target = match output {
+        Output::Postman => "Postman",
+        _ => "OpenAPI",
+    };
+    let operations = api.graphql.iter().flat_map(|surface| &surface.operations);
+    operations
+        .map(|operation| warning(
+            api,
+            Some(&operation.id),
+            Feature::GraphQlOperation,
+            output,
+            format!("{} operation {}: GraphQL operation skipped in {target} output", api.name, operation.id),
+        ))
+        .collect()
 }
 
 fn warning(api: &RestApi, endpoint: Option<&str>, feature: Feature, output: Output, message: String) -> ValidationDiagnostic {

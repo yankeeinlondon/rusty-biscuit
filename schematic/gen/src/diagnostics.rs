@@ -156,6 +156,9 @@ pub enum Feature {
     OAuth2Grant,
     /// A typed path parameter (`EndpointParams.path`).
     PathParameter,
+    /// A GraphQL operation, which an output does not carry.
+    #[serde(rename = "graphql-operation")]
+    GraphQlOperation,
 }
 
 impl Feature {
@@ -188,6 +191,7 @@ impl Feature {
             Self::SchemaComposition => "schema-composition",
             Self::OAuth2Grant => "oauth2-grant",
             Self::PathParameter => "path-parameter",
+            Self::GraphQlOperation => "graphql-operation",
         }
     }
 }

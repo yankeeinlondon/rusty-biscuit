@@ -122,6 +122,32 @@ fn one_text_or_binary_fallback_takes_unmatched_media_types() {
 }
 
 #[test]
+fn an_author_named_variant_is_an_identifier_unique_to_a_multi_shape_endpoint() {
+    let named = |shape: SuccessShape, name: &str| with(shape, |s| s.variant = Some(name.into()));
+    let file = with(SuccessShape::new(ResponseShape::Binary), |s| s.fallback = true);
+    assert!(validate_success_shapes(&[named(json("Listing"), "Directory"), named(file.clone(), "File")]).is_ok());
+    assert!(validate_success_shapes(&[named(json("Listing"), "Directory"), file.clone()]).is_ok(), "naming one shape is enough");
+    rejects(&[named(json("Listing"), "Directory")], "names the variant Directory, but a single shape generates no enum");
+    rejects(&[named(json("Listing"), "Same"), named(file.clone(), "Same")], "both name the variant Same");
+    for bad in ["", "directory", "Dir-Listing", "Dir Listing", "Self", "Ünïcode", "9Lives"] {
+        rejects(&[named(json("Listing"), bad), file.clone()], "must be an UpperCamelCase Rust identifier");
+    }
+
+    let shape = named(json("Listing"), "Directory");
+    let text = serde_json::to_string(&shape).unwrap();
+    assert_eq!(text, r#"{"shape":{"Json":{"Named":"Listing"}},"variant":"Directory"}"#);
+    assert_eq!(serde_json::from_str::<SuccessShape>(&text).unwrap(), shape);
+    assert!(serde_json::from_str::<SuccessShape>(r#"{"shape":"Text","variant":null}"#).is_err(), "null is not absent");
+    assert!(serde_json::from_str::<SuccessShape>(r#"{"shape":"Text","variant":3}"#).is_err());
+    assert_eq!(shape.legacy_response(), None, "a named variant needs response model v2 storage");
+
+    let mut ctx = DefinitionContext::types_in("::fixture");
+    let record = ctx.register::<Record>().unwrap();
+    let refused = Endpoint::get("Get", "/x").describes("Get").returns(Success::json(record).variant("Record")).build();
+    assert!(refused.unwrap_err().to_string().contains("single shape generates no enum"));
+}
+
+#[test]
 fn stream_end_conditions_must_suit_their_framing() {
     let ok = |framing, end, keep| validate_success_shapes(&[stream(framing, end, keep)]).is_ok();
     assert!(ok(sse(), StreamEnd::DataLineEquals("[DONE]".into()), false));

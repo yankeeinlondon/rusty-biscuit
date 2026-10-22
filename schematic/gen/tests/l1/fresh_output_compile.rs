@@ -23,10 +23,11 @@
 use std::path::Path;
 
 use schematic_define::{
-    ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, AuthPolicy, AuthStrategy,
-    AuthorizationCodeGrant, CrossOrigin, Endpoint, EndpointParams, EnvList, FormField,
-    OAuth2ClientAuthMethod, OAuth2Config, ParamDef, ParamStyle, PkceRequirement, QueryParamType,
-    RestApi, RestMethod,
+    AddressRule, ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, AuthPolicy, AuthStrategy,
+    AuthorizationCodeGrant, CrossOrigin, Endpoint, EndpointParams, EnvList, ErrorEntry, FormField,
+    GraphQlOperation, GraphQlSurface, GraphQlVariables, OAuth2ClientAuthMethod, OAuth2Config, ParamDef,
+    ParamStyle, PkceRequirement, QueryParamType, ResponseShape, RestApi, RestMethod, StatusMatch, StreamEnd,
+    StreamFraming, SuccessShape, TypeRef,
 };
 use schematic_define::pagination::{
     Collection, CursorSource, InputParam, KeepAlive, LinkSource, MoreSignal, PageSize,
@@ -99,6 +100,21 @@ const FIXTURE_COVERAGE: &[(&str, &[&str])] = &[
             "unserializable-query-left-out",
         ],
     ),
+    (
+        "FixtureShapes",
+        &[
+            "json-and-sse-success-enum",
+            "ndjson-stream-kept-terminator",
+            "byte-stream",
+            "named-variants-and-fallback",
+            "status-selected-json-shapes",
+            "api-error-defaults",
+            "endpoint-error-overlay",
+            "error-opt-out",
+            "single-and-enum-failures",
+        ],
+    ),
+    ("FixtureGraphQl", &["graphql-typed-variables", "graphql-unit-variables", "graphql-address-rules", "graphql-http-errors"]),
 ];
 
 /// Request and response types for the fixture APIs, one module per API.
@@ -169,6 +185,82 @@ pub struct EntryLinkPage {
 "#,
     ),
     ("fixture_query", ""),
+    (
+        "fixture_shapes",
+        r#"
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Message {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Delta {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Chunk {
+    pub n: u32,
+    pub done: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Listing {
+    pub entries: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Record {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Job {
+    pub job: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Problem {
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Conflict {
+    pub reason: String,
+}
+"#,
+    ),
+    (
+        "fixture_graphql",
+        r#"
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Login {
+    pub login: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ViewerData {
+    pub viewer: Login,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CheckVars {
+    pub owner: String,
+    pub name: String,
+    pub n0: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CheckData {
+    pub repository: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Problem {
+    pub message: String,
+}
+"#,
+    ),
 ];
 
 fn endpoint(id: &str, method: RestMethod, path: &str, response: ApiResponse) -> Endpoint {
@@ -494,7 +586,87 @@ fn fixture_apis() -> Vec<RestApi> {
         names,
         pages_fixture(),
         query_fixture(),
+        shapes_fixture(),
+        graphql_fixture(),
     ]
+}
+
+fn named(name: &str) -> TypeRef { TypeRef::Named(name.to_string()) }
+
+fn previewed(id: &str, method: RestMethod, path: &str, shapes: Vec<SuccessShape>) -> Endpoint {
+    let mut fixture = endpoint(id, method, path, ApiResponse::Empty);
+    fixture.shapes_preview = shapes;
+    fixture
+}
+
+fn shape(kind: ResponseShape, edit: impl FnOnce(&mut SuccessShape)) -> SuccessShape {
+    let mut shape = SuccessShape::new(kind);
+    edit(&mut shape);
+    shape
+}
+
+/// Several success shapes, streams, and declared errors. `Endpoint::response`
+/// cannot store these until the response model switch, so the endpoints
+/// carry them in the hidden `shapes_preview` seam, which every generator
+/// path reads through `Endpoint::success_shapes()`.
+fn shapes_fixture() -> RestApi {
+    let mut create = previewed("CreateMessage", RestMethod::Post, "/messages", vec![
+        shape(ResponseShape::Json(named("Message")), |s| s.note = Some("returned when `stream` is false or omitted".into())),
+        shape(
+            ResponseShape::Stream { framing: StreamFraming::Sse(named("Delta")), end: StreamEnd::DataLineEquals("[DONE]".into()), keep: false },
+            |s| s.note = Some("returned when `stream` is true".into()),
+        ),
+    ]);
+    create.errors = vec![ErrorEntry::new(StatusMatch::exact(404), ResponseShape::Text)];
+    let chunks = previewed("StreamChunks", RestMethod::Get, "/chunks", vec![SuccessShape::new(ResponseShape::Stream {
+        framing: StreamFraming::Ndjson(named("Chunk")),
+        end: StreamEnd::FieldEquals { field: "done".into(), value: serde_json::json!(true) },
+        keep: true,
+    })]);
+    let mut download = previewed("Download", RestMethod::Get, "/download", vec![shape(
+        ResponseShape::Stream { framing: StreamFraming::Bytes, end: StreamEnd::ConnectionClose, keep: false },
+        |s| s.content_type = Some("audio/mpeg".into()),
+    )]);
+    download.no_declared_errors = true;
+    let source = previewed("GetSource", RestMethod::Get, "/source/{path}", vec![
+        shape(ResponseShape::Json(named("Listing")), |s| s.variant = Some("Directory".into())),
+        shape(ResponseShape::Binary, |s| { s.fallback = true; s.variant = Some("File".into()); }),
+    ]);
+    let mut submit = previewed("Submit", RestMethod::Post, "/jobs", vec![
+        shape(ResponseShape::Json(named("Record")), |s| { s.statuses = vec![200]; s.variant = Some("Record".into()); }),
+        shape(ResponseShape::Json(named("Job")), |s| { s.statuses = vec![202]; s.variant = Some("Job".into()); }),
+    ]);
+    submit.errors = vec![ErrorEntry::new(StatusMatch::exact(409), ResponseShape::Json(named("Conflict")))];
+    let mut api = fixture_api("FixtureShapes", "fixture_shapes", AuthStrategy::None, vec![create, chunks, download, source, submit]);
+    api.errors = vec![ErrorEntry::new(StatusMatch::class(5), ResponseShape::Json(named("Problem")))];
+    crate::common::components::with_referenced_components(api)
+}
+
+/// GraphQL operations beside one REST endpoint, under the GitHub address
+/// rules. The definition's base ends in `/api/v3`; tests point it at a mock.
+fn graphql_fixture() -> RestApi {
+    let mut ctx = schematic_define::DefinitionContext::types_in("::fixture");
+    let mut viewer = GraphQlOperation::query("Viewer", "query { viewer { login } }")
+        .describes("The signed-in user").no_variables().data::<serde_json::Value>(&mut ctx).build().unwrap();
+    viewer.data = named("ViewerData");
+    let mut check = GraphQlOperation::query("CheckStatus", "query CheckStatus($owner: String!, $name: String!, $n0: Int!) { repository(owner: $owner, name: $name) { p0: pullRequest(number: $n0) { number } } }")
+        .describes("Check status of pull requests").no_variables().data::<serde_json::Value>(&mut ctx)
+        .operation_name("CheckStatus").build().unwrap();
+    check.variables = GraphQlVariables::Typed(named("CheckVars"));
+    check.data = named("CheckData");
+    check.errors = vec![ErrorEntry::new(StatusMatch::exact(403), ResponseShape::Json(named("Problem")))];
+    let mut rename = GraphQlOperation::mutation("Rename", "mutation { rename { login } }")
+        .describes("Rename the signed-in user").no_variables().data::<serde_json::Value>(&mut ctx).build().unwrap();
+    rename.data = named("Login");
+    rename.no_declared_errors = true;
+    let mut api = fixture_api("FixtureGraphQl", "fixture_graphql", AuthStrategy::None, vec![
+        endpoint("GetUser", RestMethod::Get, "/user", ApiResponse::json_type("Login")),
+    ]);
+    api.base_url = "http://127.0.0.1:1/api/v3".to_string();
+    let mut surface = GraphQlSurface::new(AddressRule::github());
+    surface.operations = vec![viewer, check, rename];
+    api.graphql = Some(surface);
+    crate::common::components::with_referenced_components(api)
 }
 
 /// A query parameter with every field the generator reads.
@@ -1519,6 +1691,231 @@ async fn typed_registration_paths_preserve_nullable_nested_wire_shape() {
     assert!(client.typed_durations().await.unwrap().is_none());
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }
+
+// ---- response model v2: several shapes, streams, declared errors ----
+
+async fn reply(server: &MockServer, at: &str, template: ResponseTemplate) {
+    server.reset().await;
+    Mock::given(path(at.to_string())).respond_with(template).mount(server).await;
+}
+
+#[tokio::test]
+async fn a_multi_shape_endpoint_returns_the_variant_its_content_type_selects() {
+    use schematic_schema::fixture_shapes::{CreateMessageRequest, CreateMessageResponse, Delta, FixtureShapes, Message};
+    let server = MockServer::start().await;
+    let client = FixtureShapes::new().base_url(server.uri()).build().unwrap();
+
+    reply(&server, "/messages", ResponseTemplate::new(200).set_body_raw(r#"{"id":"m1"}"#, "Application/JSON; charset=utf-8")).await;
+    match client.send(CreateMessageRequest::default()).full().await.unwrap().into_result().unwrap() {
+        CreateMessageResponse::Json(message) => assert_eq!(message, Message { id: "m1".into() }),
+        other => panic!("expected the JSON variant: {other:?}"),
+    }
+
+    let events = "data: {\"text\":\"a\"}\n\ndata: {\"text\":\"b\"}\n\ndata: [DONE]\n\n";
+    reply(&server, "/messages", ResponseTemplate::new(200).set_body_raw(events, "text/event-stream")).await;
+    let CreateMessageResponse::Stream(mut stream) = client.send(CreateMessageRequest::default()).full().await.unwrap().into_result().unwrap() else {
+        panic!("expected the stream variant");
+    };
+    let mut items = Vec::new();
+    while let Some(item) = stream.next().await {
+        items.push(item.unwrap());
+    }
+    assert_eq!(items, [Delta { text: "a".into() }, Delta { text: "b".into() }], "`[DONE]` is consumed");
+
+    reply(&server, "/messages", ResponseTemplate::new(200).set_body_raw("<html/>", "text/html")).await;
+    let response = client.send(CreateMessageRequest::default()).full().await.unwrap();
+    let Outcome::Failure(error) = &response.outcome else { panic!("HTML selects no shape: {response}") };
+    assert!(matches!(error.kind, ErrorKind::UnexpectedContentType), "{error}");
+    assert_eq!(error.body, &b"<html/>"[..]);
+}
+
+#[tokio::test]
+async fn single_stream_endpoints_deliver_items_and_bytes_as_they_are_framed() {
+    use schematic_schema::fixture_shapes::{Chunk, DownloadRequest, FixtureShapes, StreamChunksRequest};
+    let server = MockServer::start().await;
+    let client = FixtureShapes::new().base_url(server.uri()).build().unwrap();
+
+    reply(&server, "/chunks", ResponseTemplate::new(200).set_body_raw("{\"n\":1,\"done\":false}\n\n{\"n\":2,\"done\":true}\n", "application/x-ndjson")).await;
+    let mut chunks = client.send(StreamChunksRequest::default()).full().await.unwrap().into_result().unwrap();
+    let mut items = Vec::new();
+    while let Some(item) = chunks.next().await {
+        items.push(item.unwrap());
+    }
+    assert_eq!(items, [Chunk { n: 1, done: false }, Chunk { n: 2, done: true }], "the kept `done` line is the last item");
+
+    reply(&server, "/chunks", ResponseTemplate::new(200).set_body_raw("{\"n\":1,\"done\":false}\n", "application/x-ndjson")).await;
+    let mut early = client.send(StreamChunksRequest::default()).full().await.unwrap().into_result().unwrap();
+    assert!(early.next().await.unwrap().is_ok());
+    let ended = early.next().await.unwrap().unwrap_err();
+    assert!(matches!(ended, schematic_schema::schematic_runtime::StreamError::EndedEarly), "{ended:?}");
+    assert!(early.next().await.is_none());
+
+    reply(&server, "/download", ResponseTemplate::new(200).set_body_raw(vec![1u8, 2, 3, 4], "audio/mpeg")).await;
+    let mut bytes = client.send(DownloadRequest::default()).full().await.unwrap().into_result().unwrap();
+    let mut received = Vec::new();
+    while let Some(chunk) = bytes.next().await {
+        received.extend_from_slice(&chunk.unwrap());
+    }
+    assert_eq!(received, [1, 2, 3, 4]);
+}
+
+#[tokio::test]
+async fn named_fallback_and_status_shapes_select_their_variants() {
+    use schematic_schema::fixture_shapes::{FixtureShapes, GetSourceRequest, GetSourceResponse, Job, Listing, Record, SubmitRequest, SubmitResponse};
+    let server = MockServer::start().await;
+    let client = FixtureShapes::new().base_url(server.uri()).build().unwrap();
+
+    reply(&server, "/source/docs", ResponseTemplate::new(200).set_body_raw(r#"{"entries":["a.md"]}"#, "application/json")).await;
+    match client.send(GetSourceRequest::new("docs")).full().await.unwrap().into_result().unwrap() {
+        GetSourceResponse::Directory(listing) => assert_eq!(listing, Listing { entries: vec!["a.md".into()] }),
+        other => panic!("expected Directory: {other:?}"),
+    }
+    reply(&server, "/source/logo.png", ResponseTemplate::new(200).set_body_raw(vec![0x89u8, b'P'], "image/png")).await;
+    match client.send(GetSourceRequest::new("logo.png")).full().await.unwrap().into_result().unwrap() {
+        GetSourceResponse::File(bytes) => assert_eq!(&bytes[..], [0x89, b'P']),
+        other => panic!("an unmatched media type takes the fallback: {other:?}"),
+    }
+
+    reply(&server, "/jobs", ResponseTemplate::new(200).set_body_raw(r#"{"id":"r1"}"#, "application/json")).await;
+    assert!(matches!(client.send(SubmitRequest::default()).full().await.unwrap().into_result().unwrap(), SubmitResponse::Record(Record { id }) if id == "r1"));
+    reply(&server, "/jobs", ResponseTemplate::new(202).set_body_raw(r#"{"job":"j1"}"#, "application/json")).await;
+    assert!(matches!(client.send(SubmitRequest::default()).full().await.unwrap().into_result().unwrap(), SubmitResponse::Job(Job { job }) if job == "j1"));
+
+    let mutated = FixtureShapes::new()
+        .base_url(server.uri())
+        .mutate_response::<SubmitRequest, _>(|_meta, response| {
+            if let SubmitResponse::Job(job) = response {
+                job.job.push_str(" (seen)");
+            }
+            Ok(())
+        })
+        .build()
+        .unwrap();
+    assert!(matches!(mutated.send(SubmitRequest::default()).full().await.unwrap().into_result().unwrap(), SubmitResponse::Job(Job { job }) if job == "j1 (seen)"),
+        "an all-JSON enum accepts a typed mutator");
+}
+
+#[tokio::test]
+async fn declared_errors_decode_by_the_most_specific_status_and_opt_outs_stay_undeclared() {
+    use schematic_schema::fixture_shapes::{
+        Conflict, CreateMessageError, CreateMessageRequest, DownloadRequest, FixtureShapes, Problem, StreamChunksRequest, SubmitError, SubmitRequest,
+    };
+    let server = MockServer::start().await;
+    let client = FixtureShapes::new().base_url(server.uri()).build().unwrap();
+
+    reply(&server, "/messages", ResponseTemplate::new(404).set_body_raw("no such thread", "text/plain")).await;
+    let error = client.send(CreateMessageRequest::default()).full().await.unwrap().into_result().unwrap_err();
+    assert!(matches!(&error.kind, ErrorKind::Declared(CreateMessageError::Text(text)) if text == "no such thread"), "{error}");
+    reply(&server, "/messages", ResponseTemplate::new(503).set_body_raw(r#"{"message":"busy"}"#, "application/json")).await;
+    let error = client.send(CreateMessageRequest::default()).full().await.unwrap().into_result().unwrap_err();
+    assert!(matches!(&error.kind, ErrorKind::Declared(CreateMessageError::Problem(Problem { message })) if message == "busy"), "API defaults are inherited: {error}");
+    reply(&server, "/messages", ResponseTemplate::new(503).set_body_raw("<html/>", "text/html")).await;
+    let error = client.send(CreateMessageRequest::default()).full().await.unwrap().into_result().unwrap_err();
+    assert!(matches!(error.kind, ErrorKind::MalformedError), "{error}");
+    assert_eq!(error.body, &b"<html/>"[..]);
+    reply(&server, "/messages", ResponseTemplate::new(400).set_body_raw("bad", "text/plain")).await;
+    let error = client.send(CreateMessageRequest::default()).full().await.unwrap().into_result().unwrap_err();
+    assert!(matches!(error.kind, ErrorKind::Undeclared), "no entry matches 400: {error}");
+
+    reply(&server, "/jobs", ResponseTemplate::new(409).set_body_raw(r#"{"reason":"taken"}"#, "application/json")).await;
+    let error = client.send(SubmitRequest::default()).full().await.unwrap().into_result().unwrap_err();
+    assert!(matches!(&error.kind, ErrorKind::Declared(SubmitError::Conflict(Conflict { reason })) if reason == "taken"), "{error}");
+
+    reply(&server, "/chunks", ResponseTemplate::new(500).set_body_raw(r#"{"message":"down"}"#, "application/json")).await;
+    let error = client.send(StreamChunksRequest::default()).full().await.unwrap().into_result().unwrap_err();
+    assert!(matches!(&error.kind, ErrorKind::Declared(Problem { message }) if message == "down"), "one distinct shape is the failure type itself: {error}");
+
+    reply(&server, "/download", ResponseTemplate::new(500).set_body_raw(r#"{"message":"down"}"#, "application/json")).await;
+    let error = client.send(DownloadRequest::default()).full().await.unwrap().into_result().unwrap_err();
+    assert!(matches!(error.kind, ErrorKind::Undeclared), "an opted-out endpoint declares nothing: {error}");
+}
+
+// ---- GraphQL operations ----
+
+#[tokio::test]
+async fn graphql_operations_post_their_document_to_the_address_the_rules_derive() {
+    use schematic_schema::fixture_graphql::{CheckData, CheckStatusRequest, CheckVars, FixtureGraphQl, GetUserRequest, Login, ViewerData, ViewerRequest};
+    let server = MockServer::start().await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(200).set_body_raw(r#"{"data":{"repository":null,"viewer":{"login":"me"}},"login":"me"}"#, "application/json"))
+        .mount(&server)
+        .await;
+    let enterprise = FixtureGraphQl::new().base_url(format!("{}/api/v3/", server.uri())).build().unwrap();
+    let variables = CheckVars { owner: "o".into(), name: "r".into(), n0: 7 };
+    let data = enterprise.send(CheckStatusRequest::new(variables)).full().await.unwrap().into_result().unwrap();
+    assert_eq!(data, CheckData { repository: None });
+    let request = only_request(&server).await;
+    assert_eq!(request.method.as_str(), "POST");
+    assert_eq!(request.url.path(), "/api/graphql", "`/api/v3` is replaced");
+    assert_eq!(header(&request, "accept"), ["application/json"]);
+    assert_eq!(header(&request, "content-type"), ["application/json"]);
+    let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+    assert_eq!(body, serde_json::json!({
+        "query": CheckStatusRequest::DOCUMENT,
+        "variables": {"owner": "o", "name": "r", "n0": 7},
+        "operationName": "CheckStatus",
+    }));
+
+    server.reset().await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(200).set_body_raw(r#"{"data":{"viewer":{"login":"me"}},"login":"me"}"#, "application/json"))
+        .mount(&server)
+        .await;
+    let dotcom = FixtureGraphQl::new().base_url(server.uri()).build().unwrap();
+    let data = dotcom.send(ViewerRequest::new()).full().await.unwrap().into_result().unwrap();
+    assert_eq!(data, ViewerData { viewer: Login { login: "me".into() } });
+    let request = only_request(&server).await;
+    assert_eq!(request.url.path(), "/graphql", "any other base gains `/graphql`");
+    let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+    assert_eq!(body, serde_json::json!({"query": "query { viewer { login } }"}), "no variables or operationName member");
+
+    server.reset().await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(200).set_body_raw(r#"{"login":"me"}"#, "application/json"))
+        .mount(&server)
+        .await;
+    let user = enterprise.send(GetUserRequest::default()).full().await.unwrap().into_result().unwrap();
+    assert_eq!(user, Login { login: "me".into() });
+    assert_eq!(only_request(&server).await.url.path(), "/api/v3/user", "REST paths stay under the base");
+
+    server.reset().await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(200).set_body_raw(r#"{"data":{"viewer":{"login":"me"}}}"#, "application/json"))
+        .mount(&server)
+        .await;
+    let overridden = FixtureGraphQl::new().base_url(server.uri()).graphql_url(format!("{}/custom/gql", server.uri())).build().unwrap();
+    overridden.send(ViewerRequest::new()).full().await.unwrap().into_result().unwrap();
+    assert_eq!(only_request(&server).await.url.path(), "/custom/gql", "an override beats the rules");
+}
+
+#[tokio::test]
+async fn graphql_errors_and_http_errors_reach_the_composite_failure() {
+    use schematic_schema::fixture_graphql::{CheckStatusRequest, CheckVars, FixtureGraphQl, Problem, RenameRequest};
+    use schematic_schema::schematic_runtime::GraphQlOperationError;
+    let server = MockServer::start().await;
+    let client = FixtureGraphQl::new().base_url(server.uri()).build().unwrap();
+    let variables = || CheckVars { owner: "o".into(), name: "r".into(), n0: 1 };
+
+    reply(&server, "/graphql", ResponseTemplate::new(200).set_body_raw(
+        r#"{"data":null,"errors":[{"message":"limited","type":"RATE_LIMITED"}]}"#, "application/json")).await;
+    let error = client.send(CheckStatusRequest::new(variables())).full().await.unwrap().into_result().unwrap_err();
+    let ErrorKind::Declared(GraphQlOperationError::GraphQl(failure)) = &error.kind else { panic!("{error}") };
+    assert_eq!(failure.errors[0].message, "limited");
+    assert_eq!(failure.errors[0].other["type"], "RATE_LIMITED");
+    assert!(failure.partial_data.is_none());
+
+    reply(&server, "/graphql", ResponseTemplate::new(403).set_body_raw(r#"{"message":"forbidden"}"#, "application/json")).await;
+    let error = client.send(CheckStatusRequest::new(variables())).full().await.unwrap().into_result().unwrap_err();
+    assert!(matches!(&error.kind, ErrorKind::Declared(GraphQlOperationError::Http(Problem { message })) if message == "forbidden"), "{error}");
+
+    reply(&server, "/graphql", ResponseTemplate::new(403).set_body_raw(r#"{"message":"forbidden"}"#, "application/json")).await;
+    let error = client.send(RenameRequest::new()).full().await.unwrap().into_result().unwrap_err();
+    assert!(matches!(error.kind, ErrorKind::Undeclared), "an opted-out operation declares no HTTP error: {error}");
+    reply(&server, "/graphql", ResponseTemplate::new(200).set_body_raw(r#"{"errors":[{"message":"denied"}]}"#, "application/json")).await;
+    let error = client.send(RenameRequest::new()).full().await.unwrap().into_result().unwrap_err();
+    assert!(matches!(&error.kind, ErrorKind::Declared(GraphQlOperationError::GraphQl(failure)) if failure.errors[0].message == "denied"),
+        "GraphQL errors stay declared after an HTTP opt-out: {error}");
+}
 "##;
 
 /// Environment for the child test process; see [`REQUEST_SIDE_TEST`].
@@ -1566,6 +1963,12 @@ const REQUEST_SIDE_TESTS: &[&str] = &[
     "unset_values_are_omitted_and_empty_arrays_are_sent_empty",
     "a_generated_session_opens_pages_and_closes_inside_its_scope",
     "typed_registration_paths_preserve_nullable_nested_wire_shape",
+    "a_multi_shape_endpoint_returns_the_variant_its_content_type_selects",
+    "single_stream_endpoints_deliver_items_and_bytes_as_they_are_framed",
+    "named_fallback_and_status_shapes_select_their_variants",
+    "declared_errors_decode_by_the_most_specific_status_and_opt_outs_stay_undeclared",
+    "graphql_operations_post_their_document_to_the_address_the_rules_derive",
+    "graphql_errors_and_http_errors_reach_the_composite_failure",
 ];
 
 #[test]
@@ -1574,7 +1977,7 @@ fn request_side_test_list_names_every_child_test() {
         .split("async fn ")
         .skip(1)
         .filter_map(|rest| rest.split('(').next())
-        .filter(|name| !["start_server", "only_request", "assert_nothing_sent"].contains(name))
+        .filter(|name| !["start_server", "only_request", "assert_nothing_sent", "reply"].contains(name))
         .collect();
     assert_eq!(declared, REQUEST_SIDE_TESTS);
 }
@@ -1749,7 +2152,43 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
     ("endpoint success is required", "fn misuse() { let _ = schematic_define::Endpoint::get(\"Get\", \"/\").describes(\"Get\").build(); }", "E0599", "build"),
     ("API description is required", "fn misuse() { let c = schematic_define::DefinitionContext::types_in(\"::models\"); let _ = schematic_define::RestApi::builder(&c, \"Api\", \"https://example.com\").no_auth().build(); }", "E0599", "build"),
     ("API authentication is required", "fn misuse() { let c = schematic_define::DefinitionContext::types_in(\"::models\"); let _ = schematic_define::RestApi::builder(&c, \"Api\", \"https://example.com\").describes(\"Api\").build(); }", "E0599", "build"),
-    ("ErrorSet only supports none", "fn misuse() { let _ = schematic_define::ErrorSet::status(400); }", "E0599", "ErrorSet"),
+    ("ErrorSet has no status shorthand", "fn misuse() { let _ = schematic_define::ErrorSet::status(400); }", "E0599", "ErrorSet"),
+    (
+        "GraphQL variables of another type",
+        "fn misuse() { let _ = schematic_schema::fixture_graphql::CheckStatusRequest::new(schematic_schema::fixture_graphql::Login::default()); }",
+        "E0308",
+        "CheckVars",
+    ),
+    (
+        "a mutator on an SSE/NDJSON stream endpoint",
+        "fn misuse() { let _ = schematic_schema::fixture_shapes::FixtureShapes::new().mutate_response::<schematic_schema::fixture_shapes::StreamChunksRequest, _>(|_, _| Ok(())); }",
+        "E0277",
+        "SupportsHooks",
+    ),
+    (
+        "a mutator on a byte stream endpoint",
+        "fn misuse() { let _ = schematic_schema::fixture_shapes::FixtureShapes::new().mutate_response::<schematic_schema::fixture_shapes::DownloadRequest, _>(|_, _| Ok(())); }",
+        "E0277",
+        "SupportsHooks",
+    ),
+    (
+        "a mutator on a text endpoint",
+        "fn misuse() { let _ = FixtureBasic::new().mutate_response::<GetNoteRequest, _>(|_, _| Ok(())); }",
+        "E0277",
+        "SupportsHooks",
+    ),
+    (
+        "a mutator on a binary endpoint",
+        "fn misuse() { let _ = FixtureBasic::new().mutate_response::<schematic_schema::fixture_basic::GetBlobRequest, _>(|_, _| Ok(())); }",
+        "E0277",
+        "SupportsHooks",
+    ),
+    (
+        "a mutator on JSON mixed with a stream",
+        "fn misuse() { let _ = schematic_schema::fixture_shapes::FixtureShapes::new().mutate_response::<schematic_schema::fixture_shapes::CreateMessageRequest, _>(|_, _| Ok(())); }",
+        "E0277",
+        "SupportsHooks",
+    ),
     (
         "a descriptor cannot be constructed from a bare name",
         "fn misuse() { let _ = schematic_define::TypeDesc::new(\"Model\"); }",
@@ -2069,6 +2508,12 @@ fn slow_generated_types_reject_misuse_at_compile_time() {
             client.send(ListWidgetsRequest::default()).full().await.unwrap();
         let _ = response.data();
         let _ = FixtureBearer::new().mutate_response::<ListWidgetsRequest, _>(|_, _| Ok(()));
+        // An all-JSON success enum and a GraphQL operation's data accept a
+        // typed mutator.
+        let _ = schematic_schema::fixture_shapes::FixtureShapes::new()
+            .mutate_response::<schematic_schema::fixture_shapes::SubmitRequest, _>(|_, _: &mut schematic_schema::fixture_shapes::SubmitResponse| Ok(()));
+        let _ = schematic_schema::fixture_graphql::FixtureGraphQl::new()
+            .mutate_response::<schematic_schema::fixture_graphql::ViewerRequest, _>(|_, _: &mut schematic_schema::fixture_graphql::ViewerData| Ok(()));
         // An all-optional request keeps `Default`; a required query value
         // goes through `new()`.
         fn needs_default<T: Default>() {}

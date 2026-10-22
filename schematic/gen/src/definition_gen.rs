@@ -18,9 +18,10 @@ use std::path::Path;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::{
-    ApiKeyLocation, ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, FormField,
-    FormFieldKind, OAuth2Config, ParamDef, ParamStyle, PrimitiveType, QueryParamType, RestApi,
-    RestMethod, TypeRef,
+    ApiKeyLocation, ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, ErrorEntry,
+    FormField, FormFieldKind, JsonTag, OAuth2Config, ParamDef, ParamStyle, PrimitiveType,
+    QueryParamType, ResponseShape, RestApi, RestMethod, StatusMatch, StreamEnd, StreamFraming,
+    SuccessShape, TypeRef,
 };
 
 use crate::errors::GeneratorError;
@@ -177,6 +178,10 @@ fn rest_api_tokens(api: &RestApi, overlay: Option<&syn::Path>) -> TokenStream {
     builder = quote! { #builder.cross_origin(#policy) };
     for name in &api.secret_names { builder = quote! { #builder.secret_header(#name) }; }
     for (key, value) in &api.headers { builder = quote! { #builder.header(#key, #value) }; }
+    if !api.errors.is_empty() {
+        let errors = error_set_tokens(&api.errors);
+        builder = quote! { #builder.default_errors(#errors) };
+    }
     let endpoints = api.endpoints.iter().enumerate().map(|(index, endpoint)| {
         let function = format_ident!("endpoint_{}", index);
         let expression = endpoint_tokens(endpoint);
@@ -185,7 +190,7 @@ fn rest_api_tokens(api: &RestApi, overlay: Option<&syn::Path>) -> TokenStream {
             Some(ApiRequest::FormData { fields } | ApiRequest::UrlEncoded { fields }) => fields.iter().any(|field| matches!(field.kind, FormFieldKind::Json(_))),
             _ => false,
         };
-        let argument = if matches!(endpoint.response, ApiResponse::Json(_)) || typed_request { format_ident!("ctx") } else { format_ident!("_ctx") };
+        let argument = if registers_response_types(endpoint) || typed_request { format_ident!("ctx") } else { format_ident!("_ctx") };
         quote! {
             fn #function(#argument: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
                 #expression
@@ -209,15 +214,31 @@ fn endpoint_tokens(endpoint: &Endpoint) -> TokenStream {
     let path = &endpoint.path;
     let description = &endpoint.description;
     let mut builder = quote! { Endpoint::new(#id, #method, #path).describes(#description) };
-    builder = match &endpoint.response {
-        ApiResponse::Json(reference) => {
-            let ty = imported_type(reference);
-            quote! { #builder.returns_json::<#ty>(ctx) }
+    let shapes = endpoint.success_shapes();
+    builder = match shapes.as_slice() {
+        [only] if only.legacy_response().is_some() => match &endpoint.response {
+            ApiResponse::Json(reference) => {
+                let ty = imported_type(reference);
+                quote! { #builder.returns_json::<#ty>(ctx) }
+            }
+            ApiResponse::Text => quote! { #builder.returns_text() },
+            ApiResponse::Binary => quote! { #builder.returns_binary() },
+            _ => quote! { #builder.returns_empty() },
+        },
+        _ => {
+            for shape in &shapes {
+                let success = success_tokens(shape);
+                builder = quote! { #builder.returns(#success) };
+            }
+            builder
         }
-        ApiResponse::Text => quote! { #builder.returns_text() },
-        ApiResponse::Binary => quote! { #builder.returns_binary() },
-        _ => quote! { #builder.returns_empty() },
     };
+    if endpoint.no_declared_errors {
+        builder = quote! { #builder.errors(ErrorSet::none()) };
+    } else if !endpoint.errors.is_empty() {
+        let errors = error_set_tokens(&endpoint.errors);
+        builder = quote! { #builder.errors(#errors) };
+    }
     if let Some(request) = &endpoint.request {
         builder = match request {
             ApiRequest::Json(reference) => {
@@ -246,6 +267,95 @@ fn endpoint_tokens(endpoint: &Endpoint) -> TokenStream {
     }
     for (key, value) in &endpoint.headers { builder = quote! { #builder.header(#key, #value) }; }
     quote! { #builder.build() }
+}
+
+/// Whether the endpoint's success shapes or own error entries register a
+/// JSON type, so its emitted function needs the context.
+fn registers_response_types(endpoint: &Endpoint) -> bool {
+    let success = endpoint.success_shapes().iter().any(|shape| matches!(&shape.shape,
+        ResponseShape::Json(_) | ResponseShape::Stream { framing: StreamFraming::Sse(_) | StreamFraming::Ndjson(_), .. }));
+    success || endpoint.errors.iter().any(|entry| matches!(entry.shape, ResponseShape::Json(_)))
+}
+
+/// A `Success` expression reproducing `shape` and every fact it declares.
+fn success_tokens(shape: &SuccessShape) -> TokenStream {
+    let register = |reference: &TypeRef| { let ty = imported_type(reference); quote! { ctx.register::<#ty>()? } };
+    let mut tokens = match &shape.shape {
+        ResponseShape::Json(reference) => { let desc = register(reference); quote! { Success::json(#desc) } }
+        ResponseShape::Text => quote! { Success::text() },
+        ResponseShape::Binary => quote! { Success::binary() },
+        ResponseShape::Stream { framing, end, keep } => {
+            let mut stream = match framing {
+                StreamFraming::Sse(item) => { let desc = register(item); quote! { Success::sse(#desc) } }
+                StreamFraming::Ndjson(item) => { let desc = register(item); quote! { Success::ndjson(#desc) } }
+                _ => quote! { Success::bytes() },
+            };
+            stream = match end {
+                StreamEnd::DataLineEquals(data) => quote! { #stream.ends_at_data_line(#data) },
+                StreamEnd::EventNamed(name) => quote! { #stream.ends_at_event(#name) },
+                StreamEnd::FieldEquals { field, value } => { let value = scalar_tokens(value); quote! { #stream.ends_when_field(#field, #value) } }
+                _ => stream,
+            };
+            if *keep { stream = quote! { #stream.keep_end() }; }
+            stream
+        }
+        _ => quote! { Success::empty() },
+    };
+    if let Some(content_type) = &shape.content_type { tokens = quote! { #tokens.content_type(#content_type) }; }
+    for status in &shape.statuses { tokens = quote! { #tokens.status(#status) }; }
+    tokens = match &shape.json_tag {
+        Some(JsonTag::Field { name, value }) => { let value = scalar_tokens(value); quote! { #tokens.tagged(#name, #value) } }
+        Some(JsonTag::Array) => quote! { #tokens.json_array() },
+        Some(JsonTag::Object) => quote! { #tokens.json_object() },
+        _ => tokens,
+    };
+    if shape.fallback { tokens = quote! { #tokens.fallback() }; }
+    if let Some(note) = &shape.note { tokens = quote! { #tokens.note(#note) }; }
+    if let Some(variant) = &shape.variant { tokens = quote! { #tokens.variant(#variant) }; }
+    tokens
+}
+
+/// An `ErrorSet` expression declaring `entries` in order.
+fn error_set_tokens(entries: &[ErrorEntry]) -> TokenStream {
+    let mut tokens = quote! { ErrorSet::new() };
+    for entry in entries {
+        let status = match entry.status {
+            StatusMatch::Exact(status) => quote! { StatusMatch::exact(#status) },
+            StatusMatch::Range { lo, hi } if lo % 100 == 0 && hi == lo + 99 => { let class = lo / 100; quote! { StatusMatch::class(#class) } }
+            StatusMatch::Range { lo, hi } => quote! { StatusMatch::range(#lo, #hi) },
+            _ => panic!("error status match {} has no builder form", entry.status),
+        };
+        let mut shape = match &entry.shape {
+            ResponseShape::Json(reference) => { let ty = imported_type(reference); quote! { ErrorShape::json(ctx.register::<#ty>()?) } }
+            ResponseShape::Text => quote! { ErrorShape::text() },
+            ResponseShape::Binary => quote! { ErrorShape::binary() },
+            _ => quote! { ErrorShape::empty() },
+        };
+        if let Some(content_type) = &entry.content_type { shape = quote! { #shape.content_type(#content_type) }; }
+        tokens = quote! { #tokens.on(#status, #shape) };
+    }
+    tokens
+}
+
+/// A literal for a tag or terminator value, which validation keeps to a
+/// string, number, or boolean.
+///
+/// ## Panics
+///
+/// Panics on any other JSON value.
+fn scalar_tokens(value: &serde_json::Value) -> TokenStream {
+    use proc_macro2::Literal;
+    match value {
+        serde_json::Value::String(text) => quote! { #text },
+        serde_json::Value::Bool(flag) => quote! { #flag },
+        serde_json::Value::Number(number) => {
+            let literal = if let Some(unsigned) = number.as_u64() { Literal::u64_suffixed(unsigned) }
+                else if let Some(signed) = number.as_i64() { Literal::i64_suffixed(signed) }
+                else { Literal::f64_suffixed(number.as_f64().expect("a JSON number that is no integer is a float")) };
+            quote! { #literal }
+        }
+        other => panic!("tag or terminator value {other} is not a string, number, or boolean"),
+    }
 }
 
 /// The Rust type an emitted builder registers for an imported reference.
@@ -515,6 +625,56 @@ mod tests {
         let code = format_code(&validate_code(&tokens).unwrap());
 
         assert!(code.contains("pub fn define_sample_api() -> RestApi"));
+    }
+
+    #[test]
+    fn emits_builder_calls_reproducing_response_model_v2_facts() {
+        let mut api = sample_api();
+        let shape = |kind: ResponseShape, edit: &dyn Fn(&mut SuccessShape)| { let mut shape = SuccessShape::new(kind); edit(&mut shape); shape };
+        let named = |name: &str| TypeRef::Named(name.into());
+        api.errors = vec![ErrorEntry::new(StatusMatch::class(5), ResponseShape::Text)];
+        let endpoint = &mut api.endpoints[0];
+        endpoint.shapes_preview = vec![
+            shape(ResponseShape::Json(named("Directory")), &|s| {
+                s.json_tag = Some(JsonTag::Field { name: "type".into(), value: serde_json::json!("dir") });
+                s.variant = Some("Directory".into());
+                s.statuses = vec![200, 203];
+            }),
+            shape(ResponseShape::Json(TypeRef::Array(Box::new(named("Entry")))), &|s| s.json_tag = Some(JsonTag::Array)),
+            shape(ResponseShape::Stream { framing: StreamFraming::Sse(named("Event")), end: StreamEnd::EventNamed("message_stop".into()), keep: false },
+                &|s| s.note = Some("returned when `stream` is true".into())),
+            shape(ResponseShape::Stream { framing: StreamFraming::Ndjson(named("Chunk")), end: StreamEnd::FieldEquals { field: "done".into(), value: serde_json::json!(true) }, keep: true }, &|_| {}),
+            shape(ResponseShape::Stream { framing: StreamFraming::Bytes, end: StreamEnd::ConnectionClose, keep: false }, &|s| s.content_type = Some("audio/mpeg".into())),
+            shape(ResponseShape::Binary, &|s| s.fallback = true),
+        ];
+        endpoint.errors = vec![
+            ErrorEntry::new(StatusMatch::exact(404), ResponseShape::Json(named("Problem"))),
+            { let mut html = ErrorEntry::new(StatusMatch::range(429, 431), ResponseShape::Text); html.content_type = Some("text/html".into()); html },
+        ];
+        let mut opted_out = api.endpoints[0].clone();
+        opted_out.id = "OptedOut".into();
+        opted_out.shapes_preview = vec![];
+        opted_out.errors = vec![];
+        opted_out.no_declared_errors = true;
+        api.endpoints.push(opted_out);
+
+        let code = format_code(&validate_code(&assemble_definition_module(&api, "sample", &[], None)).unwrap());
+        // Compare without whitespace or the formatter's trailing commas.
+        let code: String = code.split_whitespace().collect::<String>().replace(",)", ")");
+
+        for expected in [
+            ".default_errors(ErrorSet::new().on(StatusMatch::class(5u16),ErrorShape::text()))",
+            ".returns(Success::json(ctx.register::<Directory>()?).status(200u16).status(203u16).tagged(\"type\",\"dir\").variant(\"Directory\"))",
+            ".returns(Success::json(ctx.register::<Vec<Entry>>()?).json_array())",
+            ".returns(Success::sse(ctx.register::<Event>()?).ends_at_event(\"message_stop\").note(\"returnedwhen`stream`istrue\"))",
+            ".returns(Success::ndjson(ctx.register::<Chunk>()?).ends_when_field(\"done\",true).keep_end())",
+            ".returns(Success::bytes().content_type(\"audio/mpeg\"))",
+            ".returns(Success::binary().fallback())",
+            ".errors(ErrorSet::new().on(StatusMatch::exact(404u16),ErrorShape::json(ctx.register::<Problem>()?)).on(StatusMatch::range(429u16,431u16),ErrorShape::text().content_type(\"text/html\")))",
+            ".returns_json::<ListItemsResponse>(ctx).errors(ErrorSet::none())",
+        ] {
+            assert!(code.contains(expected), "missing {expected}\n{code}");
+        }
     }
 
     #[test]

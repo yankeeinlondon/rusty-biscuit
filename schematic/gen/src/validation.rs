@@ -43,7 +43,7 @@ use schematic_define::openapi::import::naming::sanitize_rust_field_ident;
 use schematic_define::{
     ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, DefinitionError, Endpoint,
     EnvAuthStrategy, ErrorEntry, FormFieldKind, GraphQlOperation, GraphQlVariables, ParamDef,
-    QueryParamType, ResponseShape, RestApi, TypeRef,
+    QueryParamType, ResponseShape, RestApi, StreamFraming, TypeRef,
 };
 use schematic_define::pagination::{
     PaginationRuleGroup, Resolution, Step, resolve, validate_pagination,
@@ -55,6 +55,7 @@ use crate::codegen::request_structs::param_enums::variant_collisions;
 use crate::codegen::request_structs::path_params::{PathValue, typed_path_fields};
 use crate::codegen::request_structs::shared::{extract_query_params, query_shape};
 use crate::codegen::pagination::pager_view;
+use crate::codegen::responses::{end_marker_names, failure_enum_needed, success_variant_names};
 use crate::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use crate::errors::GeneratorError;
 use crate::export::resolve_module_name;
@@ -407,6 +408,7 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
         check_raw_body_content_type(api, endpoint, diagnostics);
         check_sent_params(api, endpoint, diagnostics);
         check_query_shapes(api, endpoint, diagnostics);
+        check_success_variants(api, endpoint, diagnostics);
     }
 
     check_pagination(api, diagnostics);
@@ -877,8 +879,15 @@ fn referenced_type_names(api: &RestApi, endpoint: &Endpoint) -> Vec<(&'static st
         }
         _ => {}
     }
-    if let ApiResponse::Json(reference) = &endpoint.response {
-        references.push(("response", reference));
+    let shapes = endpoint.success_shapes();
+    for shape in &shapes {
+        match &shape.shape {
+            ResponseShape::Json(reference) => references.push(("response", reference)),
+            ResponseShape::Stream { framing: StreamFraming::Sse(reference) | StreamFraming::Ndjson(reference), .. } => {
+                references.push(("stream item", reference));
+            }
+            _ => {}
+        }
     }
     references.extend(errors.entries().iter().filter_map(error_reference));
     references
@@ -908,26 +917,54 @@ fn error_reference(entry: &ErrorEntry) -> Option<(&'static str, &TypeRef)> {
     }
 }
 
-/// The success and failure enums generated for `endpoint` (Defaults D-15,
-/// D-23): `{id}Response` when it declares several success shapes, and
-/// `{id}Error` when its effective error table has several distinct shapes.
+/// The items generated for `endpoint`'s response types (Defaults D-15,
+/// D-23): `{id}Response` when it declares several success shapes, a stream
+/// end marker per stream with a terminator, and `{id}Error` when its
+/// effective error table needs the failure enum.
 fn endpoint_enum_names(api: &RestApi, endpoint: &Endpoint) -> Vec<(String, &'static str)> {
+    let shapes = endpoint.success_shapes();
     let mut names = Vec::new();
-    if endpoint.success_shapes().len() > 1 {
+    if shapes.len() > 1 {
         names.push((format!("{}Response", endpoint.id), "success enum"));
     }
-    let table = api.effective_errors(endpoint);
-    let mut shapes: Vec<(&ResponseShape, Option<&str>)> = Vec::new();
-    for entry in table.entries() {
-        let shape = (&entry.shape, entry.content_type.as_deref());
-        if !shapes.contains(&shape) {
-            shapes.push(shape);
-        }
-    }
-    if shapes.len() > 1 {
+    names.extend(end_marker_names(&endpoint.id, &shapes).into_iter().map(|name| (name, "stream end marker")));
+    if failure_enum_needed(api, &api.effective_errors(endpoint)) {
         names.push((format!("{}Error", endpoint.id), "failure enum"));
     }
     names
+}
+
+/// Reports success-enum variants that the derived names (D-15) leave
+/// colliding, which only the author can resolve.
+fn check_success_variants(api: &RestApi, endpoint: &Endpoint, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    let shapes = endpoint.success_shapes();
+    if shapes.len() < 2 {
+        return;
+    }
+    let names = success_variant_names(&shapes);
+    for (index, name) in names.iter().enumerate() {
+        if names[..index].contains(name) || names[index + 1..].iter().all(|other| other != name) {
+            continue;
+        }
+        let colliding: Vec<String> = names.iter().enumerate().filter(|(_, other)| *other == name).map(|(position, _)| {
+            let shape = &shapes[position];
+            match shape.media_type() {
+                Some(media) => format!("success shape {} ({media})", position + 1),
+                None => format!("success shape {}", position + 1),
+            }
+        }).collect();
+        diagnostics.push(ValidationDiagnostic::new(
+            Severity::Error,
+            &api.name,
+            Some(&endpoint.id),
+            Feature::GeneratedNameCollision,
+            Output::Rust,
+            format!(
+                "API {} endpoint {}: {} all generate the variant `{name}` of `{}Response`; name them with `Success::variant`",
+                api.name, endpoint.id, colliding.join(", "), endpoint.id
+            ),
+        ));
+    }
 }
 
 /// Checks an endpoint's declared path parameters against what the Rust
@@ -1215,7 +1252,9 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
         // Operations share the endpoints' naming space (R35).
         for operation in api.graphql.iter().flat_map(|surface| &surface.operations) {
             let request = format!("{}{suffix}", operation.id);
-            for (name, role) in [(call_type_name(&request), "call type"), (request, "request struct")] {
+            let failure = failure_enum_needed(api, &api.effective_operation_errors(operation))
+                .then(|| (format!("{}Error", operation.id), "failure enum"));
+            for (name, role) in [(call_type_name(&request), "call type"), (request, "request struct")].into_iter().chain(failure) {
                 emitted.entry(name).or_default().push(Owner {
                     api: &api.name,
                     endpoint: Some(&operation.id),
@@ -2350,6 +2389,18 @@ mod tests {
         assert!(rust_only(&[&api]).is_empty());
         let api = with_operations(vec![], vec![operation("viewer-data", "ViewerData")]);
         assert!(rust(&api).iter().any(|d| d.feature == Feature::InvalidIdentifier && d.message.starts_with("GraphQL operation id `viewer-data`")));
+
+        // Several distinct HTTP error shapes give the operation a failure
+        // enum, which joins the same naming space.
+        use schematic_define::{ErrorEntry, ResponseShape, StatusMatch};
+        let mut viewer = operation("Viewer", "ViewerError");
+        viewer.errors = vec![ErrorEntry::new(StatusMatch::exact(403), ResponseShape::Text), ErrorEntry::new(StatusMatch::class(5), ResponseShape::Binary)];
+        let api = with_operations(vec![], vec![viewer.clone()]);
+        let messages: Vec<String> = rust_only(&[&api]).into_iter().map(|d| d.message).collect();
+        assert_eq!(messages, ["data type `ViewerError` of TestApi::Viewer is shadowed by the failure enum of GraphQL operation TestApi::Viewer"]);
+        viewer.errors.truncate(1);
+        let api = with_operations(vec![], vec![viewer]);
+        assert!(rust_only(&[&api]).is_empty(), "one distinct shape needs no failure enum");
     }
 
     #[test]
@@ -2374,6 +2425,63 @@ mod tests {
             ErrorEntry::new(StatusMatch::class(5), ResponseShape::Text)];
         api.schemas.push(schematic_define::SchemaComponent { name: "GetError".into(), rust_path: Some("GetError".into()), schema: serde_json::json!({"type": "object"}) });
         assert!(rust_only(&[&api]).is_empty());
+    }
+
+    fn with_shapes(id: &str, shapes: Vec<schematic_define::SuccessShape>) -> Endpoint {
+        let mut endpoint = get(id);
+        endpoint.shapes_preview = shapes;
+        endpoint
+    }
+
+    #[test]
+    fn success_variants_left_colliding_by_derived_names_ask_for_author_names() {
+        use schematic_define::{ResponseShape, SuccessShape};
+        let status = |code: u16, variant: Option<&str>| {
+            let mut shape = SuccessShape::new(ResponseShape::Json(TypeRef::Named("Response".into())));
+            shape.statuses = vec![code];
+            shape.variant = variant.map(str::to_owned);
+            shape
+        };
+        let api = api_with(vec![with_shapes("Create", vec![status(200, None), status(202, None)])]);
+
+        let diagnostics = rust_only(&[&api]);
+
+        assert_eq!(features(&diagnostics), [(Severity::Error, Feature::GeneratedNameCollision)]);
+        assert_eq!(diagnostics[0].endpoint.as_deref(), Some("Create"));
+        assert_eq!(diagnostics[0].message, "API TestApi endpoint Create: success shape 1 (application/json), success shape 2 (application/json) \
+            all generate the variant `Json` of `CreateResponse`; name them with `Success::variant`");
+        let named = api_with(vec![with_shapes("Create", vec![status(200, Some("Record")), status(202, Some("Accepted"))])]);
+        assert!(rust_only(&[&named]).is_empty());
+    }
+
+    #[test]
+    fn a_stream_end_marker_joins_the_generated_names() {
+        use schematic_define::{ResponseShape, StreamEnd, StreamFraming, SuccessShape};
+        let mut api = api_with(vec![get("Other")]);
+        let sse = ResponseShape::Stream { framing: StreamFraming::Sse(TypeRef::Named("Response".into())),
+            end: StreamEnd::DataLineEquals("[DONE]".into()), keep: false };
+        api.endpoints.push(with_shapes("Chat", vec![SuccessShape::new(sse)]));
+        api.schemas.iter_mut().find(|c| c.name == "Response").expect("component").rust_path = Some("ChatEnd".into());
+
+        let diagnostics = rust_only(&[&api]);
+
+        assert!(diagnostics.iter().all(|d| d.feature == Feature::GeneratedNameCollision), "{diagnostics:?}");
+        assert!(diagnostics.iter().any(|d| d.message == "response type `ChatEnd` of TestApi::Other is shadowed by the stream end marker of TestApi::Chat"), "{diagnostics:?}");
+        assert!(diagnostics.iter().any(|d| d.message == "stream item type `ChatEnd` of TestApi::Chat is shadowed by the stream end marker of TestApi::Chat"), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn a_lone_json_string_error_needs_the_failure_enum() {
+        use schematic_define::{ErrorEntry, PrimitiveType, ResponseShape, StatusMatch};
+        let mut endpoint = get("Get");
+        endpoint.errors = vec![ErrorEntry::new(StatusMatch::exact(400), ResponseShape::Json(TypeRef::Primitive(PrimitiveType::String)))];
+        let mut api = api_with(vec![endpoint]);
+        api.schemas.iter_mut().find(|c| c.name == "Response").expect("component").rust_path = Some("GetError".into());
+
+        let diagnostics = rust_only(&[&api]);
+
+        assert_eq!(features(&diagnostics), [(Severity::Error, Feature::GeneratedNameCollision)]);
+        assert_eq!(diagnostics[0].message, "response type `GetError` of TestApi::Get is shadowed by the failure enum of TestApi::Get");
     }
 
     #[test]

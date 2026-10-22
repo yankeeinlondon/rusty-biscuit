@@ -9,7 +9,7 @@ use crate::response::ApiResponse;
 use crate::{PrimitiveType, TypeRef};
 
 /// Reference used when a body or response has no named schema to reference.
-const JSON_VALUE: TypeRef = TypeRef::Primitive(PrimitiveType::Json);
+pub(super) const JSON_VALUE: TypeRef = TypeRef::Primitive(PrimitiveType::Json);
 
 pub fn map_request_body(
     body: &Option<ReferenceOr<openapiv3::RequestBody>>,
@@ -384,7 +384,7 @@ fn classify_response_content_type(content_type: &str) -> ResponseContentClass {
     ResponseContentClass::Other
 }
 
-fn reference_from_schema(
+pub(super) fn reference_from_schema(
     schema: &ReferenceOr<Schema>,
     _resolver: &RefResolver,
     diagnostics: &mut Vec<OpenApiDiagnostic>,

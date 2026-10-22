@@ -32,7 +32,7 @@ enum Failure {
     Throttled,
 }
 
-impl ErrorBody for Failure {
+impl ErrorBody<TestApi> for Failure {
     fn decode_body(alternative: usize, body: &[u8]) -> Option<Self> {
         match alternative {
             0 => serde_json::from_slice(body).ok().map(Self::Problem),
@@ -72,7 +72,7 @@ impl Table for OptedOut {
     const ERRORS: &'static [ErrorRoute] = &[];
 }
 
-impl<E: ErrorBody, T: Table> EndpointSpec for Get<E, T> {
+impl<E: ErrorBody<TestApi>, T: Table> EndpointSpec for Get<E, T> {
     type Api = TestApi;
     type Success = Item;
     type Failure = E;
@@ -102,7 +102,7 @@ fn client(server: &MockServer) -> Client<TestApi> {
     builder(ApiDefinition::new("https://api.example.invalid"), &server.uri())
 }
 
-async fn send<E: ErrorBody, T: Table>(client: &Client<TestApi>, at: &'static str) -> Response<Item, E> {
+async fn send<E: ErrorBody<TestApi>, T: Table>(client: &Client<TestApi>, at: &'static str) -> Response<Item, E> {
     client.send(Get::<E, T> { path: at, table: PhantomData }).full().await.expect("head")
 }
 
@@ -164,7 +164,7 @@ async fn the_matched_entry_decodes_its_own_shape_and_everything_else_keeps_its_b
 async fn the_runtime_failure_types_decode_text_bytes_empty_and_any_json_under_the_default_table() {
     let server = serve(&[("/text", 500, "oops \u{e9}"), ("/json", 400, r#"{"a":1}"#), ("/not-json", 400, "{")]).await;
     let client = client(&server);
-    async fn declared<E: ErrorBody + Clone>(client: &Client<TestApi>, at: &str) -> ErrorKind<E> {
+    async fn declared<E: ErrorBody<TestApi> + Clone>(client: &Client<TestApi>, at: &str) -> ErrorKind<E> {
         let response = client.send(Call::<Json<Item>, E>::get(at)).full().await.expect("head");
         failure(&response).0
     }

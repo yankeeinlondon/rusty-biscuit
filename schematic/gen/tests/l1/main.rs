@@ -29,6 +29,7 @@ mod postman_schema;
 mod postman_var_consistency;
 mod query_param_detection;
 mod query_params_codegen;
+mod response_adapters;
 mod test_layout;
 mod typed_path_output;
 mod vocabulary_exports;

@@ -13,6 +13,7 @@ use schematic_define::{Endpoint, RestApi};
 
 use crate::codegen::api_struct::api_tag_name;
 use crate::codegen::pagination::{api_pager_view, ordinary_send_defaults};
+use crate::codegen::responses::api_error_body_impls;
 use crate::codegen::{
     ModuleDocBuilder, generate_api_struct, generate_endpoint_methods, generate_pagination_impls,
     generate_request_struct_with_defaults,
@@ -37,8 +38,9 @@ pub struct SplitApiParts {
     pub responses_rs: TokenStream,
 }
 
-/// The request structs, pager impls, call types, and endpoint methods of one
-/// API.
+/// The request structs, the `ErrorBody` impls of the API's registered JSON
+/// failure types (one per type, however many endpoints share it), pager
+/// impls, call types, and endpoint methods of one API.
 ///
 /// They are generated from the API's pager view, so a parameter a
 /// pagination strategy adopts is in none of them.
@@ -75,6 +77,10 @@ fn api_requests(api: &RestApi, module_path: &str) -> TokenStream {
             &ordinary_send_defaults(declared, original),
         ));
     }
+    for operation in api.graphql.iter().flat_map(|surface| &surface.operations) {
+        tokens.extend(crate::codegen::graphql::generate_operation_request(api, operation, &suffix, &api_tag_name(api)));
+    }
+    tokens.extend(api_error_body_impls(api, &api_tag_name(api)));
     tokens.extend(generate_pagination_impls(api, &suffix));
     tokens.extend(generate_endpoint_methods(api));
     tokens
@@ -323,5 +329,33 @@ mod tests {
         assert!(docs.contains("Retry guidance") && docs.contains("429"), "{docs}");
         assert_eq!(docs.matches("Rate limit").count(), 1, "{docs}");
         assert_eq!(docs.matches("Retry guidance").count(), 1, "{docs}");
+    }
+
+    #[test]
+    fn a_json_failure_type_shared_by_endpoints_gets_one_error_body_impl_per_api() {
+        use schematic_define::response::ResponseShape;
+        use schematic_define::{ApiResponse, ErrorEntry, RestMethod, SchemaComponent, StatusMatch, TypeRef};
+
+        let problem = || ResponseShape::Json(TypeRef::Named("Problem".into()));
+        let endpoint = |id: &str, path: &str| {
+            let mut endpoint = crate::test_utils::make_endpoint(id, RestMethod::Get, path, None);
+            endpoint.response = ApiResponse::Empty;
+            endpoint
+        };
+        let mut overlaid = endpoint("Delete", "/items/delete");
+        overlaid.errors = vec![ErrorEntry::new(StatusMatch::class(5), problem())];
+        let mut several = endpoint("Update", "/items/update");
+        several.errors = vec![ErrorEntry::new(StatusMatch::class(5), ResponseShape::Text)];
+        let mut api = make_api("Fixture", "https://fixture.test", AuthStrategy::None, vec![]);
+        api.endpoints = vec![endpoint("Get", "/items"), overlaid, several];
+        api.errors = vec![ErrorEntry::new(StatusMatch::exact(404), problem())];
+        api.schemas = vec![SchemaComponent { name: "Problem".into(), rust_path: Some("::defs::Problem".into()), schema: serde_json::json!({"type": "object"}) }];
+
+        let tokens = super::assemble_api_module(&api);
+        crate::test_utils::validate_generated_code(&tokens).expect("module parses");
+        let code: String = tokens.to_string().split_whitespace().collect();
+        assert_eq!(code.matches("typeFailure=::defs::Problem;").count(), 2, "{code}");
+        assert_eq!(code.matches("implschematic_runtime::ErrorBody<FixtureApi>for::defs::Problem{").count(), 1, "{code}");
+        assert_eq!(code.matches("implschematic_runtime::ErrorBody<FixtureApi>forUpdateError{").count(), 1, "{code}");
     }
 }

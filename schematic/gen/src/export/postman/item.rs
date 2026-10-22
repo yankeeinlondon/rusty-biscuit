@@ -1,5 +1,6 @@
 //! Request item builder.
 
+use schematic_define::response::ResponseShape;
 use schematic_define::{Backoff, Endpoint, ResetUnit, RestApi, StatusSelector};
 
 use crate::export::auth::{ExportAuth, endpoint_auth_override};
@@ -77,13 +78,25 @@ pub(crate) fn build_request_item(
     }
 }
 
+/// The first success shape's media type when it says more than the shape
+/// kind: a declared content type or a stream's. A plain JSON, text, binary,
+/// or empty shape records nothing.
+fn first_success_content_type(endpoint: &Endpoint) -> Option<String> {
+    let first = endpoint.success_shapes().into_iter().next()?;
+    let telling = first.content_type.is_some() || matches!(first.shape, ResponseShape::Stream { .. });
+    if telling { first.media_type() } else { None }
+}
+
 /// The endpoint description followed by one line per piece of definition
-/// vocabulary Postman has no field for: endpoint and parameter deprecation,
-/// and the effective rate-limit and retry metadata. `None` when all are
-/// absent, so an endpoint declaring none of them keeps its description
-/// alone.
+/// vocabulary Postman has no field for: the first success shape's content
+/// type (R29), endpoint and parameter deprecation, and the effective
+/// rate-limit and retry metadata. `None` when all are absent, so an endpoint
+/// declaring none of them keeps its description alone.
 fn request_description(endpoint: &Endpoint, api: &RestApi) -> Option<String> {
     let mut notes: Vec<String> = Vec::new();
+    if let Some(media) = first_success_content_type(endpoint) {
+        notes.push(format!("Response content type: `{media}`."));
+    }
     if endpoint.deprecated {
         notes.push("Deprecated.".to_string());
     }

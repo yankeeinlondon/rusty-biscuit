@@ -26,7 +26,7 @@ use super::json::as_text;
 use super::spec::{Carry, Input, Strategy};
 use crate::codec::{Decode, DecodeFailure, DecodeFailureKind, LiveBody};
 use crate::client::{append_query, remove_query};
-use crate::endpoint::{EndpointSpec, ErrorRoute, FormPart, QueryValue, RequestBody, RequestParts};
+use crate::endpoint::{Address, EndpointSpec, ErrorRoute, FormPart, QueryValue, RequestBody, RequestParts};
 use crate::error::InvalidArgument;
 use crate::hooks::HookStage;
 
@@ -45,6 +45,7 @@ impl<R: EndpointSpec> EndpointSpec for PageRequest<R> {
     const ENDPOINT_ID: &'static str = R::ENDPOINT_ID;
     const METHOD: Method = R::METHOD;
     const ERRORS: &'static [ErrorRoute] = R::ERRORS;
+    const ADDRESS: Address = R::ADDRESS;
 
     fn into_parts(self) -> Result<RequestParts, InvalidArgument> {
         self.parts

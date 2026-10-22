@@ -35,8 +35,9 @@ use crate::codec::{BodyReadError, DEFAULT_MAX_FRAME_BYTES, Decode, DecodeFailure
 use crate::credentials::{AuthConfig, Credential, CredentialPlacement, Resolved};
 use crate::deadline::{Deadline, Expiration, Limit};
 use crate::encode::{self, EncodedBody};
-use crate::endpoint::{Api, EndpointSpec, ErrorBody, ErrorRoute, QueryValue, RequestParts, encode_query_component};
+use crate::endpoint::{Address, Api, EndpointSpec, ErrorBody, ErrorRoute, QueryValue, RequestParts, encode_query_component};
 use crate::hooks::{HookError, HookStage, Hooks, SupportsHooks};
+use crate::graphql::{AddressRule, derive_address};
 use crate::error::{BuildError, InvalidArgument, TransportError, TransportErrorKind};
 use crate::meta::{AuthMethod, RequestMeta, ResponseMeta};
 use crate::options::{CallAuth, CallOptions};
@@ -66,6 +67,7 @@ pub struct ApiDefinition {
     cross_origin: OriginPolicy,
     endpoint_cross_origin: Vec<(String, OriginPolicy)>,
     endpoint_auth: Vec<(String, EndpointAuth)>,
+    graphql: Option<&'static [AddressRule]>,
 }
 
 /// One endpoint's authentication, replacing the API's.
@@ -99,7 +101,18 @@ impl ApiDefinition {
             cross_origin: OriginPolicy::SameOrigin,
             endpoint_cross_origin: Vec::new(),
             endpoint_auth: Vec::new(),
+            graphql: None,
         }
+    }
+
+    /// Declares the API's GraphQL address rules: a client derives its
+    /// GraphQL address from its effective base URL with the first rule that
+    /// matches (see [`derive_address`]). A
+    /// [`Client::graphql_url`] beats them.
+    #[must_use]
+    pub fn graphql(mut self, rules: &'static [AddressRule]) -> Self {
+        self.graphql = Some(rules);
+        self
     }
 
     /// Sets the API's cross-origin policy (default
@@ -229,6 +242,7 @@ struct Settings {
     env_order: Option<Vec<String>>,
     cross_origin: Option<OriginPolicy>,
     max_frame_bytes: usize,
+    graphql_url: Option<String>,
     hooks: Hooks,
 }
 
@@ -259,6 +273,9 @@ struct Inner {
     /// what a public endpoint's send strips.
     public_placements: Vec<CredentialPlacement>,
     max_frame_bytes: usize,
+    /// Where [`Address::GraphQl`] endpoints are sent; `None` when the API
+    /// declares no rules and the caller set no override.
+    graphql_url: Option<Url>,
     hooks: Hooks,
 }
 
@@ -277,6 +294,7 @@ impl<A: Api> Client<A> {
                 env_order: None,
                 cross_origin: None,
                 max_frame_bytes: DEFAULT_MAX_FRAME_BYTES,
+                graphql_url: None,
                 hooks: Hooks::default(),
             }),
             built: Arc::default(),
@@ -321,6 +339,20 @@ impl<A: Api> Client<A> {
     #[must_use]
     pub fn max_frame_bytes(self, limit: usize) -> Self {
         self.update(|settings| settings.max_frame_bytes = limit)
+    }
+
+    /// Sends GraphQL operations to `url` instead of the address the API's
+    /// rules derive from the base URL.
+    ///
+    /// The address is checked against the endpoint's cross-origin policy
+    /// like any absolute URL: under the default same-origin policy an
+    /// address on another origin than the base URL is refused at send. A URL
+    /// that is not HTTP(S) with a host, carries user information, or carries
+    /// a fragment fails validation with [`BuildError::InvalidGraphQlUrl`].
+    #[must_use]
+    pub fn graphql_url(self, url: impl Into<String>) -> Self {
+        let url = url.into();
+        self.update(|settings| settings.graphql_url = Some(url))
     }
 
     /// Bounds how long establishing a connection may take.
@@ -471,7 +503,8 @@ impl<A: Api> Client<A> {
     /// ## Errors
     ///
     /// Returns [`BuildError`] when the base URL is not a plain HTTP(S) URL,
-    /// a default header is invalid or carries a credential, the client
+    /// the GraphQL address override is invalid or the API's GraphQL rules
+    /// cannot derive one from the base URL, a default header is invalid or carries a credential, the client
     /// credential is of a kind the API does not accept, an allowed origin is
     /// not a bare HTTP(S) origin, the requested cross-origin policy loosens
     /// the API's, a connection option is set on a client attached to a shared
@@ -522,6 +555,13 @@ fn validate(settings: &Settings) -> Result<Inner, BuildError> {
         return Err(BuildError::InvalidMaxFrameBytes);
     }
     let base_url = parse_base_url(&definition.base_url)?;
+    let graphql_url = match (&settings.graphql_url, definition.graphql) {
+        (Some(url), _) => Some(parse_graphql_url(url)?),
+        (None, Some(rules)) => Some(
+            derive_address(&base_url, rules).map_err(|error| BuildError::InvalidGraphQlUrl { reason: error.reason() })?,
+        ),
+        (None, None) => None,
+    };
     let origins = OriginRules::new(&base_url, &definition.cross_origin, settings.cross_origin.as_ref())?;
     let endpoint_origins = definition.endpoint_cross_origin.iter().map(|(endpoint, policy)| {
         OriginRules::new(&base_url, policy, settings.cross_origin.as_ref())
@@ -595,6 +635,7 @@ fn validate(settings: &Settings) -> Result<Inner, BuildError> {
         endpoint_auth: definition.endpoint_auth.clone(),
         public_placements: all_placements(definition).cloned().collect(),
         max_frame_bytes: settings.max_frame_bytes,
+        graphql_url,
         hooks: settings.hooks.clone(),
     })
 }
@@ -615,6 +656,24 @@ fn parse_base_url(text: &str) -> Result<Url, BuildError> {
         return Err(BuildError::InvalidBaseUrl {
             reason: "carries user information",
         });
+    }
+    Ok(url)
+}
+
+fn parse_graphql_url(text: &str) -> Result<Url, BuildError> {
+    let invalid = |reason| BuildError::InvalidGraphQlUrl { reason };
+    let url = Url::parse(text).map_err(|_| invalid("not an absolute URL"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(invalid("scheme is not http or https"));
+    }
+    if url.host_str().is_none_or(str::is_empty) {
+        return Err(invalid("no host"));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(invalid("carries user information"));
+    }
+    if url.fragment().is_some() {
+        return Err(invalid("carries a fragment"));
     }
     Ok(url)
 }
@@ -1021,7 +1080,7 @@ impl Inner {
             .map_err(|argument| pre_send(TransportErrorKind::InvalidArgument(argument), self.base_meta::<R>()))?;
         let method = parts.method.clone();
         let mut assembled = self
-            .assemble(parts)
+            .assemble(parts, R::ADDRESS)
             .map_err(|kind| pre_send(kind, self.meta_for::<R>(&method, &inner.base_url, &HeaderMap::new(), AuthMethod::Anonymous)))?;
 
         let Decision::Follow { credentials } = inner.origins_for::<R>().link(&assembled.url) else {
@@ -1134,8 +1193,9 @@ impl Inner {
     }
 
     /// Joins the endpoint's path (or takes it whole when it is an absolute
-    /// URL) and query onto the base URL, and assembles its headers and body.
-    fn assemble(&self, parts: RequestParts) -> Result<Assembled, TransportErrorKind> {
+    /// URL) and query onto the base URL, or for [`Address::GraphQl`] the
+    /// query onto the GraphQL address, and assembles its headers and body.
+    fn assemble(&self, parts: RequestParts, address: Address) -> Result<Assembled, TransportErrorKind> {
         let inner = self;
         let RequestParts {
             method,
@@ -1144,15 +1204,19 @@ impl Inner {
             headers: part_headers,
             body,
         } = parts;
-        let mut url = if is_absolute_url(&path) {
+        let mut url = if address == Address::GraphQl {
+            // Checked against the cross-origin policy, as an absolute URL
+            // is, before it is sent.
+            inner.graphql_url.clone().ok_or(TransportErrorKind::InvalidUrl)
+        } else if is_absolute_url(&path) {
             // An absolute URL, such as a followed next-page link, is checked
             // against the cross-origin policy before it is sent.
-            Url::parse(&path)
+            Url::parse(&path).map_err(|_| TransportErrorKind::InvalidUrl)
         } else {
             let separator = if path.starts_with('/') || path.is_empty() { "" } else { "/" };
             Url::parse(&format!("{}{separator}{path}", inner.base_url.as_str().trim_end_matches('/')))
-        }
-        .map_err(|_| TransportErrorKind::InvalidUrl)?;
+                .map_err(|_| TransportErrorKind::InvalidUrl)
+        }?;
         url.set_fragment(None);
         append_query(&mut url, query.iter().map(|(name, value)| (name.as_str(), value)));
 

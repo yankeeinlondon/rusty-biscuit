@@ -88,11 +88,11 @@ pub use codec::{
 pub use credentials::{AuthConfig, Credential, CredentialKind, CredentialPlacement, EnvFallback};
 pub use deadline::Deadline;
 pub use endpoint::{
-    Api, EndpointSpec, ErrorBody, ErrorRoute, FormPart, QueryDelimiter, QueryValue, RequestBody, RequestParts,
+    Address, Api, EndpointSpec, ErrorBody, ErrorRoute, FormPart, QueryDelimiter, QueryValue, RequestBody, RequestParts,
     StatusMatch,
 };
 pub use error::{BuildError, InvalidArgument, TransportError, TransportErrorKind};
-pub use graphql::{GraphQl, GraphQlError, GraphQlFailure, GraphQlOperationError, Location, PathSegment};
+pub use graphql::{AddressRule, GraphQl, GraphQlError, GraphQlFailure, GraphQlOperationError, Location, PathSegment};
 pub use hooks::{HookError, HookStage, SupportsHooks};
 pub use meta::{AuthMethod, RequestMeta, ResponseMeta};
 pub use options::CallOptions;
@@ -121,4 +121,4 @@ pub use response::{
 /// value its generator was built against, and the generator's partial
 /// generation refuses to keep modules generated against a different value.
 /// Increment it with every change that generated code can observe.
-pub const ABI: u32 = 5;
+pub const ABI: u32 = 6;

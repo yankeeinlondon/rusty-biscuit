@@ -40,7 +40,7 @@ pub struct ProviderError {
     pub message: String,
 }
 
-impl ErrorBody for ProviderError {
+impl ErrorBody<TestApi> for ProviderError {
     fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
         serde_json::from_slice(body).ok()
     }
@@ -93,7 +93,7 @@ impl<D, E> Clone for Call<D, E> {
 impl<D, E> EndpointSpec for Call<D, E>
 where
     D: Decode,
-    E: ErrorBody,
+    E: ErrorBody<TestApi>,
 {
     type Api = TestApi;
     type Success = D::Output;

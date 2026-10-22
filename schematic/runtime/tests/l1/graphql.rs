@@ -71,7 +71,7 @@ struct Problem {
     message: String,
 }
 
-impl ErrorBody for Problem {
+impl ErrorBody<TestApi> for Problem {
     fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
         serde_json::from_slice(body).ok()
     }
@@ -91,7 +91,7 @@ fn operation<D, H>(path: &'static str) -> Operation<D, H> {
 impl<D, H> EndpointSpec for Operation<D, H>
 where
     D: serde::de::DeserializeOwned + Send + 'static,
-    H: ErrorBody,
+    H: ErrorBody<TestApi>,
 {
     type Api = TestApi;
     type Success = D;
@@ -129,7 +129,7 @@ fn client(server: &MockServer) -> Client<TestApi> {
 async fn send<D, H>(client: &Client<TestApi>, at: &'static str) -> Reply<D, H>
 where
     D: serde::de::DeserializeOwned + Send + 'static,
-    H: ErrorBody,
+    H: ErrorBody<TestApi>,
 {
     client.send(operation::<D, H>(at)).full().await.expect("head")
 }

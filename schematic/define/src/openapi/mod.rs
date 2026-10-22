@@ -10,6 +10,8 @@
 //!
 //! - [`OpenApiSource`] - Input source for OpenAPI documents (file, string, bytes, or parsed)
 //! - [`OpenApiError`] - Errors that can occur during OpenAPI processing
+//! - [`classify_responses`] - One operation's responses as response model v2
+//!   success shapes and error entries
 //!
 //! ### Export
 //!
@@ -89,7 +91,8 @@ pub use extensions::{
 };
 pub use import::{
     BaseUrlPolicy, ContentPreference, DiagnosticSeverity, OpenApiDiagnostic, OpenApiImport,
-    OpenApiImportOptions, OpenApiImportResult, RefResolver,
+    OpenApiImportOptions, OpenApiImportResult, RefResolver, ResponseClassification,
+    classify_responses,
 };
 pub use options::{ExportFormat, ExportOptions, serialize};
 pub use source::OpenApiSource;

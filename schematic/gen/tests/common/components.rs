@@ -6,11 +6,18 @@ use schematic_define::{RestApi, SchemaComponent};
 /// does not carry yet. Fixture names are not real Rust types, so each is
 /// spelled by its bare name and described as an unconstrained object.
 pub fn with_referenced_components(mut api: RestApi) -> RestApi {
-    let mut names: Vec<String> = Vec::new();
+    let mut references: Vec<schematic_define::TypeRef> = Vec::new();
     for endpoint in &api.endpoints {
-        for reference in endpoint.json_references() {
-            names.extend(reference.names().into_iter().map(str::to_owned));
-        }
+        references.extend(endpoint.json_references().into_iter().cloned());
+        references.extend(endpoint.success_shapes().into_iter().filter_map(|shape| shape_reference(shape.shape)));
+    }
+    references.extend(api.errors.iter().filter_map(|entry| shape_reference(entry.shape.clone())));
+    for operation in api.graphql.iter().flat_map(|surface| &surface.operations) {
+        references.extend(operation.json_references().into_iter().cloned());
+    }
+    let mut names: Vec<String> = Vec::new();
+    for reference in &references {
+        names.extend(reference.names().into_iter().map(str::to_owned));
     }
     for name in names {
         if api.component(&name).is_none() {
@@ -22,6 +29,16 @@ pub fn with_referenced_components(mut api: RestApi) -> RestApi {
         }
     }
     api
+}
+
+/// The type a JSON shape or an SSE/NDJSON stream's items decode as.
+fn shape_reference(shape: schematic_define::ResponseShape) -> Option<schematic_define::TypeRef> {
+    use schematic_define::{ResponseShape, StreamFraming};
+    match shape {
+        ResponseShape::Json(reference)
+        | ResponseShape::Stream { framing: StreamFraming::Sse(reference) | StreamFraming::Ndjson(reference), .. } => Some(reference),
+        _ => None,
+    }
 }
 
 /// A fixture API carrying `endpoint` and a component for every name it

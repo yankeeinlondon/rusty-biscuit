@@ -34,7 +34,7 @@ pub trait EndpointSpec: Send + 'static {
     type Success: Send + 'static;
     /// The declared error body; [`NoDeclaredError`](crate::NoDeclaredError)
     /// when the endpoint declares none.
-    type Failure: ErrorBody;
+    type Failure: ErrorBody<Self::Api>;
     /// The codec that reads a 2xx body into [`Self::Success`].
     type Decoder: Decode<Output = Self::Success>;
 
@@ -54,6 +54,10 @@ pub trait EndpointSpec: Send + 'static {
     /// shape of a single-shape failure type.
     const ERRORS: &'static [ErrorRoute] = &[ErrorRoute::new(StatusMatch::Range { lo: 400, hi: 599 }, 0)];
 
+    /// Where the request is sent; [`Address::Base`] unless the endpoint is
+    /// a GraphQL operation.
+    const ADDRESS: Address = Address::Base;
+
     /// Assembles the application-level request.
     ///
     /// The result carries no credential: the runtime resolves credentials
@@ -66,15 +70,36 @@ pub trait EndpointSpec: Send + 'static {
     fn into_parts(self) -> Result<RequestParts, InvalidArgument>;
 }
 
+/// Where an endpoint's request is sent.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Address {
+    /// [`RequestParts::path`] joined onto the client's base URL, or taken
+    /// whole when it is an absolute URL.
+    Base,
+    /// The client's GraphQL address (see [`crate::graphql`]).
+    /// [`RequestParts::path`] is ignored; declared query pairs are still
+    /// appended. A client with neither GraphQL address rules nor a
+    /// [`Client::graphql_url`](crate::Client::graphql_url) refuses the send
+    /// with [`TransportErrorKind::InvalidUrl`](crate::TransportErrorKind::InvalidUrl)
+    /// before any request.
+    GraphQl,
+}
+
 /// A failure body that the runtime decodes when a declared error status
 /// arrives, so the caller never performs a decode step.
 ///
-/// The runtime implements it for the plain shapes of a single-shape table:
-/// `String` (text, invalid UTF-8 replaced), [`Bytes`] (binary), `()`
-/// (empty), and [`serde_json::Value`] (any JSON). Generated code implements
-/// it for registered JSON types and for the enum of a table with several
-/// distinct shapes.
-pub trait ErrorBody: Sized + Send + 'static {
+/// `A` is the [`Api`] marker of the endpoint whose failure this is. The
+/// runtime implements it for every `A` for the plain shapes of a
+/// single-shape table: `String` (text, invalid UTF-8 replaced), [`Bytes`]
+/// (binary), `()` (empty), and [`serde_json::Value`] (any JSON). Generated
+/// code implements `ErrorBody<ApiMarker>` once per API module for each
+/// registered JSON type the module's error tables name, and for the enum of a
+/// table with several distinct shapes. The marker parameter is what makes
+/// that legal: registered types live in another crate, and the orphan rule
+/// allows a foreign trait on a foreign type only when a local type, here the
+/// generated marker, appears among the trait's parameters.
+pub trait ErrorBody<A>: Sized + Send + 'static {
     /// `false` only for [`NoDeclaredError`](crate::NoDeclaredError): every
     /// error reply of such an endpoint is reported as undeclared.
     const DECLARED: bool = true;
@@ -93,25 +118,25 @@ pub trait ErrorBody: Sized + Send + 'static {
     }
 }
 
-impl ErrorBody for String {
+impl<A> ErrorBody<A> for String {
     fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
         Some(String::from_utf8_lossy(body).into_owned())
     }
 }
 
-impl ErrorBody for Bytes {
+impl<A> ErrorBody<A> for Bytes {
     fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
         Some(Bytes::copy_from_slice(body))
     }
 }
 
-impl ErrorBody for () {
+impl<A> ErrorBody<A> for () {
     fn decode_body(_: usize, _: &[u8]) -> Option<Self> {
         Some(())
     }
 }
 
-impl ErrorBody for serde_json::Value {
+impl<A> ErrorBody<A> for serde_json::Value {
     fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
         serde_json::from_slice(body).ok()
     }

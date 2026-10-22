@@ -91,6 +91,8 @@ impl Success {
     pub fn fallback(mut self) -> Self { self.shape.fallback = true; self }
     /// When this shape is returned; variant rustdoc and export only.
     pub fn note(mut self, note: impl Into<String>) -> Self { self.shape.note = Some(note.into()); self }
+    /// Names this shape's variant of the generated success enum (D-15).
+    pub fn variant(mut self, name: impl Into<String>) -> Self { self.shape.variant = Some(name.into()); self }
     pub fn ends_at_data_line(self, data: impl Into<String>) -> Self { self.ends(StreamEnd::DataLineEquals(data.into())) }
     pub fn ends_at_event(self, name: impl Into<String>) -> Self { self.ends(StreamEnd::EventNamed(name.into())) }
     /// Ends at the item whose field at dotted `path` equals `value`.
@@ -177,7 +179,7 @@ impl Endpoint {
         EndpointBuilder { endpoint: Endpoint { id: id.into(), method, path: path.into(),
             description: String::new(), request: None, response: ApiResponse::Empty,
             headers: vec![], params: None, cross_origin: None, pagination: None, rate_limit: None, retry_guidance: None,
-            deprecated: false, auth: None, errors: vec![], no_declared_errors: false }, successes: vec![], auth_choices: 0, error: None, state: PhantomData }
+            deprecated: false, auth: None, errors: vec![], no_declared_errors: false, shapes_preview: vec![] }, successes: vec![], auth_choices: 0, error: None, state: PhantomData }
     }
     pub fn get(id: impl Into<String>, path: impl Into<String>) -> EndpointBuilder { Self::new(id, RestMethod::Get, path) }
     pub fn post(id: impl Into<String>, path: impl Into<String>) -> EndpointBuilder { Self::new(id, RestMethod::Post, path) }

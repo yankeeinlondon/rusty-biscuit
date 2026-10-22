@@ -299,8 +299,98 @@ pub(super) fn check_text(content: &str, json: bool) -> Result<(), OpenApiError> 
                         return Err(invalid(path, format!("{api} endpoint {id} GET cannot declare a request body")));
                     }
                     check_parameters(operation.get("parameters"), path)?;
+                    let id = operation.get("operationId").and_then(Value::as_str).unwrap_or(method);
+                    let api = value.0["info"]["title"].as_str().unwrap_or("API");
+                    check_responses(operation.get("responses"), &format!("API {api} endpoint {id} {} {path} responses", method.to_uppercase()))?;
                 }
             }
+        }
+    }
+    if let Some(responses) = value.0.get("components").and_then(|components| components.get("responses")) {
+        let responses = responses.as_object().ok_or_else(|| invalid("components.responses", "Expected responses object"))?;
+        for (name, response) in responses {
+            check_response(response, &format!("components.responses.{name}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// The response members the v2 classification reads, which `openapiv3`
+/// would otherwise accept silently: it drops unknown status keys, merges
+/// `4XX` with `4xx`, reads a null `schema` or `discriminator` as absent, and
+/// keeps an empty `$ref`, `oneOf`, or `propertyName`. Media and status keys
+/// are compared normalized, so differently spelled duplicates are rejected.
+fn check_responses(responses: Option<&Value>, context: &str) -> Result<(), OpenApiError> {
+    let Some(responses) = responses else { return Ok(()) };
+    let responses = responses.as_object().ok_or_else(|| invalid(context, "Expected responses object; null is not omission"))?;
+    let mut seen = HashSet::new();
+    for (key, response) in responses {
+        if key.starts_with("x-") { continue; }
+        let normalized = key.to_ascii_uppercase();
+        let valid = normalized == "DEFAULT"
+            || normalized.parse::<u16>().is_ok_and(|code| key.len() == 3 && (100..=599).contains(&code))
+            || matches!(normalized.as_bytes(), [b'1'..=b'5', b'X', b'X']);
+        if !valid { return Err(invalid(context, format!("Response key `{key}` is not `default`, a status 100-599, or a class 1XX-5XX"))); }
+        if !seen.insert(normalized) { return Err(invalid(context, format!("Response key `{key}` duplicates another spelling of the same status"))); }
+        check_response(response, &format!("{context}.{key}"))?;
+    }
+    Ok(())
+}
+
+fn check_response(response: &Value, context: &str) -> Result<(), OpenApiError> {
+    let response = response.as_object().ok_or_else(|| invalid(context, "Expected response object"))?;
+    if let Some(reference) = response.get("$ref") {
+        return check_reference(reference, context);
+    }
+    let Some(content) = response.get("content") else { return Ok(()) };
+    let content = content.as_object().ok_or_else(|| invalid(context, "Expected content object; null is not omission"))?;
+    let mut seen = HashSet::new();
+    for (key, media) in content {
+        let normalized = match crate::response::normalize_media_type(key) {
+            Ok(normalized) => normalized,
+            // Media ranges are well formed but unrepresentable; the importer reports them.
+            Err(_) if is_media_range(key) => key.trim().to_ascii_lowercase(),
+            Err(message) => return Err(invalid(context, message)),
+        };
+        if !seen.insert(normalized) { return Err(invalid(context, format!("Media type `{key}` duplicates another spelling of the same media type"))); }
+        let context = format!("{context}.content.{key}");
+        let media = media.as_object().ok_or_else(|| invalid(&context, "Expected media type object"))?;
+        if let Some(schema) = media.get("schema") { check_schema(schema, &format!("{context}.schema"))?; }
+    }
+    Ok(())
+}
+
+fn is_media_range(key: &str) -> bool {
+    let key = key.split(';').next().unwrap_or_default().trim();
+    key == "*/*" || key.strip_suffix("/*").is_some_and(|kind| !kind.is_empty() && kind.bytes().all(|c| c.is_ascii_alphanumeric() || b"!#$%&'+-.^_`|~".contains(&c)))
+}
+
+fn check_reference(reference: &Value, context: &str) -> Result<(), OpenApiError> {
+    match reference.as_str() {
+        Some(reference) if !reference.is_empty() => Ok(()),
+        _ => Err(invalid(context, "`$ref` must be a nonempty string")),
+    }
+}
+
+fn check_schema(schema: &Value, context: &str) -> Result<(), OpenApiError> {
+    let schema = schema.as_object().ok_or_else(|| invalid(context, "Expected schema object; null is not omission"))?;
+    if let Some(reference) = schema.get("$ref") { check_reference(reference, context)?; }
+    if let Some(members) = schema.get("oneOf") {
+        let members = members.as_array().filter(|members| !members.is_empty())
+            .ok_or_else(|| invalid(context, "`oneOf` must be a nonempty array"))?;
+        for member in members {
+            let member = member.as_object().ok_or_else(|| invalid(context, "`oneOf` member must be a schema or reference object"))?;
+            if let Some(reference) = member.get("$ref") { check_reference(reference, context)?; }
+        }
+    }
+    if let Some(discriminator) = schema.get("discriminator") {
+        let discriminator = discriminator.as_object().ok_or_else(|| invalid(context, "Expected discriminator object; null is not omission"))?;
+        if !discriminator.get("propertyName").and_then(Value::as_str).is_some_and(|name| !name.is_empty()) {
+            return Err(invalid(context, "`discriminator.propertyName` must be a nonempty string"));
+        }
+        if let Some(mapping) = discriminator.get("mapping")
+            && !mapping.as_object().is_some_and(|mapping| mapping.values().all(|target| target.as_str().is_some_and(|target| !target.is_empty()))) {
+            return Err(invalid(context, "`discriminator.mapping` must map values to nonempty reference strings"));
         }
     }
     Ok(())

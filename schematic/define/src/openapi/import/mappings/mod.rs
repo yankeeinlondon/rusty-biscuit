@@ -1,7 +1,9 @@
+mod classify;
 mod parameters;
 mod responses;
 mod schema;
 
+pub use classify::{ResponseClassification, classify_responses};
 pub use responses::map_responses;
 pub use schema::{SchemaMapResult, map_all_schemas};
 
@@ -81,7 +83,7 @@ pub fn map_operation(
     let params = parameters::map_parameters(&op.parameters, resolver, &mut diagnostics);
 
     Ok((
-        Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+        Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false, shapes_preview: vec![],
             id,
             method,
             path: path.to_string(),

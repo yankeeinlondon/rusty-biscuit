@@ -14,6 +14,7 @@ mod endpoint_auth;
 mod envelope;
 mod error_routes;
 mod graphql;
+mod graphql_address;
 mod hooks;
 mod metadata_boundary;
 mod origin_policy;

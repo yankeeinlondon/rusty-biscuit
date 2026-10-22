@@ -21,6 +21,29 @@
 //! The client-global JSON hook sees the wire wrapper, once, before
 //! classification. A typed mutator runs on decoded data only after a
 //! failure-free reply, never on partial data.
+//!
+//! ## The operation address
+//!
+//! An endpoint whose [`EndpointSpec::ADDRESS`](crate::EndpointSpec::ADDRESS)
+//! is [`Address::GraphQl`](crate::Address::GraphQl) is sent to the client's
+//! GraphQL address rather than to a path under its base URL. The address is
+//! the caller's [`Client::graphql_url`](crate::Client::graphql_url) when set,
+//! and otherwise is derived from the client's effective base URL by the
+//! [`AddressRule`]s the API declares through
+//! [`ApiDefinition::graphql`](crate::ApiDefinition::graphql):
+//!
+//! ```
+//! use schematic_runtime::graphql::derive_address;
+//! use schematic_runtime::{AddressRule, Url};
+//!
+//! const GITHUB: &[AddressRule] = &[
+//!     AddressRule::ReplaceSuffix { suffix: "/api/v3", with: "/api/graphql" },
+//!     AddressRule::Append("/graphql"),
+//! ];
+//! let derive = |base: &str| derive_address(&Url::parse(base).unwrap(), GITHUB).unwrap().to_string();
+//! assert_eq!(derive("https://api.github.com"), "https://api.github.com/graphql");
+//! assert_eq!(derive("https://ghe.example/prefix/api/v3/"), "https://ghe.example/prefix/api/graphql");
+//! ```
 
 use std::any::Any;
 use std::fmt;
@@ -30,6 +53,7 @@ use bytes::Bytes;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use url::Url;
 
 use crate::codec::{Decode, DecodeFailure, DecodeFailureKind, LiveBody};
 use crate::endpoint::{ErrorBody, RequestBody};
@@ -61,6 +85,95 @@ pub fn request_body<V: Serialize>(document: &str, variables: Option<&V>, operati
         body.insert("operationName".to_owned(), Value::String(name.to_owned()));
     }
     Ok(RequestBody::Json(Value::Object(body).to_string()))
+}
+
+/// One way to derive an API's GraphQL address from a base URL; see
+/// [`derive_address`].
+///
+/// Paths are compared and rewritten as `/`-separated segments, so a rule's
+/// leading or trailing slash is not significant.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddressRule {
+    /// Matches a base whose path ends in the segments of `suffix`, and
+    /// replaces those segments with the segments of `with`.
+    ReplaceSuffix {
+        /// The trailing path segments to match.
+        suffix: &'static str,
+        /// The segments that replace them.
+        with: &'static str,
+    },
+    /// Matches every base, and appends these path segments.
+    Append(&'static str),
+}
+
+/// Why [`derive_address`] could not derive an address.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddressError {
+    /// The base carries a query or fragment, which a path rule cannot place.
+    QueryOrFragment,
+    /// The base has no hierarchical path, such as a `data:` URL.
+    NotHierarchical,
+    /// No rule matched the base.
+    NoRuleMatched,
+}
+
+impl AddressError {
+    /// A short description, free of the URL.
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::QueryOrFragment => "the base URL carries a query or fragment",
+            Self::NotHierarchical => "the base URL has no hierarchical path",
+            Self::NoRuleMatched => "no GraphQL address rule matches the base URL",
+        }
+    }
+}
+
+impl fmt::Display for AddressError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.reason())
+    }
+}
+
+impl std::error::Error for AddressError {}
+
+/// The GraphQL address `rules` derive from `base`: the first rule that
+/// matches, in order, rewrites the base's path. Scheme, host, port, and any
+/// path prefix before a replaced suffix are kept; a trailing slash on the
+/// base is ignored.
+///
+/// ## Errors
+///
+/// Returns [`AddressError`] when the base carries a query or fragment, has no
+/// hierarchical path, or no rule matches.
+pub fn derive_address(base: &Url, rules: &[AddressRule]) -> Result<Url, AddressError> {
+    if base.query().is_some() || base.fragment().is_some() {
+        return Err(AddressError::QueryOrFragment);
+    }
+    let mut segments: Vec<&str> = base.path_segments().ok_or(AddressError::NotHierarchical)?.collect();
+    if segments.last() == Some(&"") {
+        segments.pop();
+    }
+    let split = |path: &'static str| path.split('/').filter(|segment| !segment.is_empty());
+    for rule in rules {
+        let tail = match *rule {
+            AddressRule::ReplaceSuffix { suffix, with } => {
+                let suffix: Vec<&str> = split(suffix).collect();
+                if !segments.ends_with(&suffix) {
+                    continue;
+                }
+                segments.truncate(segments.len() - suffix.len());
+                with
+            }
+            AddressRule::Append(tail) => tail,
+        };
+        segments.extend(split(tail));
+        let mut address = base.clone();
+        address.set_path(&format!("/{}", segments.join("/")));
+        return Ok(address);
+    }
+    Err(AddressError::NoRuleMatched)
 }
 
 /// One entry of a GraphQL `errors` array.
@@ -178,10 +291,10 @@ pub enum GraphQlOperationError<D, H> {
     Http(H),
 }
 
-impl<D, H> ErrorBody for GraphQlOperationError<D, H>
+impl<A, D, H> ErrorBody<A> for GraphQlOperationError<D, H>
 where
     D: Send + 'static,
-    H: ErrorBody,
+    H: ErrorBody<A>,
 {
     const DECLARED: bool = H::DECLARED;
 

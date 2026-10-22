@@ -184,6 +184,13 @@ pub enum BuildError {
     Transport,
     /// The stream frame limit is zero.
     InvalidMaxFrameBytes,
+    /// The caller's GraphQL address is not an HTTP(S) URL with a host, no
+    /// user information, and no fragment, or the API's address rules cannot
+    /// derive one from the base URL.
+    InvalidGraphQlUrl {
+        /// What is wrong with it.
+        reason: &'static str,
+    },
 }
 
 impl fmt::Display for BuildError {
@@ -209,6 +216,7 @@ impl fmt::Display for BuildError {
             Self::InvalidCertificate => f.write_str("root certificate could not be parsed"),
             Self::Transport => f.write_str("HTTP client could not be initialized"),
             Self::InvalidMaxFrameBytes => f.write_str("the stream frame limit must be at least one byte"),
+            Self::InvalidGraphQlUrl { reason } => write!(f, "invalid GraphQL URL: {reason}"),
         }
     }
 }

@@ -248,12 +248,16 @@ pub struct SuccessShape {
     /// reads it.
     #[serde(default, deserialize_with = "crate::serde_presence::non_null", skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// The author's name for this shape's variant of the generated success
+    /// enum (`Directory`, `File`); `None` derives it from the shape kind.
+    #[serde(default, deserialize_with = "crate::serde_presence::non_null", skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
 }
 
 impl SuccessShape {
     /// A shape with no declared selection facts.
     pub fn new(shape: ResponseShape) -> Self {
-        Self { shape, content_type: None, statuses: vec![], json_tag: None, fallback: false, note: None }
+        Self { shape, content_type: None, statuses: vec![], json_tag: None, fallback: false, note: None, variant: None }
     }
 
     /// The normalized media type the shape is selected by: the declared
@@ -271,7 +275,7 @@ impl SuccessShape {
     /// `Endpoint::response` is an [`ApiResponse`]: only a non-stream shape
     /// without selection facts or a note.
     pub fn legacy_response(&self) -> Option<ApiResponse> {
-        if self.content_type.is_some() || !self.statuses.is_empty() || self.json_tag.is_some() || self.fallback || self.note.is_some() {
+        if self.content_type.is_some() || !self.statuses.is_empty() || self.json_tag.is_some() || self.fallback || self.note.is_some() || self.variant.is_some() {
             return None;
         }
         match &self.shape {
@@ -381,6 +385,12 @@ pub fn validate_success_shapes(shapes: &[SuccessShape]) -> Result<(), String> {
     if fallbacks.len() > 1 {
         return Err(format!("{} and {} are both the fallback; at most one is allowed", describe(fallbacks[0], &shapes[fallbacks[0]]), describe(fallbacks[1], &shapes[fallbacks[1]])));
     }
+    for (index, shape) in shapes.iter().enumerate() {
+        let Some(name) = &shape.variant else { continue };
+        if let Some(earlier) = shapes[..index].iter().position(|other| other.variant.as_ref() == Some(name)) {
+            return Err(format!("{} and {} both name the variant {name}", describe(earlier, &shapes[earlier]), describe(index, shape)));
+        }
+    }
     let bodies: Vec<usize> = (0..shapes.len()).filter(|&i| shapes[i].shape != ResponseShape::Empty).collect();
     let mut declared: Vec<u16> = bodies.iter().flat_map(|&i| shapes[i].statuses.iter().copied()).collect();
     declared.sort_unstable();
@@ -394,6 +404,14 @@ pub fn validate_success_shapes(shapes: &[SuccessShape]) -> Result<(), String> {
 }
 
 fn validate_shape(shape: &SuccessShape, several: bool) -> Result<(), String> {
+    if let Some(name) = &shape.variant {
+        if !several { return Err(format!("names the variant {name}, but a single shape generates no enum")); }
+        let mut chars = name.chars();
+        let leading = chars.next().is_some_and(|first| first.is_ascii_uppercase());
+        if !leading || !chars.all(|c| c.is_ascii_alphanumeric()) || name == "Self" {
+            return Err(format!("variant name `{name}` must be an UpperCamelCase Rust identifier"));
+        }
+    }
     if let Some(content_type) = &shape.content_type {
         if shape.shape == ResponseShape::Empty { return Err("an empty shape has no media type".into()); }
         if shape.fallback { return Err("the fallback declares no content type; it takes every unmatched media type".into()); }

@@ -239,7 +239,7 @@ fn generated_files_exist_and_have_expected_structure() {
     let lib_content =
         std::fs::read_to_string(src_dir.join("lib.rs")).expect("Failed to read lib.rs");
     assert!(lib_content.contains("//!"));
-    assert!(lib_content.contains("pub const SCHEMATIC_RUNTIME_ABI: u32 = 5;"));
+    assert!(lib_content.contains(&format!("pub const SCHEMATIC_RUNTIME_ABI: u32 = {};", schematic_gen::RUNTIME_ABI)));
     assert!(lib_content.contains("schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI"));
     assert!(lib_content.contains("pub use schematic_runtime;"));
     assert!(lib_content.contains("pub mod shared;"));
