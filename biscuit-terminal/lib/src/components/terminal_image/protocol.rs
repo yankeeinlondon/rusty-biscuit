@@ -9,8 +9,6 @@ use crate::discovery::detection::{
 };
 use crate::discovery::fonts::CellSize;
 
-use crate::discovery::detection::probe::next_kitty_id;
-
 use super::cursor::{compute_cursor_rows, needs_scroll_compensation};
 use super::half_block::half_blocks_permitted;
 use super::tmux::{TMUX_MESSAGE_BUDGET, wrap_graphics_for_tmux};
@@ -97,6 +95,8 @@ pub enum ImageOutput {
 pub(crate) enum InlineImage {
     /// Escape sequences that draw the image at the cursor and return the
     /// cursor to where it started; the image covers `rows` lines from there.
+    /// On a route that [`needs_cursor_resync`](GraphicsRoute::needs_cursor_resync)
+    /// the cursor ends at column 0 of the starting row instead.
     Overlay { sequence: String, rows: u32 },
     /// Lines of text that draw the image (Unicode placeholders), one per
     /// image row; the first also carries the upload.
@@ -286,10 +286,11 @@ impl TerminalImage {
             "Image rendered to terminal"
         );
 
+        let resync = cursor_resync(&term.graphics_route);
         let output = if cursor_rows > 0 {
-            format!("{}\x1b[{}B\r{}", sequence, cursor_rows, suffix)
+            format!("{}{}\x1b[{}B\r{}", sequence, resync, cursor_rows, suffix)
         } else {
-            format!("{}\r{}", sequence, suffix)
+            format!("{}{}\r{}", sequence, resync, suffix)
         };
         Ok(ImageOutput::Pixels(output))
     }
@@ -375,9 +376,7 @@ impl TerminalImage {
         let tmux = term.graphics_route.transport == GraphicsTransport::Tmux;
         let image = match encoder {
             Encoder::Kitty => {
-                if tmux {
-                    self.render_kitty_with_id(&png_data, width_cells, height_cells, next_kitty_id())
-                } else if matches!(term.app, TerminalApp::Wezterm) {
+                if tmux || matches!(term.app, TerminalApp::Wezterm) {
                     self.render_kitty_cells(&png_data, width_cells, height_cells)
                 } else {
                     self.render_kitty_width_only(&png_data, width_cells)
@@ -399,13 +398,26 @@ impl TerminalImage {
             String::new()
         };
 
-        let sequence = format!("\x1b[s{}{}\x1b[u", prefix, image);
+        let sequence = format!(
+            "\x1b[s{}{}\x1b[u{}",
+            prefix,
+            image,
+            cursor_resync(&term.graphics_route)
+        );
         let protocol = if matches!(encoder, Encoder::Kitty) { "kitty" } else { "iterm2" };
         Ok(for_transport(term, protocol, sequence).map(|sequence| InlineImage::Overlay {
             sequence,
             rows: height_cells,
         }))
     }
+}
+
+/// What follows an image on `route` so the next carriage return reaches the
+/// terminal: a space and a carriage return where the route
+/// [`needs_cursor_resync`](GraphicsRoute::needs_cursor_resync), nothing
+/// elsewhere. The space lands just right of the image's first row.
+fn cursor_resync(route: &GraphicsRoute) -> &'static str {
+    if route.needs_cursor_resync { " \r" } else { "" }
 }
 
 /// `sequence` as the route's transport carries it: unchanged when direct,

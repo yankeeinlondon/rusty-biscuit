@@ -27,6 +27,9 @@ const STEP: Duration = Duration::from_secs(15);
 const OSC10_QUERY: &[u8] = b"\x1b]10;?\x07";
 const OSC11_QUERY: &[u8] = b"\x1b]11;?\x07";
 const DA1_QUERY: &[u8] = b"\x1b[c";
+const CELL_SIZE_QUERY: &[u8] = b"\x1b[16t";
+/// Windows Terminal's live answer (2026-10-21): 20 px tall, 10 px wide.
+const CELL_SIZE_REPLY: &[u8] = b"\x1b[6;20;10t";
 /// Windows Terminal's DA1 reply; attribute `4` is Sixel.
 const SIXEL_DA1_REPLY: &[u8] = b"\x1b[?61;4;6;7;14;21;22;23;24;28;32;42c";
 /// The same reply without Sixel.
@@ -318,4 +321,65 @@ fn keys_typed_during_the_exchange_reach_the_program_afterwards() {
         line(&output, "graphics_bg_color[0]"),
         "Some(RgbValue { r: 17, g: 34, b: 51 })"
     );
+}
+
+#[test]
+fn the_cell_size_answer_reaches_a_windows_program() {
+    require_level!(Level::L2, true, "ConPTY");
+    // Answers are written in list order, which is the request's order: the
+    // cell-size reply must land before DA1 ends the exchange.
+    let console = ProbeConsole::launch(
+        vec![
+            answer(OSC10_QUERY, b"\x1b]10;rgb:cccc/dddd/eeee\x1b\\"),
+            answer(OSC11_QUERY, b"\x1b]11;rgb:1111/2222/3333\x1b\\"),
+            answer(CELL_SIZE_QUERY, CELL_SIZE_REPLY),
+            answer(DA1_QUERY, PLAIN_DA1_REPLY),
+        ],
+        &[("PROBE_GRAPHICS_CELL_SIZE", "1")],
+    );
+    let output = console.finish();
+
+    assert_eq!(
+        line(&output, "graphics_cell_size[0]"),
+        "Some(CellSize { width: 10, height: 20 })",
+        "{output}"
+    );
+    assert_eq!(
+        line(&output, "graphics_bg_color[0]"),
+        "Some(RgbValue { r: 17, g: 34, b: 51 })"
+    );
+}
+
+#[test]
+fn an_unanswered_cell_size_query_leaves_the_size_unmeasured() {
+    require_level!(Level::L2, true, "ConPTY");
+    let console = ProbeConsole::launch(
+        vec![
+            answer(OSC11_QUERY, b"\x1b]11;rgb:1111/2222/3333\x1b\\"),
+            answer(DA1_QUERY, PLAIN_DA1_REPLY),
+        ],
+        &[("PROBE_GRAPHICS_CELL_SIZE", "1")],
+    );
+    let output = console.finish();
+
+    // Unanswered is unmeasured: callers use CellSize::FALLBACK.
+    assert_eq!(line(&output, "graphics_cell_size[0]"), "None", "{output}");
+}
+
+#[test]
+fn a_probe_off_terminal_never_asks_for_the_cell_size() {
+    require_level!(Level::L2, true, "ConPTY");
+    // The console would answer, but a `ProbeMode::Off` terminal must not
+    // start an exchange when `cell_size()` is read at render time.
+    let console = ProbeConsole::launch(
+        vec![
+            answer(OSC11_QUERY, b"\x1b]11;rgb:1111/2222/3333\x1b\\"),
+            answer(CELL_SIZE_QUERY, CELL_SIZE_REPLY),
+            answer(DA1_QUERY, PLAIN_DA1_REPLY),
+        ],
+        &[("PROBE_GRAPHICS_CELL_SIZE", "1"), ("PROBE_GRAPHICS_PROBE", "off")],
+    );
+    let output = console.finish();
+
+    assert_eq!(line(&output, "graphics_cell_size[0]"), "None", "{output}");
 }

@@ -154,3 +154,39 @@ fn the_route_serializes_as_data() {
     let back: GraphicsRoute = serde_json::from_value(json).unwrap();
     assert_eq!(back, route);
 }
+
+fn windows_route(vars: &[(&str, &str)]) -> GraphicsRoute {
+    let mut inputs = vars
+        .iter()
+        .fold(RouteInputs::new(true), |inputs, (k, v)| inputs.with_var(k, *v));
+    inputs.is_windows = true;
+    resolve_graphics_route(&inputs)
+}
+
+/// Only an iTerm2 route through the Windows SSH server's console host needs
+/// the space-then-CR resync after an image.
+#[test]
+fn only_the_windows_ssh_server_iterm2_route_needs_a_cursor_resync() {
+    let detected = windows_route(&[("SSH_CONNECTION", "1 2 3 4"), ("LC_TERMINAL", "WezTerm")]);
+    assert_eq!(detected.format, GraphicsFormat::Iterm2);
+    assert!(detected.needs_cursor_resync, "{detected:?}");
+    assert!(detected.forced_by_caller().needs_cursor_resync);
+
+    let forced = windows_route(&[("SSH_CONNECTION", "1 2 3 4"), ("BISCUIT_GRAPHICS", "iterm2")]);
+    assert_eq!(forced.format, GraphicsFormat::Iterm2);
+    assert_eq!(forced.confidence, RouteConfidence::Forced);
+    assert!(forced.needs_cursor_resync, "{forced:?}");
+
+    let not_resynced = [
+        windows_route(&[("SSH_CONNECTION", "1 2 3 4")]),
+        windows_route(&[("SSH_CONNECTION", "1 2 3 4"), ("BISCUIT_GRAPHICS", "kitty")]),
+        windows_route(&[("WT_SESSION", "x"), ("BISCUIT_GRAPHICS", "iterm2")]),
+        route_with(&[("TERM_PROGRAM", "iTerm.app")], true),
+        route_with(&[("SSH_CONNECTION", "1 2 3 4"), ("LC_TERMINAL", "WezTerm")], true),
+        route_with(&[("BISCUIT_GRAPHICS", "iterm2")], true),
+        GraphicsRoute::from(ImageSupport::ITerm),
+    ];
+    for route in not_resynced {
+        assert!(!route.needs_cursor_resync, "{route:?}");
+    }
+}

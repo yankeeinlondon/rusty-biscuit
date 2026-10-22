@@ -1,7 +1,9 @@
 //! Sixel rendering paths for [`TerminalImage`].
 //!
-//! Sixel has no partial transparency, so every image is composited onto an
-//! opaque background first ([`SixelBackground`]). Quantization is
+//! Sixel has no partial transparency. A fully transparent pixel is left
+//! unset, so the terminal's own background shows through it; a partially
+//! transparent one is blended onto the best-known background
+//! ([`SixelBackground`]) and drawn opaque. Quantization is
 //! deterministic: Wu's method, a 256-color palette, and no dithering, so a
 //! fixed image always encodes to the same bytes and crisp diagrams gain no
 //! dithering noise.
@@ -13,7 +15,7 @@ use image::DynamicImage;
 
 use crate::discovery::detection::ColorMode;
 use crate::discovery::fonts::CellSize;
-use crate::discovery::osc_queries::RgbValue;
+use crate::discovery::osc_queries::{ColorSource, RgbValue};
 use crate::terminal::Terminal;
 
 use super::encoded_png::ImagePixels;
@@ -22,8 +24,13 @@ use super::{TerminalImage, TerminalImageError};
 /// The most colors a Sixel image's palette holds.
 pub const SIXEL_PALETTE_COLORS: u16 = 256;
 
-/// The opaque color a Sixel image is composited onto, and where it came
-/// from.
+/// The best-known terminal background, and whether the terminal reported
+/// it.
+///
+/// Sixel and half-block images blend their partially transparent pixels onto
+/// `color`; fully transparent pixels are never painted with it. A
+/// `Measured` color is exact; an `Estimated` one can differ from the
+/// terminal's real background, so only antialiased edges can show it.
 ///
 /// ## Examples
 ///
@@ -50,23 +57,26 @@ pub struct SixelBackground {
 /// Whether a [`SixelBackground`] was measured or estimated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackgroundSource {
-    /// The terminal answered the background-color query (OSC 11).
+    /// The terminal answered the background-color query (OSC 11):
+    /// [`Terminal::background_source`] is [`ColorSource::Measured`].
     Measured,
-    /// No measured color: white for a light color mode, black for a dark or
-    /// unknown one. The image's edges may not match the terminal exactly.
+    /// The terminal reported no color: its `COLORFGBG` or per-app default
+    /// when it has one, else white for a light color mode and black for a
+    /// dark or unknown one.
     Estimated,
 }
 
 impl SixelBackground {
-    /// The terminal's measured background, or the light/dark estimate when
-    /// it has none.
+    /// The terminal's measured background; otherwise its estimated
+    /// background, or the light/dark estimate when it has none.
     #[must_use]
     pub fn for_terminal(term: &Terminal) -> Self {
         if let Some(color) = term.background_color {
-            return Self {
-                color,
-                source: BackgroundSource::Measured,
+            let source = match term.background_source {
+                ColorSource::Measured => BackgroundSource::Measured,
+                ColorSource::Estimated => BackgroundSource::Estimated,
             };
+            return Self { color, source };
         }
         let level = if term.color_mode == ColorMode::Light { 255 } else { 0 };
         Self {
@@ -146,14 +156,13 @@ fn scaled_height(width: u32, (pixel_width, pixel_height): (u32, u32)) -> u32 {
     u32::try_from(height).unwrap_or(u32::MAX).max(1)
 }
 
-/// Encodes `image` resized to `size`, composited onto `background`, and
-/// padded below with `background` to `padded_height` pixels (whole cell
-/// rows), as one Sixel DCS sequence.
+/// Encodes `image` resized to `size` and padded below to `padded_height`
+/// pixels (whole cell rows), as one Sixel DCS sequence.
 ///
-/// Pixels are opaque, so the raster is opaque; the DCS still declares
-/// transparent background mode (`P2=1`) so a terminal that rounds the
-/// height up to a whole six-pixel band leaves the extra pixels alone instead
-/// of painting them with color register 0.
+/// The DCS declares transparent background mode (`P2=1`): a pixel with no
+/// sixel bit in any color keeps whatever the terminal shows there. Fully
+/// transparent pixels and the padding get no bits; partially transparent
+/// pixels are blended onto `background` and drawn opaque.
 pub(super) fn encode_sixel(
     image: &DynamicImage,
     (width, height): (u32, u32),
@@ -170,19 +179,23 @@ pub(super) fn encode_sixel(
     let padded_height = padded_height.max(height);
     let source = image.to_rgba8();
     let mut canvas = Vec::with_capacity(width as usize * padded_height as usize * 4);
-    let fill = [background.r, background.g, background.b, 255];
+    // icy_sixel sets no bits for alpha below 128; every pixel it receives is
+    // either fully transparent or opaque, so only alpha 0 is left unset.
+    const UNSET: [u8; 4] = [0, 0, 0, 0];
     for y in 0..padded_height {
         for x in 0..width {
-            if y < height {
-                let [r, g, b, a] = source.get_pixel(x, y).0;
-                canvas.extend_from_slice(&[
+            if y >= height {
+                canvas.extend_from_slice(&UNSET);
+                continue;
+            }
+            match source.get_pixel(x, y).0 {
+                [_, _, _, 0] => canvas.extend_from_slice(&UNSET),
+                [r, g, b, a] => canvas.extend_from_slice(&[
                     blend(r, background.r, a),
                     blend(g, background.g, a),
                     blend(b, background.b, a),
                     255,
-                ]);
-            } else {
-                canvas.extend_from_slice(&fill);
+                ]),
             }
         }
     }

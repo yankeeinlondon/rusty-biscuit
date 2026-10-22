@@ -141,6 +141,7 @@ mod unix {
         assert_eq!(field(&collected, "graphics_confidence[0]"), "Verified");
         assert_eq!(field(&collected, "graphics_text_color[0]"), TEXT_COLOR);
         assert_eq!(field(&collected, "graphics_bg_color[0]"), BG_COLOR);
+        assert_eq!(field(&collected, "graphics_bg_source[0]"), "Measured");
     }
 
     /// An unidentified terminal outside the color-query list gets the Kitty
@@ -179,6 +180,24 @@ mod unix {
 
         assert_eq!(field(&collected, "graphics_format[0]"), "Sixel");
         assert_eq!(field(&collected, "graphics_confidence[0]"), "Verified");
+        assert_eq!(
+            field(&collected, "graphics_bg_source[0]"),
+            "Estimated",
+            "no OSC 11 was sent, so any background is a guess"
+        );
+    }
+
+    /// A queried terminal that answers DA1 but not OSC 11 keeps its per-app
+    /// default background, labelled as an estimate, never as measured.
+    #[test]
+    fn unanswered_background_query_is_an_estimate() {
+        expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+        let mut answers = [ProbeAnswer::every(DA1_QUERY, DA1_REPLY)];
+        let collected = run(&[ALACRITTY], &mut answers);
+
+        assert_eq!(count_occurrences(&collected, OSC11_QUERY), 1, "{}", raw(&collected));
+        assert_eq!(field(&collected, "graphics_bg_color[0]"), BG_COLOR, "{}", raw(&collected));
+        assert_eq!(field(&collected, "graphics_bg_source[0]"), "Estimated", "{}", raw(&collected));
     }
 
     /// DA1 without attribute 4 and no Kitty reply is a verified negative.
@@ -440,10 +459,11 @@ mod unix {
 
     const HIDDEN_TMUX: (&str, &str) = ("PROBE_TERM", "tmux-256color");
 
-    /// `TERM=tmux-256color` without `TMUX`: a direct exchange, then a wrapped
-    /// one. The direct one answers only DA1; the wrapped Kitty query comes
-    /// back as a passthrough tmux delivers it (unwrapped), giving a verified
-    /// Kitty route through tmux.
+    /// `TERM=tmux-256color` without `TMUX`: a direct exchange carrying DA1
+    /// alone (an unwrapped Kitty query would retitle a real tmux pane), then
+    /// a wrapped one. The wrapped Kitty query comes back as a passthrough
+    /// tmux delivers it (unwrapped), giving a verified Kitty route through
+    /// tmux.
     #[test]
     fn hidden_tmux_passthrough_verifies_a_tmux_route() {
         expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
@@ -455,8 +475,8 @@ mod unix {
 
         assert_eq!(
             direct_kitty_queries(&collected).len(),
-            1,
-            "{}",
+            0,
+            "the direct exchange must not carry the Kitty query; {}",
             raw(&collected)
         );
         assert_eq!(
@@ -465,7 +485,7 @@ mod unix {
             "{}",
             raw(&collected)
         );
-        let direct_at = position(&collected, b"\x1b_Gi=").expect("direct query");
+        let direct_at = position(&collected, DA1_QUERY).expect("direct DA1 request");
         let wrapped_at = position(&collected, b"\x1bPtmux;").expect("wrapped query");
         assert!(
             direct_at < wrapped_at,
@@ -505,15 +525,35 @@ mod unix {
         assert_eq!(field(&collected, "graphics_confidence[0]"), "Unknown");
         let reason = field(&collected, "graphics_reason[0]");
         assert!(
-            reason.contains("neither the wrapped nor the plain Kitty graphics query was answered"),
+            reason.contains("the wrapped Kitty graphics query was not answered"),
             "{reason}"
         );
         let fix = field(&collected, "graphics_fix[0]");
         assert!(fix.contains("BISCUIT_GRAPHICS_TRANSPORT=tmux"), "{fix}");
+        assert!(fix.contains("BISCUIT_GRAPHICS_TRANSPORT=direct"), "{fix}");
+        assert!(direct_kitty_queries(&collected).is_empty(), "{}", raw(&collected));
+    }
+
+    /// Inside GNU screen (`STY`), which takes an unwrapped APC as a
+    /// hardstatus change, the direct exchange carries DA1 alone, so no Kitty
+    /// query reaches screen and no Kitty route comes from it.
+    #[test]
+    fn gnu_screen_direct_exchange_carries_no_kitty_query() {
+        expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+        let mut answers = [
+            ProbeAnswer::kitty("OK"),
+            ProbeAnswer::every(DA1_QUERY, DA1_REPLY),
+        ];
+        let collected = run(&[UNIDENTIFIED, ("STY", "123.pts-0.host")], &mut answers);
+
+        assert!(direct_kitty_queries(&collected).is_empty(), "{}", raw(&collected));
+        assert!(kitty_query_ids(&collected, true).is_empty(), "{}", raw(&collected));
+        assert!(count_occurrences(&collected, DA1_QUERY) >= 1, "{}", raw(&collected));
+        assert_eq!(field(&collected, "graphics_format[0]"), "None");
     }
 
     /// The wrapped exchange doubles every ESC inside the envelope exactly
-    /// once and uses a fresh image ID.
+    /// once, and is the only Kitty query sent.
     #[test]
     fn wrapped_exchange_doubles_escapes_once() {
         expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
@@ -525,8 +565,7 @@ mod unix {
 
         let direct = direct_kitty_queries(&collected);
         let wrapped = kitty_query_ids(&collected, true);
-        assert_eq!((direct.len(), wrapped.len()), (1, 1), "{}", raw(&collected));
-        assert_ne!(direct[0], wrapped[0], "the wrapped query needs a fresh ID");
+        assert_eq!((direct.len(), wrapped.len()), (0, 1), "{}", raw(&collected));
 
         let mut expected = format!(
             "\x1bPtmux;\x1b\x1b_Gi={},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\x1b\\\x1b\\",

@@ -2,6 +2,10 @@
 //! text, two image pixels per cell (`▀` with a truecolor foreground for the
 //! upper pixel and background for the lower one).
 //!
+//! A fully transparent pixel is never painted: it shows the terminal's
+//! default background (`▄` for a transparent upper pixel, a space for two).
+//! Partially transparent pixels are blended onto [`SixelBackground`].
+//!
 //! Half-blocks are a text fallback, not an image protocol: they never count
 //! as image support on the route, and diagrams never use them.
 //!
@@ -20,6 +24,8 @@ use super::{TerminalImage, TerminalImageError};
 
 /// The glyph whose foreground is a cell's upper pixel.
 const UPPER_HALF_BLOCK: char = '▀';
+/// The glyph whose foreground is a cell's lower pixel.
+const LOWER_HALF_BLOCK: char = '▄';
 
 /// Whether `term` may draw an image whose pixel route failed for `reason`
 /// as half-blocks.
@@ -75,10 +81,12 @@ fn half_block_pixel_rows(columns: u32, (pixel_width, pixel_height): (u32, u32), 
     u32::try_from(rows).unwrap_or(u32::MAX).max(1)
 }
 
-/// `image` resized to `columns` x `pixel_rows`, composited onto
-/// `background`, as half-block lines. An odd last pixel row gets
-/// `background` as its lower half. A color is written only when it changes
-/// from the previous cell.
+/// `image` resized to `columns` x `pixel_rows` as half-block lines.
+///
+/// Partially transparent pixels are blended onto `background`; a fully
+/// transparent pixel, and the lower half of an odd last pixel row, use the
+/// terminal's default background (`SGR 49`) instead. A cell's colors are
+/// written only when they change from the previous cell.
 pub(super) fn encode_half_blocks(
     image: &DynamicImage,
     (columns, pixel_rows): (u32, u32),
@@ -92,12 +100,15 @@ pub(super) fn encode_half_blocks(
         &resized
     };
     let source = image.to_rgba8();
-    let pixel = |x: u32, y: u32| -> (u8, u8, u8) {
+    // `None` is a transparent pixel.
+    let pixel = |x: u32, y: u32| -> Option<(u8, u8, u8)> {
         if y >= pixel_rows {
-            return (background.r, background.g, background.b);
+            return None;
         }
-        let [r, g, b, a] = source.get_pixel(x, y).0;
-        (blend(r, background.r, a), blend(g, background.g, a), blend(b, background.b, a))
+        match source.get_pixel(x, y).0 {
+            [_, _, _, 0] => None,
+            [r, g, b, a] => Some((blend(r, background.r, a), blend(g, background.g, a), blend(b, background.b, a))),
+        }
     };
 
     (0..pixel_rows.div_ceil(2))
@@ -107,16 +118,37 @@ pub(super) fn encode_half_blocks(
             for x in 0..columns {
                 let colors = (pixel(x, row * 2), pixel(x, row * 2 + 1));
                 if previous != Some(colors) {
-                    let ((fr, fg, fb), (br, bg, bb)) = colors;
-                    line.push_str(&format!("\x1b[38;2;{fr};{fg};{fb};48;2;{br};{bg};{bb}m"));
+                    line.push_str(&half_block_sgr(colors));
                     previous = Some(colors);
                 }
-                line.push(UPPER_HALF_BLOCK);
+                line.push(half_block_glyph(colors));
             }
             line.push_str("\x1b[0m");
             line
         })
         .collect()
+}
+
+/// One half-block pixel; `None` is transparent.
+type HalfBlockPixel = Option<(u8, u8, u8)>;
+
+/// The SGR for one cell's (upper, lower) pixels. It always sets the
+/// background, and the foreground whenever the cell's glyph shows one.
+fn half_block_sgr(colors: (HalfBlockPixel, HalfBlockPixel)) -> String {
+    match colors {
+        (Some((fr, fg, fb)), Some((br, bg, bb))) => format!("\x1b[38;2;{fr};{fg};{fb};48;2;{br};{bg};{bb}m"),
+        (Some((r, g, b)), None) | (None, Some((r, g, b))) => format!("\x1b[38;2;{r};{g};{b};49m"),
+        (None, None) => "\x1b[49m".to_string(),
+    }
+}
+
+/// The glyph whose foreground is the cell's one opaque pixel, or a space.
+fn half_block_glyph(colors: (HalfBlockPixel, HalfBlockPixel)) -> char {
+    match colors {
+        (None, Some(_)) => LOWER_HALF_BLOCK,
+        (None, None) => ' ',
+        (Some(_), _) => UPPER_HALF_BLOCK,
+    }
 }
 
 #[cfg(test)]

@@ -356,16 +356,17 @@ probe_rows! {
     hidden_tmux_wrapped_ok_with_forwarded_iterm2_is_iterm2:
         tunneled(hidden_tmux().with_var("LC_TERMINAL", "iTerm2"), replied(KittyReply::Accepted, None))
         => Iterm2, Tmux, Verified, Supported, fix: None, msg: ["wrapped"];
-    hidden_tmux_plain_ok_means_no_tmux:
+    hidden_tmux_plain_ok_is_not_a_direct_route:
         tunneled(direct(hidden_tmux(), replied(KittyReply::Accepted, NO_SIXEL)), replied(KittyReply::NoReply, None))
-        => Kitty, Direct, Verified, Supported, fix: None, msg: ["terminal itself"];
-    hidden_tmux_plain_ok_with_forwarded_iterm2_is_iterm2:
+        => None, Direct, Unknown, Unknown, fix: Some("BISCUIT_GRAPHICS_TRANSPORT=direct if none does"),
+           msg: ["TERM=tmux-256color", "wrapped Kitty graphics query was not answered"];
+    hidden_tmux_plain_ok_with_forwarded_iterm2_is_not_a_direct_route:
         direct(hidden_tmux().with_var("LC_TERMINAL", "iTerm2"), replied(KittyReply::Accepted, None))
-        => Iterm2, Direct, Verified, Supported, fix: None, msg: ["terminal itself"];
+        => None, Direct, Unknown, Unknown, fix: Some("BISCUIT_GRAPHICS_TRANSPORT=direct"), msg: ["TERM=tmux-256color"];
     hidden_tmux_unconfirmed_names_the_transport_override:
         tunneled(direct(hidden_tmux(), replied(KittyReply::NoReply, NO_SIXEL)), replied(KittyReply::NoReply, None))
-        => None, Direct, Unknown, Unknown, fix: Some("BISCUIT_GRAPHICS_TRANSPORT=tmux"),
-           msg: ["TERM=tmux-256color", "neither"];
+        => None, Direct, Unknown, Unknown, fix: Some("BISCUIT_GRAPHICS_TRANSPORT=tmux if a tmux with allow-passthrough on"),
+           msg: ["TERM=tmux-256color", "not answered"];
     hidden_tmux_hint_beats_forwarded_identity:
         hidden_tmux().with_var("LC_TERMINAL", "iTerm2")
         => None, Direct, Unknown, Unknown, fix: Some("BISCUIT_GRAPHICS_TRANSPORT=tmux"), msg: ["TERM=tmux-256color"];
@@ -384,6 +385,9 @@ probe_rows! {
     direct_transport_override_skips_the_hint:
         tty().with_var("TERM", "tmux-256color").with_var("BISCUIT_GRAPHICS_TRANSPORT", "direct")
         => None, Direct, Unknown, Unknown, fix: None, msg: ["not identified"];
+    direct_transport_override_with_misleading_term_uses_the_plain_ok:
+        direct(hidden_tmux().with_var("BISCUIT_GRAPHICS_TRANSPORT", "direct"), replied(KittyReply::Accepted, NO_SIXEL))
+        => Kitty, Direct, Verified, Supported, fix: None, msg: ["answered the Kitty graphics query"];
 }
 
 // `BISCUIT_GRAPHICS_TRANSPORT=tmux` without `TMUX`: a declared tmux beyond SSH.
@@ -409,10 +413,15 @@ probe_rows! {
 // Which environments are probed
 // ---------------------------------------------------------------------------
 
-const BOTH: ProbePlan = ProbePlan {
+const HIDDEN_TMUX: ProbePlan = ProbePlan {
     direct: true,
     tunneled: true,
-    direct_da1_only: false,
+    direct_da1_only: true,
+};
+const DA1_ONLY: ProbePlan = ProbePlan {
+    direct: true,
+    tunneled: false,
+    direct_da1_only: true,
 };
 const TUNNELED: ProbePlan = ProbePlan {
     direct: false,
@@ -440,7 +449,20 @@ plan_rows! {
     plan_ssh_without_hints_is_probed: tty().with_var("SSH_CONNECTION", SSH) => ProbePlan::DIRECT;
     plan_zellij_is_probed: zellij(v(0, 45)) => ProbePlan::DIRECT;
     plan_zellij_inside_kitty_is_probed: zellij(v(0, 45)).with_var("TERM_PROGRAM", "kitty") => ProbePlan::DIRECT;
-    plan_hidden_tmux_sends_both: hidden_tmux() => BOTH;
+    plan_hidden_tmux_sends_da1_direct_and_kitty_wrapped: hidden_tmux() => HIDDEN_TMUX;
+    plan_hidden_screen_term_sends_da1_direct_and_kitty_wrapped:
+        tty().with_var("TERM", "screen-256color") => HIDDEN_TMUX;
+    plan_direct_override_with_misleading_term_sends_the_kitty_query:
+        hidden_tmux().with_var("BISCUIT_GRAPHICS_TRANSPORT", "direct") => ProbePlan::DIRECT;
+    plan_gnu_screen_session_sends_da1_alone: tty().with_var("STY", "123.pts-0.host") => DA1_ONLY;
+    plan_gnu_screen_session_with_screen_term_sends_da1_alone:
+        tty().with_var("TERM", "screen-256color").with_var("STY", "123.pts-0.host") => DA1_ONLY;
+    plan_visible_tmux_with_direct_override_sends_da1_alone:
+        tty()
+            .with_var("TMUX", "/tmp/tmux-501/default,1,0")
+            .with_var("BISCUIT_GRAPHICS_TRANSPORT", "direct") => DA1_ONLY;
+    plan_declared_tmux_inside_gnu_screen_sends_wrapped_only:
+        declared_tmux().with_var("STY", "123.pts-0.host") => TUNNELED;
     plan_declared_tmux_unidentified_sends_wrapped_only: declared_tmux() => TUNNELED;
     plan_windows_terminal_unknown_version_is_probed: windows_terminal(None) => ProbePlan::DIRECT;
     plan_windows_with_unknown_term_program_is_probed:

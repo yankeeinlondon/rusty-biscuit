@@ -1,4 +1,6 @@
-//! Window pixel size and cell size queries via CSI 14 t.
+//! Window pixel size and cell size queries: the `TIOCGWINSZ` ioctl and
+//! CSI 14 t on Unix, the CSI 16 t answer from the startup exchange on native
+//! Windows.
 
 use super::types::{CellSize, WindowSizePixels};
 #[cfg(unix)]
@@ -118,11 +120,53 @@ fn parse_csi_14t_response(response: &[u8]) -> Option<WindowSizePixels> {
     Some(WindowSizePixels { width, height })
 }
 
+/// The XTWINOPS cell-size request (`CSI 16 t`). The terminal answers
+/// `CSI 6 ; <height> ; <width> t`, in pixels.
+pub(crate) const CELL_SIZE_REQUEST: &[u8] = b"\x1b[16t";
+
+/// The largest cell dimension accepted from a `CSI 16 t` reply. A real cell
+/// is tens of pixels; anything beyond this is a corrupt or hostile reply.
+const MAX_CELL_PIXELS: u32 = 1024;
+
+/// The cell size in the first complete `CSI 6 ; <height> ; <width> t` reply
+/// anywhere in `bytes`, which may hold other replies (OSC colors, DA1, Kitty)
+/// around it.
+///
+/// A reply with a zero dimension (a terminal that does not know its pixels)
+/// or one above [`MAX_CELL_PIXELS`] is `None`, as is an incomplete one.
+pub(crate) fn find_cell_size_reply(bytes: &[u8]) -> Option<CellSize> {
+    let mut from = 0;
+    while let Some(rel) = bytes[from..].windows(4).position(|w| w == b"\x1b[6;") {
+        let start = from + rel;
+        from = start + 1;
+        let params = &bytes[start + 4..];
+        let len = params
+            .iter()
+            .take_while(|b| b.is_ascii_digit() || **b == b';')
+            .count();
+        if params.get(len) != Some(&b't') {
+            continue;
+        }
+        let text = std::str::from_utf8(&params[..len]).ok()?;
+        let mut fields = text.split(';');
+        let (Some(height), Some(width), None) = (fields.next(), fields.next(), fields.next()) else {
+            continue;
+        };
+        let (Ok(height), Ok(width)) = (height.parse::<u32>(), width.parse::<u32>()) else {
+            continue;
+        };
+        let valid = |px: u32| (1..=MAX_CELL_PIXELS).contains(&px);
+        return (valid(width) && valid(height)).then_some(CellSize { width, height });
+    }
+    None
+}
+
 /// Divide window pixel dimensions by the character grid to yield cell size.
 ///
 /// Returns `None` if any dimension is zero, which guards against both an
 /// unpopulated pixel size (terminal reports `0` for `ws_xpixel`/`ws_ypixel`)
 /// and a divide-by-zero on the grid.
+#[cfg(any(not(windows), test))]
 fn cell_from_pixels(xpixel: u32, ypixel: u32, cols: u32, rows: u32) -> Option<CellSize> {
     if xpixel == 0 || ypixel == 0 || cols == 0 || rows == 0 {
         return None;
@@ -174,22 +218,28 @@ fn cell_size_ioctl() -> Option<CellSize> {
     )
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn cell_size_ioctl() -> Option<CellSize> {
     None
 }
 
 /// Calculate the cell size (font dimensions) in pixels.
 ///
-/// Prefers the synchronous `TIOCGWINSZ` ioctl, which is deterministic and free
-/// of the read-timeout race inherent to the CSI 14 t escape query. Only when the
-/// ioctl leaves the pixel fields unpopulated does this fall back to querying the
-/// terminal with [`window_size_pixels`].
+/// On Unix this is measured on every call, so it follows font changes:
+/// the synchronous `TIOCGWINSZ` ioctl first, which is deterministic and free
+/// of the read-timeout race inherent to the CSI 14 t escape query, and only
+/// when the ioctl leaves the pixel fields unpopulated, the terminal's
+/// [`window_size_pixels`] divided by the grid.
+///
+/// Native Windows has no pixel ioctl. There the size is the terminal's answer
+/// to `CSI 16 t`, asked once per process inside the startup exchange (see
+/// `docs/discovery/terminal-queries.md`); a font change later in the process
+/// is not seen.
 ///
 /// ## Returns
 ///
-/// - `Some(CellSize)` if pixel and grid dimensions can be determined
-/// - `None` if neither source yields a usable measurement
+/// - `Some(CellSize)` if the terminal reported a usable measurement
+/// - `None` otherwise; callers then use [`CellSize::FALLBACK`]
 ///
 /// ## Examples
 ///
@@ -201,6 +251,16 @@ fn cell_size_ioctl() -> Option<CellSize> {
 /// }
 /// ```
 pub fn cell_size() -> Option<CellSize> {
+    platform_cell_size()
+}
+
+#[cfg(windows)]
+fn platform_cell_size() -> Option<CellSize> {
+    crate::discovery::startup_exchange::live_cell_size()
+}
+
+#[cfg(not(windows))]
+fn platform_cell_size() -> Option<CellSize> {
     if let Some(cs) = cell_size_ioctl() {
         return Some(cs);
     }
@@ -273,6 +333,85 @@ mod tests {
     fn test_parse_csi_14t_response_non_numeric() {
         let response = b"\x1b[4;abc;deft";
         assert_eq!(parse_csi_14t_response(response), None);
+    }
+
+    #[test]
+    fn cell_size_reply_reads_height_then_width() {
+        // Windows Terminal's live answer (2026-10-21): 20 px tall, 10 px wide.
+        assert_eq!(
+            find_cell_size_reply(b"\x1b[6;20;10t"),
+            Some(CellSize {
+                width: 10,
+                height: 20
+            })
+        );
+    }
+
+    #[test]
+    fn cell_size_reply_is_found_among_the_startup_exchange_replies() {
+        let bytes = b"\x1b]10;rgb:cccc/dddd/eeee\x1b\\\x1b]11;rgb:1111/2222/3333\x07\
+            \x1b[6;20;10t\x1b_Gi=7;OK\x1b\\\x1b[?61;4;6c";
+        assert_eq!(
+            find_cell_size_reply(bytes),
+            Some(CellSize {
+                width: 10,
+                height: 20
+            })
+        );
+    }
+
+    #[test]
+    fn cell_size_reply_split_across_reads_is_read_once_complete() {
+        // The console delivers a reply in pieces; the exchange accumulates
+        // them and parses the whole buffer.
+        let wire = b"\x1b]11;rgb:1111/2222/3333\x07\x1b[6;20;10t\x1b[?61c";
+        let complete_at = wire.iter().position(|&b| b == b't').expect("final byte") + 1;
+        let mut collected = Vec::new();
+        for chunk in wire.chunks(3) {
+            collected.extend_from_slice(chunk);
+            let expected = (collected.len() >= complete_at).then_some(CellSize {
+                width: 10,
+                height: 20,
+            });
+            assert_eq!(find_cell_size_reply(&collected), expected, "after {} bytes", collected.len());
+        }
+    }
+
+    #[test]
+    fn cell_size_reply_rejects_zero_and_absurd_dimensions() {
+        assert_eq!(find_cell_size_reply(b"\x1b[6;0;0t"), None);
+        assert_eq!(find_cell_size_reply(b"\x1b[6;20;0t"), None);
+        assert_eq!(find_cell_size_reply(b"\x1b[6;0;10t"), None);
+        assert_eq!(find_cell_size_reply(b"\x1b[6;20;1025t"), None);
+        assert_eq!(find_cell_size_reply(b"\x1b[6;99999999999;10t"), None);
+        assert_eq!(
+            find_cell_size_reply(b"\x1b[6;1024;1t"),
+            Some(CellSize {
+                width: 1,
+                height: 1024
+            })
+        );
+    }
+
+    #[test]
+    fn other_csi_replies_are_not_a_cell_size() {
+        assert_eq!(find_cell_size_reply(b"\x1b[6;20t"), None);
+        assert_eq!(find_cell_size_reply(b"\x1b[6;20;10;5t"), None);
+        // CSI 14 t's window-pixel reply and a cursor position report.
+        assert_eq!(find_cell_size_reply(b"\x1b[4;1080;1920t"), None);
+        assert_eq!(find_cell_size_reply(b"\x1b[6;20R"), None);
+        assert_eq!(find_cell_size_reply(b"\x1b[?61;4c"), None);
+    }
+
+    #[test]
+    fn a_malformed_cell_size_reply_does_not_hide_a_later_one() {
+        assert_eq!(
+            find_cell_size_reply(b"\x1b[6;20t\x1b[6;18;9t"),
+            Some(CellSize {
+                width: 9,
+                height: 18
+            })
+        );
     }
 
     #[test]

@@ -986,7 +986,17 @@ mod tests {
             .build();
 
         let result = hr.render(&term);
-        assert!(result.contains("\x1b_G"), "{result:?}");
+        let params = result
+            .split("\x1b_G")
+            .nth(1)
+            .and_then(|chunk| chunk.split(';').next())
+            .unwrap_or_else(|| panic!("a Kitty upload: {result:?}"));
+        let id: u32 = params
+            .strip_prefix("q=2,i=")
+            .and_then(|rest| rest.split(',').next())
+            .and_then(|id| id.parse().ok())
+            .unwrap_or_else(|| panic!("quiet, with an image ID: {params:?}"));
+        assert_ne!(id, 0, "{params:?}");
     }
 
     #[test]

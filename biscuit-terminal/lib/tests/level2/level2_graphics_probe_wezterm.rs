@@ -170,9 +170,8 @@ fn zellij_with_kitty() -> Option<String> {
 /// a route from Zellij's answer or reports a reasoned `Unknown`; it never
 /// claims a route nobody confirmed.
 ///
-/// **Not yet run**: Zellij is not installed on the host this was written on,
-/// so only the skip path has executed. The session is started from a layout
-/// that runs the probe in its only pane, and killed by name afterwards.
+/// The session is started from a layout that runs the probe in its only
+/// pane, and killed by name afterwards.
 #[test]
 #[serial_test::serial(level2_terminal)]
 fn level2_zellij_probe_is_verified_or_reasoned() {
@@ -185,6 +184,14 @@ fn level2_zellij_probe_is_verified_or_reasoned() {
 
     let session = format!("biscuit-graphics-probe-{}", std::process::id());
     let dir = tempfile::tempdir().expect("tempdir");
+    // Zellij 0.45.1 rejects every session name ("must be less than 0
+    // characters") when its socket directory sits under macOS's long
+    // `$TMPDIR`, so the session gets a short socket directory of its own.
+    let sockets = tempfile::Builder::new()
+        .prefix("bz")
+        .tempdir_in("/tmp")
+        .expect("socket dir");
+    let socket_dir = sockets.path().display().to_string();
     let layout = dir.path().join("probe.kdl");
     std::fs::write(
         &layout,
@@ -194,22 +201,30 @@ fn level2_zellij_probe_is_verified_or_reasoned() {
         ),
     )
     .expect("write layout");
+    // A hermetic config: no tips or release-notes popup over the probe's
+    // output, whatever the host's own Zellij config says.
+    let config = dir.path().join("config.kdl");
+    std::fs::write(&config, "show_startup_tips false\nshow_release_notes false\n")
+        .expect("write config");
 
     harness.send_command_with_env("clear", &[]).expect("clear");
     harness
         .send_command_with_env(
             &format!(
-                "zellij --session {session} --new-session-with-layout {}",
+                "zellij --config {} --session {session} --new-session-with-layout {}",
+                config.display(),
                 layout.display()
             ),
-            &[],
+            &[("ZELLIJ_SOCKET_DIR", socket_dir.as_str())],
         )
         .expect("start zellij");
     let text = wait_for(&mut harness, "graphics_done", Duration::from_secs(20));
     let _ = std::process::Command::new("zellij")
+        .env("ZELLIJ_SOCKET_DIR", &socket_dir)
         .args(["kill-session", &session])
         .output();
     let _ = std::process::Command::new("zellij")
+        .env("ZELLIJ_SOCKET_DIR", &socket_dir)
         .args(["delete-session", "--force", &session])
         .output();
 

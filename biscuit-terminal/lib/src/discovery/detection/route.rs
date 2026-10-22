@@ -163,6 +163,14 @@ pub struct GraphicsRoute {
     /// estimated fallback. Set for Zellij, which measures its host itself: a
     /// query success there says nothing about whether it knows the cell size.
     pub needs_measured_cells: bool,
+    /// After an image, a space must be written before the carriage return
+    /// that returns the cursor to column 0. Set for the Windows SSH server:
+    /// its console host passes the iTerm2 sequence on without modeling the
+    /// image, so its cursor stays where the image started while the outer
+    /// terminal's moves to the image's right edge, and it drops a carriage
+    /// return it believes leaves the cursor in place. The space moves the
+    /// console host's cursor, so the carriage return reaches the terminal.
+    pub needs_cursor_resync: bool,
 }
 
 impl GraphicsRoute {
@@ -182,6 +190,7 @@ impl GraphicsRoute {
                 fix: None,
             },
             needs_measured_cells: false,
+            needs_cursor_resync: false,
         }
     }
 
@@ -203,6 +212,7 @@ impl GraphicsRoute {
                 fix: None,
             },
             needs_measured_cells: false,
+            needs_cursor_resync: false,
         }
     }
 
@@ -213,6 +223,11 @@ impl GraphicsRoute {
 
     fn needing_measured_cells(mut self) -> Self {
         self.needs_measured_cells = true;
+        self
+    }
+
+    fn needing_cursor_resync(mut self) -> Self {
+        self.needs_cursor_resync = true;
         self
     }
 
@@ -642,7 +657,10 @@ pub fn resolve_graphics_route(inputs: &RouteInputs) -> GraphicsRoute {
 /// Windows console, and every terminal whose identity already decides the
 /// route. A visible tmux is asked only what it can answer: its own DA1
 /// (`direct_da1_only`) when it could draw Sixel itself, and the wrapped
-/// query when its `allow-passthrough` could not be read.
+/// query when its `allow-passthrough` could not be read. The direct exchange
+/// never carries the Kitty query when a tmux or GNU screen is visible
+/// (`TMUX`, `STY`) or hinted by `TERM` (a likely hidden tmux, which gets the
+/// wrapped query instead).
 ///
 /// ## Examples
 ///
@@ -715,9 +733,21 @@ fn decide(inputs: &RouteInputs) -> (GraphicsRoute, ProbePlan) {
         Choice::Auto => resolve_detected(inputs, transport_choice, probing),
     };
     match probing {
-        Probing::Allowed => (route, plan),
+        Probing::Allowed => (route, without_apc_under_multiplexer(inputs, plan)),
         Probing::Blocked(_) => (route, ProbePlan::NONE),
     }
+}
+
+/// `plan` with the Kitty query dropped from the direct exchange when a tmux
+/// (`TMUX`) or GNU screen (`STY`) is visibly in the path, whatever the
+/// transport override says: both take an unwrapped APC as a title change
+/// (tmux retitles the pane, screen sets its hardstatus), and neither
+/// answers it.
+fn without_apc_under_multiplexer(inputs: &RouteInputs, mut plan: ProbePlan) -> ProbePlan {
+    if plan.direct && (inputs.var_is_set("TMUX") || inputs.var_is_set("STY")) {
+        plan.direct_da1_only = true;
+    }
+    plan
 }
 
 /// Whether a probe may be sent, and if not, the phrase saying why.
@@ -789,7 +819,11 @@ fn resolve_forced(inputs: &RouteInputs, format: GraphicsFormat, transport: Choic
             format!("{requested}: Zellij drops the iTerm2 image format"),
         );
     }
-    let route = GraphicsRoute::pixels(format, RouteConfidence::Forced, format!("forced by {requested}"));
+    let mut route = GraphicsRoute::pixels(format, RouteConfidence::Forced, format!("forced by {requested}"));
+    if windows_ssh_server(inputs) {
+        // Only iTerm2 gets here, and it still passes through the console host.
+        route = route.needing_cursor_resync();
+    }
     if tmux_in_path(inputs, transport) {
         // `BISCUIT_GRAPHICS_TRANSPORT=tmux` with no `TMUX`: a tmux beyond SSH.
         return route.through_tmux();
@@ -815,10 +849,12 @@ fn resolve_detected(inputs: &RouteInputs, transport: Choice, probing: Probing) -
     if transport == Choice::Auto
         && let Some(hint) = hidden_tmux_hint(inputs)
     {
+        // The direct exchange carries DA1 alone: a real tmux (or GNU screen)
+        // would take an unwrapped Kitty APC as a pane-title change.
         let plan = ProbePlan {
             direct: true,
             tunneled: true,
-            direct_da1_only: false,
+            direct_da1_only: true,
         };
         return (resolve_hidden_tmux(inputs, &hint, probing), plan);
     }
@@ -956,7 +992,8 @@ fn resolve_windows_ssh(inputs: &RouteInputs) -> GraphicsRoute {
             format!(
                 "Windows SSH server: the console host passes only the iTerm2 format, which {name} ({source}) renders"
             ),
-        ),
+        )
+        .needing_cursor_resync(),
         None => GraphicsRoute::unavailable(
             RouteReasonKind::BlockedTransport,
             RouteConfidence::Known,
@@ -1416,33 +1453,23 @@ fn outer_terminal(clients: Option<&[TmuxClient]>) -> OuterTerminal {
     }
 }
 
-/// A likely tmux beyond SSH (see [`hidden_tmux_hint`]). Only a tmux with
-/// passthrough on delivers the wrapped query to the outer terminal, so a
-/// correlated `OK` to it confirms the tmux transport; an `OK` to the
-/// unwrapped query means there was no tmux after all.
+/// A likely tmux beyond SSH (see [`hidden_tmux_hint`]). Only the wrapped
+/// Kitty query is sent (the direct exchange carries DA1 alone), and only a
+/// tmux with passthrough on delivers it to the outer terminal, so a
+/// correlated `OK` to it confirms the tmux transport. Anything else falls
+/// back: a misleading `TERM` with no tmux needs
+/// `BISCUIT_GRAPHICS_TRANSPORT=direct`.
 fn resolve_hidden_tmux(inputs: &RouteInputs, hint: &str, probing: Probing) -> GraphicsRoute {
-    let accepted = |result: &Option<ProbeResult>| {
-        matches!(result, Some(ProbeResult::Replied(reply)) if reply.kitty == KittyReply::Accepted)
-    };
-    if probing == Probing::Allowed {
-        if accepted(&inputs.probe.tunneled) {
-            return tunneled_route(inputs, RouteConfidence::Verified, &format!(
-                "{hint} without TMUX: a tmux with passthrough on delivered the wrapped Kitty graphics query"
-            ));
-        }
-        if accepted(&inputs.probe.direct) {
-            let mut route = tunneled_route(
-                inputs,
-                RouteConfidence::Verified,
-                &format!("{hint}, but the terminal itself answered the Kitty graphics query"),
-            );
-            route.transport = GraphicsTransport::Direct;
-            return route;
-        }
+    if probing == Probing::Allowed
+        && matches!(&inputs.probe.tunneled, Some(ProbeResult::Replied(reply)) if reply.kitty == KittyReply::Accepted)
+    {
+        return tunneled_route(inputs, RouteConfidence::Verified, &format!(
+            "{hint} without TMUX: a tmux with passthrough on delivered the wrapped Kitty graphics query"
+        ));
     }
     let detail = match probing {
         Probing::Blocked(why) => why.to_string(),
-        Probing::Allowed => "neither the wrapped nor the plain Kitty graphics query was answered".to_string(),
+        Probing::Allowed => "the wrapped Kitty graphics query was not answered".to_string(),
     };
     GraphicsRoute::unavailable(
         RouteReasonKind::Unknown,
@@ -1450,7 +1477,7 @@ fn resolve_hidden_tmux(inputs: &RouteInputs, hint: &str, probing: Probing) -> Gr
         format!("{hint} without TMUX suggests a tmux beyond SSH; {detail}"),
     )
     .with_fix(format!(
-        "set {GRAPHICS_TRANSPORT_ENV}=tmux if a tmux with allow-passthrough on runs between this program and the terminal"
+        "set {GRAPHICS_TRANSPORT_ENV}=tmux if a tmux with allow-passthrough on runs between this program and the terminal, or {GRAPHICS_TRANSPORT_ENV}=direct if none does"
     ))
 }
 

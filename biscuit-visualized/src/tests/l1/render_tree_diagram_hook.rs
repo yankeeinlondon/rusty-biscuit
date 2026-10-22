@@ -84,10 +84,22 @@ fn hook_draws_the_fence_exactly_as_the_component_does() {
         .expect("an optimistic Kitty terminal draws the diagram");
     let direct = MermaidDiagram::new(SOURCE).try_render(&term).expect("direct render");
 
-    assert_eq!(rendered.output, direct.output, "the hook adds nothing to the component's output");
+    // Every Kitty upload has a fresh image ID; nothing else may differ.
+    assert_eq!(
+        without_kitty_id(&rendered.output),
+        without_kitty_id(&direct.output),
+        "the hook adds nothing to the component's output"
+    );
     assert!(rendered.output.contains("\x1b_G"), "a Kitty image, not code: {:?}", rendered.output);
     assert!(!rendered.output.contains("A --> B"), "{:?}", rendered.output);
     assert!(rendered.diagnostics.is_empty(), "{:?}", rendered.diagnostics);
+}
+
+/// `output` with the digits of its one Kitty image ID removed.
+fn without_kitty_id(output: &str) -> String {
+    let start = output.find("\x1b_Gq=2,i=").expect("a Kitty upload") + "\x1b_Gq=2,i=".len();
+    let digits = output[start..].find(',').expect("more parameters follow the ID");
+    format!("{}{}", &output[..start], &output[start + digits..])
 }
 
 /// Finding 7 (review-1): under `RenderStrictness::Strict`, a Mermaid

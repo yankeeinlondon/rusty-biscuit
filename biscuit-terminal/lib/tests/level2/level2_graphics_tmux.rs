@@ -14,9 +14,11 @@
 //! The placeholder test attaches one client with `TERM=xterm-kitty` through
 //! `script` (a pseudo-terminal, no window), so the library identifies a kitty
 //! outer terminal from the live client list; the client's output is what
-//! tmux forwards to that terminal. The Sixel test attaches an
-//! `xterm-256color` client with `tmux -T sixel`, a feature of that client
-//! alone, so tmux draws Sixel itself.
+//! tmux forwards to that terminal. Placeholders also need tmux to send that
+//! client UTF-8 and 24-bit color, so it attaches with `tmux -u -T RGB` rather
+//! than relying on what tmux infers from the host's terminfo. The Sixel test
+//! attaches an `xterm-256color` client with `tmux -T sixel`. Both features
+//! belong to that client alone, never the shared server.
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -334,9 +336,9 @@ fn level2_tmux_passthrough_off_falls_back_and_names_the_setting() {
     assert!(find(&raw, b"tmux;").is_none(), "no passthrough envelope is written");
 }
 
-/// A kitty client attached, `allow-passthrough on`: Kitty through tmux with
-/// Unicode placeholders. tmux receives the `U=1` upload in an envelope and
-/// the placeholder grid as ordinary text, and forwards both to the client
+/// A kitty client with UTF-8 and the `RGB` feature attached,
+/// `allow-passthrough on`: Kitty through tmux with Unicode placeholders.
+/// tmux receives the `U=1` upload in an envelope and the placeholder grid as ordinary text, and forwards both to the client
 /// unwrapped, with the image ID in each cell's 24-bit foreground color.
 #[test]
 fn level2_tmux_kitty_client_gets_unicode_placeholders() {
@@ -347,7 +349,7 @@ fn level2_tmux_kitty_client_gets_unicode_placeholders() {
     require_level!(Level::L2, terminfo.is_some(), "xterm-kitty terminfo");
     let kitty = ClientSpec {
         term: "xterm-kitty",
-        features: None,
+        features: Some("RGB"),
         terminfo: terminfo.as_ref().and_then(Option::as_deref),
     };
     let session = ProbeSession::run_with("on", Some(kitty), 50, (4, 4));

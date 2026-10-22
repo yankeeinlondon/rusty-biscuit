@@ -142,11 +142,10 @@ impl TerminalImage {
 
         // WezTerm needs explicit row sizing for correct geometry. Kitty-family
         // peers render correctly with width-only sizing. Through tmux the
-        // outer terminal is not `term.app`, so rows are always explicit, and
-        // the upload carries its own ID.
-        let image_seq = if term.graphics_route.transport == GraphicsTransport::Tmux {
-            self.render_kitty_with_id(&png_data, target_cells, height_cells, next_kitty_id())
-        } else if matches!(term.app, TerminalApp::Wezterm) {
+        // outer terminal is not `term.app`, so rows are always explicit.
+        let image_seq = if term.graphics_route.transport == GraphicsTransport::Tmux
+            || matches!(term.app, TerminalApp::Wezterm)
+        {
             self.render_kitty_cells(&png_data, target_cells, height_cells)
         } else {
             self.render_kitty_width_only(&png_data, target_cells)
@@ -224,26 +223,28 @@ impl TerminalImage {
     /// escape sequences. For large images, data is chunked into 4096-byte segments.
     ///
     /// Uses `q=2` (quiet mode) to suppress all terminal responses, preventing
-    /// garbage text when the output is printed from a string.
-    ///
-    /// ## Arguments
-    ///
-    /// * `png_data` - PNG-encoded image bytes
-    /// * `width_cells` - Display width in terminal cells (columns)
-    /// * `height_cells` - Display height in terminal cells (rows)
+    /// garbage text when the output is printed from a string. Every call
+    /// uploads under a fresh nonzero image ID from
+    /// [`next_kitty_id`](crate::discovery::detection::probe::next_kitty_id),
+    /// so one upload never replaces another.
     ///
     /// ## Escape Sequence Format
     ///
     /// ```text
-    /// ESC_G q=2,f=100,a=T,t=d,m=1;{base64_chunk} ESC\  (intermediate chunks)
-    /// ESC_G q=2,f=100,a=T,t=d,m=0;{base64_chunk} ESC\  (final chunk)
+    /// ESC_G q=2,i={id},f=100,a=T,t=d,c={w},r={h},m=1;{base64_chunk} ESC\  (first chunk)
+    /// ESC_G m=1;{base64_chunk} ESC\                                       (intermediate chunks)
+    /// ESC_G m=0;{base64_chunk} ESC\                                       (final chunk)
     /// ```
+    ///
+    /// A single-chunk upload carries the parameters and `m=0` together.
     ///
     /// Where:
     /// - `q=2`: quiet mode (suppress all terminal responses)
+    /// - `i`: the image ID, on the first chunk only
     /// - `f=100`: format is PNG
     /// - `a=T`: action is transmit and display
     /// - `t=d`: transmission medium is direct (inline data)
+    /// - `c`, `r`: display width and height in cells
     /// - `m=0|1`: more chunks follow (1) or this is final (0)
     pub fn render_kitty_cells(
         &self,
@@ -253,7 +254,10 @@ impl TerminalImage {
     ) -> String {
         self.kitty_chunks(
             png_data,
-            &format!("q=2,f=100,a=T,t=d,c={width_cells},r={height_cells}"),
+            &format!(
+                "q=2,i={},f=100,a=T,t=d,c={width_cells},r={height_cells}",
+                next_kitty_id()
+            ),
         )
     }
 
@@ -268,29 +272,13 @@ impl TerminalImage {
     /// the number of rows needed to preserve the image's aspect ratio.
     /// This is the preferred method for aspect-ratio-correct rendering.
     ///
-    /// Uses `q=2` (quiet mode) to suppress all terminal responses.
-    ///
-    /// ## Arguments
-    ///
-    /// * `png_data` - PNG-encoded image bytes
-    /// * `width_cells` - Display width in terminal columns
+    /// Like [`render_kitty_cells`](Self::render_kitty_cells), the upload is
+    /// quiet (`q=2`) and carries a fresh nonzero image ID (`i=`) on its
+    /// first chunk.
     pub fn render_kitty_width_only(&self, png_data: &[u8], width_cells: u32) -> String {
-        // Only `c=` (columns): Kitty computes the rows from the aspect ratio.
-        self.kitty_chunks(png_data, &format!("q=2,f=100,a=T,t=d,c={width_cells}"))
-    }
-
-    /// [`render_kitty_cells`](Self::render_kitty_cells) with image ID `id`
-    /// (`i=`) on the upload. Quiet mode still suppresses every reply.
-    pub(super) fn render_kitty_with_id(
-        &self,
-        png_data: &[u8],
-        width_cells: u32,
-        height_cells: u32,
-        id: u32,
-    ) -> String {
         self.kitty_chunks(
             png_data,
-            &format!("q=2,i={id},f=100,a=T,t=d,c={width_cells},r={height_cells}"),
+            &format!("q=2,i={},f=100,a=T,t=d,c={width_cells}", next_kitty_id()),
         )
     }
 

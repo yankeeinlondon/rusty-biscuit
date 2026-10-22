@@ -8,7 +8,7 @@ use crate::discovery::detection::{
     underline_support,
 };
 use crate::discovery::fonts::{
-    CellSize, FontLigature, cell_size, detect_nerd_font, font_ligatures, font_name, font_size,
+    CellSize, FontLigature, detect_nerd_font, font_ligatures, font_name, font_size,
 };
 use crate::discovery::locale::{CharEncoding, TerminalLocale};
 use crate::discovery::os_detection::{
@@ -16,7 +16,7 @@ use crate::discovery::os_detection::{
 };
 use crate::discovery::detection::color::color_mode_for_background;
 use crate::discovery::osc_queries::query::heuristic_color;
-use crate::discovery::osc_queries::{RgbValue, bg_color, text_color};
+use crate::discovery::osc_queries::{ColorSource, RgbValue, bg_color_with_source, text_color};
 
 /// Walk up from `start` looking for a `.git` directory. Returns the repo root if found.
 fn find_git_root(start: &Path) -> Option<PathBuf> {
@@ -54,11 +54,20 @@ fn detect_terminal(probe_mode: ProbeMode, route: Option<GraphicsRoute>) -> Termi
     // consuming waiting input the probe's busy-input check exists to protect.
     let graphics_route = route
         .unwrap_or_else(|| crate::discovery::detection::route::graphics_route_with(probe_mode));
-    let (color_mode, text_color, background_color) = match probe_mode {
-        ProbeMode::Auto => (color_mode(), text_color(), bg_color()),
+    let (color_mode, text_color, background_color, background_source) = match probe_mode {
+        ProbeMode::Auto => {
+            let background = bg_color_with_source();
+            let source = background.map_or(ColorSource::Estimated, |(_, source)| source);
+            (color_mode(), text_color(), background.map(|(color, _)| color), source)
+        }
         ProbeMode::Off => {
             let background = heuristic_color(11);
-            (color_mode_for_background(background), heuristic_color(10), background)
+            (
+                color_mode_for_background(background),
+                heuristic_color(10),
+                background,
+                ColorSource::Estimated,
+            )
         }
     };
 
@@ -73,6 +82,7 @@ fn detect_terminal(probe_mode: ProbeMode, route: Option<GraphicsRoute>) -> Termi
         color_mode,
         text_color,
         background_color,
+        background_source,
         os: detect_os_type(),
         distro: detect_linux_distro(),
         config_file,
@@ -218,6 +228,10 @@ pub struct Terminal {
     pub text_color: Option<RgbValue>,
     /// The detected terminal background color, when available.
     pub background_color: Option<RgbValue>,
+    /// Whether the terminal reported [`background_color`](Self::background_color)
+    /// (an OSC 11 reply) or it is an estimate. `Estimated` when there is no
+    /// color.
+    pub background_source: ColorSource,
 
     /// The operating system type
     pub os: OsType,
@@ -277,9 +291,9 @@ pub struct Terminal {
     pub tab_width: usize,
 
     /// Cached cell size in pixels. When `Some`, `cell_size()` returns this value
-    /// instead of querying the terminal via CSI 14t. This starts as `None` for
-    /// normal detection so ordinary rendering does not perform live `/dev/tty`
-    /// queries unless a caller explicitly asks for cell dimensions.
+    /// instead of measuring it (see [`Terminal::cell_size`]). This starts as
+    /// `None` for normal detection so ordinary rendering does not perform live
+    /// terminal queries unless a caller explicitly asks for cell dimensions.
     pub cell_size: Option<CellSize>,
 
     /// Whether the terminal is expected to render Unicode glyphs correctly.
@@ -314,6 +328,7 @@ impl From<&Terminal> for Terminal {
             color_mode: value.color_mode,
             text_color: value.text_color,
             background_color: value.background_color,
+            background_source: value.background_source,
             os: value.os,
             distro: value.distro.clone(),
             config_file: value.config_file.clone(),
@@ -460,6 +475,7 @@ impl Terminal {
             color_mode: ColorMode::Dark,
             text_color: None,
             background_color: None,
+            background_source: ColorSource::Estimated,
             os: OsType::Unknown,
             distro: None,
             config_file: None,
@@ -531,10 +547,18 @@ impl Terminal {
     /// Get the cell size in pixels.
     ///
     /// Returns the cached cell size if available (set during detection or via builder),
-    /// otherwise queries live: the `TIOCGWINSZ` pixel fields first, then CSI 14t.
-    /// Always `None` on native Windows.
+    /// otherwise [`discovery::fonts::cell_size`](crate::discovery::fonts::cell_size):
+    /// on Unix the `TIOCGWINSZ` pixel fields first, then CSI 14t; on native
+    /// Windows the terminal's CSI 16t answer, read only if construction's
+    /// startup exchange received it (never sent here, so
+    /// [`ProbeMode::Off`] keeps console input untouched).
+    /// `None` when nothing was measured; callers then use [`CellSize::FALLBACK`].
     pub fn cell_size(&self) -> Option<CellSize> {
-        self.cell_size.or_else(cell_size)
+        #[cfg(windows)]
+        let measured = crate::discovery::startup_exchange::received_cell_size;
+        #[cfg(not(windows))]
+        let measured = crate::discovery::fonts::cell_size;
+        self.cell_size.or_else(measured)
     }
 
     /// Returns the cached color mode for this terminal instance.
@@ -764,8 +788,8 @@ impl TerminalBuilder {
     /// Set the cell size in pixels.
     ///
     /// When set, `Terminal::cell_size()` returns this value instead of
-    /// querying the terminal via CSI 14t. Prevents `/dev/tty` races
-    /// in multi-threaded test environments.
+    /// measuring it. Prevents terminal-query races in multi-threaded test
+    /// environments.
     pub fn cell_size(mut self, value: CellSize) -> Self {
         self.cell_size = Some(value);
         self
@@ -794,6 +818,7 @@ impl TerminalBuilder {
             color_mode: self.color_mode.unwrap_or(detected.color_mode),
             text_color: detected.text_color,
             background_color: detected.background_color,
+            background_source: detected.background_source,
             is_ci: self.is_ci.unwrap_or(detected.is_ci),
             is_nerd_font: self.is_nerd_font.unwrap_or(detected.is_nerd_font),
             fixed_width: self.fixed_width,

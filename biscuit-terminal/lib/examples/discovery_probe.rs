@@ -66,6 +66,8 @@
 //!   `PROBE_GRAPHICS_IMAGE=<path>` also renders that image for each
 //!   terminal's route and prints `graphics_image[i]=` (`pixels`, then the
 //!   escape sequences; `fallback:<text>`; or `error:<message>`).
+//!   `PROBE_GRAPHICS_CELL_SIZE` set also prints `graphics_cell_size[i]=`,
+//!   the terminal's `cell_size()`; unset, no cell-size lookup is made.
 //! * `prose` — Render a [`Prose`] string against the detected (or
 //!   override-built) terminal and print the raw bytes between
 //!   `---PROSE---` / `---END---` markers.
@@ -412,6 +414,10 @@ fn probe_graphics() {
         println!("graphics_fix[{i}]={:?}", route.reason.fix);
         println!("graphics_text_color[{i}]={:?}", term.text_color);
         println!("graphics_bg_color[{i}]={:?}", term.background_color);
+        println!("graphics_bg_source[{i}]={:?}", term.background_source);
+        if std::env::var_os("PROBE_GRAPHICS_CELL_SIZE").is_some() {
+            println!("graphics_cell_size[{i}]={:?}", term.cell_size());
+        }
         if let Ok(path) = std::env::var("PROBE_GRAPHICS_IMAGE") {
             print_image(i, std::path::Path::new(&path), &term);
         }

@@ -8,7 +8,7 @@ use crate::discovery::os_detection::is_ci;
 use super::parse::parse_osc_color_response;
 use super::parse::{ansi_index_to_rgb, parse_colorfgbg};
 use super::types::DEFAULT_TIMEOUT;
-use super::types::{OscQueryError, RgbValue};
+use super::types::{ColorSource, OscQueryError, RgbValue};
 
 /// Tracing target marking one *actual* tty round-trip attempt for an OSC code.
 ///
@@ -48,7 +48,9 @@ fn osc_color_name(code: u8) -> &'static str {
 /// The live step for OSC 10 and 11 is one batched round trip shared by both
 /// codes and cached per process, so building a `Terminal` (which wants both)
 /// costs the terminal one exchange.
-pub(super) fn query_osc_color(code: u8) -> Option<RgbValue> {
+///
+/// The color is [`ColorSource::Measured`] only when the live query answered.
+pub(super) fn query_osc_color(code: u8) -> Option<(RgbValue, ColorSource)> {
     resolve_color(code, true, || live_color_cached(code))
 }
 
@@ -57,6 +59,7 @@ pub(super) fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Optio
     resolve_color(code, true, || {
         live_colors(&[code], timeout).into_iter().next().flatten()
     })
+    .map(|(color, _)| color)
 }
 
 /// The live OSC 10/11 answers come from the once-per-process startup
@@ -132,9 +135,9 @@ pub(crate) fn color_query_wanted() -> bool {
 }
 
 /// The fallback chain without a live query, for a terminal constructed with
-/// probing off.
+/// probing off. Always an estimate.
 pub(crate) fn heuristic_color(code: u8) -> Option<RgbValue> {
-    resolve_color(code, false, || None)
+    resolve_color(code, false, || None).map(|(color, _)| color)
 }
 
 /// The gate and fallback chain around a live color lookup.
@@ -142,12 +145,21 @@ fn resolve_color(
     code: u8,
     live_allowed: bool,
     live: impl FnOnce() -> Option<RgbValue>,
-) -> Option<RgbValue> {
-    // Try actual OSC query first (if terminal supports it)
-    if live_allowed
-        && color_query_wanted()
-        && let Some(color) = live()
-    {
+) -> Option<(RgbValue, ColorSource)> {
+    let answer = if live_allowed && color_query_wanted() { live() } else { None };
+    let colorfgbg = std::env::var("COLORFGBG").ok();
+    sourced_color(code, answer, colorfgbg.as_deref(), &get_terminal_app())
+}
+
+/// The terminal's `answer` to the live query when there is one, else the
+/// `COLORFGBG` and terminal-app estimates.
+fn sourced_color(
+    code: u8,
+    answer: Option<RgbValue>,
+    colorfgbg: Option<&str>,
+    term_app: &TerminalApp,
+) -> Option<(RgbValue, ColorSource)> {
+    if let Some(color) = answer {
         tracing::debug!(
             code,
             r = color.r,
@@ -157,11 +169,10 @@ fn resolve_color(
             "OSC{} color detected via actual query",
             code
         );
-        return Some(color);
+        return Some((color, ColorSource::Measured));
     }
-    // Fallback 1: Try COLORFGBG environment variable
-    if let Ok(colorfgbg) = std::env::var("COLORFGBG")
-        && let Some(color) = parse_colorfgbg(&colorfgbg, code)
+    if let Some(colorfgbg) = colorfgbg
+        && let Some(color) = parse_colorfgbg(colorfgbg, code)
     {
         tracing::debug!(
             code,
@@ -173,12 +184,12 @@ fn resolve_color(
             "OSC{} color detected via COLORFGBG env var",
             code
         );
-        return Some(color);
+        // A palette index mapped to the standard ANSI colors, and inherited
+        // through multiplexers and SSH: an estimate, not the terminal's color.
+        return Some((color, ColorSource::Estimated));
     }
 
-    // Fallback 2: Terminal app defaults
-    let term_app = get_terminal_app();
-    if let Some(color) = get_terminal_default_color(&term_app, code) {
+    if let Some(color) = get_terminal_default_color(term_app, code) {
         tracing::debug!(
             code,
             terminal = ?term_app,
@@ -189,7 +200,7 @@ fn resolve_color(
             "OSC{} color detected via terminal defaults",
             code
         );
-        return Some(color);
+        return Some((color, ColorSource::Estimated));
     }
 
     // Suppress unused warnings on non-unix
@@ -357,6 +368,26 @@ mod tests {
         let bg = get_terminal_default_color(&app, 11);
         assert!(bg.is_some());
         assert!(bg.unwrap().is_dark());
+    }
+
+    #[test]
+    fn only_a_live_answer_is_measured() {
+        let kitty = TerminalApp::Kitty;
+        let answer = RgbValue::new(40, 44, 52);
+        assert_eq!(
+            sourced_color(11, Some(answer), Some("15;0"), &kitty),
+            Some((answer, ColorSource::Measured))
+        );
+        assert_eq!(
+            sourced_color(11, None, None, &kitty),
+            Some((RgbValue::new(30, 30, 30), ColorSource::Estimated)),
+            "a per-app default is an estimate"
+        );
+        assert!(
+            matches!(sourced_color(11, None, Some("15;0"), &kitty), Some((_, ColorSource::Estimated))),
+            "a COLORFGBG index is an estimate"
+        );
+        assert_eq!(sourced_color(11, None, None, &TerminalApp::AppleTerminal), None);
     }
 
     #[test]

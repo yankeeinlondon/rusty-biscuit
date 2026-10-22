@@ -185,17 +185,35 @@ pub struct ColorInfo {
     /// Hex color code
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hex: Option<String>,
+    /// `measured` when the terminal answered the OSC query, else `estimated`
+    pub source: osc_queries::ColorSource,
 }
 
-impl From<biscuit_terminal::discovery::osc_queries::RgbValue> for ColorInfo {
-    fn from(c: biscuit_terminal::discovery::osc_queries::RgbValue) -> Self {
+impl From<(osc_queries::RgbValue, osc_queries::ColorSource)> for ColorInfo {
+    fn from((c, source): (osc_queries::RgbValue, osc_queries::ColorSource)) -> Self {
         Self {
             r: c.r,
             g: c.g,
             b: c.b,
             hex: Some(format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)),
+            source,
         }
     }
+}
+
+/// A color report line: `label`, the color, and whether it was measured.
+fn color_line(label: &str, c: &ColorInfo) -> String {
+    let source = match c.source {
+        osc_queries::ColorSource::Measured => "measured",
+        osc_queries::ColorSource::Estimated => "estimated",
+    };
+    format!(
+        "{label}: <b>{}</b> ({}, {}, {}) <dim>{source}</dim>",
+        c.hex.as_deref().unwrap_or("?"),
+        c.r,
+        c.g,
+        c.b
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -218,9 +236,9 @@ pub fn collect_metadata() -> TerminalMetadata {
     let terminal = Terminal::new();
 
     // Get colors
-    let bg_color = osc_queries::bg_color().map(ColorInfo::from);
-    let text_color = osc_queries::text_color().map(ColorInfo::from);
-    let cursor_color = osc_queries::cursor_color().map(ColorInfo::from);
+    let bg_color = osc_queries::bg_color_with_source().map(ColorInfo::from);
+    let text_color = osc_queries::text_color_with_source().map(ColorInfo::from);
+    let cursor_color = osc_queries::cursor_color_with_source().map(ColorInfo::from);
 
     // Get distro info
     let distro = terminal.distro.as_ref().map(|d| DistroInfo {
@@ -414,16 +432,6 @@ pub fn render_pretty(metadata: &TerminalMetadata, verbose: u8, term: &Terminal) 
         }
     };
 
-    let color = |c: &ColorInfo| -> String {
-        format!(
-            "<b>{}</b> ({}, {}, {})",
-            c.hex.as_deref().unwrap_or("?"),
-            c.r,
-            c.g,
-            c.b
-        )
-    };
-
     let env_var = |name: &str, value: Result<String, std::env::VarError>| -> Prose {
         match value {
             Ok(v) => Prose::new(format!("{}: <b>{}</b>", name, Prose::escape_text(&v))),
@@ -508,13 +516,13 @@ pub fn render_pretty(metadata: &TerminalMetadata, verbose: u8, term: &Terminal) 
         .add(Prose::new(format!("Depth: <b>{:?}</b>", metadata.color_depth)))
         .add(Prose::new(format!("Mode: <b>{:?}</b>", metadata.color_mode)));
     if let Some(bg) = &metadata.bg_color {
-        color_list.add(Prose::new(format!("Background: {}", color(bg))));
+        color_list.add(Prose::new(color_line("Background", bg)));
     }
     if let Some(fg) = &metadata.text_color {
-        color_list.add(Prose::new(format!("Foreground: {}", color(fg))));
+        color_list.add(Prose::new(color_line("Foreground", fg)));
     }
     if let Some(cursor) = &metadata.cursor_color {
-        color_list.add(Prose::new(format!("Cursor: {}", color(cursor))));
+        color_list.add(Prose::new(color_line("Cursor", cursor)));
     }
     colors.push(color_list);
     root.push(colors);
@@ -727,7 +735,25 @@ mod tests {
                 fix: None,
             },
             needs_measured_cells: false,
+            needs_cursor_resync: false,
         }
+    }
+
+    /// Under tmux the background is the per-app default with no OSC 11
+    /// reply; the report must not present it as the terminal's answer.
+    #[test]
+    fn color_lines_say_whether_the_terminal_reported_the_color() {
+        use biscuit_terminal::discovery::osc_queries::{ColorSource, RgbValue};
+        let guess = ColorInfo::from((RgbValue::new(30, 30, 30), ColorSource::Estimated));
+        assert_eq!(
+            color_line("Background", &guess),
+            "Background: <b>#1e1e1e</b> (30, 30, 30) <dim>estimated</dim>"
+        );
+        let answer = ColorInfo::from((RgbValue::new(40, 44, 52), ColorSource::Measured));
+        assert!(color_line("Background", &answer).ends_with("<dim>measured</dim>"));
+
+        let json = serde_json::to_string(&guess).unwrap();
+        assert!(json.contains("\"source\":\"estimated\""), "{json}");
     }
 
     #[test]

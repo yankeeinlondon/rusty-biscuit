@@ -25,30 +25,55 @@ fn solid(width: u32, height: u32, color: [u8; 4]) -> DynamicImage {
 #[test]
 fn a_fixed_fixture_encodes_to_golden_lines() {
     // Upper pixel in the foreground, lower in the background; the
-    // transparent pixel shows the background color.
+    // transparent pixel uses the terminal's default background (SGR 49).
     let lines = encode_half_blocks(&quad(), (2, 2), BLACK);
     assert_eq!(
         lines,
-        vec!["\x1b[38;2;255;0;0;48;2;0;0;255m▀\x1b[38;2;0;255;0;48;2;0;0;0m▀\x1b[0m".to_string()]
+        vec!["\x1b[38;2;255;0;0;48;2;0;0;255m▀\x1b[38;2;0;255;0;49m▀\x1b[0m".to_string()]
     );
 }
 
 #[test]
-fn transparency_is_composited_onto_the_background() {
-    let lines = encode_half_blocks(&quad(), (2, 2), WHITE);
-    assert!(lines[0].contains("\x1b[38;2;0;255;0;48;2;255;255;255m▀"), "{lines:?}");
-    let half = encode_half_blocks(&solid(1, 2, [255, 0, 0, 128]), (1, 2), BLACK);
-    assert_eq!(half, vec!["\x1b[38;2;128;0;0;48;2;128;0;0m▀\x1b[0m".to_string()]);
+fn a_transparent_pixel_is_never_painted_with_the_background() {
+    // The background is a guess; whatever it is, a transparent pixel shows
+    // the terminal's own background.
+    for background in [BLACK, WHITE] {
+        let lines = encode_half_blocks(&quad(), (2, 2), background);
+        assert!(lines[0].ends_with("\x1b[38;2;0;255;0;49m▀\x1b[0m"), "{lines:?}");
+    }
 }
 
 #[test]
-fn an_odd_last_pixel_row_has_the_background_below() {
+fn a_transparent_upper_pixel_draws_the_lower_half_block() {
+    let mut img = RgbaImage::new(1, 2);
+    img.put_pixel(0, 0, Rgba([9, 9, 9, 0]));
+    img.put_pixel(0, 1, Rgba([10, 20, 30, 255]));
+    let lines = encode_half_blocks(&DynamicImage::ImageRgba8(img), (1, 2), WHITE);
+    assert_eq!(lines, vec!["\x1b[38;2;10;20;30;49m▄\x1b[0m".to_string()]);
+}
+
+#[test]
+fn a_fully_transparent_cell_is_a_space_on_the_default_background() {
+    let lines = encode_half_blocks(&solid(2, 2, [255, 0, 0, 0]), (2, 2), WHITE);
+    assert_eq!(lines, vec!["\x1b[49m  \x1b[0m".to_string()]);
+}
+
+#[test]
+fn partial_transparency_is_blended_onto_the_background() {
+    let half = encode_half_blocks(&solid(1, 2, [255, 0, 0, 128]), (1, 2), BLACK);
+    assert_eq!(half, vec!["\x1b[38;2;128;0;0;48;2;128;0;0m▀\x1b[0m".to_string()]);
+    let on_white = encode_half_blocks(&solid(1, 2, [255, 0, 0, 128]), (1, 2), WHITE);
+    assert_eq!(on_white, vec!["\x1b[38;2;255;127;127;48;2;255;127;127m▀\x1b[0m".to_string()]);
+}
+
+#[test]
+fn an_odd_last_pixel_row_has_the_default_background_below() {
     let lines = encode_half_blocks(&solid(1, 3, [10, 20, 30, 255]), (1, 3), WHITE);
     assert_eq!(
         lines,
         vec![
             "\x1b[38;2;10;20;30;48;2;10;20;30m▀\x1b[0m".to_string(),
-            "\x1b[38;2;10;20;30;48;2;255;255;255m▀\x1b[0m".to_string(),
+            "\x1b[38;2;10;20;30;49m▀\x1b[0m".to_string(),
         ]
     );
 }
@@ -327,9 +352,21 @@ mod rendering {
         let mut term = terminal(route, ColorDepth::TrueColor, true);
         term.app = TerminalApp::Wezterm;
 
-        let output = image.render_with_half_blocks(&term).unwrap();
-        assert!(matches!(output, ImageOutput::Pixels(_)), "{output:?}");
-        assert_eq!(output, image.render_with_route(&term).unwrap());
+        let ImageOutput::Pixels(output) = image.render_with_half_blocks(&term).unwrap() else {
+            panic!("a pixel route draws pixels");
+        };
+        let ImageOutput::Pixels(direct) = image.render_with_route(&term).unwrap() else {
+            panic!("a pixel route draws pixels");
+        };
+        // Every upload has a fresh image ID; everything else is identical.
+        assert_eq!(without_kitty_id(&output), without_kitty_id(&direct));
+    }
+
+    /// `output` with its Kitty image ID's digits removed.
+    fn without_kitty_id(output: &str) -> String {
+        let start = output.find("i=").expect("a Kitty image ID") + "i=".len();
+        let digits = output[start..].find(',').expect("more parameters follow the ID");
+        format!("{}{}", &output[..start], &output[start + digits..])
     }
 
     #[test]

@@ -40,14 +40,22 @@ fn palette(sixel: &str) -> Vec<(u32, u32, u32)> {
         .collect()
 }
 
+/// The RGBA pixel at (`x`, `y`) of a decoded Sixel string; alpha 0 means no
+/// color set a bit there.
+fn decoded_pixel(sixel: &str, x: usize, y: usize) -> [u8; 4] {
+    let image = SixelImage::decode(sixel.as_bytes()).expect("decodes");
+    let at = (y * image.width + x) * 4;
+    image.pixels[at..at + 4].try_into().unwrap()
+}
+
 #[test]
 fn a_fixed_fixture_encodes_to_golden_bytes() {
-    // Palette: red, blue, green, and black for the transparent pixel on a
-    // black background; one band, each color's column bits then `$`.
+    // Palette: red, blue, green; the transparent pixel sets no bit in any
+    // color. One band, each color's column bits then `$`.
     let sixel = encode_sixel(&quad(), (2, 2), 2, BLACK).unwrap();
     assert_eq!(
         sixel,
-        "\x1bP9;1;0q\"1;1;2;2#0;2;100;0;0#1;2;0;0;100#2;2;0;100;0#3;2;0;0;0#0@?$#1A?$#2?@$#3?A$-\x1b\\"
+        "\x1bP9;1;0q\"1;1;2;2#0;2;100;0;0#1;2;0;100;0#2;2;0;0;100#0@?$#1?@$#2A?$-\x1b\\"
     );
 }
 
@@ -73,12 +81,29 @@ fn a_two_color_image_gains_no_dithering_colors() {
 }
 
 #[test]
-fn transparency_is_composited_onto_the_background() {
-    let sixel = encode_sixel(&quad(), (2, 2), 2, WHITE).unwrap();
-    assert!(palette(&sixel).contains(&(100, 100, 100)), "{sixel:?}");
-    let on_black = encode_sixel(&quad(), (2, 2), 2, BLACK).unwrap();
-    assert!(palette(&on_black).contains(&(0, 0, 0)), "{on_black:?}");
-    assert!(!palette(&on_black).contains(&(78, 78, 78)), "the hidden color never shows: {on_black:?}");
+fn a_transparent_pixel_sets_no_bits_and_opaque_pixels_are_unchanged() {
+    for background in [BLACK, WHITE] {
+        let sixel = encode_sixel(&quad(), (2, 2), 2, background).unwrap();
+        assert_eq!(decoded_pixel(&sixel, 1, 1)[3], 0, "transparent pixel left unset: {sixel:?}");
+        assert_eq!(decoded_pixel(&sixel, 0, 0), [255, 0, 0, 255]);
+        assert_eq!(decoded_pixel(&sixel, 1, 0), [0, 255, 0, 255]);
+        assert_eq!(decoded_pixel(&sixel, 0, 1), [0, 0, 255, 255]);
+        let level = u32::from(background.r) * 100 / 255;
+        assert!(
+            !palette(&sixel).contains(&(level, level, level)),
+            "the background is never painted: {sixel:?}"
+        );
+    }
+}
+
+#[test]
+fn partial_transparency_is_blended_onto_the_background() {
+    let img = DynamicImage::ImageRgba8(RgbaImage::from_pixel(1, 1, Rgba([255, 0, 0, 128])));
+    let on_white = encode_sixel(&img, (1, 1), 1, WHITE).unwrap();
+    assert_eq!(palette(&on_white), vec![(100, 50, 50)], "{on_white:?}");
+    assert_eq!(decoded_pixel(&on_white, 0, 0)[3], 255, "drawn opaque");
+    let on_black = encode_sixel(&img, (1, 1), 1, BLACK).unwrap();
+    assert_eq!(palette(&on_black), vec![(50, 0, 0)], "{on_black:?}");
 }
 
 #[test]
@@ -91,12 +116,14 @@ fn half_transparent_pixels_blend_with_the_background() {
 }
 
 #[test]
-fn the_raster_is_padded_to_whole_rows_with_the_background() {
+fn the_raster_is_padded_to_whole_rows_with_unset_pixels() {
     let img = DynamicImage::ImageRgba8(RgbaImage::from_pixel(4, 3, Rgba([255, 0, 0, 255])));
     let sixel = encode_sixel(&img, (4, 3), 8, WHITE).unwrap();
     assert!(sixel.contains("\"1;1;4;8"), "raster attributes name the padded size: {sixel:?}");
-    assert!(palette(&sixel).contains(&(100, 100, 100)), "{sixel:?}");
-    assert!(palette(&sixel).contains(&(100, 0, 0)), "{sixel:?}");
+    assert_eq!(palette(&sixel), vec![(100, 0, 0)], "the padding paints no color: {sixel:?}");
+    assert_eq!(decoded_pixel(&sixel, 0, 2), [255, 0, 0, 255]);
+    assert_eq!(decoded_pixel(&sixel, 0, 3)[3], 0, "{sixel:?}");
+    assert_eq!(decoded_pixel(&sixel, 3, 7)[3], 0, "{sixel:?}");
 }
 
 #[test]
@@ -126,9 +153,10 @@ mod background {
     use super::*;
     use crate::discovery::detection::ColorMode;
 
-    fn terminal(background: Option<RgbValue>, mode: ColorMode) -> Terminal {
+    fn terminal(background: Option<RgbValue>, source: ColorSource, mode: ColorMode) -> Terminal {
         Terminal {
             background_color: background,
+            background_source: source,
             color_mode: mode,
             ..Terminal::default()
         }
@@ -139,7 +167,7 @@ mod background {
         let measured = RgbValue { r: 30, g: 40, b: 50 };
         for mode in [ColorMode::Light, ColorMode::Dark, ColorMode::Unknown] {
             assert_eq!(
-                SixelBackground::for_terminal(&terminal(Some(measured), mode)),
+                SixelBackground::for_terminal(&terminal(Some(measured), ColorSource::Measured, mode)),
                 SixelBackground {
                     color: measured,
                     source: BackgroundSource::Measured
@@ -148,9 +176,23 @@ mod background {
         }
     }
 
+    /// The live defect: under tmux the per-app default `#1e1e1e` reached
+    /// `background_color` with no OSC 11 reply and was labelled measured.
     #[test]
-    fn without_a_measurement_the_color_mode_decides_the_estimate() {
-        let estimate = |mode| SixelBackground::for_terminal(&terminal(None, mode));
+    fn an_unreported_background_is_an_estimate_not_a_measurement() {
+        let guess = RgbValue { r: 30, g: 30, b: 30 };
+        assert_eq!(
+            SixelBackground::for_terminal(&terminal(Some(guess), ColorSource::Estimated, ColorMode::Dark)),
+            SixelBackground {
+                color: guess,
+                source: BackgroundSource::Estimated
+            }
+        );
+    }
+
+    #[test]
+    fn without_any_color_the_color_mode_decides_the_estimate() {
+        let estimate = |mode| SixelBackground::for_terminal(&terminal(None, ColorSource::Estimated, mode));
         assert_eq!(
             estimate(ColorMode::Light),
             SixelBackground {

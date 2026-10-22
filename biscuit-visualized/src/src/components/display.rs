@@ -17,11 +17,14 @@ use crate::artifact::Background;
 
 /// The background to rasterize a diagram on for `term`'s graphics route.
 ///
-/// Sixel has no transparency, so a [`Transparent`](Background::Transparent)
-/// diagram is drawn on the terminal's measured background instead, or on the
-/// theme's own opaque background when the terminal reported none. Every
-/// other route and every other background is kept as requested. The
-/// artifact cache keys on the background, so the two never share a PNG.
+/// Sixel has no partial transparency, so on a Sixel route a
+/// [`Transparent`](Background::Transparent) diagram is drawn opaque on the
+/// terminal's background when the terminal measured it (OSC 11). When it did
+/// not, the diagram stays transparent: the Sixel encoder leaves its
+/// transparent pixels unset and blends only antialiased edges onto the
+/// estimate, so a wrong guess never paints a box. Every other route and
+/// every other background is kept as requested. The artifact cache keys on
+/// the background, so the rasters never share a PNG.
 pub(crate) fn display_background(requested: Background, term: &Terminal) -> Background {
     if requested != Background::Transparent || term.graphics_route.format != GraphicsFormat::Sixel {
         return requested;
@@ -33,7 +36,7 @@ pub(crate) fn display_background(requested: Background, term: &Terminal) -> Back
             g: background.color.g,
             b: background.color.b,
         },
-        BackgroundSource::Estimated => Background::Theme,
+        BackgroundSource::Estimated => requested,
     }
 }
 
@@ -60,12 +63,13 @@ pub(crate) fn display_image(png_path: &Path, columns: u32) -> Result<TerminalIma
 mod tests {
     use super::*;
     use biscuit_terminal::discovery::detection::{GraphicsRoute, ImageSupport};
-    use biscuit_terminal::discovery::osc_queries::RgbValue;
+    use biscuit_terminal::discovery::osc_queries::{ColorSource, RgbValue};
 
     fn terminal(support: ImageSupport, background: Option<RgbValue>) -> Terminal {
         Terminal {
             graphics_route: GraphicsRoute::from(support),
             background_color: background,
+            background_source: ColorSource::Measured,
             ..Terminal::default()
         }
     }
@@ -82,9 +86,18 @@ mod tests {
     }
 
     #[test]
-    fn sixel_without_a_measured_background_uses_the_theme_background() {
+    fn sixel_without_a_measured_background_stays_transparent() {
         let term = terminal(ImageSupport::Sixel, None);
-        assert_eq!(display_background(Background::Transparent, &term), Background::Theme);
+        assert_eq!(display_background(Background::Transparent, &term), Background::Transparent);
+    }
+
+    /// A per-app default (`#1e1e1e` under tmux) is a guess, never a solid
+    /// background to rasterize on.
+    #[test]
+    fn sixel_with_an_estimated_background_stays_transparent() {
+        let mut term = terminal(ImageSupport::Sixel, Some(MEASURED));
+        term.background_source = ColorSource::Estimated;
+        assert_eq!(display_background(Background::Transparent, &term), Background::Transparent);
     }
 
     #[test]

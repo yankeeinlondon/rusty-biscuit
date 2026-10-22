@@ -9,9 +9,11 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::terminal_image::ImageWidth;
-use biscuit_terminal::discovery::detection::{ImageSupport, TerminalApp};
+use biscuit_terminal::discovery::detection::{
+    ImageSupport, RouteInputs, TerminalApp, resolve_graphics_route,
+};
 use biscuit_terminal::discovery::fonts::CellSize;
-use biscuit_terminal::discovery::osc_queries::RgbValue;
+use biscuit_terminal::discovery::osc_queries::{ColorSource, RgbValue};
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Length, TargetValue};
@@ -98,6 +100,40 @@ fn a_mermaid_png_reaches_iterm2_byte_identical() {
 
     assert_eq!(iterm2_payload(&result.output), std::fs::read(&result.png_path).unwrap());
     assert!(result.output.contains("width=30;"), "{:?}", result.output);
+}
+
+/// On the Windows SSH server route a diagram ends like any image there: the
+/// iTerm2 sequence, then a space and a carriage return, then the row move.
+#[test]
+fn a_mermaid_diagram_on_the_windows_ssh_route_is_followed_by_a_space_and_a_carriage_return() {
+    let mut inputs = RouteInputs::new(true)
+        .with_var("SSH_CONNECTION", "1 2 3 4")
+        .with_var("LC_TERMINAL", "WezTerm");
+    inputs.is_windows = true;
+    let route = resolve_graphics_route(&inputs);
+    assert!(route.needs_cursor_resync, "{route:?}");
+    let term = Terminal::builder()
+        .app(TerminalApp::Wezterm)
+        .is_tty(true)
+        .graphics_route(route)
+        .width(80)
+        .cell_size(CellSize {
+            width: 8,
+            height: 16,
+        })
+        .build();
+
+    let result = MermaidDiagram::new(FLOW)
+        .with_width(ImageWidth::Characters(30))
+        .try_render(&term)
+        .expect("render");
+
+    let image_end = result.output.find("\x07\x1b[u").expect("iTerm2 image") + "\x07\x1b[u".len();
+    assert!(
+        result.output[image_end..].starts_with(" \r\x1b["),
+        "{:?}",
+        &result.output[image_end..]
+    );
 }
 
 #[test]
@@ -187,9 +223,11 @@ fn corner(path: &std::path::Path) -> [u8; 4] {
     image::open(path).unwrap().to_rgba8().get_pixel(0, 0).0
 }
 
+/// A Sixel terminal whose `background`, when given, was measured (OSC 11).
 fn sixel_terminal(background: Option<RgbValue>) -> Terminal {
     let mut term = terminal(TerminalApp::Other("xterm".into()), ImageSupport::Sixel, 80);
     term.background_color = background;
+    term.background_source = ColorSource::Measured;
     term
 }
 
@@ -210,14 +248,21 @@ fn a_mermaid_diagram_on_a_sixel_route_is_opaque_on_the_measured_background() {
     assert_eq!(corner(&kitty.png_path)[3], 0, "Kitty keeps transparency");
 }
 
+/// Without a measured background (none, or the per-app guess tmux
+/// leaves), the raster stays transparent and the Sixel encoder leaves those
+/// pixels unset rather than painting a theme or guessed box.
 #[test]
-fn a_mermaid_diagram_on_a_sixel_route_without_a_measurement_uses_the_theme_background() {
-    let result = MermaidDiagram::new(FLOW)
-        .with_width(ImageWidth::Characters(30))
-        .try_render(&sixel_terminal(None))
-        .expect("render");
-    assert!(result.output.contains("\x1bP9;1;0q"), "{:?}", result.output);
-    assert_eq!(corner(&result.png_path)[3], 255, "the theme background is opaque");
+fn a_mermaid_diagram_on_a_sixel_route_without_a_measurement_stays_transparent() {
+    let mut guessed = sixel_terminal(Some(RgbValue { r: 30, g: 30, b: 30 }));
+    guessed.background_source = ColorSource::Estimated;
+    for term in [sixel_terminal(None), guessed] {
+        let result = MermaidDiagram::new(FLOW)
+            .with_width(ImageWidth::Characters(30))
+            .try_render(&term)
+            .expect("render");
+        assert!(result.output.contains("\x1bP9;1;0q"), "{:?}", result.output);
+        assert_eq!(corner(&result.png_path)[3], 0, "the raster keeps its transparency");
+    }
 }
 
 #[test]

@@ -449,7 +449,7 @@ fn test_render_kitty_small_data() {
     let result = term_img.render_kitty(&png_data, 100, 100);
 
     // Should start with Kitty escape sequence
-    assert!(result.starts_with("\x1b_G"));
+    assert!(result.starts_with("\x1b_Gq=2,i="), "quiet, with an image ID: {result:?}");
     // Should contain format and action parameters
     assert!(result.contains("f=100")); // PNG format
     assert!(result.contains("a=T")); // Transmit and display
@@ -472,6 +472,9 @@ fn test_render_kitty_chunking() {
     // First chunk should have m=1 (more), last should have m=0
     assert!(result.contains("m=1"));
     assert!(result.contains("m=0"));
+    // Only the first chunk names the image.
+    assert_eq!(result.matches("i=").count(), 1, "{result:?}");
+    assert!(result.split("\x1b_G").skip(2).all(|chunk| chunk.starts_with("m=")));
 }
 
 #[test]
@@ -799,7 +802,7 @@ fn test_render_as_kitty_produces_valid_output() {
     let result = img.render_as_kitty(80).unwrap();
 
     // Should be a valid Kitty escape sequence
-    assert!(result.starts_with("\x1b_G"));
+    assert!(result.starts_with("\x1b_Gq=2,i="), "quiet, with an image ID: {result:?}");
     assert!(result.contains("\x1b\\"));
     assert!(result.contains("f=100")); // PNG format
 }
@@ -1419,6 +1422,95 @@ mod route_dispatch {
         }
     }
 
+    fn windows_ssh_iterm2_route() -> GraphicsRoute {
+        let mut inputs = RouteInputs::new(true)
+            .with_var("SSH_CONNECTION", "1 2 3 4")
+            .with_var("LC_TERMINAL", "WezTerm");
+        inputs.is_windows = true;
+        let route = resolve_graphics_route(&inputs);
+        assert!(route.needs_cursor_resync, "{route:?}");
+        route
+    }
+
+    /// `output` with `" \r"` inserted right after the image sequence's
+    /// closing restore-cursor.
+    fn with_resync_after_image(output: &str) -> String {
+        let end = output.rfind("\x1b[u").expect("restore cursor") + "\x1b[u".len();
+        format!("{} \r{}", &output[..end], &output[end..])
+    }
+
+    /// On the Windows SSH server the console host drops a CR it thinks is a
+    /// no-op, so the iTerm2 image is followed by a space and a CR before the
+    /// usual tail. Everything else is the bytes the route sent before.
+    #[test]
+    fn a_windows_ssh_iterm2_image_is_followed_by_a_space_and_a_carriage_return() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap().with_width(ImageWidth::Characters(10));
+        let route = windows_ssh_iterm2_route();
+        let mut unflagged_route = route.clone();
+        unflagged_route.needs_cursor_resync = false;
+        let term = terminal_with_route(TerminalApp::Wezterm, route);
+        let unflagged = terminal_with_route(TerminalApp::Wezterm, unflagged_route);
+
+        let ImageOutput::Pixels(output) = image.render_with_route(&term).unwrap() else {
+            panic!("the Windows SSH iTerm2 route draws pixels");
+        };
+        let ImageOutput::Pixels(before) = image.render_with_route(&unflagged).unwrap() else {
+            panic!("the unflagged route draws pixels");
+        };
+
+        let (sequence, rows, _) = image.render_iterm2_for_terminal(&term).unwrap();
+        assert!(sequence.ends_with("\x07\x1b[u"), "{sequence:?}");
+        assert!(
+            output.starts_with(&format!("{sequence} \r\x1b[{rows}B\r")),
+            "image, space, CR, then the existing tail: {:?}",
+            &output[sequence.len()..]
+        );
+        assert_eq!(output, with_resync_after_image(&before));
+        assert!(!before.contains(" \r"), "{before:?}");
+    }
+
+    /// A direct iTerm2 route (macOS iTerm2) gets no resync.
+    #[test]
+    fn a_direct_iterm2_image_gets_no_space_and_carriage_return() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap().with_width(ImageWidth::Characters(10));
+        let route = route_for(&[("TERM_PROGRAM", "iTerm.app")]);
+        assert!(!route.needs_cursor_resync);
+        let term = terminal_with_route(TerminalApp::ITerm2, route);
+
+        let ImageOutput::Pixels(output) = image.render_with_route(&term).unwrap() else {
+            panic!("iTerm2 draws pixels");
+        };
+        let (sequence, rows, _) = image.render_iterm2_for_terminal(&term).unwrap();
+        assert!(output.starts_with(&format!("{sequence}\x1b[{rows}B\r")), "{output:?}");
+        let (inline, _) = image.render_inline(&term).unwrap().into_overlay();
+        assert!(inline.ends_with("\x07\x1b[u"), "{inline:?}");
+    }
+
+    /// The inline overlay on the Windows SSH route carries the same space and
+    /// CR right after the image, and starts the standalone output.
+    #[test]
+    fn inline_and_standalone_windows_ssh_images_share_the_resync() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap().with_width(ImageWidth::Characters(10));
+        let route = windows_ssh_iterm2_route();
+        let mut unflagged_route = route.clone();
+        unflagged_route.needs_cursor_resync = false;
+        let term = terminal_with_route(TerminalApp::Wezterm, route);
+        let unflagged = terminal_with_route(TerminalApp::Wezterm, unflagged_route);
+
+        let (inline, rows) = image.render_inline(&term).unwrap().into_overlay();
+        let (inline_before, rows_before) = image.render_inline(&unflagged).unwrap().into_overlay();
+        assert_eq!(rows, rows_before);
+        assert_eq!(inline, format!("{inline_before} \r"));
+
+        let ImageOutput::Pixels(standalone) = image.render_with_route(&term).unwrap() else {
+            panic!("the Windows SSH iTerm2 route draws pixels");
+        };
+        assert!(standalone.starts_with(&inline), "inline {inline:?} vs standalone {standalone:?}");
+    }
+
     /// A 4-column image on an 8x16 cell is 32 pixels wide; the 2x2 fixture
     /// is square, so 32 pixels tall: two rows.
     fn sixel_image(file_path: &Path) -> TerminalImage {
@@ -1457,27 +1549,31 @@ mod route_dispatch {
     }
 
     #[test]
-    fn a_sixel_image_is_composited_on_the_measured_background_or_its_estimate() {
-        let transparent = {
-            let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 0]));
+    fn a_sixel_image_leaves_transparency_unset_and_blends_edges_on_the_background() {
+        let png = |alpha: u8| {
+            let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, alpha]));
             let mut buffer = std::io::Cursor::new(Vec::new());
             img.write_to(&mut buffer, image::ImageFormat::Png).unwrap();
-            buffer.into_inner()
+            TerminalImage::from_encoded_png(EncodedPng::new(buffer.into_inner()).unwrap())
+                .with_width(ImageWidth::Characters(2))
         };
-        let image = TerminalImage::from_encoded_png(EncodedPng::new(transparent).unwrap())
-            .with_width(ImageWidth::Characters(2));
         let route = route_for(&[("BISCUIT_GRAPHICS", "sixel")]);
         let mut term = terminal_with_route(TerminalApp::Other("xterm".into()), route);
-
         term.background_color = Some(crate::discovery::osc_queries::RgbValue { r: 0, g: 128, b: 255 });
-        let measured = image.render_with_route(&term).unwrap().into_text();
-        assert!(measured.contains("#0;2;0;50;100"), "the measured background: {measured:?}");
+
+        use crate::discovery::osc_queries::ColorSource;
+        for source in [ColorSource::Measured, ColorSource::Estimated] {
+            term.background_source = source;
+            let transparent = png(0).render_with_route(&term).unwrap().into_text();
+            assert!(!transparent.contains("#0;2;"), "{source:?}: no color is painted: {transparent:?}");
+            let edge = png(128).render_with_route(&term).unwrap().into_text();
+            assert!(edge.contains("#0;2;50;25;50"), "{source:?}: blended onto the background: {edge:?}");
+        }
 
         term.background_color = None;
         term.color_mode = crate::discovery::detection::ColorMode::Light;
-        let estimated = image.render_with_route(&term).unwrap().into_text();
-        assert!(estimated.contains("#0;2;100;100;100"), "the light estimate: {estimated:?}");
-        assert!(!estimated.contains(";100;0;0"), "the hidden red never shows: {estimated:?}");
+        let estimated = png(0).render_with_route(&term).unwrap().into_text();
+        assert!(!estimated.contains("#0;2;"), "the light estimate is never painted: {estimated:?}");
     }
 
     #[test]
@@ -1613,7 +1709,111 @@ mod route_dispatch {
         let term = terminal_with_route(TerminalApp::Kitty, ImageSupport::Kitty.into());
         let (sequence, _) = image.render_inline(&term).unwrap().into_overlay();
         assert!(!sequence.contains("tmux;"), "{sequence:?}");
-        assert!(!sequence.contains("i="), "direct uploads keep their unnumbered form");
+    }
+
+    /// A PNG of `side`x`side` noise, which does not compress: at 64 pixels
+    /// on a side its base64 needs several 4096-byte Kitty chunks.
+    fn create_noise_test_image(side: u32) -> (tempfile::TempDir, std::path::PathBuf) {
+        use image::{ImageBuffer, Rgb};
+        let mut state: u32 = 0x1234_5678;
+        let img = ImageBuffer::from_fn(side, side, |_, _| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let [r, g, b, _] = state.to_le_bytes();
+            Rgb([r, g, b])
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("noise.png");
+        img.save(&path).unwrap();
+        (dir, path)
+    }
+
+    /// The parameters of the single Kitty upload in `output`, which must be
+    /// quiet and carry a nonzero image ID on its first chunk only, spread
+    /// over more than one chunk. Returns the parameters and the ID.
+    fn numbered_upload(output: &str) -> (String, u32) {
+        assert!(!output.contains("tmux;"), "a direct upload: {output:?}");
+        let chunks: Vec<&str> = output.split("\x1b_G").skip(1).collect();
+        assert!(chunks.len() > 1, "a multi-chunk upload: {} chunk(s)", chunks.len());
+        let params = &chunks[0][..chunks[0].find(';').expect("parameters end at ';'")];
+        assert!(params.starts_with("q=2,i="), "quiet, then the ID: {params:?}");
+        let id: u32 = params["q=2,i=".len()..]
+            .split(',')
+            .next()
+            .and_then(|id| id.parse().ok())
+            .unwrap_or_else(|| panic!("a numeric ID: {params:?}"));
+        assert_ne!(id, 0, "{params:?}");
+        assert!(params.ends_with(",m=1"), "{params:?}");
+        for chunk in &chunks[1..] {
+            assert!(chunk.starts_with("m="), "a continuation carries only m=: {chunk:?}");
+            assert!(!chunk[..chunk.find(';').unwrap()].contains("i="), "{chunk:?}");
+        }
+        (params.to_string(), id)
+    }
+
+    fn direct_kitty_image(file_path: &Path) -> TerminalImage {
+        TerminalImage::new(file_path).unwrap().with_width(ImageWidth::Characters(4))
+    }
+
+    fn standalone_upload(image: &TerminalImage, term: &Terminal) -> (String, u32) {
+        let ImageOutput::Pixels(output) = image.render_with_route(term).unwrap() else {
+            panic!("a direct Kitty route draws pixels");
+        };
+        numbered_upload(&output)
+    }
+
+    fn two_column_upload(image: TerminalImage, term: &Terminal) -> (String, u32) {
+        use crate::components::two_column::TwoColumn;
+        numbered_upload(&TwoColumn::new(image, "Caption").render(term))
+    }
+
+    /// Kitty sizes by width alone; each standalone upload is quiet and
+    /// carries its own nonzero ID on the first chunk.
+    #[test]
+    fn a_standalone_direct_kitty_upload_is_numbered_and_sized_by_width() {
+        let (_dir, file_path) = create_noise_test_image(64);
+        let image = direct_kitty_image(&file_path);
+        let term = terminal_with_route(TerminalApp::Kitty, ImageSupport::Kitty.into());
+
+        let (params, id) = standalone_upload(&image, &term);
+        assert!(params.contains(",f=100,a=T,t=d,c=4,m=1"), "width only: {params:?}");
+        let (_, again) = standalone_upload(&image, &term);
+        assert_ne!(again, id, "every upload gets a fresh ID");
+    }
+
+    #[test]
+    fn an_inline_direct_kitty_upload_is_numbered_and_sized_by_width() {
+        let (_dir, file_path) = create_noise_test_image(64);
+        let term = terminal_with_route(TerminalApp::Kitty, ImageSupport::Kitty.into());
+
+        let (params, id) = two_column_upload(direct_kitty_image(&file_path), &term);
+        assert!(params.contains(",f=100,a=T,t=d,c=4,m=1"), "width only: {params:?}");
+        let (_, again) = two_column_upload(direct_kitty_image(&file_path), &term);
+        assert_ne!(again, id, "every upload gets a fresh ID");
+    }
+
+    /// WezTerm gets explicit rows; the 64-pixel square on 8x16 cells is
+    /// four columns by two rows.
+    #[test]
+    fn a_standalone_direct_wezterm_upload_is_numbered_with_explicit_cells() {
+        let (_dir, file_path) = create_noise_test_image(64);
+        let image = direct_kitty_image(&file_path);
+        let term = terminal_with_route(TerminalApp::Wezterm, ImageSupport::Kitty.into());
+
+        let (params, id) = standalone_upload(&image, &term);
+        assert!(params.contains(",f=100,a=T,t=d,c=4,r=2,m=1"), "explicit cells: {params:?}");
+        let (_, again) = standalone_upload(&image, &term);
+        assert_ne!(again, id, "every upload gets a fresh ID");
+    }
+
+    #[test]
+    fn an_inline_direct_wezterm_upload_is_numbered_with_explicit_cells() {
+        let (_dir, file_path) = create_noise_test_image(64);
+        let term = terminal_with_route(TerminalApp::Wezterm, ImageSupport::Kitty.into());
+
+        let (params, id) = two_column_upload(direct_kitty_image(&file_path), &term);
+        assert!(params.contains(",f=100,a=T,t=d,c=4,r=2,m=1"), "explicit cells: {params:?}");
+        let (_, again) = two_column_upload(direct_kitty_image(&file_path), &term);
+        assert_ne!(again, id, "every upload gets a fresh ID");
     }
 
     #[test]
@@ -1678,17 +1878,7 @@ mod route_dispatch {
     /// A PNG of noise, which does not compress, so its base64 iTerm2 message
     /// is over tmux's 1 MiB limit.
     fn create_oversized_test_image() -> (tempfile::TempDir, std::path::PathBuf) {
-        use image::{ImageBuffer, Rgb};
-        let mut state: u32 = 0x1234_5678;
-        let img = ImageBuffer::from_fn(640, 640, |_, _| {
-            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            let [r, g, b, _] = state.to_le_bytes();
-            Rgb([r, g, b])
-        });
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("noise.png");
-        img.save(&path).unwrap();
-        (dir, path)
+        create_noise_test_image(640)
     }
 
     #[test]
@@ -1870,7 +2060,11 @@ mod placeholder_dispatch {
         let (upload, first_row) = split_after_envelopes(&lines[0]);
         assert!(upload.starts_with("\x1bPtmux;\x1b\x1b_G"), "{upload:?}");
         assert!(upload.contains(",U=1,"), "{upload:?}");
-        let rows = param(upload.split("\x1bPtmux;").nth(1).unwrap(), "r");
+        let first_chunk = upload.split("\x1bPtmux;").nth(1).unwrap();
+        let id = param(first_chunk, "i");
+        assert!((1..=0xFF_FFFF).contains(&id), "a 24-bit nonzero ID: {id}");
+        assert!(first_row.starts_with(&id_color(id)), "the grid draws that ID: {first_row:?}");
+        let rows = param(first_chunk, "r");
         assert_eq!(lines.len(), rows as usize);
         for line in std::iter::once(first_row).chain(lines[1..].iter().map(String::as_str)) {
             assert!(!line.contains("tmux;"), "{line:?}");
@@ -1903,6 +2097,9 @@ mod placeholder_dispatch {
         };
         assert!(output.starts_with("\x1b[s"), "{output:?}");
         assert!(!output.contains("U=1"), "{output:?}");
+        let first = output.split("\x1bPtmux;").nth(1).expect("a wrapped upload");
+        assert!(first.contains("q=2,"), "quiet: {first:?}");
+        assert_ne!(param(first, "i"), 0, "{first:?}");
     }
 
     #[test]
