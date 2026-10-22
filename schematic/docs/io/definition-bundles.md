@@ -115,7 +115,7 @@ Each rule, with the error it produces:
 - **Every member is kept.** A key the shape does not define fails as `unknown
   member` (or serde's `unknown field`) instead of being dropped, so a typo such
   as `"deprecatd": true` is an error. An explicit default the writer would omit
-  (`"deprecated": false`, `"path": []`) is accepted.
+  (`"deprecated": false`, `"path": []`, `"errors": []`) is accepted.
 - **The definition is valid.** The checks `RestApi::builder(..).build()`
   applies run again: URLs, header names, rate-limit and retry bounds, OAuth2
   grant requirements, typed path declarations, endpoint authentication, and
@@ -130,6 +130,17 @@ Absent optional vocabulary keeps its definition meaning: an endpoint without
 `rate_limit`, `retry_guidance`, or `auth` inherits the API's; `deprecated`
 absent is `false`; `params.path` absent or `[]` keeps untyped legacy path
 placeholders; an empty Basic `names` list disables that environment fallback.
+API `errors` absent or `[]` declares no error defaults; endpoint `errors`
+absent or `[]` adds nothing but still inherits them; `no_declared_errors`
+absent is `false`; `graphql` absent means no GraphQL surface, and its
+`operations` absent or `[]` means none. An operation's `operation_name` absent
+is omitted on the wire, while `""` is kept, and its `document` may be empty.
+These members are validated like the builders validate them (see
+[success shapes and declared errors](../responses-and-errors.md) and
+[GraphQL operations](../graphql.md)): for example `Fixture endpoint GetNode:
+opts out of declared errors and also declares error entries`, or `Fixture
+operation Issues: unresolved schema reference "Gone"` for an operation whose
+data names no component.
 
 ## Literals are preserved, not redacted
 

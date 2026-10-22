@@ -33,7 +33,7 @@ flowchart LR
 
 `Endpoint::new(id, method, path)` covers every `RestMethod`. Named constructors cover `get`, `post`, `put`, `patch`, `delete`, `head`, and `options`. Empty ids/descriptions and paths without a leading `/` fail at build. API names/descriptions must be nonempty and the base URL must have an HTTP(S) scheme and host. Paths containing `?` fail shared validation and endpoint/API build; declare query inputs with `.query(ParamDef::new(...))`. Endpoint identity is `(method, path)`, with placeholder names normalized for duplicate checks. Query values and response shapes do not create separate routes.
 
-Choose one success with `returns(Success::json(desc))`, `Success::text()`, `Success::binary()`, or `Success::empty()`. Shorthands are `returns_json::<T>(&mut ctx)`, `returns_text()`, `returns_binary()`, and `returns_empty()`. A second success declaration fails with “several success shapes arrive with response model v2.” `errors(ErrorSet::none())` and API `default_errors(ErrorSet::none())` reserve the response vocabulary; no other error-set constructor exists yet.
+Declare a success with `returns(Success::json(desc))`, `Success::text()`, `Success::binary()`, or `Success::empty()`. Shorthands are `returns_json::<T>(&mut ctx)`, `returns_text()`, `returns_binary()`, and `returns_empty()`. `returns` may repeat, and `Success` also has stream constructors and selection modifiers; build checks that a client could tell several shapes apart, then stores a lone plain shape and refuses the rest until storing them lands. Declared errors use `errors(ErrorSet::new().on(StatusMatch::exact(404), ErrorShape::text()))` on an endpoint and `default_errors(..)` on the API; `ErrorSet::none()` opts an endpoint out. See [success shapes and declared errors](responses-and-errors.md).
 
 Requests use `request_json::<T>(&mut ctx)`, `request_form(fields)`, `request_urlencoded(fields)`, `request_text()`, or `request_binary()`. `FormField::json_desc("metadata", desc)` authors a typed JSON form part from a registration. Forms retain field names, required flags, descriptions, file MIME patterns, and file-count limits. Text and binary defaults are `text/plain` and `application/octet-stream`; their content type can be stated explicitly with the corresponding `_with_content_type` method. These declarations preserve output-specific transport validation; generated text and binary request fields are sent as raw bodies. A GET endpoint rejects every request-body form at endpoint build. API build also rejects a transferred GET body with destination API, endpoint and method context. HEAD keeps its existing behavior.
 
@@ -285,17 +285,18 @@ An explicit environment mapping may leave credential fields unset. An empty mapp
 
 | Method | Accepted now |
 | --- | --- |
-| `returns(Success)` | Exactly one `Success::json(desc)`, `text()`, `binary()`, or `empty()`. |
+| `returns(Success)` | Repeatable. JSON, text, binary, empty, SSE, NDJSON, or byte-stream shapes with `content_type`, `status`, `tagged`, `json_array`/`json_object`, `fallback`, `note`, `ends_*`, and `keep_end` modifiers. Build validates the set, then stores only a lone shape without modifiers. |
 | `returns_json::<T>(&mut context)` | Typed JSON shorthand; registers T in the supplied context. |
 | `returns_text()`, `returns_binary()`, `returns_empty()` | Shorthands with String, bytes, or unit success. |
-| `errors(ErrorSet)` | Only `ErrorSet::none()`. |
-| API `default_errors(ErrorSet)` | Only `ErrorSet::none()`. |
+| `errors(ErrorSet)` | Entries overlaying the API defaults (`ErrorSet::new().on(match, shape)`), or `ErrorSet::none()` to opt out of every declared error. |
+| API `default_errors(ErrorSet)` | Entries every endpoint and operation inherits; `ErrorSet::none()` adds nothing. |
+| API `graphql(rules)`, `operations(ops)` | A GraphQL surface; see [GraphQL operations](graphql.md). |
 
-`Success` and `ErrorSet` are non-exhaustive. Lowering retains the existing
-single stored response; `ErrorSet::none()` does not disable runtime errors.
-Several successes, status/range error declarations, streaming success constructors,
-content-type setters on success declarations, and GraphQL are **planned**.
-Request content-type setters already work;
-they do not add success content negotiation. There is no route selector API.
+`Success`, `ErrorShape`, and `ErrorSet` are non-exhaustive. Storing several
+successes, streams, and success modifiers, and generating declared-error
+decoding and GraphQL clients, are **planned**. Request content-type setters
+already work; they do not add success content negotiation. There is no route
+selector API: one endpoint per `(method, path)` declares every shape it can
+reply with.
 
 Start with [the compiling authoring example](authoring-examples.md).

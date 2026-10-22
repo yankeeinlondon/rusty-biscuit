@@ -432,10 +432,23 @@ Use `Endpoint::{get,post,put,patch,delete,head,options}` or `new(id, method, pat
 then `describes` and one success declaration before fallible `build`. JSON methods
 receive `&mut DefinitionContext`; build endpoints before borrowing that context
 with `RestApi::builder(&ctx, name, base_url)`. API description and one explicit
-no_auth/bearer_env/basic_env/authentication choice are required. Repeated success
-or auth choices fail; explicit env mappings must agree independent of setter order.
-`Success` and `ErrorSet` are non-exhaustive placeholders; only `ErrorSet::none()`
-is available. JSON bodies lower to a `TypeRef`; API build stores the context's
+no_auth/bearer_env/basic_env/authentication choice are required. Repeated auth
+choices fail; explicit env mappings must agree independent of setter order.
+`.returns(Success)` may repeat (JSON/text/binary/empty plus `sse`, `ndjson`,
+`bytes`, and modifiers `content_type`, `status`, `tagged`, `json_array`/`json_object`,
+`fallback`, `note`, `ends_*`, `keep_end`). Build runs `response::validate_success_shapes`
+(R1/R3/R3a–c/R23 selection rules), then stores only a lone modifier-free shape in
+`Endpoint::response: ApiResponse` and refuses the rest ("are stored once
+Endpoint::response holds response model v2 shapes"); `Endpoint::success_shapes()` is
+the reader seam. Declared errors are stored now: `ErrorSet::new().on(StatusMatch, ErrorShape)`
+fills `Endpoint::errors`/`RestApi::errors`, `ErrorSet::none()` sets
+`Endpoint::no_declared_errors`, and `RestApi::effective_errors(&ep)` gives the
+`ErrorTable` (exact, then narrowest range). GraphQL: `GraphQlOperation::query/mutation`
+(typestate: describes, variables/no_variables, data) and `RestApiBuilder::graphql(AddressRule::github())
+.operations(..)` fill `RestApi::graphql`; errors render as `DefinitionError::InvalidOperation`
+(`{api} operation {id}: ...`). See `schematic/docs/responses-and-errors.md` and
+`schematic/docs/graphql.md`. New defaulted members must join the bundle's
+`OMITTED_DEFAULTS`. JSON bodies lower to a `TypeRef`; API build stores the context's
 components and runs `validate_references`. OpenAPI export writes `Named` as a
 `$ref` and takes `components.schemas` from `api.schemas`. Root typed Vec responses
 retain GET list inference, while Option/nominal wrappers do not. All shipped REST
@@ -525,5 +538,6 @@ README is an overview; its detailed reference lives in
 `schematic/docs/generation/generated-clients.md`. The create-schematic-api command
 teaches the same fallible context assembly. Keep these entry points aligned.
 The L1 `authoring_guidance` corpus rejects obsolete REST constructor examples.
-Only four Success forms and ErrorSet::none exist; response extensions are
-planned (the definition vocabulary above has landed). Reserve success stream/content-type names. No selector API is planned here.
+Success shapes, declared errors, and GraphQL operations are authored as above;
+storing several shapes and generating their clients, error decoding, and GraphQL
+requests are planned. No selector API is planned here.
