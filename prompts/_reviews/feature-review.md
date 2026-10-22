@@ -22,10 +22,10 @@ description: |-
         - if there is then this review will be repurposed to focus on getting the review feedback from the caller
         - if there is not then this review will be conducted like a normal review that compares the implementation against what was specified
     
-    2. **Last Review** (_in a multi-spec pipeline_)
+    2. **Next-spec refresh** (_in a multi-spec pipeline_)
 
-        In the last review cycle (aka, when `ready` has been set to `true`) -- but _only_ if this spec is part of a multi-spec pipeline -- we will
-        look at whether the next spec and plan need to be refreshed based on the current spec's findings and decisions.
+        In the first review -- but _only_ when a `next_spec` is passed and the review did not stop for a blocking decision -- the next spec and plan are
+        refreshed against what this spec actually built, and the outcome is recorded as `next_spec_refresh` on the review file.
     
 dir: "{{dirname(spec)}}"
 design: |-
@@ -88,54 +88,42 @@ failure:
         💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area || ctx.repo }}** failed to complete ({{err.msg}})!
     effect: phase-jump-3
 finalize:
-    - when: "human_in_the_loop && !err"
+    # The review file is read here, after the agent wrote it; nothing upstream
+    # sets these values. Only a blocking decision stops the pipeline.
+    - when: "!err && file_exists(review) && length(frontmatter(review, 'human_in_the_loop') || []) > 0"
       message: |-
-        - the first review after the implementation of `{{spec_name}}` was conducted and there are decisions that require your attention:
+        - the first review after the implementation of `{{spec_name}}` found decisions that block the pipeline:
 
-        {{human_in_the_loop}}
+        {{ as_ordered_list(frontmatter(review, 'human_in_the_loop')) }}
       info: |-
-          - the first review after the implementation of {{ link(spec) }} was conducted and there are decisions that require your attention:
-    
-          {{human_in_the_loop}}
+          - the first review after the implementation of {{ link(spec) }} found decisions that block the pipeline:
+
+          {{ as_ordered_list(frontmatter(review, 'human_in_the_loop')) }}
       stop: null
-    - when: "refreshed && !err"
+    - when: "!err && next_spec && file_exists(review) && frontmatter(review, 'next_spec_refresh') == 'refreshed'"
       message: |-
-        - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
-        - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
-        - the spec and plan have been refreshed:
+        - the next spec in the pipeline, `{{parent_dir(next_spec)}}`, and its plan were refreshed:
 
-        {{refreshed}}
-
-        > **Note:** no human review was needed for this refresh
+        {{ frontmatter(review, 'next_spec_refresh_summary') }}
       info: |-
-        - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
-        - the next spec which will be implemented is `{{link(next_spec)}}`
-        - the spec and plan have been refreshed:
+        - the next spec in the pipeline, {{link(next_spec)}}, and its plan were refreshed:
 
-        {{refreshed}}
-
-        > **Note:** no human review was needed for this refresh
-    - when: "refresh_review && !err"
+        {{ frontmatter(review, 'next_spec_refresh_summary') }}
+    - when: "!err && next_spec && file_exists(review) && frontmatter(review, 'next_spec_refresh') == 'not-needed'"
       message: |-
-        - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
-        - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
-        - the spec and plan have decisions that require human intervention:
-  
-        {{refresh_review}}
+        - the next spec in the pipeline, `{{parent_dir(next_spec)}}`, was checked and needed no refresh
       info: |-
-        - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
-        - the next spec which will be implemented is `{{link(next_spec)}}`
-        - the spec and plan have been refreshed:
-  
-        {{refreshed}}     
+        - the next spec in the pipeline, {{link(next_spec)}}, was checked and needed no refresh
+    - when: "!err && next_spec && file_exists(review) && frontmatter(review, 'next_spec_refresh') == 'blocked'"
+      message: |-
+        - refreshing the next spec in the pipeline, `{{parent_dir(next_spec)}}`, hit a blocking decision:
+
+        {{ frontmatter(review, 'next_spec_refresh_summary') }}
+      info: |-
+        - refreshing the next spec in the pipeline, {{link(next_spec)}}, hit a blocking decision:
+
+        {{ frontmatter(review, 'next_spec_refresh_summary') }}
       stop: null
-    - when: "no_refresh && !err"
-      message: |-
-        - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
-        - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
-      info: |-
-          - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
-          - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
 ---
 # Review of {{title_case(without_date(parent_dir(spec)))}}
 
@@ -197,9 +185,14 @@ intermixed with the implementation where ever possible. As a result, the very fi
     - find any decisions which were made by the agent during the implementations
     - find any rules or decisions that the agent flagged as needing to be made
     - find any work that was deferred
+- classify each decision with "Rulings, Defaults, and Pre-authorizations" below; the pipeline runs unattended, so **course 2 is the default** and course 1 is rare
+    - a decision that has a recommended option, a planning default, or one option clearly consistent with the spec is **not** a reason to stop: adopt the recommendation (or accept what the implementer built when it follows one) and record it under `## Decisions adopted for author review` in the review body, with the alternatives and why
+    - an implementer adopting a recommendation that the spec said "requires author resolution" is a decision to record, not a reason to stop
+    - deferred work the spec allows to be deferred is recorded, not escalated
 - based on what you hear back you need to choose one of the following courses of action:
-    1. **Human review:**
-        - There are impactful/meaningful design decisions or rules that need to be made 
+    1. **Human review** (_only for blocking decisions_):
+        - at least one decision is **blocking**: no recommendation or default exists, no option is clearly consistent with the spec, and a wrong choice would be costly to undo once the next spec builds on it
+        - only the blocking decisions go into `human_in_the_loop`; record every other decision as adopted
         - so we will report on this and stop the review cycle to allow for a human-in-the-loop review
         - Process:
             - Report back to caller using the **Writing Clearly** guidelines below
@@ -226,12 +219,14 @@ intermixed with the implementation where ever possible. As a result, the very fi
             - all other required Frontmatter metadata is set on the review file
 
         > **Note:** the exercise of comparing the implementation to the specification is **not** done during this review when you choose this course of action; the focus is exclusively to document what we need from the caller.
-    2. **Summary decisions and gather findings:**
-        - Small decisions were made by the agent but nothing that really warrants a human review
-        - so we will report these decisions to the caller for informational purposes, but
+    2. **Summary decisions and gather findings** (_the default_):
+        - decisions were made or adopted, but none is blocking; this holds even when they are numerous or consequential
+        - record them under `## Decisions adopted for author review` so the author can revisit any of them later; a reversal becomes an ordinary fix
         - set `human_in_the_loop` property on the review file to `null` 
-        - the review process will continue in a normal fashion
+        - the review process will continue in a normal fashion, including the next spec's refresh
 ::end-block
+
+::file "../_rulings.md"
 
 ## Spec Review
 
@@ -419,12 +414,10 @@ The spec file which underpins the requirements for this feature review needs to 
 This is the first review after the implementation completed:
 
 - during this implementation the agent was strongly encouraged to complete the work including making small design decisions where there was a gap
-- this means that there may now be several "decisions" that the agent made without a review or things that were deferred because a decision was needed. If either condition exists then we will stop now to get feedback:
-    - report all decisions/rules/deferred scope that needs to be reviewed
-    - take the time to write this clearly, giving examples where possible
-    - avoid jargon and do not assume that the caller knows this repo
-    - YOU MUST set the `human_in_the_loop` to `true` on the review file ({{review}})
-- if no review is required by the caller then you must set `human-in-the-loop` to `false` on the review file ({{review}})
+- this means that there may now be several "decisions" that the agent made without a review or things that were deferred because a decision was needed
+    - record every one of them under `## Decisions adopted for author review`, clearly and with examples, avoiding jargon and without assuming the caller knows this repo
+    - stop for feedback **only** when at least one is blocking (see "Choose Course of Action"); then put just the blocking decisions in `human_in_the_loop`
+- otherwise set `human_in_the_loop` to `null` on the review file ({{review}}) and continue
 
 ::end-block
 
@@ -437,8 +430,26 @@ We are in a multi-plan based implementation:
 - the next spec is '{{next_spec}}', it has a plan located at '{{next_plan}}'
 - both the **spec** and the **plan** were written _before_ the current spec was implemented
 - we must now refresh the next spec and plan based on:
-    - what we've learned during the implementation of the current phase
-    - 
+    - what was learned and built while implementing this spec (its implementation log, the landed code, and this review's findings)
+    - every decision recorded in this review, adopted or ruled
+- skip this section only when you chose **Human review** above; the next spec then stays `refresh_required: true` until the blocking decisions are ruled
+
+Refresh the next spec ({{next_spec}}):
+
+- check its "Refresh notes" (or similar) section and every assumption it makes about this spec: symbol names, file paths, contracts, serialized formats, counts, version constants, and builder or runtime surfaces; verify each against the landed code, not against this spec's text
+- correct stale facts in place and add a dated reader note summarizing what changed and why; keep decided requirements unless the landed code forces a change, and say so when it does
+- resolve conflicts under "Rulings, Defaults, and Pre-authorizations": adopt a recommendation or clearly consistent option and record it; add an Open Question only for a blocking one
+- set its `refresh_required` frontmatter property to `false`
+
+Refresh the next plan ({{next_plan}}):
+
+- update rules and tasks that cite stale names, files, counts, or prerequisites; a prerequisite gate that the landed code now satisfies must say so, listing the actual symbols and locations, and must not wait on rulings already recorded
+- if its implementation log already exists from a run that stopped at a prerequisite gate, set that log's `human_review` to `false`, remove its `human_review_items` and `message_to_agent`, append a dated note explaining the refresh, and set the plan's `phase` back to the first phase that did no real work
+
+Record the outcome on this review file ({{review}}):
+
+- `next_spec_refresh`: `refreshed`, `not-needed`, or `blocked` (only when a blocking decision stops the refresh)
+- `next_spec_refresh_summary`: a short Markdown list of what changed, or of the blocking decision
 
 ::end-block
 
