@@ -12,25 +12,16 @@ docs_created_during_phase_1:
   - schematic/features/2026-10-15-schematic-definition-vocabulary/inventory.md
 skills_files_updated_during_phase_1: []
 packages: []
-human_review: true
-human_review_items:
-  - |-
-    Decide where a replacement endpoint authentication policy gets its credentials before Phase 2 implements that policy. Otherwise later code could send the API's bearer token in the wrong credential location.
-    - Recommended: keep `.auth(policy)` and add an optional endpoint environment mapping. A present mapping replaces the API mapping; an absent mapping reuses only compatible API sources. This preserves existing calls and supports independent credentials, but requires compatibility validation.
-    - Alternative: permit only compatible API credential sources. This is simpler, but cannot describe endpoints with independent credentials.
-    - Alternative: defer replacement policies and implement public endpoints first. This avoids deciding now, but leaves R2 incomplete.
-  - |-
-    Confirm the future breaking implementation scope before Phase 2 changes definitions and consumers. Phase 1 found that shipped Basic calls use a unit enum variant, which cannot keep the same expression after Basic gains credential lists.
-    - Recommended: confirm the specification's listed generated-artifact, OAuth2, dependent-caller, fixture, and adoption changes, including mechanical Bitbucket/EMQX Basic calls and tests. This fulfills the planned behavior while keeping output unchanged for Basic; it requires reviewing a wider source diff.
-    - Alternative: approve only additive metadata and defer Basic/OAuth2/query migrations. This reduces the immediate diff but cannot complete the specification.
-    - Alternative: preserve the unit Basic shape. This avoids those caller edits but contradicts the chosen embedded-credential vocabulary and requires revising the design.
+human_review: false
 message_to_agent: |-
   Phase 1 is complete on the reviewed working tree; no source files changed.
   TypeDesc privately stores TypeRef and a Rust path, with no serde/structural
   slot or context identity; ModelCatalog has no serde/context attachment.
   See contracts.md and inventory.md for actual interfaces, matrix, and callers.
-  PD4 replacement credential sources still need an author ruling. Future
-  breaking scope confirmation is unrecorded. Bitbucket/EMQX use
+  PD4 is adopted as a default: keep .auth(policy) and add an optional
+  endpoint EnvMapping (present replaces the API mapping; absent reuses only
+  compatible API sources). The spec's pre-authorizations are granted,
+  including the breaking Basic/OAuth2/query scope. Bitbucket/EMQX use
   .authentication(AuthStrategy::Basic, ...), not basic_env; a payload Basic
   variant needs the R12-permitted mechanical authoring edits and an R10 flag.
   Strict bundle preflight must distinguish absent/null; raw RestApi snapshots
