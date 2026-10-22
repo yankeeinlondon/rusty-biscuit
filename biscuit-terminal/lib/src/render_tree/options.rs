@@ -2,13 +2,14 @@
 //!
 //! [`TerminalRenderContext`] bundles the terminal capabilities the renderer
 //! consults; [`TerminalRenderOptions`] pairs that context with a
-//! [`RenderStrictness`] policy.
+//! [`RenderStrictness`] policy and the optional render hooks
+//! ([`CodeRenderer`], [`DiagramRenderer`]).
 
 use std::path::PathBuf;
 use std::rc::Rc;
 
 use renderable::layout::Layout as RenderableLayout;
-use renderable::tree::{CodeRenderer, GraphicsMode, RenderStrictness, TerminalMermaidMode};
+use renderable::tree::{CodeRenderer, GraphicsMode, NodeAttrs, RenderStrictness, TerminalMermaidMode};
 
 /// How an image renders when no raster form is emitted (graphics off / vector,
 /// or a failed protocol render).
@@ -26,7 +27,7 @@ pub enum ImagePlaceholder {
     Block,
 }
 
-use crate::discovery::detection::{ColorDepth, ColorMode, ImageSupport};
+use crate::discovery::detection::{ColorDepth, ColorMode};
 use crate::terminal::Terminal;
 use crate::utils::layout::Layout;
 
@@ -74,8 +75,6 @@ pub struct TerminalRenderContext {
     pub inline_code_background: Option<(u8, u8, u8)>,
     /// Whether the terminal renders OSC8 hyperlinks.
     pub hyperlinks: bool,
-    /// The terminal image-protocol support level.
-    pub image_support: ImageSupport,
     /// Whether the terminal renders Unicode glyphs correctly.
     pub supports_unicode: bool,
     /// The base layout applied to block-level output.
@@ -167,7 +166,7 @@ pub struct TerminalRenderContext {
 impl TerminalRenderContext {
     /// Builds a context from an already-detected [`Terminal`].
     ///
-    /// Width, color depth, hyperlink support, image support, and Unicode
+    /// Width, color depth, hyperlink support, and Unicode
     /// support are copied from the terminal; the layout defaults to
     /// [`Layout::default`]. The `available_width` is initialized to the
     /// terminal width and `current_indent` to 0.
@@ -183,7 +182,6 @@ impl TerminalRenderContext {
             inline_code_color: None,
             inline_code_background: None,
             hyperlinks: term.osc_link_support,
-            image_support: term.image_support.clone(),
             supports_unicode: term.supports_unicode,
             layout: Layout::default(),
             terminal: Terminal::from(term),
@@ -325,15 +323,22 @@ pub struct TerminalRenderOptions {
     /// [`NodeKind::Code`](renderable::tree::NodeKind::Code) node before
     /// falling back to its built-in plain code-block rendering.
     pub code_renderer: Option<Rc<dyn CodeRenderer>>,
+    /// An optional hook that draws diagram code fences.
+    ///
+    /// Without one a Mermaid fence always renders as a code block, whatever
+    /// [`TerminalRenderContext::mermaid_mode`] asks for. See
+    /// [`DiagramRenderer`] for when it is consulted.
+    pub diagram_renderer: Option<Rc<dyn DiagramRenderer>>,
 }
 
 impl std::fmt::Debug for TerminalRenderOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // `dyn CodeRenderer` is not `Debug`; report only whether one is set.
+        // The hooks are not `Debug`; report only whether each is set.
         f.debug_struct("TerminalRenderOptions")
             .field("context", &self.context)
             .field("strictness", &self.strictness)
             .field("code_renderer", &self.code_renderer.is_some())
+            .field("diagram_renderer", &self.diagram_renderer.is_some())
             .finish()
     }
 }
@@ -346,6 +351,7 @@ impl TerminalRenderOptions {
             context: TerminalRenderContext::from_terminal(term),
             strictness,
             code_renderer: None,
+            diagram_renderer: None,
         }
     }
 
@@ -354,6 +360,81 @@ impl TerminalRenderOptions {
     pub fn with_code_renderer(mut self, code_renderer: Rc<dyn CodeRenderer>) -> Self {
         self.code_renderer = Some(code_renderer);
         self
+    }
+
+    /// Sets the optional diagram render hook.
+    #[must_use]
+    pub fn with_diagram_renderer(mut self, diagram_renderer: Rc<dyn DiagramRenderer>) -> Self {
+        self.diagram_renderer = Some(diagram_renderer);
+        self
+    }
+}
+
+/// Draws a diagram code fence for the terminal render-tree renderer.
+///
+/// This crate does not know about diagrams. A caller that wants Mermaid
+/// fences drawn installs an implementation on
+/// [`TerminalRenderOptions::diagram_renderer`]; `biscuit-visualized` provides
+/// one behind its `terminal` feature.
+///
+/// The renderer consults the hook only for a `mermaid` fence when
+/// [`TerminalRenderContext::mermaid_mode`] is [`TerminalMermaidMode::Image`]
+/// and [`TerminalRenderContext::graphics_mode`] is [`GraphicsMode::Rich`], and
+/// before the [`CodeRenderer`] hook. An `Err` is handled by the render's
+/// [`RenderStrictness`]: `Strict` rejects the render, `Warn` records a lossy
+/// diagnostic, and both `Warn` and `Lossy` fall back to code rendering.
+pub trait DiagramRenderer {
+    /// Renders `request.source` to terminal output.
+    ///
+    /// ## Errors
+    ///
+    /// Returns a [`DiagramRenderError`] when the diagram cannot be drawn for
+    /// this terminal (invalid source, no usable graphics route, a rendering
+    /// failure).
+    fn render_terminal_diagram(
+        &self,
+        request: &DiagramRenderRequest<'_>,
+    ) -> Result<String, DiagramRenderError>;
+}
+
+/// What the render-tree renderer hands a [`DiagramRenderer`].
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub struct DiagramRenderRequest<'a> {
+    /// The fence body: the diagram source.
+    pub source: &'a str,
+    /// The code node's attributes; its layout is `attrs.layout`.
+    pub attrs: &'a NodeAttrs,
+    /// The capability snapshot to render against, with
+    /// [`TerminalRenderContext::force_graphics`] already applied.
+    pub terminal: &'a Terminal,
+    /// The columns available at the fence's position.
+    pub available_width: u32,
+}
+
+/// Why a [`DiagramRenderer`] could not draw a diagram.
+///
+/// Displays as the underlying error, so diagnostics read the same whichever
+/// hook produced them.
+#[derive(Debug)]
+pub struct DiagramRenderError(Box<dyn std::error::Error>);
+
+impl DiagramRenderError {
+    /// Wraps the hook's own error.
+    pub fn new(error: impl Into<Box<dyn std::error::Error>>) -> Self {
+        Self(error.into())
+    }
+}
+
+impl std::fmt::Display for DiagramRenderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::error::Error for DiagramRenderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
     }
 }
 

@@ -47,7 +47,7 @@ use parity_helpers::strip_ansi;
 fn text_terminal(width: u32) -> Terminal {
     let mut term = Terminal::new_optimistic(width);
     term.is_tty = false;
-    term.image_support = ImageSupport::None;
+    term.graphics_route = ImageSupport::None.into();
     term.color_depth = ColorDepth::TrueColor;
     term.supports_unicode = true;
     term

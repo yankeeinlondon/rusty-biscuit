@@ -95,10 +95,11 @@ bt image "photo.jpg|80"      # Fixed 80 columns
 bt image "photo.jpg|fill"    # Fill available width
 ```
 
-Protocol selection:
+Protocol selection follows the [graphics route](../docs/discovery/graphics-routes.md), including through tmux, Zellij, and SSH:
 - **Kitty protocol**: Kitty, WezTerm, Ghostty, Konsole, Warp
-- **iTerm2 protocol**: iTerm2 (even if Kitty advertised)
-- **Fallback**: Alt text for unsupported terminals
+- **iTerm2 protocol**: iTerm2 (even if Kitty advertised), mintty, and a Windows SSH server
+- **Sixel**: Windows Terminal 1.22+, a tmux 3.4+ that draws Sixel itself, or a terminal whose DA1 reply reports Sixel
+- **Fallback**: half-blocks on a truecolor, Unicode terminal, else alt text (always alt text when piped)
 
 ### Prose Rendering
 
@@ -324,7 +325,7 @@ bt flowchart --json "A --> B"                      # Output as JSON
 - **Inverse mode**: Solid background with contrasting colors (`--inverse`)
 - **High resolution**: 2x scale for sharp rendering on modern displays
 - **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill`. Without it, diagrams are sized so their body text is one terminal line tall, capped at the terminal width
-- **Aspect ratio preservation**: Images always maintain correct proportions via viuer
+- **Aspect ratio preservation**: Images always keep their proportions
 
 **Rendering backend:**
 - Pure Rust rendering via `biscuit-visualized` and `mermaid-rs-renderer`
@@ -428,7 +429,7 @@ bt git-graph --json "commit" "branch feature"   # Output as JSON
 - **Inverse mode**: Solid background with contrasting colors (`--inverse`)
 - **Title support**: Add a title above the diagram (`-t`/`--title`)
 - **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill`. Without it, diagrams are sized so their body text is one terminal line tall, capped at the terminal width
-- **Aspect ratio preservation**: Images always maintain correct proportions via viuer
+- **Aspect ratio preservation**: Images always keep their proportions
 
 **Rendering backend:**
 - Pure Rust rendering via `biscuit-visualized` and `mermaid-rs-renderer`

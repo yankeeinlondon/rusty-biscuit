@@ -210,6 +210,34 @@ impl TmuxHarness {
         self.session()
     }
 
+    /// Captures the visible pane plus up to `lines` rows of scrollback above
+    /// it, with escapes, for output taller than the pane.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error when `tmux capture-pane` fails.
+    ///
+    /// ## Notes
+    ///
+    /// A shared pane is reused across serial tests, so its scrollback can hold
+    /// earlier tests' output. Scope assertions to a string only the test under
+    /// capture emits, or clear the pane (`ESC[3J`) before driving the command.
+    pub fn capture_scrollback(&mut self, lines: u32) -> io::Result<CapturedFrame> {
+        let session = self.session().to_string();
+        let start = format!("-{lines}");
+        let mut cmd = tmux_command();
+        cmd.args(["capture-pane", "-t", &session, "-p", "-e", "-S", &start]);
+        let out = run_with_timeout(&mut cmd, CAPTURE_TIMEOUT)?;
+        if !out.status.success() {
+            return Err(io::Error::other(format!(
+                "tmux capture-pane (scrollback) failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+        let raw = String::from_utf8_lossy(&out.stdout).into_owned();
+        Ok(CapturedFrame::from_raw(raw))
+    }
+
     /// Returns the pane's text width in columns, queried live from tmux.
     ///
     /// Reading `#{pane_width}` rather than assuming the spawn geometry keeps

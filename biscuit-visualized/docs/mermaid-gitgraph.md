@@ -5,7 +5,7 @@
 - **Merge repair:** a labeled `merge` gets back the second parent the parser loses.
 - **Tag spacing:** commits are spaced so no two tags overlap.
 
-Both happen for every gitGraph and every caller: `MermaidDiagram` directly, biscuit-terminal's `GitGraph` and `bt git-graph`, and Darkmatter's Mermaid blocks. There is nothing to opt into and no new option.
+Both happen for every gitGraph and every caller: `MermaidDiagram` directly, the `GitGraph` component and `bt git-graph`, and Darkmatter's Mermaid blocks. There is nothing to opt into and no new option.
 
 ## Where the corrections run
 
@@ -20,7 +20,7 @@ flowchart LR
     layout --> geometry[gitgraph_geometry]
 ```
 
-All three outputs go through the one private `MermaidDiagram::compute_layout`. So the size `biscuit-terminal` measures to fit a terminal is always the size of the image it then draws.
+All three outputs go through the one private `MermaidDiagram::compute_layout`. So the size the `MermaidDiagram` component measures to fit a terminal is always the size of the image it then draws.
 
 ## Merge repair
 
@@ -102,7 +102,7 @@ Everything else is laid out once, unchanged:
 
 0.3.1's parser does not recognize `RL`: `direction RL` lays out exactly like `LR`. The pair rule orders labels by their commits' x, so it would hold for a mirrored layout too.
 
-The step is still one value for the whole diagram, so one colliding pair widens every column. Callers that fit a width should expect that a colliding graph may need shrinking. biscuit-terminal's `GitGraph` trims commits first and then shrinks, and never shortens a label.
+The step is still one value for the whole diagram, so one colliding pair widens every column. Callers that fit a width should expect that a colliding graph may need shrinking. The `GitGraph` component trims commits first and then shrinks, and never shortens a label.
 
 ## Cache identity
 
@@ -110,7 +110,7 @@ Neither correction adds a rendering input: each is derived from the Mermaid text
 
 ## Checking a layout
 
-`MermaidDiagram::gitgraph_geometry()` returns the laid-out commits (ID, lane, repaired parents, placement index and x, tag text and bounds), the commit step, and the size, from the same layout that renders. `tag_boxes()` and `tag_overlaps()` answer "do any tags overlap?" without rasterizing. `biscuit_visualized::mermaid::default_gitgraph_commit_step()` gives the renderer's default step to compare against. Both are `#[doc(hidden)]` test support, not a stable API. biscuit-terminal and worktree tests use them to prove placement on real layouts, because Mermaid text alone cannot show an overlap.
+`MermaidDiagram::gitgraph_geometry()` returns the laid-out commits (ID, lane, repaired parents, placement index and x, tag text and bounds), the commit step, and the size, from the same layout that renders. `tag_boxes()` and `tag_overlaps()` answer "do any tags overlap?" without rasterizing. `biscuit_visualized::mermaid::default_gitgraph_commit_step()` gives the renderer's default step to compare against. Both are `#[doc(hidden)]` test support, not a stable API. The `GitGraph` component's tests and worktree tests use them to prove placement on real layouts, because Mermaid text alone cannot show an overlap.
 
 ## Tests
 

@@ -10,7 +10,7 @@
         <li>terminal <b>metadata</b> (<i>13+ terminal emulators, color depth, light/dark mode, dimensions, font, OS</i>)</li>
         <li>OSC8 links, OSC52 clipboard, and OSC10/11/12 color queries</li>
         <li>multiplex detection for tmux/Zellij plus native WezTerm/Ghostty/Kitty support</li>
-        <li>inline image rendering via Kitty/iTerm2 protocols with graceful fallback</li>
+        <li>inline image rendering via Kitty/iTerm2/Sixel, following a detected <a href="./docs/discovery/graphics-routes.md">graphics route</a>, with a half-block or alt-text fallback</li>
         <li>terminal-facing Mermaid rendering via <code>MermaidDiagram</code>, backed by <code>biscuit-visualized</code> (pure Rust)</li>
         <li>terminal-facing graph rendering via <code>GraphExpression</code>, with arrow, dash, and DOT syntax support</li>
         <li>color system: BasicColor (16 ANSI), RgbColor, WebColor (148 CSS), Tailwind (22 families × 11 shades)</li>
@@ -32,7 +32,7 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
     - Terminal Size (cols and rows)
     - OSC8 Link Support
     - OSC10 and OSC11 support for terminal querying
-    - Image rendering supporting
+    - The [graphics route](./docs/discovery/graphics-routes.md): which image format (Kitty, iTerm2, Sixel) reaches the terminal, or why none does, overridable with `BISCUIT_GRAPHICS` and `BISCUIT_GRAPHICS_TRANSPORT`
     - Background color and Color Mode (light/dark)
     - Support for Underlining variants (straight, double, curly, dotted, curly, dashed) and whether underlining can have it's own color
     - The name of the terminal app being used
@@ -49,8 +49,6 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
 
     - [`BlockQuote`](./docs/components/block_quote.md)
     - [`FileSystem`](./docs/components/file_system.md) — directory trees with terminal-aware icons and linked entries
-    - [`GraphExpression`](./docs/components/graph_expression.md) (graph adapter backed by `biscuit-visualized`)
-    - [`MermaidDiagram`](./docs/components/mermaid_diagram.md) (Mermaid adapter backed by `biscuit-visualized`)
     - [`OrderedList` and `UnorderedList`](./docs/components/list.md)
     - [`PadLeft`](./docs/components/pad_left.md) and [`PadRight`](./docs/components/pad_right.md)
     - [`Progress`](./docs/components/progress.md)
@@ -70,6 +68,8 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
     - [`TextBlock`](./docs/components/text_block.md)
     - [`Todo`](./docs/components/todo.md)
     - [`TwoColumn`](./docs/components/two_column.md)
+
+    Diagram components (`MermaidDiagram`, `GraphExpression`, `GitGraph`) live in [`biscuit-visualized`](../biscuit-visualized/README.md), which depends on this library.
 
     As well as compositional components:
 

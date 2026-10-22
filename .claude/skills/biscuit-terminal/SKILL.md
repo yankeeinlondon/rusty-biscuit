@@ -1,6 +1,6 @@
 ---
 name: biscuit-terminal
-description: Expert knowledge for the biscuit-terminal Rust library - terminal capability detection, rich terminal rendering, terminal components, inline image rendering, Mermaid/graph adapters, `TerminalRenderable`, `Prose`, and the terminal renderer for the renderable tree. Use when building CLI terminal output, using terminal-aware components, rendering images or diagrams, detecting color/underline/italics support, or folding `renderable::tree` nodes to terminal text.
+description: Expert knowledge for the biscuit-terminal Rust library - terminal capability detection, rich terminal rendering, terminal components, inline image rendering, the render-tree diagram hook, `TerminalRenderable`, `Prose`, and the terminal renderer for the renderable tree. Use when building CLI terminal output, using terminal-aware components, rendering images or diagrams, detecting color/underline/italics support, or folding `renderable::tree` nodes to terminal text.
 hash: a552a21dc0a66232-95f568f032e66a02
 ---
 
@@ -43,6 +43,10 @@ library, and renders `renderable::tree` nodes to terminal output.
    `TerminalImageOptions`.
 5. Keep nested components structural by projecting them into the render tree
    instead of degrading them to ANSI-stripped text.
+6. Know nothing about diagrams. `MermaidDiagram`, `GraphExpression`, and
+   `GitGraph` live in `biscuit-visualized` (`terminal` feature), which depends
+   on this crate; Mermaid fences reach them only through the render-tree
+   diagram hook (`diagrams.md`).
 
 ## Common Entry Points
 
@@ -90,7 +94,7 @@ Open only the topic file needed for the task:
 | Component catalog | `components.md` |
 | Render-tree terminal renderer | `render-tree.md` |
 | Inline images | `image-rendering.md` |
-| Mermaid diagrams | `mermaid-diagrams.md` |
+| Diagram hook, package boundary, `bt` diagram commands | `diagrams.md` |
 | Colors | `color-system.md` |
 | Detection functions | `discovery.md` |
 | OS/environment detection | `os-environment.md` |
@@ -119,11 +123,28 @@ Use the `renderable` skill for shared IR/layout/style definitions. Use the
   `BISCUIT_TERMINAL_QUERY_SILENCE_MS=1000` so a busy host's slow manufactured
   reply is not mistaken for a silent terminal; pass it empty to test the
   default budget.
+- A PTY test that manufactures a Kitty graphics reply must echo the `i=<id>`
+  of the query it saw: every probe uses a fresh ID, and a reply without the
+  matching ID is ignored (the route stays `Unknown`). Parse the ID from the
+  `ESC _ G` bytes the probe wrote rather than hard-coding one. Pure route
+  tests set `RouteInputs::probe` instead (`l1/graphics_probe_matrix.rs`).
+- `discovery_probe graphics` constructs `PROBE_GRAPHICS_CONSTRUCTIONS`
+  terminals and prints `graphics_<field>[i]=` lines, then `graphics_done`;
+  `PROBE_GRAPHICS_PROBE=off` builds with `ProbeMode::Off`, and
+  `PROBE_READ_TYPEAHEAD_MS` reads one stdin line afterwards
+  (`typeahead_line=`) to check what the exchange consumed;
+  `PROBE_GRAPHICS_CELL_SIZE` adds `graphics_cell_size[i]=` (`cell_size()`).
+  On Unix it also prints `tty_modes_restored=`, whether `/dev/tty` is back in
+  canonical mode with echo after the constructions.
 - The PTY tests spawn the `discovery_probe` example. `just test` builds it,
   but a narrowed `cargo nextest run --test l1 ...` does not, and silently runs
   a stale probe: run `cargo build -p biscuit-terminal --example
   discovery_probe` after changing the library (a mutation check passed
   vacuously this way on 2026-10-05).
+- The tmux L2 Sixel test attaches its client with `tmux -T sixel` (a
+  per-client feature); never change the server-wide `terminal-features`,
+  since other tests share the server. It gates on `#{sixel_support}`. tmux
+  does not redraw Sixel for a `script` client that has no pixel size.
 - The library's integration tests build as two binaries (`autotests = false`):
   `lib/tests/l1/` and `lib/tests/level2/` (`terminal-tests`). Each former test
   file is a module, so select one with `--test l1 <module>::`, never

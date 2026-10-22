@@ -106,6 +106,18 @@ impl std::fmt::Display for RgbValue {
     }
 }
 
+/// Where a detected terminal color came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ColorSource {
+    /// The terminal answered the live OSC query with this color.
+    Measured,
+    /// No answer: a `COLORFGBG` palette index or the terminal app's usual
+    /// default. The real color may differ, for example under a multiplexer,
+    /// which is never queried.
+    Estimated,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2195,7 +2195,7 @@ fn v54_cache_clear_subcommand_parses_cleanly() {
 
 /// The `icon` binary is shipped via `just install`, which delegates to
 /// `cargo install --path ./cli --features image`. The `image` cargo feature
-/// pulls in `biscuit-visualized`/`resvg` so the binary can render icons
+/// pulls in `resvg` (through biscuit-terminal) so the binary can render icons
 /// through the Kitty/iTerm2 inline-image protocol in image-capable terminals
 /// (e.g. WezTerm). Without it, glyph-less icons like the `Os` variants
 /// degrade to a text identifier everywhere — even in terminals that fully

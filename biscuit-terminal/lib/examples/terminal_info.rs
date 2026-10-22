@@ -28,7 +28,7 @@ fn main() {
         "Italics:        {}",
         if term.supports_italic { "yes" } else { "no" }
     );
-    println!("Images:         {:?}", term.image_support);
+    println!("Images:         {:?}", term.image_support());
     println!(
         "OSC8 Links:     {}",
         if term.osc_link_support { "yes" } else { "no" }

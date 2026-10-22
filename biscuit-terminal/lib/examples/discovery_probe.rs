@@ -52,6 +52,25 @@
 //!   `Terminal` constructions, three `cell_size()` lookups, and one cursor
 //!   position query, then print `query_budget_elapsed_ms=` and
 //!   `query_budget_done`. The test counts each query on the master side.
+//! * `graphics` — Construct `PROBE_GRAPHICS_CONSTRUCTIONS` (default 1)
+//!   `Terminal` values and print each one's graphics route and colors as
+//!   `graphics_<field>[i]=` lines, then `graphics_done`. With
+//!   `PROBE_GRAPHICS_PROBE=off` the terminals are built with
+//!   `ProbeMode::Off`. With `PROBE_AWAIT_TYPEAHEAD_MS` set (Unix), it first
+//!   waits at most that long for a typed line to be pending on stdin, without
+//!   reading it, and prints `typeahead_pending=true|false`; a test that types
+//!   ahead uses this so the construction's exchange cannot start before the
+//!   keys arrive. With `PROBE_READ_TYPEAHEAD_MS` set, it then reads one
+//!   line from stdin for at most that long and prints `typeahead_line=`
+//!   (`None` when nothing arrived), before `graphics_done`.
+//!   `PROBE_GRAPHICS_IMAGE=<path>` also renders that image for each
+//!   terminal's route and prints `graphics_image[i]=` (`pixels`, then the
+//!   escape sequences; `fallback:<text>`; or `error:<message>`).
+//!   `PROBE_GRAPHICS_CELL_SIZE` set also prints `graphics_cell_size[i]=`,
+//!   the terminal's `cell_size()`; unset, no cell-size lookup is made.
+//!   On Unix it also prints `tty_modes_restored=true|false`: whether
+//!   `/dev/tty`'s canonical and echo modes are what they were before the
+//!   constructions.
 //! * `prose` — Render a [`Prose`] string against the detected (or
 //!   override-built) terminal and print the raw bytes between
 //!   `---PROSE---` / `---END---` markers.
@@ -208,6 +227,7 @@ fn main() {
         "cursor" => probe_cursor(),
         "cursor_timeout" => probe_cursor_timeout(),
         "terminal" => probe_terminal(),
+        "graphics" => probe_graphics(),
         "terminal_cache" => probe_terminal_cache(),
         "terminal_latency" => probe_terminal_latency(),
         "query_budget" => probe_query_budget(),
@@ -355,10 +375,149 @@ fn probe_terminal() {
     println!("app={:?}", term.app);
     println!("color_depth={:?}", term.color_depth);
     println!("supports_italic={}", term.supports_italic);
-    println!("image_support={:?}", term.image_support);
+    println!("image_support={:?}", term.image_support());
     println!("underline_support={:?}", term.underline_support);
     println!("osc_link_support={}", term.osc_link_support);
     println!("is_ci={}", term.is_ci);
+}
+
+// ---------------------------------------------------------------------------
+// Graphics route and probe
+// ---------------------------------------------------------------------------
+
+fn probe_graphics() {
+    use biscuit_terminal::discovery::detection::ProbeMode;
+    use biscuit_terminal::terminal::Terminal;
+
+    let count = std::env::var("PROBE_GRAPHICS_CONSTRUCTIONS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(1)
+        .max(1);
+    let probe_off = std::env::var("PROBE_GRAPHICS_PROBE").is_ok_and(|v| v == "off");
+    if let Some(wait_ms) = std::env::var("PROBE_AWAIT_TYPEAHEAD_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+    {
+        println!("typeahead_pending={}", await_stdin_line(wait_ms));
+    }
+    let modes_before = tty_line_modes();
+    for i in 0..count {
+        let term = if probe_off {
+            Terminal::builder().probe(ProbeMode::Off).build()
+        } else {
+            Terminal::new()
+        };
+        let route = &term.graphics_route;
+        println!("graphics_format[{i}]={:?}", route.format);
+        println!("graphics_transport[{i}]={:?}", route.transport);
+        println!("graphics_placement[{i}]={:?}", route.placement);
+        println!("graphics_confidence[{i}]={:?}", route.confidence);
+        println!("graphics_reason_kind[{i}]={:?}", route.reason.kind);
+        println!("graphics_reason[{i}]={}", route.reason.message);
+        println!("graphics_fix[{i}]={:?}", route.reason.fix);
+        println!("graphics_text_color[{i}]={:?}", term.text_color);
+        println!("graphics_bg_color[{i}]={:?}", term.background_color);
+        println!("graphics_bg_source[{i}]={:?}", term.background_source);
+        if std::env::var_os("PROBE_GRAPHICS_CELL_SIZE").is_some() {
+            println!("graphics_cell_size[{i}]={:?}", term.cell_size());
+        }
+        if let Ok(path) = std::env::var("PROBE_GRAPHICS_IMAGE") {
+            print_image(i, std::path::Path::new(&path), &term);
+        }
+    }
+    if let Some(before) = modes_before {
+        println!("tty_modes_restored={}", tty_line_modes() == Some(before));
+    }
+    if let Some(wait_ms) = std::env::var("PROBE_READ_TYPEAHEAD_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+    {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut line = String::new();
+            if std::io::stdin().read_line(&mut line).is_ok() {
+                let _ = sender.send(line);
+            }
+        });
+        let line = receiver
+            .recv_timeout(std::time::Duration::from_millis(wait_ms))
+            .ok()
+            .map(|line| line.trim_end_matches(['\r', '\n']).to_string());
+        println!("typeahead_line={line:?}");
+    }
+    println!("graphics_done");
+}
+
+/// Renders the image at `path` for `term`'s route: `graphics_image[i]=` then
+/// `pixels` (followed by the escape sequences themselves), `fallback:<text>`,
+/// or `error:<message>`.
+fn print_image(i: usize, path: &std::path::Path, term: &biscuit_terminal::terminal::Terminal) {
+    use biscuit_terminal::components::terminal_image::{ImageOutput, TerminalImage};
+    use std::io::Write;
+
+    match TerminalImage::new(path).and_then(|image| image.render_with_route(term)) {
+        Ok(ImageOutput::Pixels(sequence)) => {
+            println!("graphics_image[{i}]=pixels");
+            print!("{sequence}");
+            let _ = std::io::stdout().flush();
+        }
+        Ok(ImageOutput::Fallback { text, .. }) => println!("graphics_image[{i}]=fallback:{text}"),
+        Ok(ImageOutput::HalfBlocks { .. }) => unreachable!("render_with_route never draws half-blocks"),
+        Err(error) => println!("graphics_image[{i}]=error:{error}"),
+    }
+}
+
+/// Whether stdin became readable within `wait_ms`, without consuming it.
+///
+/// stdin is still in canonical mode here, so it turns readable only once a
+/// whole line has been typed.
+#[cfg(unix)]
+fn await_stdin_line(wait_ms: u64) -> bool {
+    // SAFETY: `set` is zero-initialized by FD_ZERO, fd 0 is below
+    // FD_SETSIZE, and every pointer is valid for the duration of the call.
+    unsafe {
+        let mut set: libc::fd_set = std::mem::zeroed();
+        libc::FD_ZERO(&mut set);
+        libc::FD_SET(0, &mut set);
+        let mut tv = libc::timeval {
+            tv_sec: (wait_ms / 1000) as libc::time_t,
+            tv_usec: ((wait_ms % 1000) * 1000) as libc::suseconds_t,
+        };
+        libc::select(
+            1,
+            &mut set,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut tv,
+        ) > 0
+    }
+}
+
+#[cfg(not(unix))]
+fn await_stdin_line(_wait_ms: u64) -> bool {
+    false
+}
+
+/// The `ICANON` and `ECHO` bits of `/dev/tty`, which a query exchange clears
+/// while it runs and must restore. `None` without a controlling terminal.
+#[cfg(unix)]
+fn tty_line_modes() -> Option<libc::tcflag_t> {
+    use std::os::unix::io::AsRawFd;
+
+    let tty = std::fs::File::open("/dev/tty").ok()?;
+    // SAFETY: `termios` is plain data that tcgetattr fully initializes on
+    // success, and the descriptor is open for the duration of the call.
+    unsafe {
+        let mut termios: libc::termios = std::mem::zeroed();
+        (libc::tcgetattr(tty.as_raw_fd(), &mut termios) == 0)
+            .then_some(termios.c_lflag & (libc::ICANON | libc::ECHO))
+    }
+}
+
+#[cfg(not(unix))]
+fn tty_line_modes() -> Option<u32> {
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -518,9 +677,9 @@ fn probe_prose() {
     let force_straight = parse_bool_env("PROBE_FORCE_UNDERLINE_STRAIGHT");
     let force_double = parse_bool_env("PROBE_FORCE_UNDERLINE_DOUBLE");
 
-    // Build the Terminal manually so the probe never triggers the
-    // viuer-based image detection cascade — that path sends terminal
-    // queries and blocks indefinitely inside a non-responding test PTY.
+    // Build the Terminal manually so the probe never triggers the startup
+    // color and graphics queries — they send terminal queries and wait on
+    // a non-responding test PTY.
     //
     // Start from `Terminal::new_optimistic(80)` (no probes; all fields
     // explicit), then stamp the prose-relevant capabilities from the

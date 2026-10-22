@@ -46,7 +46,17 @@ The user-facing record is the area's `docs/` tree.
 - `markdown::cleanup::frontmatter::repair_frontmatter` is the raw-source repair
   both consumers call. Its schema configuration is a lazy closure, so absent or
   empty frontmatter never builds a context. Clean diagnostics
-  (`cleanup::diagnostic`) use document coordinates.
+  (`cleanup::diagnostic`) use document coordinates. When the first pass
+  changes the text and it parses, a rescan adds only new findings; that is how
+  a tab-indented root gets `yaml.tab-indentation` and then
+  `yaml.root-indentation` in one run.
+- `yaml.root-indentation` (Biscuit File, deterministic) moves an indented
+  nonempty block root mapping to column 0: one finding whose repairs are
+  space-only prefix edits, proven together by parse equality. Less-indented
+  comments and terminators are kept; flow/sequence/scalar roots, markers or
+  directives, and `? ! & *` first keys get none, and a failed proof (block
+  scalar blank lines) offers nothing. It exists because the text-preserving
+  editors (`md hash --save`, restore, leaf location) refuse indented roots.
 - `markdown::cleanup::clean_body(body, &ResolvedMarkdownRules)` is the guarded
   body engine. It never re-serializes Markdown: rules propose bounded byte
   edits against one parse, and one final comparison accepts the candidate or

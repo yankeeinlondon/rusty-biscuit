@@ -121,3 +121,20 @@ fn public_restore_api_returns_typed_errors_for_ambiguous_input() {
 
     assert!(matches!(error, MarkdownError::FrontmatterTextEdit { .. }));
 }
+
+#[test]
+fn restore_refuses_an_indented_root_through_the_public_api() {
+    let indented = "---\n    prompt: |-\n        Your task is to ...\n---\nBody.\n";
+    let column_zero = "---\nprompt: |-\n    Your task is to ...\n---\nBody.\n";
+
+    for (current, snapshot) in [(indented, column_zero), (column_zero, indented)] {
+        match restore_properties_text(current, snapshot, &["prompt", "hash", "last_updated"]) {
+            Err(MarkdownError::FrontmatterTextEdit { reason }) => assert!(
+                reason.starts_with("frontmatter root mapping is indented by 4 spaces")
+                    && reason.contains("md clean --save"),
+                "{reason}"
+            ),
+            other => panic!("expected FrontmatterTextEdit, got {other:?}"),
+        }
+    }
+}

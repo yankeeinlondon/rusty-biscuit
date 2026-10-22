@@ -239,6 +239,35 @@ assert_eq!(
 
 A document that already parses never gets a tab repair.
 
+A parseable root mapping that is indented as a whole gets
+`yaml.root-indentation`, which moves it to column 0. Indentation is legal
+YAML, but tools that edit frontmatter text in place expect top-level keys at
+column 0. The repair removes the smallest leading-space count shared by the
+content lines. Comments indented at least that far move with them, comments
+indented less stay where they are, and the repair never touches line
+terminators:
+
+```rust
+use biscuit_file::analyze_yaml;
+
+let analysis = analyze_yaml("    title: Example\n  # note\n    tags:\n      - a\n");
+assert_eq!(
+    analysis.apply().source,
+    "title: Example\n  # note\ntags:\n  - a\n"
+);
+```
+
+The repair is one diagnostic that carries a prefix edit per line, and those
+edits are proven together: the dedented text must parse to the same value, or
+nothing is offered. That proof can fail, for example when blank lines inside
+a block scalar would change the scalar's value. The repair is also not
+offered for a root that is already at column 0, for flow (`{...}`), sequence,
+or scalar roots, for empty or comment-only sources, for sources with
+directives (`%YAML`) or explicit `---` / `...` markers, or when the first key
+is complex (`?`), tagged, anchored, or an alias. A tab-indented root is
+recovered by `yaml.tab-indentation` first; analyzing the repaired text again
+then offers `yaml.root-indentation`.
+
 ### `Pdf`
 
 Extract text, Markdown, or table-of-contents from PDFs.

@@ -17,7 +17,7 @@
 
 use std::cell::{OnceCell, RefCell};
 
-use biscuit_terminal::components::mermaid::MermaidDiagram;
+use biscuit_visualized::components::mermaid::MermaidDiagram;
 use biscuit_terminal::terminal::Terminal;
 use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::color::{

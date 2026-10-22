@@ -417,3 +417,15 @@ codes before you match libtest output. lldb refuses Apple-signed platform
 binaries but attaches to ones you built. Pick the binary with the same `-p`
 selection the recipe uses; feature unification can otherwise give you a
 different artifact.
+
+## Zellij in tests: long `$TMPDIR` rejects every session name
+
+Zellij 0.45.1 on macOS derives its socket directory from `$TMPDIR`
+(`/var/folders/…/T/zellij-<uid>/…`) and then rejects any `--session` name
+with "session name must be less than 0 characters" (measured 2026-10-21).
+Give a test session a short `ZELLIJ_SOCKET_DIR` (a temp dir under `/tmp`),
+and pass the same variable to `kill-session` and `delete-session`. A fresh
+socket directory also means first-run state, so Zellij shows its "About
+Zellij" tips popup over the pane; start it with a `--config` file holding
+`show_startup_tips false` and `show_release_notes false`. See
+`biscuit-terminal/lib/tests/level2/level2_graphics_probe_wezterm.rs`.

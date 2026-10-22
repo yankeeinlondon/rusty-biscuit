@@ -1,25 +1,12 @@
 pub use crate::components::block_quote::BlockQuote;
 pub use crate::components::compose::Compose;
 pub use crate::components::filesystem::{FileMetrics, FileSystem, FileSystemError, MetricKind};
-#[cfg(feature = "image")]
-pub use crate::components::git_graph::{
-    GitGraph, GitGraphPlan, GraphLine, GraphPullRequest, GraphViewport, LaneEntry, LaneMerge,
-};
-#[cfg(feature = "image")]
-pub use crate::components::graph_expression::{
-    GraphExpression, GraphInputSyntax, GraphOrientation, GraphRenderError,
-};
 pub use crate::components::horizontal_rule::{
     HorizontalRule, RuleAlignment, RuleStyle, RuleWeight,
 };
 pub use crate::components::image_options::{TerminalImageOptions, TerminalImageOptionsBuilder};
 pub use crate::components::inline_content::InlineContent;
 pub use crate::components::list::{OrderedList, UnorderedList};
-#[cfg(feature = "image")]
-pub use crate::components::mermaid::{
-    MermaidConfig, MermaidDiagram, MermaidRenderError, MermaidRenderResult, MermaidTheme,
-    QuadrantTheme,
-};
 pub use crate::components::metrics_tree::{
     MetricMarker, MetricNode, MetricShare, MetricValue, MetricsTree,
 };

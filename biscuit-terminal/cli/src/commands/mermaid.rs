@@ -1,7 +1,7 @@
 use crate::args::LayoutArgs;
 use crate::commands::shared::*;
 use crate::output::RenderMeta;
-use biscuit_terminal::components::mermaid::MermaidDiagram;
+use biscuit_visualized::components::mermaid::MermaidDiagram;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::section::{HeadingLevel, Section};
@@ -111,18 +111,19 @@ fn mermaid_source_block(instructions: &str) -> Prose {
 
 /// Handle Mermaid rendering errors with user-friendly output.
 pub fn handle_mermaid_error(
-    error: biscuit_terminal::components::mermaid::MermaidRenderError,
+    error: biscuit_visualized::components::mermaid::MermaidRenderError,
     instructions: &str,
     diagram_type: &str,
     term: &Terminal,
 ) -> color_eyre::Result<()> {
-    use biscuit_terminal::components::mermaid::MermaidRenderError;
+    use biscuit_visualized::components::mermaid::MermaidRenderError;
 
     match error {
         MermaidRenderError::NoImageSupport => {
             // Graceful degradation: output the diagram as a fenced code block
             // so piped/non-TTY consumers still get useful output.
             println!("```mermaid\n{}\n```", instructions);
+            crate::hints::emit_terminal_route_hint(term);
             Ok(())
         }
         MermaidRenderError::Visualization(ref viz_err) => {

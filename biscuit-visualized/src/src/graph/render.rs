@@ -4,7 +4,7 @@ use super::{
     expression::GraphExpression,
 };
 use crate::{
-    artifact::{OutputFormat, RenderRequest, RenderedArtifact},
+    artifact::{Background, OutputFormat, RenderRequest, RenderedArtifact},
     cache::{file_cache::GRAPH_BACKEND, FileCache, VisualizationKind},
     raster,
 };
@@ -391,7 +391,7 @@ impl GraphDiagram {
 
         svg_content = apply_graph_background(
             &svg_content,
-            request.transparent_background,
+            request.background,
             self.color_theme.as_ref(),
         );
 
@@ -402,13 +402,10 @@ impl GraphDiagram {
 
         let (final_content, final_format) = match request.format {
             OutputFormat::Svg => (svg_content.into_bytes(), OutputFormat::Svg),
-            OutputFormat::Png => {
-                let png_bytes = match request.target_width {
-                    Some(width) => raster::rasterize_svg_to_png(&svg_content, width)?,
-                    None => raster::rasterize_svg_to_png_bytes(&svg_content, request.scale)?,
-                };
-                (png_bytes, OutputFormat::Png)
-            }
+            OutputFormat::Png => (
+                raster::png::rasterize_svg_for_request(&svg_content, request)?,
+                OutputFormat::Png,
+            ),
         };
 
         let path = cache.store(
@@ -442,9 +439,7 @@ impl GraphDiagram {
             "syntax": self.syntax.as_str(),
             "orientation": self.orientation.as_str(),
             "title": self.title,
-            "scale": request.scale.max(1),
-            "target_width": request.target_width,
-            "transparent_background": request.transparent_background,
+            "request": request.cache_identity(),
             "color_theme": theme_key,
         }))
         .unwrap_or_else(|_| "{}".to_string());
@@ -474,12 +469,16 @@ impl GraphDiagram {
 
 fn apply_graph_background(
     svg: &str,
-    transparent_background: bool,
+    background: Background,
     theme: Option<&GraphColorTheme>,
 ) -> String {
-    if transparent_background {
-        return svg.to_string();
-    }
+    let fill = match background {
+        Background::Transparent => return svg.to_string(),
+        Background::Solid { .. } => background.solid_hex().unwrap_or_default(),
+        Background::Theme => theme
+            .map(|theme| theme.surface_color.clone())
+            .unwrap_or_else(|| "#ffffff".to_string()),
+    };
 
     let Some(svg_start) = svg.find("<svg") else {
         return svg.to_string();
@@ -491,9 +490,6 @@ fn apply_graph_background(
     let insert_pos = svg_start + open_end + 1;
     let mut output = String::with_capacity(svg.len() + 48);
     output.push_str(&svg[..insert_pos]);
-    let fill = theme
-        .map(|theme| theme.surface_color.as_str())
-        .unwrap_or("#ffffff");
     output.push_str(&format!(
         r#"<rect width="100%" height="100%" fill="{fill}"/>"#
     ));

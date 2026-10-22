@@ -37,18 +37,14 @@ use renderable::tree::{
     HrWeight, InheritedStyle, NodeKind, ProgressHints, RenderError, RenderNode, RenderStrictness,
     Rendered, Severity, TableColumnHints, TableTerminalHints, TextLayoutHints, TextOverflow,
 };
-#[cfg(feature = "image")]
 use renderable::tree::TerminalMermaidMode;
 use renderable::tree::{ValidationError, ValidationMode, is_html_comment_only, validate};
 
 use crate::components::block_quote::BlockQuote;
 use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyle, RuleWeight};
-#[cfg(feature = "image")]
-use crate::components::mermaid::MermaidDiagram;
 use crate::components::prose::{LineBreaks, Prose};
 use crate::components::renderable::TerminalRenderable;
 use crate::components::terminal_image::TerminalImage;
-use crate::discovery::detection::ImageSupport;
 use crate::components::table::cell::pad_cell;
 use crate::components::table::table::{
     BG_RESET, FG_RESET, apply_vertical_padding, build_border, highlight_bg_escape, row_paint,
@@ -64,7 +60,7 @@ use crate::utils::block_constraint::{
 use crate::utils::layout::{Alignment, WordWrap};
 use crate::utils::word_wrap::truncate;
 
-use super::options::{ImagePlaceholder, TerminalRenderOptions};
+use super::options::{DiagramRenderRequest, ImagePlaceholder, TerminalRenderOptions};
 use super::style;
 
 /// Maximum size of an inline terminal image at [`GraphicsMode::Rich`], matching
@@ -1714,14 +1710,15 @@ impl Writer<'_> {
     ///
     /// ## Mermaid promotion
     ///
-    /// A `lang="mermaid"` block is promoted to a rasterized image only when the
-    /// Mermaid opt-in ([`TerminalRenderContext::mermaid_mode`] is
+    /// A `lang="mermaid"` block is handed to the
+    /// [`diagram_renderer`](TerminalRenderOptions::diagram_renderer) hook only
+    /// when the Mermaid opt-in ([`TerminalRenderContext::mermaid_mode`] is
     /// [`TerminalMermaidMode::Image`]) *and* the fidelity ceiling
     /// ([`TerminalRenderContext::graphics_mode`] is [`GraphicsMode::Rich`]) both
     /// permit it. [`GraphicsMode`] alone never promotes a fence — that keeps the
-    /// public default ("Mermaid stays code") intact. When promotion is not
-    /// requested the block degrades through the code-render hook and finally to
-    /// the built-in plain fallback.
+    /// public default ("Mermaid stays code") intact. With no hook installed, or
+    /// when promotion is not requested, the block degrades through the
+    /// code-render hook and finally to the built-in plain fallback.
     ///
     /// ## Errors
     ///
@@ -1735,37 +1732,45 @@ impl Writer<'_> {
         meta: Option<&str>,
         attrs: &renderable::tree::NodeAttrs,
     ) -> Result<String, RenderError> {
-        let _is_mermaid = lang
+        let is_mermaid = lang
             .map(|l| l.eq_ignore_ascii_case("mermaid"))
             .unwrap_or(false);
 
         // Promotion is gated by the opt-in AND the ceiling: terminal Mermaid
         // rasterizes only at `Rich`, and only when the caller opted in.
-        #[cfg(feature = "image")]
-        if _is_mermaid
+        if is_mermaid
             && self.opts.context.mermaid_mode == TerminalMermaidMode::Image
             && self.opts.context.graphics_mode == GraphicsMode::Rich
         {
-            let term = self.effective_terminal();
-            let diagram = MermaidDiagram::new(value);
-            match diagram.try_render(&term) {
-                Ok(result) => return Ok(result.output),
-                Err(e) => match self.opts.strictness {
-                    RenderStrictness::Strict => {
-                        return Err(RenderError::LossyRejected {
-                            message: format!("Mermaid promotion failed: {e}"),
-                        });
-                    }
-                    RenderStrictness::Warn => {
-                        self.diagnostics.push(Diagnostic::lossy(
-                            format!(
-                                "Mermaid rasterization failed, falling back to code block: {e}"
-                            ),
-                            None,
-                        ));
-                    }
-                    RenderStrictness::Lossy => {}
-                },
+            if let Some(diagrams) = &self.opts.diagram_renderer {
+                let term = self.effective_terminal();
+                let request = DiagramRenderRequest {
+                    source: value,
+                    attrs,
+                    terminal: &term,
+                    available_width: self.opts.context.available_width,
+                };
+                match diagrams.render_terminal_diagram(&request) {
+                    Ok(output) => return Ok(output),
+                    Err(e) => match self.opts.strictness {
+                        RenderStrictness::Strict => {
+                            return Err(RenderError::LossyRejected {
+                                message: format!("Mermaid promotion failed: {e}"),
+                            });
+                        }
+                        RenderStrictness::Warn => {
+                            self.diagnostics.push(Diagnostic::lossy(
+                                format!(
+                                    "Mermaid rasterization failed, falling back to code block: {e}"
+                                ),
+                                None,
+                            ));
+                        }
+                        RenderStrictness::Lossy => {}
+                    },
+                }
+            } else {
+                tracing::debug!("Mermaid promotion requested without hook; rendering the fence as code");
             }
         }
 
@@ -1795,10 +1800,12 @@ impl Writer<'_> {
     ///
     /// `TerminalImageMode::Force` (mapped to `force_graphics` at the darkmatter
     /// entry point) attempts image-protocol output even when detection reports
-    /// no support: the returned terminal is marked as a TTY and, if it
-    /// advertises no image protocol, is upgraded to Kitty. This mirrors the
-    /// legacy terminal image renderer's force path so the policy is enforced at
-    /// the renderer boundary rather than dropped.
+    /// no support: the returned terminal is marked as a TTY and its route
+    /// becomes [`GraphicsRoute::forced_by_caller`], which upgrades a route
+    /// without pixels to Kitty unless `BISCUIT_GRAPHICS=none`, an invalid
+    /// override, a blocked transport, or nonterminal stdout stopped it.
+    ///
+    /// [`GraphicsRoute::forced_by_caller`]: crate::discovery::detection::GraphicsRoute::forced_by_caller
     fn effective_terminal(&self) -> std::borrow::Cow<'_, crate::terminal::Terminal> {
         use std::borrow::Cow;
 
@@ -1807,9 +1814,7 @@ impl Writer<'_> {
         }
         let mut forced = self.opts.context.terminal.clone();
         forced.is_tty = true;
-        if matches!(forced.image_support, ImageSupport::None) {
-            forced.image_support = ImageSupport::Kitty;
-        }
+        forced.graphics_route = forced.graphics_route.forced_by_caller();
         Cow::Owned(forced)
     }
 
@@ -1862,13 +1867,21 @@ impl Writer<'_> {
         let term = self.effective_terminal();
         // Without graphics support (and without force) there is no image
         // protocol to target — fall back to alt text.
-        if !term.is_tty || matches!(term.image_support, ImageSupport::None) {
+        if !term.is_tty || !term.graphics_route.has_pixels() {
             return None;
         }
 
         let image = TerminalImage::new(&full_path).ok()?.with_alt_text(alt);
-        let output = image.render(&term);
-        (!output.is_empty()).then_some(output)
+        // A fallback (for example an image too large for tmux's message
+        // limit) keeps the render tree's own placeholder style; the tree
+        // never draws half-blocks, which `render_with_route` does not produce.
+        match image.render_with_route(&term).ok()? {
+            crate::components::terminal_image::ImageOutput::Pixels(output) => {
+                (!output.is_empty()).then_some(output)
+            }
+            crate::components::terminal_image::ImageOutput::Fallback { .. }
+            | crate::components::terminal_image::ImageOutput::HalfBlocks { .. } => None,
+        }
     }
 
     /// Renders an `"icon"` extended node by walking the degradation ladder
@@ -1895,7 +1908,7 @@ impl Writer<'_> {
             return Ok(unicode.clone());
         }
         if !icon.svg.is_empty()
-            && !matches!(term.image_support, ImageSupport::None)
+            && term.graphics_route.has_pixels()
             && let Ok(s) = render_svg_string(&icon.svg, term)
         {
             return Ok(s);
@@ -4045,6 +4058,35 @@ mod render_tree_tests {
         );
     }
 
+    /// Plain images outside the tree draw half-blocks on a truecolor Unicode
+    /// terminal with no pixel route; the tree keeps its placeholder style at
+    /// every graphics mode instead.
+    #[test]
+    fn render_tree_image_without_pixels_keeps_its_placeholder_not_half_blocks() {
+        use crate::discovery::detection::ImageSupport;
+
+        let (dir, name) = temp_png();
+        let node = RenderNode::paragraph(vec![RenderNode::image(&name, None, "a cat")]);
+        let term = Terminal::builder()
+            .width(80)
+            .image_support(ImageSupport::None)
+            .is_tty(true)
+            .color_depth(ColorDepth::TrueColor)
+            .supports_unicode(true)
+            .build();
+        assert!(!term.graphics_route.has_pixels());
+
+        for mode in [GraphicsMode::Rich, GraphicsMode::Vector, GraphicsMode::Off] {
+            let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+            opts.context.graphics_mode = mode;
+            opts.context.image_base_path = Some(dir.path().to_path_buf());
+
+            let out = render_terminal_node(&node, &opts).expect("render").output;
+            assert!(strip_escape_codes(&out).contains("[a cat]"), "{mode:?}: {out:?}");
+            assert!(!out.contains('▀'), "{mode:?} drew half-blocks: {out:?}");
+        }
+    }
+
     /// Finding 3 (review-3): the security contract. At `Rich` on a fully
     /// image-capable terminal, out-of-contract sources — a remote URL, an
     /// absolute path, and a path-traversal escape from the base dir — must all
@@ -4118,6 +4160,65 @@ mod render_tree_tests {
             forced.contains("\x1b_G"),
             "force_graphics must emit the image protocol on an unsupported terminal; got: {forced:?}",
         );
+    }
+
+    /// `force_graphics` never lifts `BISCUIT_GRAPHICS=none`: a user-disabled
+    /// route stays without pixels, so the image renders as alt text.
+    #[test]
+    fn render_tree_force_graphics_does_not_lift_user_disabled_graphics() {
+        use crate::discovery::detection::{RouteInputs, resolve_graphics_route};
+
+        let (dir, name) = temp_png();
+        let node = RenderNode::paragraph(vec![RenderNode::image(&name, None, "a cat")]);
+        let disabled = resolve_graphics_route(
+            &RouteInputs::new(true)
+                .with_var("TERM_PROGRAM", "WezTerm")
+                .with_var("BISCUIT_GRAPHICS", "none"),
+        );
+        let term = Terminal::builder()
+            .width(80)
+            .graphics_route(disabled)
+            .is_tty(true)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = GraphicsMode::Rich;
+        opts.context.image_base_path = Some(dir.path().to_path_buf());
+        opts.context.force_graphics = true;
+
+        let out = render_terminal_node(&node, &opts).expect("render").output;
+        assert!(!out.contains("\x1b_G"), "user-disabled graphics stay off: {out:?}");
+        assert!(strip_escape_codes(&out).contains("[a cat]"), "{out:?}");
+    }
+
+    /// A route forced by `BISCUIT_GRAPHICS=kitty` is still capped by the
+    /// render's `GraphicsMode`: below `Rich` nothing is rasterized.
+    #[test]
+    fn render_tree_graphics_mode_caps_a_forced_route() {
+        use crate::discovery::detection::{RouteInputs, resolve_graphics_route};
+
+        let (dir, name) = temp_png();
+        let node = RenderNode::paragraph(vec![RenderNode::image(&name, None, "a cat")]);
+        let forced = resolve_graphics_route(
+            &RouteInputs::new(true).with_var("BISCUIT_GRAPHICS", "kitty"),
+        );
+        let term = Terminal::builder()
+            .width(80)
+            .graphics_route(forced)
+            .is_tty(true)
+            .build();
+        for mode in [GraphicsMode::Off, GraphicsMode::Vector] {
+            let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+            opts.context.graphics_mode = mode;
+            opts.context.image_base_path = Some(dir.path().to_path_buf());
+            let out = render_terminal_node(&node, &opts).expect("render").output;
+            assert!(!out.contains("\x1b_G"), "{mode:?} must not rasterize: {out:?}");
+            assert!(strip_escape_codes(&out).contains("[a cat]"), "{mode:?}: {out:?}");
+        }
+        let mut rich = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        rich.context.graphics_mode = GraphicsMode::Rich;
+        rich.context.image_base_path = Some(dir.path().to_path_buf());
+        let out = render_terminal_node(&node, &rich).expect("render").output;
+        assert!(out.contains("\x1b_G"), "control: Rich sends the forced format: {out:?}");
     }
 
     #[test]
@@ -5455,24 +5556,33 @@ mod render_tree_tests {
 
     /// Finding 7 (review-1): under `RenderStrictness::Strict`, a Mermaid
     /// promotion that cannot complete must escalate to a `RenderError` rather
-    /// than silently degrading to a code block. A terminal with no image
-    /// support guarantees the promotion fails (no protocol to target, or no
-    /// rasterization deps) regardless of host capability.
+    /// than silently degrading to a code block. The hook here always fails;
+    /// `biscuit-visualized` covers the same contract with its real hook.
     #[test]
-    #[cfg(feature = "image")]
     fn mermaid_promotion_failure_rejects_under_strict() {
-        use crate::discovery::detection::ImageSupport;
+        use crate::render_tree::{DiagramRenderError, DiagramRenderRequest, DiagramRenderer};
         use renderable::tree::{GraphicsMode, TerminalMermaidMode};
+
+        struct FailingDiagrams;
+        impl DiagramRenderer for FailingDiagrams {
+            fn render_terminal_diagram(
+                &self,
+                _request: &DiagramRenderRequest<'_>,
+            ) -> Result<String, DiagramRenderError> {
+                Err(DiagramRenderError::new("no image support"))
+            }
+        }
 
         let mermaid_node =
             RenderNode::code(Some("mermaid".to_string()), None, "flowchart LR\n    A --> B");
 
         let term = Terminal::builder()
             .width(80)
-            .image_support(ImageSupport::None)
+            .image_support(crate::discovery::detection::ImageSupport::None)
             .is_tty(false)
             .build();
-        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Strict);
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Strict)
+            .with_diagram_renderer(Rc::new(FailingDiagrams));
         opts.context.graphics_mode = GraphicsMode::Rich;
         opts.context.mermaid_mode = TerminalMermaidMode::Image;
 

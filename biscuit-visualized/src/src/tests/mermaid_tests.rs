@@ -1,4 +1,4 @@
-use crate::artifact::{OutputFormat, RenderRequest};
+use crate::artifact::{Background, OutputFormat, RenderRequest};
 use crate::mermaid::{MermaidConfig, MermaidDiagram, MermaidTheme, QuadrantTheme};
 use crate::tests::isolated_cache_dir;
 use serial_test::serial;
@@ -159,7 +159,8 @@ fn mermaid_theme_changes_svg_output() {
         format: OutputFormat::Svg,
         scale: 1,
         target_width: None,
-        transparent_background: false,
+        row_height: None,
+        background: Background::Theme,
     };
 
     let light = MermaidDiagram::new("graph LR; A-->B")
@@ -190,7 +191,8 @@ fn mermaid_transparent_background_changes_svg_output() {
             format: OutputFormat::Svg,
             scale: 1,
             target_width: None,
-            transparent_background: false,
+            row_height: None,
+            background: Background::Theme,
         })
         .unwrap();
     let transparent = diagram
@@ -198,7 +200,8 @@ fn mermaid_transparent_background_changes_svg_output() {
             format: OutputFormat::Svg,
             scale: 1,
             target_width: None,
-            transparent_background: true,
+            row_height: None,
+            background: Background::Transparent,
         })
         .unwrap();
 
@@ -229,7 +232,8 @@ fn mermaid_quadrant_config_changes_svg_output() {
             format: OutputFormat::Svg,
             scale: 1,
             target_width: None,
-            transparent_background: false,
+            row_height: None,
+            background: Background::Theme,
         })
         .unwrap();
 
@@ -249,7 +253,8 @@ fn mermaid_cache_separates_scale_theme_and_transparency() {
             format: OutputFormat::Png,
             scale: 1,
             target_width: None,
-            transparent_background: false,
+            row_height: None,
+            background: Background::Theme,
         })
         .unwrap();
     let scaled_again = base
@@ -257,7 +262,8 @@ fn mermaid_cache_separates_scale_theme_and_transparency() {
             format: OutputFormat::Png,
             scale: 3,
             target_width: None,
-            transparent_background: false,
+            row_height: None,
+            background: Background::Theme,
         })
         .unwrap();
     let light = MermaidDiagram::new("graph LR; A-->B")
@@ -266,7 +272,8 @@ fn mermaid_cache_separates_scale_theme_and_transparency() {
             format: OutputFormat::Png,
             scale: 1,
             target_width: None,
-            transparent_background: false,
+            row_height: None,
+            background: Background::Theme,
         })
         .unwrap();
     let transparent = MermaidDiagram::new("graph LR; A-->B")
@@ -274,7 +281,8 @@ fn mermaid_cache_separates_scale_theme_and_transparency() {
             format: OutputFormat::Png,
             scale: 1,
             target_width: None,
-            transparent_background: true,
+            row_height: None,
+            background: Background::Transparent,
         })
         .unwrap();
 
@@ -415,7 +423,8 @@ fn mermaid_pie_chart_init_directive_applies_custom_colors() {
             format: OutputFormat::Svg,
             scale: 1,
             target_width: None,
-            transparent_background: true,
+            row_height: None,
+            background: Background::Transparent,
         })
         .unwrap();
 
@@ -513,7 +522,8 @@ fn mermaid_backend_smoke_renders_supported_cli_diagram_families() {
                 format: OutputFormat::Svg,
                 scale: 1,
                 target_width: None,
-                transparent_background: true,
+                row_height: None,
+                background: Background::Transparent,
             })
             .unwrap_or_else(|err| panic!("{name} should render successfully: {err}"));
 
@@ -536,7 +546,8 @@ fn mermaid_natural_size_matches_the_rendered_viewbox() {
                 format: OutputFormat::Svg,
                 scale: 1,
                 target_width: None,
-                transparent_background: true,
+                row_height: None,
+                background: Background::Transparent,
             })
             .unwrap();
         let svg = std::fs::read_to_string(artifact.path).unwrap();
@@ -564,4 +575,52 @@ fn mermaid_natural_size_grows_with_commits() {
         .natural_size()
         .unwrap();
     assert!(long.width > short.width, "{long:?} vs {short:?}");
+}
+
+/// A solid background paints the theme's background color over, and every
+/// background and geometry is its own artifact.
+#[test]
+#[serial]
+fn mermaid_render_separates_backgrounds_and_geometry() {
+    let _cache_dir = isolated_cache_dir();
+
+    let diagram = MermaidDiagram::new("graph LR; A-->B").with_theme(MermaidTheme::Default);
+    let svg = |background| {
+        let artifact = diagram
+            .render(&RenderRequest {
+                format: OutputFormat::Svg,
+                background,
+                ..RenderRequest::default()
+            })
+            .unwrap();
+        std::fs::read_to_string(artifact.path).unwrap()
+    };
+    let theme = svg(Background::Theme);
+    let solid = svg(Background::Solid { r: 0x12, g: 0x34, b: 0x56 });
+    assert!(!theme.contains("#123456"));
+    assert!(solid.contains("#123456"), "{solid}");
+
+    let png = RenderRequest::default().with_target_width(240);
+    let requests = [
+        png.clone(),
+        png.clone().with_background(Background::Transparent),
+        png.clone().with_background(Background::Solid { r: 0x12, g: 0x34, b: 0x56 }),
+        png.clone().with_row_height(16),
+        png.clone().with_row_height(17),
+        png.clone().with_target_width(241),
+    ];
+    let artifacts: Vec<_> = requests.iter().map(|request| diagram.render(request).unwrap()).collect();
+    for (i, a) in artifacts.iter().enumerate() {
+        for b in &artifacts[i + 1..] {
+            assert_ne!(a.path, b.path);
+        }
+    }
+    let again = diagram.render(&png).unwrap();
+    assert!(again.cache_hit);
+    assert_eq!(again.path, artifacts[0].path);
+
+    // Row padding on the real diagram: 240 px wide, whole 16 px rows.
+    let padded = image::load_from_memory(&std::fs::read(&artifacts[3].path).unwrap()).unwrap();
+    assert_eq!(padded.width(), 240);
+    assert_eq!(padded.height() % 16, 0);
 }

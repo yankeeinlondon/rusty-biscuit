@@ -27,7 +27,7 @@ use std::path::PathBuf;
 pub use super::terminal_image::ImageWidth;
 
 /// Default maximum file size: 10MB
-const DEFAULT_MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
+pub(crate) const DEFAULT_MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
 /// Configuration options for terminal image rendering.
 ///

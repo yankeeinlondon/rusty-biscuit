@@ -155,7 +155,9 @@ if let Some(cs) = cell_size() {
 // Default: 8×16 if detection fails
 ```
 
-Used for accurate image aspect ratio calculation.
+Used for accurate image aspect ratio calculation. Unix: `TIOCGWINSZ` pixels, then
+CSI 14 t, on every call. Native Windows: the `CSI 16 t` answer carried in the
+startup exchange, cached per process (`startup_exchange::live_cell_size`).
 
 ### Config Parsing by Terminal
 

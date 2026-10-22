@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use biscuit_terminal::components::git_graph::{GitGraphPlan, GraphViewport, NaturalSize};
-use biscuit_terminal::components::mermaid::MermaidTheme;
+use biscuit_visualized::components::git_graph::{GitGraphPlan, GraphViewport, NaturalSize};
+use biscuit_visualized::components::mermaid::MermaidTheme;
 use biscuit_terminal::discovery::fonts::CellSize;
 use biscuit_visualized::mermaid::{CommitGeometry, GitGraphGeometry, MermaidDiagram};
 use worktree::fork_origin::{ForkOrigin, ForkOriginStore};

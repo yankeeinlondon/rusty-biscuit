@@ -20,14 +20,16 @@ let diagram = MermaidDiagram::new("flowchart LR\n    A --> B")
 ```rust
 use biscuit_visualized::artifact::{RenderRequest, OutputFormat};
 
-let req = RenderRequest::new(OutputFormat::Svg);
-let artifact = diagram.render(req)?;
+let req = RenderRequest { format: OutputFormat::Svg, ..RenderRequest::default() };
+let artifact = diagram.render(&req)?;
 
 // artifact.path: PathBuf to the rendered file (may be in cache)
 // artifact.format: OutputFormat::Svg
 // artifact.cache_hit: bool
-// artifact.alt_text: Option<String>
+// artifact.alt_text: String
 ```
+
+`RenderRequest::background` sets the Mermaid theme's background: `Theme` (default) keeps it, `Solid { r, g, b }` replaces it with that hex color, and `Transparent` sets it (and the edge-label background) to `none`. PNG-only fields (`target_width`, `row_height`) are covered in [Rasterization](./rasterization.md).
 
 ### Fallback
 
