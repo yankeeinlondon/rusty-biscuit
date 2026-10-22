@@ -13,6 +13,7 @@ packages:
   - schematic-define
   - schematic-gen
   - schematic-runtime
+  - schematic-schema
 human_review: false
 source_files_during_phase_2:
   - schematic/define/src/builders.rs
@@ -50,15 +51,6 @@ docs_created_during_phase_2:
   - schematic/docs/graphql.md
 skills_files_updated_during_phase_2:
   - .claude/skills/schematic-define/SKILL.md
-message_to_agent: |-
-  Phase 3 is complete; read "## Phase 3" in this log, especially "What landed" and "Adopted defaults and decisions".
-  The runtime targets Phase 4 should generate against (all in schematic-runtime, re-exported at the crate root):
-  - single stream shape: `type Decoder = Sse<T, End>` / `Ndjson<T, End>` / `ByteStream`; `type Success = ItemStream<T>` (or `ByteStream`). `End` is a generated unit struct implementing `StreamEnd { const CONDITION: EndCondition; const KEEP: bool }`; use `UntilClose` for connection close. `EndCondition::FieldEquals { path: &[..segments..], value: Scalar::.. }` takes the dotted field split into object keys.
-  - several shapes: a generated enum implementing `Alternatives { const ROUTES: &[Route]; async fn decode_alternative(index, LiveBody) }` (routes in variant order, built with `Route::new(ShapeKind::..).media(normalized).statuses(&[..]).tag(JsonTag::..).fallback()`; media is the effective normalized type, None for empty/fallback), decoded by `Shapes<Enum>`; also `impl JsonAlternatives` when every shape is JSON (that alone makes a mutator compile).
-  - errors: `const ERRORS: &'static [ErrorRoute] = &[ErrorRoute::new(StatusMatch::Exact(404) | StatusMatch::Range { lo, hi }, alternative)]` on EndpointSpec (the old DECLARED_ERROR_STATUSES is gone; default is 400-599 -> 0). The failure type implements `ErrorBody::decode_body(alternative, body)`; runtime impls exist for String, Bytes, (), serde_json::Value; opted-out endpoints use `NoDeclaredError` and `ERRORS = &[]`.
-  - GraphQL: `type Decoder = GraphQl<D>; type Failure = GraphQlOperationError<D, H>`; build the body with `schematic_runtime::graphql::request_body(document, Option<&V>, Option<&str>)` (None variables omits the member), POST with `Accept: application/json`.
-  RUNTIME_ABI/ABI is still 5: bump both (runtime/src/lib.rs `ABI` and gen/src/lib.rs `RUNTIME_ABI`) when generated code first uses these items, then regenerate schematic-schema.
-  New ErrorKind::UnexpectedContentType, BodyReadError::DeadlineExceeded, BuildError::InvalidMaxFrameBytes, DecodeFailureKind::{UnexpectedContentType, Declared}; Client::max_frame_bytes(usize) (default DEFAULT_MAX_FRAME_BYTES = 16 MiB).
 source_files_during_phase_3:
   - schematic/runtime/Cargo.toml
   - schematic/runtime/src/client.rs
@@ -99,6 +91,95 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/schematic-define/SKILL.md
+message_to_agent: |-
+  Phase 4 is complete; read "## Phase 4" in this log ("Decisions taken before the waves", "What landed", "Adopted defaults and decisions").
+  What Phase 5's storage switch must do with Phase 4's work:
+  - The generator, OpenAPI exporter, x-schematic writer, Postman exporter, and definition_gen already read `Endpoint::success_shapes()` and `RestApi::effective_errors`; once `Endpoint::response` stores `Vec<SuccessShape>`, they need no change. Production OpenAPI import still uses the legacy mapping: switch `mappings::map_operation` to `openapi::classify_responses` and extend `OpenApiImport::remap_reference_names` to shapes and error entries (the log lists the behavior differences that switch causes).
+  - Delete the hidden test seam `Endpoint::shapes_preview` (define/src/types.rs) and make `success_shapes()` return the stored list. Tests that set it: gen `codegen::responses::tests`, gen `tests/l1/fresh_output_compile.rs` (`shapes_fixture`), `tests/l1/response_adapters.rs`, `tests/common/components.rs` (`shape_reference`), define `tests/response_openapi.rs`, and the definition_gen unit test; assign `response` instead. Fold stream item types into `Endpoint::json_references()`.
+  - Still reading `endpoint.response` directly: define `pagination/{resolve,validate}.rs`, gen `check_pagination`, and the Postman composition warning in `gen/src/export/vocabulary.rs`.
+  - `SuccessShape::variant` / `Success::variant(name)` is new (D-15 author names): use it for Bitbucket `Directory`/`File`, and for any two shapes of one kind whose content types do not separate their names (validation asks for it).
+  - `ErrorBody` is now `ErrorBody<A>` (A = the generated API marker) so generated code can implement it for registered types from schematic-definitions; runtime `ABI` and gen `RUNTIME_ABI` are 6 and `schematic-schema` is regenerated for 6. Regenerate with `just generate` after migrating definitions.
+  - The D-15 collision with Ollama's unregistered `GenerateResponse`/`ChatResponse` (Phase 1 contract freeze) is still to be resolved by renaming those types when they are registered.
+source_files_during_phase_4:
+  - schematic/define/src/builders.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/responses.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/openapi/import.rs
+  - schematic/define/src/openapi/import/mappings/classify.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/mappings/responses.rs
+  - schematic/define/src/openapi/import/query_paths.rs
+  - schematic/define/src/openapi/mod.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/response.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/response_import_matrix.rs
+  - schematic/define/tests/response_openapi.rs
+  - schematic/define/tests/response_vocabulary.rs
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/client/helpers.rs
+  - schematic/gen/src/codegen/client/methods.rs
+  - schematic/gen/src/codegen/client/mod.rs
+  - schematic/gen/src/codegen/client/shared_auth.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/names.rs
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/graphql.rs
+  - schematic/gen/src/codegen/mod.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+  - schematic/gen/src/codegen/responses.rs
+  - schematic/gen/src/codegen/variant.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/postman/item.rs
+  - schematic/gen/src/export/vocabulary.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/common/components.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/gen/tests/l1/response_adapters.rs
+  - schematic/runtime/src/api_client.rs
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/endpoint.rs
+  - schematic/runtime/src/error.rs
+  - schematic/runtime/src/graphql.rs
+  - schematic/runtime/src/lib.rs
+  - schematic/runtime/src/pager/request.rs
+  - schematic/runtime/src/response.rs
+  - schematic/runtime/tests/l1/envelope.rs
+  - schematic/runtime/tests/l1/error_routes.rs
+  - schematic/runtime/tests/l1/graphql.rs
+  - schematic/runtime/tests/l1/graphql_address.rs
+  - schematic/runtime/tests/l1/main.rs
+  - schematic/runtime/tests/l1/support.rs
+  - schematic/runtime/tests/l1/whole_send_elapsed.rs
+  - schematic/schema/src/lib.rs
+docs_updated_during_phase_4:
+  - schematic/docs/definition-builders.md
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/graphql.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/responses-and-errors.md
+  - schematic/docs/runtime/README.md
+  - schematic/docs/runtime/building-clients.md
+  - schematic/docs/runtime/codecs.md
+  - schematic/docs/runtime/sending-and-responses.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/gen.md
 ---
 
 # Implementation Log for 2026-10-16-schematic-response-model-graphql (8 phases)
@@ -1373,3 +1454,370 @@ generation), `responses-and-errors.md` and `graphql.md` (new "Decoding a
 reply" section), and `dependencies.md` (serde `derive`, futures-util use).
 The `schematic-define` skill's streaming note now names the runtime codecs
 the generator will target.
+
+## Phase 4
+
+Run of 2026-10-22. Tree: HEAD `6f030fd26` plus the uncommitted Phase 3
+runtime work (still in the working tree, so the scope calculator below also
+sees Phase 3's files). Implementer: `claude/opus` as coordinator, with three
+foreground subagents on disjoint files (REST response codegen; consumer
+adapters; runtime GraphQL address and `ErrorBody<A>`), then GraphQL codegen,
+the ABI bump, and fixture integration in the main session.
+
+### Decisions taken before the waves
+
+- **decision: a hidden test seam `Endpoint::shapes_preview`** (define
+  `types.rs`). `Endpoint::response` still holds one `ApiResponse`, so no
+  definition can carry several shapes or a stream until Phase 5. The field is
+  `#[doc(hidden)]`, `#[serde(skip)]`, set by no builder, and read only by
+  `Endpoint::success_shapes()` when nonempty. It lets generator and exporter
+  tests drive multi-shape and stream endpoints through the real pipeline
+  (validation, request structs, module assembly, fixture crates) now, and
+  Phase 5 deletes it when `response` becomes the shape list (the test
+  fixtures then assign `response` instead). Alternative rejected: a
+  `generate_*_with_shapes` entry point in the generator, which would bypass
+  validation and module assembly and leave a test-only public function in
+  production code. It is not a second response system: nothing serializes,
+  builds, or exports it outside tests.
+- **deviation (frozen form, additive): `SuccessShape::variant`** (string,
+  absent means none, `non_null`) and the builder `Success::variant(name)`.
+  D-15 says "the author may name variants in the definition, and does so for
+  R3b groups and R32a (`Directory`, `File`)", but the Phase 1 freeze gave the
+  stored shape no member to hold that name. Validation: an UpperCamelCase
+  ASCII identifier other than `Self`, unique within the endpoint, and refused
+  on a single shape (which generates no enum), mirroring the R3c fallback
+  rule. `legacy_response()` refuses a named shape. Test:
+  `define/tests/response_vocabulary.rs::an_author_named_variant_is_an_identifier_unique_to_a_multi_shape_endpoint`.
+- **removed dead generator code** (Phase 1 review agenda item 10):
+  `gen/src/codegen/client/` (5 files), `codegen/request_enum.rs`,
+  `codegen/error.rs`, `codegen/variant.rs`. None was declared in
+  `codegen/mod.rs`, so none compiled; they were the last readers of the
+  removed `ResponseKind` and would have needed v2 edits for nothing.
+- **finding and decision: `ErrorBody` becomes `ErrorBody<A>` (generic over the
+  API marker).** Registered JSON types live in `schematic-definitions`
+  (`schema/src/anthropic.rs` re-exports `schematic_definitions::anthropic::*`),
+  so the generated crate cannot write `impl ErrorBody for
+  ::schematic_definitions::…::Problem`: Rust's orphan rule forbids it, although
+  the runtime docs promised that "generated code implements it for registered
+  JSON types". With the API marker (a generated, local type) as a trait
+  parameter, `impl ErrorBody<Anthropic> for ::schematic_definitions::…::Problem`
+  is legal, so R20's "the failure type is the matched shape's type" holds
+  without a wrapper. Alternatives rejected: a local newtype or one-variant enum
+  per endpoint (contradicts R20), and a second associated failure-decoder
+  type on `EndpointSpec` (larger change to every generated impl and to the
+  GraphQL composite).
+
+**Tree note.** The pipeline committed Phase 3 while this run was underway
+(`d4037bbe6`, `8a10f5298`, `44b6878b3`). Those commits hold no Phase 4 edit
+(checked: HEAD has no `ErrorBody<A>`, `AddressRule` in the runtime, or
+`## Phase 4` here), so the working tree is exactly Phase 4's change.
+
+### What landed
+
+**Wave 7: REST generation** (`gen/src/codegen/responses.rs`, new; wired in
+`request_structs/endpoint_spec.rs` and `output/assemble/api.rs`). The
+generator reads only `Endpoint::success_shapes()` and
+`RestApi::effective_errors`:
+
+- one shape keeps today's `Json<T>`/`Text`/`Binary`/`Empty`; an SSE/NDJSON
+  stream is `ItemStream<T>` with `Sse<T, End>`/`Ndjson<T, End>`; a byte stream
+  is `ByteStream`. `End` is `UntilClose` for a consumed connection close, else
+  a generated `{Id}End` (`{Id}{Variant}End` inside an enum) implementing
+  `StreamEnd` (`FieldEquals` paths split on `.`, values mapped to `Scalar`).
+- several shapes generate `{Id}Response` (D-15) deriving `Debug`, variants in
+  declaration order with the note as rustdoc, named by `SuccessShape::variant`,
+  else the kind, else kind plus media subtype (`JsonProblem`); still-equal
+  names are a `generated-name-collision` diagnostic asking for
+  `Success::variant`. `impl Alternatives` (routes: normalized media, statuses,
+  tags, fallback) and `impl JsonAlternatives` only when every shape is JSON;
+  `Decoder = Shapes<{Id}Response>`.
+- failures: an empty or opted-out table keeps `NoDeclaredError` and emits no
+  `ERRORS` (so every shipped endpoint is byte-identical); one distinct shape is
+  its own type (R20); several give `{Id}Error` (D-23) with an
+  `ErrorBody<{Api}Api>` impl dispatching on the route's alternative.
+  `api_error_body_impls` emits one `ErrorBody<{Api}Api>` per registered JSON
+  error type per API module (`ErrorBody<A>` decision above).
+- validation: end-marker and operation failure-enum names join the module's
+  naming space; stream item types are "referenced types" (role "stream
+  item"); `failure_enum_needed` decides `{Id}Error` for endpoints and
+  operations alike.
+
+**Wave 7: GraphQL generation** (`gen/src/codegen/graphql.rs`, new). One
+request struct per operation, `{id}{suffix}`: typed variables as its one field
+taken by `new`, or a unit struct with `new()`; `DOCUMENT` and `OPERATION_NAME`
+constants; `EndpointSpec` with `METHOD = POST`, `ADDRESS = Address::GraphQl`,
+`Accept: application/json`, `Decoder = GraphQl<D>`, `Failure =
+GraphQlOperationError<D, H>` where `H` comes from the same failure codegen
+over `effective_operation_errors`. `definition()` gains `.graphql(&[..])` for
+an API with a surface. No endpoint method or convenience wrapper.
+
+**Runtime support (subagent)**, needed by the generated GraphQL and error code:
+
+- `ErrorBody<A>` (generic over the API marker); runtime impls are blanket over
+  `A`; `EndpointSpec::Failure: ErrorBody<Self::Api>`.
+- `Address { Base, GraphQl }` and `EndpointSpec::ADDRESS` (default `Base`).
+  A GraphQL-address request goes to the resolved GraphQL URL through the one
+  shared assembly step (typed send, `send_raw`, `check_arguments`, the pager),
+  with the endpoint's cross-origin check as for an absolute URL.
+- `graphql::{AddressRule, AddressError, derive_address}` (R39: segment-wise,
+  trailing slash ignored, proxy prefix kept, query/fragment base refused,
+  first match wins); `ApiDefinition::graphql(rules)`;
+  `Client::graphql_url(url)` with `BuildError::InvalidGraphQlUrl { reason }`
+  (reason only, never the URL). The address is derived at build from the
+  effective base URL.
+- The generated API-struct macro (`api_client!`) now forwards `graphql_url`
+  and `max_frame_bytes`; both joined `API_CLIENT_METHODS`. **Gap closed:**
+  Phase 3 added `Client::max_frame_bytes` but a generated API struct could not
+  reach it.
+- `ABI` 5 → 6 (runtime `ABI`, gen `RUNTIME_ABI`): generated code now names
+  `ErrorBody<A>`, `Address`, `AddressRule`, the stream codecs, and
+  `Alternatives`. `schematic-schema` regenerated with the generator
+  (`cargo run -p schematic-gen -- generate --api all …`, the `just generate`
+  command without its desktop notification); the only diff is the two ABI
+  lines of `schema/src/lib.rs`. OpenAPI and Postman artifacts unchanged.
+  `gen/tests/l1/e2e_generation.rs` now reads the ABI from `RUNTIME_ABI`
+  instead of the literal `5`.
+
+**Wave 7: consumer adapters (subagent)**:
+
+- OpenAPI export: production now goes through the v2 mapping
+  (`openapi/export/responses.rs::map_responses(shapes, &ErrorTable)` from
+  `paths.rs::map_operation`), byte-identical for every shipped definition
+  (`artifact_drift` green). Per-status merging, `oneOf` + `discriminator`,
+  array/object `oneOf`, `*/*` fallback, notes in descriptions, byte streams as
+  binary strings, SSE/NDJSON item schemas, resolved-table error keys with
+  class expansion (D-25), success and error keys disjoint. The binary schema
+  is now `StringFormat::Binary` (serializes identically, and survives an
+  `openapiv3` parse).
+- `x-schematic`: an operation-level `success` member when shapes carry facts
+  the standard fields lose (omitted for a lone legacy-representable shape),
+  and the declared error levels (`errors` on the document and operations,
+  `no_declared_errors`).
+- OpenAPI import: `openapi::classify_responses(api, endpoint, &Responses,
+  &RefResolver) -> ResponseClassification { successes, errors, diagnostics }`
+  implements R28 and is tested directly; **production import stays legacy**
+  (an endpoint cannot store several shapes yet). Differences Phase 5 will see
+  on switching: SSE becomes a stream (today Binary plus an info diagnostic); no
+  representable success becomes an import error (today Empty plus a warning);
+  error statuses become endpoint entries (today ignored); several media types
+  keep one shape each (today one by preference). Phase 5 must also extend
+  `OpenApiImport::remap_reference_names` to shapes and error entries.
+- Parser-boundary checks for the response fields `classify_responses` reads
+  were added to the existing `check_text` loader; they are live (existing
+  import tests and shipped corpora pass).
+- Postman: the first success shape's content type (`first_success_content_type`),
+  a description line only when that shape declares a content type or streams.
+- R42/D-29: OpenAPI and Postman skip GraphQL operations with a nonfatal
+  `graphql-operation` warning, `<API> operation <id>: GraphQL operation skipped
+  in <OpenAPI|Postman> output` (new `Feature::GraphQlOperation`).
+- `definition_gen.rs` emits v2 builder calls (`Success::sse(..)`, modifiers,
+  `ErrorSet::new().on(..)`, `ErrorSet::none()`) when an endpoint carries v2
+  facts; the legacy `returns_*` path otherwise (committed outputs unchanged).
+
+**Wave 8: fixture integration.** `gen/tests/l1/fresh_output_compile.rs` gains
+two fixture APIs generated, compiled offline, and run against wiremock in the
+fixture crate:
+
+- `FixtureShapes` (via `shapes_preview`): `CreateMessage` JSON + SSE `[DONE]`
+  with notes and a 404 text overlay; `StreamChunks` NDJSON `done = true` kept;
+  `Download` byte stream `audio/mpeg`, opted out; `GetSource` `Directory` JSON +
+  `File` binary fallback; `Submit` `Record` 200 / `Job` 202 with a 409
+  `Conflict` overlay; API default `5XX` → `Problem`.
+- `FixtureGraphQl`: GitHub address rules on a `/api/v3` base, `CheckStatus`
+  (typed variables, operation name, 403 → `Problem`), `Viewer` (no
+  variables), `Rename` mutation (HTTP opt-out), and a REST `GetUser`.
+- `tests/common/components.rs` now also registers components for preview
+  shapes, API error entries, and GraphQL operation references.
+
+### Adopted defaults and decisions (Phase 4)
+
+- **adopted default: failure variant collisions get a position suffix**
+  (`Problem`, `Problem2`) after the media-subtype suffix, rather than a
+  diagnostic (source: D-23 "named after the shape's type"; error shapes have no
+  author-naming facility, so a diagnostic would leave the author with no fix).
+  Success-variant collisions are a diagnostic because `Success::variant` exists.
+- **adopted default: a lone JSON error shape whose Rust type the runtime
+  already decodes differently** (`String`, `bytes::Bytes`, `()`,
+  `NoDeclaredError`) generates the `{Id}Error` enum so the body is read as JSON;
+  `serde_json::Value` is used directly (the runtime's impl decodes JSON).
+  Source: R20, constrained by the runtime impls of Phase 3.
+- **adopted default: D-25 expansion.** A class range that an exact or narrower
+  entry supersedes in part is expanded into its exact statuses (a `4XX` default
+  plus an exact `404` exports 100 keys). OpenAPI already lets an exact key take
+  precedence over `4XX`, so keeping `4XX` + `404` would also preserve lookup.
+  **Review agenda:** whether to keep the class key in that case.
+- **decision: `x-schematic` carries the declared error levels**, not the
+  resolved table (the `responses` map already shows the resolved table); stream
+  framing/end live only in the operation-level `x-schematic.success`.
+- **decision: import declares success statuses only when the statuses carry
+  different shape sets**, ignoring a body-less 204; inline `oneOf` members and
+  array/object split members import as `serde_json::Value` (as
+  `reference_from_schema` already does).
+- **decision: GraphQL operations get no endpoint method** on the API struct;
+  the request value goes through `send` (R36 "the existing generic send").
+- **decision: an invalid author variant name falls back to `Shape{n}` in
+  codegen** instead of panicking; define validation rejects such names first.
+- **deferred (Phase 7, not a Phase 4 gap):** the generated pager for a
+  paginated operation. Phase 4 prepared it: the runtime pager forwards
+  `R::ADDRESS` (`graphql_address::every_page_of_a_graphql_address_endpoint_reaches_that_address`).
+- **known limitations recorded for Phase 5:** `check_pagination` and the
+  Postman composition warning still read `endpoint.response`; a multi-shape
+  paginated endpoint is not handled until storage switches.
+- **mechanical:** the misuse label "ErrorSet only supports none" is now "ErrorSet
+  has no status shorthand" (it has `new`/`on` since Phase 2; the case still
+  fails as intended).
+
+### Requirement-to-test mapping (Phase 4 scope)
+
+Tiers: every test below is L1 except the `slow_` fresh-output guards, which
+`just test` runs through `just test-fresh-output` (they invoke Cargo, so they
+stay off archive consumers, as before). New files are declared:
+`gen/tests/l1/main.rs` (`mod response_adapters;`),
+`runtime/tests/l1/main.rs` (`mod graphql_address;`); the two new
+`define/tests/*.rs` files compile under define's autotests (`all-features` in
+its CI metadata). No name carries a tier marker by accident.
+
+Boundaries and fidelity: generator output (F1, token assertions parsed by
+`syn`) for naming and shape; **the real generated crate compiled offline and
+run against wiremock (F2)** for R2/R7/R12/R19/R20/R36–R39 behavior; the
+public define importer/exporter (F1, in-process, including `openapiv3`
+re-parse); the runtime client against loopback mocks (F2).
+
+| Req | Behavior | Test |
+| --- | --- | --- |
+| R2 | one shape keeps its type/codec; streams are `ItemStream`/`ByteStream`; several shapes are `{Id}Response` | `gen codegen::responses::tests::{a_single_plain_shape_keeps_its_type_and_codec_and_declares_no_error, a_single_sse_stream_consuming_its_data_line_terminator_names_a_generated_end_marker, a_kept_ndjson_field_terminator_splits_its_dotted_path, a_byte_stream_and_a_connection_close_stream_need_no_end_marker, scalars_keep_their_json_kind, json_plus_sse_is_an_enum_whose_variant_docs_carry_the_notes}`; compiled and run: `fresh_output_compile::slow_fixture_apis_compile_and_send_offline` (child tests `a_multi_shape_endpoint_returns_the_variant_its_content_type_selects`, `single_stream_endpoints_deliver_items_and_bytes_as_they_are_framed`) |
+| R3, R3a–R3c (generated) | routes carry media, statuses, tags, fallback; JSON + empty; unexpected content type through a generated client | `responses::tests::{json_shapes_told_apart_by_status_are_all_json_alternatives, tagged_json_groups_route_by_discriminator_or_json_kind, a_binary_fallback_has_no_media_type_and_disables_json_alternatives, json_plus_empty_has_a_unit_variant_chosen_by_204}`; child tests `a_multi_shape_endpoint_returns_the_variant_its_content_type_selects`, `named_fallback_and_status_shapes_select_their_variants` |
+| D-15 naming | author variant names; kind, then media subtype; collision diagnostic; `variant` validation and serialized form | `responses::tests::derived_variant_names_take_the_media_subtype_only_when_kinds_repeat`; `gen validation::tests::success_variants_left_colliding_by_derived_names_ask_for_author_names`; `define/tests/response_vocabulary.rs::an_author_named_variant_is_an_identifier_unique_to_a_multi_shape_endpoint` |
+| R8/R11 (generated) | `[DONE]` consumed; NDJSON `done` kept as last item; ended early through the generated client; byte chunks in order | child test `single_stream_endpoints_deliver_items_and_bytes_as_they_are_framed` |
+| R12 | `JsonAlternatives` only for all-JSON; mutator refused on NDJSON, byte stream, text, binary, JSON+stream; all-JSON enum and GraphQL data accept one; mutator runs on a generated all-JSON enum | `slow_generated_types_reject_misuse_at_compile_time` (five new misuses plus the control); child test `named_fallback_and_status_shapes_select_their_variants` |
+| R13a | notes reach variant rustdoc and the OpenAPI response description | `responses::tests::json_plus_sse_is_an_enum_whose_variant_docs_carry_the_notes`; `define/tests/response_openapi.rs::every_shape_of_a_status_merges_into_one_response_object_with_its_notes` |
+| R19, R20 | inherited/overlaid/opted-out tables; one shape is its type with one deduplicated `ErrorBody<Api>` impl; several give `{Id}Error` with correct alternatives; exact beats range through a generated client; malformed, undeclared, opt-out | `responses::tests::{inherited_api_errors_with_one_json_shape_fail_as_that_type, an_endpoint_overlay_with_a_second_shape_generates_the_failure_enum, an_opted_out_endpoint_declares_no_error_and_no_table, a_lone_error_shape_uses_the_runtime_body_unless_the_runtime_decodes_its_type_otherwise, repeated_error_variant_names_take_the_media_subtype_then_a_position, error_body_impls_are_one_per_distinct_type}`; `output::assemble::api::tests::a_json_failure_type_shared_by_endpoints_gets_one_error_body_impl_per_api`; `validation::tests::{a_stream_end_marker_joins_the_generated_names, a_lone_json_string_error_needs_the_failure_enum}`; child test `declared_errors_decode_by_the_most_specific_status_and_opt_outs_stay_undeclared`; runtime `graphql_address::a_registered_type_of_another_module_decodes_a_declared_http_error` |
+| R21, R27, D-25, D-31 | per-status merge, `oneOf`/discriminator, array/object, `*/*`, byte stream binary, class kept vs expanded, keys disjoint, `openapiv3` re-parse (JSON and YAML) | `define/tests/response_openapi.rs::{json_shapes_sharing_status_and_media_become_a_one_of_naming_the_discriminator, array_and_object_json_shapes_become_a_one_of_without_a_discriminator, byte_streams_export_as_binary_strings_under_each_declared_status, a_class_range_stays_4xx_unless_an_exact_entry_supersedes_part_of_it, the_exported_document_parses_back_through_openapiv3_as_json_and_yaml}`; define unit `export::responses::tests::{a_class_range_superseded_in_part_expands_to_its_exact_statuses, a_range_that_is_not_a_class_exports_its_exact_statuses}`; `gen/tests/l1/response_adapters.rs::the_grouped_openapi_document_merges_shapes_and_parses_back` |
+| R26 | `x-schematic` carries tags, fallback, notes, variant, stream end, declared errors | define unit `extensions::tests::response_vocabulary_round_trips_through_both_extensions`; `response_openapi.rs::x_schematic_carries_declared_error_levels_and_no_success_for_a_plain_shape` |
+| R28 | media families, stream without schema, `oneOf` separable or not, endpoint-level errors and diagnostics, status declaration, no-success error, export→import round trip | `response_openapi.rs::{import_classifies_each_normalized_media_family, a_stream_without_a_named_item_schema_decodes_values_until_close_with_a_diagnostic, a_one_of_separates_by_discriminator_or_array_versus_object_and_otherwise_imports_as_one_schema, errors_stay_endpoint_level_and_unrepresentable_responses_are_reported, success_statuses_are_declared_only_when_statuses_carry_different_shapes, an_operation_without_a_representable_success_is_an_import_error, export_then_import_of_json_sse_fallback_and_errors_yields_the_same_shapes_and_entries}` |
+| R29 | Postman records the first shape's content type | `response_adapters.rs::postman_records_the_first_success_shapes_telling_content_type` |
+| R35 (call site), R36 | wrong variables type fails to compile; POST, `Accept`/`Content-Type` JSON, body members, unit omits `variables`, `operationName` only when set | `slow_generated_types_reject_misuse_at_compile_time` ("GraphQL variables of another type"); `gen codegen::graphql::tests::{typed_variables_are_the_request_field_and_reach_the_body_with_the_operation_name, an_operation_without_variables_omits_them_and_its_name_by_default}`; child test `graphql_operations_post_their_document_to_the_address_the_rules_derive` |
+| R35 naming | operation failure enum joins the naming space | `validation::tests::an_operation_shares_the_endpoint_naming_space` |
+| R37 (generated) | GraphQL errors with GitHub `type`, 403 typed HTTP failure, opt-out keeps GraphQL errors declared | `codegen::graphql::tests::the_failure_composes_graphql_errors_with_the_effective_http_table`; child test `graphql_errors_and_http_errors_reach_the_composite_failure` |
+| R39, D-11 | derivation table; `/api/v3` and root bases for REST and GraphQL; caller base override moves it; override beats rules; invalid override fails at build; foreign override refused under same-origin, sent under `allow_origins`; no address fails before send; pager pages reach it; generated rules and `graphql_url` | runtime `graphql_address::{derivation_takes_the_first_matching_rule_over_path_segments, rest_and_graphql_endpoints_reach_their_addresses_under_both_bases, a_graphql_url_override_beats_the_rules, an_invalid_override_or_an_underivable_base_fails_at_build, a_foreign_override_is_refused_under_same_origin_and_sent_when_its_endpoint_allows_it, a_graphql_send_with_neither_rules_nor_override_fails_before_sending, every_page_of_a_graphql_address_endpoint_reaches_that_address}`; `codegen::graphql::tests::address_rules_join_the_api_definition_in_order_only_for_a_graphql_surface`; child test `graphql_operations_post_their_document_to_the_address_the_rules_derive` |
+| R41 (generated) | a mutator for an operation is typed `&mut D` | misuse control in `slow_generated_types_reject_misuse_at_compile_time` |
+| R42 | both exporters skip operations with a nonfatal warning | `response_adapters.rs::both_exporters_skip_graphql_operations_with_a_warning` |
+| definition source | importer emits v2 builder calls | gen unit `definition_gen::tests::emits_builder_calls_reproducing_response_model_v2_facts` |
+| no regression | every shipped definition's Rust, OpenAPI, and Postman output unchanged except the ABI lines | `artifact_drift`, `definition_baseline`, `fresh_output_compile::slow_real_apis_compile_offline`, `import_overlay` (all in `just test`) |
+
+**Deferred to the phase that owns the boundary:** R43's sniff fixtures through
+a generated operation and R40's generated pager are Phase 7 (Wave 14);
+switching production import onto `classify_responses` and storing shapes are
+Phase 5.
+
+### Input robustness matrix (OpenAPI response fields, JSON and YAML)
+
+Two loaders (`serde_json`, `serde_yaml_ng`), both through `check_text` and
+then `openapiv3`. Default outcome for every cell: an import error naming the
+operation and member path; nothing imported. Columns: `responses`,
+`content`, `schema`, response `$ref`, `oneOf`,
+`discriminator.propertyName` (and `mapping`). Rejected rows (32 cells, each
+format): null, wrong type, one invalid member, all members invalid, empty
+where empty is not allowed, duplicates by spelling (`4XX`/`4xx`, media-type
+case), exact textual duplicate keys (JSON; YAML's parser already rejects them),
+and trailing content. Exceptions (accepted, checked through
+`classify_responses`): a response with no `content` or empty `content` is
+Empty; absent or empty `schema` is `serde_json::Value` plus a diagnostic; an
+inline response is used directly; an absent discriminator is a single schema
+plus a diagnostic; empty `responses` is "no success", an import error; a
+media range gets a diagnostic. A control row proves the unedited fixture
+imports. Tests: `define/tests/response_import_matrix.rs::{json_response_matrix,
+yaml_response_matrix, json_exact_duplicate_keys_are_rejected_for_every_column}`.
+Production import keeps today's behavior on these cells until Phase 5.
+
+**Smell grep** (subagent, re-checked for the new codegen): the `#[serde(default)]`
+members added are the write-only `x-schematic` members, each paired with its
+skip-when-default serialization; `unwrap_or` in `check_text` and `classify.rs`
+only labels messages; `split(';').next().unwrap_or_default()` cannot reach its
+default; no `.ok()` or `filter_map(.. as_str())` on a load-bearing parse. The
+generated `ErrorBody` impl's `serde_json::from_slice(body).ok()` is the
+runtime's documented "`None` is `MalformedError`" contract.
+
+### Review agenda entries raised in Phase 4
+
+1. **`SuccessShape::variant`** is a new stored member beyond the Phase 1
+   freeze (additive, omitted when unset). D-15 needs somewhere to keep author
+   variant names; confirm the member name and the "only on several shapes"
+   rule.
+2. **`ErrorBody<A>`** replaces `ErrorBody` (orphan rule; see the decision
+   above). Confirm the trait shape before Phase 5 adds the first shipped error
+   tables.
+3. **D-25 expansion** of a partly superseded class (100 exact keys for `4XX` +
+   `404`) versus keeping `4XX` beside the exact key.
+4. **Failure variant collisions** take a position suffix (`Problem2`); error
+   shapes have no author-naming facility.
+5. **The `shapes_preview` test seam** lives in `schematic-define` until Phase
+   5; confirm it is removed there.
+
+### Phase 4 gates
+
+The scope calculator, run from the repository root after all edits:
+
+```sh
+git status --porcelain --untracked-files=all | awk '{print $NF}' \
+  | xargs python3 scripts/ci/affected_scope.py
+```
+
+Result: `packages: [schematic-define, schematic-gen, schematic-runtime,
+test-toolkit, darkmatter]`, `change_class: package`. So both gates ran, once,
+after every subagent had finished.
+
+- `just lint` (schematic): clean.
+- `just test` (schematic): **2599 passed, 15 skipped** (Phase 3: 2541; the 15
+  skips are the same environment-gated tests), fresh-output 9/9 (the fixture
+  test now also builds and runs `FixtureShapes` and `FixtureGraphQl`; the
+  misuse test has the five new misuses), compile-fail 1/1, exit 0. No test
+  was reported slow, timed out, or leaky. Before the gate the two slow guards
+  were run alone: `slow_fixture_apis_compile_and_send_offline` (92 s, all
+  child tests passed first time) and
+  `slow_generated_types_reject_misuse_at_compile_time` (40 s).
+- `just check-tier-coverage schematic`: 0 stranded.
+- In-area generated crate: `just test-schema` 55/55 (one slow under the
+  generated crate's compile, as before); `just lint-schema` clean.
+- Subagent-scoped runs (before the gate): runtime `l1` 400 passed and
+  `just test-compile-fail` 1/1; define full suite 796/796; gen lib 483 then
+  488 with the GraphQL tests; the l1 `artifact_drift`, `definition_baseline`,
+  `output_validation`, `e2e_generation`, `postman_*`, `openapi_*`,
+  `import_overlay`, `definition_bundles`, and `response_adapters` groups
+  green; clippy `-D warnings` clean on all three crates.
+- Dependents of `schematic-schema` / `schematic-definitions`, serially:
+  `cargo check --tests` clean for `sniff`, `biscuit-speaks`, `homelab`,
+  `eversolo-integration`, `arcam-amp-integration`,
+  `unfolded-integration-helper`, `sony-receiver-integration`, and
+  `model-citizen`. Behavior tests that send through a generated client (the
+  `ErrorBody<A>` trait and ABI changed underneath them): `sniff` remote tests
+  75/75, `homelab` 49/49, `biscuit-speaks` ElevenLabs 48/48, `model-citizen`
+  153/153. None of them names `ErrorBody`, `EndpointSpec`, or the ABI.
+- `darkmatter` tests that read shipped skills (`shipped_schema_corpus`,
+  `schema_roots`, `schema_phase_validation`, `current_root*`): 55/55.
+- `test-toolkit::archive_path_guard`: `every_allowlist_entry_still_names_a_live_site`
+  passed; **`no_archive_executed_target_bakes_in_a_producer_path` fails,
+  pre-existing and unchanged since Phase 2**:
+  `schematic/definitions/tests/authoring_surface.rs:5` and
+  `schematic/gen/tests/l1/definition_baseline.rs:301`, neither touched by this
+  phase. No new file is reported.
+- Cross-OS check: not run. No path, process, console, or `#[cfg]` code
+  changed; GraphQL address derivation works on parsed `url::Url` path
+  segments; the new fixture-crate tests use the existing fresh-output harness
+  (which CI already runs on every OS) and wiremock on dynamic ports.
+- Nothing was staged or committed (the three `git rm` deletions were unstaged
+  immediately; they remain plain working-tree deletions). `cargo fmt` was not
+  run.
+
+Docs updated: `responses-and-errors.md` (new "Generated success and failure
+types"; `.variant`; stored form), `graphql.md` (new "Generated operation
+requests"; generated rules and `graphql_url`; planned markers removed),
+`generation/generated-clients.md` (`Success`/`Failure` from shapes and tables;
+operations), `runtime/codecs.md` ("What generated code emits" replaces
+"Planned"), `runtime/README.md`, `runtime/sending-and-responses.md`,
+`definition-builders.md`; by subagents `runtime/codecs.md` (`ErrorBody<A>`),
+`runtime/building-clients.md` (`graphql_url`), `io/export-openapi.md`,
+`io/openapi-extensions.md`, `io/export-postman.md`, `io/import-openapi.md`,
+and `generation/validation.md`. The `schematic-define` skill (`SKILL.md`,
+`schematic/gen.md`) now describes the generated v2 codecs, the test seam,
+`variant`, and the removed dead files.

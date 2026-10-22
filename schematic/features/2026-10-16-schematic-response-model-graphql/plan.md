@@ -14,6 +14,7 @@ packages:
   - schematic-define
   - schematic-gen
   - schematic-runtime
+  - schematic-schema
 source_files_during_phase_2:
   - schematic/define/src/builders.rs
   - schematic/define/src/bundle.rs
@@ -90,6 +91,86 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_4:
+  - schematic/define/src/builders.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/responses.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/openapi/import.rs
+  - schematic/define/src/openapi/import/mappings/classify.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/mappings/responses.rs
+  - schematic/define/src/openapi/import/query_paths.rs
+  - schematic/define/src/openapi/mod.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/response.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/response_import_matrix.rs
+  - schematic/define/tests/response_openapi.rs
+  - schematic/define/tests/response_vocabulary.rs
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/client/helpers.rs
+  - schematic/gen/src/codegen/client/methods.rs
+  - schematic/gen/src/codegen/client/mod.rs
+  - schematic/gen/src/codegen/client/shared_auth.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/names.rs
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/graphql.rs
+  - schematic/gen/src/codegen/mod.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+  - schematic/gen/src/codegen/responses.rs
+  - schematic/gen/src/codegen/variant.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/postman/item.rs
+  - schematic/gen/src/export/vocabulary.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/common/components.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/gen/tests/l1/response_adapters.rs
+  - schematic/runtime/src/api_client.rs
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/endpoint.rs
+  - schematic/runtime/src/error.rs
+  - schematic/runtime/src/graphql.rs
+  - schematic/runtime/src/lib.rs
+  - schematic/runtime/src/pager/request.rs
+  - schematic/runtime/src/response.rs
+  - schematic/runtime/tests/l1/envelope.rs
+  - schematic/runtime/tests/l1/error_routes.rs
+  - schematic/runtime/tests/l1/graphql.rs
+  - schematic/runtime/tests/l1/graphql_address.rs
+  - schematic/runtime/tests/l1/main.rs
+  - schematic/runtime/tests/l1/support.rs
+  - schematic/runtime/tests/l1/whole_send_elapsed.rs
+  - schematic/schema/src/lib.rs
+docs_updated_during_phase_4:
+  - schematic/docs/definition-builders.md
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/graphql.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/responses-and-errors.md
+  - schematic/docs/runtime/README.md
+  - schematic/docs/runtime/building-clients.md
+  - schematic/docs/runtime/codecs.md
+  - schematic/docs/runtime/sending-and-responses.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/gen.md
 ---
 
 # Schematic response model v2 and GraphQL implementation plan
@@ -270,19 +351,19 @@ Address-rule tag and required `suffix`, replacement, and append-path payloads, p
 
 ### Wave 7 — Code generation (parallel after Phase 3)
 
-- [ ] **REST generation**
+- [x] **REST generation**
   - Extend codegen request structs/traits/enums/module docs to emit plain or enum success/failure types, effective error lookup, stream codec metadata, and shape notes as variant rustdoc. Nothing is injected into request bodies. No convenience send wrapper methods.
   - Add fixtures for single/multiple successes, exact-status-distinct JSON, discriminator- and array/object-distinct JSON, a fallback shape, inherited/overlaid/opted-out errors, and hook marker eligibility. Keep the old production response path active.
-- [ ] **GraphQL generation**
+- [x] **GraphQL generation**
   - Emit typed operation requests using `EndpointSpec`, POST body constants/typed variables, explicit operationName, composite failures, managed address override, and the existing generic send. Handle URL segments/proxy prefixes/trailing slashes, builder-invalid URLs, and cross-origin checks.
   - Prepare pagination integration using landed Relay/body-path contracts and freeze generated naming collision tests. Write generated fixture tests without adding shipped GitHub operations.
-- [ ] **Consumer adapters**
+- [x] **Consumer adapters**
   - Prepare reusable v2 mapping functions for OpenAPI export/import, Postman first-shape content type, and `x-schematic` writes behind the legacy production adapters. Own disjoint exporter/importer/extension files; coordinator resolves shared imports.
   - Include status/media aggregation, `oneOf`/`discriminator` and `*/*` fallback export, resolved-range expansion, normalized import classification and contextual loss diagnostics. Implement the matrix's parser-boundary checks where supported upstream parsers would otherwise hide null, invalid members, duplicates, or trailing content. No extension reader.
 
 ### Wave 8 — Compile fixtures (sequential)
 
-- [ ] **Fixture integration**
+- [x] **Fixture integration**
   - Wire additive modules/manifests and generate isolated fixture crates. Compile through the actual runtime and run a representative generated stream/multi-shape/error/GraphQL request against local mocks.
   - Run compile-fail cases for wrong GraphQL variables and invalid hook registration on streams, text, binary, and mixed JSON alternatives; prove all-JSON alternatives remain eligible. Validate module/suffix/body/enum naming collisions.
 
