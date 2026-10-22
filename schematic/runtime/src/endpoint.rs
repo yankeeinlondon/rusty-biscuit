@@ -85,7 +85,7 @@ pub struct RequestParts {
     pub path: String,
     /// Declared query parameters in declaration order, **not**
     /// percent-encoded. Duplicate names are kept in order.
-    pub query: Vec<(String, String)>,
+    pub query: Vec<(String, QueryValue)>,
     /// Request headers as (name, value) pairs, including cookie parameters
     /// already folded into a `Cookie` header.
     pub headers: Vec<(String, String)>,
@@ -102,6 +102,112 @@ impl RequestParts {
             query: Vec::new(),
             headers: Vec::new(),
             body: RequestBody::Empty,
+        }
+    }
+}
+
+/// The value of one declared query pair, before percent-encoding.
+///
+/// The client encodes every value once, when it builds the URL: every byte
+/// outside the RFC 3986 unreserved set becomes `%XX`, so a space is `%20`,
+/// never `+`. A [`Delimited`](Self::Delimited) value encodes each element
+/// that way and then joins them with its delimiter, so a delimiter inside an
+/// element stays escaped:
+///
+/// ```
+/// use schematic_runtime::{QueryDelimiter, QueryValue};
+///
+/// let tags = QueryValue::delimited(["a,b", "c"], QueryDelimiter::Comma);
+/// assert_eq!(tags.encoded(), "a%2Cb,c");
+/// assert_eq!(QueryValue::from("a,b c").encoded(), "a%2Cb%20c");
+/// assert_eq!(QueryValue::delimited(Vec::<String>::new(), QueryDelimiter::Pipe).encoded(), "");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueryValue {
+    /// One value, encoded whole.
+    Text(String),
+    /// A non-exploded array (OpenAPI `form` with `explode: false`,
+    /// `spaceDelimited`, or `pipeDelimited`): the elements in order and the
+    /// delimiter that joins them. No elements is the empty value.
+    Delimited {
+        /// The unencoded elements.
+        elements: Vec<String>,
+        /// What joins the encoded elements.
+        delimiter: QueryDelimiter,
+    },
+}
+
+/// The separator of a [`QueryValue::Delimited`] value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryDelimiter {
+    /// A literal `,` (`form`, `explode: false`).
+    Comma,
+    /// A space, sent as `%20` (`spaceDelimited`).
+    Space,
+    /// A `|`, sent as `%7C` (`pipeDelimited`).
+    Pipe,
+}
+
+impl QueryDelimiter {
+    /// The delimiter as it appears in the encoded query.
+    pub fn encoded(self) -> &'static str {
+        match self {
+            Self::Comma => ",",
+            Self::Space => "%20",
+            Self::Pipe => "%7C",
+        }
+    }
+}
+
+impl QueryValue {
+    /// A [`Delimited`](Self::Delimited) value of `elements` joined by
+    /// `delimiter`.
+    pub fn delimited<I>(elements: I, delimiter: QueryDelimiter) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<String>,
+    {
+        Self::Delimited { elements: elements.into_iter().map(Into::into).collect(), delimiter }
+    }
+
+    /// The value as it is written into the URL's query.
+    pub fn encoded(&self) -> String {
+        let mut out = String::new();
+        match self {
+            Self::Text(text) => encode_query_component(text, &mut out),
+            Self::Delimited { elements, delimiter } => {
+                for (index, element) in elements.iter().enumerate() {
+                    if index > 0 {
+                        out.push_str(delimiter.encoded());
+                    }
+                    encode_query_component(element, &mut out);
+                }
+            }
+        }
+        out
+    }
+}
+
+impl From<String> for QueryValue {
+    fn from(text: String) -> Self {
+        Self::Text(text)
+    }
+}
+
+impl From<&str> for QueryValue {
+    fn from(text: &str) -> Self {
+        Self::Text(text.to_owned())
+    }
+}
+
+/// Percent-encodes `text` into `out`, keeping only RFC 3986 unreserved
+/// characters; the one query encoding the runtime writes.
+pub(crate) fn encode_query_component(text: &str, out: &mut String) {
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
         }
     }
 }

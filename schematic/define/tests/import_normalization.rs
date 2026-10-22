@@ -305,3 +305,40 @@ fn referenced_query_declarations_require_resolvable_parameter_objects() {
         assert_eq!(import(&input, yaml).unwrap().api.endpoints[0].params.as_ref().unwrap().query.len(), 2);
     }
 }
+
+#[test]
+fn absent_explode_takes_the_openapi_default_for_the_style() {
+    let array = json!({"type":"array","items":{"type":"string"}});
+    let input = json!({"openapi":"3.0.0","info":{"title":"Explode","version":"1"},"paths":{
+        "/items":{"get":{"operationId":"listItems","parameters":[
+            {"name":"form_default","in":"query","schema":array},
+            {"name":"form_explicit_false","in":"query","explode":false,"schema":array},
+            {"name":"form_explicit_true","in":"query","style":"form","explode":true,"schema":array},
+            {"name":"pipes","in":"query","style":"pipeDelimited","schema":array},
+            {"name":"spaces","in":"query","style":"spaceDelimited","schema":array},
+            {"name":"filter","in":"query","style":"deepObject","schema":{"type":"object"}},
+            {"name":"x-tags","in":"header","schema":array},
+            {"name":"session","in":"cookie","schema":array}
+        ],"responses":{"200":{"description":"ok"}}}}
+    }});
+    for yaml in [false, true] {
+        let result = import(&input, yaml).unwrap();
+        let params = result.api.endpoints[0].params.as_ref().unwrap();
+        let explode = |list: &[schematic_define::ParamDef]| {
+            list.iter().map(|param| (param.name.clone(), param.explode)).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            explode(&params.query),
+            [
+                ("form_default".to_string(), true),
+                ("form_explicit_false".to_string(), false),
+                ("form_explicit_true".to_string(), true),
+                ("pipes".to_string(), false),
+                ("spaces".to_string(), false),
+                ("filter".to_string(), false),
+            ]
+        );
+        assert_eq!(explode(&params.header), [("x-tags".to_string(), false)]);
+        assert_eq!(explode(&params.cookie), [("session".to_string(), true)]);
+    }
+}

@@ -63,7 +63,7 @@ assert_eq!(pet.rust_path.as_deref(), Some("items::Pet")); // `Pet` without modul
 | info, servers, externalDocs | API name, description, base URL, docs URL; import options may override metadata |
 | operationId or operation fallback | PascalCase endpoint id, de-conflicted as needed |
 | path parameter | Path template placeholder |
-| query, header, cookie | Parameter in the declared transport location |
+| query, header, cookie | Parameter in the declared transport location, with its `required`, `style`, and `explode`; an absent `explode` takes OpenAPI's default, `true` for `form` style (query and cookie) and `false` otherwise |
 | JSON body | Typed model or free-form JSON |
 | multipart / URL-encoded body | Form fields, with file constraints where supported |
 | text / binary body | Raw body with content type |

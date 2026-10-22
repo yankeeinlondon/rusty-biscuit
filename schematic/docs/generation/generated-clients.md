@@ -463,7 +463,7 @@ impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
 
     fn into_parts(self) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = format!("/models/{}", urlencoding::encode(&self.model.to_string()));
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -875,7 +875,7 @@ impl schematic_runtime::EndpointSpec for GetMessageRequest {
             urlencoding::encode(&self.thread_id.to_string()),
             urlencoding::encode(&self.message_id.to_string()),
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -965,12 +965,28 @@ in [Generation Validation](./validation.md#what-each-output-checks).
 
 ## Query Parameters
 
-Declared query parameters become optional fields with `with_*` builders.
-`into_parts()` returns them in `RequestParts::query` as unencoded
-`(name, value)` pairs, apart from the path, and the runtime encodes each pair
-once when it builds the URL (a space is `%20`, never `+`), appending them
-with `&` after any query already in the path template. See
-[`docs/generation/request-side.md`](../generation/request-side.md).
+Declared query parameters become fields with `with_*` builders: a required
+one is a `T` field taken by `new()` after the path parameters and before the
+body, an optional one an `Option<T>` field. An enum parameter gets a
+generated `{RequestType}{FieldPascalCase}` enum. A request with a required
+query parameter, like one with a typed path parameter, has no `Default` and
+no `From` impls; its endpoint method takes the value as an argument rather
+than offering a setter:
+
+```rust
+// `start_time` is required; `bucket_width` is an optional enum.
+let costs = client
+    .usage_costs(1_700_000_000)
+    .bucket_width(UsageCostsRequestBucketWidth::V1d)
+    .await?;
+```
+
+`into_parts()` returns the parameters in `RequestParts::query` as unencoded
+`(name, QueryValue)` pairs, apart from the path, and the runtime encodes each
+pair once when it builds the URL (a space is `%20`, never `+`), appending
+them with `&` after any query already in the path template. Arrays are
+repeated or delimited as their `style` and `explode` declare. See
+[`docs/generation/request-side.md`](../generation/request-side.md#query-parameters).
 
 ## Request Bodies
 

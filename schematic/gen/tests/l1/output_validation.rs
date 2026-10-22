@@ -485,19 +485,28 @@ fn nested_arrays_fail_the_rust_client_at_every_parameter_location() {
 
         let nested = api_with_located_type(place, array_of(array_of(QueryParamType::Boolean)));
         let diagnostics = validate_rust_client(&[&nested]);
-        assert_eq!(
-            diagnostics,
-            vec![ValidationDiagnostic::new(
+        // An optional query parameter the client cannot serialize is left
+        // out of the request type (a warning); header and cookie parameters
+        // have no such fallback.
+        let (severity, message) = if feature == Feature::QueryParameter {
+            (
+                Severity::Warning,
+                "query parameter `flags` is an array of arrays in `form` style with explode false, \
+                 which the Rust client cannot serialize; it is left out of the request type"
+                    .to_string(),
+            )
+        } else {
+            (
                 Severity::Error,
-                "Located",
-                Some("ListThings"),
-                feature,
-                Output::Rust,
                 format!(
                     "{location} parameter `flags` is an array of arrays, which has no \
                      {location} serialization"
                 ),
-            )],
+            )
+        };
+        assert_eq!(
+            diagnostics,
+            vec![ValidationDiagnostic::new(severity, "Located", Some("ListThings"), feature, Output::Rust, message)],
             "{location}"
         );
         // OpenAPI states the nested shape as a schema; Postman carries no
@@ -514,7 +523,13 @@ fn nested_query_array_leaves_earlier_rust_output_untouched() {
     std::fs::write(Path::new(&roots.rust).join("lib.rs"), "// earlier output\n").unwrap();
     let rust_before = snapshot_tree(roots.schema_dir());
     let (_, _, query) = PLACEMENTS[0];
-    let api = api_with_located_type(query, array_of(array_of(QueryParamType::Boolean)));
+    let mut api = api_with_located_type(query, array_of(array_of(QueryParamType::Boolean)));
+    // Required, so the client cannot leave it out: the Rust output fails.
+    api.endpoints[0].params.as_mut().unwrap().query[0].required = true;
+    assert!(
+        validate_rust_client(&[&api]).iter().any(|d| d.is_error() && d.feature == Feature::QueryParameter),
+        "the required nested array is a Rust validation error"
+    );
 
     let report = generate_batch(&[api], &BatchScope::Complete, &roots.opts());
 
@@ -622,6 +637,28 @@ fn grouped_document_renames_a_shared_raw_id() {
 /// All nine original query-bearing routes have been normalized or merged.
 const EMBEDDED_QUERY_ENDPOINTS: [(&str, &str); 0] = [];
 
+/// The query parameters of the live definitions that the Rust client cannot
+/// serialize, so it leaves them out of their request types: JSON values
+/// (OpenAI's import maps some `$ref`'d enums and objects to JSON) and one
+/// `deepObject` filter.
+const OMITTED_RUST_QUERY_PARAMS: [(&str, &str, &str); 15] = [
+    ("OpenAI", "CreateConversationItems", "include"),
+    ("OpenAI", "GetConversationItem", "include"),
+    ("OpenAI", "GetResponse", "include"),
+    ("OpenAI", "ListAuditLogs", "effective_at"),
+    ("OpenAI", "ListAuditLogs", "event_types[]"),
+    ("OpenAI", "ListChatCompletions", "metadata"),
+    ("OpenAI", "ListConversationItems", "include"),
+    ("OpenAI", "ListInputItems", "include"),
+    ("OpenAI", "ListPaginatedFineTuningJobs", "metadata"),
+    ("OpenAI", "ListSkills", "order"),
+    ("OpenAI", "ListSkillVersions", "order"),
+    ("OpenAI", "ListThreadItemsMethod", "order"),
+    ("OpenAI", "ListThreadsMethod", "order"),
+    ("OpenAI", "ListVideos", "order"),
+    ("OpenAI", "RetrieveVideoContent", "variant"),
+];
+
 #[test]
 fn live_definitions_have_no_embedded_queries_or_validation_gaps() {
     let apis = resolve_all_apis();
@@ -642,10 +679,30 @@ fn live_definitions_have_no_embedded_queries_or_validation_gaps() {
     for (output, diagnostics) in &by_output {
         let errors: Vec<_> = diagnostics.iter().filter(|d| d.is_error()).collect();
         assert!(errors.is_empty(), "{output}: {errors:#?}");
-        // Embedded queries are the only accepted gap in any output.
+        // The Rust client leaves out exactly the listed query parameters.
+        let omitted: BTreeSet<(String, String, String)> = diagnostics
+            .iter()
+            .filter(|d| d.feature == Feature::QueryParameter)
+            .map(|d| {
+                assert_eq!((d.severity, d.output), (Severity::Warning, Output::Rust), "{d}");
+                assert!(d.message.ends_with("it is left out of the request type"), "{d}");
+                let param = d.message.split('`').nth(1).unwrap().to_string();
+                (d.api.join(","), d.endpoint.clone().unwrap(), param)
+            })
+            .collect();
+        let expected_omitted: BTreeSet<(String, String, String)> = if *output == Output::Rust {
+            OMITTED_RUST_QUERY_PARAMS
+                .iter()
+                .map(|(api, endpoint, param)| (api.to_string(), endpoint.to_string(), param.to_string()))
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
+        assert_eq!(omitted, expected_omitted, "{output}");
+        // Embedded queries are the only other accepted gap in any output.
         let other: Vec<_> = diagnostics
             .iter()
-            .filter(|d| d.feature != Feature::QueryInPath)
+            .filter(|d| d.feature != Feature::QueryInPath && d.feature != Feature::QueryParameter)
             .collect();
         assert!(other.is_empty(), "{output}: {other:#?}");
 
@@ -776,4 +833,129 @@ fn cli_reports_each_output_and_exits_nonzero_when_one_fails() {
         std::fs::read_to_string(&roots.openapi).unwrap(),
         "not a directory"
     );
+}
+
+/// `fixture_api`'s endpoint with `query` as its only parameters.
+fn with_query(query: Vec<ParamDef>) -> RestApi {
+    let mut api = fixture_api("Located", "located");
+    api.endpoints[0].params = Some(EndpointParams { query, ..EndpointParams::default() });
+    api
+}
+
+fn query_param(name: &str, required: bool, param_type: QueryParamType, style: ParamStyle, explode: bool) -> ParamDef {
+    let mut param = ParamDef::new(name, param_type);
+    param.required = required;
+    param.style = style;
+    param.explode = explode;
+    param
+}
+
+fn rust_findings(api: &RestApi) -> Vec<(Severity, Feature, String)> {
+    validate_rust_client(&[api]).into_iter().map(|d| (d.severity, d.feature, d.message)).collect()
+}
+
+#[test]
+fn query_shapes_are_checked_for_the_rust_client_only() {
+    let array = || QueryParamType::Array(Box::new(QueryParamType::String));
+    // Control: every supported combination validates cleanly.
+    let supported = with_query(vec![
+        query_param("q", true, QueryParamType::String, ParamStyle::Form, false),
+        query_param("n", false, QueryParamType::Number, ParamStyle::Form, true),
+        query_param("form", false, array(), ParamStyle::Form, false),
+        query_param("exploded", false, array(), ParamStyle::Form, true),
+        query_param("spaces", false, array(), ParamStyle::SpaceDelimited, false),
+        query_param("pipes", false, array(), ParamStyle::PipeDelimited, false),
+        query_param("kind", false, QueryParamType::Enum(vec!["a".into()]), ParamStyle::Form, false),
+    ]);
+    assert!(rust_findings(&supported).is_empty(), "{:?}", rust_findings(&supported));
+
+    let cases = [
+        (QueryParamType::Json, ParamStyle::Form, false, "a JSON value in `form` style with explode false"),
+        (QueryParamType::Json, ParamStyle::DeepObject, true, "a JSON value in `deepObject` style with explode true"),
+        (QueryParamType::String, ParamStyle::Simple, false, "a single value in `simple` style with explode false"),
+        (QueryParamType::String, ParamStyle::PipeDelimited, false, "a single value in `pipeDelimited` style with explode false"),
+        (array(), ParamStyle::SpaceDelimited, true, "an array in `spaceDelimited` style with explode true"),
+        (array(), ParamStyle::PipeDelimited, true, "an array in `pipeDelimited` style with explode true"),
+        (array(), ParamStyle::Simple, false, "an array in `simple` style with explode false"),
+        (
+            QueryParamType::Array(Box::new(QueryParamType::Json)),
+            ParamStyle::Form,
+            true,
+            "an array of JSON values in `form` style with explode true",
+        ),
+    ];
+    for (param_type, style, explode, declared) in cases {
+        let optional = with_query(vec![query_param("p", false, param_type.clone(), style, explode)]);
+        assert_eq!(
+            rust_findings(&optional),
+            [(
+                Severity::Warning,
+                Feature::QueryParameter,
+                format!(
+                    "query parameter `p` is {declared}, which the Rust client cannot serialize; it is left \
+                     out of the request type"
+                ),
+            )],
+            "optional {declared}"
+        );
+        let required = with_query(vec![query_param("p", true, param_type, style, explode)]);
+        assert_eq!(
+            rust_findings(&required),
+            [(
+                Severity::Error,
+                Feature::QueryParameter,
+                format!("required query parameter `p` is {declared}, which the Rust client cannot serialize"),
+            )],
+            "required {declared}"
+        );
+        // The exports state any style; they have nothing to report.
+        assert!(validate_openapi(&[&required]).is_empty(), "{declared}");
+        assert!(validate_postman(&[&required]).is_empty(), "{declared}");
+    }
+}
+
+#[test]
+fn query_enums_need_values_distinct_variants_and_a_free_type_name() {
+    let enum_param = |values: &[&str]| {
+        query_param(
+            "sort",
+            false,
+            QueryParamType::Enum(values.iter().map(|value| value.to_string()).collect()),
+            ParamStyle::Form,
+            false,
+        )
+    };
+    assert_eq!(
+        rust_findings(&with_query(vec![enum_param(&[])])),
+        [(Severity::Error, Feature::QueryParameter, "query parameter `sort` declares an enum with no values".to_string())]
+    );
+    assert_eq!(
+        rust_findings(&with_query(vec![enum_param(&["a-b", "a_b"])])),
+        [(
+            Severity::Error,
+            Feature::GeneratedNameCollision,
+            "query parameter `sort` enum values `a-b`, `a_b` all generate the variant `AB`".to_string()
+        )]
+    );
+    // An array of enums is checked the same way.
+    let mut array = enum_param(&["x", "x"]);
+    array.param_type = QueryParamType::Array(Box::new(array.param_type));
+    array.explode = true;
+    assert_eq!(rust_findings(&with_query(vec![array]))[0].1, Feature::GeneratedNameCollision);
+
+    // A grouped API in the same module whose request suffix spells its
+    // `ListThings` request type `ListThingsRequestSort`.
+    let api = with_query(vec![enum_param(&["asc", "desc"])]);
+    let mut other = fixture_api("Other", "located");
+    other.request_suffix = Some("RequestSort".to_string());
+    let collisions: Vec<_> = validate_rust_client(&[&api, &other])
+        .into_iter()
+        .filter(|d| {
+            d.is_error()
+                && d.feature == Feature::GeneratedNameCollision
+                && d.message.contains("`ListThingsRequestSort`")
+                && d.message.contains("query-parameter enum")
+        })
+        .collect();
+    assert_eq!(collisions.len(), 1, "{:?}", validate_rust_client(&[&api, &other]));
 }

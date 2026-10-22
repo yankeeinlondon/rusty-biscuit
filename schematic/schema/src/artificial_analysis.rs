@@ -93,7 +93,7 @@ impl schematic_runtime::EndpointSpec for ListLlmModelsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/data/llms/models".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -144,9 +144,9 @@ impl schematic_runtime::EndpointSpec for ListTextToImageModelsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/data/media/text-to-image".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.include_categories {
-            query.push(("include_categories".to_string(), value.to_string()));
+            query.push(("include_categories".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -183,7 +183,7 @@ impl schematic_runtime::EndpointSpec for ListImageEditingModelsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/data/media/image-editing".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -219,7 +219,7 @@ impl schematic_runtime::EndpointSpec for ListTextToSpeechModelsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/data/media/text-to-speech".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -270,9 +270,9 @@ impl schematic_runtime::EndpointSpec for ListTextToVideoModelsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/data/media/text-to-video".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.include_categories {
-            query.push(("include_categories".to_string(), value.to_string()));
+            query.push(("include_categories".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -324,9 +324,9 @@ impl schematic_runtime::EndpointSpec for ListImageToVideoModelsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/data/media/image-to-video".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.include_categories {
-            query.push(("include_categories".to_string(), value.to_string()));
+            query.push(("include_categories".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -844,7 +844,7 @@ impl schematic_runtime::EndpointSpec for EvaluateCritPtRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/critpt/evaluate".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,

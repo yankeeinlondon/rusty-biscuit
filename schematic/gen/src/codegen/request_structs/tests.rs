@@ -863,17 +863,17 @@ fn generates_query_param_in_into_parts() {
 
     // Pairs are collected apart from the path and returned unencoded
     assert!(
-        code.contains("let mut query: Vec<(String, String)> = Vec::new()"),
+        code.contains("let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new()"),
         "Expected query collector, got:\n{}",
         code
     );
     assert!(
-        code.contains(r#"query.push(("page".to_string(), value.to_string()))"#),
+        code.contains(r#"query.push(("page".to_string(), value.to_string().into()))"#),
         "Expected page param push, got:\n{}",
         code
     );
     assert!(
-        code.contains(r#"query.push(("limit".to_string(), value.to_string()))"#),
+        code.contains(r#"query.push(("limit".to_string(), value.to_string().into()))"#),
         "Expected limit param push, got:\n{}",
         code
     );
@@ -911,10 +911,13 @@ fn generates_different_query_param_types() {
     let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
-    assert!(code.contains("pub q: Option<String>"));
-    // Enum becomes String
-    assert!(code.contains("pub sort: Option<String>"));
-    assert!(code.contains("pub flag: Option<bool>"));
+    assert!(code.contains("pub q: Option<String>"), "{code}");
+    // An enum gets its own type, sent by its wire spelling.
+    assert!(code.contains("pub sort: Option<SearchRequestSort>"), "{code}");
+    assert!(code.contains("pub enum SearchRequestSort {"), "{code}");
+    assert!(code.contains("Self::Desc => \"desc\""), "{code}");
+    assert!(code.contains("pub fn with_sort(mut self, value: SearchRequestSort) -> Self"), "{code}");
+    assert!(code.contains("pub flag: Option<bool>"), "{code}");
 }
 
 #[test]
@@ -934,18 +937,15 @@ fn generates_array_query_param() {
     let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
-    assert!(code.contains("pub tags: Option<Vec<String>>"));
-    // Array params push multiple entries to collector
+    assert!(code.contains("pub tags: Option<Vec<String>>"), "{code}");
+    // A form array without explode is one pair of comma-delimited elements.
     assert!(
-        code.contains("for value in values"),
-        "Expected loop over array values, got:\n{}",
-        code
+        squash(&code).contains(&squash(
+            r#"query.push(("tags".to_string(), schematic_runtime::QueryValue::delimited(value.iter().map(|element| element.to_string()), schematic_runtime::QueryDelimiter::Comma)));"#
+        )),
+        "Expected one delimited tags pair, got:\n{code}"
     );
-    assert!(
-        code.contains(r#"query.push(("tags".to_string(), value.to_string()))"#),
-        "Expected tags push in loop, got:\n{}",
-        code
-    );
+    assert!(!code.contains("for element in value"), "{code}");
 }
 
 #[test]
@@ -1228,7 +1228,7 @@ fn named_param(name: &str, param_type: QueryParamType) -> schematic_define::Para
         description: None,
         param_type,
         explode: false,
-        style: schematic_define::ParamStyle::Simple,
+        style: schematic_define::ParamStyle::Form,
     }
 }
 
@@ -1273,7 +1273,7 @@ fn header_parameters_become_optional_fields_sent_under_their_wire_names() {
     assert!(flat.contains(&squash(r#"headers.push(("X-Trace-Id".to_string(), value))"#)), "{code}");
     // Arrays are joined with `,`; header values never join the query.
     assert!(code.contains(r#".join(",")"#), "{code}");
-    assert!(code.contains("let query: Vec<(String, String)> = Vec::new()"), "{code}");
+    assert!(code.contains("let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new()"), "{code}");
     assert!(!code.contains("combine_cookie_headers"), "{code}");
 }
 
@@ -1338,16 +1338,17 @@ fn explicit_rust_parameter_name_preserves_wire_query_and_ordinary_setters() {
     let mut endpoint = make_endpoint("ListTree", RestMethod::Get, "/tree", None);
     let mut reference = named_param("ref", QueryParamType::String);
     reference.rust_name = Some("git_ref".into());
-    endpoint.params = Some(schematic_define::EndpointParams {
-        query: vec![reference, named_param("recursive", QueryParamType::Boolean), named_param("beta", QueryParamType::Boolean)],
-        ..Default::default()
-    });
+    let mut query = vec![reference, named_param("recursive", QueryParamType::Boolean), named_param("beta", QueryParamType::Boolean)];
+    for param in &mut query {
+        param.required = false;
+    }
+    endpoint.params = Some(schematic_define::EndpointParams { query, ..Default::default() });
     let code = format_generated_code(&generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint)).unwrap();
     assert!(code.contains("pub git_ref: Option<String>"), "{code}");
     assert!(code.contains("#[serde(rename = \"ref\")]"), "{code}");
     assert!(code.contains("fn with_git_ref("), "{code}");
     assert!(code.contains("self.git_ref"), "{code}");
-    assert!(code.contains("query.push((\"ref\".to_string(), value.to_string()))"), "{code}");
+    assert!(code.contains("query.push((\"ref\".to_string(), value.to_string().into()))"), "{code}");
     assert!(code.contains("fn with_recursive("), "{code}");
     assert!(code.contains("fn with_beta("), "{code}");
     assert!(!code.contains("query.push((\"git_ref\""), "{code}");

@@ -12,7 +12,8 @@ Use this skill when working in `schematic/define` or when updating docs/tests th
 `schematic-define` is the definition layer for Schematic:
 
 - `RestApi`, `Endpoint`, `RestMethod`
-- `AuthStrategy`, `ApiKeyLocation`, `UpdateStrategy`
+- `AuthStrategy`, `ApiKeyLocation`, `UpdateStrategy`, `OAuth2Config` (one variant per grant)
+- `EndpointAuth`, `RateLimit`, `RetryGuidance`, `DefinitionBundle`
 - `ApiRequest`, `ApiResponse`, `FormField`, `Schema`
 - `Headers` (credential headers of generated WebSocket clients; REST clients use runtime `Credential`s), `EnvMapping`, `EnvList`, `SensitiveString`
 - OpenAPI vendor extension models (`x-schematic`)
@@ -47,8 +48,10 @@ through the usual `pub body:` field.
 `EndpointSpec::into_parts()` returns a `schematic_runtime::RequestParts`
 struct (`method`, `path`, `query`, `headers`, `body`) or an `InvalidArgument`.
 `body` is a `RequestBody` (`Empty` / `Json` / `Multipart` / `UrlEncoded` /
-`Raw`); `query` holds declared query parameters as unencoded pairs kept out of
-the path, which the runtime encodes once (`%20` for a space). `Text` bodies are
+`Raw`); `query` holds declared query parameters as unencoded
+`(String, QueryValue)` pairs kept out of the path, which the runtime encodes
+once (`%20` for a space); `QueryValue::Delimited` carries a non-exploded array
+whose elements are encoded before the literal `,`/`%20`/`%7C` join. `Text` bodies are
 a `body: String` field and `Binary` bodies a `body: Vec<u8>` field, both sent
 as `RequestBody::Raw` under the declared content type. Header and cookie
 parameters (`EndpointParams.header`/`cookie`) become `with_*` fields sent in
@@ -62,6 +65,10 @@ parameters (`EndpointParams.header`/`cookie`) become `with_*` fields sent in
 - `ApiKey { header: String }`
 - `ApiKeyParam { location: ApiKeyLocation, name: String }`
 - `Basic { username_env: EnvList, password_env: EnvList }`
+- `OAuth2(OAuth2Config)`: `AuthorizationCodePkce`, `ClientCredentials`, or
+  `DeviceCode`, each a struct with only that grant's URLs (PKCE is
+  `Required`/`Supported` on the authorization-code grant only); API build runs
+  `OAuth2Config::validate` on every grant it carries
 - `None`
 
 `ApiKeyLocation` supports:
@@ -254,8 +261,8 @@ Schematic defines three extension structs, but exporter emission is currently:
 - emitted: operation-level `x-schematic`
 - defined but not emitted: schema-level `x-schematic` (`SchematicSchemaExtension`)
 
-Document-level extension carries API-wide config (`module_path`, `request_suffix`, `env_mapping`, `headers`).
-Operation-level extension carries endpoint config (`request`, `response`, `headers`).
+Document-level extension carries API-wide config (`module_path`, `request_suffix`, `env_mapping`, `headers`, `rate_limit`, `retry_guidance`).
+Operation-level extension carries endpoint config (`request`, `response`, `headers`, and the endpoint's own `rate_limit`/`retry_guidance`, absent when it inherits the document's).
 
 Serialized response shape uses enum tagging. A JSON response holds the stored
 `TypeRef` (component names plus wrappers), never a Rust path:
@@ -320,7 +327,9 @@ against wiremock):
 ```bash
 just -f schematic/justfile test
 just -f schematic/justfile generate
-cargo check --manifest-path schematic/schema/Cargo.toml
+just -f schematic/justfile test-schema
+just -f schematic/justfile lint-schema
+just -f schematic/justfile migration-check
 ```
 
 The generator's tmux capture suite is L2 behind its internal
@@ -448,7 +457,21 @@ endpoint value replaces the API value whole; read through
 replacement policy's env fallback against the endpoint mapping, else the API's
 effective mapping. A required pager-adopted parameter needs a type-valid sent
 default (`pager-managed-default-invalid`). Generated output: a typed-path
-request has typed fields, a template-ordered `new(..)` and no `Default`; the
+request has typed fields, a template-ordered `new(..)` and no `Default`.
+Query fidelity: a required (non-adopted) query parameter is a `T` field and a
+`new()`/endpoint-method argument after the path parameters (no call setter, no
+`Default`, no `From` impls); enums become `{Request}{FieldPascal}`; arrays
+follow `style`/`explode` (form exploded repeats, form/space/pipe non-exploded
+delimit; empty array sends `name=`). `ParamDef::new` is form with
+`explode: false` (comma-delimited); the OpenAPI importer defaults an absent
+`explode` to `style == form`. An unsendable query shape (JSON, nested/JSON
+arrays, deepObject/simple, delimited scalar) is a `query-parameter` Rust
+warning and is left out when optional, an error when required. After a
+generator change that alters signatures, build dependents with
+`--all-features --all-targets`: sniff's remote providers are feature-gated
+and a default build hides their call sites. Also run `just test-schema`: the
+hand-written tests in `schematic/schema/tests/` call generated signatures, and
+no other gate (including `just test`) compiles them. The
 runtime applies endpoint auth per send (`ApiDefinition::endpoint_public` /
 `endpoint_auth`; a replacement that resolves no credential fails before send).
 New diagnostics: `path-parameter` (Rust error), `endpoint-auth`,
@@ -502,5 +525,5 @@ README is an overview; its detailed reference lives in
 `schematic/docs/generation/generated-clients.md`. The create-schematic-api command
 teaches the same fallible context assembly. Keep these entry points aligned.
 The L1 `authoring_guidance` corpus rejects obsolete REST constructor examples.
-Only four Success forms and ErrorSet::none exist; response/vocabulary extensions
-are planned. Reserve success stream/content-type names. No selector API is planned here.
+Only four Success forms and ErrorSet::none exist; response extensions are
+planned (the definition vocabulary above has landed). Reserve success stream/content-type names. No selector API is planned here.

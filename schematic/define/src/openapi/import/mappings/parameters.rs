@@ -52,7 +52,7 @@ pub fn map_parameter(
             &parameter_data.description,
             get_param_schema(parameter_data),
             map_query_style(style),
-            parameter_data.explode.unwrap_or(false),
+            parameter_data.explode,
         ),
         openapiv3::Parameter::Header {
             parameter_data,
@@ -63,7 +63,7 @@ pub fn map_parameter(
             &parameter_data.description,
             get_param_schema(parameter_data),
             map_header_style(style),
-            parameter_data.explode.unwrap_or(false),
+            parameter_data.explode,
         ),
         openapiv3::Parameter::Cookie {
             parameter_data,
@@ -74,12 +74,16 @@ pub fn map_parameter(
             &parameter_data.description,
             get_param_schema(parameter_data),
             map_cookie_style(style),
-            parameter_data.explode.unwrap_or(false),
+            parameter_data.explode,
         ),
         openapiv3::Parameter::Path { .. } => {
             return None;
         }
     };
+
+    // OpenAPI 3.0.3: "When style is form, the default value is true. For
+    // all other styles, the default value is false."
+    let explode = explode.unwrap_or(style == ParamStyle::Form);
 
     let param_type = match schema {
         Some(s) => map_schema_to_param_type(s, diagnostics),

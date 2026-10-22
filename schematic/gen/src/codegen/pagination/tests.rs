@@ -21,7 +21,7 @@ fn param(name: &str, required: bool) -> ParamDef {
         description: None,
         param_type: QueryParamType::Integer,
         explode: false,
-        style: ParamStyle::Simple,
+        style: ParamStyle::Form,
     }
 }
 
@@ -280,12 +280,12 @@ fn an_ordinary_send_carries_required_adopted_defaults_and_omits_optional_ones() 
     let module = module(&api);
     let shelves = squash(item(&module, "impl schematic_runtime::EndpointSpec for ListShelvesRequest"));
     assert!(
-        shelves.contains(r#"letmutquery=query;query.extend([("page".to_owned(),"1".to_owned()),("per_page".to_owned(),"50".to_owned())]);"#),
+        shelves.contains(r#"letmutquery=query;query.extend([("page".to_owned(),schematic_runtime::QueryValue::from("1")),("per_page".to_owned(),schematic_runtime::QueryValue::from("50"))]);"#),
         "the first page and the authored size are sent:\n{shelves}"
     );
     let books = squash(item(&module, "impl schematic_runtime::EndpointSpec for ListBooksRequest"));
     assert!(
-        books.contains(r#"query.extend([("offset".to_owned(),"0".to_owned())]);"#),
+        books.contains(r#"query.extend([("offset".to_owned(),schematic_runtime::QueryValue::from("0"))]);"#),
         "a zero-based offset starts at zero:\n{books}"
     );
     assert!(!books.contains(r#""limit".to_owned()"#), "an optional adopted size is omitted:\n{books}");

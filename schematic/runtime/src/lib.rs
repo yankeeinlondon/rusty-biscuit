@@ -75,7 +75,9 @@ pub use client::{ApiDefinition, Client, DEFAULT_TIMEOUT, MAX_REDIRECTS};
 pub use codec::{Binary, BodyReadError, Decode, DecodeFailure, DecodeFailureKind, Empty, Json, LiveBody, Text};
 pub use credentials::{AuthConfig, Credential, CredentialKind, CredentialPlacement, EnvFallback};
 pub use deadline::Deadline;
-pub use endpoint::{Api, EndpointSpec, ErrorBody, FormPart, RequestBody, RequestParts};
+pub use endpoint::{
+    Api, EndpointSpec, ErrorBody, FormPart, QueryDelimiter, QueryValue, RequestBody, RequestParts,
+};
 pub use error::{BuildError, InvalidArgument, TransportError, TransportErrorKind};
 pub use hooks::{HookError, HookStage, SupportsHooks};
 pub use meta::{AuthMethod, RequestMeta, ResponseMeta};
@@ -103,4 +105,4 @@ pub use response::{
 /// value its generator was built against, and the generator's partial
 /// generation refuses to keep modules generated against a different value.
 /// Increment it with every change that generated code can observe.
-pub const ABI: u32 = 4;
+pub const ABI: u32 = 5;

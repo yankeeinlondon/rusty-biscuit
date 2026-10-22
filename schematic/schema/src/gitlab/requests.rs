@@ -87,15 +87,15 @@ impl schematic_runtime::EndpointSpec for ListRepositoryTreeRequest {
         let path = format!(
             "/projects/{}/repository/tree", urlencoding::encode(& self.id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.recursive {
-            query.push(("recursive".to_string(), value.to_string()));
+            query.push(("recursive".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.git_ref {
-            query.push(("git_ref".to_string(), value.to_string()));
+            query.push(("git_ref".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.path {
-            query.push(("path".to_string(), value.to_string()));
+            query.push(("path".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -114,11 +114,10 @@ impl schematic_runtime::EndpointSpec for ListRepositoryTreeRequest {
 /// ```text
 /// use schematic_schema::gitlab::GetRepositoryFileRequest;
 ///
-/// let request = GetRepositoryFileRequest::new("id_value", "file_path_value")
-///     .with_git_ref(/* value */)
+/// let request = GetRepositoryFileRequest::new("id_value", "file_path_value", "ref_value")
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetRepositoryFileRequest {
     /// Path parameter: id
     pub id: String,
@@ -126,20 +125,24 @@ pub struct GetRepositoryFileRequest {
     pub file_path: String,
     /// Query parameter: ref
     #[serde(rename = "ref")]
-    pub git_ref: Option<String>,
+    pub git_ref: String,
 }
 impl GetRepositoryFileRequest {
-    /// Creates a new request with the required path parameters.
-    pub fn new(id: impl Into<String>, file_path: impl Into<String>) -> Self {
+    /// Creates a new request with the required path and query parameters.
+    pub fn new(
+        id: impl Into<String>,
+        file_path: impl Into<String>,
+        git_ref: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             file_path: file_path.into(),
-            git_ref: None,
+            git_ref: git_ref.into(),
         }
     }
     /// Sets the `git_ref` query parameter.
     pub fn with_git_ref(mut self, value: String) -> Self {
-        self.git_ref = Some(value);
+        self.git_ref = value;
         self
     }
 }
@@ -157,10 +160,9 @@ impl schematic_runtime::EndpointSpec for GetRepositoryFileRequest {
             "/projects/{}/repository/files/{}", urlencoding::encode(& self.id
             .to_string()), urlencoding::encode(& self.file_path.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.git_ref {
-            query.push(("ref".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.git_ref;
+        query.push(("ref".to_string(), value.to_string().into()));
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -213,7 +215,7 @@ impl schematic_runtime::EndpointSpec for GetProjectRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = format!("/projects/{}", urlencoding::encode(& self.id.to_string()));
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -222,6 +224,101 @@ impl schematic_runtime::EndpointSpec for GetProjectRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `visibility` query parameter of [`ListGroupProjectsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListGroupProjectsRequestVisibility {
+    /// `public`
+    #[serde(rename = "public")]
+    Public,
+    /// `internal`
+    #[serde(rename = "internal")]
+    Internal,
+    /// `private`
+    #[serde(rename = "private")]
+    Private,
+}
+impl ListGroupProjectsRequestVisibility {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Public => "public",
+            Self::Internal => "internal",
+            Self::Private => "private",
+        }
+    }
+}
+impl ::core::fmt::Display for ListGroupProjectsRequestVisibility {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `order_by` query parameter of [`ListGroupProjectsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListGroupProjectsRequestOrderBy {
+    /// `id`
+    #[serde(rename = "id")]
+    Id,
+    /// `name`
+    #[serde(rename = "name")]
+    Name,
+    /// `path`
+    #[serde(rename = "path")]
+    Path,
+    /// `created_at`
+    #[serde(rename = "created_at")]
+    CreatedAt,
+    /// `updated_at`
+    #[serde(rename = "updated_at")]
+    UpdatedAt,
+    /// `last_activity_at`
+    #[serde(rename = "last_activity_at")]
+    LastActivityAt,
+}
+impl ListGroupProjectsRequestOrderBy {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Id => "id",
+            Self::Name => "name",
+            Self::Path => "path",
+            Self::CreatedAt => "created_at",
+            Self::UpdatedAt => "updated_at",
+            Self::LastActivityAt => "last_activity_at",
+        }
+    }
+}
+impl ::core::fmt::Display for ListGroupProjectsRequestOrderBy {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `sort` query parameter of [`ListGroupProjectsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListGroupProjectsRequestSort {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListGroupProjectsRequestSort {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListGroupProjectsRequestSort {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListGroupProjects` endpoint.
@@ -246,11 +343,11 @@ pub struct ListGroupProjectsRequest {
     /// Query parameter: Filter by archived status
     pub archived: Option<bool>,
     /// Query parameter: Filter by visibility level
-    pub visibility: Option<String>,
+    pub visibility: Option<ListGroupProjectsRequestVisibility>,
     /// Query parameter: Sort field
-    pub order_by: Option<String>,
+    pub order_by: Option<ListGroupProjectsRequestOrderBy>,
     /// Query parameter: Sort direction
-    pub sort: Option<String>,
+    pub sort: Option<ListGroupProjectsRequestSort>,
     /// Query parameter: Include projects from subgroups
     pub include_subgroups: Option<bool>,
 }
@@ -272,17 +369,17 @@ impl ListGroupProjectsRequest {
         self
     }
     /// Sets the `visibility` query parameter.
-    pub fn with_visibility(mut self, value: String) -> Self {
+    pub fn with_visibility(mut self, value: ListGroupProjectsRequestVisibility) -> Self {
         self.visibility = Some(value);
         self
     }
     /// Sets the `order_by` query parameter.
-    pub fn with_order_by(mut self, value: String) -> Self {
+    pub fn with_order_by(mut self, value: ListGroupProjectsRequestOrderBy) -> Self {
         self.order_by = Some(value);
         self
     }
     /// Sets the `sort` query parameter.
-    pub fn with_sort(mut self, value: String) -> Self {
+    pub fn with_sort(mut self, value: ListGroupProjectsRequestSort) -> Self {
         self.sort = Some(value);
         self
     }
@@ -331,21 +428,21 @@ impl schematic_runtime::EndpointSpec for ListGroupProjectsRequest {
         let path = format!(
             "/groups/{}/projects", urlencoding::encode(& self.id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.archived {
-            query.push(("archived".to_string(), value.to_string()));
+            query.push(("archived".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.visibility {
-            query.push(("visibility".to_string(), value.to_string()));
+            query.push(("visibility".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.order_by {
-            query.push(("order_by".to_string(), value.to_string()));
+            query.push(("order_by".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.sort {
-            query.push(("sort".to_string(), value.to_string()));
+            query.push(("sort".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.include_subgroups {
-            query.push(("include_subgroups".to_string(), value.to_string()));
+            query.push(("include_subgroups".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -397,7 +494,7 @@ impl schematic_runtime::EndpointSpec for GetBranchRequest {
             "/projects/{}/repository/branches/{}", urlencoding::encode(& self.id
             .to_string()), urlencoding::encode(& self.branch.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -406,6 +503,39 @@ impl schematic_runtime::EndpointSpec for GetBranchRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `state` query parameter of [`ListMergeRequestsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListMergeRequestsRequestState {
+    /// `opened`
+    #[serde(rename = "opened")]
+    Opened,
+    /// `closed`
+    #[serde(rename = "closed")]
+    Closed,
+    /// `merged`
+    #[serde(rename = "merged")]
+    Merged,
+    /// `all`
+    #[serde(rename = "all")]
+    All,
+}
+impl ListMergeRequestsRequestState {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Opened => "opened",
+            Self::Closed => "closed",
+            Self::Merged => "merged",
+            Self::All => "all",
+        }
+    }
+}
+impl ::core::fmt::Display for ListMergeRequestsRequestState {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListMergeRequests` endpoint.
@@ -424,7 +554,7 @@ pub struct ListMergeRequestsRequest {
     /// Path parameter: id
     pub id: String,
     /// Query parameter: Filter by merge request state
-    pub state: Option<String>,
+    pub state: Option<ListMergeRequestsRequestState>,
 }
 impl ListMergeRequestsRequest {
     /// Creates a new request with the required path parameters.
@@ -432,7 +562,7 @@ impl ListMergeRequestsRequest {
         Self { id: id.into(), state: None }
     }
     /// Sets the `state` query parameter.
-    pub fn with_state(mut self, value: String) -> Self {
+    pub fn with_state(mut self, value: ListMergeRequestsRequestState) -> Self {
         self.state = Some(value);
         self
     }
@@ -465,9 +595,9 @@ impl schematic_runtime::EndpointSpec for ListMergeRequestsRequest {
         let path = format!(
             "/projects/{}/merge_requests", urlencoding::encode(& self.id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.state {
-            query.push(("state".to_string(), value.to_string()));
+            query.push(("state".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -521,7 +651,7 @@ impl schematic_runtime::EndpointSpec for GetMergeRequestRequest {
             "/projects/{}/merge_requests/{}", urlencoding::encode(& self.id.to_string()),
             urlencoding::encode(& self.merge_request_iid.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -574,7 +704,7 @@ impl schematic_runtime::EndpointSpec for ListMergeRequestCommitsRequest {
             "/projects/{}/merge_requests/{}/commits", urlencoding::encode(& self.id
             .to_string()), urlencoding::encode(& self.merge_request_iid.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -627,7 +757,7 @@ impl schematic_runtime::EndpointSpec for ListMergeRequestChangesRequest {
             "/projects/{}/merge_requests/{}/changes", urlencoding::encode(& self.id
             .to_string()), urlencoding::encode(& self.merge_request_iid.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -636,6 +766,35 @@ impl schematic_runtime::EndpointSpec for ListMergeRequestChangesRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `state` query parameter of [`ListIssuesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListIssuesRequestState {
+    /// `opened`
+    #[serde(rename = "opened")]
+    Opened,
+    /// `closed`
+    #[serde(rename = "closed")]
+    Closed,
+    /// `all`
+    #[serde(rename = "all")]
+    All,
+}
+impl ListIssuesRequestState {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Opened => "opened",
+            Self::Closed => "closed",
+            Self::All => "all",
+        }
+    }
+}
+impl ::core::fmt::Display for ListIssuesRequestState {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListIssues` endpoint.
@@ -654,7 +813,7 @@ pub struct ListIssuesRequest {
     /// Path parameter: id
     pub id: String,
     /// Query parameter: Filter by issue state
-    pub state: Option<String>,
+    pub state: Option<ListIssuesRequestState>,
 }
 impl ListIssuesRequest {
     /// Creates a new request with the required path parameters.
@@ -662,7 +821,7 @@ impl ListIssuesRequest {
         Self { id: id.into(), state: None }
     }
     /// Sets the `state` query parameter.
-    pub fn with_state(mut self, value: String) -> Self {
+    pub fn with_state(mut self, value: ListIssuesRequestState) -> Self {
         self.state = Some(value);
         self
     }
@@ -695,9 +854,9 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
         let path = format!(
             "/projects/{}/issues", urlencoding::encode(& self.id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.state {
-            query.push(("state".to_string(), value.to_string()));
+            query.push(("state".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -749,7 +908,7 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
             "/projects/{}/issues/{}", urlencoding::encode(& self.id.to_string()),
             urlencoding::encode(& self.issue_iid.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -802,7 +961,7 @@ impl schematic_runtime::EndpointSpec for ListIssueNotesRequest {
             "/projects/{}/issues/{}/notes", urlencoding::encode(& self.id.to_string()),
             urlencoding::encode(& self.issue_iid.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -855,7 +1014,7 @@ impl schematic_runtime::EndpointSpec for ListIssueParticipantsRequest {
             "/projects/{}/issues/{}/participants", urlencoding::encode(& self.id
             .to_string()), urlencoding::encode(& self.issue_iid.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -912,7 +1071,7 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
         let path = format!(
             "/projects/{}/repository/tags", urlencoding::encode(& self.id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -963,7 +1122,7 @@ impl schematic_runtime::EndpointSpec for GetTagRequest {
             "/projects/{}/repository/tags/{}", urlencoding::encode(& self.id
             .to_string()), urlencoding::encode(& self.tag_name.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1020,7 +1179,7 @@ impl schematic_runtime::EndpointSpec for ListReleasesRequest {
         let path = format!(
             "/projects/{}/releases", urlencoding::encode(& self.id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1071,7 +1230,7 @@ impl schematic_runtime::EndpointSpec for GetReleaseRequest {
             "/projects/{}/releases/{}", urlencoding::encode(& self.id.to_string()),
             urlencoding::encode(& self.tag_name.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1127,7 +1286,7 @@ impl schematic_runtime::EndpointSpec for GetLatestReleaseRequest {
             "/projects/{}/releases/permalink/latest", urlencoding::encode(& self.id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1136,6 +1295,67 @@ impl schematic_runtime::EndpointSpec for GetLatestReleaseRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `status` query parameter of [`ListProjectPipelinesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListProjectPipelinesRequestStatus {
+    /// `created`
+    #[serde(rename = "created")]
+    Created,
+    /// `waiting_for_resource`
+    #[serde(rename = "waiting_for_resource")]
+    WaitingForResource,
+    /// `preparing`
+    #[serde(rename = "preparing")]
+    Preparing,
+    /// `pending`
+    #[serde(rename = "pending")]
+    Pending,
+    /// `running`
+    #[serde(rename = "running")]
+    Running,
+    /// `success`
+    #[serde(rename = "success")]
+    Success,
+    /// `failed`
+    #[serde(rename = "failed")]
+    Failed,
+    /// `canceled`
+    #[serde(rename = "canceled")]
+    Canceled,
+    /// `skipped`
+    #[serde(rename = "skipped")]
+    Skipped,
+    /// `manual`
+    #[serde(rename = "manual")]
+    Manual,
+    /// `scheduled`
+    #[serde(rename = "scheduled")]
+    Scheduled,
+}
+impl ListProjectPipelinesRequestStatus {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::WaitingForResource => "waiting_for_resource",
+            Self::Preparing => "preparing",
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Success => "success",
+            Self::Failed => "failed",
+            Self::Canceled => "canceled",
+            Self::Skipped => "skipped",
+            Self::Manual => "manual",
+            Self::Scheduled => "scheduled",
+        }
+    }
+}
+impl ::core::fmt::Display for ListProjectPipelinesRequestStatus {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListProjectPipelines` endpoint.
@@ -1157,7 +1377,7 @@ pub struct ListProjectPipelinesRequest {
     /// Path parameter: id
     pub id: String,
     /// Query parameter: Filter by pipeline status
-    pub status: Option<String>,
+    pub status: Option<ListProjectPipelinesRequestStatus>,
     /// Query parameter: Filter by pipeline source (e.g., push, merge_request_event, schedule)
     pub source: Option<String>,
     /// Query parameter: Filter by branch or tag name
@@ -1177,7 +1397,7 @@ impl ListProjectPipelinesRequest {
         }
     }
     /// Sets the `status` query parameter.
-    pub fn with_status(mut self, value: String) -> Self {
+    pub fn with_status(mut self, value: ListProjectPipelinesRequestStatus) -> Self {
         self.status = Some(value);
         self
     }
@@ -1234,18 +1454,18 @@ impl schematic_runtime::EndpointSpec for ListProjectPipelinesRequest {
         let path = format!(
             "/projects/{}/pipelines", urlencoding::encode(& self.id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.status {
-            query.push(("status".to_string(), value.to_string()));
+            query.push(("status".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.source {
-            query.push(("source".to_string(), value.to_string()));
+            query.push(("source".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.git_ref {
-            query.push(("git_ref".to_string(), value.to_string()));
+            query.push(("git_ref".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.sha {
-            query.push(("sha".to_string(), value.to_string()));
+            query.push(("sha".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -1696,10 +1916,6 @@ pub struct GetRepositoryFileCall<'a>(
     schematic_runtime::Call<'a, GitLabApi, GetRepositoryFileRequest>,
 );
 impl<'a> GetRepositoryFileCall<'a> {
-    /// Sets the `ref` query parameter (`String`).
-    pub fn git_ref(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_git_ref(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -1804,16 +2020,16 @@ impl<'a> ListGroupProjectsCall<'a> {
     pub fn archived(self, value: bool) -> Self {
         Self(self.0.map_request(|request| request.with_archived(value)))
     }
-    /// Sets the `visibility` query parameter (`String`). Filter by visibility level
-    pub fn visibility(self, value: String) -> Self {
+    /// Sets the `visibility` query parameter (`ListGroupProjectsRequestVisibility`). Filter by visibility level
+    pub fn visibility(self, value: ListGroupProjectsRequestVisibility) -> Self {
         Self(self.0.map_request(|request| request.with_visibility(value)))
     }
-    /// Sets the `order_by` query parameter (`String`). Sort field
-    pub fn order_by(self, value: String) -> Self {
+    /// Sets the `order_by` query parameter (`ListGroupProjectsRequestOrderBy`). Sort field
+    pub fn order_by(self, value: ListGroupProjectsRequestOrderBy) -> Self {
         Self(self.0.map_request(|request| request.with_order_by(value)))
     }
-    /// Sets the `sort` query parameter (`String`). Sort direction
-    pub fn sort(self, value: String) -> Self {
+    /// Sets the `sort` query parameter (`ListGroupProjectsRequestSort`). Sort direction
+    pub fn sort(self, value: ListGroupProjectsRequestSort) -> Self {
         Self(self.0.map_request(|request| request.with_sort(value)))
     }
     /// Sets the `include_subgroups` query parameter (`bool`). Include projects from subgroups
@@ -1970,8 +2186,8 @@ pub struct ListMergeRequestsCall<'a>(
     schematic_runtime::Call<'a, GitLabApi, ListMergeRequestsRequest>,
 );
 impl<'a> ListMergeRequestsCall<'a> {
-    /// Sets the `state` query parameter (`String`). Filter by merge request state
-    pub fn state(self, value: String) -> Self {
+    /// Sets the `state` query parameter (`ListMergeRequestsRequestState`). Filter by merge request state
+    pub fn state(self, value: ListMergeRequestsRequestState) -> Self {
         Self(self.0.map_request(|request| request.with_state(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -2280,8 +2496,8 @@ impl<'a> ::core::future::IntoFuture for ListMergeRequestChangesCall<'a> {
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListIssuesCall<'a>(schematic_runtime::Call<'a, GitLabApi, ListIssuesRequest>);
 impl<'a> ListIssuesCall<'a> {
-    /// Sets the `state` query parameter (`String`). Filter by issue state
-    pub fn state(self, value: String) -> Self {
+    /// Sets the `state` query parameter (`ListIssuesRequestState`). Filter by issue state
+    pub fn state(self, value: ListIssuesRequestState) -> Self {
         Self(self.0.map_request(|request| request.with_state(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -2933,8 +3149,8 @@ pub struct ListProjectPipelinesCall<'a>(
     schematic_runtime::Call<'a, GitLabApi, ListProjectPipelinesRequest>,
 );
 impl<'a> ListProjectPipelinesCall<'a> {
-    /// Sets the `status` query parameter (`String`). Filter by pipeline status
-    pub fn status(self, value: String) -> Self {
+    /// Sets the `status` query parameter (`ListProjectPipelinesRequestStatus`). Filter by pipeline status
+    pub fn status(self, value: ListProjectPipelinesRequestStatus) -> Self {
         Self(self.0.map_request(|request| request.with_status(value)))
     }
     /// Sets the `source` query parameter (`String`). Filter by pipeline source (e.g., push, merge_request_event, schedule)
@@ -3073,16 +3289,16 @@ impl GitLab {
     ///
     /// - `id: impl Into<String>`: the `{id}` path parameter
     /// - `file_path: impl Into<String>`: the `{file_path}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`git_ref`](GetRepositoryFileCall::git_ref): the `ref` query parameter (`String`).
+    /// - `git_ref: impl Into<String>`: the required `ref` query parameter
     pub fn get_repository_file(
         &self,
         id: impl Into<String>,
         file_path: impl Into<String>,
+        git_ref: impl Into<String>,
     ) -> GetRepositoryFileCall<'_> {
-        GetRepositoryFileCall(self.0.send(GetRepositoryFileRequest::new(id, file_path)))
+        GetRepositoryFileCall(
+            self.0.send(GetRepositoryFileRequest::new(id, file_path, git_ref)),
+        )
     }
     /// Get project metadata (use URL-encoded path or numeric ID)
     ///
@@ -3109,9 +3325,9 @@ impl GitLab {
     /// ## Optional values
     ///
     /// - [`archived`](ListGroupProjectsCall::archived): the `archived` query parameter (`bool`). Filter by archived status
-    /// - [`visibility`](ListGroupProjectsCall::visibility): the `visibility` query parameter (`String`). Filter by visibility level
-    /// - [`order_by`](ListGroupProjectsCall::order_by): the `order_by` query parameter (`String`). Sort field
-    /// - [`sort`](ListGroupProjectsCall::sort): the `sort` query parameter (`String`). Sort direction
+    /// - [`visibility`](ListGroupProjectsCall::visibility): the `visibility` query parameter (`ListGroupProjectsRequestVisibility`). Filter by visibility level
+    /// - [`order_by`](ListGroupProjectsCall::order_by): the `order_by` query parameter (`ListGroupProjectsRequestOrderBy`). Sort field
+    /// - [`sort`](ListGroupProjectsCall::sort): the `sort` query parameter (`ListGroupProjectsRequestSort`). Sort direction
     /// - [`include_subgroups`](ListGroupProjectsCall::include_subgroups): the `include_subgroups` query parameter (`bool`). Include projects from subgroups
     pub fn list_group_projects(
         &self,
@@ -3148,7 +3364,7 @@ impl GitLab {
     ///
     /// ## Optional values
     ///
-    /// - [`state`](ListMergeRequestsCall::state): the `state` query parameter (`String`). Filter by merge request state
+    /// - [`state`](ListMergeRequestsCall::state): the `state` query parameter (`ListMergeRequestsRequestState`). Filter by merge request state
     pub fn list_merge_requests(
         &self,
         id: impl Into<String>,
@@ -3224,7 +3440,7 @@ impl GitLab {
     ///
     /// ## Optional values
     ///
-    /// - [`state`](ListIssuesCall::state): the `state` query parameter (`String`). Filter by issue state
+    /// - [`state`](ListIssuesCall::state): the `state` query parameter (`ListIssuesRequestState`). Filter by issue state
     pub fn list_issues(&self, id: impl Into<String>) -> ListIssuesCall<'_> {
         ListIssuesCall(self.0.send(ListIssuesRequest::new(id)))
     }
@@ -3363,7 +3579,7 @@ impl GitLab {
     ///
     /// ## Optional values
     ///
-    /// - [`status`](ListProjectPipelinesCall::status): the `status` query parameter (`String`). Filter by pipeline status
+    /// - [`status`](ListProjectPipelinesCall::status): the `status` query parameter (`ListProjectPipelinesRequestStatus`). Filter by pipeline status
     /// - [`source`](ListProjectPipelinesCall::source): the `source` query parameter (`String`). Filter by pipeline source (e.g., push, merge_request_event, schedule)
     /// - [`git_ref`](ListProjectPipelinesCall::git_ref): the `git_ref` query parameter (`String`). Filter by branch or tag name
     /// - [`sha`](ListProjectPipelinesCall::sha): the `sha` query parameter (`String`). Filter by commit SHA

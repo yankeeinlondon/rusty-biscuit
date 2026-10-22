@@ -92,6 +92,8 @@ let api = RestApi::builder(&context, "Items", "https://example.com")
   Explicit endpoint collections keep serialized origin `Exception`. There are
   93 authored pagers; adoption must preserve the exposed controls.
 - Endpoint OAuth scopes are removed; explicit API auth_policy remains effective.
+- Basic carries `username_env`/`password_env` inside `AuthStrategy::Basic`;
+  OAuth2 is one `OAuth2Config` variant per grant.
 - WebSocket factories and stored forms retain their established construction API.
 
 ## Import and generated artifacts
@@ -134,6 +136,7 @@ README is an overview; its detailed reference lives in
 `schematic/docs/generation/generated-clients.md`. The create-schematic-api command
 teaches the same fallible context assembly. Keep these entry points aligned.
 The L1 `authoring_guidance` corpus rejects obsolete REST constructor examples.
-Only four Success forms and ErrorSet::none exist; response/vocabulary extensions
-are planned. Reserve path_param/public/auth/deprecated/rate_limit and success
-stream/content-type names. No selector API is planned here.
+Only four Success forms and ErrorSet::none exist; response extensions are
+planned. The definition vocabulary (`path_param`, `public`, `auth`,
+`deprecated`, `rate_limit`, `retry_guidance`, `one_of`) exists; see the parent
+skill. Reserve success stream/content-type names. No selector API is planned here.

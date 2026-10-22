@@ -65,10 +65,10 @@
 //! `Err(`[`schematic_runtime::TransportError`]`)` only when no response
 //! arrived.
 /// The `schematic-runtime` ABI this crate was generated against.
-pub const SCHEMATIC_RUNTIME_ABI: u32 = 4;
+pub const SCHEMATIC_RUNTIME_ABI: u32 = 5;
 const _: () = assert!(
     schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI,
-    "schematic-schema was generated for schematic-runtime ABI 4, but the schematic-runtime it is built against has another ABI; regenerate the crate with the schematic-gen of that runtime (`just generate` in schematic/)"
+    "schematic-schema was generated for schematic-runtime ABI 5, but the schematic-runtime it is built against has another ABI; regenerate the crate with the schematic-gen of that runtime (`just generate` in schematic/)"
 );
 /// The runtime that sends this crate's requests.
 pub use schematic_runtime;

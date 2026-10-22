@@ -25,6 +25,12 @@ fn format_tokens(tokens: &TokenStream) -> String {
     prettyplease::unparse(&file)
 }
 
+/// Removes all whitespace and trailing commas, so layout does not matter.
+fn squash(code: &str) -> String {
+    let flat: String = code.split_whitespace().collect();
+    flat.replace(",)", ")").replace(",]", "]")
+}
+
 /// Helper to create an endpoint with query parameters.
 fn make_endpoint_with_query(
     id: &str,
@@ -79,12 +85,12 @@ fn single_query_param_is_collected_apart_from_the_path() {
         code
     );
     assert!(
-        code.contains("let mut query: Vec<(String, String)> = Vec::new()"),
+        code.contains("let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new()"),
         "Should collect query pairs\nGenerated code:\n{}",
         code
     );
     assert!(
-        code.contains(r#"query.push(("page".to_string(), value.to_string()))"#),
+        code.contains(r#"query.push(("page".to_string(), value.to_string().into()))"#),
         "Should push the unencoded value under its wire name\nGenerated code:\n{}",
         code
     );
@@ -120,7 +126,7 @@ fn multiple_query_params_keep_declaration_order() {
     let positions: Vec<usize> = ["page", "limit", "sort"]
         .iter()
         .map(|name| {
-            let push = format!(r#"query.push(("{name}".to_string(), value.to_string()))"#);
+            let push = format!(r#"query.push(("{name}".to_string(), value.to_string().into()))"#);
             code.find(&push)
                 .unwrap_or_else(|| panic!("missing push for {name}\nGenerated code:\n{code}"))
         })
@@ -152,7 +158,7 @@ fn legacy_path_template_query_stays_in_the_path() {
         code
     );
     assert!(
-        code.contains(r#"query.push(("page".to_string(), value.to_string()))"#),
+        code.contains(r#"query.push(("page".to_string(), value.to_string().into()))"#),
         "The declared parameter should still be a separate pair\nGenerated code:\n{}",
         code
     );
@@ -166,7 +172,7 @@ fn endpoint_without_query_params_returns_empty_pairs() {
     let code = format_tokens(&tokens);
 
     assert!(
-        code.contains("let query: Vec<(String, String)> = Vec::new();"),
+        code.contains("let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();"),
         "Should return an empty pair list\nGenerated code:\n{}",
         code
     );
@@ -205,26 +211,26 @@ fn boolean_query_param_generates_correctly() {
 }
 
 #[test]
-fn enum_query_param_generates_as_string() {
+fn enum_query_param_generates_an_enum_named_for_the_request_and_field() {
     let endpoint = make_endpoint_with_query(
         "ListItems",
         RestMethod::Get,
         "/items",
         vec![(
             "status",
-            QueryParamType::Enum(vec!["active".into(), "inactive".into(), "pending".into()]),
+            QueryParamType::Enum(vec!["active".into(), "in-active".into(), "pending".into()]),
         )],
     );
 
     let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
-    // Enum params are currently generated as String (may change in future)
-    assert!(
-        code.contains("pub status: Option<String>"),
-        "Enum should be Option<String>\nGenerated code:\n{}",
-        code
-    );
+    assert!(code.contains("pub status: Option<ListItemsRequestStatus>"), "{code}");
+    assert!(code.contains("pub enum ListItemsRequestStatus {"), "{code}");
+    assert!(code.contains("#[serde(rename = \"in-active\")]\n    InActive,"), "{code}");
+    assert!(code.contains("Self::InActive => \"in-active\""), "{code}");
+    assert!(code.contains("pub fn with_status(mut self, value: ListItemsRequestStatus) -> Self"), "{code}");
+    assert!(code.contains(r#"query.push(("status".to_string(), value.to_string().into()))"#), "{code}");
 }
 
 #[test]
@@ -298,7 +304,7 @@ fn array_query_param_generates_vec_field() {
 }
 
 #[test]
-fn array_query_param_generates_loop_for_values() {
+fn array_query_param_without_explode_is_one_comma_delimited_pair() {
     let endpoint = make_endpoint_with_query(
         "ListItems",
         RestMethod::Get,
@@ -310,21 +316,15 @@ fn array_query_param_generates_loop_for_values() {
     );
 
     let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
-    let code = format_tokens(&tokens);
+    let code = squash(&format_tokens(&tokens));
 
-    // Array params should generate a loop that pushes each value to collector
     assert!(
-        code.contains("for value in values"),
-        "Should iterate over array values\nGenerated code:\n{}",
-        code
+        code.contains(&squash(
+            r#"query.push(("tags".to_string(), schematic_runtime::QueryValue::delimited(value.iter().map(|element| element.to_string()), schematic_runtime::QueryDelimiter::Comma)));"#
+        )),
+        "{code}"
     );
-
-    // Each array value becomes its own pair under the same key
-    assert!(
-        code.contains(r#"query.push(("tags".to_string(), value.to_string()))"#),
-        "Array values should push repeated pairs\nGenerated code:\n{}",
-        code
-    );
+    assert!(!code.contains("forelementinvalue"), "{code}");
 }
 
 #[test]
@@ -708,4 +708,249 @@ fn special_char_query_params_are_sanitized_with_serde_rename() {
         code.contains(r#"query.push(("user.name".to_string()"#),
         "query key should stay `user.name`:\n{code}"
     );
+}
+
+// =============================================================================
+// Required values, Default, and wire forms (PD8)
+// =============================================================================
+
+/// A query parameter declared with every field the generator reads.
+fn query(name: &str, required: bool, param_type: QueryParamType, style: ParamStyle, explode: bool) -> ParamDef {
+    let mut param = ParamDef::new(name, param_type);
+    param.required = required;
+    param.style = style;
+    param.explode = explode;
+    param
+}
+
+fn endpoint_with(id: &str, method: RestMethod, path: &str, query: Vec<ParamDef>) -> Endpoint {
+    let mut endpoint = make_endpoint_with_query(id, method, path, vec![]);
+    endpoint.params = Some(EndpointParams { query, ..EndpointParams::default() });
+    endpoint
+}
+
+fn generated(endpoint: &Endpoint) -> String {
+    format_tokens(&generate_request_struct(&crate::common::components::api_for(endpoint), endpoint))
+}
+
+#[test]
+fn required_query_values_follow_the_path_in_declaration_order_and_precede_the_body() {
+    let mode = QueryParamType::Enum(vec!["fast".into(), "safe".into()]);
+    let mut endpoint = endpoint_with(
+        "CreateItems",
+        RestMethod::Post,
+        "/orgs/{org}/items",
+        vec![
+            query("page", false, QueryParamType::Integer, ParamStyle::Form, false),
+            query("since", true, QueryParamType::Integer, ParamStyle::Form, false),
+            query("mode", true, mode, ParamStyle::Form, false),
+            query("label", true, QueryParamType::String, ParamStyle::Form, false),
+            query("tags", true, QueryParamType::Array(Box::new(QueryParamType::String)), ParamStyle::Form, true),
+        ],
+    );
+    endpoint.request = Some(schematic_define::ApiRequest::json_type("NewItem"));
+    let code = generated(&endpoint);
+    let flat = squash(&code);
+
+    assert!(code.contains("pub since: i64,"), "{code}");
+    assert!(code.contains("pub mode: CreateItemsRequestMode,"), "{code}");
+    assert!(code.contains("pub label: String,"), "{code}");
+    assert!(code.contains("pub tags: Vec<String>,"), "{code}");
+    assert!(code.contains("pub page: Option<i64>,"), "{code}");
+    assert!(
+        flat.contains(&squash(
+            "pub fn new(org: impl Into<String>, since: i64, mode: CreateItemsRequestMode, \
+             label: impl Into<String>, tags: Vec<String>, body: NewItem) -> Self"
+        )),
+        "{code}"
+    );
+    assert!(
+        flat.contains(&squash("org: org.into(), since, mode, label: label.into(), tags, page: None, body,")),
+        "{code}"
+    );
+    assert!(code.contains("#[derive(Debug, Clone, Serialize, Deserialize)]\npub struct CreateItemsRequest"), "{code}");
+    assert!(!code.contains("impl From<"), "a required query value is only taken by new():\n{code}");
+    // Setters assign the field's own shape.
+    assert!(flat.contains(&squash("pub fn with_since(mut self, value: i64) -> Self { self.since = value; self }")), "{code}");
+    assert!(flat.contains(&squash("pub fn with_page(mut self, value: i64) -> Self { self.page = Some(value); self }")), "{code}");
+    // A required value is always sent; an optional one only when set.
+    assert!(flat.contains(&squash(r#"let value = &self.since; query.push(("since".to_string(), value.to_string().into()));"#)), "{code}");
+    assert!(flat.contains(&squash(r#"if let Some(ref value) = self.page { query.push(("page".to_string(), value.to_string().into())); }"#)), "{code}");
+}
+
+#[test]
+fn a_query_only_request_with_a_required_value_has_a_constructor_and_no_default() {
+    let required = endpoint_with(
+        "Search",
+        RestMethod::Get,
+        "/search",
+        vec![
+            query("q", true, QueryParamType::String, ParamStyle::Form, false),
+            query("limit", false, QueryParamType::Integer, ParamStyle::Form, false),
+        ],
+    );
+    let code = generated(&required);
+    assert!(squash(&code).contains(&squash("pub fn new(q: impl Into<String>) -> Self { Self { q: q.into(), limit: None } }")), "{code}");
+    assert!(code.contains("Creates a new request with the required query parameters."), "{code}");
+    assert!(code.contains("#[derive(Debug, Clone, Serialize, Deserialize)]\npub struct SearchRequest"), "{code}");
+    assert!(code.contains("let request = SearchRequest::new(\"q_value\")"), "the doc example calls new():\n{code}");
+
+    // Control: the same request with every value optional keeps `Default`.
+    let optional = endpoint_with(
+        "Search",
+        RestMethod::Get,
+        "/search",
+        vec![
+            query("q", false, QueryParamType::String, ParamStyle::Form, false),
+            query("limit", false, QueryParamType::Integer, ParamStyle::Form, false),
+        ],
+    );
+    let code = generated(&optional);
+    assert!(code.contains("#[derive(Debug, Clone, Default, Serialize, Deserialize)]\npub struct SearchRequest"), "{code}");
+    assert!(code.contains("pub fn new() -> Self"), "{code}");
+}
+
+#[test]
+fn a_required_query_value_suppresses_the_single_path_from_impls() {
+    let endpoint = endpoint_with(
+        "GetFile",
+        RestMethod::Get,
+        "/files/{path}",
+        vec![query("ref", true, QueryParamType::String, ParamStyle::Form, false)],
+    );
+    let code = generated(&endpoint);
+    assert!(code.contains("pub fn new(path: impl Into<String>, ref_: impl Into<String>) -> Self"), "{code}");
+    assert!(!code.contains("impl From<&str>"), "{code}");
+    // Untyped paths alone keep `Default`, as before; the required query value removes it.
+    assert!(code.contains("#[derive(Debug, Clone, Serialize, Deserialize)]\npub struct GetFileRequest"), "{code}");
+}
+
+#[test]
+fn array_wire_forms_follow_style_and_explode() {
+    let strings = || QueryParamType::Array(Box::new(QueryParamType::String));
+    let kinds = QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["a".into(), "b-c".into()])));
+    let endpoint = endpoint_with(
+        "ListItems",
+        RestMethod::Get,
+        "/items",
+        vec![
+            query("exploded", false, strings(), ParamStyle::Form, true),
+            query("commas", false, strings(), ParamStyle::Form, false),
+            query("spaces", false, strings(), ParamStyle::SpaceDelimited, false),
+            query("pipes", false, strings(), ParamStyle::PipeDelimited, false),
+            query("kinds", true, kinds, ParamStyle::Form, true),
+        ],
+    );
+    let code = generated(&endpoint);
+    let flat = squash(&code);
+
+    let exploded = r#"if value.is_empty() { query.push(("exploded".to_string(), String::new().into())); }
+        for element in value { query.push(("exploded".to_string(), element.to_string().into())); }"#;
+    assert!(flat.contains(&squash(exploded)), "one pair per element, `name=` when empty:\n{code}");
+    for (name, delimiter) in [("commas", "Comma"), ("spaces", "Space"), ("pipes", "Pipe")] {
+        let push = format!(
+            r#"query.push(("{name}".to_string(), schematic_runtime::QueryValue::delimited(value.iter().map(|element| element.to_string()), schematic_runtime::QueryDelimiter::{delimiter})));"#
+        );
+        assert!(flat.contains(&squash(&push)), "{name}:\n{code}");
+    }
+    // Enum elements share the enum machinery of a scalar enum.
+    assert!(code.contains("pub kinds: Vec<ListItemsRequestKinds>,"), "{code}");
+    assert!(code.contains("pub enum ListItemsRequestKinds {"), "{code}");
+    assert!(code.contains("Self::BC => \"b-c\""), "{code}");
+    assert!(flat.contains(&squash(r#"let value = &self.kinds; if value.is_empty()"#)), "{code}");
+}
+
+#[test]
+fn query_values_the_client_cannot_serialize_are_left_out_of_the_request() {
+    let strings = || QueryParamType::Array(Box::new(QueryParamType::String));
+    let endpoint = endpoint_with(
+        "ListItems",
+        RestMethod::Get,
+        "/items",
+        vec![
+            query("kept", false, QueryParamType::String, ParamStyle::Form, false),
+            query("json", false, QueryParamType::Json, ParamStyle::Form, false),
+            query("filter", false, QueryParamType::Json, ParamStyle::DeepObject, true),
+            query("simple", false, QueryParamType::String, ParamStyle::Simple, false),
+            query("piped_scalar", false, QueryParamType::String, ParamStyle::PipeDelimited, false),
+            query("spaces_exploded", false, strings(), ParamStyle::SpaceDelimited, true),
+            query("nested", false, QueryParamType::Array(Box::new(strings())), ParamStyle::Form, true),
+            query("json_items", false, QueryParamType::Array(Box::new(QueryParamType::Json)), ParamStyle::Form, true),
+        ],
+    );
+    let code = generated(&endpoint);
+
+    assert!(code.contains("pub kept: Option<String>,"), "{code}");
+    for left_out in ["json", "filter", "simple", "piped_scalar", "spaces_exploded", "nested", "json_items"] {
+        assert!(!code.contains(&format!("pub {left_out}:")), "{left_out} has no field:\n{code}");
+        assert!(!code.contains(&format!("fn with_{left_out}(")), "{left_out} has no setter:\n{code}");
+        assert!(!code.contains(&format!("\"{left_out}\".to_string()")), "{left_out} is never sent:\n{code}");
+    }
+}
+
+// =============================================================================
+// Pager-adopted parameters are never constructor arguments (R14)
+// =============================================================================
+
+/// The `pub fn new(...)` line of `code`.
+fn new_signature(code: &str) -> &str {
+    code.lines().find(|line| line.trim_start().starts_with("pub fn new(")).unwrap_or_default()
+}
+
+#[test]
+fn an_openai_style_pager_keeps_adopted_required_values_out_of_new() {
+    use schematic_define::pagination::{Collection, CursorSource, MoreSignal, PageSize, Strategy};
+    use schematic_gen::codegen::pagination::pager_view;
+
+    let mut api = crate::common::components::api_for(&endpoint_with(
+        "ListThings",
+        RestMethod::Get,
+        "/things",
+        vec![
+            query("after", false, QueryParamType::String, ParamStyle::Form, true),
+            query("limit", true, QueryParamType::Integer, ParamStyle::Form, true),
+            query("order", true, QueryParamType::Enum(vec!["asc".into(), "desc".into()]), ParamStyle::Form, true),
+        ],
+    ));
+    api.endpoints[0].pagination = Some(Collection::at("data").item_type("Thing").paginate(
+        Strategy::cursor("after", CursorSource::last_item("id"))
+            .more_when(MoreSignal::has_more("has_more"))
+            .resumable()
+            .page_size(PageSize::new("limit").sent_default(20)),
+    ));
+    let viewed = pager_view(&api, &api.endpoints[0]);
+    let code = format_tokens(&generate_request_struct(&api, &viewed));
+
+    assert_eq!(new_signature(&code).trim(), "pub fn new(order: ListThingsRequestOrder) -> Self {", "{code}");
+    assert!(!code.contains("pub limit") && !code.contains("pub after"), "{code}");
+}
+
+#[test]
+fn no_shipped_openai_request_takes_an_adopted_parameter_in_new() {
+    use schematic_define::pagination::{AdoptionOutcome, param_adoptions, resolve};
+    use schematic_gen::codegen::pagination::pager_view;
+
+    let api = schematic_gen::pipeline::resolve_api("openai").unwrap();
+    let mut checked = 0;
+    for endpoint in &api.endpoints {
+        let resolution = resolve(&api, endpoint);
+        let Some(strategy) = resolution.strategy() else { continue };
+        let adopted: Vec<String> = param_adoptions(endpoint, strategy)
+            .into_iter()
+            .filter(|adoption| adoption.outcome == AdoptionOutcome::Adopted)
+            .map(|adoption| adoption.name)
+            .collect();
+        if adopted.is_empty() {
+            continue;
+        }
+        let viewed = pager_view(&api, endpoint);
+        let code = format_tokens(&generate_request_struct(&api, &viewed));
+        let new = new_signature(&code);
+        for name in &adopted {
+            assert!(!new.contains(&format!("{name}:")), "{} takes `{name}`: {new}", endpoint.id);
+            assert!(!code.contains(&format!("pub {name}:")), "{} keeps a `{name}` field", endpoint.id);
+        }
+        checked += 1;
+    }
+    assert!(checked > 20, "OpenAI's cursor lists adopt `after`/`limit`; only {checked} checked");
 }

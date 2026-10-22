@@ -27,7 +27,7 @@ impl schematic_runtime::EndpointSpec for DeviceGetModelRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooControlCenter/getModel".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -45,23 +45,22 @@ impl schematic_runtime::EndpointSpec for DeviceGetModelRequest {
 /// ```text
 /// use schematic_schema::eversolo::RemoteSendKeyRequest;
 ///
-/// let request = RemoteSendKeyRequest::default()
-///     .with_key(/* value */)
+/// let request = RemoteSendKeyRequest::new("key_value")
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteSendKeyRequest {
     /// Query parameter: Remote key constant (e.g., Key.VolumeUp, Key.MediaPlay, Key.PowerOff)
-    pub key: Option<String>,
+    pub key: String,
 }
 impl RemoteSendKeyRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { key: None }
+    /// Creates a new request with the required query parameters.
+    pub fn new(key: impl Into<String>) -> Self {
+        Self { key: key.into() }
     }
     /// Sets the `key` query parameter.
     pub fn with_key(mut self, value: String) -> Self {
-        self.key = Some(value);
+        self.key = value;
         self
     }
 }
@@ -78,10 +77,9 @@ impl schematic_runtime::EndpointSpec for RemoteSendKeyRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooControlCenter/RemoteControl/sendkey".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.key {
-            query.push(("key".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.key;
+        query.push(("key".to_string(), value.to_string().into()));
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -99,23 +97,22 @@ impl schematic_runtime::EndpointSpec for RemoteSendKeyRequest {
 /// ```text
 /// use schematic_schema::eversolo::RemoteInputTextRequest;
 ///
-/// let request = RemoteInputTextRequest::default()
-///     .with_text(/* value */)
+/// let request = RemoteInputTextRequest::new("text_value")
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteInputTextRequest {
     /// Query parameter: Text string to input
-    pub text: Option<String>,
+    pub text: String,
 }
 impl RemoteInputTextRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { text: None }
+    /// Creates a new request with the required query parameters.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self { text: text.into() }
     }
     /// Sets the `text` query parameter.
     pub fn with_text(mut self, value: String) -> Self {
-        self.text = Some(value);
+        self.text = value;
         self
     }
 }
@@ -132,10 +129,9 @@ impl schematic_runtime::EndpointSpec for RemoteInputTextRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooControlCenter/RemoteControl/inputtext".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.text {
-            query.push(("text".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.text;
+        query.push(("text".to_string(), value.to_string().into()));
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -171,7 +167,7 @@ impl schematic_runtime::EndpointSpec for MusicGetStateRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooMusicControl/v2/getState".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -207,7 +203,7 @@ impl schematic_runtime::EndpointSpec for MusicPlayOrPauseRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooMusicControl/v2/playOrPause".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -243,7 +239,7 @@ impl schematic_runtime::EndpointSpec for MusicPlayNextRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooMusicControl/v2/playNext".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -279,7 +275,7 @@ impl schematic_runtime::EndpointSpec for MusicPlayLastRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooMusicControl/v2/playLast".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -297,23 +293,22 @@ impl schematic_runtime::EndpointSpec for MusicPlayLastRequest {
 /// ```text
 /// use schematic_schema::eversolo::MusicSeekToRequest;
 ///
-/// let request = MusicSeekToRequest::default()
-///     .with_time(/* value */)
+/// let request = MusicSeekToRequest::new(1)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MusicSeekToRequest {
     /// Query parameter: Target position in milliseconds
-    pub time: Option<i64>,
+    pub time: i64,
 }
 impl MusicSeekToRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { time: None }
+    /// Creates a new request with the required query parameters.
+    pub fn new(time: i64) -> Self {
+        Self { time }
     }
     /// Sets the `time` query parameter.
     pub fn with_time(mut self, value: i64) -> Self {
-        self.time = Some(value);
+        self.time = value;
         self
     }
 }
@@ -330,10 +325,9 @@ impl schematic_runtime::EndpointSpec for MusicSeekToRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooMusicControl/v2/seekTo".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.time {
-            query.push(("time".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.time;
+        query.push(("time".to_string(), value.to_string().into()));
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -369,7 +363,7 @@ impl schematic_runtime::EndpointSpec for MusicGetInputOutputListRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooMusicControl/v2/getInputAndOutputList".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -387,23 +381,22 @@ impl schematic_runtime::EndpointSpec for MusicGetInputOutputListRequest {
 /// ```text
 /// use schematic_schema::eversolo::MusicSetInputRequest;
 ///
-/// let request = MusicSetInputRequest::default()
-///     .with_tag(/* value */)
+/// let request = MusicSetInputRequest::new("tag_value")
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MusicSetInputRequest {
     /// Query parameter: Input tag from getInputAndOutputList
-    pub tag: Option<String>,
+    pub tag: String,
 }
 impl MusicSetInputRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { tag: None }
+    /// Creates a new request with the required query parameters.
+    pub fn new(tag: impl Into<String>) -> Self {
+        Self { tag: tag.into() }
     }
     /// Sets the `tag` query parameter.
     pub fn with_tag(mut self, value: String) -> Self {
-        self.tag = Some(value);
+        self.tag = value;
         self
     }
 }
@@ -420,10 +413,9 @@ impl schematic_runtime::EndpointSpec for MusicSetInputRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooMusicControl/v2/setInputList".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.tag {
-            query.push(("tag".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.tag;
+        query.push(("tag".to_string(), value.to_string().into()));
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -441,23 +433,22 @@ impl schematic_runtime::EndpointSpec for MusicSetInputRequest {
 /// ```text
 /// use schematic_schema::eversolo::MusicSetOutputRequest;
 ///
-/// let request = MusicSetOutputRequest::default()
-///     .with_tag(/* value */)
+/// let request = MusicSetOutputRequest::new("tag_value")
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MusicSetOutputRequest {
     /// Query parameter: Output tag from getInputAndOutputList
-    pub tag: Option<String>,
+    pub tag: String,
 }
 impl MusicSetOutputRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { tag: None }
+    /// Creates a new request with the required query parameters.
+    pub fn new(tag: impl Into<String>) -> Self {
+        Self { tag: tag.into() }
     }
     /// Sets the `tag` query parameter.
     pub fn with_tag(mut self, value: String) -> Self {
-        self.tag = Some(value);
+        self.tag = value;
         self
     }
 }
@@ -474,10 +465,9 @@ impl schematic_runtime::EndpointSpec for MusicSetOutputRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooMusicControl/v2/setOutInputList".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.tag {
-            query.push(("tag".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.tag;
+        query.push(("tag".to_string(), value.to_string().into()));
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -495,23 +485,22 @@ impl schematic_runtime::EndpointSpec for MusicSetOutputRequest {
 /// ```text
 /// use schematic_schema::eversolo::MusicSetVolumeRequest;
 ///
-/// let request = MusicSetVolumeRequest::default()
-///     .with_volume(/* value */)
+/// let request = MusicSetVolumeRequest::new(1)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MusicSetVolumeRequest {
     /// Query parameter: Volume level (0 to maxVolume)
-    pub volume: Option<i64>,
+    pub volume: i64,
 }
 impl MusicSetVolumeRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { volume: None }
+    /// Creates a new request with the required query parameters.
+    pub fn new(volume: i64) -> Self {
+        Self { volume }
     }
     /// Sets the `volume` query parameter.
     pub fn with_volume(mut self, value: i64) -> Self {
-        self.volume = Some(value);
+        self.volume = value;
         self
     }
 }
@@ -528,10 +517,9 @@ impl schematic_runtime::EndpointSpec for MusicSetVolumeRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooMusicControl/v2/setDevicesVolume".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.volume {
-            query.push(("volume".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.volume;
+        query.push(("volume".to_string(), value.to_string().into()));
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -549,24 +537,23 @@ impl schematic_runtime::EndpointSpec for MusicSetVolumeRequest {
 /// ```text
 /// use schematic_schema::eversolo::MusicSetMuteRequest;
 ///
-/// let request = MusicSetMuteRequest::default()
-///     .with_is_mute(/* value */)
+/// let request = MusicSetMuteRequest::new(1)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MusicSetMuteRequest {
     /// Query parameter: Mute state: 0 = unmuted, 1 = muted
     #[serde(rename = "isMute")]
-    pub is_mute: Option<i64>,
+    pub is_mute: i64,
 }
 impl MusicSetMuteRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { is_mute: None }
+    /// Creates a new request with the required query parameters.
+    pub fn new(is_mute: i64) -> Self {
+        Self { is_mute }
     }
     /// Sets the `is_mute` query parameter.
     pub fn with_is_mute(mut self, value: i64) -> Self {
-        self.is_mute = Some(value);
+        self.is_mute = value;
         self
     }
 }
@@ -583,10 +570,9 @@ impl schematic_runtime::EndpointSpec for MusicSetMuteRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooMusicControl/v2/setMuteVolume".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.is_mute {
-            query.push(("isMute".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.is_mute;
+        query.push(("isMute".to_string(), value.to_string().into()));
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -622,7 +608,7 @@ impl schematic_runtime::EndpointSpec for PowerGetOptionsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooMusicControl/v2/getPowerOption".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -640,23 +626,22 @@ impl schematic_runtime::EndpointSpec for PowerGetOptionsRequest {
 /// ```text
 /// use schematic_schema::eversolo::PowerSetOptionRequest;
 ///
-/// let request = PowerSetOptionRequest::default()
-///     .with_tag(/* value */)
+/// let request = PowerSetOptionRequest::new("tag_value")
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PowerSetOptionRequest {
     /// Query parameter: Power option tag (poweroff, reboot, screen, timeshutdown)
-    pub tag: Option<String>,
+    pub tag: String,
 }
 impl PowerSetOptionRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { tag: None }
+    /// Creates a new request with the required query parameters.
+    pub fn new(tag: impl Into<String>) -> Self {
+        Self { tag: tag.into() }
     }
     /// Sets the `tag` query parameter.
     pub fn with_tag(mut self, value: String) -> Self {
-        self.tag = Some(value);
+        self.tag = value;
         self
     }
 }
@@ -673,10 +658,9 @@ impl schematic_runtime::EndpointSpec for PowerSetOptionRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooMusicControl/v2/setPowerOption".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.tag {
-            query.push(("tag".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.tag;
+        query.push(("tag".to_string(), value.to_string().into()));
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -712,7 +696,7 @@ impl schematic_runtime::EndpointSpec for SystemGetScreenBrightnessRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/SystemSettings/displaySettings/getScreenBrightness".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -730,23 +714,22 @@ impl schematic_runtime::EndpointSpec for SystemGetScreenBrightnessRequest {
 /// ```text
 /// use schematic_schema::eversolo::SystemSetScreenBrightnessRequest;
 ///
-/// let request = SystemSetScreenBrightnessRequest::default()
-///     .with_index(/* value */)
+/// let request = SystemSetScreenBrightnessRequest::new(1)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemSetScreenBrightnessRequest {
     /// Query parameter: Brightness level index
-    pub index: Option<i64>,
+    pub index: i64,
 }
 impl SystemSetScreenBrightnessRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { index: None }
+    /// Creates a new request with the required query parameters.
+    pub fn new(index: i64) -> Self {
+        Self { index }
     }
     /// Sets the `index` query parameter.
     pub fn with_index(mut self, value: i64) -> Self {
-        self.index = Some(value);
+        self.index = value;
         self
     }
 }
@@ -763,10 +746,9 @@ impl schematic_runtime::EndpointSpec for SystemSetScreenBrightnessRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/SystemSettings/displaySettings/setScreenBrightness".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.index {
-            query.push(("index".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.index;
+        query.push(("index".to_string(), value.to_string().into()));
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -802,7 +784,7 @@ impl schematic_runtime::EndpointSpec for SystemGetKnobBrightnessRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/SystemSettings/displaySettings/getKnobBrightness".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -820,23 +802,22 @@ impl schematic_runtime::EndpointSpec for SystemGetKnobBrightnessRequest {
 /// ```text
 /// use schematic_schema::eversolo::SystemSetKnobBrightnessRequest;
 ///
-/// let request = SystemSetKnobBrightnessRequest::default()
-///     .with_index(/* value */)
+/// let request = SystemSetKnobBrightnessRequest::new(1)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemSetKnobBrightnessRequest {
     /// Query parameter: Brightness level index
-    pub index: Option<i64>,
+    pub index: i64,
 }
 impl SystemSetKnobBrightnessRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { index: None }
+    /// Creates a new request with the required query parameters.
+    pub fn new(index: i64) -> Self {
+        Self { index }
     }
     /// Sets the `index` query parameter.
     pub fn with_index(mut self, value: i64) -> Self {
-        self.index = Some(value);
+        self.index = value;
         self
     }
 }
@@ -853,10 +834,9 @@ impl schematic_runtime::EndpointSpec for SystemSetKnobBrightnessRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/SystemSettings/displaySettings/setKnobBrightness".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.index {
-            query.push(("index".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.index;
+        query.push(("index".to_string(), value.to_string().into()));
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -892,7 +872,7 @@ impl schematic_runtime::EndpointSpec for SystemGetVuModeListRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/SystemSettings/displaySettings/getVUModeList".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -910,23 +890,22 @@ impl schematic_runtime::EndpointSpec for SystemGetVuModeListRequest {
 /// ```text
 /// use schematic_schema::eversolo::SystemSetVuModeRequest;
 ///
-/// let request = SystemSetVuModeRequest::default()
-///     .with_index(/* value */)
+/// let request = SystemSetVuModeRequest::new(1)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemSetVuModeRequest {
     /// Query parameter: VU mode index from getVUModeList
-    pub index: Option<i64>,
+    pub index: i64,
 }
 impl SystemSetVuModeRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { index: None }
+    /// Creates a new request with the required query parameters.
+    pub fn new(index: i64) -> Self {
+        Self { index }
     }
     /// Sets the `index` query parameter.
     pub fn with_index(mut self, value: i64) -> Self {
-        self.index = Some(value);
+        self.index = value;
         self
     }
 }
@@ -943,10 +922,9 @@ impl schematic_runtime::EndpointSpec for SystemSetVuModeRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/SystemSettings/displaySettings/setVUMode".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.index {
-            query.push(("index".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.index;
+        query.push(("index".to_string(), value.to_string().into()));
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -982,7 +960,7 @@ impl schematic_runtime::EndpointSpec for SystemGetSpectrumModeListRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/SystemSettings/displaySettings/getSpPlayModeList".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1000,23 +978,22 @@ impl schematic_runtime::EndpointSpec for SystemGetSpectrumModeListRequest {
 /// ```text
 /// use schematic_schema::eversolo::SystemSetSpectrumModeRequest;
 ///
-/// let request = SystemSetSpectrumModeRequest::default()
-///     .with_index(/* value */)
+/// let request = SystemSetSpectrumModeRequest::new(1)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemSetSpectrumModeRequest {
     /// Query parameter: Spectrum mode index from getSpPlayModeList
-    pub index: Option<i64>,
+    pub index: i64,
 }
 impl SystemSetSpectrumModeRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { index: None }
+    /// Creates a new request with the required query parameters.
+    pub fn new(index: i64) -> Self {
+        Self { index }
     }
     /// Sets the `index` query parameter.
     pub fn with_index(mut self, value: i64) -> Self {
-        self.index = Some(value);
+        self.index = value;
         self
     }
 }
@@ -1033,10 +1010,9 @@ impl schematic_runtime::EndpointSpec for SystemSetSpectrumModeRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/SystemSettings/displaySettings/setSpPlayModeList".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.index {
-            query.push(("index".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.index;
+        query.push(("index".to_string(), value.to_string().into()));
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1054,24 +1030,23 @@ impl schematic_runtime::EndpointSpec for SystemSetSpectrumModeRequest {
 /// ```text
 /// use schematic_schema::eversolo::SystemChangeVuDisplayRequest;
 ///
-/// let request = SystemChangeVuDisplayRequest::default()
-///     .with_open_type(/* value */)
+/// let request = SystemChangeVuDisplayRequest::new(1)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemChangeVuDisplayRequest {
     /// Query parameter: Display open type
     #[serde(rename = "openType")]
-    pub open_type: Option<i64>,
+    pub open_type: i64,
 }
 impl SystemChangeVuDisplayRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { open_type: None }
+    /// Creates a new request with the required query parameters.
+    pub fn new(open_type: i64) -> Self {
+        Self { open_type }
     }
     /// Sets the `open_type` query parameter.
     pub fn with_open_type(mut self, value: i64) -> Self {
-        self.open_type = Some(value);
+        self.open_type = value;
         self
     }
 }
@@ -1088,10 +1063,9 @@ impl schematic_runtime::EndpointSpec for SystemChangeVuDisplayRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/ZidooMusicControl/v2/changVUDisplay".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.open_type {
-            query.push(("openType".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.open_type;
+        query.push(("openType".to_string(), value.to_string().into()));
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1162,10 +1136,6 @@ pub struct RemoteSendKeyCall<'a>(
     schematic_runtime::Call<'a, EversoloApi, RemoteSendKeyRequest>,
 );
 impl<'a> RemoteSendKeyCall<'a> {
-    /// Sets the `key` query parameter (`String`). Remote key constant (e.g., Key.VolumeUp, Key.MediaPlay, Key.PowerOff)
-    pub fn key(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_key(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -1217,10 +1187,6 @@ pub struct RemoteInputTextCall<'a>(
     schematic_runtime::Call<'a, EversoloApi, RemoteInputTextRequest>,
 );
 impl<'a> RemoteInputTextCall<'a> {
-    /// Sets the `text` query parameter (`String`). Text string to input
-    pub fn text(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_text(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -1476,10 +1442,6 @@ pub struct MusicSeekToCall<'a>(
     schematic_runtime::Call<'a, EversoloApi, MusicSeekToRequest>,
 );
 impl<'a> MusicSeekToCall<'a> {
-    /// Sets the `time` query parameter (`i64`). Target position in milliseconds
-    pub fn time(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_time(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -1582,10 +1544,6 @@ pub struct MusicSetInputCall<'a>(
     schematic_runtime::Call<'a, EversoloApi, MusicSetInputRequest>,
 );
 impl<'a> MusicSetInputCall<'a> {
-    /// Sets the `tag` query parameter (`String`). Input tag from getInputAndOutputList
-    pub fn tag(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_tag(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -1637,10 +1595,6 @@ pub struct MusicSetOutputCall<'a>(
     schematic_runtime::Call<'a, EversoloApi, MusicSetOutputRequest>,
 );
 impl<'a> MusicSetOutputCall<'a> {
-    /// Sets the `tag` query parameter (`String`). Output tag from getInputAndOutputList
-    pub fn tag(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_tag(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -1692,10 +1646,6 @@ pub struct MusicSetVolumeCall<'a>(
     schematic_runtime::Call<'a, EversoloApi, MusicSetVolumeRequest>,
 );
 impl<'a> MusicSetVolumeCall<'a> {
-    /// Sets the `volume` query parameter (`i64`). Volume level (0 to maxVolume)
-    pub fn volume(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_volume(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -1747,10 +1697,6 @@ pub struct MusicSetMuteCall<'a>(
     schematic_runtime::Call<'a, EversoloApi, MusicSetMuteRequest>,
 );
 impl<'a> MusicSetMuteCall<'a> {
-    /// Sets the `isMute` query parameter (`i64`). Mute state: 0 = unmuted, 1 = muted
-    pub fn is_mute(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_is_mute(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -1853,10 +1799,6 @@ pub struct PowerSetOptionCall<'a>(
     schematic_runtime::Call<'a, EversoloApi, PowerSetOptionRequest>,
 );
 impl<'a> PowerSetOptionCall<'a> {
-    /// Sets the `tag` query parameter (`String`). Power option tag (poweroff, reboot, screen, timeshutdown)
-    pub fn tag(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_tag(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -1959,10 +1901,6 @@ pub struct SystemSetScreenBrightnessCall<'a>(
     schematic_runtime::Call<'a, EversoloApi, SystemSetScreenBrightnessRequest>,
 );
 impl<'a> SystemSetScreenBrightnessCall<'a> {
-    /// Sets the `index` query parameter (`i64`). Brightness level index
-    pub fn index(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_index(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -2065,10 +2003,6 @@ pub struct SystemSetKnobBrightnessCall<'a>(
     schematic_runtime::Call<'a, EversoloApi, SystemSetKnobBrightnessRequest>,
 );
 impl<'a> SystemSetKnobBrightnessCall<'a> {
-    /// Sets the `index` query parameter (`i64`). Brightness level index
-    pub fn index(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_index(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -2171,10 +2105,6 @@ pub struct SystemSetVuModeCall<'a>(
     schematic_runtime::Call<'a, EversoloApi, SystemSetVuModeRequest>,
 );
 impl<'a> SystemSetVuModeCall<'a> {
-    /// Sets the `index` query parameter (`i64`). VU mode index from getVUModeList
-    pub fn index(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_index(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -2277,10 +2207,6 @@ pub struct SystemSetSpectrumModeCall<'a>(
     schematic_runtime::Call<'a, EversoloApi, SystemSetSpectrumModeRequest>,
 );
 impl<'a> SystemSetSpectrumModeCall<'a> {
-    /// Sets the `index` query parameter (`i64`). Spectrum mode index from getSpPlayModeList
-    pub fn index(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_index(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -2332,10 +2258,6 @@ pub struct SystemChangeVuDisplayCall<'a>(
     schematic_runtime::Call<'a, EversoloApi, SystemChangeVuDisplayRequest>,
 );
 impl<'a> SystemChangeVuDisplayCall<'a> {
-    /// Sets the `openType` query parameter (`i64`). Display open type
-    pub fn open_type(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_open_type(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -2393,11 +2315,11 @@ impl Eversolo {
     ///
     /// Returns a [`RemoteSendKeyCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
-    /// ## Optional values
+    /// ## Arguments
     ///
-    /// - [`key`](RemoteSendKeyCall::key): the `key` query parameter (`String`). Remote key constant (e.g., Key.VolumeUp, Key.MediaPlay, Key.PowerOff)
-    pub fn remote_send_key(&self) -> RemoteSendKeyCall<'_> {
-        RemoteSendKeyCall(self.0.send(RemoteSendKeyRequest::default()))
+    /// - `key: impl Into<String>`: the required `key` query parameter
+    pub fn remote_send_key(&self, key: impl Into<String>) -> RemoteSendKeyCall<'_> {
+        RemoteSendKeyCall(self.0.send(RemoteSendKeyRequest::new(key)))
     }
     /// Send text input to the device
     ///
@@ -2405,11 +2327,11 @@ impl Eversolo {
     ///
     /// Returns a [`RemoteInputTextCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
-    /// ## Optional values
+    /// ## Arguments
     ///
-    /// - [`text`](RemoteInputTextCall::text): the `text` query parameter (`String`). Text string to input
-    pub fn remote_input_text(&self) -> RemoteInputTextCall<'_> {
-        RemoteInputTextCall(self.0.send(RemoteInputTextRequest::default()))
+    /// - `text: impl Into<String>`: the required `text` query parameter
+    pub fn remote_input_text(&self, text: impl Into<String>) -> RemoteInputTextCall<'_> {
+        RemoteInputTextCall(self.0.send(RemoteInputTextRequest::new(text)))
     }
     /// Get current playback state, track info, and volume
     ///
@@ -2449,11 +2371,11 @@ impl Eversolo {
     ///
     /// Returns a [`MusicSeekToCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
-    /// ## Optional values
+    /// ## Arguments
     ///
-    /// - [`time`](MusicSeekToCall::time): the `time` query parameter (`i64`). Target position in milliseconds
-    pub fn music_seek_to(&self) -> MusicSeekToCall<'_> {
-        MusicSeekToCall(self.0.send(MusicSeekToRequest::default()))
+    /// - `time: i64`: the required `time` query parameter
+    pub fn music_seek_to(&self, time: i64) -> MusicSeekToCall<'_> {
+        MusicSeekToCall(self.0.send(MusicSeekToRequest::new(time)))
     }
     /// List available audio inputs and outputs
     ///
@@ -2471,11 +2393,11 @@ impl Eversolo {
     ///
     /// Returns a [`MusicSetInputCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
-    /// ## Optional values
+    /// ## Arguments
     ///
-    /// - [`tag`](MusicSetInputCall::tag): the `tag` query parameter (`String`). Input tag from getInputAndOutputList
-    pub fn music_set_input(&self) -> MusicSetInputCall<'_> {
-        MusicSetInputCall(self.0.send(MusicSetInputRequest::default()))
+    /// - `tag: impl Into<String>`: the required `tag` query parameter
+    pub fn music_set_input(&self, tag: impl Into<String>) -> MusicSetInputCall<'_> {
+        MusicSetInputCall(self.0.send(MusicSetInputRequest::new(tag)))
     }
     /// Set the active audio output
     ///
@@ -2483,11 +2405,11 @@ impl Eversolo {
     ///
     /// Returns a [`MusicSetOutputCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
-    /// ## Optional values
+    /// ## Arguments
     ///
-    /// - [`tag`](MusicSetOutputCall::tag): the `tag` query parameter (`String`). Output tag from getInputAndOutputList
-    pub fn music_set_output(&self) -> MusicSetOutputCall<'_> {
-        MusicSetOutputCall(self.0.send(MusicSetOutputRequest::default()))
+    /// - `tag: impl Into<String>`: the required `tag` query parameter
+    pub fn music_set_output(&self, tag: impl Into<String>) -> MusicSetOutputCall<'_> {
+        MusicSetOutputCall(self.0.send(MusicSetOutputRequest::new(tag)))
     }
     /// Set the absolute volume level
     ///
@@ -2495,11 +2417,11 @@ impl Eversolo {
     ///
     /// Returns a [`MusicSetVolumeCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
-    /// ## Optional values
+    /// ## Arguments
     ///
-    /// - [`volume`](MusicSetVolumeCall::volume): the `volume` query parameter (`i64`). Volume level (0 to maxVolume)
-    pub fn music_set_volume(&self) -> MusicSetVolumeCall<'_> {
-        MusicSetVolumeCall(self.0.send(MusicSetVolumeRequest::default()))
+    /// - `volume: i64`: the required `volume` query parameter
+    pub fn music_set_volume(&self, volume: i64) -> MusicSetVolumeCall<'_> {
+        MusicSetVolumeCall(self.0.send(MusicSetVolumeRequest::new(volume)))
     }
     /// Set or clear mute state
     ///
@@ -2507,11 +2429,11 @@ impl Eversolo {
     ///
     /// Returns a [`MusicSetMuteCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
-    /// ## Optional values
+    /// ## Arguments
     ///
-    /// - [`is_mute`](MusicSetMuteCall::is_mute): the `isMute` query parameter (`i64`). Mute state: 0 = unmuted, 1 = muted
-    pub fn music_set_mute(&self) -> MusicSetMuteCall<'_> {
-        MusicSetMuteCall(self.0.send(MusicSetMuteRequest::default()))
+    /// - `is_mute: i64`: the required `isMute` query parameter
+    pub fn music_set_mute(&self, is_mute: i64) -> MusicSetMuteCall<'_> {
+        MusicSetMuteCall(self.0.send(MusicSetMuteRequest::new(is_mute)))
     }
     /// Get available power options (shutdown, reboot, etc.)
     ///
@@ -2527,11 +2449,11 @@ impl Eversolo {
     ///
     /// Returns a [`PowerSetOptionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
-    /// ## Optional values
+    /// ## Arguments
     ///
-    /// - [`tag`](PowerSetOptionCall::tag): the `tag` query parameter (`String`). Power option tag (poweroff, reboot, screen, timeshutdown)
-    pub fn power_set_option(&self) -> PowerSetOptionCall<'_> {
-        PowerSetOptionCall(self.0.send(PowerSetOptionRequest::default()))
+    /// - `tag: impl Into<String>`: the required `tag` query parameter
+    pub fn power_set_option(&self, tag: impl Into<String>) -> PowerSetOptionCall<'_> {
+        PowerSetOptionCall(self.0.send(PowerSetOptionRequest::new(tag)))
     }
     /// Get current screen brightness level (community-discovered)
     ///
@@ -2549,12 +2471,15 @@ impl Eversolo {
     ///
     /// Returns a [`SystemSetScreenBrightnessCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
-    /// ## Optional values
+    /// ## Arguments
     ///
-    /// - [`index`](SystemSetScreenBrightnessCall::index): the `index` query parameter (`i64`). Brightness level index
-    pub fn system_set_screen_brightness(&self) -> SystemSetScreenBrightnessCall<'_> {
+    /// - `index: i64`: the required `index` query parameter
+    pub fn system_set_screen_brightness(
+        &self,
+        index: i64,
+    ) -> SystemSetScreenBrightnessCall<'_> {
         SystemSetScreenBrightnessCall(
-            self.0.send(SystemSetScreenBrightnessRequest::default()),
+            self.0.send(SystemSetScreenBrightnessRequest::new(index)),
         )
     }
     /// Get current knob LED brightness level (community-discovered)
@@ -2573,12 +2498,15 @@ impl Eversolo {
     ///
     /// Returns a [`SystemSetKnobBrightnessCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
-    /// ## Optional values
+    /// ## Arguments
     ///
-    /// - [`index`](SystemSetKnobBrightnessCall::index): the `index` query parameter (`i64`). Brightness level index
-    pub fn system_set_knob_brightness(&self) -> SystemSetKnobBrightnessCall<'_> {
+    /// - `index: i64`: the required `index` query parameter
+    pub fn system_set_knob_brightness(
+        &self,
+        index: i64,
+    ) -> SystemSetKnobBrightnessCall<'_> {
         SystemSetKnobBrightnessCall(
-            self.0.send(SystemSetKnobBrightnessRequest::default()),
+            self.0.send(SystemSetKnobBrightnessRequest::new(index)),
         )
     }
     /// List available VU meter display modes (community-discovered)
@@ -2595,11 +2523,11 @@ impl Eversolo {
     ///
     /// Returns a [`SystemSetVuModeCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
-    /// ## Optional values
+    /// ## Arguments
     ///
-    /// - [`index`](SystemSetVuModeCall::index): the `index` query parameter (`i64`). VU mode index from getVUModeList
-    pub fn system_set_vu_mode(&self) -> SystemSetVuModeCall<'_> {
-        SystemSetVuModeCall(self.0.send(SystemSetVuModeRequest::default()))
+    /// - `index: i64`: the required `index` query parameter
+    pub fn system_set_vu_mode(&self, index: i64) -> SystemSetVuModeCall<'_> {
+        SystemSetVuModeCall(self.0.send(SystemSetVuModeRequest::new(index)))
     }
     /// List available spectrum display modes (community-discovered)
     ///
@@ -2617,11 +2545,11 @@ impl Eversolo {
     ///
     /// Returns a [`SystemSetSpectrumModeCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
-    /// ## Optional values
+    /// ## Arguments
     ///
-    /// - [`index`](SystemSetSpectrumModeCall::index): the `index` query parameter (`i64`). Spectrum mode index from getSpPlayModeList
-    pub fn system_set_spectrum_mode(&self) -> SystemSetSpectrumModeCall<'_> {
-        SystemSetSpectrumModeCall(self.0.send(SystemSetSpectrumModeRequest::default()))
+    /// - `index: i64`: the required `index` query parameter
+    pub fn system_set_spectrum_mode(&self, index: i64) -> SystemSetSpectrumModeCall<'_> {
+        SystemSetSpectrumModeCall(self.0.send(SystemSetSpectrumModeRequest::new(index)))
     }
     /// Toggle VU display open/close (community-discovered)
     ///
@@ -2629,10 +2557,15 @@ impl Eversolo {
     ///
     /// Returns a [`SystemChangeVuDisplayCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
-    /// ## Optional values
+    /// ## Arguments
     ///
-    /// - [`open_type`](SystemChangeVuDisplayCall::open_type): the `openType` query parameter (`i64`). Display open type
-    pub fn system_change_vu_display(&self) -> SystemChangeVuDisplayCall<'_> {
-        SystemChangeVuDisplayCall(self.0.send(SystemChangeVuDisplayRequest::default()))
+    /// - `open_type: i64`: the required `openType` query parameter
+    pub fn system_change_vu_display(
+        &self,
+        open_type: i64,
+    ) -> SystemChangeVuDisplayCall<'_> {
+        SystemChangeVuDisplayCall(
+            self.0.send(SystemChangeVuDisplayRequest::new(open_type)),
+        )
     }
 }

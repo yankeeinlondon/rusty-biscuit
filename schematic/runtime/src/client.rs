@@ -35,7 +35,7 @@ use crate::codec::{BodyReadError, Decode, DecodeFailureKind, LiveBody, StreamBou
 use crate::credentials::{AuthConfig, Credential, CredentialPlacement, Resolved};
 use crate::deadline::{Deadline, Expiration, Limit};
 use crate::encode::{self, EncodedBody};
-use crate::endpoint::{Api, EndpointSpec, ErrorBody, RequestParts};
+use crate::endpoint::{Api, EndpointSpec, ErrorBody, QueryValue, RequestParts, encode_query_component};
 use crate::hooks::{HookError, HookStage, Hooks, SupportsHooks};
 use crate::error::{BuildError, InvalidArgument, TransportError, TransportErrorKind};
 use crate::meta::{AuthMethod, RequestMeta, ResponseMeta};
@@ -1131,7 +1131,7 @@ impl Inner {
         }
         .map_err(|_| TransportErrorKind::InvalidUrl)?;
         url.set_fragment(None);
-        append_query(&mut url, query.iter().map(|(name, value)| (name.as_str(), value.as_str())));
+        append_query(&mut url, query.iter().map(|(name, value)| (name.as_str(), value)));
 
         let mut headers = inner.default_headers.clone();
         let mut replaced = Vec::new();
@@ -1222,23 +1222,32 @@ fn strip_secrets(secrets: &SecretNames, assembled: &mut Assembled) {
     remove_query(&mut assembled.url, |name| secrets.is_secret_query(name));
 }
 
-fn remove_query(url: &mut Url, remove: impl Fn(&str) -> bool) {
-    let kept: Vec<(String, String)> = url
-        .query_pairs()
-        .filter(|(pair_name, _)| !remove(pair_name))
-        .map(|(pair_name, value)| (pair_name.into_owned(), value.into_owned()))
+/// Drops every query pair whose decoded name `remove` matches. The pairs
+/// kept are kept byte for byte: decoding and re-encoding them would turn a
+/// delimited value's literal `,` into `%2C`.
+pub(crate) fn remove_query(url: &mut Url, remove: impl Fn(&str) -> bool) {
+    let Some(query) = url.query() else {
+        return;
+    };
+    let segments: Vec<&str> = query.split('&').collect();
+    let kept: Vec<&str> = segments
+        .iter()
+        .copied()
+        .filter(|segment| {
+            // Names are decoded exactly as `Url::query_pairs` decodes them.
+            !url::form_urlencoded::parse(segment.as_bytes()).next().is_some_and(|(name, _)| remove(&name))
+        })
         .collect();
-    if kept.len() == url.query_pairs().count() {
+    if kept.len() == segments.len() {
         return;
     }
-    url.set_query(None);
-    append_query(url, kept.iter().map(|(name, value)| (name.as_str(), value.as_str())));
+    let kept = kept.join("&");
+    url.set_query((!kept.is_empty()).then_some(kept.as_str()));
 }
 
-/// Appends `pairs` to `url`'s query. Names and values are percent-encoded
-/// except for RFC 3986 unreserved characters, so a space is sent as `%20`,
-/// never `+`; the generated clients have always put this form on the wire.
-fn append_query<'a>(url: &mut Url, pairs: impl IntoIterator<Item = (&'a str, &'a str)>) {
+/// Appends `pairs` to `url`'s query, each name and value encoded once (see
+/// [`QueryValue`]).
+pub(crate) fn append_query<'a>(url: &mut Url, pairs: impl IntoIterator<Item = (&'a str, &'a QueryValue)>) {
     let mut query = url.query().unwrap_or_default().to_string();
     for (name, value) in pairs {
         if !query.is_empty() {
@@ -1246,20 +1255,10 @@ fn append_query<'a>(url: &mut Url, pairs: impl IntoIterator<Item = (&'a str, &'a
         }
         encode_query_component(name, &mut query);
         query.push('=');
-        encode_query_component(value, &mut query);
+        query.push_str(&value.encoded());
     }
     if !query.is_empty() {
         url.set_query(Some(&query));
-    }
-}
-
-fn encode_query_component(text: &str, out: &mut String) {
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(char::from(byte));
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
     }
 }
 
@@ -1297,7 +1296,7 @@ fn place_credential(assembled: &mut Assembled, placement: &CredentialPlacement, 
                     "the request already sets the query parameter `{name}` that carries the credential"
                 )));
             }
-            append_query(&mut assembled.url, [(name.as_str(), value)]);
+            append_query(&mut assembled.url, [(name.as_str(), &QueryValue::from(value))]);
         }
         CredentialPlacement::ApiKeyCookie { name } => {
             if cookie_pairs(&assembled.headers).any(|(cookie, _)| &cookie == name) {

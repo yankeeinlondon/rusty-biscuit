@@ -42,7 +42,7 @@ impl schematic_runtime::EndpointSpec for CreateSpeechRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/audio/speech".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -239,7 +239,7 @@ impl schematic_runtime::EndpointSpec for CreateTranscriptionRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/audio/transcriptions".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -345,7 +345,7 @@ impl schematic_runtime::EndpointSpec for CreateTranslationRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/audio/translations".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -381,7 +381,7 @@ impl schematic_runtime::EndpointSpec for ListVoiceConsentsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/audio/voice_consents".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -475,7 +475,7 @@ impl schematic_runtime::EndpointSpec for CreateVoiceConsentRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/audio/voice_consents".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -537,7 +537,7 @@ impl schematic_runtime::EndpointSpec for GetVoiceConsentRequest {
             "/audio/voice_consents/{}", urlencoding::encode(& self.consent_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -594,7 +594,7 @@ impl schematic_runtime::EndpointSpec for UpdateVoiceConsentRequest {
             "/audio/voice_consents/{}", urlencoding::encode(& self.consent_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -663,7 +663,7 @@ impl schematic_runtime::EndpointSpec for DeleteVoiceConsentRequest {
             "/audio/voice_consents/{}", urlencoding::encode(& self.consent_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -757,7 +757,7 @@ impl schematic_runtime::EndpointSpec for CreateVoiceRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/audio/voices".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -793,7 +793,7 @@ impl schematic_runtime::EndpointSpec for ListBatchesRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/batches".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -842,7 +842,7 @@ impl schematic_runtime::EndpointSpec for CreateBatchRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/batches".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -906,7 +906,7 @@ impl schematic_runtime::EndpointSpec for RetrieveBatchRequest {
         let path = format!(
             "/batches/{}", urlencoding::encode(& self.batch_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -963,7 +963,7 @@ impl schematic_runtime::EndpointSpec for CancelBatchRequest {
         let path = format!(
             "/batches/{}/cancel", urlencoding::encode(& self.batch_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -972,6 +972,31 @@ impl schematic_runtime::EndpointSpec for CancelBatchRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListChatCompletionsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListChatCompletionsRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListChatCompletionsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListChatCompletionsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListChatCompletions` endpoint.
@@ -983,7 +1008,6 @@ impl schematic_runtime::EndpointSpec for CancelBatchRequest {
 ///
 /// let request = ListChatCompletionsRequest::default()
 ///     .with_model(/* value */)
-///     .with_metadata(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
@@ -991,35 +1015,21 @@ impl schematic_runtime::EndpointSpec for CancelBatchRequest {
 pub struct ListChatCompletionsRequest {
     /// Query parameter: The model used to generate the Chat Completions.
     pub model: Option<String>,
-    /** Query parameter: A list of metadata keys to filter the Chat Completions by. Example:
-
-`metadata[key1]=value1&metadata[key2]=value2`
-*/
-    pub metadata: Option<serde_json::Value>,
     /// Query parameter: Sort order for Chat Completions by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
-    pub order: Option<String>,
+    pub order: Option<ListChatCompletionsRequestOrder>,
 }
 impl ListChatCompletionsRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            model: None,
-            metadata: None,
-            order: None,
-        }
+        Self { model: None, order: None }
     }
     /// Sets the `model` query parameter.
     pub fn with_model(mut self, value: String) -> Self {
         self.model = Some(value);
         self
     }
-    /// Sets the `metadata` query parameter.
-    pub fn with_metadata(mut self, value: serde_json::Value) -> Self {
-        self.metadata = Some(value);
-        self
-    }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListChatCompletionsRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -1037,15 +1047,12 @@ impl schematic_runtime::EndpointSpec for ListChatCompletionsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/chat/completions".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.model {
-            query.push(("model".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.metadata {
-            query.push(("metadata".to_string(), value.to_string()));
+            query.push(("model".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -1102,7 +1109,7 @@ impl schematic_runtime::EndpointSpec for CreateChatCompletionRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/chat/completions".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1170,7 +1177,7 @@ impl schematic_runtime::EndpointSpec for GetChatCompletionRequest {
         let path = format!(
             "/chat/completions/{}", urlencoding::encode(& self.completion_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1223,7 +1230,7 @@ impl schematic_runtime::EndpointSpec for UpdateChatCompletionRequest {
         let path = format!(
             "/chat/completions/{}", urlencoding::encode(& self.completion_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1291,7 +1298,7 @@ impl schematic_runtime::EndpointSpec for DeleteChatCompletionRequest {
         let path = format!(
             "/chat/completions/{}", urlencoding::encode(& self.completion_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1300,6 +1307,31 @@ impl schematic_runtime::EndpointSpec for DeleteChatCompletionRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`GetChatCompletionMessagesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum GetChatCompletionMessagesRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl GetChatCompletionMessagesRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for GetChatCompletionMessagesRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `GetChatCompletionMessages` endpoint.
@@ -1318,7 +1350,7 @@ pub struct GetChatCompletionMessagesRequest {
     /// Path parameter: completion_id
     pub completion_id: String,
     /// Query parameter: Sort order for messages by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
-    pub order: Option<String>,
+    pub order: Option<GetChatCompletionMessagesRequestOrder>,
 }
 impl GetChatCompletionMessagesRequest {
     /// Creates a new request with the required path parameters.
@@ -1329,7 +1361,7 @@ impl GetChatCompletionMessagesRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: GetChatCompletionMessagesRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -1366,9 +1398,9 @@ impl schematic_runtime::EndpointSpec for GetChatCompletionMessagesRequest {
             "/chat/completions/{}/messages", urlencoding::encode(& self.completion_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -1421,7 +1453,7 @@ impl schematic_runtime::EndpointSpec for CreateCompletionRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/completions".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1437,6 +1469,31 @@ impl schematic_runtime::EndpointSpec for CreateCompletionRequest {
                     })?,
             ),
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListContainersRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListContainersRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListContainersRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListContainersRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListContainers` endpoint.
@@ -1455,7 +1512,7 @@ impl schematic_runtime::EndpointSpec for CreateCompletionRequest {
 pub struct ListContainersRequest {
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
-    pub order: Option<String>,
+    pub order: Option<ListContainersRequestOrder>,
     /// Query parameter: Filter results by container name.
     pub name: Option<String>,
 }
@@ -1465,7 +1522,7 @@ impl ListContainersRequest {
         Self { order: None, name: None }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListContainersRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -1488,12 +1545,12 @@ impl schematic_runtime::EndpointSpec for ListContainersRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/containers".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.name {
-            query.push(("name".to_string(), value.to_string()));
+            query.push(("name".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -1546,7 +1603,7 @@ impl schematic_runtime::EndpointSpec for CreateContainerRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/containers".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1614,7 +1671,7 @@ impl schematic_runtime::EndpointSpec for RetrieveContainerRequest {
         let path = format!(
             "/containers/{}", urlencoding::encode(& self.container_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1673,7 +1730,7 @@ impl schematic_runtime::EndpointSpec for DeleteContainerRequest {
         let path = format!(
             "/containers/{}", urlencoding::encode(& self.container_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1682,6 +1739,31 @@ impl schematic_runtime::EndpointSpec for DeleteContainerRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListContainerFilesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListContainerFilesRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListContainerFilesRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListContainerFilesRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListContainerFiles` endpoint.
@@ -1701,7 +1783,7 @@ pub struct ListContainerFilesRequest {
     pub container_id: String,
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
-    pub order: Option<String>,
+    pub order: Option<ListContainerFilesRequestOrder>,
 }
 impl ListContainerFilesRequest {
     /// Creates a new request with the required path parameters.
@@ -1712,7 +1794,7 @@ impl ListContainerFilesRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListContainerFilesRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -1748,9 +1830,9 @@ impl schematic_runtime::EndpointSpec for ListContainerFilesRequest {
         let path = format!(
             "/containers/{}/files", urlencoding::encode(& self.container_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -1807,7 +1889,7 @@ impl schematic_runtime::EndpointSpec for CreateContainerFileRequest {
         let path = format!(
             "/containers/{}/files", urlencoding::encode(& self.container_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1867,7 +1949,7 @@ impl schematic_runtime::EndpointSpec for RetrieveContainerFileRequest {
             "/containers/{}/files/{}", urlencoding::encode(& self.container_id
             .to_string()), urlencoding::encode(& self.file_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1918,7 +2000,7 @@ impl schematic_runtime::EndpointSpec for DeleteContainerFileRequest {
             "/containers/{}/files/{}", urlencoding::encode(& self.container_id
             .to_string()), urlencoding::encode(& self.file_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1969,7 +2051,7 @@ impl schematic_runtime::EndpointSpec for RetrieveContainerFileContentRequest {
             "/containers/{}/files/{}/content", urlencoding::encode(& self.container_id
             .to_string()), urlencoding::encode(& self.file_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1978,6 +2060,31 @@ impl schematic_runtime::EndpointSpec for RetrieveContainerFileContentRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListConversationItemsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListConversationItemsRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListConversationItemsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListConversationItemsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListConversationItems` endpoint.
@@ -1989,7 +2096,6 @@ impl schematic_runtime::EndpointSpec for RetrieveContainerFileContentRequest {
 ///
 /// let request = ListConversationItemsRequest::new("conversation_id_value")
 ///     .with_order(/* value */)
-///     .with_include(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -2000,16 +2106,7 @@ pub struct ListConversationItemsRequest {
 - `asc`: Return the input items in ascending order.
 - `desc`: Return the input items in descending order.
 */
-    pub order: Option<String>,
-    /** Query parameter: Specify additional output data to include in the model response. Currently supported values are:
-- `web_search_call.action.sources`: Include the sources of the web search tool call.
-- `code_interpreter_call.outputs`: Includes the outputs of python code execution in code interpreter tool call items.
-- `computer_call_output.output.image_url`: Include image urls from the computer call output.
-- `file_search_call.results`: Include the search results of the file search tool call.
-- `message.input_image.image_url`: Include image urls from the input message.
-- `message.output_text.logprobs`: Include logprobs with assistant messages.
-- `reasoning.encrypted_content`: Includes an encrypted version of reasoning tokens in reasoning item outputs. This enables reasoning items to be used in multi-turn conversations when using the Responses API statelessly (like when the `store` parameter is set to `false`, or when an organization is enrolled in the zero data retention program).*/
-    pub include: Option<Vec<serde_json::Value>>,
+    pub order: Option<ListConversationItemsRequestOrder>,
 }
 impl ListConversationItemsRequest {
     /// Creates a new request with the required path parameters.
@@ -2017,17 +2114,11 @@ impl ListConversationItemsRequest {
         Self {
             conversation_id: conversation_id.into(),
             order: None,
-            include: None,
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListConversationItemsRequestOrder) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `include` query parameter.
-    pub fn with_include(mut self, value: Vec<serde_json::Value>) -> Self {
-        self.include = Some(value);
         self
     }
 }
@@ -2036,7 +2127,6 @@ impl From<&str> for ListConversationItemsRequest {
         Self {
             conversation_id: param.to_string(),
             order: None,
-            include: None,
         }
     }
 }
@@ -2045,7 +2135,6 @@ impl From<String> for ListConversationItemsRequest {
         Self {
             conversation_id: param,
             order: None,
-            include: None,
         }
     }
 }
@@ -2065,14 +2154,9 @@ impl schematic_runtime::EndpointSpec for ListConversationItemsRequest {
             "/conversations/{}/items", urlencoding::encode(& self.conversation_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref values) = self.include {
-            for value in values {
-                query.push(("include".to_string(), value.to_string()));
-            }
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -2093,17 +2177,12 @@ impl schematic_runtime::EndpointSpec for ListConversationItemsRequest {
 ///
 /// let body: ::serde_json::Value = Default::default();
 /// let request = CreateConversationItemsRequest::new("conversation_id_value", body)
-///     .with_include(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateConversationItemsRequest {
     /// Path parameter: conversation_id
     pub conversation_id: String,
-    /** Query parameter: Additional fields to include in the response. See the `include`
-parameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.
-*/
-    pub include: Option<Vec<serde_json::Value>>,
     /// Request body
     pub body: ::serde_json::Value,
 }
@@ -2112,14 +2191,8 @@ impl CreateConversationItemsRequest {
     pub fn new(conversation_id: impl Into<String>, body: ::serde_json::Value) -> Self {
         Self {
             conversation_id: conversation_id.into(),
-            include: None,
             body,
         }
-    }
-    /// Sets the `include` query parameter.
-    pub fn with_include(mut self, value: Vec<serde_json::Value>) -> Self {
-        self.include = Some(value);
-        self
     }
 }
 impl schematic_runtime::EndpointSpec for CreateConversationItemsRequest {
@@ -2138,12 +2211,7 @@ impl schematic_runtime::EndpointSpec for CreateConversationItemsRequest {
             "/conversations/{}/items", urlencoding::encode(& self.conversation_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref values) = self.include {
-            for value in values {
-                query.push(("include".to_string(), value.to_string()));
-            }
-        }
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2169,7 +2237,6 @@ impl schematic_runtime::EndpointSpec for CreateConversationItemsRequest {
 /// use schematic_schema::openai::GetConversationItemRequest;
 ///
 /// let request = GetConversationItemRequest::new("conversation_id_value", "item_id_value")
-///     .with_include(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -2178,10 +2245,6 @@ pub struct GetConversationItemRequest {
     pub conversation_id: String,
     /// Path parameter: item_id
     pub item_id: String,
-    /** Query parameter: Additional fields to include in the response. See the `include`
-parameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.
-*/
-    pub include: Option<Vec<serde_json::Value>>,
 }
 impl GetConversationItemRequest {
     /// Creates a new request with the required path parameters.
@@ -2189,13 +2252,7 @@ impl GetConversationItemRequest {
         Self {
             conversation_id: conversation_id.into(),
             item_id: item_id.into(),
-            include: None,
         }
-    }
-    /// Sets the `include` query parameter.
-    pub fn with_include(mut self, value: Vec<serde_json::Value>) -> Self {
-        self.include = Some(value);
-        self
     }
 }
 impl schematic_runtime::EndpointSpec for GetConversationItemRequest {
@@ -2214,12 +2271,7 @@ impl schematic_runtime::EndpointSpec for GetConversationItemRequest {
             "/conversations/{}/items/{}", urlencoding::encode(& self.conversation_id
             .to_string()), urlencoding::encode(& self.item_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref values) = self.include {
-            for value in values {
-                query.push(("include".to_string(), value.to_string()));
-            }
-        }
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2272,7 +2324,7 @@ impl schematic_runtime::EndpointSpec for DeleteConversationItemRequest {
             "/conversations/{}/items/{}", urlencoding::encode(& self.conversation_id
             .to_string()), urlencoding::encode(& self.item_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2324,7 +2376,7 @@ impl schematic_runtime::EndpointSpec for CreateEmbeddingRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/embeddings".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2342,6 +2394,56 @@ impl schematic_runtime::EndpointSpec for CreateEmbeddingRequest {
         })
     }
 }
+/// Values of the `order` query parameter of [`ListEvalsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListEvalsRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListEvalsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListEvalsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `order_by` query parameter of [`ListEvalsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListEvalsRequestOrderBy {
+    /// `created_at`
+    #[serde(rename = "created_at")]
+    CreatedAt,
+    /// `updated_at`
+    #[serde(rename = "updated_at")]
+    UpdatedAt,
+}
+impl ListEvalsRequestOrderBy {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::CreatedAt => "created_at",
+            Self::UpdatedAt => "updated_at",
+        }
+    }
+}
+impl ::core::fmt::Display for ListEvalsRequestOrderBy {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `ListEvals` endpoint.
 ///
 /// ## Example
@@ -2357,11 +2459,11 @@ impl schematic_runtime::EndpointSpec for CreateEmbeddingRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListEvalsRequest {
     /// Query parameter: Sort order for evals by timestamp. Use `asc` for ascending order or `desc` for descending order.
-    pub order: Option<String>,
+    pub order: Option<ListEvalsRequestOrder>,
     /** Query parameter: Evals can be ordered by creation time or last updated time. Use
 `created_at` for creation time or `updated_at` for last updated time.
 */
-    pub order_by: Option<String>,
+    pub order_by: Option<ListEvalsRequestOrderBy>,
 }
 impl ListEvalsRequest {
     /// Creates a new request with default values.
@@ -2372,12 +2474,12 @@ impl ListEvalsRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListEvalsRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
     /// Sets the `order_by` query parameter.
-    pub fn with_order_by(mut self, value: String) -> Self {
+    pub fn with_order_by(mut self, value: ListEvalsRequestOrderBy) -> Self {
         self.order_by = Some(value);
         self
     }
@@ -2393,12 +2495,12 @@ impl schematic_runtime::EndpointSpec for ListEvalsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/evals".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.order_by {
-            query.push(("order_by".to_string(), value.to_string()));
+            query.push(("order_by".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -2448,7 +2550,7 @@ impl schematic_runtime::EndpointSpec for CreateEvalRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/evals".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2508,7 +2610,7 @@ impl schematic_runtime::EndpointSpec for GetEvalRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = format!("/evals/{}", urlencoding::encode(& self.eval_id.to_string()));
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2557,7 +2659,7 @@ impl schematic_runtime::EndpointSpec for UpdateEvalRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = format!("/evals/{}", urlencoding::encode(& self.eval_id.to_string()));
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2617,7 +2719,7 @@ impl schematic_runtime::EndpointSpec for DeleteEvalRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = format!("/evals/{}", urlencoding::encode(& self.eval_id.to_string()));
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2626,6 +2728,68 @@ impl schematic_runtime::EndpointSpec for DeleteEvalRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`GetEvalRunsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum GetEvalRunsRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl GetEvalRunsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for GetEvalRunsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `status` query parameter of [`GetEvalRunsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum GetEvalRunsRequestStatus {
+    /// `queued`
+    #[serde(rename = "queued")]
+    Queued,
+    /// `in_progress`
+    #[serde(rename = "in_progress")]
+    InProgress,
+    /// `completed`
+    #[serde(rename = "completed")]
+    Completed,
+    /// `canceled`
+    #[serde(rename = "canceled")]
+    Canceled,
+    /// `failed`
+    #[serde(rename = "failed")]
+    Failed,
+}
+impl GetEvalRunsRequestStatus {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Canceled => "canceled",
+            Self::Failed => "failed",
+        }
+    }
+}
+impl ::core::fmt::Display for GetEvalRunsRequestStatus {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `GetEvalRuns` endpoint.
@@ -2645,9 +2809,9 @@ pub struct GetEvalRunsRequest {
     /// Path parameter: eval_id
     pub eval_id: String,
     /// Query parameter: Sort order for runs by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
-    pub order: Option<String>,
+    pub order: Option<GetEvalRunsRequestOrder>,
     /// Query parameter: Filter runs by status. One of `queued` | `in_progress` | `failed` | `completed` | `canceled`.
-    pub status: Option<String>,
+    pub status: Option<GetEvalRunsRequestStatus>,
 }
 impl GetEvalRunsRequest {
     /// Creates a new request with the required path parameters.
@@ -2659,12 +2823,12 @@ impl GetEvalRunsRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: GetEvalRunsRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
     /// Sets the `status` query parameter.
-    pub fn with_status(mut self, value: String) -> Self {
+    pub fn with_status(mut self, value: GetEvalRunsRequestStatus) -> Self {
         self.status = Some(value);
         self
     }
@@ -2700,12 +2864,12 @@ impl schematic_runtime::EndpointSpec for GetEvalRunsRequest {
         let path = format!(
             "/evals/{}/runs", urlencoding::encode(& self.eval_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.status {
-            query.push(("status".to_string(), value.to_string()));
+            query.push(("status".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -2760,7 +2924,7 @@ impl schematic_runtime::EndpointSpec for CreateEvalRunRequest {
         let path = format!(
             "/evals/{}/runs", urlencoding::encode(& self.eval_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2818,7 +2982,7 @@ impl schematic_runtime::EndpointSpec for GetEvalRunRequest {
             "/evals/{}/runs/{}", urlencoding::encode(& self.eval_id.to_string()),
             urlencoding::encode(& self.run_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2869,7 +3033,7 @@ impl schematic_runtime::EndpointSpec for CancelEvalRunRequest {
             "/evals/{}/runs/{}", urlencoding::encode(& self.eval_id.to_string()),
             urlencoding::encode(& self.run_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2920,7 +3084,7 @@ impl schematic_runtime::EndpointSpec for DeleteEvalRunRequest {
             "/evals/{}/runs/{}", urlencoding::encode(& self.eval_id.to_string()),
             urlencoding::encode(& self.run_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2929,6 +3093,56 @@ impl schematic_runtime::EndpointSpec for DeleteEvalRunRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `status` query parameter of [`GetEvalRunOutputItemsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum GetEvalRunOutputItemsRequestStatus {
+    /// `fail`
+    #[serde(rename = "fail")]
+    Fail,
+    /// `pass`
+    #[serde(rename = "pass")]
+    Pass,
+}
+impl GetEvalRunOutputItemsRequestStatus {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Fail => "fail",
+            Self::Pass => "pass",
+        }
+    }
+}
+impl ::core::fmt::Display for GetEvalRunOutputItemsRequestStatus {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `order` query parameter of [`GetEvalRunOutputItemsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum GetEvalRunOutputItemsRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl GetEvalRunOutputItemsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for GetEvalRunOutputItemsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `GetEvalRunOutputItems` endpoint.
@@ -2952,9 +3166,9 @@ pub struct GetEvalRunOutputItemsRequest {
     /** Query parameter: Filter output items by status. Use `failed` to filter by failed output
 items or `pass` to filter by passed output items.
 */
-    pub status: Option<String>,
+    pub status: Option<GetEvalRunOutputItemsRequestStatus>,
     /// Query parameter: Sort order for output items by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
-    pub order: Option<String>,
+    pub order: Option<GetEvalRunOutputItemsRequestOrder>,
 }
 impl GetEvalRunOutputItemsRequest {
     /// Creates a new request with the required path parameters.
@@ -2967,12 +3181,12 @@ impl GetEvalRunOutputItemsRequest {
         }
     }
     /// Sets the `status` query parameter.
-    pub fn with_status(mut self, value: String) -> Self {
+    pub fn with_status(mut self, value: GetEvalRunOutputItemsRequestStatus) -> Self {
         self.status = Some(value);
         self
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: GetEvalRunOutputItemsRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -2993,12 +3207,12 @@ impl schematic_runtime::EndpointSpec for GetEvalRunOutputItemsRequest {
             "/evals/{}/runs/{}/output_items", urlencoding::encode(& self.eval_id
             .to_string()), urlencoding::encode(& self.run_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.status {
-            query.push(("status".to_string(), value.to_string()));
+            query.push(("status".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -3060,7 +3274,7 @@ impl schematic_runtime::EndpointSpec for GetEvalRunOutputItemRequest {
             .to_string()), urlencoding::encode(& self.run_id.to_string()),
             urlencoding::encode(& self.output_item_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -3069,6 +3283,31 @@ impl schematic_runtime::EndpointSpec for GetEvalRunOutputItemRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListFilesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListFilesRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListFilesRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListFilesRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListFiles` endpoint.
@@ -3089,7 +3328,7 @@ pub struct ListFilesRequest {
     pub purpose: Option<String>,
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
-    pub order: Option<String>,
+    pub order: Option<ListFilesRequestOrder>,
 }
 impl ListFilesRequest {
     /// Creates a new request with default values.
@@ -3102,7 +3341,7 @@ impl ListFilesRequest {
         self
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListFilesRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -3120,12 +3359,12 @@ impl schematic_runtime::EndpointSpec for ListFilesRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/files".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.purpose {
-            query.push(("purpose".to_string(), value.to_string()));
+            query.push(("purpose".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -3220,7 +3459,7 @@ impl schematic_runtime::EndpointSpec for CreateFileRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/files".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -3273,7 +3512,7 @@ impl schematic_runtime::EndpointSpec for RetrieveFileRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = format!("/files/{}", urlencoding::encode(& self.file_id.to_string()));
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -3328,7 +3567,7 @@ impl schematic_runtime::EndpointSpec for DeleteFileRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = format!("/files/{}", urlencoding::encode(& self.file_id.to_string()));
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -3383,7 +3622,7 @@ impl schematic_runtime::EndpointSpec for DownloadFileRequest {
         let path = format!(
             "/files/{}/content", urlencoding::encode(& self.file_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -3434,7 +3673,7 @@ impl schematic_runtime::EndpointSpec for RunGraderRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/fine_tuning/alpha/graders/run".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -3493,7 +3732,7 @@ impl schematic_runtime::EndpointSpec for ValidateGraderRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/fine_tuning/alpha/graders/validate".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -3509,6 +3748,31 @@ impl schematic_runtime::EndpointSpec for ValidateGraderRequest {
                     })?,
             ),
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListFineTuningCheckpointPermissionsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListFineTuningCheckpointPermissionsRequestOrder {
+    /// `ascending`
+    #[serde(rename = "ascending")]
+    Ascending,
+    /// `descending`
+    #[serde(rename = "descending")]
+    Descending,
+}
+impl ListFineTuningCheckpointPermissionsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ascending => "ascending",
+            Self::Descending => "descending",
+        }
+    }
+}
+impl ::core::fmt::Display for ListFineTuningCheckpointPermissionsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListFineTuningCheckpointPermissions` endpoint.
@@ -3530,7 +3794,7 @@ pub struct ListFineTuningCheckpointPermissionsRequest {
     /// Query parameter: The ID of the project to get permissions for.
     pub project_id: Option<String>,
     /// Query parameter: The order in which to retrieve permissions.
-    pub order: Option<String>,
+    pub order: Option<ListFineTuningCheckpointPermissionsRequestOrder>,
 }
 impl ListFineTuningCheckpointPermissionsRequest {
     /// Creates a new request with the required path parameters.
@@ -3547,7 +3811,10 @@ impl ListFineTuningCheckpointPermissionsRequest {
         self
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(
+        mut self,
+        value: ListFineTuningCheckpointPermissionsRequestOrder,
+    ) -> Self {
         self.order = Some(value);
         self
     }
@@ -3586,12 +3853,12 @@ impl schematic_runtime::EndpointSpec for ListFineTuningCheckpointPermissionsRequ
             "/fine_tuning/checkpoints/{}/permissions", urlencoding::encode(& self
             .fine_tuned_model_checkpoint.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.project_id {
-            query.push(("project_id".to_string(), value.to_string()));
+            query.push(("project_id".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -3649,7 +3916,7 @@ impl schematic_runtime::EndpointSpec for CreateFineTuningCheckpointPermissionReq
             "/fine_tuning/checkpoints/{}/permissions", urlencoding::encode(& self
             .fine_tuned_model_checkpoint.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -3713,7 +3980,7 @@ impl schematic_runtime::EndpointSpec for DeleteFineTuningCheckpointPermissionReq
             .fine_tuned_model_checkpoint.to_string()), urlencoding::encode(& self
             .permission_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -3732,26 +3999,10 @@ impl schematic_runtime::EndpointSpec for DeleteFineTuningCheckpointPermissionReq
 /// use schematic_schema::openai::ListPaginatedFineTuningJobsRequest;
 ///
 /// let request = ListPaginatedFineTuningJobsRequest::default()
-///     .with_metadata(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ListPaginatedFineTuningJobsRequest {
-    /** Query parameter: Optional metadata filter. To filter, use the syntax `metadata[k]=v`. Alternatively, set `metadata=null` to indicate no metadata.
-*/
-    pub metadata: Option<serde_json::Value>,
-}
-impl ListPaginatedFineTuningJobsRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { metadata: None }
-    }
-    /// Sets the `metadata` query parameter.
-    pub fn with_metadata(mut self, value: serde_json::Value) -> Self {
-        self.metadata = Some(value);
-        self
-    }
-}
+pub struct ListPaginatedFineTuningJobsRequest {}
 impl schematic_runtime::EndpointSpec for ListPaginatedFineTuningJobsRequest {
     type Api = OpenAIApi;
     type Success = ::schematic_definitions::openai::ListPaginatedFineTuningJobsResponse;
@@ -3765,10 +4016,7 @@ impl schematic_runtime::EndpointSpec for ListPaginatedFineTuningJobsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/fine_tuning/jobs".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.metadata {
-            query.push(("metadata".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -3822,7 +4070,7 @@ impl schematic_runtime::EndpointSpec for CreateFineTuningJobRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/fine_tuning/jobs".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -3891,7 +4139,7 @@ impl schematic_runtime::EndpointSpec for RetrieveFineTuningJobRequest {
             "/fine_tuning/jobs/{}", urlencoding::encode(& self.fine_tuning_job_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -3953,7 +4201,7 @@ impl schematic_runtime::EndpointSpec for CancelFineTuningJobRequest {
             "/fine_tuning/jobs/{}/cancel", urlencoding::encode(& self.fine_tuning_job_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4015,7 +4263,7 @@ impl schematic_runtime::EndpointSpec for ListFineTuningJobCheckpointsRequest {
             "/fine_tuning/jobs/{}/checkpoints", urlencoding::encode(& self
             .fine_tuning_job_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4077,7 +4325,7 @@ impl schematic_runtime::EndpointSpec for ListFineTuningEventsRequest {
             "/fine_tuning/jobs/{}/events", urlencoding::encode(& self.fine_tuning_job_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4139,7 +4387,7 @@ impl schematic_runtime::EndpointSpec for PauseFineTuningJobRequest {
             "/fine_tuning/jobs/{}/pause", urlencoding::encode(& self.fine_tuning_job_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4201,7 +4449,7 @@ impl schematic_runtime::EndpointSpec for ResumeFineTuningJobRequest {
             "/fine_tuning/jobs/{}/resume", urlencoding::encode(& self.fine_tuning_job_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4253,7 +4501,7 @@ impl schematic_runtime::EndpointSpec for CreateImageEditRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/images/edits".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4311,7 +4559,7 @@ impl schematic_runtime::EndpointSpec for CreateImageRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/images/generations".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4434,7 +4682,7 @@ impl schematic_runtime::EndpointSpec for CreateImageVariationRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/images/variations".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4470,7 +4718,7 @@ impl schematic_runtime::EndpointSpec for ListModelsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/models".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4523,7 +4771,7 @@ impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = format!("/models/{}", urlencoding::encode(& self.model.to_string()));
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4578,7 +4826,7 @@ impl schematic_runtime::EndpointSpec for DeleteModelRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = format!("/models/{}", urlencoding::encode(& self.model.to_string()));
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4630,7 +4878,7 @@ impl schematic_runtime::EndpointSpec for CreateModerationRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/moderations".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4648,6 +4896,31 @@ impl schematic_runtime::EndpointSpec for CreateModerationRequest {
         })
     }
 }
+/// Values of the `order` query parameter of [`AdminApiKeysListRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum AdminApiKeysListRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl AdminApiKeysListRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for AdminApiKeysListRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `AdminApiKeysList` endpoint.
 ///
 /// ## Example
@@ -4662,7 +4935,7 @@ impl schematic_runtime::EndpointSpec for CreateModerationRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AdminApiKeysListRequest {
     /// Query parameter: order
-    pub order: Option<String>,
+    pub order: Option<AdminApiKeysListRequestOrder>,
 }
 impl AdminApiKeysListRequest {
     /// Creates a new request with default values.
@@ -4670,7 +4943,7 @@ impl AdminApiKeysListRequest {
         Self { order: None }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: AdminApiKeysListRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -4686,9 +4959,9 @@ impl schematic_runtime::EndpointSpec for AdminApiKeysListRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/admin_api_keys".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -4740,7 +5013,7 @@ impl schematic_runtime::EndpointSpec for AdminApiKeysCreateRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/admin_api_keys".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4803,7 +5076,7 @@ impl schematic_runtime::EndpointSpec for AdminApiKeysGetRequest {
             "/organization/admin_api_keys/{}", urlencoding::encode(& self.key_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4859,7 +5132,7 @@ impl schematic_runtime::EndpointSpec for AdminApiKeysDeleteRequest {
             "/organization/admin_api_keys/{}", urlencoding::encode(& self.key_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4878,9 +5151,7 @@ impl schematic_runtime::EndpointSpec for AdminApiKeysDeleteRequest {
 /// use schematic_schema::openai::ListAuditLogsRequest;
 ///
 /// let request = ListAuditLogsRequest::default()
-///     .with_effective_at(/* value */)
 ///     .with_project_ids__(/* value */)
-///     .with_event_types__(/* value */)
 ///     .with_actor_ids__(/* value */)
 ///     .with_actor_emails__(/* value */)
 ///     .with_resource_ids__(/* value */)
@@ -4889,14 +5160,9 @@ impl schematic_runtime::EndpointSpec for AdminApiKeysDeleteRequest {
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuditLogsRequest {
-    /// Query parameter: Return only events whose `effective_at` (Unix seconds) is in this range.
-    pub effective_at: Option<serde_json::Value>,
     /// Query parameter: Return only events for these projects.
     #[serde(rename = "project_ids[]")]
     pub project_ids__: Option<Vec<String>>,
-    /// Query parameter: Return only events with a `type` in one of these values. For example, `project.created`. For all options, see the documentation for the [audit log object](/docs/api-reference/audit-logs/object).
-    #[serde(rename = "event_types[]")]
-    pub event_types__: Option<Vec<serde_json::Value>>,
     /// Query parameter: Return only events performed by these actors. Can be a user ID, a service account ID, or an api key tracking ID.
     #[serde(rename = "actor_ids[]")]
     pub actor_ids__: Option<Vec<String>>,
@@ -4913,28 +5179,16 @@ impl ListAuditLogsRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
         Self {
-            effective_at: None,
             project_ids__: None,
-            event_types__: None,
             actor_ids__: None,
             actor_emails__: None,
             resource_ids__: None,
             tenant_only: None,
         }
     }
-    /// Sets the `effective_at` query parameter.
-    pub fn with_effective_at(mut self, value: serde_json::Value) -> Self {
-        self.effective_at = Some(value);
-        self
-    }
     /// Sets the `project_ids__` query parameter.
     pub fn with_project_ids__(mut self, value: Vec<String>) -> Self {
         self.project_ids__ = Some(value);
-        self
-    }
-    /// Sets the `event_types__` query parameter.
-    pub fn with_event_types__(mut self, value: Vec<serde_json::Value>) -> Self {
-        self.event_types__ = Some(value);
         self
     }
     /// Sets the `actor_ids__` query parameter.
@@ -4971,37 +5225,41 @@ impl schematic_runtime::EndpointSpec for ListAuditLogsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/audit_logs".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.effective_at {
-            query.push(("effective_at".to_string(), value.to_string()));
-        }
-        if let Some(ref values) = self.project_ids__ {
-            for value in values {
-                query.push(("project_ids[]".to_string(), value.to_string()));
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        if let Some(ref value) = self.project_ids__ {
+            if value.is_empty() {
+                query.push(("project_ids[]".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("project_ids[]".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.event_types__ {
-            for value in values {
-                query.push(("event_types[]".to_string(), value.to_string()));
+        if let Some(ref value) = self.actor_ids__ {
+            if value.is_empty() {
+                query.push(("actor_ids[]".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("actor_ids[]".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.actor_ids__ {
-            for value in values {
-                query.push(("actor_ids[]".to_string(), value.to_string()));
+        if let Some(ref value) = self.actor_emails__ {
+            if value.is_empty() {
+                query.push(("actor_emails[]".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("actor_emails[]".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.actor_emails__ {
-            for value in values {
-                query.push(("actor_emails[]".to_string(), value.to_string()));
+        if let Some(ref value) = self.resource_ids__ {
+            if value.is_empty() {
+                query.push(("resource_ids[]".to_string(), String::new().into()));
             }
-        }
-        if let Some(ref values) = self.resource_ids__ {
-            for value in values {
-                query.push(("resource_ids[]".to_string(), value.to_string()));
+            for element in value {
+                query.push(("resource_ids[]".to_string(), element.to_string().into()));
             }
         }
         if let Some(ref value) = self.tenant_only {
-            query.push(("tenant_only".to_string(), value.to_string()));
+            query.push(("tenant_only".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -5011,6 +5269,31 @@ impl schematic_runtime::EndpointSpec for ListAuditLogsRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListOrganizationCertificatesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListOrganizationCertificatesRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListOrganizationCertificatesRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListOrganizationCertificatesRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListOrganizationCertificates` endpoint.
@@ -5028,7 +5311,7 @@ impl schematic_runtime::EndpointSpec for ListAuditLogsRequest {
 pub struct ListOrganizationCertificatesRequest {
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
-    pub order: Option<String>,
+    pub order: Option<ListOrganizationCertificatesRequestOrder>,
 }
 impl ListOrganizationCertificatesRequest {
     /// Creates a new request with default values.
@@ -5036,7 +5319,10 @@ impl ListOrganizationCertificatesRequest {
         Self { order: None }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(
+        mut self,
+        value: ListOrganizationCertificatesRequestOrder,
+    ) -> Self {
         self.order = Some(value);
         self
     }
@@ -5054,9 +5340,9 @@ impl schematic_runtime::EndpointSpec for ListOrganizationCertificatesRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/certificates".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -5109,7 +5395,7 @@ impl schematic_runtime::EndpointSpec for UploadCertificateRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/certificates".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -5170,7 +5456,7 @@ impl schematic_runtime::EndpointSpec for ActivateOrganizationCertificatesRequest
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/certificates/activate".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -5231,7 +5517,7 @@ impl schematic_runtime::EndpointSpec for DeactivateOrganizationCertificatesReque
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/certificates/deactivate".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -5247,6 +5533,27 @@ impl schematic_runtime::EndpointSpec for DeactivateOrganizationCertificatesReque
                     })?,
             ),
         })
+    }
+}
+/// Values of the `include` query parameter of [`GetCertificateRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum GetCertificateRequestInclude {
+    /// `content`
+    #[serde(rename = "content")]
+    Content,
+}
+impl GetCertificateRequestInclude {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Content => "content",
+        }
+    }
+}
+impl ::core::fmt::Display for GetCertificateRequestInclude {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `GetCertificate` endpoint.
@@ -5265,7 +5572,7 @@ pub struct GetCertificateRequest {
     /// Path parameter: certificate_id
     pub certificate_id: String,
     /// Query parameter: A list of additional fields to include in the response. Currently the only supported value is `content` to fetch the PEM content of the certificate.
-    pub include: Option<Vec<String>>,
+    pub include: Option<Vec<GetCertificateRequestInclude>>,
 }
 impl GetCertificateRequest {
     /// Creates a new request with the required path parameters.
@@ -5276,7 +5583,7 @@ impl GetCertificateRequest {
         }
     }
     /// Sets the `include` query parameter.
-    pub fn with_include(mut self, value: Vec<String>) -> Self {
+    pub fn with_include(mut self, value: Vec<GetCertificateRequestInclude>) -> Self {
         self.include = Some(value);
         self
     }
@@ -5311,10 +5618,13 @@ impl schematic_runtime::EndpointSpec for GetCertificateRequest {
             "/organization/certificates/{}", urlencoding::encode(& self.certificate_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref values) = self.include {
-            for value in values {
-                query.push(("include".to_string(), value.to_string()));
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        if let Some(ref value) = self.include {
+            if value.is_empty() {
+                query.push(("include".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("include".to_string(), element.to_string().into()));
             }
         }
         let headers: Vec<(String, String)> = vec![];
@@ -5371,7 +5681,7 @@ impl schematic_runtime::EndpointSpec for ModifyCertificateRequest {
             "/organization/certificates/{}", urlencoding::encode(& self.certificate_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -5440,7 +5750,7 @@ impl schematic_runtime::EndpointSpec for DeleteCertificateRequest {
             "/organization/certificates/{}", urlencoding::encode(& self.certificate_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -5451,6 +5761,56 @@ impl schematic_runtime::EndpointSpec for DeleteCertificateRequest {
         })
     }
 }
+/// Values of the `bucket_width` query parameter of [`UsageCostsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageCostsRequestBucketWidth {
+    /// `1d`
+    #[serde(rename = "1d")]
+    V1d,
+}
+impl UsageCostsRequestBucketWidth {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::V1d => "1d",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageCostsRequestBucketWidth {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `group_by` query parameter of [`UsageCostsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageCostsRequestGroupBy {
+    /// `project_id`
+    #[serde(rename = "project_id")]
+    ProjectId,
+    /// `line_item`
+    #[serde(rename = "line_item")]
+    LineItem,
+    /// `api_key_id`
+    #[serde(rename = "api_key_id")]
+    ApiKeyId,
+}
+impl UsageCostsRequestGroupBy {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProjectId => "project_id",
+            Self::LineItem => "line_item",
+            Self::ApiKeyId => "api_key_id",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageCostsRequestGroupBy {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `UsageCosts` endpoint.
 ///
 /// ## Example
@@ -5458,8 +5818,7 @@ impl schematic_runtime::EndpointSpec for DeleteCertificateRequest {
 /// ```text
 /// use schematic_schema::openai::UsageCostsRequest;
 ///
-/// let request = UsageCostsRequest::default()
-///     .with_start_time(/* value */)
+/// let request = UsageCostsRequest::new(1)
 ///     .with_end_time(/* value */)
 ///     .with_bucket_width(/* value */)
 ///     .with_project_ids(/* value */)
@@ -5467,26 +5826,26 @@ impl schematic_runtime::EndpointSpec for DeleteCertificateRequest {
 ///     .with_group_by(/* value */)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageCostsRequest {
     /// Query parameter: Start time (Unix seconds) of the query time range, inclusive.
-    pub start_time: Option<i64>,
+    pub start_time: i64,
     /// Query parameter: End time (Unix seconds) of the query time range, exclusive.
     pub end_time: Option<i64>,
     /// Query parameter: Width of each time bucket in response. Currently only `1d` is supported, default to `1d`.
-    pub bucket_width: Option<String>,
+    pub bucket_width: Option<UsageCostsRequestBucketWidth>,
     /// Query parameter: Return only costs for these projects.
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Return only costs for these API keys.
     pub api_key_ids: Option<Vec<String>>,
     /// Query parameter: Group the costs by the specified fields. Support fields include `project_id`, `line_item`, `api_key_id` and any combination of them.
-    pub group_by: Option<Vec<String>>,
+    pub group_by: Option<Vec<UsageCostsRequestGroupBy>>,
 }
 impl UsageCostsRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
+    /// Creates a new request with the required query parameters.
+    pub fn new(start_time: i64) -> Self {
         Self {
-            start_time: None,
+            start_time,
             end_time: None,
             bucket_width: None,
             project_ids: None,
@@ -5496,7 +5855,7 @@ impl UsageCostsRequest {
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
-        self.start_time = Some(value);
+        self.start_time = value;
         self
     }
     /// Sets the `end_time` query parameter.
@@ -5505,7 +5864,7 @@ impl UsageCostsRequest {
         self
     }
     /// Sets the `bucket_width` query parameter.
-    pub fn with_bucket_width(mut self, value: String) -> Self {
+    pub fn with_bucket_width(mut self, value: UsageCostsRequestBucketWidth) -> Self {
         self.bucket_width = Some(value);
         self
     }
@@ -5520,7 +5879,7 @@ impl UsageCostsRequest {
         self
     }
     /// Sets the `group_by` query parameter.
-    pub fn with_group_by(mut self, value: Vec<String>) -> Self {
+    pub fn with_group_by(mut self, value: Vec<UsageCostsRequestGroupBy>) -> Self {
         self.group_by = Some(value);
         self
     }
@@ -5538,29 +5897,37 @@ impl schematic_runtime::EndpointSpec for UsageCostsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/costs".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.start_time {
-            query.push(("start_time".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.start_time;
+        query.push(("start_time".to_string(), value.to_string().into()));
         if let Some(ref value) = self.end_time {
-            query.push(("end_time".to_string(), value.to_string()));
+            query.push(("end_time".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.bucket_width {
-            query.push(("bucket_width".to_string(), value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string().into()));
         }
-        if let Some(ref values) = self.project_ids {
-            for value in values {
-                query.push(("project_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.project_ids {
+            if value.is_empty() {
+                query.push(("project_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("project_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.api_key_ids {
-            for value in values {
-                query.push(("api_key_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.api_key_ids {
+            if value.is_empty() {
+                query.push(("api_key_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("api_key_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.group_by {
-            for value in values {
-                query.push(("group_by".to_string(), value.to_string()));
+        if let Some(ref value) = self.group_by {
+            if value.is_empty() {
+                query.push(("group_by".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("group_by".to_string(), element.to_string().into()));
             }
         }
         let headers: Vec<(String, String)> = vec![];
@@ -5598,7 +5965,7 @@ impl schematic_runtime::EndpointSpec for RetrieveOrganizationDataRetentionReques
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/data_retention".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -5654,7 +6021,7 @@ impl schematic_runtime::EndpointSpec for UpdateOrganizationDataRetentionRequest 
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/data_retention".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -5672,6 +6039,31 @@ impl schematic_runtime::EndpointSpec for UpdateOrganizationDataRetentionRequest 
         })
     }
 }
+/// Values of the `order` query parameter of [`ListGroupsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListGroupsRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListGroupsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListGroupsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `ListGroups` endpoint.
 ///
 /// ## Example
@@ -5686,7 +6078,7 @@ impl schematic_runtime::EndpointSpec for UpdateOrganizationDataRetentionRequest 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListGroupsRequest {
     /// Query parameter: Specifies the sort order of the returned groups.
-    pub order: Option<String>,
+    pub order: Option<ListGroupsRequestOrder>,
 }
 impl ListGroupsRequest {
     /// Creates a new request with default values.
@@ -5694,7 +6086,7 @@ impl ListGroupsRequest {
         Self { order: None }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListGroupsRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -5712,9 +6104,9 @@ impl schematic_runtime::EndpointSpec for ListGroupsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/groups".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -5766,7 +6158,7 @@ impl schematic_runtime::EndpointSpec for CreateGroupRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/groups".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -5832,7 +6224,7 @@ impl schematic_runtime::EndpointSpec for RetrieveGroupRequest {
         let path = format!(
             "/organization/groups/{}", urlencoding::encode(& self.group_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -5888,7 +6280,7 @@ impl schematic_runtime::EndpointSpec for UpdateGroupRequest {
         let path = format!(
             "/organization/groups/{}", urlencoding::encode(& self.group_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -5954,7 +6346,7 @@ impl schematic_runtime::EndpointSpec for DeleteGroupRequest {
         let path = format!(
             "/organization/groups/{}", urlencoding::encode(& self.group_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -5963,6 +6355,31 @@ impl schematic_runtime::EndpointSpec for DeleteGroupRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListGroupRoleAssignmentsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListGroupRoleAssignmentsRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListGroupRoleAssignmentsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListGroupRoleAssignmentsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListGroupRoleAssignments` endpoint.
@@ -5981,7 +6398,7 @@ pub struct ListGroupRoleAssignmentsRequest {
     /// Path parameter: group_id
     pub group_id: String,
     /// Query parameter: Sort order for the returned organization roles.
-    pub order: Option<String>,
+    pub order: Option<ListGroupRoleAssignmentsRequestOrder>,
 }
 impl ListGroupRoleAssignmentsRequest {
     /// Creates a new request with the required path parameters.
@@ -5992,7 +6409,7 @@ impl ListGroupRoleAssignmentsRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListGroupRoleAssignmentsRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -6029,9 +6446,9 @@ impl schematic_runtime::EndpointSpec for ListGroupRoleAssignmentsRequest {
             "/organization/groups/{}/roles", urlencoding::encode(& self.group_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -6089,7 +6506,7 @@ impl schematic_runtime::EndpointSpec for AssignGroupRoleRequest {
             "/organization/groups/{}/roles", urlencoding::encode(& self.group_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -6149,7 +6566,7 @@ impl schematic_runtime::EndpointSpec for RetrieveGroupRoleRequest {
             "/organization/groups/{}/roles/{}", urlencoding::encode(& self.group_id
             .to_string()), urlencoding::encode(& self.role_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -6202,7 +6619,7 @@ impl schematic_runtime::EndpointSpec for UnassignGroupRoleRequest {
             "/organization/groups/{}/roles/{}", urlencoding::encode(& self.group_id
             .to_string()), urlencoding::encode(& self.role_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -6211,6 +6628,31 @@ impl schematic_runtime::EndpointSpec for UnassignGroupRoleRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListGroupUsersRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListGroupUsersRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListGroupUsersRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListGroupUsersRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListGroupUsers` endpoint.
@@ -6229,7 +6671,7 @@ pub struct ListGroupUsersRequest {
     /// Path parameter: group_id
     pub group_id: String,
     /// Query parameter: Specifies the sort order of users in the list.
-    pub order: Option<String>,
+    pub order: Option<ListGroupUsersRequestOrder>,
 }
 impl ListGroupUsersRequest {
     /// Creates a new request with the required path parameters.
@@ -6240,7 +6682,7 @@ impl ListGroupUsersRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListGroupUsersRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -6277,9 +6719,9 @@ impl schematic_runtime::EndpointSpec for ListGroupUsersRequest {
             "/organization/groups/{}/users", urlencoding::encode(& self.group_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -6337,7 +6779,7 @@ impl schematic_runtime::EndpointSpec for AddGroupUserRequest {
             "/organization/groups/{}/users", urlencoding::encode(& self.group_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -6397,7 +6839,7 @@ impl schematic_runtime::EndpointSpec for RetrieveGroupUserRequest {
             "/organization/groups/{}/users/{}", urlencoding::encode(& self.group_id
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -6450,7 +6892,7 @@ impl schematic_runtime::EndpointSpec for RemoveGroupUserRequest {
             "/organization/groups/{}/users/{}", urlencoding::encode(& self.group_id
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -6486,7 +6928,7 @@ impl schematic_runtime::EndpointSpec for ListInvitesRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/invites".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -6535,7 +6977,7 @@ impl schematic_runtime::EndpointSpec for InviteUserRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/invites".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -6601,7 +7043,7 @@ impl schematic_runtime::EndpointSpec for RetrieveInviteRequest {
         let path = format!(
             "/organization/invites/{}", urlencoding::encode(& self.invite_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -6662,7 +7104,7 @@ impl schematic_runtime::EndpointSpec for DeleteInviteRequest {
         let path = format!(
             "/organization/invites/{}", urlencoding::encode(& self.invite_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -6713,9 +7155,9 @@ impl schematic_runtime::EndpointSpec for ListProjectsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/projects".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.include_archived {
-            query.push(("include_archived".to_string(), value.to_string()));
+            query.push(("include_archived".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -6766,7 +7208,7 @@ impl schematic_runtime::EndpointSpec for CreateProjectRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/projects".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -6833,7 +7275,7 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectRequest {
             "/organization/projects/{}", urlencoding::encode(& self.project_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -6888,7 +7330,7 @@ impl schematic_runtime::EndpointSpec for ModifyProjectRequest {
             "/organization/projects/{}", urlencoding::encode(& self.project_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -6904,6 +7346,35 @@ impl schematic_runtime::EndpointSpec for ModifyProjectRequest {
                     })?,
             ),
         })
+    }
+}
+/// Values of the `owner_project_access` query parameter of [`ListProjectApiKeysRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListProjectApiKeysRequestOwnerProjectAccess {
+    /// `active`
+    #[serde(rename = "active")]
+    Active,
+    /// `inactive`
+    #[serde(rename = "inactive")]
+    Inactive,
+    /// `any`
+    #[serde(rename = "any")]
+    Any,
+}
+impl ListProjectApiKeysRequestOwnerProjectAccess {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Inactive => "inactive",
+            Self::Any => "any",
+        }
+    }
+}
+impl ::core::fmt::Display for ListProjectApiKeysRequestOwnerProjectAccess {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListProjectApiKeys` endpoint.
@@ -6923,7 +7394,7 @@ pub struct ListProjectApiKeysRequest {
     pub project_id: String,
     /** Query parameter: Filter API keys by whether the owner currently has effective access to the project. Use `active` for owners with access, `inactive` for owners without access, or `any` for all enabled project API keys. If omitted, the endpoint applies its existing membership-based visibility rules, which may exclude some enabled keys.
 */
-    pub owner_project_access: Option<String>,
+    pub owner_project_access: Option<ListProjectApiKeysRequestOwnerProjectAccess>,
 }
 impl ListProjectApiKeysRequest {
     /// Creates a new request with the required path parameters.
@@ -6934,7 +7405,10 @@ impl ListProjectApiKeysRequest {
         }
     }
     /// Sets the `owner_project_access` query parameter.
-    pub fn with_owner_project_access(mut self, value: String) -> Self {
+    pub fn with_owner_project_access(
+        mut self,
+        value: ListProjectApiKeysRequestOwnerProjectAccess,
+    ) -> Self {
         self.owner_project_access = Some(value);
         self
     }
@@ -6971,9 +7445,9 @@ impl schematic_runtime::EndpointSpec for ListProjectApiKeysRequest {
             "/organization/projects/{}/api_keys", urlencoding::encode(& self.project_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.owner_project_access {
-            query.push(("owner_project_access".to_string(), value.to_string()));
+            query.push(("owner_project_access".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -7027,7 +7501,7 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectApiKeyRequest {
             "/organization/projects/{}/api_keys/{}", urlencoding::encode(& self
             .project_id.to_string()), urlencoding::encode(& self.api_key_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -7080,7 +7554,7 @@ impl schematic_runtime::EndpointSpec for DeleteProjectApiKeyRequest {
             "/organization/projects/{}/api_keys/{}", urlencoding::encode(& self
             .project_id.to_string()), urlencoding::encode(& self.api_key_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -7140,7 +7614,7 @@ impl schematic_runtime::EndpointSpec for ArchiveProjectRequest {
             "/organization/projects/{}/archive", urlencoding::encode(& self.project_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -7149,6 +7623,31 @@ impl schematic_runtime::EndpointSpec for ArchiveProjectRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListProjectCertificatesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListProjectCertificatesRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListProjectCertificatesRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListProjectCertificatesRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListProjectCertificates` endpoint.
@@ -7168,7 +7667,7 @@ pub struct ListProjectCertificatesRequest {
     pub project_id: String,
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
-    pub order: Option<String>,
+    pub order: Option<ListProjectCertificatesRequestOrder>,
 }
 impl ListProjectCertificatesRequest {
     /// Creates a new request with the required path parameters.
@@ -7179,7 +7678,7 @@ impl ListProjectCertificatesRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListProjectCertificatesRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -7216,9 +7715,9 @@ impl schematic_runtime::EndpointSpec for ListProjectCertificatesRequest {
             "/organization/projects/{}/certificates", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -7276,7 +7775,7 @@ impl schematic_runtime::EndpointSpec for ActivateProjectCertificatesRequest {
             "/organization/projects/{}/certificates/activate", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -7340,7 +7839,7 @@ impl schematic_runtime::EndpointSpec for DeactivateProjectCertificatesRequest {
             "/organization/projects/{}/certificates/deactivate", urlencoding::encode(&
             self.project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -7409,7 +7908,7 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectDataRetentionRequest {
             "/organization/projects/{}/data_retention", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -7466,7 +7965,7 @@ impl schematic_runtime::EndpointSpec for UpdateProjectDataRetentionRequest {
             "/organization/projects/{}/data_retention", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -7482,6 +7981,31 @@ impl schematic_runtime::EndpointSpec for UpdateProjectDataRetentionRequest {
                     })?,
             ),
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListProjectGroupsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListProjectGroupsRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListProjectGroupsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListProjectGroupsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListProjectGroups` endpoint.
@@ -7500,7 +8024,7 @@ pub struct ListProjectGroupsRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Query parameter: Sort order for the returned groups.
-    pub order: Option<String>,
+    pub order: Option<ListProjectGroupsRequestOrder>,
 }
 impl ListProjectGroupsRequest {
     /// Creates a new request with the required path parameters.
@@ -7511,7 +8035,7 @@ impl ListProjectGroupsRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListProjectGroupsRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -7548,9 +8072,9 @@ impl schematic_runtime::EndpointSpec for ListProjectGroupsRequest {
             "/organization/projects/{}/groups", urlencoding::encode(& self.project_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -7608,7 +8132,7 @@ impl schematic_runtime::EndpointSpec for AddProjectGroupRequest {
             "/organization/projects/{}/groups", urlencoding::encode(& self.project_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -7624,6 +8148,31 @@ impl schematic_runtime::EndpointSpec for AddProjectGroupRequest {
                     })?,
             ),
         })
+    }
+}
+/// Values of the `group_type` query parameter of [`RetrieveProjectGroupRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum RetrieveProjectGroupRequestGroupType {
+    /// `group`
+    #[serde(rename = "group")]
+    Group,
+    /// `tenant_group`
+    #[serde(rename = "tenant_group")]
+    TenantGroup,
+}
+impl RetrieveProjectGroupRequestGroupType {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Group => "group",
+            Self::TenantGroup => "tenant_group",
+        }
+    }
+}
+impl ::core::fmt::Display for RetrieveProjectGroupRequestGroupType {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `RetrieveProjectGroup` endpoint.
@@ -7644,7 +8193,7 @@ pub struct RetrieveProjectGroupRequest {
     /// Path parameter: group_id
     pub group_id: String,
     /// Query parameter: The type of group to retrieve.
-    pub group_type: Option<String>,
+    pub group_type: Option<RetrieveProjectGroupRequestGroupType>,
 }
 impl RetrieveProjectGroupRequest {
     /// Creates a new request with the required path parameters.
@@ -7656,7 +8205,10 @@ impl RetrieveProjectGroupRequest {
         }
     }
     /// Sets the `group_type` query parameter.
-    pub fn with_group_type(mut self, value: String) -> Self {
+    pub fn with_group_type(
+        mut self,
+        value: RetrieveProjectGroupRequestGroupType,
+    ) -> Self {
         self.group_type = Some(value);
         self
     }
@@ -7677,9 +8229,9 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectGroupRequest {
             "/organization/projects/{}/groups/{}", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.group_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.group_type {
-            query.push(("group_type".to_string(), value.to_string()));
+            query.push(("group_type".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -7733,7 +8285,7 @@ impl schematic_runtime::EndpointSpec for RemoveProjectGroupRequest {
             "/organization/projects/{}/groups/{}", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.group_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -7795,7 +8347,7 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectHostedToolPermissionsReq
             "/organization/projects/{}/hosted_tool_permissions", urlencoding::encode(&
             self.project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -7852,7 +8404,7 @@ impl schematic_runtime::EndpointSpec for UpdateProjectHostedToolPermissionsReque
             "/organization/projects/{}/hosted_tool_permissions", urlencoding::encode(&
             self.project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -7921,7 +8473,7 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectModelPermissionsRequest 
             "/organization/projects/{}/model_permissions", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -7978,7 +8530,7 @@ impl schematic_runtime::EndpointSpec for UpdateProjectModelPermissionsRequest {
             "/organization/projects/{}/model_permissions", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8047,7 +8599,7 @@ impl schematic_runtime::EndpointSpec for DeleteProjectModelPermissionsRequest {
             "/organization/projects/{}/model_permissions", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8109,7 +8661,7 @@ impl schematic_runtime::EndpointSpec for ListProjectRateLimitsRequest {
             "/organization/projects/{}/rate_limits", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8171,7 +8723,7 @@ impl schematic_runtime::EndpointSpec for UpdateProjectRateLimitsRequest {
             .project_id.to_string()), urlencoding::encode(& self.rate_limit_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8240,7 +8792,7 @@ impl schematic_runtime::EndpointSpec for ListProjectServiceAccountsRequest {
             "/organization/projects/{}/service_accounts", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8297,7 +8849,7 @@ impl schematic_runtime::EndpointSpec for CreateProjectServiceAccountRequest {
             "/organization/projects/{}/service_accounts", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8361,7 +8913,7 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectServiceAccountRequest {
             .project_id.to_string()), urlencoding::encode(& self.service_account_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8423,7 +8975,7 @@ impl schematic_runtime::EndpointSpec for UpdateProjectServiceAccountRequest {
             .project_id.to_string()), urlencoding::encode(& self.service_account_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8487,7 +9039,7 @@ impl schematic_runtime::EndpointSpec for DeleteProjectServiceAccountRequest {
             .project_id.to_string()), urlencoding::encode(& self.service_account_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8496,6 +9048,31 @@ impl schematic_runtime::EndpointSpec for DeleteProjectServiceAccountRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListProjectSpendAlertsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListProjectSpendAlertsRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListProjectSpendAlertsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListProjectSpendAlertsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListProjectSpendAlerts` endpoint.
@@ -8514,7 +9091,7 @@ pub struct ListProjectSpendAlertsRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Query parameter: Sort order for the returned spend alerts.
-    pub order: Option<String>,
+    pub order: Option<ListProjectSpendAlertsRequestOrder>,
 }
 impl ListProjectSpendAlertsRequest {
     /// Creates a new request with the required path parameters.
@@ -8525,7 +9102,7 @@ impl ListProjectSpendAlertsRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListProjectSpendAlertsRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -8562,9 +9139,9 @@ impl schematic_runtime::EndpointSpec for ListProjectSpendAlertsRequest {
             "/organization/projects/{}/spend_alerts", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -8622,7 +9199,7 @@ impl schematic_runtime::EndpointSpec for CreateProjectSpendAlertRequest {
             "/organization/projects/{}/spend_alerts", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8682,7 +9259,7 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectSpendAlertRequest {
             "/organization/projects/{}/spend_alerts/{}", urlencoding::encode(& self
             .project_id.to_string()), urlencoding::encode(& self.alert_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8743,7 +9320,7 @@ impl schematic_runtime::EndpointSpec for UpdateProjectSpendAlertRequest {
             "/organization/projects/{}/spend_alerts/{}", urlencoding::encode(& self
             .project_id.to_string()), urlencoding::encode(& self.alert_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8803,7 +9380,7 @@ impl schematic_runtime::EndpointSpec for DeleteProjectSpendAlertRequest {
             "/organization/projects/{}/spend_alerts/{}", urlencoding::encode(& self
             .project_id.to_string()), urlencoding::encode(& self.alert_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8865,7 +9442,7 @@ impl schematic_runtime::EndpointSpec for ListProjectUsersRequest {
             "/organization/projects/{}/users", urlencoding::encode(& self.project_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8920,7 +9497,7 @@ impl schematic_runtime::EndpointSpec for CreateProjectUserRequest {
             "/organization/projects/{}/users", urlencoding::encode(& self.project_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8978,7 +9555,7 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectUserRequest {
             "/organization/projects/{}/users/{}", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -9037,7 +9614,7 @@ impl schematic_runtime::EndpointSpec for ModifyProjectUserRequest {
             "/organization/projects/{}/users/{}", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -9097,7 +9674,7 @@ impl schematic_runtime::EndpointSpec for DeleteProjectUserRequest {
             "/organization/projects/{}/users/{}", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -9106,6 +9683,31 @@ impl schematic_runtime::EndpointSpec for DeleteProjectUserRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListRolesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListRolesRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListRolesRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListRolesRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListRoles` endpoint.
@@ -9122,7 +9724,7 @@ impl schematic_runtime::EndpointSpec for DeleteProjectUserRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRolesRequest {
     /// Query parameter: Sort order for the returned roles.
-    pub order: Option<String>,
+    pub order: Option<ListRolesRequestOrder>,
 }
 impl ListRolesRequest {
     /// Creates a new request with default values.
@@ -9130,7 +9732,7 @@ impl ListRolesRequest {
         Self { order: None }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListRolesRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -9148,9 +9750,9 @@ impl schematic_runtime::EndpointSpec for ListRolesRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/roles".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -9205,7 +9807,7 @@ impl schematic_runtime::EndpointSpec for CreateRoleRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/roles".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -9267,7 +9869,7 @@ impl schematic_runtime::EndpointSpec for RetrieveRoleRequest {
         let path = format!(
             "/organization/roles/{}", urlencoding::encode(& self.role_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -9321,7 +9923,7 @@ impl schematic_runtime::EndpointSpec for UpdateRoleRequest {
         let path = format!(
             "/organization/roles/{}", urlencoding::encode(& self.role_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -9385,7 +9987,7 @@ impl schematic_runtime::EndpointSpec for DeleteRoleRequest {
         let path = format!(
             "/organization/roles/{}", urlencoding::encode(& self.role_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -9394,6 +9996,31 @@ impl schematic_runtime::EndpointSpec for DeleteRoleRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListOrganizationSpendAlertsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListOrganizationSpendAlertsRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListOrganizationSpendAlertsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListOrganizationSpendAlertsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListOrganizationSpendAlerts` endpoint.
@@ -9410,7 +10037,7 @@ impl schematic_runtime::EndpointSpec for DeleteRoleRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListOrganizationSpendAlertsRequest {
     /// Query parameter: Sort order for the returned spend alerts.
-    pub order: Option<String>,
+    pub order: Option<ListOrganizationSpendAlertsRequestOrder>,
 }
 impl ListOrganizationSpendAlertsRequest {
     /// Creates a new request with default values.
@@ -9418,7 +10045,7 @@ impl ListOrganizationSpendAlertsRequest {
         Self { order: None }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListOrganizationSpendAlertsRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -9436,9 +10063,9 @@ impl schematic_runtime::EndpointSpec for ListOrganizationSpendAlertsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/spend_alerts".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -9491,7 +10118,7 @@ impl schematic_runtime::EndpointSpec for CreateOrganizationSpendAlertRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/spend_alerts".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -9558,7 +10185,7 @@ impl schematic_runtime::EndpointSpec for RetrieveOrganizationSpendAlertRequest {
             "/organization/spend_alerts/{}", urlencoding::encode(& self.alert_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -9615,7 +10242,7 @@ impl schematic_runtime::EndpointSpec for UpdateOrganizationSpendAlertRequest {
             "/organization/spend_alerts/{}", urlencoding::encode(& self.alert_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -9682,7 +10309,7 @@ impl schematic_runtime::EndpointSpec for DeleteOrganizationSpendAlertRequest {
             "/organization/spend_alerts/{}", urlencoding::encode(& self.alert_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -9693,6 +10320,68 @@ impl schematic_runtime::EndpointSpec for DeleteOrganizationSpendAlertRequest {
         })
     }
 }
+/// Values of the `bucket_width` query parameter of [`UsageAudioSpeechesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageAudioSpeechesRequestBucketWidth {
+    /// `1m`
+    #[serde(rename = "1m")]
+    V1m,
+    /// `1h`
+    #[serde(rename = "1h")]
+    V1h,
+    /// `1d`
+    #[serde(rename = "1d")]
+    V1d,
+}
+impl UsageAudioSpeechesRequestBucketWidth {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::V1m => "1m",
+            Self::V1h => "1h",
+            Self::V1d => "1d",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageAudioSpeechesRequestBucketWidth {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `group_by` query parameter of [`UsageAudioSpeechesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageAudioSpeechesRequestGroupBy {
+    /// `project_id`
+    #[serde(rename = "project_id")]
+    ProjectId,
+    /// `user_id`
+    #[serde(rename = "user_id")]
+    UserId,
+    /// `api_key_id`
+    #[serde(rename = "api_key_id")]
+    ApiKeyId,
+    /// `model`
+    #[serde(rename = "model")]
+    Model,
+}
+impl UsageAudioSpeechesRequestGroupBy {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProjectId => "project_id",
+            Self::UserId => "user_id",
+            Self::ApiKeyId => "api_key_id",
+            Self::Model => "model",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageAudioSpeechesRequestGroupBy {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `UsageAudioSpeeches` endpoint.
 ///
 /// ## Example
@@ -9700,8 +10389,7 @@ impl schematic_runtime::EndpointSpec for DeleteOrganizationSpendAlertRequest {
 /// ```text
 /// use schematic_schema::openai::UsageAudioSpeechesRequest;
 ///
-/// let request = UsageAudioSpeechesRequest::default()
-///     .with_start_time(/* value */)
+/// let request = UsageAudioSpeechesRequest::new(1)
 ///     .with_end_time(/* value */)
 ///     .with_bucket_width(/* value */)
 ///     .with_project_ids(/* value */)
@@ -9711,14 +10399,14 @@ impl schematic_runtime::EndpointSpec for DeleteOrganizationSpendAlertRequest {
 ///     .with_group_by(/* value */)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageAudioSpeechesRequest {
     /// Query parameter: Start time (Unix seconds) of the query time range, inclusive.
-    pub start_time: Option<i64>,
+    pub start_time: i64,
     /// Query parameter: End time (Unix seconds) of the query time range, exclusive.
     pub end_time: Option<i64>,
     /// Query parameter: Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub bucket_width: Option<String>,
+    pub bucket_width: Option<UsageAudioSpeechesRequestBucketWidth>,
     /// Query parameter: Return only usage for these projects.
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Return only usage for these users.
@@ -9728,13 +10416,13 @@ pub struct UsageAudioSpeechesRequest {
     /// Query parameter: Return only usage for these models.
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    pub group_by: Option<Vec<String>>,
+    pub group_by: Option<Vec<UsageAudioSpeechesRequestGroupBy>>,
 }
 impl UsageAudioSpeechesRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
+    /// Creates a new request with the required query parameters.
+    pub fn new(start_time: i64) -> Self {
         Self {
-            start_time: None,
+            start_time,
             end_time: None,
             bucket_width: None,
             project_ids: None,
@@ -9746,7 +10434,7 @@ impl UsageAudioSpeechesRequest {
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
-        self.start_time = Some(value);
+        self.start_time = value;
         self
     }
     /// Sets the `end_time` query parameter.
@@ -9755,7 +10443,10 @@ impl UsageAudioSpeechesRequest {
         self
     }
     /// Sets the `bucket_width` query parameter.
-    pub fn with_bucket_width(mut self, value: String) -> Self {
+    pub fn with_bucket_width(
+        mut self,
+        value: UsageAudioSpeechesRequestBucketWidth,
+    ) -> Self {
         self.bucket_width = Some(value);
         self
     }
@@ -9780,7 +10471,10 @@ impl UsageAudioSpeechesRequest {
         self
     }
     /// Sets the `group_by` query parameter.
-    pub fn with_group_by(mut self, value: Vec<String>) -> Self {
+    pub fn with_group_by(
+        mut self,
+        value: Vec<UsageAudioSpeechesRequestGroupBy>,
+    ) -> Self {
         self.group_by = Some(value);
         self
     }
@@ -9798,39 +10492,53 @@ impl schematic_runtime::EndpointSpec for UsageAudioSpeechesRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/usage/audio_speeches".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.start_time {
-            query.push(("start_time".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.start_time;
+        query.push(("start_time".to_string(), value.to_string().into()));
         if let Some(ref value) = self.end_time {
-            query.push(("end_time".to_string(), value.to_string()));
+            query.push(("end_time".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.bucket_width {
-            query.push(("bucket_width".to_string(), value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string().into()));
         }
-        if let Some(ref values) = self.project_ids {
-            for value in values {
-                query.push(("project_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.project_ids {
+            if value.is_empty() {
+                query.push(("project_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("project_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.user_ids {
-            for value in values {
-                query.push(("user_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.user_ids {
+            if value.is_empty() {
+                query.push(("user_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("user_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.api_key_ids {
-            for value in values {
-                query.push(("api_key_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.api_key_ids {
+            if value.is_empty() {
+                query.push(("api_key_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("api_key_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.models {
-            for value in values {
-                query.push(("models".to_string(), value.to_string()));
+        if let Some(ref value) = self.models {
+            if value.is_empty() {
+                query.push(("models".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("models".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.group_by {
-            for value in values {
-                query.push(("group_by".to_string(), value.to_string()));
+        if let Some(ref value) = self.group_by {
+            if value.is_empty() {
+                query.push(("group_by".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("group_by".to_string(), element.to_string().into()));
             }
         }
         let headers: Vec<(String, String)> = vec![];
@@ -9843,6 +10551,68 @@ impl schematic_runtime::EndpointSpec for UsageAudioSpeechesRequest {
         })
     }
 }
+/// Values of the `bucket_width` query parameter of [`UsageAudioTranscriptionsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageAudioTranscriptionsRequestBucketWidth {
+    /// `1m`
+    #[serde(rename = "1m")]
+    V1m,
+    /// `1h`
+    #[serde(rename = "1h")]
+    V1h,
+    /// `1d`
+    #[serde(rename = "1d")]
+    V1d,
+}
+impl UsageAudioTranscriptionsRequestBucketWidth {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::V1m => "1m",
+            Self::V1h => "1h",
+            Self::V1d => "1d",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageAudioTranscriptionsRequestBucketWidth {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `group_by` query parameter of [`UsageAudioTranscriptionsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageAudioTranscriptionsRequestGroupBy {
+    /// `project_id`
+    #[serde(rename = "project_id")]
+    ProjectId,
+    /// `user_id`
+    #[serde(rename = "user_id")]
+    UserId,
+    /// `api_key_id`
+    #[serde(rename = "api_key_id")]
+    ApiKeyId,
+    /// `model`
+    #[serde(rename = "model")]
+    Model,
+}
+impl UsageAudioTranscriptionsRequestGroupBy {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProjectId => "project_id",
+            Self::UserId => "user_id",
+            Self::ApiKeyId => "api_key_id",
+            Self::Model => "model",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageAudioTranscriptionsRequestGroupBy {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `UsageAudioTranscriptions` endpoint.
 ///
 /// ## Example
@@ -9850,8 +10620,7 @@ impl schematic_runtime::EndpointSpec for UsageAudioSpeechesRequest {
 /// ```text
 /// use schematic_schema::openai::UsageAudioTranscriptionsRequest;
 ///
-/// let request = UsageAudioTranscriptionsRequest::default()
-///     .with_start_time(/* value */)
+/// let request = UsageAudioTranscriptionsRequest::new(1)
 ///     .with_end_time(/* value */)
 ///     .with_bucket_width(/* value */)
 ///     .with_project_ids(/* value */)
@@ -9861,14 +10630,14 @@ impl schematic_runtime::EndpointSpec for UsageAudioSpeechesRequest {
 ///     .with_group_by(/* value */)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageAudioTranscriptionsRequest {
     /// Query parameter: Start time (Unix seconds) of the query time range, inclusive.
-    pub start_time: Option<i64>,
+    pub start_time: i64,
     /// Query parameter: End time (Unix seconds) of the query time range, exclusive.
     pub end_time: Option<i64>,
     /// Query parameter: Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub bucket_width: Option<String>,
+    pub bucket_width: Option<UsageAudioTranscriptionsRequestBucketWidth>,
     /// Query parameter: Return only usage for these projects.
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Return only usage for these users.
@@ -9878,13 +10647,13 @@ pub struct UsageAudioTranscriptionsRequest {
     /// Query parameter: Return only usage for these models.
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    pub group_by: Option<Vec<String>>,
+    pub group_by: Option<Vec<UsageAudioTranscriptionsRequestGroupBy>>,
 }
 impl UsageAudioTranscriptionsRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
+    /// Creates a new request with the required query parameters.
+    pub fn new(start_time: i64) -> Self {
         Self {
-            start_time: None,
+            start_time,
             end_time: None,
             bucket_width: None,
             project_ids: None,
@@ -9896,7 +10665,7 @@ impl UsageAudioTranscriptionsRequest {
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
-        self.start_time = Some(value);
+        self.start_time = value;
         self
     }
     /// Sets the `end_time` query parameter.
@@ -9905,7 +10674,10 @@ impl UsageAudioTranscriptionsRequest {
         self
     }
     /// Sets the `bucket_width` query parameter.
-    pub fn with_bucket_width(mut self, value: String) -> Self {
+    pub fn with_bucket_width(
+        mut self,
+        value: UsageAudioTranscriptionsRequestBucketWidth,
+    ) -> Self {
         self.bucket_width = Some(value);
         self
     }
@@ -9930,7 +10702,10 @@ impl UsageAudioTranscriptionsRequest {
         self
     }
     /// Sets the `group_by` query parameter.
-    pub fn with_group_by(mut self, value: Vec<String>) -> Self {
+    pub fn with_group_by(
+        mut self,
+        value: Vec<UsageAudioTranscriptionsRequestGroupBy>,
+    ) -> Self {
         self.group_by = Some(value);
         self
     }
@@ -9948,39 +10723,53 @@ impl schematic_runtime::EndpointSpec for UsageAudioTranscriptionsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/usage/audio_transcriptions".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.start_time {
-            query.push(("start_time".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.start_time;
+        query.push(("start_time".to_string(), value.to_string().into()));
         if let Some(ref value) = self.end_time {
-            query.push(("end_time".to_string(), value.to_string()));
+            query.push(("end_time".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.bucket_width {
-            query.push(("bucket_width".to_string(), value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string().into()));
         }
-        if let Some(ref values) = self.project_ids {
-            for value in values {
-                query.push(("project_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.project_ids {
+            if value.is_empty() {
+                query.push(("project_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("project_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.user_ids {
-            for value in values {
-                query.push(("user_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.user_ids {
+            if value.is_empty() {
+                query.push(("user_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("user_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.api_key_ids {
-            for value in values {
-                query.push(("api_key_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.api_key_ids {
+            if value.is_empty() {
+                query.push(("api_key_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("api_key_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.models {
-            for value in values {
-                query.push(("models".to_string(), value.to_string()));
+        if let Some(ref value) = self.models {
+            if value.is_empty() {
+                query.push(("models".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("models".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.group_by {
-            for value in values {
-                query.push(("group_by".to_string(), value.to_string()));
+        if let Some(ref value) = self.group_by {
+            if value.is_empty() {
+                query.push(("group_by".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("group_by".to_string(), element.to_string().into()));
             }
         }
         let headers: Vec<(String, String)> = vec![];
@@ -9993,6 +10782,56 @@ impl schematic_runtime::EndpointSpec for UsageAudioTranscriptionsRequest {
         })
     }
 }
+/// Values of the `bucket_width` query parameter of [`UsageCodeInterpreterSessionsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageCodeInterpreterSessionsRequestBucketWidth {
+    /// `1m`
+    #[serde(rename = "1m")]
+    V1m,
+    /// `1h`
+    #[serde(rename = "1h")]
+    V1h,
+    /// `1d`
+    #[serde(rename = "1d")]
+    V1d,
+}
+impl UsageCodeInterpreterSessionsRequestBucketWidth {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::V1m => "1m",
+            Self::V1h => "1h",
+            Self::V1d => "1d",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageCodeInterpreterSessionsRequestBucketWidth {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `group_by` query parameter of [`UsageCodeInterpreterSessionsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageCodeInterpreterSessionsRequestGroupBy {
+    /// `project_id`
+    #[serde(rename = "project_id")]
+    ProjectId,
+}
+impl UsageCodeInterpreterSessionsRequestGroupBy {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProjectId => "project_id",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageCodeInterpreterSessionsRequestGroupBy {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `UsageCodeInterpreterSessions` endpoint.
 ///
 /// ## Example
@@ -10000,32 +10839,31 @@ impl schematic_runtime::EndpointSpec for UsageAudioTranscriptionsRequest {
 /// ```text
 /// use schematic_schema::openai::UsageCodeInterpreterSessionsRequest;
 ///
-/// let request = UsageCodeInterpreterSessionsRequest::default()
-///     .with_start_time(/* value */)
+/// let request = UsageCodeInterpreterSessionsRequest::new(1)
 ///     .with_end_time(/* value */)
 ///     .with_bucket_width(/* value */)
 ///     .with_project_ids(/* value */)
 ///     .with_group_by(/* value */)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageCodeInterpreterSessionsRequest {
     /// Query parameter: Start time (Unix seconds) of the query time range, inclusive.
-    pub start_time: Option<i64>,
+    pub start_time: i64,
     /// Query parameter: End time (Unix seconds) of the query time range, exclusive.
     pub end_time: Option<i64>,
     /// Query parameter: Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub bucket_width: Option<String>,
+    pub bucket_width: Option<UsageCodeInterpreterSessionsRequestBucketWidth>,
     /// Query parameter: Return only usage for these projects.
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`.
-    pub group_by: Option<Vec<String>>,
+    pub group_by: Option<Vec<UsageCodeInterpreterSessionsRequestGroupBy>>,
 }
 impl UsageCodeInterpreterSessionsRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
+    /// Creates a new request with the required query parameters.
+    pub fn new(start_time: i64) -> Self {
         Self {
-            start_time: None,
+            start_time,
             end_time: None,
             bucket_width: None,
             project_ids: None,
@@ -10034,7 +10872,7 @@ impl UsageCodeInterpreterSessionsRequest {
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
-        self.start_time = Some(value);
+        self.start_time = value;
         self
     }
     /// Sets the `end_time` query parameter.
@@ -10043,7 +10881,10 @@ impl UsageCodeInterpreterSessionsRequest {
         self
     }
     /// Sets the `bucket_width` query parameter.
-    pub fn with_bucket_width(mut self, value: String) -> Self {
+    pub fn with_bucket_width(
+        mut self,
+        value: UsageCodeInterpreterSessionsRequestBucketWidth,
+    ) -> Self {
         self.bucket_width = Some(value);
         self
     }
@@ -10053,7 +10894,10 @@ impl UsageCodeInterpreterSessionsRequest {
         self
     }
     /// Sets the `group_by` query parameter.
-    pub fn with_group_by(mut self, value: Vec<String>) -> Self {
+    pub fn with_group_by(
+        mut self,
+        value: Vec<UsageCodeInterpreterSessionsRequestGroupBy>,
+    ) -> Self {
         self.group_by = Some(value);
         self
     }
@@ -10071,24 +10915,29 @@ impl schematic_runtime::EndpointSpec for UsageCodeInterpreterSessionsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/usage/code_interpreter_sessions".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.start_time {
-            query.push(("start_time".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.start_time;
+        query.push(("start_time".to_string(), value.to_string().into()));
         if let Some(ref value) = self.end_time {
-            query.push(("end_time".to_string(), value.to_string()));
+            query.push(("end_time".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.bucket_width {
-            query.push(("bucket_width".to_string(), value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string().into()));
         }
-        if let Some(ref values) = self.project_ids {
-            for value in values {
-                query.push(("project_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.project_ids {
+            if value.is_empty() {
+                query.push(("project_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("project_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.group_by {
-            for value in values {
-                query.push(("group_by".to_string(), value.to_string()));
+        if let Some(ref value) = self.group_by {
+            if value.is_empty() {
+                query.push(("group_by".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("group_by".to_string(), element.to_string().into()));
             }
         }
         let headers: Vec<(String, String)> = vec![];
@@ -10101,6 +10950,76 @@ impl schematic_runtime::EndpointSpec for UsageCodeInterpreterSessionsRequest {
         })
     }
 }
+/// Values of the `bucket_width` query parameter of [`UsageCompletionsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageCompletionsRequestBucketWidth {
+    /// `1m`
+    #[serde(rename = "1m")]
+    V1m,
+    /// `1h`
+    #[serde(rename = "1h")]
+    V1h,
+    /// `1d`
+    #[serde(rename = "1d")]
+    V1d,
+}
+impl UsageCompletionsRequestBucketWidth {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::V1m => "1m",
+            Self::V1h => "1h",
+            Self::V1d => "1d",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageCompletionsRequestBucketWidth {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `group_by` query parameter of [`UsageCompletionsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageCompletionsRequestGroupBy {
+    /// `project_id`
+    #[serde(rename = "project_id")]
+    ProjectId,
+    /// `user_id`
+    #[serde(rename = "user_id")]
+    UserId,
+    /// `api_key_id`
+    #[serde(rename = "api_key_id")]
+    ApiKeyId,
+    /// `model`
+    #[serde(rename = "model")]
+    Model,
+    /// `batch`
+    #[serde(rename = "batch")]
+    Batch,
+    /// `service_tier`
+    #[serde(rename = "service_tier")]
+    ServiceTier,
+}
+impl UsageCompletionsRequestGroupBy {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProjectId => "project_id",
+            Self::UserId => "user_id",
+            Self::ApiKeyId => "api_key_id",
+            Self::Model => "model",
+            Self::Batch => "batch",
+            Self::ServiceTier => "service_tier",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageCompletionsRequestGroupBy {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `UsageCompletions` endpoint.
 ///
 /// ## Example
@@ -10108,8 +11027,7 @@ impl schematic_runtime::EndpointSpec for UsageCodeInterpreterSessionsRequest {
 /// ```text
 /// use schematic_schema::openai::UsageCompletionsRequest;
 ///
-/// let request = UsageCompletionsRequest::default()
-///     .with_start_time(/* value */)
+/// let request = UsageCompletionsRequest::new(1)
 ///     .with_end_time(/* value */)
 ///     .with_bucket_width(/* value */)
 ///     .with_project_ids(/* value */)
@@ -10120,14 +11038,14 @@ impl schematic_runtime::EndpointSpec for UsageCodeInterpreterSessionsRequest {
 ///     .with_group_by(/* value */)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageCompletionsRequest {
     /// Query parameter: Start time (Unix seconds) of the query time range, inclusive.
-    pub start_time: Option<i64>,
+    pub start_time: i64,
     /// Query parameter: End time (Unix seconds) of the query time range, exclusive.
     pub end_time: Option<i64>,
     /// Query parameter: Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub bucket_width: Option<String>,
+    pub bucket_width: Option<UsageCompletionsRequestBucketWidth>,
     /// Query parameter: Return only usage for these projects.
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Return only usage for these users.
@@ -10140,13 +11058,13 @@ pub struct UsageCompletionsRequest {
 */
     pub batch: Option<bool>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `batch`, `service_tier` or any combination of them.
-    pub group_by: Option<Vec<String>>,
+    pub group_by: Option<Vec<UsageCompletionsRequestGroupBy>>,
 }
 impl UsageCompletionsRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
+    /// Creates a new request with the required query parameters.
+    pub fn new(start_time: i64) -> Self {
         Self {
-            start_time: None,
+            start_time,
             end_time: None,
             bucket_width: None,
             project_ids: None,
@@ -10159,7 +11077,7 @@ impl UsageCompletionsRequest {
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
-        self.start_time = Some(value);
+        self.start_time = value;
         self
     }
     /// Sets the `end_time` query parameter.
@@ -10168,7 +11086,10 @@ impl UsageCompletionsRequest {
         self
     }
     /// Sets the `bucket_width` query parameter.
-    pub fn with_bucket_width(mut self, value: String) -> Self {
+    pub fn with_bucket_width(
+        mut self,
+        value: UsageCompletionsRequestBucketWidth,
+    ) -> Self {
         self.bucket_width = Some(value);
         self
     }
@@ -10198,7 +11119,7 @@ impl UsageCompletionsRequest {
         self
     }
     /// Sets the `group_by` query parameter.
-    pub fn with_group_by(mut self, value: Vec<String>) -> Self {
+    pub fn with_group_by(mut self, value: Vec<UsageCompletionsRequestGroupBy>) -> Self {
         self.group_by = Some(value);
         self
     }
@@ -10216,42 +11137,56 @@ impl schematic_runtime::EndpointSpec for UsageCompletionsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/usage/completions".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.start_time {
-            query.push(("start_time".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.start_time;
+        query.push(("start_time".to_string(), value.to_string().into()));
         if let Some(ref value) = self.end_time {
-            query.push(("end_time".to_string(), value.to_string()));
+            query.push(("end_time".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.bucket_width {
-            query.push(("bucket_width".to_string(), value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string().into()));
         }
-        if let Some(ref values) = self.project_ids {
-            for value in values {
-                query.push(("project_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.project_ids {
+            if value.is_empty() {
+                query.push(("project_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("project_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.user_ids {
-            for value in values {
-                query.push(("user_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.user_ids {
+            if value.is_empty() {
+                query.push(("user_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("user_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.api_key_ids {
-            for value in values {
-                query.push(("api_key_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.api_key_ids {
+            if value.is_empty() {
+                query.push(("api_key_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("api_key_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.models {
-            for value in values {
-                query.push(("models".to_string(), value.to_string()));
+        if let Some(ref value) = self.models {
+            if value.is_empty() {
+                query.push(("models".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("models".to_string(), element.to_string().into()));
             }
         }
         if let Some(ref value) = self.batch {
-            query.push(("batch".to_string(), value.to_string()));
+            query.push(("batch".to_string(), value.to_string().into()));
         }
-        if let Some(ref values) = self.group_by {
-            for value in values {
-                query.push(("group_by".to_string(), value.to_string()));
+        if let Some(ref value) = self.group_by {
+            if value.is_empty() {
+                query.push(("group_by".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("group_by".to_string(), element.to_string().into()));
             }
         }
         let headers: Vec<(String, String)> = vec![];
@@ -10264,6 +11199,68 @@ impl schematic_runtime::EndpointSpec for UsageCompletionsRequest {
         })
     }
 }
+/// Values of the `bucket_width` query parameter of [`UsageEmbeddingsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageEmbeddingsRequestBucketWidth {
+    /// `1m`
+    #[serde(rename = "1m")]
+    V1m,
+    /// `1h`
+    #[serde(rename = "1h")]
+    V1h,
+    /// `1d`
+    #[serde(rename = "1d")]
+    V1d,
+}
+impl UsageEmbeddingsRequestBucketWidth {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::V1m => "1m",
+            Self::V1h => "1h",
+            Self::V1d => "1d",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageEmbeddingsRequestBucketWidth {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `group_by` query parameter of [`UsageEmbeddingsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageEmbeddingsRequestGroupBy {
+    /// `project_id`
+    #[serde(rename = "project_id")]
+    ProjectId,
+    /// `user_id`
+    #[serde(rename = "user_id")]
+    UserId,
+    /// `api_key_id`
+    #[serde(rename = "api_key_id")]
+    ApiKeyId,
+    /// `model`
+    #[serde(rename = "model")]
+    Model,
+}
+impl UsageEmbeddingsRequestGroupBy {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProjectId => "project_id",
+            Self::UserId => "user_id",
+            Self::ApiKeyId => "api_key_id",
+            Self::Model => "model",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageEmbeddingsRequestGroupBy {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `UsageEmbeddings` endpoint.
 ///
 /// ## Example
@@ -10271,8 +11268,7 @@ impl schematic_runtime::EndpointSpec for UsageCompletionsRequest {
 /// ```text
 /// use schematic_schema::openai::UsageEmbeddingsRequest;
 ///
-/// let request = UsageEmbeddingsRequest::default()
-///     .with_start_time(/* value */)
+/// let request = UsageEmbeddingsRequest::new(1)
 ///     .with_end_time(/* value */)
 ///     .with_bucket_width(/* value */)
 ///     .with_project_ids(/* value */)
@@ -10282,14 +11278,14 @@ impl schematic_runtime::EndpointSpec for UsageCompletionsRequest {
 ///     .with_group_by(/* value */)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageEmbeddingsRequest {
     /// Query parameter: Start time (Unix seconds) of the query time range, inclusive.
-    pub start_time: Option<i64>,
+    pub start_time: i64,
     /// Query parameter: End time (Unix seconds) of the query time range, exclusive.
     pub end_time: Option<i64>,
     /// Query parameter: Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub bucket_width: Option<String>,
+    pub bucket_width: Option<UsageEmbeddingsRequestBucketWidth>,
     /// Query parameter: Return only usage for these projects.
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Return only usage for these users.
@@ -10299,13 +11295,13 @@ pub struct UsageEmbeddingsRequest {
     /// Query parameter: Return only usage for these models.
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    pub group_by: Option<Vec<String>>,
+    pub group_by: Option<Vec<UsageEmbeddingsRequestGroupBy>>,
 }
 impl UsageEmbeddingsRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
+    /// Creates a new request with the required query parameters.
+    pub fn new(start_time: i64) -> Self {
         Self {
-            start_time: None,
+            start_time,
             end_time: None,
             bucket_width: None,
             project_ids: None,
@@ -10317,7 +11313,7 @@ impl UsageEmbeddingsRequest {
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
-        self.start_time = Some(value);
+        self.start_time = value;
         self
     }
     /// Sets the `end_time` query parameter.
@@ -10326,7 +11322,10 @@ impl UsageEmbeddingsRequest {
         self
     }
     /// Sets the `bucket_width` query parameter.
-    pub fn with_bucket_width(mut self, value: String) -> Self {
+    pub fn with_bucket_width(
+        mut self,
+        value: UsageEmbeddingsRequestBucketWidth,
+    ) -> Self {
         self.bucket_width = Some(value);
         self
     }
@@ -10351,7 +11350,7 @@ impl UsageEmbeddingsRequest {
         self
     }
     /// Sets the `group_by` query parameter.
-    pub fn with_group_by(mut self, value: Vec<String>) -> Self {
+    pub fn with_group_by(mut self, value: Vec<UsageEmbeddingsRequestGroupBy>) -> Self {
         self.group_by = Some(value);
         self
     }
@@ -10369,39 +11368,53 @@ impl schematic_runtime::EndpointSpec for UsageEmbeddingsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/usage/embeddings".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.start_time {
-            query.push(("start_time".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.start_time;
+        query.push(("start_time".to_string(), value.to_string().into()));
         if let Some(ref value) = self.end_time {
-            query.push(("end_time".to_string(), value.to_string()));
+            query.push(("end_time".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.bucket_width {
-            query.push(("bucket_width".to_string(), value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string().into()));
         }
-        if let Some(ref values) = self.project_ids {
-            for value in values {
-                query.push(("project_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.project_ids {
+            if value.is_empty() {
+                query.push(("project_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("project_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.user_ids {
-            for value in values {
-                query.push(("user_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.user_ids {
+            if value.is_empty() {
+                query.push(("user_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("user_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.api_key_ids {
-            for value in values {
-                query.push(("api_key_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.api_key_ids {
+            if value.is_empty() {
+                query.push(("api_key_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("api_key_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.models {
-            for value in values {
-                query.push(("models".to_string(), value.to_string()));
+        if let Some(ref value) = self.models {
+            if value.is_empty() {
+                query.push(("models".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("models".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.group_by {
-            for value in values {
-                query.push(("group_by".to_string(), value.to_string()));
+        if let Some(ref value) = self.group_by {
+            if value.is_empty() {
+                query.push(("group_by".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("group_by".to_string(), element.to_string().into()));
             }
         }
         let headers: Vec<(String, String)> = vec![];
@@ -10414,6 +11427,68 @@ impl schematic_runtime::EndpointSpec for UsageEmbeddingsRequest {
         })
     }
 }
+/// Values of the `bucket_width` query parameter of [`UsageFileSearchCallsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageFileSearchCallsRequestBucketWidth {
+    /// `1m`
+    #[serde(rename = "1m")]
+    V1m,
+    /// `1h`
+    #[serde(rename = "1h")]
+    V1h,
+    /// `1d`
+    #[serde(rename = "1d")]
+    V1d,
+}
+impl UsageFileSearchCallsRequestBucketWidth {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::V1m => "1m",
+            Self::V1h => "1h",
+            Self::V1d => "1d",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageFileSearchCallsRequestBucketWidth {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `group_by` query parameter of [`UsageFileSearchCallsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageFileSearchCallsRequestGroupBy {
+    /// `project_id`
+    #[serde(rename = "project_id")]
+    ProjectId,
+    /// `user_id`
+    #[serde(rename = "user_id")]
+    UserId,
+    /// `api_key_id`
+    #[serde(rename = "api_key_id")]
+    ApiKeyId,
+    /// `vector_store_id`
+    #[serde(rename = "vector_store_id")]
+    VectorStoreId,
+}
+impl UsageFileSearchCallsRequestGroupBy {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProjectId => "project_id",
+            Self::UserId => "user_id",
+            Self::ApiKeyId => "api_key_id",
+            Self::VectorStoreId => "vector_store_id",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageFileSearchCallsRequestGroupBy {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `UsageFileSearchCalls` endpoint.
 ///
 /// ## Example
@@ -10421,8 +11496,7 @@ impl schematic_runtime::EndpointSpec for UsageEmbeddingsRequest {
 /// ```text
 /// use schematic_schema::openai::UsageFileSearchCallsRequest;
 ///
-/// let request = UsageFileSearchCallsRequest::default()
-///     .with_start_time(/* value */)
+/// let request = UsageFileSearchCallsRequest::new(1)
 ///     .with_end_time(/* value */)
 ///     .with_bucket_width(/* value */)
 ///     .with_project_ids(/* value */)
@@ -10432,14 +11506,14 @@ impl schematic_runtime::EndpointSpec for UsageEmbeddingsRequest {
 ///     .with_group_by(/* value */)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageFileSearchCallsRequest {
     /// Query parameter: Start time (Unix seconds) of the query time range, inclusive.
-    pub start_time: Option<i64>,
+    pub start_time: i64,
     /// Query parameter: End time (Unix seconds) of the query time range, exclusive.
     pub end_time: Option<i64>,
     /// Query parameter: Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub bucket_width: Option<String>,
+    pub bucket_width: Option<UsageFileSearchCallsRequestBucketWidth>,
     /// Query parameter: Return only usage for these projects.
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Return only usage for these users.
@@ -10449,13 +11523,13 @@ pub struct UsageFileSearchCallsRequest {
     /// Query parameter: Return only usage for these vector stores.
     pub vector_store_ids: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `vector_store_id` or any combination of them.
-    pub group_by: Option<Vec<String>>,
+    pub group_by: Option<Vec<UsageFileSearchCallsRequestGroupBy>>,
 }
 impl UsageFileSearchCallsRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
+    /// Creates a new request with the required query parameters.
+    pub fn new(start_time: i64) -> Self {
         Self {
-            start_time: None,
+            start_time,
             end_time: None,
             bucket_width: None,
             project_ids: None,
@@ -10467,7 +11541,7 @@ impl UsageFileSearchCallsRequest {
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
-        self.start_time = Some(value);
+        self.start_time = value;
         self
     }
     /// Sets the `end_time` query parameter.
@@ -10476,7 +11550,10 @@ impl UsageFileSearchCallsRequest {
         self
     }
     /// Sets the `bucket_width` query parameter.
-    pub fn with_bucket_width(mut self, value: String) -> Self {
+    pub fn with_bucket_width(
+        mut self,
+        value: UsageFileSearchCallsRequestBucketWidth,
+    ) -> Self {
         self.bucket_width = Some(value);
         self
     }
@@ -10501,7 +11578,10 @@ impl UsageFileSearchCallsRequest {
         self
     }
     /// Sets the `group_by` query parameter.
-    pub fn with_group_by(mut self, value: Vec<String>) -> Self {
+    pub fn with_group_by(
+        mut self,
+        value: Vec<UsageFileSearchCallsRequestGroupBy>,
+    ) -> Self {
         self.group_by = Some(value);
         self
     }
@@ -10519,39 +11599,53 @@ impl schematic_runtime::EndpointSpec for UsageFileSearchCallsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/usage/file_search_calls".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.start_time {
-            query.push(("start_time".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.start_time;
+        query.push(("start_time".to_string(), value.to_string().into()));
         if let Some(ref value) = self.end_time {
-            query.push(("end_time".to_string(), value.to_string()));
+            query.push(("end_time".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.bucket_width {
-            query.push(("bucket_width".to_string(), value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string().into()));
         }
-        if let Some(ref values) = self.project_ids {
-            for value in values {
-                query.push(("project_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.project_ids {
+            if value.is_empty() {
+                query.push(("project_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("project_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.user_ids {
-            for value in values {
-                query.push(("user_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.user_ids {
+            if value.is_empty() {
+                query.push(("user_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("user_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.api_key_ids {
-            for value in values {
-                query.push(("api_key_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.api_key_ids {
+            if value.is_empty() {
+                query.push(("api_key_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("api_key_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.vector_store_ids {
-            for value in values {
-                query.push(("vector_store_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.vector_store_ids {
+            if value.is_empty() {
+                query.push(("vector_store_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("vector_store_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.group_by {
-            for value in values {
-                query.push(("group_by".to_string(), value.to_string()));
+        if let Some(ref value) = self.group_by {
+            if value.is_empty() {
+                query.push(("group_by".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("group_by".to_string(), element.to_string().into()));
             }
         }
         let headers: Vec<(String, String)> = vec![];
@@ -10564,6 +11658,142 @@ impl schematic_runtime::EndpointSpec for UsageFileSearchCallsRequest {
         })
     }
 }
+/// Values of the `bucket_width` query parameter of [`UsageImagesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageImagesRequestBucketWidth {
+    /// `1m`
+    #[serde(rename = "1m")]
+    V1m,
+    /// `1h`
+    #[serde(rename = "1h")]
+    V1h,
+    /// `1d`
+    #[serde(rename = "1d")]
+    V1d,
+}
+impl UsageImagesRequestBucketWidth {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::V1m => "1m",
+            Self::V1h => "1h",
+            Self::V1d => "1d",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageImagesRequestBucketWidth {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `sources` query parameter of [`UsageImagesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageImagesRequestSources {
+    /// `image.generation`
+    #[serde(rename = "image.generation")]
+    ImageGeneration,
+    /// `image.edit`
+    #[serde(rename = "image.edit")]
+    ImageEdit,
+    /// `image.variation`
+    #[serde(rename = "image.variation")]
+    ImageVariation,
+}
+impl UsageImagesRequestSources {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ImageGeneration => "image.generation",
+            Self::ImageEdit => "image.edit",
+            Self::ImageVariation => "image.variation",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageImagesRequestSources {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `sizes` query parameter of [`UsageImagesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageImagesRequestSizes {
+    /// `256x256`
+    #[serde(rename = "256x256")]
+    V256x256,
+    /// `512x512`
+    #[serde(rename = "512x512")]
+    V512x512,
+    /// `1024x1024`
+    #[serde(rename = "1024x1024")]
+    V1024x1024,
+    /// `1792x1792`
+    #[serde(rename = "1792x1792")]
+    V1792x1792,
+    /// `1024x1792`
+    #[serde(rename = "1024x1792")]
+    V1024x1792,
+}
+impl UsageImagesRequestSizes {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::V256x256 => "256x256",
+            Self::V512x512 => "512x512",
+            Self::V1024x1024 => "1024x1024",
+            Self::V1792x1792 => "1792x1792",
+            Self::V1024x1792 => "1024x1792",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageImagesRequestSizes {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `group_by` query parameter of [`UsageImagesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageImagesRequestGroupBy {
+    /// `project_id`
+    #[serde(rename = "project_id")]
+    ProjectId,
+    /// `user_id`
+    #[serde(rename = "user_id")]
+    UserId,
+    /// `api_key_id`
+    #[serde(rename = "api_key_id")]
+    ApiKeyId,
+    /// `model`
+    #[serde(rename = "model")]
+    Model,
+    /// `size`
+    #[serde(rename = "size")]
+    Size,
+    /// `source`
+    #[serde(rename = "source")]
+    Source,
+}
+impl UsageImagesRequestGroupBy {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProjectId => "project_id",
+            Self::UserId => "user_id",
+            Self::ApiKeyId => "api_key_id",
+            Self::Model => "model",
+            Self::Size => "size",
+            Self::Source => "source",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageImagesRequestGroupBy {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `UsageImages` endpoint.
 ///
 /// ## Example
@@ -10571,8 +11801,7 @@ impl schematic_runtime::EndpointSpec for UsageFileSearchCallsRequest {
 /// ```text
 /// use schematic_schema::openai::UsageImagesRequest;
 ///
-/// let request = UsageImagesRequest::default()
-///     .with_start_time(/* value */)
+/// let request = UsageImagesRequest::new(1)
 ///     .with_end_time(/* value */)
 ///     .with_bucket_width(/* value */)
 ///     .with_sources(/* value */)
@@ -10584,18 +11813,18 @@ impl schematic_runtime::EndpointSpec for UsageFileSearchCallsRequest {
 ///     .with_group_by(/* value */)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageImagesRequest {
     /// Query parameter: Start time (Unix seconds) of the query time range, inclusive.
-    pub start_time: Option<i64>,
+    pub start_time: i64,
     /// Query parameter: End time (Unix seconds) of the query time range, exclusive.
     pub end_time: Option<i64>,
     /// Query parameter: Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub bucket_width: Option<String>,
+    pub bucket_width: Option<UsageImagesRequestBucketWidth>,
     /// Query parameter: Return only usages for these sources. Possible values are `image.generation`, `image.edit`, `image.variation` or any combination of them.
-    pub sources: Option<Vec<String>>,
+    pub sources: Option<Vec<UsageImagesRequestSources>>,
     /// Query parameter: Return only usages for these image sizes. Possible values are `256x256`, `512x512`, `1024x1024`, `1792x1792`, `1024x1792` or any combination of them.
-    pub sizes: Option<Vec<String>>,
+    pub sizes: Option<Vec<UsageImagesRequestSizes>>,
     /// Query parameter: Return only usage for these projects.
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Return only usage for these users.
@@ -10605,13 +11834,13 @@ pub struct UsageImagesRequest {
     /// Query parameter: Return only usage for these models.
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `size`, `source` or any combination of them.
-    pub group_by: Option<Vec<String>>,
+    pub group_by: Option<Vec<UsageImagesRequestGroupBy>>,
 }
 impl UsageImagesRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
+    /// Creates a new request with the required query parameters.
+    pub fn new(start_time: i64) -> Self {
         Self {
-            start_time: None,
+            start_time,
             end_time: None,
             bucket_width: None,
             sources: None,
@@ -10625,7 +11854,7 @@ impl UsageImagesRequest {
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
-        self.start_time = Some(value);
+        self.start_time = value;
         self
     }
     /// Sets the `end_time` query parameter.
@@ -10634,17 +11863,17 @@ impl UsageImagesRequest {
         self
     }
     /// Sets the `bucket_width` query parameter.
-    pub fn with_bucket_width(mut self, value: String) -> Self {
+    pub fn with_bucket_width(mut self, value: UsageImagesRequestBucketWidth) -> Self {
         self.bucket_width = Some(value);
         self
     }
     /// Sets the `sources` query parameter.
-    pub fn with_sources(mut self, value: Vec<String>) -> Self {
+    pub fn with_sources(mut self, value: Vec<UsageImagesRequestSources>) -> Self {
         self.sources = Some(value);
         self
     }
     /// Sets the `sizes` query parameter.
-    pub fn with_sizes(mut self, value: Vec<String>) -> Self {
+    pub fn with_sizes(mut self, value: Vec<UsageImagesRequestSizes>) -> Self {
         self.sizes = Some(value);
         self
     }
@@ -10669,7 +11898,7 @@ impl UsageImagesRequest {
         self
     }
     /// Sets the `group_by` query parameter.
-    pub fn with_group_by(mut self, value: Vec<String>) -> Self {
+    pub fn with_group_by(mut self, value: Vec<UsageImagesRequestGroupBy>) -> Self {
         self.group_by = Some(value);
         self
     }
@@ -10687,49 +11916,69 @@ impl schematic_runtime::EndpointSpec for UsageImagesRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/usage/images".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.start_time {
-            query.push(("start_time".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.start_time;
+        query.push(("start_time".to_string(), value.to_string().into()));
         if let Some(ref value) = self.end_time {
-            query.push(("end_time".to_string(), value.to_string()));
+            query.push(("end_time".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.bucket_width {
-            query.push(("bucket_width".to_string(), value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string().into()));
         }
-        if let Some(ref values) = self.sources {
-            for value in values {
-                query.push(("sources".to_string(), value.to_string()));
+        if let Some(ref value) = self.sources {
+            if value.is_empty() {
+                query.push(("sources".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("sources".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.sizes {
-            for value in values {
-                query.push(("sizes".to_string(), value.to_string()));
+        if let Some(ref value) = self.sizes {
+            if value.is_empty() {
+                query.push(("sizes".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("sizes".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.project_ids {
-            for value in values {
-                query.push(("project_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.project_ids {
+            if value.is_empty() {
+                query.push(("project_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("project_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.user_ids {
-            for value in values {
-                query.push(("user_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.user_ids {
+            if value.is_empty() {
+                query.push(("user_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("user_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.api_key_ids {
-            for value in values {
-                query.push(("api_key_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.api_key_ids {
+            if value.is_empty() {
+                query.push(("api_key_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("api_key_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.models {
-            for value in values {
-                query.push(("models".to_string(), value.to_string()));
+        if let Some(ref value) = self.models {
+            if value.is_empty() {
+                query.push(("models".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("models".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.group_by {
-            for value in values {
-                query.push(("group_by".to_string(), value.to_string()));
+        if let Some(ref value) = self.group_by {
+            if value.is_empty() {
+                query.push(("group_by".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("group_by".to_string(), element.to_string().into()));
             }
         }
         let headers: Vec<(String, String)> = vec![];
@@ -10742,6 +11991,68 @@ impl schematic_runtime::EndpointSpec for UsageImagesRequest {
         })
     }
 }
+/// Values of the `bucket_width` query parameter of [`UsageModerationsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageModerationsRequestBucketWidth {
+    /// `1m`
+    #[serde(rename = "1m")]
+    V1m,
+    /// `1h`
+    #[serde(rename = "1h")]
+    V1h,
+    /// `1d`
+    #[serde(rename = "1d")]
+    V1d,
+}
+impl UsageModerationsRequestBucketWidth {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::V1m => "1m",
+            Self::V1h => "1h",
+            Self::V1d => "1d",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageModerationsRequestBucketWidth {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `group_by` query parameter of [`UsageModerationsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageModerationsRequestGroupBy {
+    /// `project_id`
+    #[serde(rename = "project_id")]
+    ProjectId,
+    /// `user_id`
+    #[serde(rename = "user_id")]
+    UserId,
+    /// `api_key_id`
+    #[serde(rename = "api_key_id")]
+    ApiKeyId,
+    /// `model`
+    #[serde(rename = "model")]
+    Model,
+}
+impl UsageModerationsRequestGroupBy {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProjectId => "project_id",
+            Self::UserId => "user_id",
+            Self::ApiKeyId => "api_key_id",
+            Self::Model => "model",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageModerationsRequestGroupBy {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `UsageModerations` endpoint.
 ///
 /// ## Example
@@ -10749,8 +12060,7 @@ impl schematic_runtime::EndpointSpec for UsageImagesRequest {
 /// ```text
 /// use schematic_schema::openai::UsageModerationsRequest;
 ///
-/// let request = UsageModerationsRequest::default()
-///     .with_start_time(/* value */)
+/// let request = UsageModerationsRequest::new(1)
 ///     .with_end_time(/* value */)
 ///     .with_bucket_width(/* value */)
 ///     .with_project_ids(/* value */)
@@ -10760,14 +12070,14 @@ impl schematic_runtime::EndpointSpec for UsageImagesRequest {
 ///     .with_group_by(/* value */)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageModerationsRequest {
     /// Query parameter: Start time (Unix seconds) of the query time range, inclusive.
-    pub start_time: Option<i64>,
+    pub start_time: i64,
     /// Query parameter: End time (Unix seconds) of the query time range, exclusive.
     pub end_time: Option<i64>,
     /// Query parameter: Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub bucket_width: Option<String>,
+    pub bucket_width: Option<UsageModerationsRequestBucketWidth>,
     /// Query parameter: Return only usage for these projects.
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Return only usage for these users.
@@ -10777,13 +12087,13 @@ pub struct UsageModerationsRequest {
     /// Query parameter: Return only usage for these models.
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    pub group_by: Option<Vec<String>>,
+    pub group_by: Option<Vec<UsageModerationsRequestGroupBy>>,
 }
 impl UsageModerationsRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
+    /// Creates a new request with the required query parameters.
+    pub fn new(start_time: i64) -> Self {
         Self {
-            start_time: None,
+            start_time,
             end_time: None,
             bucket_width: None,
             project_ids: None,
@@ -10795,7 +12105,7 @@ impl UsageModerationsRequest {
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
-        self.start_time = Some(value);
+        self.start_time = value;
         self
     }
     /// Sets the `end_time` query parameter.
@@ -10804,7 +12114,10 @@ impl UsageModerationsRequest {
         self
     }
     /// Sets the `bucket_width` query parameter.
-    pub fn with_bucket_width(mut self, value: String) -> Self {
+    pub fn with_bucket_width(
+        mut self,
+        value: UsageModerationsRequestBucketWidth,
+    ) -> Self {
         self.bucket_width = Some(value);
         self
     }
@@ -10829,7 +12142,7 @@ impl UsageModerationsRequest {
         self
     }
     /// Sets the `group_by` query parameter.
-    pub fn with_group_by(mut self, value: Vec<String>) -> Self {
+    pub fn with_group_by(mut self, value: Vec<UsageModerationsRequestGroupBy>) -> Self {
         self.group_by = Some(value);
         self
     }
@@ -10847,39 +12160,53 @@ impl schematic_runtime::EndpointSpec for UsageModerationsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/usage/moderations".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.start_time {
-            query.push(("start_time".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.start_time;
+        query.push(("start_time".to_string(), value.to_string().into()));
         if let Some(ref value) = self.end_time {
-            query.push(("end_time".to_string(), value.to_string()));
+            query.push(("end_time".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.bucket_width {
-            query.push(("bucket_width".to_string(), value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string().into()));
         }
-        if let Some(ref values) = self.project_ids {
-            for value in values {
-                query.push(("project_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.project_ids {
+            if value.is_empty() {
+                query.push(("project_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("project_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.user_ids {
-            for value in values {
-                query.push(("user_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.user_ids {
+            if value.is_empty() {
+                query.push(("user_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("user_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.api_key_ids {
-            for value in values {
-                query.push(("api_key_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.api_key_ids {
+            if value.is_empty() {
+                query.push(("api_key_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("api_key_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.models {
-            for value in values {
-                query.push(("models".to_string(), value.to_string()));
+        if let Some(ref value) = self.models {
+            if value.is_empty() {
+                query.push(("models".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("models".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.group_by {
-            for value in values {
-                query.push(("group_by".to_string(), value.to_string()));
+        if let Some(ref value) = self.group_by {
+            if value.is_empty() {
+                query.push(("group_by".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("group_by".to_string(), element.to_string().into()));
             }
         }
         let headers: Vec<(String, String)> = vec![];
@@ -10892,6 +12219,56 @@ impl schematic_runtime::EndpointSpec for UsageModerationsRequest {
         })
     }
 }
+/// Values of the `bucket_width` query parameter of [`UsageVectorStoresRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageVectorStoresRequestBucketWidth {
+    /// `1m`
+    #[serde(rename = "1m")]
+    V1m,
+    /// `1h`
+    #[serde(rename = "1h")]
+    V1h,
+    /// `1d`
+    #[serde(rename = "1d")]
+    V1d,
+}
+impl UsageVectorStoresRequestBucketWidth {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::V1m => "1m",
+            Self::V1h => "1h",
+            Self::V1d => "1d",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageVectorStoresRequestBucketWidth {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `group_by` query parameter of [`UsageVectorStoresRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageVectorStoresRequestGroupBy {
+    /// `project_id`
+    #[serde(rename = "project_id")]
+    ProjectId,
+}
+impl UsageVectorStoresRequestGroupBy {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProjectId => "project_id",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageVectorStoresRequestGroupBy {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `UsageVectorStores` endpoint.
 ///
 /// ## Example
@@ -10899,32 +12276,31 @@ impl schematic_runtime::EndpointSpec for UsageModerationsRequest {
 /// ```text
 /// use schematic_schema::openai::UsageVectorStoresRequest;
 ///
-/// let request = UsageVectorStoresRequest::default()
-///     .with_start_time(/* value */)
+/// let request = UsageVectorStoresRequest::new(1)
 ///     .with_end_time(/* value */)
 ///     .with_bucket_width(/* value */)
 ///     .with_project_ids(/* value */)
 ///     .with_group_by(/* value */)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageVectorStoresRequest {
     /// Query parameter: Start time (Unix seconds) of the query time range, inclusive.
-    pub start_time: Option<i64>,
+    pub start_time: i64,
     /// Query parameter: End time (Unix seconds) of the query time range, exclusive.
     pub end_time: Option<i64>,
     /// Query parameter: Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub bucket_width: Option<String>,
+    pub bucket_width: Option<UsageVectorStoresRequestBucketWidth>,
     /// Query parameter: Return only usage for these projects.
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`.
-    pub group_by: Option<Vec<String>>,
+    pub group_by: Option<Vec<UsageVectorStoresRequestGroupBy>>,
 }
 impl UsageVectorStoresRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
+    /// Creates a new request with the required query parameters.
+    pub fn new(start_time: i64) -> Self {
         Self {
-            start_time: None,
+            start_time,
             end_time: None,
             bucket_width: None,
             project_ids: None,
@@ -10933,7 +12309,7 @@ impl UsageVectorStoresRequest {
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
-        self.start_time = Some(value);
+        self.start_time = value;
         self
     }
     /// Sets the `end_time` query parameter.
@@ -10942,7 +12318,10 @@ impl UsageVectorStoresRequest {
         self
     }
     /// Sets the `bucket_width` query parameter.
-    pub fn with_bucket_width(mut self, value: String) -> Self {
+    pub fn with_bucket_width(
+        mut self,
+        value: UsageVectorStoresRequestBucketWidth,
+    ) -> Self {
         self.bucket_width = Some(value);
         self
     }
@@ -10952,7 +12331,7 @@ impl UsageVectorStoresRequest {
         self
     }
     /// Sets the `group_by` query parameter.
-    pub fn with_group_by(mut self, value: Vec<String>) -> Self {
+    pub fn with_group_by(mut self, value: Vec<UsageVectorStoresRequestGroupBy>) -> Self {
         self.group_by = Some(value);
         self
     }
@@ -10970,24 +12349,29 @@ impl schematic_runtime::EndpointSpec for UsageVectorStoresRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/usage/vector_stores".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.start_time {
-            query.push(("start_time".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.start_time;
+        query.push(("start_time".to_string(), value.to_string().into()));
         if let Some(ref value) = self.end_time {
-            query.push(("end_time".to_string(), value.to_string()));
+            query.push(("end_time".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.bucket_width {
-            query.push(("bucket_width".to_string(), value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string().into()));
         }
-        if let Some(ref values) = self.project_ids {
-            for value in values {
-                query.push(("project_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.project_ids {
+            if value.is_empty() {
+                query.push(("project_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("project_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.group_by {
-            for value in values {
-                query.push(("group_by".to_string(), value.to_string()));
+        if let Some(ref value) = self.group_by {
+            if value.is_empty() {
+                query.push(("group_by".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("group_by".to_string(), element.to_string().into()));
             }
         }
         let headers: Vec<(String, String)> = vec![];
@@ -11000,6 +12384,101 @@ impl schematic_runtime::EndpointSpec for UsageVectorStoresRequest {
         })
     }
 }
+/// Values of the `bucket_width` query parameter of [`UsageWebSearchCallsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageWebSearchCallsRequestBucketWidth {
+    /// `1m`
+    #[serde(rename = "1m")]
+    V1m,
+    /// `1h`
+    #[serde(rename = "1h")]
+    V1h,
+    /// `1d`
+    #[serde(rename = "1d")]
+    V1d,
+}
+impl UsageWebSearchCallsRequestBucketWidth {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::V1m => "1m",
+            Self::V1h => "1h",
+            Self::V1d => "1d",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageWebSearchCallsRequestBucketWidth {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `context_levels` query parameter of [`UsageWebSearchCallsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageWebSearchCallsRequestContextLevels {
+    /// `low`
+    #[serde(rename = "low")]
+    Low,
+    /// `medium`
+    #[serde(rename = "medium")]
+    Medium,
+    /// `high`
+    #[serde(rename = "high")]
+    High,
+}
+impl UsageWebSearchCallsRequestContextLevels {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageWebSearchCallsRequestContextLevels {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `group_by` query parameter of [`UsageWebSearchCallsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UsageWebSearchCallsRequestGroupBy {
+    /// `project_id`
+    #[serde(rename = "project_id")]
+    ProjectId,
+    /// `user_id`
+    #[serde(rename = "user_id")]
+    UserId,
+    /// `api_key_id`
+    #[serde(rename = "api_key_id")]
+    ApiKeyId,
+    /// `model`
+    #[serde(rename = "model")]
+    Model,
+    /// `context_level`
+    #[serde(rename = "context_level")]
+    ContextLevel,
+}
+impl UsageWebSearchCallsRequestGroupBy {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProjectId => "project_id",
+            Self::UserId => "user_id",
+            Self::ApiKeyId => "api_key_id",
+            Self::Model => "model",
+            Self::ContextLevel => "context_level",
+        }
+    }
+}
+impl ::core::fmt::Display for UsageWebSearchCallsRequestGroupBy {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `UsageWebSearchCalls` endpoint.
 ///
 /// ## Example
@@ -11007,8 +12486,7 @@ impl schematic_runtime::EndpointSpec for UsageVectorStoresRequest {
 /// ```text
 /// use schematic_schema::openai::UsageWebSearchCallsRequest;
 ///
-/// let request = UsageWebSearchCallsRequest::default()
-///     .with_start_time(/* value */)
+/// let request = UsageWebSearchCallsRequest::new(1)
 ///     .with_end_time(/* value */)
 ///     .with_bucket_width(/* value */)
 ///     .with_project_ids(/* value */)
@@ -11019,14 +12497,14 @@ impl schematic_runtime::EndpointSpec for UsageVectorStoresRequest {
 ///     .with_group_by(/* value */)
 ///;
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageWebSearchCallsRequest {
     /// Query parameter: Start time (Unix seconds) of the query time range, inclusive.
-    pub start_time: Option<i64>,
+    pub start_time: i64,
     /// Query parameter: End time (Unix seconds) of the query time range, exclusive.
     pub end_time: Option<i64>,
     /// Query parameter: Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub bucket_width: Option<String>,
+    pub bucket_width: Option<UsageWebSearchCallsRequestBucketWidth>,
     /// Query parameter: Return only usage for these projects.
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Return only usage for these users.
@@ -11036,15 +12514,15 @@ pub struct UsageWebSearchCallsRequest {
     /// Query parameter: Return only usage for these models.
     pub models: Option<Vec<String>>,
     /// Query parameter: Return only web search usage for these context levels.
-    pub context_levels: Option<Vec<String>>,
+    pub context_levels: Option<Vec<UsageWebSearchCallsRequestContextLevels>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `context_level` or any combination of them.
-    pub group_by: Option<Vec<String>>,
+    pub group_by: Option<Vec<UsageWebSearchCallsRequestGroupBy>>,
 }
 impl UsageWebSearchCallsRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
+    /// Creates a new request with the required query parameters.
+    pub fn new(start_time: i64) -> Self {
         Self {
-            start_time: None,
+            start_time,
             end_time: None,
             bucket_width: None,
             project_ids: None,
@@ -11057,7 +12535,7 @@ impl UsageWebSearchCallsRequest {
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
-        self.start_time = Some(value);
+        self.start_time = value;
         self
     }
     /// Sets the `end_time` query parameter.
@@ -11066,7 +12544,10 @@ impl UsageWebSearchCallsRequest {
         self
     }
     /// Sets the `bucket_width` query parameter.
-    pub fn with_bucket_width(mut self, value: String) -> Self {
+    pub fn with_bucket_width(
+        mut self,
+        value: UsageWebSearchCallsRequestBucketWidth,
+    ) -> Self {
         self.bucket_width = Some(value);
         self
     }
@@ -11091,12 +12572,18 @@ impl UsageWebSearchCallsRequest {
         self
     }
     /// Sets the `context_levels` query parameter.
-    pub fn with_context_levels(mut self, value: Vec<String>) -> Self {
+    pub fn with_context_levels(
+        mut self,
+        value: Vec<UsageWebSearchCallsRequestContextLevels>,
+    ) -> Self {
         self.context_levels = Some(value);
         self
     }
     /// Sets the `group_by` query parameter.
-    pub fn with_group_by(mut self, value: Vec<String>) -> Self {
+    pub fn with_group_by(
+        mut self,
+        value: Vec<UsageWebSearchCallsRequestGroupBy>,
+    ) -> Self {
         self.group_by = Some(value);
         self
     }
@@ -11114,44 +12601,61 @@ impl schematic_runtime::EndpointSpec for UsageWebSearchCallsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/usage/web_search_calls".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.start_time {
-            query.push(("start_time".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        let value = &self.start_time;
+        query.push(("start_time".to_string(), value.to_string().into()));
         if let Some(ref value) = self.end_time {
-            query.push(("end_time".to_string(), value.to_string()));
+            query.push(("end_time".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.bucket_width {
-            query.push(("bucket_width".to_string(), value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string().into()));
         }
-        if let Some(ref values) = self.project_ids {
-            for value in values {
-                query.push(("project_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.project_ids {
+            if value.is_empty() {
+                query.push(("project_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("project_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.user_ids {
-            for value in values {
-                query.push(("user_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.user_ids {
+            if value.is_empty() {
+                query.push(("user_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("user_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.api_key_ids {
-            for value in values {
-                query.push(("api_key_ids".to_string(), value.to_string()));
+        if let Some(ref value) = self.api_key_ids {
+            if value.is_empty() {
+                query.push(("api_key_ids".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("api_key_ids".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.models {
-            for value in values {
-                query.push(("models".to_string(), value.to_string()));
+        if let Some(ref value) = self.models {
+            if value.is_empty() {
+                query.push(("models".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("models".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.context_levels {
-            for value in values {
-                query.push(("context_levels".to_string(), value.to_string()));
+        if let Some(ref value) = self.context_levels {
+            if value.is_empty() {
+                query.push(("context_levels".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("context_levels".to_string(), element.to_string().into()));
             }
         }
-        if let Some(ref values) = self.group_by {
-            for value in values {
-                query.push(("group_by".to_string(), value.to_string()));
+        if let Some(ref value) = self.group_by {
+            if value.is_empty() {
+                query.push(("group_by".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("group_by".to_string(), element.to_string().into()));
             }
         }
         let headers: Vec<(String, String)> = vec![];
@@ -11204,10 +12708,13 @@ impl schematic_runtime::EndpointSpec for ListUsersRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/users".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref values) = self.emails {
-            for value in values {
-                query.push(("emails".to_string(), value.to_string()));
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+        if let Some(ref value) = self.emails {
+            if value.is_empty() {
+                query.push(("emails".to_string(), String::new().into()));
+            }
+            for element in value {
+                query.push(("emails".to_string(), element.to_string().into()));
             }
         }
         let headers: Vec<(String, String)> = vec![];
@@ -11264,7 +12771,7 @@ impl schematic_runtime::EndpointSpec for RetrieveUserRequest {
         let path = format!(
             "/organization/users/{}", urlencoding::encode(& self.user_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11318,7 +12825,7 @@ impl schematic_runtime::EndpointSpec for ModifyUserRequest {
         let path = format!(
             "/organization/users/{}", urlencoding::encode(& self.user_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11382,7 +12889,7 @@ impl schematic_runtime::EndpointSpec for DeleteUserRequest {
         let path = format!(
             "/organization/users/{}", urlencoding::encode(& self.user_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11391,6 +12898,31 @@ impl schematic_runtime::EndpointSpec for DeleteUserRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListUserRoleAssignmentsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListUserRoleAssignmentsRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListUserRoleAssignmentsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListUserRoleAssignmentsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListUserRoleAssignments` endpoint.
@@ -11409,7 +12941,7 @@ pub struct ListUserRoleAssignmentsRequest {
     /// Path parameter: user_id
     pub user_id: String,
     /// Query parameter: Sort order for the returned organization roles.
-    pub order: Option<String>,
+    pub order: Option<ListUserRoleAssignmentsRequestOrder>,
 }
 impl ListUserRoleAssignmentsRequest {
     /// Creates a new request with the required path parameters.
@@ -11420,7 +12952,7 @@ impl ListUserRoleAssignmentsRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListUserRoleAssignmentsRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -11457,9 +12989,9 @@ impl schematic_runtime::EndpointSpec for ListUserRoleAssignmentsRequest {
             "/organization/users/{}/roles", urlencoding::encode(& self.user_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -11517,7 +13049,7 @@ impl schematic_runtime::EndpointSpec for AssignUserRoleRequest {
             "/organization/users/{}/roles", urlencoding::encode(& self.user_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11577,7 +13109,7 @@ impl schematic_runtime::EndpointSpec for RetrieveUserRoleRequest {
             "/organization/users/{}/roles/{}", urlencoding::encode(& self.user_id
             .to_string()), urlencoding::encode(& self.role_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11630,7 +13162,7 @@ impl schematic_runtime::EndpointSpec for UnassignUserRoleRequest {
             "/organization/users/{}/roles/{}", urlencoding::encode(& self.user_id
             .to_string()), urlencoding::encode(& self.role_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11639,6 +13171,31 @@ impl schematic_runtime::EndpointSpec for UnassignUserRoleRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListProjectGroupRoleAssignmentsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListProjectGroupRoleAssignmentsRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListProjectGroupRoleAssignmentsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListProjectGroupRoleAssignmentsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListProjectGroupRoleAssignments` endpoint.
@@ -11659,7 +13216,7 @@ pub struct ListProjectGroupRoleAssignmentsRequest {
     /// Path parameter: group_id
     pub group_id: String,
     /// Query parameter: Sort order for the returned project roles.
-    pub order: Option<String>,
+    pub order: Option<ListProjectGroupRoleAssignmentsRequestOrder>,
 }
 impl ListProjectGroupRoleAssignmentsRequest {
     /// Creates a new request with the required path parameters.
@@ -11671,7 +13228,10 @@ impl ListProjectGroupRoleAssignmentsRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(
+        mut self,
+        value: ListProjectGroupRoleAssignmentsRequestOrder,
+    ) -> Self {
         self.order = Some(value);
         self
     }
@@ -11692,9 +13252,9 @@ impl schematic_runtime::EndpointSpec for ListProjectGroupRoleAssignmentsRequest 
             "/projects/{}/groups/{}/roles", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.group_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -11756,7 +13316,7 @@ impl schematic_runtime::EndpointSpec for AssignProjectGroupRoleRequest {
             "/projects/{}/groups/{}/roles", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.group_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11824,7 +13384,7 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectGroupRoleRequest {
             .to_string()), urlencoding::encode(& self.group_id.to_string()),
             urlencoding::encode(& self.role_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11885,7 +13445,7 @@ impl schematic_runtime::EndpointSpec for UnassignProjectGroupRoleRequest {
             .to_string()), urlencoding::encode(& self.group_id.to_string()),
             urlencoding::encode(& self.role_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11894,6 +13454,31 @@ impl schematic_runtime::EndpointSpec for UnassignProjectGroupRoleRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListProjectRolesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListProjectRolesRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListProjectRolesRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListProjectRolesRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListProjectRoles` endpoint.
@@ -11912,7 +13497,7 @@ pub struct ListProjectRolesRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Query parameter: Sort order for the returned roles.
-    pub order: Option<String>,
+    pub order: Option<ListProjectRolesRequestOrder>,
 }
 impl ListProjectRolesRequest {
     /// Creates a new request with the required path parameters.
@@ -11923,7 +13508,7 @@ impl ListProjectRolesRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListProjectRolesRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -11959,9 +13544,9 @@ impl schematic_runtime::EndpointSpec for ListProjectRolesRequest {
         let path = format!(
             "/projects/{}/roles", urlencoding::encode(& self.project_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -12016,7 +13601,7 @@ impl schematic_runtime::EndpointSpec for CreateProjectRoleRequest {
         let path = format!(
             "/projects/{}/roles", urlencoding::encode(& self.project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12074,7 +13659,7 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectRoleRequest {
             "/projects/{}/roles/{}", urlencoding::encode(& self.project_id.to_string()),
             urlencoding::encode(& self.role_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12133,7 +13718,7 @@ impl schematic_runtime::EndpointSpec for UpdateProjectRoleRequest {
             "/projects/{}/roles/{}", urlencoding::encode(& self.project_id.to_string()),
             urlencoding::encode(& self.role_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12193,7 +13778,7 @@ impl schematic_runtime::EndpointSpec for DeleteProjectRoleRequest {
             "/projects/{}/roles/{}", urlencoding::encode(& self.project_id.to_string()),
             urlencoding::encode(& self.role_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12202,6 +13787,31 @@ impl schematic_runtime::EndpointSpec for DeleteProjectRoleRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListProjectUserRoleAssignmentsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListProjectUserRoleAssignmentsRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListProjectUserRoleAssignmentsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListProjectUserRoleAssignmentsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListProjectUserRoleAssignments` endpoint.
@@ -12222,7 +13832,7 @@ pub struct ListProjectUserRoleAssignmentsRequest {
     /// Path parameter: user_id
     pub user_id: String,
     /// Query parameter: Sort order for the returned project roles.
-    pub order: Option<String>,
+    pub order: Option<ListProjectUserRoleAssignmentsRequestOrder>,
 }
 impl ListProjectUserRoleAssignmentsRequest {
     /// Creates a new request with the required path parameters.
@@ -12234,7 +13844,10 @@ impl ListProjectUserRoleAssignmentsRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(
+        mut self,
+        value: ListProjectUserRoleAssignmentsRequestOrder,
+    ) -> Self {
         self.order = Some(value);
         self
     }
@@ -12255,9 +13868,9 @@ impl schematic_runtime::EndpointSpec for ListProjectUserRoleAssignmentsRequest {
             "/projects/{}/users/{}/roles", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -12319,7 +13932,7 @@ impl schematic_runtime::EndpointSpec for AssignProjectUserRoleRequest {
             "/projects/{}/users/{}/roles", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12387,7 +14000,7 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectUserRoleRequest {
             .to_string()), urlencoding::encode(& self.user_id.to_string()),
             urlencoding::encode(& self.role_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12448,7 +14061,7 @@ impl schematic_runtime::EndpointSpec for UnassignProjectUserRoleRequest {
             .to_string()), urlencoding::encode(& self.user_id.to_string()),
             urlencoding::encode(& self.role_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12532,7 +14145,7 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeCallRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/realtime/calls".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12586,7 +14199,7 @@ impl schematic_runtime::EndpointSpec for AcceptRealtimeCallRequest {
         let path = format!(
             "/realtime/calls/{}/accept", urlencoding::encode(& self.call_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12648,7 +14261,7 @@ impl schematic_runtime::EndpointSpec for HangupRealtimeCallRequest {
         let path = format!(
             "/realtime/calls/{}/hangup", urlencoding::encode(& self.call_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12702,7 +14315,7 @@ impl schematic_runtime::EndpointSpec for ReferRealtimeCallRequest {
         let path = format!(
             "/realtime/calls/{}/refer", urlencoding::encode(& self.call_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12763,7 +14376,7 @@ impl schematic_runtime::EndpointSpec for RejectRealtimeCallRequest {
         let path = format!(
             "/realtime/calls/{}/reject", urlencoding::encode(& self.call_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12826,7 +14439,7 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeClientSecretRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/realtime/client_secrets".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12889,7 +14502,7 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeSessionRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/realtime/sessions".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12952,7 +14565,7 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranscriptionSessionReque
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/realtime/transcription_sessions".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -13015,7 +14628,7 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranslationClientSecretRe
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/realtime/translations/client_secrets".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -13099,9 +14712,9 @@ impl schematic_runtime::EndpointSpec for CreateResponseRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/responses".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.beta {
-            query.push(("beta".to_string(), value.to_string()));
+            query.push(("beta".to_string(), value.to_string().into()));
         }
         let mut headers: Vec<(String, String)> = vec![];
         if let Some(ref value) = self.openai_beta {
@@ -13137,7 +14750,6 @@ impl schematic_runtime::EndpointSpec for CreateResponseRequest {
 /// use schematic_schema::openai::GetResponseRequest;
 ///
 /// let request = GetResponseRequest::new("response_id_value")
-///     .with_include(/* value */)
 ///     .with_stream(/* value */)
 ///     .with_starting_after(/* value */)
 ///     .with_include_obfuscation(/* value */)
@@ -13149,10 +14761,6 @@ impl schematic_runtime::EndpointSpec for CreateResponseRequest {
 pub struct GetResponseRequest {
     /// Path parameter: response_id
     pub response_id: String,
-    /** Query parameter: Additional fields to include in the response. See the `include`
-parameter for Response creation above for more information.
-*/
-    pub include: Option<Vec<serde_json::Value>>,
     /** Query parameter: If set to true, the model response data will be streamed to the client
 as it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format).
 See the [Streaming section below](/docs/api-reference/responses-streaming)
@@ -13182,18 +14790,12 @@ impl GetResponseRequest {
     pub fn new(response_id: impl Into<String>) -> Self {
         Self {
             response_id: response_id.into(),
-            include: None,
             stream: None,
             starting_after: None,
             include_obfuscation: None,
             beta: None,
             openai_beta: None,
         }
-    }
-    /// Sets the `include` query parameter.
-    pub fn with_include(mut self, value: Vec<serde_json::Value>) -> Self {
-        self.include = Some(value);
-        self
     }
     /// Sets the `stream` query parameter.
     pub fn with_stream(mut self, value: bool) -> Self {
@@ -13225,7 +14827,6 @@ impl From<&str> for GetResponseRequest {
     fn from(param: &str) -> Self {
         Self {
             response_id: param.to_string(),
-            include: None,
             stream: None,
             starting_after: None,
             include_obfuscation: None,
@@ -13238,7 +14839,6 @@ impl From<String> for GetResponseRequest {
     fn from(param: String) -> Self {
         Self {
             response_id: param,
-            include: None,
             stream: None,
             starting_after: None,
             include_obfuscation: None,
@@ -13262,23 +14862,18 @@ impl schematic_runtime::EndpointSpec for GetResponseRequest {
         let path = format!(
             "/responses/{}", urlencoding::encode(& self.response_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref values) = self.include {
-            for value in values {
-                query.push(("include".to_string(), value.to_string()));
-            }
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.stream {
-            query.push(("stream".to_string(), value.to_string()));
+            query.push(("stream".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.starting_after {
-            query.push(("starting_after".to_string(), value.to_string()));
+            query.push(("starting_after".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.include_obfuscation {
-            query.push(("include_obfuscation".to_string(), value.to_string()));
+            query.push(("include_obfuscation".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.beta {
-            query.push(("beta".to_string(), value.to_string()));
+            query.push(("beta".to_string(), value.to_string().into()));
         }
         let mut headers: Vec<(String, String)> = vec![];
         if let Some(ref value) = self.openai_beta {
@@ -13372,9 +14967,9 @@ impl schematic_runtime::EndpointSpec for DeleteResponseRequest {
         let path = format!(
             "/responses/{}", urlencoding::encode(& self.response_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.beta {
-            query.push(("beta".to_string(), value.to_string()));
+            query.push(("beta".to_string(), value.to_string().into()));
         }
         let mut headers: Vec<(String, String)> = vec![];
         if let Some(ref value) = self.openai_beta {
@@ -13470,9 +15065,9 @@ impl schematic_runtime::EndpointSpec for CancelResponseRequest {
         let path = format!(
             "/responses/{}/cancel", urlencoding::encode(& self.response_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.beta {
-            query.push(("beta".to_string(), value.to_string()));
+            query.push(("beta".to_string(), value.to_string().into()));
         }
         let mut headers: Vec<(String, String)> = vec![];
         if let Some(ref value) = self.openai_beta {
@@ -13493,6 +15088,31 @@ impl schematic_runtime::EndpointSpec for CancelResponseRequest {
         })
     }
 }
+/// Values of the `order` query parameter of [`ListInputItemsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListInputItemsRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListInputItemsRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListInputItemsRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `ListInputItems` endpoint.
 ///
 /// ## Example
@@ -13502,7 +15122,6 @@ impl schematic_runtime::EndpointSpec for CancelResponseRequest {
 ///
 /// let request = ListInputItemsRequest::new("response_id_value")
 ///     .with_order(/* value */)
-///     .with_include(/* value */)
 ///     .with_beta(/* value */)
 ///     .with_openai_beta(/* value */)
 ///;
@@ -13515,11 +15134,7 @@ pub struct ListInputItemsRequest {
 - `asc`: Return the input items in ascending order.
 - `desc`: Return the input items in descending order.
 */
-    pub order: Option<String>,
-    /** Query parameter: Additional fields to include in the response. See the `include`
-parameter for Response creation above for more information.
-*/
-    pub include: Option<Vec<serde_json::Value>>,
+    pub order: Option<ListInputItemsRequestOrder>,
     /// Query parameter: beta
     pub beta: Option<bool>,
     /// Header parameter `openai-beta`: Optional beta features to enable for this request.
@@ -13532,19 +15147,13 @@ impl ListInputItemsRequest {
         Self {
             response_id: response_id.into(),
             order: None,
-            include: None,
             beta: None,
             openai_beta: None,
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListInputItemsRequestOrder) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `include` query parameter.
-    pub fn with_include(mut self, value: Vec<serde_json::Value>) -> Self {
-        self.include = Some(value);
         self
     }
     /// Sets the `beta` query parameter.
@@ -13563,7 +15172,6 @@ impl From<&str> for ListInputItemsRequest {
         Self {
             response_id: param.to_string(),
             order: None,
-            include: None,
             beta: None,
             openai_beta: None,
         }
@@ -13574,7 +15182,6 @@ impl From<String> for ListInputItemsRequest {
         Self {
             response_id: param,
             order: None,
-            include: None,
             beta: None,
             openai_beta: None,
         }
@@ -13596,17 +15203,12 @@ impl schematic_runtime::EndpointSpec for ListInputItemsRequest {
             "/responses/{}/input_items", urlencoding::encode(& self.response_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref values) = self.include {
-            for value in values {
-                query.push(("include".to_string(), value.to_string()));
-            }
+            query.push(("order".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.beta {
-            query.push(("beta".to_string(), value.to_string()));
+            query.push(("beta".to_string(), value.to_string().into()));
         }
         let mut headers: Vec<(String, String)> = vec![];
         if let Some(ref value) = self.openai_beta {
@@ -13666,7 +15268,7 @@ impl schematic_runtime::EndpointSpec for CreateUploadRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/uploads".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -13732,7 +15334,7 @@ impl schematic_runtime::EndpointSpec for CancelUploadRequest {
         let path = format!(
             "/uploads/{}/cancel", urlencoding::encode(& self.upload_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -13786,7 +15388,7 @@ impl schematic_runtime::EndpointSpec for CompleteUploadRequest {
         let path = format!(
             "/uploads/{}/complete", urlencoding::encode(& self.upload_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -13864,7 +15466,7 @@ impl schematic_runtime::EndpointSpec for AddUploadPartRequest {
         let path = format!(
             "/uploads/{}/parts", urlencoding::encode(& self.upload_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -13873,6 +15475,31 @@ impl schematic_runtime::EndpointSpec for AddUploadPartRequest {
             headers,
             body: schematic_runtime::RequestBody::Multipart(self.body.into_form_parts()),
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListVectorStoresRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListVectorStoresRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListVectorStoresRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListVectorStoresRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListVectorStores` endpoint.
@@ -13890,7 +15517,7 @@ impl schematic_runtime::EndpointSpec for AddUploadPartRequest {
 pub struct ListVectorStoresRequest {
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
-    pub order: Option<String>,
+    pub order: Option<ListVectorStoresRequestOrder>,
 }
 impl ListVectorStoresRequest {
     /// Creates a new request with default values.
@@ -13898,7 +15525,7 @@ impl ListVectorStoresRequest {
         Self { order: None }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListVectorStoresRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
@@ -13916,9 +15543,9 @@ impl schematic_runtime::EndpointSpec for ListVectorStoresRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/vector_stores".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -13973,7 +15600,7 @@ impl schematic_runtime::EndpointSpec for CreateVectorStoreRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/vector_stores".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -14041,7 +15668,7 @@ impl schematic_runtime::EndpointSpec for GetVectorStoreRequest {
         let path = format!(
             "/vector_stores/{}", urlencoding::encode(& self.vector_store_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -14097,7 +15724,7 @@ impl schematic_runtime::EndpointSpec for ModifyVectorStoreRequest {
         let path = format!(
             "/vector_stores/{}", urlencoding::encode(& self.vector_store_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -14165,7 +15792,7 @@ impl schematic_runtime::EndpointSpec for DeleteVectorStoreRequest {
         let path = format!(
             "/vector_stores/{}", urlencoding::encode(& self.vector_store_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -14222,7 +15849,7 @@ impl schematic_runtime::EndpointSpec for CreateVectorStoreFileBatchRequest {
             "/vector_stores/{}/file_batches", urlencoding::encode(& self.vector_store_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -14283,7 +15910,7 @@ impl schematic_runtime::EndpointSpec for GetVectorStoreFileBatchRequest {
             .vector_store_id.to_string()), urlencoding::encode(& self.batch_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -14337,7 +15964,7 @@ impl schematic_runtime::EndpointSpec for CancelVectorStoreFileBatchRequest {
             .vector_store_id.to_string()), urlencoding::encode(& self.batch_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -14346,6 +15973,64 @@ impl schematic_runtime::EndpointSpec for CancelVectorStoreFileBatchRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListFilesInVectorStoreBatchRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListFilesInVectorStoreBatchRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListFilesInVectorStoreBatchRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListFilesInVectorStoreBatchRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `filter` query parameter of [`ListFilesInVectorStoreBatchRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListFilesInVectorStoreBatchRequestFilter {
+    /// `in_progress`
+    #[serde(rename = "in_progress")]
+    InProgress,
+    /// `completed`
+    #[serde(rename = "completed")]
+    Completed,
+    /// `failed`
+    #[serde(rename = "failed")]
+    Failed,
+    /// `cancelled`
+    #[serde(rename = "cancelled")]
+    Cancelled,
+}
+impl ListFilesInVectorStoreBatchRequestFilter {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+impl ::core::fmt::Display for ListFilesInVectorStoreBatchRequestFilter {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListFilesInVectorStoreBatch` endpoint.
@@ -14368,9 +16053,9 @@ pub struct ListFilesInVectorStoreBatchRequest {
     pub batch_id: String,
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
-    pub order: Option<String>,
+    pub order: Option<ListFilesInVectorStoreBatchRequestOrder>,
     /// Query parameter: Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
-    pub filter: Option<String>,
+    pub filter: Option<ListFilesInVectorStoreBatchRequestFilter>,
 }
 impl ListFilesInVectorStoreBatchRequest {
     /// Creates a new request with the required path parameters.
@@ -14383,12 +16068,15 @@ impl ListFilesInVectorStoreBatchRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListFilesInVectorStoreBatchRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
     /// Sets the `filter` query parameter.
-    pub fn with_filter(mut self, value: String) -> Self {
+    pub fn with_filter(
+        mut self,
+        value: ListFilesInVectorStoreBatchRequestFilter,
+    ) -> Self {
         self.filter = Some(value);
         self
     }
@@ -14410,12 +16098,12 @@ impl schematic_runtime::EndpointSpec for ListFilesInVectorStoreBatchRequest {
             .vector_store_id.to_string()), urlencoding::encode(& self.batch_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.filter {
-            query.push(("filter".to_string(), value.to_string()));
+            query.push(("filter".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -14425,6 +16113,64 @@ impl schematic_runtime::EndpointSpec for ListFilesInVectorStoreBatchRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `order` query parameter of [`ListVectorStoreFilesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListVectorStoreFilesRequestOrder {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListVectorStoreFilesRequestOrder {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListVectorStoreFilesRequestOrder {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `filter` query parameter of [`ListVectorStoreFilesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListVectorStoreFilesRequestFilter {
+    /// `in_progress`
+    #[serde(rename = "in_progress")]
+    InProgress,
+    /// `completed`
+    #[serde(rename = "completed")]
+    Completed,
+    /// `failed`
+    #[serde(rename = "failed")]
+    Failed,
+    /// `cancelled`
+    #[serde(rename = "cancelled")]
+    Cancelled,
+}
+impl ListVectorStoreFilesRequestFilter {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+impl ::core::fmt::Display for ListVectorStoreFilesRequestFilter {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListVectorStoreFiles` endpoint.
@@ -14445,9 +16191,9 @@ pub struct ListVectorStoreFilesRequest {
     pub vector_store_id: String,
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
-    pub order: Option<String>,
+    pub order: Option<ListVectorStoreFilesRequestOrder>,
     /// Query parameter: Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
-    pub filter: Option<String>,
+    pub filter: Option<ListVectorStoreFilesRequestFilter>,
 }
 impl ListVectorStoreFilesRequest {
     /// Creates a new request with the required path parameters.
@@ -14459,12 +16205,12 @@ impl ListVectorStoreFilesRequest {
         }
     }
     /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
+    pub fn with_order(mut self, value: ListVectorStoreFilesRequestOrder) -> Self {
         self.order = Some(value);
         self
     }
     /// Sets the `filter` query parameter.
-    pub fn with_filter(mut self, value: String) -> Self {
+    pub fn with_filter(mut self, value: ListVectorStoreFilesRequestFilter) -> Self {
         self.filter = Some(value);
         self
     }
@@ -14503,12 +16249,12 @@ impl schematic_runtime::EndpointSpec for ListVectorStoreFilesRequest {
             "/vector_stores/{}/files", urlencoding::encode(& self.vector_store_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
+            query.push(("order".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.filter {
-            query.push(("filter".to_string(), value.to_string()));
+            query.push(("filter".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -14566,7 +16312,7 @@ impl schematic_runtime::EndpointSpec for CreateVectorStoreFileRequest {
             "/vector_stores/{}/files", urlencoding::encode(& self.vector_store_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -14626,7 +16372,7 @@ impl schematic_runtime::EndpointSpec for GetVectorStoreFileRequest {
             "/vector_stores/{}/files/{}", urlencoding::encode(& self.vector_store_id
             .to_string()), urlencoding::encode(& self.file_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -14687,7 +16433,7 @@ impl schematic_runtime::EndpointSpec for UpdateVectorStoreFileAttributesRequest 
             "/vector_stores/{}/files/{}", urlencoding::encode(& self.vector_store_id
             .to_string()), urlencoding::encode(& self.file_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -14747,7 +16493,7 @@ impl schematic_runtime::EndpointSpec for DeleteVectorStoreFileRequest {
             "/vector_stores/{}/files/{}", urlencoding::encode(& self.vector_store_id
             .to_string()), urlencoding::encode(& self.file_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -14801,7 +16547,7 @@ impl schematic_runtime::EndpointSpec for RetrieveVectorStoreFileContentRequest {
             .vector_store_id.to_string()), urlencoding::encode(& self.file_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -14858,7 +16604,7 @@ impl schematic_runtime::EndpointSpec for SearchVectorStoreRequest {
             "/vector_stores/{}/search", urlencoding::encode(& self.vector_store_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -14917,7 +16663,7 @@ impl schematic_runtime::EndpointSpec for CreateConversationRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/conversations".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -14985,7 +16731,7 @@ impl schematic_runtime::EndpointSpec for GetConversationRequest {
         let path = format!(
             "/conversations/{}", urlencoding::encode(& self.conversation_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15041,7 +16787,7 @@ impl schematic_runtime::EndpointSpec for UpdateConversationRequest {
         let path = format!(
             "/conversations/{}", urlencoding::encode(& self.conversation_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15109,7 +16855,7 @@ impl schematic_runtime::EndpointSpec for DeleteConversationRequest {
         let path = format!(
             "/conversations/{}", urlencoding::encode(& self.conversation_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15145,7 +16891,7 @@ impl schematic_runtime::EndpointSpec for GetorganizationspendlimitRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/spend_limit".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15201,7 +16947,7 @@ impl schematic_runtime::EndpointSpec for UpdateorganizationspendlimitRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/spend_limit".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15244,7 +16990,7 @@ impl schematic_runtime::EndpointSpec for DeleteorganizationspendlimitRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/spend_limit".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15306,7 +17052,7 @@ impl schematic_runtime::EndpointSpec for GetprojectspendlimitRequest {
             "/organization/projects/{}/spend_limit", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15363,7 +17109,7 @@ impl schematic_runtime::EndpointSpec for UpdateprojectspendlimitRequest {
             "/organization/projects/{}/spend_limit", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15432,7 +17178,7 @@ impl schematic_runtime::EndpointSpec for DeleteprojectspendlimitRequest {
             "/organization/projects/{}/spend_limit", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15494,7 +17240,7 @@ impl schematic_runtime::EndpointSpec for CreateanAPIkeyforaserviceaccountRequest
             urlencoding::encode(& self.project_id.to_string()), urlencoding::encode(&
             self.service_account_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15572,7 +17318,7 @@ impl schematic_runtime::EndpointSpec for CreatecontentprovenancecheckRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/content_provenance_checks".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15591,25 +17337,10 @@ impl schematic_runtime::EndpointSpec for CreatecontentprovenancecheckRequest {
 /// use schematic_schema::openai::ListVideosRequest;
 ///
 /// let request = ListVideosRequest::default()
-///     .with_order(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ListVideosRequest {
-    /// Query parameter: Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
-    pub order: Option<serde_json::Value>,
-}
-impl ListVideosRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { order: None }
-    }
-    /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: serde_json::Value) -> Self {
-        self.order = Some(value);
-        self
-    }
-}
+pub struct ListVideosRequest {}
 impl schematic_runtime::EndpointSpec for ListVideosRequest {
     type Api = OpenAIApi;
     type Success = ::schematic_definitions::openai::VideoListResource;
@@ -15623,10 +17354,7 @@ impl schematic_runtime::EndpointSpec for ListVideosRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/videos".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15677,7 +17405,7 @@ impl schematic_runtime::EndpointSpec for CreateVideoRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/videos".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15765,7 +17493,7 @@ impl schematic_runtime::EndpointSpec for CreateVideoCharacterRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/videos/characters".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15826,7 +17554,7 @@ impl schematic_runtime::EndpointSpec for GetVideoCharacterRequest {
         let path = format!(
             "/videos/characters/{}", urlencoding::encode(& self.character_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15878,7 +17606,7 @@ impl schematic_runtime::EndpointSpec for CreateVideoEditRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/videos/edits".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -15939,7 +17667,7 @@ impl schematic_runtime::EndpointSpec for CreateVideoExtendRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/videos/extensions".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -16005,7 +17733,7 @@ impl schematic_runtime::EndpointSpec for GetVideoRequest {
         let path = format!(
             "/videos/{}", urlencoding::encode(& self.video_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -16064,7 +17792,7 @@ impl schematic_runtime::EndpointSpec for DeleteVideoRequest {
         let path = format!(
             "/videos/{}", urlencoding::encode(& self.video_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -16083,44 +17811,29 @@ impl schematic_runtime::EndpointSpec for DeleteVideoRequest {
 /// use schematic_schema::openai::RetrieveVideoContentRequest;
 ///
 /// let request = RetrieveVideoContentRequest::new("video_id_value")
-///     .with_variant(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveVideoContentRequest {
     /// Path parameter: video_id
     pub video_id: String,
-    /// Query parameter: Which downloadable asset to return. Defaults to the MP4 video.
-    pub variant: Option<serde_json::Value>,
 }
 impl RetrieveVideoContentRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(video_id: impl Into<String>) -> Self {
-        Self {
-            video_id: video_id.into(),
-            variant: None,
-        }
-    }
-    /// Sets the `variant` query parameter.
-    pub fn with_variant(mut self, value: serde_json::Value) -> Self {
-        self.variant = Some(value);
-        self
+        Self { video_id: video_id.into() }
     }
 }
 impl From<&str> for RetrieveVideoContentRequest {
     fn from(param: &str) -> Self {
         Self {
             video_id: param.to_string(),
-            variant: None,
         }
     }
 }
 impl From<String> for RetrieveVideoContentRequest {
     fn from(param: String) -> Self {
-        Self {
-            video_id: param,
-            variant: None,
-        }
+        Self { video_id: param }
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveVideoContentRequest {
@@ -16136,10 +17849,7 @@ impl schematic_runtime::EndpointSpec for RetrieveVideoContentRequest {
         let path = format!(
             "/videos/{}/content", urlencoding::encode(& self.video_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.variant {
-            query.push(("variant".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -16195,7 +17905,7 @@ impl schematic_runtime::EndpointSpec for CreateVideoRemixRequest {
         let path = format!(
             "/videos/{}/remix", urlencoding::encode(& self.video_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -16279,9 +17989,9 @@ impl schematic_runtime::EndpointSpec for GetinputtokencountsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/responses/input_tokens".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.beta {
-            query.push(("beta".to_string(), value.to_string()));
+            query.push(("beta".to_string(), value.to_string().into()));
         }
         let mut headers: Vec<(String, String)> = vec![];
         if let Some(ref value) = self.openai_beta {
@@ -16379,9 +18089,9 @@ impl schematic_runtime::EndpointSpec for CompactconversationRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/responses/compact".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.beta {
-            query.push(("beta".to_string(), value.to_string()));
+            query.push(("beta".to_string(), value.to_string().into()));
         }
         let mut headers: Vec<(String, String)> = vec![];
         if let Some(ref value) = self.openai_beta {
@@ -16417,25 +18127,10 @@ impl schematic_runtime::EndpointSpec for CompactconversationRequest {
 /// use schematic_schema::openai::ListSkillsRequest;
 ///
 /// let request = ListSkillsRequest::default()
-///     .with_order(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ListSkillsRequest {
-    /// Query parameter: Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
-    pub order: Option<serde_json::Value>,
-}
-impl ListSkillsRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { order: None }
-    }
-    /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: serde_json::Value) -> Self {
-        self.order = Some(value);
-        self
-    }
-}
+pub struct ListSkillsRequest {}
 impl schematic_runtime::EndpointSpec for ListSkillsRequest {
     type Api = OpenAIApi;
     type Success = ::schematic_definitions::openai::SkillListResource;
@@ -16449,10 +18144,7 @@ impl schematic_runtime::EndpointSpec for ListSkillsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/skills".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -16503,7 +18195,7 @@ impl schematic_runtime::EndpointSpec for CreateSkillRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/skills".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -16569,7 +18261,7 @@ impl schematic_runtime::EndpointSpec for GetSkillRequest {
         let path = format!(
             "/skills/{}", urlencoding::encode(& self.skill_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -16625,7 +18317,7 @@ impl schematic_runtime::EndpointSpec for UpdateSkillDefaultVersionRequest {
         let path = format!(
             "/skills/{}", urlencoding::encode(& self.skill_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -16691,7 +18383,7 @@ impl schematic_runtime::EndpointSpec for DeleteSkillRequest {
         let path = format!(
             "/skills/{}", urlencoding::encode(& self.skill_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -16748,7 +18440,7 @@ impl schematic_runtime::EndpointSpec for GetSkillContentRequest {
         let path = format!(
             "/skills/{}/content", urlencoding::encode(& self.skill_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -16767,44 +18459,29 @@ impl schematic_runtime::EndpointSpec for GetSkillContentRequest {
 /// use schematic_schema::openai::ListSkillVersionsRequest;
 ///
 /// let request = ListSkillVersionsRequest::new("skill_id_value")
-///     .with_order(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSkillVersionsRequest {
     /// Path parameter: skill_id
     pub skill_id: String,
-    /// Query parameter: Sort order of results by version number.
-    pub order: Option<serde_json::Value>,
 }
 impl ListSkillVersionsRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(skill_id: impl Into<String>) -> Self {
-        Self {
-            skill_id: skill_id.into(),
-            order: None,
-        }
-    }
-    /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: serde_json::Value) -> Self {
-        self.order = Some(value);
-        self
+        Self { skill_id: skill_id.into() }
     }
 }
 impl From<&str> for ListSkillVersionsRequest {
     fn from(param: &str) -> Self {
         Self {
             skill_id: param.to_string(),
-            order: None,
         }
     }
 }
 impl From<String> for ListSkillVersionsRequest {
     fn from(param: String) -> Self {
-        Self {
-            skill_id: param,
-            order: None,
-        }
+        Self { skill_id: param }
     }
 }
 impl schematic_runtime::EndpointSpec for ListSkillVersionsRequest {
@@ -16822,10 +18499,7 @@ impl schematic_runtime::EndpointSpec for ListSkillVersionsRequest {
         let path = format!(
             "/skills/{}/versions", urlencoding::encode(& self.skill_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -16881,7 +18555,7 @@ impl schematic_runtime::EndpointSpec for CreateSkillVersionRequest {
         let path = format!(
             "/skills/{}/versions", urlencoding::encode(& self.skill_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -16941,7 +18615,7 @@ impl schematic_runtime::EndpointSpec for GetSkillVersionRequest {
             "/skills/{}/versions/{}", urlencoding::encode(& self.skill_id.to_string()),
             urlencoding::encode(& self.version.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -16994,7 +18668,7 @@ impl schematic_runtime::EndpointSpec for DeleteSkillVersionRequest {
             "/skills/{}/versions/{}", urlencoding::encode(& self.skill_id.to_string()),
             urlencoding::encode(& self.version.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -17045,7 +18719,7 @@ impl schematic_runtime::EndpointSpec for GetSkillVersionContentRequest {
             "/skills/{}/versions/{}/content", urlencoding::encode(& self.skill_id
             .to_string()), urlencoding::encode(& self.version.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -17107,7 +18781,7 @@ impl schematic_runtime::EndpointSpec for CancelChatSessionMethodRequest {
             "/chatkit/sessions/{}/cancel", urlencoding::encode(& self.session_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -17159,7 +18833,7 @@ impl schematic_runtime::EndpointSpec for CreateChatSessionMethodRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/chatkit/sessions".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -17185,44 +18859,31 @@ impl schematic_runtime::EndpointSpec for CreateChatSessionMethodRequest {
 /// use schematic_schema::openai::ListThreadItemsMethodRequest;
 ///
 /// let request = ListThreadItemsMethodRequest::new("thread_id_value")
-///     .with_order(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListThreadItemsMethodRequest {
     /// Path parameter: thread_id
     pub thread_id: String,
-    /// Query parameter: Sort order for results by creation time. Defaults to `desc`.
-    pub order: Option<serde_json::Value>,
 }
 impl ListThreadItemsMethodRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(thread_id: impl Into<String>) -> Self {
         Self {
             thread_id: thread_id.into(),
-            order: None,
         }
-    }
-    /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: serde_json::Value) -> Self {
-        self.order = Some(value);
-        self
     }
 }
 impl From<&str> for ListThreadItemsMethodRequest {
     fn from(param: &str) -> Self {
         Self {
             thread_id: param.to_string(),
-            order: None,
         }
     }
 }
 impl From<String> for ListThreadItemsMethodRequest {
     fn from(param: String) -> Self {
-        Self {
-            thread_id: param,
-            order: None,
-        }
+        Self { thread_id: param }
     }
 }
 impl schematic_runtime::EndpointSpec for ListThreadItemsMethodRequest {
@@ -17241,10 +18902,7 @@ impl schematic_runtime::EndpointSpec for ListThreadItemsMethodRequest {
             "/chatkit/threads/{}/items", urlencoding::encode(& self.thread_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -17305,7 +18963,7 @@ impl schematic_runtime::EndpointSpec for GetThreadMethodRequest {
         let path = format!(
             "/chatkit/threads/{}", urlencoding::encode(& self.thread_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -17366,7 +19024,7 @@ impl schematic_runtime::EndpointSpec for DeleteThreadMethodRequest {
         let path = format!(
             "/chatkit/threads/{}", urlencoding::encode(& self.thread_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -17385,26 +19043,18 @@ impl schematic_runtime::EndpointSpec for DeleteThreadMethodRequest {
 /// use schematic_schema::openai::ListThreadsMethodRequest;
 ///
 /// let request = ListThreadsMethodRequest::default()
-///     .with_order(/* value */)
 ///     .with_user(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListThreadsMethodRequest {
-    /// Query parameter: Sort order for results by creation time. Defaults to `desc`.
-    pub order: Option<serde_json::Value>,
     /// Query parameter: Filter threads that belong to this user identifier. Defaults to null to return all users.
     pub user: Option<String>,
 }
 impl ListThreadsMethodRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self { order: None, user: None }
-    }
-    /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: serde_json::Value) -> Self {
-        self.order = Some(value);
-        self
+        Self { user: None }
     }
     /// Sets the `user` query parameter.
     pub fn with_user(mut self, value: String) -> Self {
@@ -17425,12 +19075,9 @@ impl schematic_runtime::EndpointSpec for ListThreadsMethodRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/chatkit/threads".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
-        }
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.user {
-            query.push(("user".to_string(), value.to_string()));
+            query.push(("user".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -21312,12 +22959,8 @@ impl<'a> ListChatCompletionsCall<'a> {
     pub fn model(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_model(value)))
     }
-    /// Sets the `metadata` query parameter (`serde_json::Value`). A list of metadata keys to filter the Chat Completions by. Example: `metadata[key1]=value1&metadata[key2]=value2`
-    pub fn metadata(self, value: serde_json::Value) -> Self {
-        Self(self.0.map_request(|request| request.with_metadata(value)))
-    }
-    /// Sets the `order` query parameter (`String`). Sort order for Chat Completions by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListChatCompletionsRequestOrder`). Sort order for Chat Completions by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    pub fn order(self, value: ListChatCompletionsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -21629,8 +23272,8 @@ pub struct GetChatCompletionMessagesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, GetChatCompletionMessagesRequest>,
 );
 impl<'a> GetChatCompletionMessagesCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order for messages by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`GetChatCompletionMessagesRequestOrder`). Sort order for messages by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    pub fn order(self, value: GetChatCompletionMessagesRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -21805,8 +23448,8 @@ pub struct ListContainersCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListContainersRequest>,
 );
 impl<'a> ListContainersCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListContainersRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: ListContainersRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// Sets the `name` query parameter (`String`). Filter results by container name.
@@ -22071,8 +23714,8 @@ pub struct ListContainerFilesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListContainerFilesRequest>,
 );
 impl<'a> ListContainerFilesCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListContainerFilesRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: ListContainerFilesRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -22388,13 +24031,9 @@ pub struct ListConversationItemsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListConversationItemsRequest>,
 );
 impl<'a> ListConversationItemsCall<'a> {
-    /// Sets the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListConversationItemsRequestOrder`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
+    pub fn order(self, value: ListConversationItemsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Specify additional output data to include in the model response. Currently supported values are: - `web_search_call.action.sources`: Include the sources of the web search tool call. - `code_interpreter_call.outputs`: Includes the outputs of python code execution in code interpreter tool call items. - `computer_call_output.output.image_url`: Include image urls from the computer call output. - `file_search_call.results`: Include the search results of the file search tool call. - `message.input_image.image_url`: Include image urls from the input message. - `message.output_text.logprobs`: Include logprobs with assistant messages. - `reasoning.encrypted_content`: Includes an encrypted version of reasoning tokens in reasoning item outputs. This enables reasoning items to be used in multi-turn conversations when using the Responses API statelessly (like when the `store` parameter is set to `false`, or when an organization is enrolled in the zero data retention program).
-    pub fn include(self, value: Vec<serde_json::Value>) -> Self {
-        Self(self.0.map_request(|request| request.with_include(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -22499,10 +24138,6 @@ pub struct CreateConversationItemsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, CreateConversationItemsRequest>,
 );
 impl<'a> CreateConversationItemsCall<'a> {
-    /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.
-    pub fn include(self, value: Vec<serde_json::Value>) -> Self {
-        Self(self.0.map_request(|request| request.with_include(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -22554,10 +24189,6 @@ pub struct GetConversationItemCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, GetConversationItemRequest>,
 );
 impl<'a> GetConversationItemCall<'a> {
-    /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.
-    pub fn include(self, value: Vec<serde_json::Value>) -> Self {
-        Self(self.0.map_request(|request| request.with_include(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -22711,12 +24342,12 @@ impl<'a> ::core::future::IntoFuture for CreateEmbeddingCall<'a> {
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListEvalsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListEvalsRequest>);
 impl<'a> ListEvalsCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order for evals by timestamp. Use `asc` for ascending order or `desc` for descending order.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListEvalsRequestOrder`). Sort order for evals by timestamp. Use `asc` for ascending order or `desc` for descending order.
+    pub fn order(self, value: ListEvalsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
-    /// Sets the `order_by` query parameter (`String`). Evals can be ordered by creation time or last updated time. Use `created_at` for creation time or `updated_at` for last updated time.
-    pub fn order_by(self, value: String) -> Self {
+    /// Sets the `order_by` query parameter (`ListEvalsRequestOrderBy`). Evals can be ordered by creation time or last updated time. Use `created_at` for creation time or `updated_at` for last updated time.
+    pub fn order_by(self, value: ListEvalsRequestOrderBy) -> Self {
         Self(self.0.map_request(|request| request.with_order_by(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -23010,12 +24641,12 @@ pub struct GetEvalRunsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, GetEvalRunsRequest>,
 );
 impl<'a> GetEvalRunsCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order for runs by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`GetEvalRunsRequestOrder`). Sort order for runs by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    pub fn order(self, value: GetEvalRunsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
-    /// Sets the `status` query parameter (`String`). Filter runs by status. One of `queued` | `in_progress` | `failed` | `completed` | `canceled`.
-    pub fn status(self, value: String) -> Self {
+    /// Sets the `status` query parameter (`GetEvalRunsRequestStatus`). Filter runs by status. One of `queued` | `in_progress` | `failed` | `completed` | `canceled`.
+    pub fn status(self, value: GetEvalRunsRequestStatus) -> Self {
         Self(self.0.map_request(|request| request.with_status(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -23321,12 +24952,12 @@ pub struct GetEvalRunOutputItemsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, GetEvalRunOutputItemsRequest>,
 );
 impl<'a> GetEvalRunOutputItemsCall<'a> {
-    /// Sets the `status` query parameter (`String`). Filter output items by status. Use `failed` to filter by failed output items or `pass` to filter by passed output items.
-    pub fn status(self, value: String) -> Self {
+    /// Sets the `status` query parameter (`GetEvalRunOutputItemsRequestStatus`). Filter output items by status. Use `failed` to filter by failed output items or `pass` to filter by passed output items.
+    pub fn status(self, value: GetEvalRunOutputItemsRequestStatus) -> Self {
         Self(self.0.map_request(|request| request.with_status(value)))
     }
-    /// Sets the `order` query parameter (`String`). Sort order for output items by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`GetEvalRunOutputItemsRequestOrder`). Sort order for output items by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    pub fn order(self, value: GetEvalRunOutputItemsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -23487,8 +25118,8 @@ impl<'a> ListFilesCall<'a> {
     pub fn purpose(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_purpose(value)))
     }
-    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListFilesRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: ListFilesRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -23892,8 +25523,8 @@ impl<'a> ListFineTuningCheckpointPermissionsCall<'a> {
     pub fn project_id(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_project_id(value)))
     }
-    /// Sets the `order` query parameter (`String`). The order in which to retrieve permissions.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListFineTuningCheckpointPermissionsRequestOrder`). The order in which to retrieve permissions.
+    pub fn order(self, value: ListFineTuningCheckpointPermissionsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -24133,10 +25764,6 @@ pub struct ListPaginatedFineTuningJobsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListPaginatedFineTuningJobsRequest>,
 );
 impl<'a> ListPaginatedFineTuningJobsCall<'a> {
-    /// Sets the `metadata` query parameter (`serde_json::Value`). Optional metadata filter. To filter, use the syntax `metadata[k]=v`. Alternatively, set `metadata=null` to indicate no metadata.
-    pub fn metadata(self, value: serde_json::Value) -> Self {
-        Self(self.0.map_request(|request| request.with_metadata(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -25092,8 +26719,8 @@ pub struct AdminApiKeysListCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, AdminApiKeysListRequest>,
 );
 impl<'a> AdminApiKeysListCall<'a> {
-    /// Sets the `order` query parameter (`String`).
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`AdminApiKeysListRequestOrder`).
+    pub fn order(self, value: AdminApiKeysListRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -25354,17 +26981,9 @@ pub struct ListAuditLogsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListAuditLogsRequest>,
 );
 impl<'a> ListAuditLogsCall<'a> {
-    /// Sets the `effective_at` query parameter (`serde_json::Value`). Return only events whose `effective_at` (Unix seconds) is in this range.
-    pub fn effective_at(self, value: serde_json::Value) -> Self {
-        Self(self.0.map_request(|request| request.with_effective_at(value)))
-    }
     /// Sets the `project_ids[]` query parameter (`Vec<String>`). Return only events for these projects.
     pub fn project_ids__(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_project_ids__(value)))
-    }
-    /// Sets the `event_types[]` query parameter (`Vec<serde_json::Value>`). Return only events with a `type` in one of these values. For example, `project.created`. For all options, see the documentation for the [audit log object](/docs/api-reference/audit-logs/object).
-    pub fn event_types__(self, value: Vec<serde_json::Value>) -> Self {
-        Self(self.0.map_request(|request| request.with_event_types__(value)))
     }
     /// Sets the `actor_ids[]` query parameter (`Vec<String>`). Return only events performed by these actors. Can be a user ID, a service account ID, or an api key tracking ID.
     pub fn actor_ids__(self, value: Vec<String>) -> Self {
@@ -25497,8 +27116,8 @@ pub struct ListOrganizationCertificatesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListOrganizationCertificatesRequest>,
 );
 impl<'a> ListOrganizationCertificatesCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListOrganizationCertificatesRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: ListOrganizationCertificatesRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -25785,8 +27404,8 @@ pub struct GetCertificateCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, GetCertificateRequest>,
 );
 impl<'a> GetCertificateCall<'a> {
-    /// Sets the `include` query parameter (`Vec<String>`). A list of additional fields to include in the response. Currently the only supported value is `content` to fetch the PEM content of the certificate.
-    pub fn include(self, value: Vec<String>) -> Self {
+    /// Sets the `include` query parameter (`Vec<GetCertificateRequestInclude>`). A list of additional fields to include in the response. Currently the only supported value is `content` to fetch the PEM content of the certificate.
+    pub fn include(self, value: Vec<GetCertificateRequestInclude>) -> Self {
         Self(self.0.map_request(|request| request.with_include(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -25942,16 +27561,12 @@ impl<'a> ::core::future::IntoFuture for DeleteCertificateCall<'a> {
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageCostsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, UsageCostsRequest>);
 impl<'a> UsageCostsCall<'a> {
-    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
-    pub fn start_time(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_start_time(value)))
-    }
     /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
     pub fn end_time(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_end_time(value)))
     }
-    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently only `1d` is supported, default to `1d`.
-    pub fn bucket_width(self, value: String) -> Self {
+    /// Sets the `bucket_width` query parameter (`UsageCostsRequestBucketWidth`). Width of each time bucket in response. Currently only `1d` is supported, default to `1d`.
+    pub fn bucket_width(self, value: UsageCostsRequestBucketWidth) -> Self {
         Self(self.0.map_request(|request| request.with_bucket_width(value)))
     }
     /// Sets the `project_ids` query parameter (`Vec<String>`). Return only costs for these projects.
@@ -25962,8 +27577,8 @@ impl<'a> UsageCostsCall<'a> {
     pub fn api_key_ids(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_api_key_ids(value)))
     }
-    /// Sets the `group_by` query parameter (`Vec<String>`). Group the costs by the specified fields. Support fields include `project_id`, `line_item`, `api_key_id` and any combination of them.
-    pub fn group_by(self, value: Vec<String>) -> Self {
+    /// Sets the `group_by` query parameter (`Vec<UsageCostsRequestGroupBy>`). Group the costs by the specified fields. Support fields include `project_id`, `line_item`, `api_key_id` and any combination of them.
+    pub fn group_by(self, value: Vec<UsageCostsRequestGroupBy>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -26177,8 +27792,8 @@ impl<'a> ::core::future::IntoFuture for UpdateOrganizationDataRetentionCall<'a> 
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListGroupsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListGroupsRequest>);
 impl<'a> ListGroupsCall<'a> {
-    /// Sets the `order` query parameter (`String`). Specifies the sort order of the returned groups.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListGroupsRequestOrder`). Specifies the sort order of the returned groups.
+    pub fn order(self, value: ListGroupsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -26482,8 +28097,8 @@ pub struct ListGroupRoleAssignmentsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListGroupRoleAssignmentsRequest>,
 );
 impl<'a> ListGroupRoleAssignmentsCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order for the returned organization roles.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListGroupRoleAssignmentsRequestOrder`). Sort order for the returned organization roles.
+    pub fn order(self, value: ListGroupRoleAssignmentsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -26760,8 +28375,8 @@ pub struct ListGroupUsersCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListGroupUsersRequest>,
 );
 impl<'a> ListGroupUsersCall<'a> {
-    /// Sets the `order` query parameter (`String`). Specifies the sort order of users in the list.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListGroupUsersRequestOrder`). Specifies the sort order of users in the list.
+    pub fn order(self, value: ListGroupUsersRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -27536,8 +29151,11 @@ pub struct ListProjectApiKeysCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectApiKeysRequest>,
 );
 impl<'a> ListProjectApiKeysCall<'a> {
-    /// Sets the `owner_project_access` query parameter (`String`). Filter API keys by whether the owner currently has effective access to the project. Use `active` for owners with access, `inactive` for owners without access, or `any` for all enabled project API keys. If omitted, the endpoint applies its existing membership-based visibility rules, which may exclude some enabled keys.
-    pub fn owner_project_access(self, value: String) -> Self {
+    /// Sets the `owner_project_access` query parameter (`ListProjectApiKeysRequestOwnerProjectAccess`). Filter API keys by whether the owner currently has effective access to the project. Use `active` for owners with access, `inactive` for owners without access, or `any` for all enabled project API keys. If omitted, the endpoint applies its existing membership-based visibility rules, which may exclude some enabled keys.
+    pub fn owner_project_access(
+        self,
+        value: ListProjectApiKeysRequestOwnerProjectAccess,
+    ) -> Self {
         Self(self.0.map_request(|request| request.with_owner_project_access(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -27798,8 +29416,8 @@ pub struct ListProjectCertificatesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectCertificatesRequest>,
 );
 impl<'a> ListProjectCertificatesCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListProjectCertificatesRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: ListProjectCertificatesRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -28119,8 +29737,8 @@ pub struct ListProjectGroupsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectGroupsRequest>,
 );
 impl<'a> ListProjectGroupsCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order for the returned groups.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListProjectGroupsRequestOrder`). Sort order for the returned groups.
+    pub fn order(self, value: ListProjectGroupsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -28277,8 +29895,8 @@ pub struct RetrieveProjectGroupCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, RetrieveProjectGroupRequest>,
 );
 impl<'a> RetrieveProjectGroupCall<'a> {
-    /// Sets the `group_type` query parameter (`String`). The type of group to retrieve.
-    pub fn group_type(self, value: String) -> Self {
+    /// Sets the `group_type` query parameter (`RetrieveProjectGroupRequestGroupType`). The type of group to retrieve.
+    pub fn group_type(self, value: RetrieveProjectGroupRequestGroupType) -> Self {
         Self(self.0.map_request(|request| request.with_group_type(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -29155,8 +30773,8 @@ pub struct ListProjectSpendAlertsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectSpendAlertsRequest>,
 );
 impl<'a> ListProjectSpendAlertsCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order for the returned spend alerts.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListProjectSpendAlertsRequestOrder`). Sort order for the returned spend alerts.
+    pub fn order(self, value: ListProjectSpendAlertsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -29785,8 +31403,8 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectUserCall<'a> {
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListRolesCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListRolesRequest>);
 impl<'a> ListRolesCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order for the returned roles.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListRolesRequestOrder`). Sort order for the returned roles.
+    pub fn order(self, value: ListRolesRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -30084,8 +31702,8 @@ pub struct ListOrganizationSpendAlertsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListOrganizationSpendAlertsRequest>,
 );
 impl<'a> ListOrganizationSpendAlertsCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order for the returned spend alerts.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListOrganizationSpendAlertsRequestOrder`). Sort order for the returned spend alerts.
+    pub fn order(self, value: ListOrganizationSpendAlertsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -30443,16 +32061,12 @@ pub struct UsageAudioSpeechesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, UsageAudioSpeechesRequest>,
 );
 impl<'a> UsageAudioSpeechesCall<'a> {
-    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
-    pub fn start_time(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_start_time(value)))
-    }
     /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
     pub fn end_time(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_end_time(value)))
     }
-    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub fn bucket_width(self, value: String) -> Self {
+    /// Sets the `bucket_width` query parameter (`UsageAudioSpeechesRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: UsageAudioSpeechesRequestBucketWidth) -> Self {
         Self(self.0.map_request(|request| request.with_bucket_width(value)))
     }
     /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
@@ -30471,8 +32085,8 @@ impl<'a> UsageAudioSpeechesCall<'a> {
     pub fn models(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_models(value)))
     }
-    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    pub fn group_by(self, value: Vec<String>) -> Self {
+    /// Sets the `group_by` query parameter (`Vec<UsageAudioSpeechesRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    pub fn group_by(self, value: Vec<UsageAudioSpeechesRequestGroupBy>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -30580,16 +32194,15 @@ pub struct UsageAudioTranscriptionsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, UsageAudioTranscriptionsRequest>,
 );
 impl<'a> UsageAudioTranscriptionsCall<'a> {
-    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
-    pub fn start_time(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_start_time(value)))
-    }
     /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
     pub fn end_time(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_end_time(value)))
     }
-    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub fn bucket_width(self, value: String) -> Self {
+    /// Sets the `bucket_width` query parameter (`UsageAudioTranscriptionsRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(
+        self,
+        value: UsageAudioTranscriptionsRequestBucketWidth,
+    ) -> Self {
         Self(self.0.map_request(|request| request.with_bucket_width(value)))
     }
     /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
@@ -30608,8 +32221,8 @@ impl<'a> UsageAudioTranscriptionsCall<'a> {
     pub fn models(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_models(value)))
     }
-    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    pub fn group_by(self, value: Vec<String>) -> Self {
+    /// Sets the `group_by` query parameter (`Vec<UsageAudioTranscriptionsRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    pub fn group_by(self, value: Vec<UsageAudioTranscriptionsRequestGroupBy>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -30733,24 +32346,26 @@ pub struct UsageCodeInterpreterSessionsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, UsageCodeInterpreterSessionsRequest>,
 );
 impl<'a> UsageCodeInterpreterSessionsCall<'a> {
-    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
-    pub fn start_time(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_start_time(value)))
-    }
     /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
     pub fn end_time(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_end_time(value)))
     }
-    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub fn bucket_width(self, value: String) -> Self {
+    /// Sets the `bucket_width` query parameter (`UsageCodeInterpreterSessionsRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(
+        self,
+        value: UsageCodeInterpreterSessionsRequestBucketWidth,
+    ) -> Self {
         Self(self.0.map_request(|request| request.with_bucket_width(value)))
     }
     /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
     pub fn project_ids(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_project_ids(value)))
     }
-    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`.
-    pub fn group_by(self, value: Vec<String>) -> Self {
+    /// Sets the `group_by` query parameter (`Vec<UsageCodeInterpreterSessionsRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`.
+    pub fn group_by(
+        self,
+        value: Vec<UsageCodeInterpreterSessionsRequestGroupBy>,
+    ) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -30878,16 +32493,12 @@ pub struct UsageCompletionsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, UsageCompletionsRequest>,
 );
 impl<'a> UsageCompletionsCall<'a> {
-    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
-    pub fn start_time(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_start_time(value)))
-    }
     /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
     pub fn end_time(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_end_time(value)))
     }
-    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub fn bucket_width(self, value: String) -> Self {
+    /// Sets the `bucket_width` query parameter (`UsageCompletionsRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: UsageCompletionsRequestBucketWidth) -> Self {
         Self(self.0.map_request(|request| request.with_bucket_width(value)))
     }
     /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
@@ -30910,8 +32521,8 @@ impl<'a> UsageCompletionsCall<'a> {
     pub fn batch(self, value: bool) -> Self {
         Self(self.0.map_request(|request| request.with_batch(value)))
     }
-    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `batch`, `service_tier` or any combination of them.
-    pub fn group_by(self, value: Vec<String>) -> Self {
+    /// Sets the `group_by` query parameter (`Vec<UsageCompletionsRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `batch`, `service_tier` or any combination of them.
+    pub fn group_by(self, value: Vec<UsageCompletionsRequestGroupBy>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -31019,16 +32630,12 @@ pub struct UsageEmbeddingsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, UsageEmbeddingsRequest>,
 );
 impl<'a> UsageEmbeddingsCall<'a> {
-    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
-    pub fn start_time(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_start_time(value)))
-    }
     /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
     pub fn end_time(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_end_time(value)))
     }
-    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub fn bucket_width(self, value: String) -> Self {
+    /// Sets the `bucket_width` query parameter (`UsageEmbeddingsRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: UsageEmbeddingsRequestBucketWidth) -> Self {
         Self(self.0.map_request(|request| request.with_bucket_width(value)))
     }
     /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
@@ -31047,8 +32654,8 @@ impl<'a> UsageEmbeddingsCall<'a> {
     pub fn models(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_models(value)))
     }
-    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    pub fn group_by(self, value: Vec<String>) -> Self {
+    /// Sets the `group_by` query parameter (`Vec<UsageEmbeddingsRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    pub fn group_by(self, value: Vec<UsageEmbeddingsRequestGroupBy>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -31156,16 +32763,12 @@ pub struct UsageFileSearchCallsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, UsageFileSearchCallsRequest>,
 );
 impl<'a> UsageFileSearchCallsCall<'a> {
-    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
-    pub fn start_time(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_start_time(value)))
-    }
     /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
     pub fn end_time(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_end_time(value)))
     }
-    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub fn bucket_width(self, value: String) -> Self {
+    /// Sets the `bucket_width` query parameter (`UsageFileSearchCallsRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: UsageFileSearchCallsRequestBucketWidth) -> Self {
         Self(self.0.map_request(|request| request.with_bucket_width(value)))
     }
     /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
@@ -31184,8 +32787,8 @@ impl<'a> UsageFileSearchCallsCall<'a> {
     pub fn vector_store_ids(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_vector_store_ids(value)))
     }
-    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `vector_store_id` or any combination of them.
-    pub fn group_by(self, value: Vec<String>) -> Self {
+    /// Sets the `group_by` query parameter (`Vec<UsageFileSearchCallsRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `vector_store_id` or any combination of them.
+    pub fn group_by(self, value: Vec<UsageFileSearchCallsRequestGroupBy>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -31293,24 +32896,20 @@ pub struct UsageImagesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, UsageImagesRequest>,
 );
 impl<'a> UsageImagesCall<'a> {
-    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
-    pub fn start_time(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_start_time(value)))
-    }
     /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
     pub fn end_time(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_end_time(value)))
     }
-    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub fn bucket_width(self, value: String) -> Self {
+    /// Sets the `bucket_width` query parameter (`UsageImagesRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: UsageImagesRequestBucketWidth) -> Self {
         Self(self.0.map_request(|request| request.with_bucket_width(value)))
     }
-    /// Sets the `sources` query parameter (`Vec<String>`). Return only usages for these sources. Possible values are `image.generation`, `image.edit`, `image.variation` or any combination of them.
-    pub fn sources(self, value: Vec<String>) -> Self {
+    /// Sets the `sources` query parameter (`Vec<UsageImagesRequestSources>`). Return only usages for these sources. Possible values are `image.generation`, `image.edit`, `image.variation` or any combination of them.
+    pub fn sources(self, value: Vec<UsageImagesRequestSources>) -> Self {
         Self(self.0.map_request(|request| request.with_sources(value)))
     }
-    /// Sets the `sizes` query parameter (`Vec<String>`). Return only usages for these image sizes. Possible values are `256x256`, `512x512`, `1024x1024`, `1792x1792`, `1024x1792` or any combination of them.
-    pub fn sizes(self, value: Vec<String>) -> Self {
+    /// Sets the `sizes` query parameter (`Vec<UsageImagesRequestSizes>`). Return only usages for these image sizes. Possible values are `256x256`, `512x512`, `1024x1024`, `1792x1792`, `1024x1792` or any combination of them.
+    pub fn sizes(self, value: Vec<UsageImagesRequestSizes>) -> Self {
         Self(self.0.map_request(|request| request.with_sizes(value)))
     }
     /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
@@ -31329,8 +32928,8 @@ impl<'a> UsageImagesCall<'a> {
     pub fn models(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_models(value)))
     }
-    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `size`, `source` or any combination of them.
-    pub fn group_by(self, value: Vec<String>) -> Self {
+    /// Sets the `group_by` query parameter (`Vec<UsageImagesRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `size`, `source` or any combination of them.
+    pub fn group_by(self, value: Vec<UsageImagesRequestGroupBy>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -31436,16 +33035,12 @@ pub struct UsageModerationsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, UsageModerationsRequest>,
 );
 impl<'a> UsageModerationsCall<'a> {
-    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
-    pub fn start_time(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_start_time(value)))
-    }
     /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
     pub fn end_time(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_end_time(value)))
     }
-    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub fn bucket_width(self, value: String) -> Self {
+    /// Sets the `bucket_width` query parameter (`UsageModerationsRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: UsageModerationsRequestBucketWidth) -> Self {
         Self(self.0.map_request(|request| request.with_bucket_width(value)))
     }
     /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
@@ -31464,8 +33059,8 @@ impl<'a> UsageModerationsCall<'a> {
     pub fn models(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_models(value)))
     }
-    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    pub fn group_by(self, value: Vec<String>) -> Self {
+    /// Sets the `group_by` query parameter (`Vec<UsageModerationsRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    pub fn group_by(self, value: Vec<UsageModerationsRequestGroupBy>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -31573,24 +33168,20 @@ pub struct UsageVectorStoresCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, UsageVectorStoresRequest>,
 );
 impl<'a> UsageVectorStoresCall<'a> {
-    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
-    pub fn start_time(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_start_time(value)))
-    }
     /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
     pub fn end_time(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_end_time(value)))
     }
-    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub fn bucket_width(self, value: String) -> Self {
+    /// Sets the `bucket_width` query parameter (`UsageVectorStoresRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: UsageVectorStoresRequestBucketWidth) -> Self {
         Self(self.0.map_request(|request| request.with_bucket_width(value)))
     }
     /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
     pub fn project_ids(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_project_ids(value)))
     }
-    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`.
-    pub fn group_by(self, value: Vec<String>) -> Self {
+    /// Sets the `group_by` query parameter (`Vec<UsageVectorStoresRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`.
+    pub fn group_by(self, value: Vec<UsageVectorStoresRequestGroupBy>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -31698,16 +33289,12 @@ pub struct UsageWebSearchCallsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, UsageWebSearchCallsRequest>,
 );
 impl<'a> UsageWebSearchCallsCall<'a> {
-    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
-    pub fn start_time(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_start_time(value)))
-    }
     /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
     pub fn end_time(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_end_time(value)))
     }
-    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    pub fn bucket_width(self, value: String) -> Self {
+    /// Sets the `bucket_width` query parameter (`UsageWebSearchCallsRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: UsageWebSearchCallsRequestBucketWidth) -> Self {
         Self(self.0.map_request(|request| request.with_bucket_width(value)))
     }
     /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
@@ -31726,12 +33313,15 @@ impl<'a> UsageWebSearchCallsCall<'a> {
     pub fn models(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_models(value)))
     }
-    /// Sets the `context_levels` query parameter (`Vec<String>`). Return only web search usage for these context levels.
-    pub fn context_levels(self, value: Vec<String>) -> Self {
+    /// Sets the `context_levels` query parameter (`Vec<UsageWebSearchCallsRequestContextLevels>`). Return only web search usage for these context levels.
+    pub fn context_levels(
+        self,
+        value: Vec<UsageWebSearchCallsRequestContextLevels>,
+    ) -> Self {
         Self(self.0.map_request(|request| request.with_context_levels(value)))
     }
-    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `context_level` or any combination of them.
-    pub fn group_by(self, value: Vec<String>) -> Self {
+    /// Sets the `group_by` query parameter (`Vec<UsageWebSearchCallsRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `context_level` or any combination of them.
+    pub fn group_by(self, value: Vec<UsageWebSearchCallsRequestGroupBy>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -32089,8 +33679,8 @@ pub struct ListUserRoleAssignmentsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListUserRoleAssignmentsRequest>,
 );
 impl<'a> ListUserRoleAssignmentsCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order for the returned organization roles.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListUserRoleAssignmentsRequestOrder`). Sort order for the returned organization roles.
+    pub fn order(self, value: ListUserRoleAssignmentsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -32351,8 +33941,8 @@ pub struct ListProjectGroupRoleAssignmentsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectGroupRoleAssignmentsRequest>,
 );
 impl<'a> ListProjectGroupRoleAssignmentsCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order for the returned project roles.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListProjectGroupRoleAssignmentsRequestOrder`). Sort order for the returned project roles.
+    pub fn order(self, value: ListProjectGroupRoleAssignmentsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -32633,8 +34223,8 @@ pub struct ListProjectRolesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectRolesRequest>,
 );
 impl<'a> ListProjectRolesCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order for the returned roles.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListProjectRolesRequestOrder`). Sort order for the returned roles.
+    pub fn order(self, value: ListProjectRolesRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -32946,8 +34536,8 @@ pub struct ListProjectUserRoleAssignmentsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectUserRoleAssignmentsRequest>,
 );
 impl<'a> ListProjectUserRoleAssignmentsCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order for the returned project roles.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListProjectUserRoleAssignmentsRequestOrder`). Sort order for the returned project roles.
+    pub fn order(self, value: ListProjectUserRoleAssignmentsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -33752,10 +35342,6 @@ pub struct GetResponseCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, GetResponseRequest>,
 );
 impl<'a> GetResponseCall<'a> {
-    /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
-    pub fn include(self, value: Vec<serde_json::Value>) -> Self {
-        Self(self.0.map_request(|request| request.with_include(value)))
-    }
     /// Sets the `stream` query parameter (`bool`). If set to true, the model response data will be streamed to the client as it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format). See the [Streaming section below](/docs/api-reference/responses-streaming) for more information.
     pub fn stream(self, value: bool) -> Self {
         Self(self.0.map_request(|request| request.with_stream(value)))
@@ -33945,13 +35531,9 @@ pub struct ListInputItemsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListInputItemsRequest>,
 );
 impl<'a> ListInputItemsCall<'a> {
-    /// Sets the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListInputItemsRequestOrder`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
+    pub fn order(self, value: ListInputItemsRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
-    pub fn include(self, value: Vec<serde_json::Value>) -> Self {
-        Self(self.0.map_request(|request| request.with_include(value)))
     }
     /// Sets the `beta` query parameter (`bool`).
     pub fn beta(self, value: bool) -> Self {
@@ -34270,8 +35852,8 @@ pub struct ListVectorStoresCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListVectorStoresRequest>,
 );
 impl<'a> ListVectorStoresCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListVectorStoresRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: ListVectorStoresRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -34746,12 +36328,12 @@ pub struct ListFilesInVectorStoreBatchCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListFilesInVectorStoreBatchRequest>,
 );
 impl<'a> ListFilesInVectorStoreBatchCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListFilesInVectorStoreBatchRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: ListFilesInVectorStoreBatchRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
-    /// Sets the `filter` query parameter (`String`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
-    pub fn filter(self, value: String) -> Self {
+    /// Sets the `filter` query parameter (`ListFilesInVectorStoreBatchRequestFilter`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
+    pub fn filter(self, value: ListFilesInVectorStoreBatchRequestFilter) -> Self {
         Self(self.0.map_request(|request| request.with_filter(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -34889,12 +36471,12 @@ pub struct ListVectorStoreFilesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListVectorStoreFilesRequest>,
 );
 impl<'a> ListVectorStoreFilesCall<'a> {
-    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    pub fn order(self, value: String) -> Self {
+    /// Sets the `order` query parameter (`ListVectorStoreFilesRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: ListVectorStoreFilesRequestOrder) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
     }
-    /// Sets the `filter` query parameter (`String`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
-    pub fn filter(self, value: String) -> Self {
+    /// Sets the `filter` query parameter (`ListVectorStoreFilesRequestFilter`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
+    pub fn filter(self, value: ListVectorStoreFilesRequestFilter) -> Self {
         Self(self.0.map_request(|request| request.with_filter(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -35952,10 +37534,6 @@ impl<'a> ::core::future::IntoFuture for CreatecontentprovenancecheckCall<'a> {
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListVideosCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListVideosRequest>);
 impl<'a> ListVideosCall<'a> {
-    /// Sets the `order` query parameter (`serde_json::Value`). Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
-    pub fn order(self, value: serde_json::Value) -> Self {
-        Self(self.0.map_request(|request| request.with_order(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -36406,10 +37984,6 @@ pub struct RetrieveVideoContentCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, RetrieveVideoContentRequest>,
 );
 impl<'a> RetrieveVideoContentCall<'a> {
-    /// Sets the `variant` query parameter (`serde_json::Value`). Which downloadable asset to return. Defaults to the MP4 video.
-    pub fn variant(self, value: serde_json::Value) -> Self {
-        Self(self.0.map_request(|request| request.with_variant(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -36630,10 +38204,6 @@ impl<'a> ::core::future::IntoFuture for CompactconversationCall<'a> {
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListSkillsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListSkillsRequest>);
 impl<'a> ListSkillsCall<'a> {
-    /// Sets the `order` query parameter (`serde_json::Value`). Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
-    pub fn order(self, value: serde_json::Value) -> Self {
-        Self(self.0.map_request(|request| request.with_order(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -36984,10 +38554,6 @@ pub struct ListSkillVersionsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListSkillVersionsRequest>,
 );
 impl<'a> ListSkillVersionsCall<'a> {
-    /// Sets the `order` query parameter (`serde_json::Value`). Sort order of results by version number.
-    pub fn order(self, value: serde_json::Value) -> Self {
-        Self(self.0.map_request(|request| request.with_order(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -37399,10 +38965,6 @@ pub struct ListThreadItemsMethodCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListThreadItemsMethodRequest>,
 );
 impl<'a> ListThreadItemsMethodCall<'a> {
-    /// Sets the `order` query parameter (`serde_json::Value`). Sort order for results by creation time. Defaults to `desc`.
-    pub fn order(self, value: serde_json::Value) -> Self {
-        Self(self.0.map_request(|request| request.with_order(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -37620,10 +39182,6 @@ pub struct ListThreadsMethodCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListThreadsMethodRequest>,
 );
 impl<'a> ListThreadsMethodCall<'a> {
-    /// Sets the `order` query parameter (`serde_json::Value`). Sort order for results by creation time. Defaults to `desc`.
-    pub fn order(self, value: serde_json::Value) -> Self {
-        Self(self.0.map_request(|request| request.with_order(value)))
-    }
     /// Sets the `user` query parameter (`String`). Filter threads that belong to this user identifier. Defaults to null to return all users.
     pub fn user(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_user(value)))
@@ -37924,8 +39482,7 @@ impl OpenAI {
     /// ## Optional values
     ///
     /// - [`model`](ListChatCompletionsCall::model): the `model` query parameter (`String`). The model used to generate the Chat Completions.
-    /// - [`metadata`](ListChatCompletionsCall::metadata): the `metadata` query parameter (`serde_json::Value`). A list of metadata keys to filter the Chat Completions by. Example: `metadata[key1]=value1&metadata[key2]=value2`
-    /// - [`order`](ListChatCompletionsCall::order): the `order` query parameter (`String`). Sort order for Chat Completions by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    /// - [`order`](ListChatCompletionsCall::order): the `order` query parameter (`ListChatCompletionsRequestOrder`). Sort order for Chat Completions by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
     pub fn list_chat_completions(&self) -> ListChatCompletionsCall<'_> {
         ListChatCompletionsCall(self.0.send(ListChatCompletionsRequest::default()))
     }
@@ -38030,7 +39587,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](GetChatCompletionMessagesCall::order): the `order` query parameter (`String`). Sort order for messages by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    /// - [`order`](GetChatCompletionMessagesCall::order): the `order` query parameter (`GetChatCompletionMessagesRequestOrder`). Sort order for messages by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
     pub fn get_chat_completion_messages(
         &self,
         completion_id: impl Into<String>,
@@ -38064,7 +39621,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListContainersCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    /// - [`order`](ListContainersCall::order): the `order` query parameter (`ListContainersRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     /// - [`name`](ListContainersCall::name): the `name` query parameter (`String`). Filter results by container name.
     pub fn list_containers(&self) -> ListContainersCall<'_> {
         ListContainersCall(self.0.send(ListContainersRequest::default()))
@@ -38126,7 +39683,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListContainerFilesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    /// - [`order`](ListContainerFilesCall::order): the `order` query parameter (`ListContainerFilesRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn list_container_files(
         &self,
         container_id: impl Into<String>,
@@ -38223,8 +39780,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListConversationItemsCall::order): the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
-    /// - [`include`](ListConversationItemsCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Specify additional output data to include in the model response. Currently supported values are: - `web_search_call.action.sources`: Include the sources of the web search tool call. - `code_interpreter_call.outputs`: Includes the outputs of python code execution in code interpreter tool call items. - `computer_call_output.output.image_url`: Include image urls from the computer call output. - `file_search_call.results`: Include the search results of the file search tool call. - `message.input_image.image_url`: Include image urls from the input message. - `message.output_text.logprobs`: Include logprobs with assistant messages. - `reasoning.encrypted_content`: Includes an encrypted version of reasoning tokens in reasoning item outputs. This enables reasoning items to be used in multi-turn conversations when using the Responses API statelessly (like when the `store` parameter is set to `false`, or when an organization is enrolled in the zero data retention program).
+    /// - [`order`](ListConversationItemsCall::order): the `order` query parameter (`ListConversationItemsRequestOrder`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
     pub fn list_conversation_items(
         &self,
         conversation_id: impl Into<String>,
@@ -38243,10 +39799,6 @@ impl OpenAI {
     ///
     /// - `conversation_id: impl Into<String>`: the `{conversation_id}` path parameter
     /// - `body: ::serde_json::Value`: the request body
-    ///
-    /// ## Optional values
-    ///
-    /// - [`include`](CreateConversationItemsCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.
     pub fn create_conversation_items(
         &self,
         conversation_id: impl Into<String>,
@@ -38266,10 +39818,6 @@ impl OpenAI {
     ///
     /// - `conversation_id: impl Into<String>`: the `{conversation_id}` path parameter
     /// - `item_id: impl Into<String>`: the `{item_id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`include`](GetConversationItemCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.
     pub fn get_conversation_item(
         &self,
         conversation_id: impl Into<String>,
@@ -38321,8 +39869,8 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListEvalsCall::order): the `order` query parameter (`String`). Sort order for evals by timestamp. Use `asc` for ascending order or `desc` for descending order.
-    /// - [`order_by`](ListEvalsCall::order_by): the `order_by` query parameter (`String`). Evals can be ordered by creation time or last updated time. Use `created_at` for creation time or `updated_at` for last updated time.
+    /// - [`order`](ListEvalsCall::order): the `order` query parameter (`ListEvalsRequestOrder`). Sort order for evals by timestamp. Use `asc` for ascending order or `desc` for descending order.
+    /// - [`order_by`](ListEvalsCall::order_by): the `order_by` query parameter (`ListEvalsRequestOrderBy`). Evals can be ordered by creation time or last updated time. Use `created_at` for creation time or `updated_at` for last updated time.
     pub fn list_evals(&self) -> ListEvalsCall<'_> {
         ListEvalsCall(self.0.send(ListEvalsRequest::default()))
     }
@@ -38396,8 +39944,8 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](GetEvalRunsCall::order): the `order` query parameter (`String`). Sort order for runs by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
-    /// - [`status`](GetEvalRunsCall::status): the `status` query parameter (`String`). Filter runs by status. One of `queued` | `in_progress` | `failed` | `completed` | `canceled`.
+    /// - [`order`](GetEvalRunsCall::order): the `order` query parameter (`GetEvalRunsRequestOrder`). Sort order for runs by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    /// - [`status`](GetEvalRunsCall::status): the `status` query parameter (`GetEvalRunsRequestStatus`). Filter runs by status. One of `queued` | `in_progress` | `failed` | `completed` | `canceled`.
     pub fn get_eval_runs(&self, eval_id: impl Into<String>) -> GetEvalRunsCall<'_> {
         GetEvalRunsCall(self.0.send(GetEvalRunsRequest::new(eval_id)))
     }
@@ -38482,8 +40030,8 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`status`](GetEvalRunOutputItemsCall::status): the `status` query parameter (`String`). Filter output items by status. Use `failed` to filter by failed output items or `pass` to filter by passed output items.
-    /// - [`order`](GetEvalRunOutputItemsCall::order): the `order` query parameter (`String`). Sort order for output items by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    /// - [`status`](GetEvalRunOutputItemsCall::status): the `status` query parameter (`GetEvalRunOutputItemsRequestStatus`). Filter output items by status. Use `failed` to filter by failed output items or `pass` to filter by passed output items.
+    /// - [`order`](GetEvalRunOutputItemsCall::order): the `order` query parameter (`GetEvalRunOutputItemsRequestOrder`). Sort order for output items by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
     pub fn get_eval_run_output_items(
         &self,
         eval_id: impl Into<String>,
@@ -38525,7 +40073,7 @@ impl OpenAI {
     /// ## Optional values
     ///
     /// - [`purpose`](ListFilesCall::purpose): the `purpose` query parameter (`String`). Only return files with the given purpose.
-    /// - [`order`](ListFilesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    /// - [`order`](ListFilesCall::order): the `order` query parameter (`ListFilesRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn list_files(&self) -> ListFilesCall<'_> {
         ListFilesCall(self.0.send(ListFilesRequest::default()))
     }
@@ -38646,7 +40194,7 @@ impl OpenAI {
     /// ## Optional values
     ///
     /// - [`project_id`](ListFineTuningCheckpointPermissionsCall::project_id): the `project_id` query parameter (`String`). The ID of the project to get permissions for.
-    /// - [`order`](ListFineTuningCheckpointPermissionsCall::order): the `order` query parameter (`String`). The order in which to retrieve permissions.
+    /// - [`order`](ListFineTuningCheckpointPermissionsCall::order): the `order` query parameter (`ListFineTuningCheckpointPermissionsRequestOrder`). The order in which to retrieve permissions.
     pub fn list_fine_tuning_checkpoint_permissions(
         &self,
         fine_tuned_model_checkpoint: impl Into<String>,
@@ -38722,10 +40270,6 @@ impl OpenAI {
     /// `GET /fine_tuning/jobs`
     ///
     /// Returns a [`ListPaginatedFineTuningJobsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
-    ///
-    /// ## Optional values
-    ///
-    /// - [`metadata`](ListPaginatedFineTuningJobsCall::metadata): the `metadata` query parameter (`serde_json::Value`). Optional metadata filter. To filter, use the syntax `metadata[k]=v`. Alternatively, set `metadata=null` to indicate no metadata.
     pub fn list_paginated_fine_tuning_jobs(
         &self,
     ) -> ListPaginatedFineTuningJobsCall<'_> {
@@ -38957,7 +40501,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](AdminApiKeysListCall::order): the `order` query parameter (`String`).
+    /// - [`order`](AdminApiKeysListCall::order): the `order` query parameter (`AdminApiKeysListRequestOrder`).
     pub fn admin_api_keys_list(&self) -> AdminApiKeysListCall<'_> {
         AdminApiKeysListCall(self.0.send(AdminApiKeysListRequest::default()))
     }
@@ -39014,9 +40558,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`effective_at`](ListAuditLogsCall::effective_at): the `effective_at` query parameter (`serde_json::Value`). Return only events whose `effective_at` (Unix seconds) is in this range.
     /// - [`project_ids__`](ListAuditLogsCall::project_ids__): the `project_ids[]` query parameter (`Vec<String>`). Return only events for these projects.
-    /// - [`event_types__`](ListAuditLogsCall::event_types__): the `event_types[]` query parameter (`Vec<serde_json::Value>`). Return only events with a `type` in one of these values. For example, `project.created`. For all options, see the documentation for the [audit log object](/docs/api-reference/audit-logs/object).
     /// - [`actor_ids__`](ListAuditLogsCall::actor_ids__): the `actor_ids[]` query parameter (`Vec<String>`). Return only events performed by these actors. Can be a user ID, a service account ID, or an api key tracking ID.
     /// - [`actor_emails__`](ListAuditLogsCall::actor_emails__): the `actor_emails[]` query parameter (`Vec<String>`). Return only events performed by users with these emails.
     /// - [`resource_ids__`](ListAuditLogsCall::resource_ids__): the `resource_ids[]` query parameter (`Vec<String>`). Return only events performed on these targets. For example, a project ID updated. For ChatGPT connector role events, use the workspace connector resource ID shown in `details.id`, such as `<workspace_id>__<connector_id>`.
@@ -39032,7 +40574,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListOrganizationCertificatesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    /// - [`order`](ListOrganizationCertificatesCall::order): the `order` query parameter (`ListOrganizationCertificatesRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn list_organization_certificates(
         &self,
     ) -> ListOrganizationCertificatesCall<'_> {
@@ -39109,7 +40651,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`include`](GetCertificateCall::include): the `include` query parameter (`Vec<String>`). A list of additional fields to include in the response. Currently the only supported value is `content` to fetch the PEM content of the certificate.
+    /// - [`include`](GetCertificateCall::include): the `include` query parameter (`Vec<GetCertificateRequestInclude>`). A list of additional fields to include in the response. Currently the only supported value is `content` to fetch the PEM content of the certificate.
     pub fn get_certificate(
         &self,
         certificate_id: impl Into<String>,
@@ -39158,16 +40700,19 @@ impl OpenAI {
     ///
     /// Returns a [`UsageCostsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
+    /// ## Arguments
+    ///
+    /// - `start_time: i64`: the required `start_time` query parameter
+    ///
     /// ## Optional values
     ///
-    /// - [`start_time`](UsageCostsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
     /// - [`end_time`](UsageCostsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
-    /// - [`bucket_width`](UsageCostsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently only `1d` is supported, default to `1d`.
+    /// - [`bucket_width`](UsageCostsCall::bucket_width): the `bucket_width` query parameter (`UsageCostsRequestBucketWidth`). Width of each time bucket in response. Currently only `1d` is supported, default to `1d`.
     /// - [`project_ids`](UsageCostsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only costs for these projects.
     /// - [`api_key_ids`](UsageCostsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only costs for these API keys.
-    /// - [`group_by`](UsageCostsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the costs by the specified fields. Support fields include `project_id`, `line_item`, `api_key_id` and any combination of them.
-    pub fn usage_costs(&self) -> UsageCostsCall<'_> {
-        UsageCostsCall(self.0.send(UsageCostsRequest::default()))
+    /// - [`group_by`](UsageCostsCall::group_by): the `group_by` query parameter (`Vec<UsageCostsRequestGroupBy>`). Group the costs by the specified fields. Support fields include `project_id`, `line_item`, `api_key_id` and any combination of them.
+    pub fn usage_costs(&self, start_time: i64) -> UsageCostsCall<'_> {
+        UsageCostsCall(self.0.send(UsageCostsRequest::new(start_time)))
     }
     /// Retrieves organization data retention controls.
     ///
@@ -39206,7 +40751,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListGroupsCall::order): the `order` query parameter (`String`). Specifies the sort order of the returned groups.
+    /// - [`order`](ListGroupsCall::order): the `order` query parameter (`ListGroupsRequestOrder`). Specifies the sort order of the returned groups.
     pub fn list_groups(&self) -> ListGroupsCall<'_> {
         ListGroupsCall(self.0.send(ListGroupsRequest::default()))
     }
@@ -39278,7 +40823,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListGroupRoleAssignmentsCall::order): the `order` query parameter (`String`). Sort order for the returned organization roles.
+    /// - [`order`](ListGroupRoleAssignmentsCall::order): the `order` query parameter (`ListGroupRoleAssignmentsRequestOrder`). Sort order for the returned organization roles.
     pub fn list_group_role_assignments(
         &self,
         group_id: impl Into<String>,
@@ -39354,7 +40899,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListGroupUsersCall::order): the `order` query parameter (`String`). Specifies the sort order of users in the list.
+    /// - [`order`](ListGroupUsersCall::order): the `order` query parameter (`ListGroupUsersRequestOrder`). Specifies the sort order of users in the list.
     pub fn list_group_users(
         &self,
         group_id: impl Into<String>,
@@ -39535,7 +41080,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`owner_project_access`](ListProjectApiKeysCall::owner_project_access): the `owner_project_access` query parameter (`String`). Filter API keys by whether the owner currently has effective access to the project. Use `active` for owners with access, `inactive` for owners without access, or `any` for all enabled project API keys. If omitted, the endpoint applies its existing membership-based visibility rules, which may exclude some enabled keys.
+    /// - [`owner_project_access`](ListProjectApiKeysCall::owner_project_access): the `owner_project_access` query parameter (`ListProjectApiKeysRequestOwnerProjectAccess`). Filter API keys by whether the owner currently has effective access to the project. Use `active` for owners with access, `inactive` for owners without access, or `any` for all enabled project API keys. If omitted, the endpoint applies its existing membership-based visibility rules, which may exclude some enabled keys.
     pub fn list_project_api_keys(
         &self,
         project_id: impl Into<String>,
@@ -39610,7 +41155,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListProjectCertificatesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    /// - [`order`](ListProjectCertificatesCall::order): the `order` query parameter (`ListProjectCertificatesRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn list_project_certificates(
         &self,
         project_id: impl Into<String>,
@@ -39708,7 +41253,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListProjectGroupsCall::order): the `order` query parameter (`String`). Sort order for the returned groups.
+    /// - [`order`](ListProjectGroupsCall::order): the `order` query parameter (`ListProjectGroupsRequestOrder`). Sort order for the returned groups.
     pub fn list_project_groups(
         &self,
         project_id: impl Into<String>,
@@ -39745,7 +41290,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`group_type`](RetrieveProjectGroupCall::group_type): the `group_type` query parameter (`String`). The type of group to retrieve.
+    /// - [`group_type`](RetrieveProjectGroupCall::group_type): the `group_type` query parameter (`RetrieveProjectGroupRequestGroupType`). The type of group to retrieve.
     pub fn retrieve_project_group(
         &self,
         project_id: impl Into<String>,
@@ -40037,7 +41582,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListProjectSpendAlertsCall::order): the `order` query parameter (`String`). Sort order for the returned spend alerts.
+    /// - [`order`](ListProjectSpendAlertsCall::order): the `order` query parameter (`ListProjectSpendAlertsRequestOrder`). Sort order for the returned spend alerts.
     pub fn list_project_spend_alerts(
         &self,
         project_id: impl Into<String>,
@@ -40228,7 +41773,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListRolesCall::order): the `order` query parameter (`String`). Sort order for the returned roles.
+    /// - [`order`](ListRolesCall::order): the `order` query parameter (`ListRolesRequestOrder`). Sort order for the returned roles.
     pub fn list_roles(&self) -> ListRolesCall<'_> {
         ListRolesCall(self.0.send(ListRolesRequest::default()))
     }
@@ -40296,7 +41841,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListOrganizationSpendAlertsCall::order): the `order` query parameter (`String`). Sort order for the returned spend alerts.
+    /// - [`order`](ListOrganizationSpendAlertsCall::order): the `order` query parameter (`ListOrganizationSpendAlertsRequestOrder`). Sort order for the returned spend alerts.
     pub fn list_organization_spend_alerts(&self) -> ListOrganizationSpendAlertsCall<'_> {
         ListOrganizationSpendAlertsCall(
             self.0.send(ListOrganizationSpendAlertsRequest::default()),
@@ -40378,18 +41923,21 @@ impl OpenAI {
     ///
     /// Returns a [`UsageAudioSpeechesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
+    /// ## Arguments
+    ///
+    /// - `start_time: i64`: the required `start_time` query parameter
+    ///
     /// ## Optional values
     ///
-    /// - [`start_time`](UsageAudioSpeechesCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
     /// - [`end_time`](UsageAudioSpeechesCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
-    /// - [`bucket_width`](UsageAudioSpeechesCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`bucket_width`](UsageAudioSpeechesCall::bucket_width): the `bucket_width` query parameter (`UsageAudioSpeechesRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
     /// - [`project_ids`](UsageAudioSpeechesCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
     /// - [`user_ids`](UsageAudioSpeechesCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
     /// - [`api_key_ids`](UsageAudioSpeechesCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
     /// - [`models`](UsageAudioSpeechesCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
-    /// - [`group_by`](UsageAudioSpeechesCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    pub fn usage_audio_speeches(&self) -> UsageAudioSpeechesCall<'_> {
-        UsageAudioSpeechesCall(self.0.send(UsageAudioSpeechesRequest::default()))
+    /// - [`group_by`](UsageAudioSpeechesCall::group_by): the `group_by` query parameter (`Vec<UsageAudioSpeechesRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    pub fn usage_audio_speeches(&self, start_time: i64) -> UsageAudioSpeechesCall<'_> {
+        UsageAudioSpeechesCall(self.0.send(UsageAudioSpeechesRequest::new(start_time)))
     }
     /// Get audio transcriptions usage details for the organization.
     ///
@@ -40397,19 +41945,25 @@ impl OpenAI {
     ///
     /// Returns a [`UsageAudioTranscriptionsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
+    /// ## Arguments
+    ///
+    /// - `start_time: i64`: the required `start_time` query parameter
+    ///
     /// ## Optional values
     ///
-    /// - [`start_time`](UsageAudioTranscriptionsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
     /// - [`end_time`](UsageAudioTranscriptionsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
-    /// - [`bucket_width`](UsageAudioTranscriptionsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`bucket_width`](UsageAudioTranscriptionsCall::bucket_width): the `bucket_width` query parameter (`UsageAudioTranscriptionsRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
     /// - [`project_ids`](UsageAudioTranscriptionsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
     /// - [`user_ids`](UsageAudioTranscriptionsCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
     /// - [`api_key_ids`](UsageAudioTranscriptionsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
     /// - [`models`](UsageAudioTranscriptionsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
-    /// - [`group_by`](UsageAudioTranscriptionsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    pub fn usage_audio_transcriptions(&self) -> UsageAudioTranscriptionsCall<'_> {
+    /// - [`group_by`](UsageAudioTranscriptionsCall::group_by): the `group_by` query parameter (`Vec<UsageAudioTranscriptionsRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    pub fn usage_audio_transcriptions(
+        &self,
+        start_time: i64,
+    ) -> UsageAudioTranscriptionsCall<'_> {
         UsageAudioTranscriptionsCall(
-            self.0.send(UsageAudioTranscriptionsRequest::default()),
+            self.0.send(UsageAudioTranscriptionsRequest::new(start_time)),
         )
     }
     /// Get code interpreter sessions usage details for the organization.
@@ -40418,18 +41972,22 @@ impl OpenAI {
     ///
     /// Returns a [`UsageCodeInterpreterSessionsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
+    /// ## Arguments
+    ///
+    /// - `start_time: i64`: the required `start_time` query parameter
+    ///
     /// ## Optional values
     ///
-    /// - [`start_time`](UsageCodeInterpreterSessionsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
     /// - [`end_time`](UsageCodeInterpreterSessionsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
-    /// - [`bucket_width`](UsageCodeInterpreterSessionsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`bucket_width`](UsageCodeInterpreterSessionsCall::bucket_width): the `bucket_width` query parameter (`UsageCodeInterpreterSessionsRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
     /// - [`project_ids`](UsageCodeInterpreterSessionsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
-    /// - [`group_by`](UsageCodeInterpreterSessionsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`.
+    /// - [`group_by`](UsageCodeInterpreterSessionsCall::group_by): the `group_by` query parameter (`Vec<UsageCodeInterpreterSessionsRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`.
     pub fn usage_code_interpreter_sessions(
         &self,
+        start_time: i64,
     ) -> UsageCodeInterpreterSessionsCall<'_> {
         UsageCodeInterpreterSessionsCall(
-            self.0.send(UsageCodeInterpreterSessionsRequest::default()),
+            self.0.send(UsageCodeInterpreterSessionsRequest::new(start_time)),
         )
     }
     /// Get completions usage details for the organization.
@@ -40438,19 +41996,22 @@ impl OpenAI {
     ///
     /// Returns a [`UsageCompletionsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
+    /// ## Arguments
+    ///
+    /// - `start_time: i64`: the required `start_time` query parameter
+    ///
     /// ## Optional values
     ///
-    /// - [`start_time`](UsageCompletionsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
     /// - [`end_time`](UsageCompletionsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
-    /// - [`bucket_width`](UsageCompletionsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`bucket_width`](UsageCompletionsCall::bucket_width): the `bucket_width` query parameter (`UsageCompletionsRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
     /// - [`project_ids`](UsageCompletionsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
     /// - [`user_ids`](UsageCompletionsCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
     /// - [`api_key_ids`](UsageCompletionsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
     /// - [`models`](UsageCompletionsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
     /// - [`batch`](UsageCompletionsCall::batch): the `batch` query parameter (`bool`). If `true`, return batch jobs only. If `false`, return non-batch jobs only. By default, return both.
-    /// - [`group_by`](UsageCompletionsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `batch`, `service_tier` or any combination of them.
-    pub fn usage_completions(&self) -> UsageCompletionsCall<'_> {
-        UsageCompletionsCall(self.0.send(UsageCompletionsRequest::default()))
+    /// - [`group_by`](UsageCompletionsCall::group_by): the `group_by` query parameter (`Vec<UsageCompletionsRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `batch`, `service_tier` or any combination of them.
+    pub fn usage_completions(&self, start_time: i64) -> UsageCompletionsCall<'_> {
+        UsageCompletionsCall(self.0.send(UsageCompletionsRequest::new(start_time)))
     }
     /// Get embeddings usage details for the organization.
     ///
@@ -40458,18 +42019,21 @@ impl OpenAI {
     ///
     /// Returns a [`UsageEmbeddingsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
+    /// ## Arguments
+    ///
+    /// - `start_time: i64`: the required `start_time` query parameter
+    ///
     /// ## Optional values
     ///
-    /// - [`start_time`](UsageEmbeddingsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
     /// - [`end_time`](UsageEmbeddingsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
-    /// - [`bucket_width`](UsageEmbeddingsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`bucket_width`](UsageEmbeddingsCall::bucket_width): the `bucket_width` query parameter (`UsageEmbeddingsRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
     /// - [`project_ids`](UsageEmbeddingsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
     /// - [`user_ids`](UsageEmbeddingsCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
     /// - [`api_key_ids`](UsageEmbeddingsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
     /// - [`models`](UsageEmbeddingsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
-    /// - [`group_by`](UsageEmbeddingsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    pub fn usage_embeddings(&self) -> UsageEmbeddingsCall<'_> {
-        UsageEmbeddingsCall(self.0.send(UsageEmbeddingsRequest::default()))
+    /// - [`group_by`](UsageEmbeddingsCall::group_by): the `group_by` query parameter (`Vec<UsageEmbeddingsRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    pub fn usage_embeddings(&self, start_time: i64) -> UsageEmbeddingsCall<'_> {
+        UsageEmbeddingsCall(self.0.send(UsageEmbeddingsRequest::new(start_time)))
     }
     /// Get file search calls usage details for the organization.
     ///
@@ -40477,18 +42041,26 @@ impl OpenAI {
     ///
     /// Returns a [`UsageFileSearchCallsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
+    /// ## Arguments
+    ///
+    /// - `start_time: i64`: the required `start_time` query parameter
+    ///
     /// ## Optional values
     ///
-    /// - [`start_time`](UsageFileSearchCallsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
     /// - [`end_time`](UsageFileSearchCallsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
-    /// - [`bucket_width`](UsageFileSearchCallsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`bucket_width`](UsageFileSearchCallsCall::bucket_width): the `bucket_width` query parameter (`UsageFileSearchCallsRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
     /// - [`project_ids`](UsageFileSearchCallsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
     /// - [`user_ids`](UsageFileSearchCallsCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
     /// - [`api_key_ids`](UsageFileSearchCallsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
     /// - [`vector_store_ids`](UsageFileSearchCallsCall::vector_store_ids): the `vector_store_ids` query parameter (`Vec<String>`). Return only usage for these vector stores.
-    /// - [`group_by`](UsageFileSearchCallsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `vector_store_id` or any combination of them.
-    pub fn usage_file_search_calls(&self) -> UsageFileSearchCallsCall<'_> {
-        UsageFileSearchCallsCall(self.0.send(UsageFileSearchCallsRequest::default()))
+    /// - [`group_by`](UsageFileSearchCallsCall::group_by): the `group_by` query parameter (`Vec<UsageFileSearchCallsRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `vector_store_id` or any combination of them.
+    pub fn usage_file_search_calls(
+        &self,
+        start_time: i64,
+    ) -> UsageFileSearchCallsCall<'_> {
+        UsageFileSearchCallsCall(
+            self.0.send(UsageFileSearchCallsRequest::new(start_time)),
+        )
     }
     /// Get images usage details for the organization.
     ///
@@ -40496,20 +42068,23 @@ impl OpenAI {
     ///
     /// Returns a [`UsageImagesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
+    /// ## Arguments
+    ///
+    /// - `start_time: i64`: the required `start_time` query parameter
+    ///
     /// ## Optional values
     ///
-    /// - [`start_time`](UsageImagesCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
     /// - [`end_time`](UsageImagesCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
-    /// - [`bucket_width`](UsageImagesCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
-    /// - [`sources`](UsageImagesCall::sources): the `sources` query parameter (`Vec<String>`). Return only usages for these sources. Possible values are `image.generation`, `image.edit`, `image.variation` or any combination of them.
-    /// - [`sizes`](UsageImagesCall::sizes): the `sizes` query parameter (`Vec<String>`). Return only usages for these image sizes. Possible values are `256x256`, `512x512`, `1024x1024`, `1792x1792`, `1024x1792` or any combination of them.
+    /// - [`bucket_width`](UsageImagesCall::bucket_width): the `bucket_width` query parameter (`UsageImagesRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`sources`](UsageImagesCall::sources): the `sources` query parameter (`Vec<UsageImagesRequestSources>`). Return only usages for these sources. Possible values are `image.generation`, `image.edit`, `image.variation` or any combination of them.
+    /// - [`sizes`](UsageImagesCall::sizes): the `sizes` query parameter (`Vec<UsageImagesRequestSizes>`). Return only usages for these image sizes. Possible values are `256x256`, `512x512`, `1024x1024`, `1792x1792`, `1024x1792` or any combination of them.
     /// - [`project_ids`](UsageImagesCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
     /// - [`user_ids`](UsageImagesCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
     /// - [`api_key_ids`](UsageImagesCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
     /// - [`models`](UsageImagesCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
-    /// - [`group_by`](UsageImagesCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `size`, `source` or any combination of them.
-    pub fn usage_images(&self) -> UsageImagesCall<'_> {
-        UsageImagesCall(self.0.send(UsageImagesRequest::default()))
+    /// - [`group_by`](UsageImagesCall::group_by): the `group_by` query parameter (`Vec<UsageImagesRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `size`, `source` or any combination of them.
+    pub fn usage_images(&self, start_time: i64) -> UsageImagesCall<'_> {
+        UsageImagesCall(self.0.send(UsageImagesRequest::new(start_time)))
     }
     /// Get moderations usage details for the organization.
     ///
@@ -40517,18 +42092,21 @@ impl OpenAI {
     ///
     /// Returns a [`UsageModerationsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
+    /// ## Arguments
+    ///
+    /// - `start_time: i64`: the required `start_time` query parameter
+    ///
     /// ## Optional values
     ///
-    /// - [`start_time`](UsageModerationsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
     /// - [`end_time`](UsageModerationsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
-    /// - [`bucket_width`](UsageModerationsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`bucket_width`](UsageModerationsCall::bucket_width): the `bucket_width` query parameter (`UsageModerationsRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
     /// - [`project_ids`](UsageModerationsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
     /// - [`user_ids`](UsageModerationsCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
     /// - [`api_key_ids`](UsageModerationsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
     /// - [`models`](UsageModerationsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
-    /// - [`group_by`](UsageModerationsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    pub fn usage_moderations(&self) -> UsageModerationsCall<'_> {
-        UsageModerationsCall(self.0.send(UsageModerationsRequest::default()))
+    /// - [`group_by`](UsageModerationsCall::group_by): the `group_by` query parameter (`Vec<UsageModerationsRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    pub fn usage_moderations(&self, start_time: i64) -> UsageModerationsCall<'_> {
+        UsageModerationsCall(self.0.send(UsageModerationsRequest::new(start_time)))
     }
     /// Get vector stores usage details for the organization.
     ///
@@ -40536,15 +42114,18 @@ impl OpenAI {
     ///
     /// Returns a [`UsageVectorStoresCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
+    /// ## Arguments
+    ///
+    /// - `start_time: i64`: the required `start_time` query parameter
+    ///
     /// ## Optional values
     ///
-    /// - [`start_time`](UsageVectorStoresCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
     /// - [`end_time`](UsageVectorStoresCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
-    /// - [`bucket_width`](UsageVectorStoresCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`bucket_width`](UsageVectorStoresCall::bucket_width): the `bucket_width` query parameter (`UsageVectorStoresRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
     /// - [`project_ids`](UsageVectorStoresCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
-    /// - [`group_by`](UsageVectorStoresCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`.
-    pub fn usage_vector_stores(&self) -> UsageVectorStoresCall<'_> {
-        UsageVectorStoresCall(self.0.send(UsageVectorStoresRequest::default()))
+    /// - [`group_by`](UsageVectorStoresCall::group_by): the `group_by` query parameter (`Vec<UsageVectorStoresRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`.
+    pub fn usage_vector_stores(&self, start_time: i64) -> UsageVectorStoresCall<'_> {
+        UsageVectorStoresCall(self.0.send(UsageVectorStoresRequest::new(start_time)))
     }
     /// Get web search calls usage details for the organization.
     ///
@@ -40552,19 +42133,25 @@ impl OpenAI {
     ///
     /// Returns a [`UsageWebSearchCallsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
+    /// ## Arguments
+    ///
+    /// - `start_time: i64`: the required `start_time` query parameter
+    ///
     /// ## Optional values
     ///
-    /// - [`start_time`](UsageWebSearchCallsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
     /// - [`end_time`](UsageWebSearchCallsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
-    /// - [`bucket_width`](UsageWebSearchCallsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`bucket_width`](UsageWebSearchCallsCall::bucket_width): the `bucket_width` query parameter (`UsageWebSearchCallsRequestBucketWidth`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
     /// - [`project_ids`](UsageWebSearchCallsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
     /// - [`user_ids`](UsageWebSearchCallsCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
     /// - [`api_key_ids`](UsageWebSearchCallsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
     /// - [`models`](UsageWebSearchCallsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
-    /// - [`context_levels`](UsageWebSearchCallsCall::context_levels): the `context_levels` query parameter (`Vec<String>`). Return only web search usage for these context levels.
-    /// - [`group_by`](UsageWebSearchCallsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `context_level` or any combination of them.
-    pub fn usage_web_search_calls(&self) -> UsageWebSearchCallsCall<'_> {
-        UsageWebSearchCallsCall(self.0.send(UsageWebSearchCallsRequest::default()))
+    /// - [`context_levels`](UsageWebSearchCallsCall::context_levels): the `context_levels` query parameter (`Vec<UsageWebSearchCallsRequestContextLevels>`). Return only web search usage for these context levels.
+    /// - [`group_by`](UsageWebSearchCallsCall::group_by): the `group_by` query parameter (`Vec<UsageWebSearchCallsRequestGroupBy>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `context_level` or any combination of them.
+    pub fn usage_web_search_calls(
+        &self,
+        start_time: i64,
+    ) -> UsageWebSearchCallsCall<'_> {
+        UsageWebSearchCallsCall(self.0.send(UsageWebSearchCallsRequest::new(start_time)))
     }
     /// Lists all of the users in the organization.
     ///
@@ -40631,7 +42218,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListUserRoleAssignmentsCall::order): the `order` query parameter (`String`). Sort order for the returned organization roles.
+    /// - [`order`](ListUserRoleAssignmentsCall::order): the `order` query parameter (`ListUserRoleAssignmentsRequestOrder`). Sort order for the returned organization roles.
     pub fn list_user_role_assignments(
         &self,
         user_id: impl Into<String>,
@@ -40704,7 +42291,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListProjectGroupRoleAssignmentsCall::order): the `order` query parameter (`String`). Sort order for the returned project roles.
+    /// - [`order`](ListProjectGroupRoleAssignmentsCall::order): the `order` query parameter (`ListProjectGroupRoleAssignmentsRequestOrder`). Sort order for the returned project roles.
     pub fn list_project_group_role_assignments(
         &self,
         project_id: impl Into<String>,
@@ -40799,7 +42386,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListProjectRolesCall::order): the `order` query parameter (`String`). Sort order for the returned roles.
+    /// - [`order`](ListProjectRolesCall::order): the `order` query parameter (`ListProjectRolesRequestOrder`). Sort order for the returned roles.
     pub fn list_project_roles(
         &self,
         project_id: impl Into<String>,
@@ -40897,7 +42484,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListProjectUserRoleAssignmentsCall::order): the `order` query parameter (`String`). Sort order for the returned project roles.
+    /// - [`order`](ListProjectUserRoleAssignmentsCall::order): the `order` query parameter (`ListProjectUserRoleAssignmentsRequestOrder`). Sort order for the returned project roles.
     pub fn list_project_user_role_assignments(
         &self,
         project_id: impl Into<String>,
@@ -41202,7 +42789,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`include`](GetResponseCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
     /// - [`stream`](GetResponseCall::stream): the `stream` query parameter (`bool`). If set to true, the model response data will be streamed to the client as it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format). See the [Streaming section below](/docs/api-reference/responses-streaming) for more information.
     /// - [`starting_after`](GetResponseCall::starting_after): the `starting_after` query parameter (`i64`). The sequence number of the event after which to start streaming.
     /// - [`include_obfuscation`](GetResponseCall::include_obfuscation): the `include_obfuscation` query parameter (`bool`). When true, stream obfuscation will be enabled. Stream obfuscation adds random characters to an `obfuscation` field on streaming delta events to normalize payload sizes as a mitigation to certain side-channel attacks. These obfuscation fields are included by default, but add a small amount of overhead to the data stream. You can set `include_obfuscation` to false to optimize for bandwidth if you trust the network links between your application and the OpenAI API.
@@ -41265,8 +42851,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListInputItemsCall::order): the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
-    /// - [`include`](ListInputItemsCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
+    /// - [`order`](ListInputItemsCall::order): the `order` query parameter (`ListInputItemsRequestOrder`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
     /// - [`beta`](ListInputItemsCall::beta): the `beta` query parameter (`bool`).
     /// - [`openai_beta`](ListInputItemsCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
     pub fn list_input_items(
@@ -41375,7 +42960,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListVectorStoresCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    /// - [`order`](ListVectorStoresCall::order): the `order` query parameter (`ListVectorStoresRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn list_vector_stores(&self) -> ListVectorStoresCall<'_> {
         ListVectorStoresCall(self.0.send(ListVectorStoresRequest::default()))
     }
@@ -41517,8 +43102,8 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListFilesInVectorStoreBatchCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    /// - [`filter`](ListFilesInVectorStoreBatchCall::filter): the `filter` query parameter (`String`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
+    /// - [`order`](ListFilesInVectorStoreBatchCall::order): the `order` query parameter (`ListFilesInVectorStoreBatchRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    /// - [`filter`](ListFilesInVectorStoreBatchCall::filter): the `filter` query parameter (`ListFilesInVectorStoreBatchRequestFilter`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
     pub fn list_files_in_vector_store_batch(
         &self,
         vector_store_id: impl Into<String>,
@@ -41542,8 +43127,8 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListVectorStoreFilesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    /// - [`filter`](ListVectorStoreFilesCall::filter): the `filter` query parameter (`String`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
+    /// - [`order`](ListVectorStoreFilesCall::order): the `order` query parameter (`ListVectorStoreFilesRequestOrder`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    /// - [`filter`](ListVectorStoreFilesCall::filter): the `filter` query parameter (`ListVectorStoreFilesRequestFilter`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
     pub fn list_vector_store_files(
         &self,
         vector_store_id: impl Into<String>,
@@ -41889,10 +43474,6 @@ impl OpenAI {
     /// `GET /videos`
     ///
     /// Returns a [`ListVideosCall`]: chain optional values and per-call settings on it, then `.await` it to send.
-    ///
-    /// ## Optional values
-    ///
-    /// - [`order`](ListVideosCall::order): the `order` query parameter (`serde_json::Value`). Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
     pub fn list_videos(&self) -> ListVideosCall<'_> {
         ListVideosCall(self.0.send(ListVideosRequest::default()))
     }
@@ -42006,10 +43587,6 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `video_id: impl Into<String>`: the `{video_id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`variant`](RetrieveVideoContentCall::variant): the `variant` query parameter (`serde_json::Value`). Which downloadable asset to return. Defaults to the MP4 video.
     pub fn retrieve_video_content(
         &self,
         video_id: impl Into<String>,
@@ -42082,10 +43659,6 @@ impl OpenAI {
     /// `GET /skills`
     ///
     /// Returns a [`ListSkillsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
-    ///
-    /// ## Optional values
-    ///
-    /// - [`order`](ListSkillsCall::order): the `order` query parameter (`serde_json::Value`). Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
     pub fn list_skills(&self) -> ListSkillsCall<'_> {
         ListSkillsCall(self.0.send(ListSkillsRequest::default()))
     }
@@ -42171,10 +43744,6 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `skill_id: impl Into<String>`: the `{skill_id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`order`](ListSkillVersionsCall::order): the `order` query parameter (`serde_json::Value`). Sort order of results by version number.
     pub fn list_skill_versions(
         &self,
         skill_id: impl Into<String>,
@@ -42300,10 +43869,6 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `thread_id: impl Into<String>`: the `{thread_id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`order`](ListThreadItemsMethodCall::order): the `order` query parameter (`serde_json::Value`). Sort order for results by creation time. Defaults to `desc`.
     pub fn list_thread_items_method(
         &self,
         thread_id: impl Into<String>,
@@ -42350,7 +43915,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`order`](ListThreadsMethodCall::order): the `order` query parameter (`serde_json::Value`). Sort order for results by creation time. Defaults to `desc`.
     /// - [`user`](ListThreadsMethodCall::user): the `user` query parameter (`String`). Filter threads that belong to this user identifier. Defaults to null to return all users.
     pub fn list_threads_method(&self) -> ListThreadsMethodCall<'_> {
         ListThreadsMethodCall(self.0.send(ListThreadsMethodRequest::default()))

@@ -31,12 +31,45 @@ and an explicit authentication choice. Both builds are fallible; REST structs
 are non-exhaustive and external callers use builders. WebSocket definitions
 retain their existing construction API.
 
+Optional vocabulary adds facts a definition can state when the provider has
+them:
+
+```rust
+let endpoint = Endpoint::get("GetIssue", "/repos/{owner}/{repo}/issues/{number}")
+    .describes("Get an issue")
+    .returns_json::<Issue>(&mut context)
+    .path_param(ParamDef::path("owner", QueryParamType::String))
+    .path_param(ParamDef::path("repo", QueryParamType::String))
+    .path_param(ParamDef::path("number", QueryParamType::Integer))
+    .query(ParamDef::new("fields", QueryParamType::String).required())
+    .deprecated()
+    .public()
+    .build()?;
+// Generated: GetIssueRequest::new(owner, repo, number, fields), with no Default
+```
+
+- **Typed path parameters** (`path_param`) must match the template's
+  placeholders. **Required query parameters** become constructor arguments,
+  after the path parameters. A parameter a pager adopts is the exception.
+- **Endpoint authentication**: `.public()` sends no credential, and strips any
+  raw header placed where a credential goes. `.auth(policy)` replaces the
+  API policy.
+- **`deprecated`** reaches docs and OpenAPI. **`rate_limit`** and
+  **`retry_guidance`** are metadata only; nothing retries.
+- **Basic** keeps its username and password variable lists inside
+  `AuthStrategy::Basic`. **OAuth2** is one `OAuth2Config` variant per grant.
+- **Composed bodies**: `context.one_of::<T>([..])`, `any_of`, and `all_of` bind
+  a hand-written type to an OpenAPI composition.
+- **`DefinitionBundle`** serializes an API with its schemas. It loads without
+  the Rust types, for comparison and export; it cannot generate a client.
+
 Read the current behavior and examples in:
 
 - [Definition builders](../docs/definition-builders.md): required facts, auth coherence, parameter locations, route identity, and validation.
 - [Typed registration](../docs/typed-registration.md): nominal types, aliases, containers, ordered module groups, and destination validation.
 - [Pagination](../docs/pagination.md): API defaults, endpoint collections, caller controls, and parameter adoption.
-- [Definition snapshots](../docs/definition-snapshots.md): serialized transfer contracts.
+- [Definition snapshots](../docs/definition-snapshots.md) and [definition bundles](../docs/io/definition-bundles.md): serialized transfer contracts.
+- [Request inputs](../docs/generation/request-side.md) and [credentials](../docs/runtime/credentials.md#endpoint-authentication): query fidelity and endpoint authentication on the wire.
 - [Headers](../docs/headers/README.md) and [runtime](../docs/runtime/README.md): credentials and execution policy.
 - [OpenAPI extensions](../docs/io/openapi-extensions.md) and [imports](../docs/io/import-openapi.md).
 - [Package dependencies](../docs/dependencies.md).

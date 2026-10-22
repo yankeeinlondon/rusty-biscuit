@@ -104,15 +104,15 @@ pub(super) fn generate_into_parts_body(
 /// Appends each required adopted parameter's default to the assembled query
 /// or headers.
 fn generate_defaults(defaults: &[OrdinaryDefault]) -> TokenStream {
-    let pushes = |location: ParamLocation| {
+    let pushes = |location: ParamLocation, value_type: TokenStream| {
         defaults
             .iter()
             .filter(move |default| default.location == location)
-            .map(|OrdinaryDefault { name, value, .. }| quote! { (#name.to_owned(), #value.to_owned()) })
+            .map(|OrdinaryDefault { name, value, .. }| quote! { (#name.to_owned(), #value_type::from(#value)) })
             .collect::<Vec<_>>()
     };
-    let query = pushes(ParamLocation::Query);
-    let headers = pushes(ParamLocation::Header);
+    let query = pushes(ParamLocation::Query, quote! { schematic_runtime::QueryValue });
+    let headers = pushes(ParamLocation::Header, quote! { String });
     let mut statements = TokenStream::new();
     if !query.is_empty() {
         statements.extend(quote! { let mut query = query; query.extend([#(#query),*]); });

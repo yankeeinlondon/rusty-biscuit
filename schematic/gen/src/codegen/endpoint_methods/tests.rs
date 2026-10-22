@@ -25,7 +25,7 @@ fn param(name: &str, param_type: QueryParamType, description: Option<&str>) -> P
         description: description.map(str::to_string),
         param_type,
         explode: false,
-        style: ParamStyle::Simple,
+        style: ParamStyle::Form,
     }
 }
 
@@ -587,6 +587,46 @@ fn example_invocation_passes_path_parameters_and_the_body() {
     assert_eq!(invocation("GetWidget"), r#"client.get_widget("owner", "widget_id")"#);
     assert_eq!(invocation("CreateWidget"), r#"client.create_widget("owner", body)"#);
     assert_eq!(invocation("New"), "client.new_endpoint()");
+}
+
+#[test]
+fn required_query_values_are_method_arguments_and_optional_ones_typed_setters() {
+    let mut search = endpoint("Search", RestMethod::Post, "/orgs/{org}/search", "Searches.");
+    search.request = Some(ApiRequest::json_type("Query"));
+    let mut since = param("since", QueryParamType::Integer, None);
+    since.required = true;
+    let mut scope = param("scope", QueryParamType::Enum(vec!["all".into(), "mine".into()]), None);
+    scope.required = true;
+    search.params = Some(EndpointParams {
+        query: vec![
+            since,
+            param("order", QueryParamType::Enum(vec!["asc".into(), "desc".into()]), None),
+            scope,
+        ],
+        ..Default::default()
+    });
+    let api = api("Finder", vec![search]);
+    let code = code(&api);
+    let flat = squash(&code);
+
+    assert!(
+        flat.contains(&squash(
+            "pub fn search(&self, org: impl Into<String>, since: i64, scope: SearchRequestScope, body: Query) \
+             -> SearchCall<'_> { SearchCall(self.0.send(SearchRequest::new(org, since, scope, body))) }"
+        )),
+        "{code}"
+    );
+    let setters = inherent_fns(&code, "SearchCall");
+    assert!(setters.contains("order"), "{setters:?}");
+    assert!(!setters.contains("since") && !setters.contains("scope"), "required values have no setter: {setters:?}");
+    assert!(flat.contains(&squash("pub fn order(self, value: SearchRequestOrder) -> Self")), "{code}");
+    let docs = fn_docs(&code, "Finder", "search").join("\n");
+    assert!(docs.contains("- `since: i64`: the required `since` query parameter"), "{docs}");
+    assert!(docs.contains("- `scope: SearchRequestScope`: the required `scope` query parameter"), "{docs}");
+    assert_eq!(
+        example_invocation(&api, &api.endpoints[0], "client"),
+        r#"client.search("org", 1, SearchRequestScope::All, body)"#
+    );
 }
 
 // ---- reserved names stay true to the code they reserve (ruling 6) ----

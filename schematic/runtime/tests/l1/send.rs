@@ -9,7 +9,8 @@ use http::Method;
 use schematic_runtime::redact::REDACTED;
 use schematic_runtime::{
     ApiDefinition, AuthConfig, AuthMethod, Binary, CallOptions, Credential, CredentialPlacement, Empty, ErrorKind,
-    FormPart, Json, NoDeclaredError, Outcome, RequestBody, RequestParts, Text, TransportErrorKind,
+    FormPart, Json, NoDeclaredError, Outcome, QueryDelimiter, QueryValue, RequestBody, RequestParts, Text,
+    TransportErrorKind,
 };
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -261,6 +262,31 @@ async fn query_order_duplicates_and_a_template_query_reach_the_server() {
     assert_eq!(received[0].url.fragment(), None, "fragments are never sent");
     let names: Vec<_> = response.meta.request.query.iter().map(|(name, value)| format!("{name}={value}")).collect();
     assert_eq!(names, ["fixed=1", "tag=a", "tag=b", "q=x y&z+~é"]);
+}
+
+#[tokio::test]
+async fn delimited_query_values_encode_each_element_once_and_keep_their_delimiter() {
+    let server = serve(200, br#"{"id":1}"#, "application/json").await;
+    let mut parts = RequestParts::new(Method::GET, "/item");
+    parts.query = vec![
+        ("form".into(), QueryValue::delimited(["a,b", "c"], QueryDelimiter::Comma)),
+        ("space".into(), QueryValue::delimited(["x y", "z"], QueryDelimiter::Space)),
+        ("pipe".into(), QueryValue::delimited(["p|q", "é/%"], QueryDelimiter::Pipe)),
+        ("empty".into(), QueryValue::delimited(Vec::<String>::new(), QueryDelimiter::Comma)),
+        ("text".into(), "a,b".into()),
+    ];
+    let response = plain_client(&server.uri())
+        .send(Call::<Json<Item>>::new(parts)).full()
+        .await
+        .expect("head");
+
+    let received = server.received_requests().await.expect("recorded");
+    assert_eq!(
+        received[0].url.query(),
+        Some("form=a%2Cb,c&space=x%20y%20z&pipe=p%7Cq%7C%C3%A9%2F%25&empty=&text=a%2Cb")
+    );
+    let decoded: Vec<_> = response.meta.request.query.iter().map(|(name, value)| format!("{name}={value}")).collect();
+    assert_eq!(decoded, ["form=a,b,c", "space=x y z", "pipe=p|q|é/%", "empty=", "text=a,b"]);
 }
 
 #[tokio::test]

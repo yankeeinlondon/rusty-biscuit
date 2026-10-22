@@ -27,6 +27,10 @@ const BASIC_APIS: &[&str] = &["bitbucket", "emqx-basic"];
 // equivalent only while the same snapshot's explicit `basic_user` names
 // exactly that variable, which the current builder also requires.
 const UNUSED_USERNAME_APIS: &[&str] = &["unfolded-circle-core-rest"];
+// Imported before the importer applied OpenAPI's `explode` default, `true`
+// for `form` style: their snapshots record `false` for every form-style query
+// and cookie parameter, and the vendored document declares none of them.
+const FORM_EXPLODE_DEFAULT_APIS: &[&str] = &["openai"];
 
 /// Deliberate definition adoptions made after the snapshots were taken: one
 /// API, one top-level definition field, and the exact value adopted. A
@@ -91,7 +95,37 @@ fn normalize_historical(key: &str, mut historical: Value) -> Value {
         metadata.as_object_mut().unwrap().remove("endpoints");
         historical["fingerprints"]["api_metadata"] = Value::String(fingerprint(&metadata));
     }
+    if FORM_EXPLODE_DEFAULT_APIS.contains(&key) {
+        apply_form_explode_default(&mut historical);
+    }
     historical
+}
+
+/// Sets `explode` to `true` on every form-style query and cookie parameter
+/// that records `false`, and recomputes the fingerprint of each endpoint it
+/// changes exactly as `snapshot` does.
+fn apply_form_explode_default(historical: &mut Value) {
+    let count = historical["definition"]["endpoints"].as_array().map_or(0, Vec::len);
+    for index in 0..count {
+        let endpoint = &mut historical["definition"]["endpoints"][index];
+        let mut changed = false;
+        for location in ["query", "cookie"] {
+            let Some(params) = endpoint.pointer_mut(&format!("/params/{location}")).and_then(Value::as_array_mut)
+            else {
+                continue;
+            };
+            for param in params {
+                if param["style"] == "Form" && param["explode"] == false {
+                    param["explode"] = Value::Bool(true);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            let blake3 = fingerprint(endpoint);
+            historical["fingerprints"]["endpoints"][index]["blake3"] = Value::String(blake3);
+        }
+    }
 }
 
 fn historical_differences(key: &str, historical: Value, api: &RestApi) -> Vec<String> {

@@ -289,8 +289,12 @@ reports as `RepeatedContinuation`).
 - **Next links are sent as the provider wrote them,** with GET. A relative
   link resolves against the URL of the response that carried it, after any
   redirect. The pager does not re-add the page size to a followed link unless
-  the caller changed the size during the traversal. A response that names
-  two different next links is `InvalidContinuation`.
+  the caller changed the size during the traversal. When it does add a value
+  to a link (a changed size or a carried query parameter), it replaces only
+  the pairs of that name: the link's other pairs are kept byte for byte, and
+  the added value is encoded as every declared query value is (a space is
+  `%20`). A response that names two different next links is
+  `InvalidContinuation`.
 - **Next links obey the API's cross-origin policy.** Each link is checked
   with the listing endpoint's policy before it is requested, and a refused
   link reaches no server; see

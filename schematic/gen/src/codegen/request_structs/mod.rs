@@ -13,7 +13,7 @@ mod into_parts;
 mod named_params;
 pub(crate) mod param_enums;
 pub(crate) mod path_params;
-mod query_params;
+pub(crate) mod query_params;
 pub(crate) mod shared;
 mod single;
 #[cfg(test)]
@@ -52,8 +52,13 @@ pub const PLACEHOLDER_API_MARKER: &str = "Api";
 ///   them in first-occurrence template order
 /// - A `body` field if the endpoint sends a body: its JSON type, a generated
 ///   form struct, `String` for a text body, or `Vec<u8>` for a binary body
-/// - a derived `Default`, unless a typed path field makes `new()` the only
-///   way to build it
+/// - one field per query parameter the Rust client can send: `T` when
+///   required, `Option<T>` otherwise, with an enum generated for enum values
+///   (see [`query_params`])
+/// - a derived `Default`, unless a typed path field or a required query
+///   field makes `new()` the only way to build it; `new()` takes the path
+///   parameters, then the required query parameters in declaration order,
+///   then the body
 /// - docs stating deprecation, an endpoint's own authentication, and its
 ///   effective rate-limit headers and retry guidance; none of these changes
 ///   the generated code
@@ -98,7 +103,7 @@ pub const PLACEHOLDER_API_MARKER: &str = "Api";
 ///
 ///     fn into_parts(self) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
 ///         let path = format!("/models/{}", urlencoding::encode(&self.model.to_string()));
-///         let query: Vec<(String, String)> = Vec::new();
+///         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
 ///         Ok(schematic_runtime::RequestParts { method: <Self as schematic_runtime::EndpointSpec>::METHOD, path, query, headers: vec![], body: schematic_runtime::RequestBody::Empty })
 ///     }
 /// }
@@ -147,15 +152,20 @@ pub(crate) fn generate_request_struct_with_defaults(
     let struct_name = format_ident!("{}{}", endpoint.id, suffix);
     let struct_name_str = format!("{}{}", endpoint.id, suffix);
     let path_params = extract_path_params(&endpoint.path);
-    let query_params = extract_query_params(&endpoint.params);
+    let query_params = extract_query_params(&endpoint.params, &struct_name_str);
     let header_params = extract_header_params(&endpoint.params);
     let cookie_params = extract_cookie_params(&endpoint.params);
     let typed_paths = path_params::typed_path_fields(endpoint, &struct_name_str);
     let typed_paths = typed_paths.as_deref();
+    // Required query parameters are `new()` arguments, after the path
+    // parameters and before the body.
+    let required_query: Vec<QueryParamInfo> =
+        query_params.iter().filter(|param| param.required).cloned().collect();
     // Every optional field starts as `None` in the generated constructors and
     // `From` impls, whichever location it is sent in.
     let optional_params: Vec<QueryParamInfo> = query_params
         .iter()
+        .filter(|param| !param.required)
         .chain(&header_params)
         .chain(&cookie_params)
         .cloned()
@@ -174,6 +184,7 @@ pub(crate) fn generate_request_struct_with_defaults(
     let path_enums = typed_paths
         .map(|fields| path_params::generate_path_enums(fields, &struct_name_str))
         .unwrap_or_default();
+    let query_enums = query_params::generate_query_enums(&query_params, &struct_name_str);
     let query_param_fields = query_params::generate_query_param_fields(&query_params);
     let header_param_fields =
         named_params::generate_named_param_fields(&header_params, ParamLocation::Header);
@@ -181,7 +192,7 @@ pub(crate) fn generate_request_struct_with_defaults(
         named_params::generate_named_param_fields(&cookie_params, ParamLocation::Cookie);
     let body_field = body::generate_body_field(api, endpoint);
 
-    let derives = derives::generate_derives(typed_paths.is_none());
+    let derives = derives::generate_derives(typed_paths.is_none() && required_query.is_empty());
 
     let default_impl =
         body::generate_default_impl(&struct_name, &path_params, &query_params, has_body);
@@ -191,8 +202,13 @@ pub(crate) fn generate_request_struct_with_defaults(
         Some(fields) => path_params::typed_path_args(fields),
         None => path_params::untyped_path_args(&path_params),
     };
-    let new_method =
-        path_params::generate_new_method(&path_args, &optional_params, has_body, body_type_name);
+    let new_method = path_params::generate_new_method(
+        &path_args,
+        &required_query,
+        &optional_params,
+        has_body,
+        body_type_name,
+    );
 
     // Generate builder methods for query, header, and cookie params
     let query_builder_methods = query_params::generate_query_builder_methods(&query_params);
@@ -201,18 +217,23 @@ pub(crate) fn generate_request_struct_with_defaults(
     let cookie_builder_methods =
         named_params::generate_named_builder_methods(&cookie_params, ParamLocation::Cookie);
 
-    // Generate From<Body> impl for body-only structs
-    let from_body_impl = body::generate_from_body_impl(
-        &struct_name,
-        &path_params,
-        &optional_params,
-        has_body,
-        body_type_name,
-    );
+    // Generate From<Body> impl for body-only structs. A required query value
+    // is only taken by `new()`.
+    let from_body_impl = if required_query.is_empty() {
+        body::generate_from_body_impl(
+            &struct_name,
+            &path_params,
+            &optional_params,
+            has_body,
+            body_type_name,
+        )
+    } else {
+        quote! {}
+    };
 
     // Generate From<&str> and From<String> impls for single-param no-body
     // structs. A typed path value is only taken by `new()`.
-    let from_string_impls = if typed_paths.is_some() {
+    let from_string_impls = if typed_paths.is_some() || !required_query.is_empty() {
         quote! {}
     } else {
         single::generate_from_string_impls(&struct_name, &path_params, &optional_params, has_body)
@@ -228,13 +249,18 @@ pub(crate) fn generate_request_struct_with_defaults(
     let endpoint_spec_impl =
         endpoint_spec::generate_endpoint_spec_impl(api, &struct_name, api_marker, endpoint, into_parts_body);
 
-    let example = match typed_paths {
+    let mut example = match typed_paths {
         Some(fields) => typed_path_example(fields),
         None => PathExample {
             args: path_params.iter().map(|p| format!("\"{p}_value\"")).collect(),
             imports: Vec::new(),
         },
     };
+    for param in &required_query {
+        let (arg, import) = query_example_arg(param);
+        example.args.push(arg);
+        example.imports.extend(import);
+    }
     let mut doc_lines = vec![format!(" Request for `{}` endpoint.", endpoint.id)];
     doc_lines.extend(
         endpoint_docs::request_doc_sections(api, endpoint)
@@ -290,6 +316,8 @@ pub(crate) fn generate_request_struct_with_defaults(
 
         #path_enums
 
+        #query_enums
+
         #(#[doc = #doc_lines])*
         #derives
         pub struct #struct_name {
@@ -329,6 +357,35 @@ struct PathExample {
     imports: Vec<String>,
 }
 
+/// A plausible `new()` argument for a required query parameter, and the
+/// enum it names, if any.
+pub(crate) fn query_example_arg(param: &QueryParamInfo) -> (String, Option<String>) {
+    use query_params::{QueryForm, QueryScalar};
+
+    let Some(shape) = &param.shape else {
+        return ("/* value */".to_string(), None);
+    };
+    let (scalar, import) = match &shape.scalar {
+        QueryScalar::String => (format!("\"{}_value\"", param.name), None),
+        QueryScalar::Integer => ("1".to_string(), None),
+        QueryScalar::Number => ("1.5".to_string(), None),
+        QueryScalar::Boolean => ("true".to_string(), None),
+        QueryScalar::Enum { type_name, values } => (
+            format!("{type_name}::{}", param_enums::enum_variant_name(values.first().map_or("", String::as_str))),
+            Some(type_name.clone()),
+        ),
+    };
+    let scalar = match (&shape.scalar, shape.form) {
+        (QueryScalar::String, QueryForm::Single) => scalar,
+        (QueryScalar::String, _) => format!("{scalar}.to_string()"),
+        _ => scalar,
+    };
+    match shape.form {
+        QueryForm::Single => (scalar, import),
+        _ => (format!("vec![{scalar}]"), import),
+    }
+}
+
 fn typed_path_example(fields: &[PathField]) -> PathExample {
     let imports = fields
         .iter()
@@ -345,9 +402,9 @@ fn typed_path_example(fields: &[PathField]) -> PathExample {
 ///
 /// The example shows how to instantiate the request struct:
 /// - For structs with no required fields: uses `Default::default()`
-/// - For structs with path params only: uses `new()` with params
+/// - For structs with path or required query params: uses `new()` with them
 /// - For structs with body: uses `new()` with body (and optional params)
-/// - Query params use builder-style `with_*` methods
+/// - Optional params use builder-style `with_*` methods
 fn generate_doc_example(
     struct_name: &str,
     path: &PathExample,
@@ -419,7 +476,7 @@ fn generate_doc_example(
         }
         lines.push(";".to_string());
     } else if !path_params.is_empty() {
-        // Path params only - use new()
+        // Path or required query params - use new()
         lines.push(request_import);
         lines.push(String::new());
 

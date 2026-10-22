@@ -54,7 +54,7 @@ impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
             "/repos/{}/{}", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -133,9 +133,9 @@ impl schematic_runtime::EndpointSpec for GetGitTreeRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
             .tree_sha.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.recursive {
-            query.push(("recursive".to_string(), value.to_string()));
+            query.push(("recursive".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -203,7 +203,7 @@ impl schematic_runtime::EndpointSpec for GetRepositoryContentRawRequest {
             "/repos/{}/{}/contents/{}", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string()), self.path
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![
             ("Accept".to_string(), "application/vnd.github.raw+json".to_string())
         ];
@@ -214,6 +214,93 @@ impl schematic_runtime::EndpointSpec for GetRepositoryContentRawRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `state` query parameter of [`ListPullRequestsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListPullRequestsRequestState {
+    /// `open`
+    #[serde(rename = "open")]
+    Open,
+    /// `closed`
+    #[serde(rename = "closed")]
+    Closed,
+    /// `all`
+    #[serde(rename = "all")]
+    All,
+}
+impl ListPullRequestsRequestState {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Closed => "closed",
+            Self::All => "all",
+        }
+    }
+}
+impl ::core::fmt::Display for ListPullRequestsRequestState {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `sort` query parameter of [`ListPullRequestsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListPullRequestsRequestSort {
+    /// `created`
+    #[serde(rename = "created")]
+    Created,
+    /// `updated`
+    #[serde(rename = "updated")]
+    Updated,
+    /// `popularity`
+    #[serde(rename = "popularity")]
+    Popularity,
+    /// `long-running`
+    #[serde(rename = "long-running")]
+    LongRunning,
+}
+impl ListPullRequestsRequestSort {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+            Self::Popularity => "popularity",
+            Self::LongRunning => "long-running",
+        }
+    }
+}
+impl ::core::fmt::Display for ListPullRequestsRequestSort {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `direction` query parameter of [`ListPullRequestsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListPullRequestsRequestDirection {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListPullRequestsRequestDirection {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListPullRequestsRequestDirection {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListPullRequests` endpoint.
@@ -245,11 +332,11 @@ pub struct ListPullRequestsRequest {
     /// Path parameter: repo
     pub repo: String,
     /// Query parameter: Filter by PR state
-    pub state: Option<String>,
+    pub state: Option<ListPullRequestsRequestState>,
     /// Query parameter: Sort field
-    pub sort: Option<String>,
+    pub sort: Option<ListPullRequestsRequestSort>,
     /// Query parameter: Sort direction
-    pub direction: Option<String>,
+    pub direction: Option<ListPullRequestsRequestDirection>,
 }
 impl ListPullRequestsRequest {
     /// Creates a new request with the required path parameters.
@@ -263,17 +350,17 @@ impl ListPullRequestsRequest {
         }
     }
     /// Sets the `state` query parameter.
-    pub fn with_state(mut self, value: String) -> Self {
+    pub fn with_state(mut self, value: ListPullRequestsRequestState) -> Self {
         self.state = Some(value);
         self
     }
     /// Sets the `sort` query parameter.
-    pub fn with_sort(mut self, value: String) -> Self {
+    pub fn with_sort(mut self, value: ListPullRequestsRequestSort) -> Self {
         self.sort = Some(value);
         self
     }
     /// Sets the `direction` query parameter.
-    pub fn with_direction(mut self, value: String) -> Self {
+    pub fn with_direction(mut self, value: ListPullRequestsRequestDirection) -> Self {
         self.direction = Some(value);
         self
     }
@@ -294,15 +381,15 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
             "/repos/{}/{}/pulls", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.state {
-            query.push(("state".to_string(), value.to_string()));
+            query.push(("state".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.sort {
-            query.push(("sort".to_string(), value.to_string()));
+            query.push(("sort".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.direction {
-            query.push(("direction".to_string(), value.to_string()));
+            query.push(("direction".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -373,7 +460,7 @@ impl schematic_runtime::EndpointSpec for ListPullRequestFilesRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
             .pull_number.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -382,6 +469,89 @@ impl schematic_runtime::EndpointSpec for ListPullRequestFilesRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `state` query parameter of [`ListIssuesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListIssuesRequestState {
+    /// `open`
+    #[serde(rename = "open")]
+    Open,
+    /// `closed`
+    #[serde(rename = "closed")]
+    Closed,
+    /// `all`
+    #[serde(rename = "all")]
+    All,
+}
+impl ListIssuesRequestState {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Closed => "closed",
+            Self::All => "all",
+        }
+    }
+}
+impl ::core::fmt::Display for ListIssuesRequestState {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `sort` query parameter of [`ListIssuesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListIssuesRequestSort {
+    /// `created`
+    #[serde(rename = "created")]
+    Created,
+    /// `updated`
+    #[serde(rename = "updated")]
+    Updated,
+    /// `comments`
+    #[serde(rename = "comments")]
+    Comments,
+}
+impl ListIssuesRequestSort {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+            Self::Comments => "comments",
+        }
+    }
+}
+impl ::core::fmt::Display for ListIssuesRequestSort {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `direction` query parameter of [`ListIssuesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListIssuesRequestDirection {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListIssuesRequestDirection {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListIssuesRequestDirection {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListIssues` endpoint.
@@ -413,11 +583,11 @@ pub struct ListIssuesRequest {
     /// Path parameter: repo
     pub repo: String,
     /// Query parameter: Filter by issue state
-    pub state: Option<String>,
+    pub state: Option<ListIssuesRequestState>,
     /// Query parameter: Sort field
-    pub sort: Option<String>,
+    pub sort: Option<ListIssuesRequestSort>,
     /// Query parameter: Sort direction
-    pub direction: Option<String>,
+    pub direction: Option<ListIssuesRequestDirection>,
 }
 impl ListIssuesRequest {
     /// Creates a new request with the required path parameters.
@@ -431,17 +601,17 @@ impl ListIssuesRequest {
         }
     }
     /// Sets the `state` query parameter.
-    pub fn with_state(mut self, value: String) -> Self {
+    pub fn with_state(mut self, value: ListIssuesRequestState) -> Self {
         self.state = Some(value);
         self
     }
     /// Sets the `sort` query parameter.
-    pub fn with_sort(mut self, value: String) -> Self {
+    pub fn with_sort(mut self, value: ListIssuesRequestSort) -> Self {
         self.sort = Some(value);
         self
     }
     /// Sets the `direction` query parameter.
-    pub fn with_direction(mut self, value: String) -> Self {
+    pub fn with_direction(mut self, value: ListIssuesRequestDirection) -> Self {
         self.direction = Some(value);
         self
     }
@@ -462,15 +632,15 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
             "/repos/{}/{}/issues", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.state {
-            query.push(("state".to_string(), value.to_string()));
+            query.push(("state".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.sort {
-            query.push(("sort".to_string(), value.to_string()));
+            query.push(("sort".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.direction {
-            query.push(("direction".to_string(), value.to_string()));
+            query.push(("direction".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -541,7 +711,7 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
             .issue_number.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -611,7 +781,7 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
             .to_string()), urlencoding::encode(& self.repo.to_string()),
             urlencoding::encode(& self.issue_number.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -681,7 +851,7 @@ impl schematic_runtime::EndpointSpec for ListIssueTimelineRequest {
             .to_string()), urlencoding::encode(& self.repo.to_string()),
             urlencoding::encode(& self.issue_number.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -743,7 +913,7 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
             "/repos/{}/{}/tags", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -805,7 +975,7 @@ impl schematic_runtime::EndpointSpec for ListReleasesRequest {
             "/repos/{}/{}/releases", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -873,7 +1043,7 @@ impl schematic_runtime::EndpointSpec for GetTagReferenceRequest {
             .to_string()), urlencoding::encode(& self.repo.to_string()),
             urlencoding::encode(& self.tag.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -941,7 +1111,7 @@ impl schematic_runtime::EndpointSpec for GetBranchReferenceRequest {
             .to_string()), urlencoding::encode(& self.repo.to_string()),
             urlencoding::encode(& self.branch.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1011,7 +1181,7 @@ impl schematic_runtime::EndpointSpec for GetAnnotatedTagRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
             .tag_sha.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1020,6 +1190,79 @@ impl schematic_runtime::EndpointSpec for GetAnnotatedTagRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `status` query parameter of [`ListWorkflowRunsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListWorkflowRunsRequestStatus {
+    /// `completed`
+    #[serde(rename = "completed")]
+    Completed,
+    /// `action_required`
+    #[serde(rename = "action_required")]
+    ActionRequired,
+    /// `cancelled`
+    #[serde(rename = "cancelled")]
+    Cancelled,
+    /// `failure`
+    #[serde(rename = "failure")]
+    Failure,
+    /// `neutral`
+    #[serde(rename = "neutral")]
+    Neutral,
+    /// `skipped`
+    #[serde(rename = "skipped")]
+    Skipped,
+    /// `stale`
+    #[serde(rename = "stale")]
+    Stale,
+    /// `success`
+    #[serde(rename = "success")]
+    Success,
+    /// `timed_out`
+    #[serde(rename = "timed_out")]
+    TimedOut,
+    /// `in_progress`
+    #[serde(rename = "in_progress")]
+    InProgress,
+    /// `queued`
+    #[serde(rename = "queued")]
+    Queued,
+    /// `requested`
+    #[serde(rename = "requested")]
+    Requested,
+    /// `waiting`
+    #[serde(rename = "waiting")]
+    Waiting,
+    /// `pending`
+    #[serde(rename = "pending")]
+    Pending,
+}
+impl ListWorkflowRunsRequestStatus {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::ActionRequired => "action_required",
+            Self::Cancelled => "cancelled",
+            Self::Failure => "failure",
+            Self::Neutral => "neutral",
+            Self::Skipped => "skipped",
+            Self::Stale => "stale",
+            Self::Success => "success",
+            Self::TimedOut => "timed_out",
+            Self::InProgress => "in_progress",
+            Self::Queued => "queued",
+            Self::Requested => "requested",
+            Self::Waiting => "waiting",
+            Self::Pending => "pending",
+        }
+    }
+}
+impl ::core::fmt::Display for ListWorkflowRunsRequestStatus {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListWorkflowRuns` endpoint.
@@ -1051,7 +1294,7 @@ pub struct ListWorkflowRunsRequest {
     /// Path parameter: repo
     pub repo: String,
     /// Query parameter: Filter by workflow run status
-    pub status: Option<String>,
+    pub status: Option<ListWorkflowRunsRequestStatus>,
     /// Query parameter: Filter by branch name
     pub branch: Option<String>,
     /// Query parameter: Filter by event type (e.g., push, pull_request)
@@ -1069,7 +1312,7 @@ impl ListWorkflowRunsRequest {
         }
     }
     /// Sets the `status` query parameter.
-    pub fn with_status(mut self, value: String) -> Self {
+    pub fn with_status(mut self, value: ListWorkflowRunsRequestStatus) -> Self {
         self.status = Some(value);
         self
     }
@@ -1100,15 +1343,15 @@ impl schematic_runtime::EndpointSpec for ListWorkflowRunsRequest {
             "/repos/{}/{}/actions/runs", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.status {
-            query.push(("status".to_string(), value.to_string()));
+            query.push(("status".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.branch {
-            query.push(("branch".to_string(), value.to_string()));
+            query.push(("branch".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.event {
-            query.push(("event".to_string(), value.to_string()));
+            query.push(("event".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -1118,6 +1361,105 @@ impl schematic_runtime::EndpointSpec for ListWorkflowRunsRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `repo_type` query parameter of [`ListOrgReposRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListOrgReposRequestRepoType {
+    /// `all`
+    #[serde(rename = "all")]
+    All,
+    /// `public`
+    #[serde(rename = "public")]
+    Public,
+    /// `private`
+    #[serde(rename = "private")]
+    Private,
+    /// `forks`
+    #[serde(rename = "forks")]
+    Forks,
+    /// `sources`
+    #[serde(rename = "sources")]
+    Sources,
+    /// `member`
+    #[serde(rename = "member")]
+    Member,
+}
+impl ListOrgReposRequestRepoType {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Public => "public",
+            Self::Private => "private",
+            Self::Forks => "forks",
+            Self::Sources => "sources",
+            Self::Member => "member",
+        }
+    }
+}
+impl ::core::fmt::Display for ListOrgReposRequestRepoType {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `sort` query parameter of [`ListOrgReposRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListOrgReposRequestSort {
+    /// `created`
+    #[serde(rename = "created")]
+    Created,
+    /// `updated`
+    #[serde(rename = "updated")]
+    Updated,
+    /// `pushed`
+    #[serde(rename = "pushed")]
+    Pushed,
+    /// `full_name`
+    #[serde(rename = "full_name")]
+    FullName,
+}
+impl ListOrgReposRequestSort {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+            Self::Pushed => "pushed",
+            Self::FullName => "full_name",
+        }
+    }
+}
+impl ::core::fmt::Display for ListOrgReposRequestSort {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `direction` query parameter of [`ListOrgReposRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListOrgReposRequestDirection {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListOrgReposRequestDirection {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListOrgReposRequestDirection {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListOrgRepos` endpoint.
@@ -1147,11 +1489,11 @@ pub struct ListOrgReposRequest {
     /// Path parameter: org
     pub org: String,
     /// Query parameter: Filter by repository type (API param: type)
-    pub repo_type: Option<String>,
+    pub repo_type: Option<ListOrgReposRequestRepoType>,
     /// Query parameter: Sort field
-    pub sort: Option<String>,
+    pub sort: Option<ListOrgReposRequestSort>,
     /// Query parameter: Sort direction
-    pub direction: Option<String>,
+    pub direction: Option<ListOrgReposRequestDirection>,
 }
 impl ListOrgReposRequest {
     /// Creates a new request with the required path parameters.
@@ -1164,17 +1506,17 @@ impl ListOrgReposRequest {
         }
     }
     /// Sets the `repo_type` query parameter.
-    pub fn with_repo_type(mut self, value: String) -> Self {
+    pub fn with_repo_type(mut self, value: ListOrgReposRequestRepoType) -> Self {
         self.repo_type = Some(value);
         self
     }
     /// Sets the `sort` query parameter.
-    pub fn with_sort(mut self, value: String) -> Self {
+    pub fn with_sort(mut self, value: ListOrgReposRequestSort) -> Self {
         self.sort = Some(value);
         self
     }
     /// Sets the `direction` query parameter.
-    pub fn with_direction(mut self, value: String) -> Self {
+    pub fn with_direction(mut self, value: ListOrgReposRequestDirection) -> Self {
         self.direction = Some(value);
         self
     }
@@ -1214,15 +1556,15 @@ impl schematic_runtime::EndpointSpec for ListOrgReposRequest {
         let path = format!(
             "/orgs/{}/repos", urlencoding::encode(& self.org.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.repo_type {
-            query.push(("repo_type".to_string(), value.to_string()));
+            query.push(("repo_type".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.sort {
-            query.push(("sort".to_string(), value.to_string()));
+            query.push(("sort".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.direction {
-            query.push(("direction".to_string(), value.to_string()));
+            query.push(("direction".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -1708,16 +2050,16 @@ pub struct ListPullRequestsCall<'a>(
     schematic_runtime::Call<'a, GitHubApi, ListPullRequestsRequest>,
 );
 impl<'a> ListPullRequestsCall<'a> {
-    /// Sets the `state` query parameter (`String`). Filter by PR state
-    pub fn state(self, value: String) -> Self {
+    /// Sets the `state` query parameter (`ListPullRequestsRequestState`). Filter by PR state
+    pub fn state(self, value: ListPullRequestsRequestState) -> Self {
         Self(self.0.map_request(|request| request.with_state(value)))
     }
-    /// Sets the `sort` query parameter (`String`). Sort field
-    pub fn sort(self, value: String) -> Self {
+    /// Sets the `sort` query parameter (`ListPullRequestsRequestSort`). Sort field
+    pub fn sort(self, value: ListPullRequestsRequestSort) -> Self {
         Self(self.0.map_request(|request| request.with_sort(value)))
     }
-    /// Sets the `direction` query parameter (`String`). Sort direction
-    pub fn direction(self, value: String) -> Self {
+    /// Sets the `direction` query parameter (`ListPullRequestsRequestDirection`). Sort direction
+    pub fn direction(self, value: ListPullRequestsRequestDirection) -> Self {
         Self(self.0.map_request(|request| request.with_direction(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -1924,16 +2266,16 @@ impl<'a> ::core::future::IntoFuture for ListPullRequestFilesCall<'a> {
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListIssuesCall<'a>(schematic_runtime::Call<'a, GitHubApi, ListIssuesRequest>);
 impl<'a> ListIssuesCall<'a> {
-    /// Sets the `state` query parameter (`String`). Filter by issue state
-    pub fn state(self, value: String) -> Self {
+    /// Sets the `state` query parameter (`ListIssuesRequestState`). Filter by issue state
+    pub fn state(self, value: ListIssuesRequestState) -> Self {
         Self(self.0.map_request(|request| request.with_state(value)))
     }
-    /// Sets the `sort` query parameter (`String`). Sort field
-    pub fn sort(self, value: String) -> Self {
+    /// Sets the `sort` query parameter (`ListIssuesRequestSort`). Sort field
+    pub fn sort(self, value: ListIssuesRequestSort) -> Self {
         Self(self.0.map_request(|request| request.with_sort(value)))
     }
-    /// Sets the `direction` query parameter (`String`). Sort direction
-    pub fn direction(self, value: String) -> Self {
+    /// Sets the `direction` query parameter (`ListIssuesRequestDirection`). Sort direction
+    pub fn direction(self, value: ListIssuesRequestDirection) -> Self {
         Self(self.0.map_request(|request| request.with_direction(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -2645,8 +2987,8 @@ pub struct ListWorkflowRunsCall<'a>(
     schematic_runtime::Call<'a, GitHubApi, ListWorkflowRunsRequest>,
 );
 impl<'a> ListWorkflowRunsCall<'a> {
-    /// Sets the `status` query parameter (`String`). Filter by workflow run status
-    pub fn status(self, value: String) -> Self {
+    /// Sets the `status` query parameter (`ListWorkflowRunsRequestStatus`). Filter by workflow run status
+    pub fn status(self, value: ListWorkflowRunsRequestStatus) -> Self {
         Self(self.0.map_request(|request| request.with_status(value)))
     }
     /// Sets the `branch` query parameter (`String`). Filter by branch name
@@ -2760,16 +3102,16 @@ pub struct ListOrgReposCall<'a>(
     schematic_runtime::Call<'a, GitHubApi, ListOrgReposRequest>,
 );
 impl<'a> ListOrgReposCall<'a> {
-    /// Sets the `repo_type` query parameter (`String`). Filter by repository type (API param: type)
-    pub fn repo_type(self, value: String) -> Self {
+    /// Sets the `repo_type` query parameter (`ListOrgReposRequestRepoType`). Filter by repository type (API param: type)
+    pub fn repo_type(self, value: ListOrgReposRequestRepoType) -> Self {
         Self(self.0.map_request(|request| request.with_repo_type(value)))
     }
-    /// Sets the `sort` query parameter (`String`). Sort field
-    pub fn sort(self, value: String) -> Self {
+    /// Sets the `sort` query parameter (`ListOrgReposRequestSort`). Sort field
+    pub fn sort(self, value: ListOrgReposRequestSort) -> Self {
         Self(self.0.map_request(|request| request.with_sort(value)))
     }
-    /// Sets the `direction` query parameter (`String`). Sort direction
-    pub fn direction(self, value: String) -> Self {
+    /// Sets the `direction` query parameter (`ListOrgReposRequestDirection`). Sort direction
+    pub fn direction(self, value: ListOrgReposRequestDirection) -> Self {
         Self(self.0.map_request(|request| request.with_direction(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -2939,9 +3281,9 @@ impl GitHub {
     ///
     /// ## Optional values
     ///
-    /// - [`state`](ListPullRequestsCall::state): the `state` query parameter (`String`). Filter by PR state
-    /// - [`sort`](ListPullRequestsCall::sort): the `sort` query parameter (`String`). Sort field
-    /// - [`direction`](ListPullRequestsCall::direction): the `direction` query parameter (`String`). Sort direction
+    /// - [`state`](ListPullRequestsCall::state): the `state` query parameter (`ListPullRequestsRequestState`). Filter by PR state
+    /// - [`sort`](ListPullRequestsCall::sort): the `sort` query parameter (`ListPullRequestsRequestSort`). Sort field
+    /// - [`direction`](ListPullRequestsCall::direction): the `direction` query parameter (`ListPullRequestsRequestDirection`). Sort direction
     pub fn list_pull_requests(
         &self,
         owner: impl Into<String>,
@@ -2983,9 +3325,9 @@ impl GitHub {
     ///
     /// ## Optional values
     ///
-    /// - [`state`](ListIssuesCall::state): the `state` query parameter (`String`). Filter by issue state
-    /// - [`sort`](ListIssuesCall::sort): the `sort` query parameter (`String`). Sort field
-    /// - [`direction`](ListIssuesCall::direction): the `direction` query parameter (`String`). Sort direction
+    /// - [`state`](ListIssuesCall::state): the `state` query parameter (`ListIssuesRequestState`). Filter by issue state
+    /// - [`sort`](ListIssuesCall::sort): the `sort` query parameter (`ListIssuesRequestSort`). Sort field
+    /// - [`direction`](ListIssuesCall::direction): the `direction` query parameter (`ListIssuesRequestDirection`). Sort direction
     pub fn list_issues(
         &self,
         owner: impl Into<String>,
@@ -3162,7 +3504,7 @@ impl GitHub {
     ///
     /// ## Optional values
     ///
-    /// - [`status`](ListWorkflowRunsCall::status): the `status` query parameter (`String`). Filter by workflow run status
+    /// - [`status`](ListWorkflowRunsCall::status): the `status` query parameter (`ListWorkflowRunsRequestStatus`). Filter by workflow run status
     /// - [`branch`](ListWorkflowRunsCall::branch): the `branch` query parameter (`String`). Filter by branch name
     /// - [`event`](ListWorkflowRunsCall::event): the `event` query parameter (`String`). Filter by event type (e.g., push, pull_request)
     pub fn list_workflow_runs(
@@ -3184,9 +3526,9 @@ impl GitHub {
     ///
     /// ## Optional values
     ///
-    /// - [`repo_type`](ListOrgReposCall::repo_type): the `repo_type` query parameter (`String`). Filter by repository type (API param: type)
-    /// - [`sort`](ListOrgReposCall::sort): the `sort` query parameter (`String`). Sort field
-    /// - [`direction`](ListOrgReposCall::direction): the `direction` query parameter (`String`). Sort direction
+    /// - [`repo_type`](ListOrgReposCall::repo_type): the `repo_type` query parameter (`ListOrgReposRequestRepoType`). Filter by repository type (API param: type)
+    /// - [`sort`](ListOrgReposCall::sort): the `sort` query parameter (`ListOrgReposRequestSort`). Sort field
+    /// - [`direction`](ListOrgReposCall::direction): the `direction` query parameter (`ListOrgReposRequestDirection`). Sort direction
     pub fn list_org_repos(&self, org: impl Into<String>) -> ListOrgReposCall<'_> {
         ListOrgReposCall(self.0.send(ListOrgReposRequest::new(org)))
     }

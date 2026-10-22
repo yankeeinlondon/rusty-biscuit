@@ -135,7 +135,10 @@ The same fields are available to code as
 | `text-request-body`, `binary-request-body`: the declared content type is empty or not a valid header value | ✓ | | | error |
 | `api-key-param`: a query API-key parameter name is empty, or a cookie API-key name is not a cookie name | ✓ | | | error |
 | `header-parameter`, `cookie-parameter`: the name is not an HTTP token | ✓ | | | error |
-| `query-parameter`, `header-parameter`, `cookie-parameter`: the type is an array of arrays | ✓ | | | error |
+| `header-parameter`, `cookie-parameter`: the type is an array of arrays | ✓ | | | error |
+| `query-parameter`: a query parameter's type, style, and `explode` have no Rust serialization (see below) | ✓ | | | warning when optional (the parameter is left out of the request type), error when required |
+| `query-parameter`: a query enum declares no values | ✓ | | | error |
+| `generated-name-collision`: two values of a query or path enum generate one variant, or a generated enum's name is already emitted in the module | ✓ | | | error |
 | `pagination-strategy`: a pagination strategy is malformed, alone or on its endpoint (see below) | ✓ | | | error |
 | `pagination-exception`: an endpoint collection has an unusable item selector, item type, item location, or alternates | ✓ | | | error |
 | `pagination-parameter`: a strategy input collides with a declared parameter it cannot adopt, adopts one without the knob that replaces it, or manages a required one without a value to send | ✓ | | | error |
@@ -154,22 +157,31 @@ parameter is optional (see
 [Postman parameter mapping](../io/export-postman.md#parameter-mapping)), so
 neither export has a rule for them.
 
-The Rust client sends each element of an array parameter as text: one
-repeated pair per element in the query, one `,`-joined value in a header or
-cookie. An element that is itself an array has no text form, so an array of
-arrays is an error at every location rather than a shape the client would
-drop or fail to compile. OpenAPI writes the nested shape as a parameter
-schema, and Postman carries no parameter type, so both exports are still
-written:
+The Rust client sends each element of a header or cookie array as text,
+joined with `,`. An element that is itself an array has no text form, so an
+array of arrays is an error there.
+
+A query parameter is sent in the form its type, style, and `explode`
+declare ([array forms](./request-side.md#array-forms)). A declaration with
+no such form (a JSON value, an array of arrays or of JSON values,
+`DeepObject` or `Simple` style, a delimited single value, or an exploded
+delimited array) is left out of the request type when it is optional, with
+a warning; when it is required no correct request exists, so it is an
+error. OpenAPI writes the declared shape as a parameter schema, and Postman
+carries no parameter type, so both exports are still written:
 
 ```rust
-// Fails the Rust client only (`query-parameter`).
+// Fails the Rust client only (`query-parameter`): required and unsendable.
 EndpointParams::default().with_query_param(
     "matrix",
     QueryParamType::Array(Box::new(QueryParamType::Array(Box::new(QueryParamType::Boolean)))),
-    false,
+    true,
     None,
 )
+```
+
+```text
+[WARN] severity=warning api=OpenAI endpoint=ListPaginatedFineTuningJobs feature=query-parameter output=rust: query parameter `metadata` is a JSON value in `deepObject` style with explode true, which the Rust client cannot serialize; it is left out of the request type
 ```
 
 Rust-only rules are never applied to the exports. An export carries type

@@ -27,7 +27,7 @@ fn param(name: &str) -> ParamDef {
         description: None,
         param_type: QueryParamType::String,
         explode: false,
-        style: ParamStyle::Simple,
+        style: ParamStyle::Form,
     }
 }
 

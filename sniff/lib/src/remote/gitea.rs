@@ -325,16 +325,16 @@ impl RemoteRepoProvider for GiteaRemote {
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
         // Map PullRequestState to Gitea API state parameter
         let api_state = match state {
-            PullRequestState::Open => "open",
-            PullRequestState::Closed => "closed",
-            PullRequestState::Merged | PullRequestState::Draft | PullRequestState::All => "all",
+            PullRequestState::Open => ListPullRequestsRequestState::Open,
+            PullRequestState::Closed => ListPullRequestsRequestState::Closed,
+            PullRequestState::Merged | PullRequestState::Draft | PullRequestState::All => ListPullRequestsRequestState::All,
         };
 
         count_api_request("pulls");
         let prs = REPLIES.value(
             self.client
                 .list_pull_requests(owner, repo)
-                .state(api_state.to_string())
+                .state(api_state)
                 .await,
         )?;
 

@@ -67,7 +67,7 @@ For authentication, `no_auth()`, `bearer_env(names)`, and `basic_env(username, p
 
 Headers, query parameters, complete parameter sets, documentation URL, version, module path, request suffix, and API cross-origin policy retain the current stored representation and generator precedence. Endpoint headers override matching API headers through the generator's existing merge. Builders preserve declaration order. Endpoint `cross_origin(policy)` replaces the API policy for that endpoint, including redirects and followed pagination links. `allow_origins` accepts only bare HTTP(S) origins, with an optional port and trailing slash; paths, user information, queries and fragments fail API build. Caller policy settings may only tighten each applicable definition policy. Runtime-only origin and redaction settings are not represented as OpenAPI/Postman transport behavior.
 
-Declare a parameter location with `query(param)`, `header_param(param)`, or `cookie(param)`. Path parameters remain explicit placeholders in the path template, and request methods declare the body location. Constant headers still use `header(name, value)`. Location never changes route identity.
+Declare a parameter location with `query(param)`, `header_param(param)`, or `cookie(param)`. Path parameters are the placeholders in the path template; type them with `path_param(param)` (see [below](#paths-deprecation-rate-limits-and-endpoint-authentication)). Request methods declare the body location. Constant headers still use `header(name, value)`. Location never changes route identity.
 
 ```rust
 use schematic_define::{CrossOrigin, Endpoint, ParamDef, QueryParamType};
@@ -80,7 +80,7 @@ let endpoint = Endpoint::get("ReadFile", "/files/{file}")
     .build()?;
 ```
 
-`ParamDef::new` creates an optional parameter; `required()` and `describes(text)` set existing metadata. `rust_name` changes only the Rust field and setter; encoding and export retain the wire name. For example, `ref` is sent on the wire while callers use `git_ref`. Optional `beta` and `recursive` parameters are ordinary Boolean inputs: omission sends no value, and a supplied false remains false.
+`ParamDef::new` creates an optional, comma-delimited (`Form`, not exploded) parameter; `required()` and `describes(text)` set existing metadata. The generated Rust client honors these flags for query parameters: a required one becomes a `new()` and endpoint-method argument, a `QueryParamType::Enum` becomes a generated enum, and `style`/`explode` decide the array form (see [query parameters](generation/request-side.md#query-parameters)). `rust_name` changes only the Rust field and setter; encoding and export retain the wire name. For example, `ref` is sent on the wire while callers use `git_ref`. Optional `beta` and `recursive` parameters are ordinary Boolean inputs: omission sends no value, and a supplied false remains false.
 
 API `request_id_header("X-Request-ID")` and `secret_header("X-Pin")` normalize names to lowercase and reject invalid HTTP header names. Parameter `secret()` adds its wire name to the predecessor runtime's redaction metadata. The existing auth strategy markers, redaction behavior and explicit `auth_policy` semantics remain authoritative.
 
@@ -177,6 +177,53 @@ request's own `auth`.
 Each new field is omitted when unset. Absent means inherit, false or empty;
 an explicit `null`, a wrong type, or `{}` for a metadata value is an error.
 
+### OAuth2 grants
+
+`OAuth2Config` has one variant per grant, and each variant's struct holds
+only the fields that grant uses. A grant that needs an endpoint cannot be
+written without it, and a grant cannot carry another grant's endpoint:
+
+| Variant | Required URLs | Grant-only fields |
+| --- | --- | --- |
+| `AuthorizationCodePkce(AuthorizationCodeGrant)` | `authorization_url`, `token_url` | `pkce`: `Required` or `Supported` (PKCE cannot be switched off) |
+| `ClientCredentials(ClientCredentialsGrant)` | `token_url` | none |
+| `DeviceCode(DeviceCodeGrant)` | `device_authorization_url`, `token_url` | none |
+
+Every grant also has an optional `revocation_url`, `default_scopes`, and
+`client_auth` (`ClientSecretBasic`, `ClientSecretPost`, or `None`).
+
+```rust
+let oauth = OAuth2Config::ClientCredentials(ClientCredentialsGrant {
+    token_url: "https://auth.example.com/token".into(),
+    revocation_url: None,
+    default_scopes: vec!["api".into()],
+    client_auth: OAuth2ClientAuthMethod::ClientSecretBasic,
+});
+let api = RestApi::builder(&ctx, "Service", "https://api.example.com")
+    .describes("Service API")
+    .authentication(AuthStrategy::OAuth2(oauth), Vec::<String>::new())
+    .endpoints([endpoint])
+    .build()?;
+```
+
+API build runs `OAuth2Config::validate` on the API's grant, on every grant in
+its `auth_policy`, and on every endpoint replacement policy. Each URL must be
+an absolute `http`/`https` URL with a host. In JSON the grant is one object
+tagged by `grant_type`. Its other members are exactly that grant's fields.
+Loading rejects a missing or null required field, an unknown member, an
+explicit `null` `revocation_url`, and any non-null value in a field another
+grant owns. A `null` in such a field is tolerated:
+
+```json
+{"grant_type": "DeviceCode", "device_authorization_url": "https://auth.example.com/device",
+ "token_url": "https://auth.example.com/token", "default_scopes": [], "client_auth": "None"}
+```
+
+A definition only declares the grant. Token acquisition and refresh belong
+to `schematic-oauth` (see [OAuth](runtime/credentials.md#oauth)). OpenAPI
+export has no device-code flow, so it leaves that scheme out and reports
+`oauth2-grant`.
+
 ## Default allow-list
 
 The public defaults below remain meaningful; the audit test checks the shipped source inventory so new defaults require an explicit decision.
@@ -196,7 +243,7 @@ The public defaults below remain meaningful; the audit test checks the shipped s
 | `SchematicDocExtension`, `SchematicSchemaExtension` | All optional extension metadata may be absent. |
 | `ExportOptions`, `ExportFormat`, `OpenApiImportOptions` | Complete tooling options with established defaults. |
 
-All shipped REST providers and the importer use typed builders. `Endpoint` and `RestApi` are `#[non_exhaustive]`, preventing external struct literals. Generated request types retain their existing defaults. The unused endpoint `oauth_scopes` field is removed; explicit API `auth_policy` remains authoritative.
+All shipped REST providers and the importer use typed builders. `Endpoint` and `RestApi` are `#[non_exhaustive]`, preventing external struct literals. A generated request type loses `Default` when it has a typed path parameter or a required query parameter that no pager adopts, so that value can only arrive through `new()`; every other request type, including one whose only inputs are untyped path placeholders, keeps it. The unused endpoint `oauth_scopes` field is removed; explicit API `auth_policy` remains authoritative.
 
 ## Definition transfer input shapes
 

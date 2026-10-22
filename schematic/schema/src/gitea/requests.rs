@@ -44,7 +44,7 @@ impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
             "/repos/{}/{}", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -114,9 +114,9 @@ impl schematic_runtime::EndpointSpec for GetGitTreeRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self.sha
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.recursive {
-            query.push(("recursive".to_string(), value.to_string()));
+            query.push(("recursive".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -175,7 +175,7 @@ impl schematic_runtime::EndpointSpec for GetRepositoryContentRawRequest {
             "/repos/{}/{}/raw/{}", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string()), self.filepath
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -184,6 +184,76 @@ impl schematic_runtime::EndpointSpec for GetRepositoryContentRawRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `state` query parameter of [`ListPullRequestsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListPullRequestsRequestState {
+    /// `open`
+    #[serde(rename = "open")]
+    Open,
+    /// `closed`
+    #[serde(rename = "closed")]
+    Closed,
+    /// `all`
+    #[serde(rename = "all")]
+    All,
+}
+impl ListPullRequestsRequestState {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Closed => "closed",
+            Self::All => "all",
+        }
+    }
+}
+impl ::core::fmt::Display for ListPullRequestsRequestState {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `sort` query parameter of [`ListPullRequestsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListPullRequestsRequestSort {
+    /// `oldest`
+    #[serde(rename = "oldest")]
+    Oldest,
+    /// `recentupdate`
+    #[serde(rename = "recentupdate")]
+    Recentupdate,
+    /// `leastupdate`
+    #[serde(rename = "leastupdate")]
+    Leastupdate,
+    /// `mostcomment`
+    #[serde(rename = "mostcomment")]
+    Mostcomment,
+    /// `leastcomment`
+    #[serde(rename = "leastcomment")]
+    Leastcomment,
+    /// `priority`
+    #[serde(rename = "priority")]
+    Priority,
+}
+impl ListPullRequestsRequestSort {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Oldest => "oldest",
+            Self::Recentupdate => "recentupdate",
+            Self::Leastupdate => "leastupdate",
+            Self::Mostcomment => "mostcomment",
+            Self::Leastcomment => "leastcomment",
+            Self::Priority => "priority",
+        }
+    }
+}
+impl ::core::fmt::Display for ListPullRequestsRequestSort {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListPullRequests` endpoint.
@@ -205,9 +275,9 @@ pub struct ListPullRequestsRequest {
     /// Path parameter: repo
     pub repo: String,
     /// Query parameter: Filter by PR state
-    pub state: Option<String>,
+    pub state: Option<ListPullRequestsRequestState>,
     /// Query parameter: Sort order for results
-    pub sort: Option<String>,
+    pub sort: Option<ListPullRequestsRequestSort>,
 }
 impl ListPullRequestsRequest {
     /// Creates a new request with the required path parameters.
@@ -220,12 +290,12 @@ impl ListPullRequestsRequest {
         }
     }
     /// Sets the `state` query parameter.
-    pub fn with_state(mut self, value: String) -> Self {
+    pub fn with_state(mut self, value: ListPullRequestsRequestState) -> Self {
         self.state = Some(value);
         self
     }
     /// Sets the `sort` query parameter.
-    pub fn with_sort(mut self, value: String) -> Self {
+    pub fn with_sort(mut self, value: ListPullRequestsRequestSort) -> Self {
         self.sort = Some(value);
         self
     }
@@ -246,12 +316,12 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
             "/repos/{}/{}/pulls", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.state {
-            query.push(("state".to_string(), value.to_string()));
+            query.push(("state".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.sort {
-            query.push(("sort".to_string(), value.to_string()));
+            query.push(("sort".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -313,7 +383,7 @@ impl schematic_runtime::EndpointSpec for ListPullRequestFilesRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
             .index.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -322,6 +392,64 @@ impl schematic_runtime::EndpointSpec for ListPullRequestFilesRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// Values of the `state` query parameter of [`ListIssuesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListIssuesRequestState {
+    /// `open`
+    #[serde(rename = "open")]
+    Open,
+    /// `closed`
+    #[serde(rename = "closed")]
+    Closed,
+    /// `all`
+    #[serde(rename = "all")]
+    All,
+}
+impl ListIssuesRequestState {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Closed => "closed",
+            Self::All => "all",
+        }
+    }
+}
+impl ::core::fmt::Display for ListIssuesRequestState {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `issue_type` query parameter of [`ListIssuesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListIssuesRequestIssueType {
+    /// `issues`
+    #[serde(rename = "issues")]
+    Issues,
+    /// `pulls`
+    #[serde(rename = "pulls")]
+    Pulls,
+    /// `all`
+    #[serde(rename = "all")]
+    All,
+}
+impl ListIssuesRequestIssueType {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Issues => "issues",
+            Self::Pulls => "pulls",
+            Self::All => "all",
+        }
+    }
+}
+impl ::core::fmt::Display for ListIssuesRequestIssueType {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 /// Request for `ListIssues` endpoint.
@@ -343,9 +471,9 @@ pub struct ListIssuesRequest {
     /// Path parameter: repo
     pub repo: String,
     /// Query parameter: Filter by issue state
-    pub state: Option<String>,
+    pub state: Option<ListIssuesRequestState>,
     /// Query parameter: Filter by type (issues, pulls, or all)
-    pub issue_type: Option<String>,
+    pub issue_type: Option<ListIssuesRequestIssueType>,
 }
 impl ListIssuesRequest {
     /// Creates a new request with the required path parameters.
@@ -358,12 +486,12 @@ impl ListIssuesRequest {
         }
     }
     /// Sets the `state` query parameter.
-    pub fn with_state(mut self, value: String) -> Self {
+    pub fn with_state(mut self, value: ListIssuesRequestState) -> Self {
         self.state = Some(value);
         self
     }
     /// Sets the `issue_type` query parameter.
-    pub fn with_issue_type(mut self, value: String) -> Self {
+    pub fn with_issue_type(mut self, value: ListIssuesRequestIssueType) -> Self {
         self.issue_type = Some(value);
         self
     }
@@ -384,12 +512,12 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
             "/repos/{}/{}/issues", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.state {
-            query.push(("state".to_string(), value.to_string()));
+            query.push(("state".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.issue_type {
-            query.push(("issue_type".to_string(), value.to_string()));
+            query.push(("issue_type".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -449,7 +577,7 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
             .index.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -510,7 +638,7 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
             .to_string()), urlencoding::encode(& self.repo.to_string()),
             urlencoding::encode(& self.index.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -571,7 +699,7 @@ impl schematic_runtime::EndpointSpec for ListIssueTimelineRequest {
             .to_string()), urlencoding::encode(& self.repo.to_string()),
             urlencoding::encode(& self.index.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -624,7 +752,7 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
             "/repos/{}/{}/tags", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -695,12 +823,12 @@ impl schematic_runtime::EndpointSpec for ListReleasesRequest {
             "/repos/{}/{}/releases", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.draft {
-            query.push(("draft".to_string(), value.to_string()));
+            query.push(("draft".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.pre_release {
-            query.push(("pre_release".to_string(), value.to_string()));
+            query.push(("pre_release".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -760,7 +888,7 @@ impl schematic_runtime::EndpointSpec for GetBranchRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
             .branch.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -821,7 +949,7 @@ impl schematic_runtime::EndpointSpec for GetTagReferenceRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
             .git_ref.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -882,7 +1010,7 @@ impl schematic_runtime::EndpointSpec for GetAnnotatedTagRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self.sha
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -939,7 +1067,7 @@ impl schematic_runtime::EndpointSpec for ListOrgReposRequest {
         let path = format!(
             "/orgs/{}/repos", urlencoding::encode(& self.org.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1394,12 +1522,12 @@ pub struct ListPullRequestsCall<'a>(
     schematic_runtime::Call<'a, GiteaApi, ListPullRequestsRequest>,
 );
 impl<'a> ListPullRequestsCall<'a> {
-    /// Sets the `state` query parameter (`String`). Filter by PR state
-    pub fn state(self, value: String) -> Self {
+    /// Sets the `state` query parameter (`ListPullRequestsRequestState`). Filter by PR state
+    pub fn state(self, value: ListPullRequestsRequestState) -> Self {
         Self(self.0.map_request(|request| request.with_state(value)))
     }
-    /// Sets the `sort` query parameter (`String`). Sort order for results
-    pub fn sort(self, value: String) -> Self {
+    /// Sets the `sort` query parameter (`ListPullRequestsRequestSort`). Sort order for results
+    pub fn sort(self, value: ListPullRequestsRequestSort) -> Self {
         Self(self.0.map_request(|request| request.with_sort(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -1606,12 +1734,12 @@ impl<'a> ::core::future::IntoFuture for ListPullRequestFilesCall<'a> {
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListIssuesCall<'a>(schematic_runtime::Call<'a, GiteaApi, ListIssuesRequest>);
 impl<'a> ListIssuesCall<'a> {
-    /// Sets the `state` query parameter (`String`). Filter by issue state
-    pub fn state(self, value: String) -> Self {
+    /// Sets the `state` query parameter (`ListIssuesRequestState`). Filter by issue state
+    pub fn state(self, value: ListIssuesRequestState) -> Self {
         Self(self.0.map_request(|request| request.with_state(value)))
     }
-    /// Sets the `issue_type` query parameter (`String`). Filter by type (issues, pulls, or all)
-    pub fn issue_type(self, value: String) -> Self {
+    /// Sets the `issue_type` query parameter (`ListIssuesRequestIssueType`). Filter by type (issues, pulls, or all)
+    pub fn issue_type(self, value: ListIssuesRequestIssueType) -> Self {
         Self(self.0.map_request(|request| request.with_issue_type(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -2490,8 +2618,8 @@ impl Gitea {
     ///
     /// ## Optional values
     ///
-    /// - [`state`](ListPullRequestsCall::state): the `state` query parameter (`String`). Filter by PR state
-    /// - [`sort`](ListPullRequestsCall::sort): the `sort` query parameter (`String`). Sort order for results
+    /// - [`state`](ListPullRequestsCall::state): the `state` query parameter (`ListPullRequestsRequestState`). Filter by PR state
+    /// - [`sort`](ListPullRequestsCall::sort): the `sort` query parameter (`ListPullRequestsRequestSort`). Sort order for results
     pub fn list_pull_requests(
         &self,
         owner: impl Into<String>,
@@ -2533,8 +2661,8 @@ impl Gitea {
     ///
     /// ## Optional values
     ///
-    /// - [`state`](ListIssuesCall::state): the `state` query parameter (`String`). Filter by issue state
-    /// - [`issue_type`](ListIssuesCall::issue_type): the `issue_type` query parameter (`String`). Filter by type (issues, pulls, or all)
+    /// - [`state`](ListIssuesCall::state): the `state` query parameter (`ListIssuesRequestState`). Filter by issue state
+    /// - [`issue_type`](ListIssuesCall::issue_type): the `issue_type` query parameter (`ListIssuesRequestIssueType`). Filter by type (issues, pulls, or all)
     pub fn list_issues(
         &self,
         owner: impl Into<String>,

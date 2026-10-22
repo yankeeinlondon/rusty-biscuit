@@ -115,7 +115,7 @@ impl schematic_runtime::EndpointSpec for GetDeviceInfoRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/api/v2/".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -149,7 +149,7 @@ impl schematic_runtime::EndpointSpec for GetServerLogsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/logs/".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -204,7 +204,7 @@ impl schematic_runtime::EndpointSpec for LaunchApplicationByIdRequest {
         let path = format!(
             "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -261,7 +261,7 @@ impl schematic_runtime::EndpointSpec for LaunchApplicationByNameRequest {
         let path = format!(
             "/ws/apps/{}", urlencoding::encode(& self.app_name.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -318,7 +318,7 @@ impl schematic_runtime::EndpointSpec for GetAppStatusRequest {
         let path = format!(
             "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -373,7 +373,7 @@ impl schematic_runtime::EndpointSpec for CloseAppRequest {
         let path = format!(
             "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -428,7 +428,7 @@ impl schematic_runtime::EndpointSpec for InstallAppRequest {
         let path = format!(
             "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,

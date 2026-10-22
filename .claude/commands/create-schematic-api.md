@@ -60,7 +60,11 @@ form metadata uses `FormField::json_desc`. Text/binary body methods support
 explicit request content types.
 
 Supply description and exactly one auth choice before API build: `no_auth`,
-`bearer_env`, `basic_env`, or `authentication(strategy, env_names)`. Explicit
+`bearer_env`, `basic_env(username, password_names)`, or
+`authentication(strategy, env_names)`. Basic keeps both variable lists inside
+`AuthStrategy::Basic` and never reads a password from `env_names`. OAuth2 is
+one `OAuth2Config` variant per grant (`AuthorizationCodePkce`,
+`ClientCredentials`, `DeviceCode`), each carrying only its own URLs. Explicit
 `env_mapping` credential names must agree with auth declarations in either setter
 order. Keep intentional multi-method `auth_policy`; an empty mapping remains
 an explicit choice. Return assembly errors with `?`; catalog compatibility
@@ -72,6 +76,32 @@ is a constant header. GET rejects every body form; HEAD behavior is unchanged.
 A path cannot contain `?`. Endpoint identity is `(method, normalized_path)`;
 query values and body shapes cannot define separate endpoints on one route.
 Wire keywords use `rust_name`, for example `ref` → `git_ref`.
+
+Query flags shape the generated client, so state them as the provider documents
+them. A `.required()` query parameter becomes a `new()` and endpoint-method
+argument after the path parameters. The request then has no `Default`.
+`QueryParamType::Enum` generates an enum. `style`/`explode` pick the array form;
+`ParamDef::new` is form-style and comma-delimited, so set the public `explode` field to
+`true` when the provider expects repeated keys. A query shape the client cannot send
+(JSON, nested arrays, deepObject) is a `query-parameter` warning when optional,
+an error when required.
+
+Optional vocabulary, used only when the provider documents the fact:
+
+```rust
+let endpoint = Endpoint::get("GetItem", "/items/{id}")
+    .describes("Get an item")
+    .returns_json::<Item>(context)
+    .path_param(ParamDef::path("id", QueryParamType::Integer))
+    .deprecated()
+    .public()
+    .build()?;
+```
+
+`path_param` declarations must equal the template's placeholders. `.public()`
+or `.auth(policy)` overrides the API policy. `.rate_limit(..)` and
+`.retry_guidance(..)` are metadata only; nothing retries. Use
+`context.one_of::<T>([..])` (or `any_of`/`all_of`) for a composed body.
 
 Keep pagination strategy helpers provider-local. Use API `default_pagination`
 and endpoint `pagination(Collection)`. `pager_managed()` alone cannot hide a
@@ -86,7 +116,7 @@ it. Allowed origins must be bare HTTP(S) origins.
 Register the module, catalog lookup/group assembly, and documented provider row.
 Update the appropriate shipped-policy and ordered endpoint-id inventories.
 READMEs remain overviews; current behavior belongs in the area's docs tree.
-Future response/vocabulary methods remain planned; only `ErrorSet::none()` is
+Future response methods remain planned; only `ErrorSet::none()` is
 available. Match non-exhaustive types with a wildcard where needed; CrossOrigin
 is intentionally exhaustive.
 
@@ -105,8 +135,13 @@ just lint
 just doctest
 just test-schema
 just lint-schema
+just migration-check
 ```
 
+These are nextest-based; do not substitute `cargo test`. When a generated
+signature changes, build the dependents that call it with
+`cargo build -p <crate> --all-features --all-targets`, because some call sites
+sit behind features.
 Review full Rust/OpenAPI/Postman file sets; never edit generated files manually.
 Do not run formatting commands, stage, or commit unless explicitly instructed.
 Report changed files, endpoint catalog, auth/env inputs, verification results,

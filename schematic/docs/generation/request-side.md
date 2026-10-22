@@ -13,10 +13,13 @@ errors, credentials, redirects, deadlines, and hooks.
 
 You can:
 
-- set query parameters with the generated `with_*` builders and rely on the
-  same bytes reaching the server as before the query was kept separate
-- read a request's query parameters as plain, unencoded `(name, value)`
-  pairs by calling `into_parts()`, without parsing a URL
+- pass required query parameters to `new()` and set optional ones with the
+  generated `with_*` builders, using generated enums where a parameter has a
+  fixed set of values
+- rely on each array parameter reaching the server in its declared form:
+  repeated (`tags=a&tags=b`) or delimited (`tags=a,b`, `a%20b`, `a%7Cb`)
+- read a request's query parameters as unencoded `(name, value)` pairs by
+  calling `into_parts()`, without parsing a URL
 - send a text or binary body exactly as given, under the endpoint's declared
   content type
 - set header and cookie parameters with `with_*` builders; every request
@@ -61,7 +64,7 @@ static `Cookie` header that cannot be merged):
 | --- | --- |
 | `method` | HTTP method (`schematic_runtime::Method`), such as `Method::GET` |
 | `path` | Path with path parameters substituted in their wire spelling and percent-encoded; keeps any query written in the path template |
-| `query` | Declared query parameters as unencoded `(name, value)` pairs, in declaration order, duplicates kept |
+| `query` | Declared query parameters as unencoded `(name, QueryValue)` pairs, in declaration order, duplicates kept (see [Query parameters](#query-parameters)) |
 | `headers` | Endpoint headers as `(name, value)` pairs: static endpoint headers, set header parameters, and at most one `Cookie` header |
 | `body` | Request body (`schematic_runtime::RequestBody`) |
 
@@ -83,35 +86,63 @@ sent. Untyped placeholders are `String` fields and are encoded as given.
 ## Query parameters
 
 A definition declares query parameters in `EndpointParams.query`. Each one
-becomes an optional field with a `with_*` builder. Only parameters you set
-are sent, in declaration order:
+becomes a request field and a `with_*` builder:
+
+- a **required** parameter (`ParamDef::required()`) is a `T` field and a
+  `new()` argument, even when the definition gives it a default value;
+- an **optional** parameter is an `Option<T>` field, sent only when set;
+- an **enum** parameter (`QueryParamType::Enum`) gets its own type,
+  `{RequestType}{FieldPascalCase}`, with one variant per value; arrays of
+  enum values use the same type.
+
+`new()` takes the path parameters in template order, then the required query
+parameters in declaration order, then the body. A request with a required
+query parameter has no `Default`, so the value can only come from `new()`;
+a request whose parameters are all optional keeps `Default`.
 
 ```rust
-use schematic_schema::gitea::ListPullRequestsRequest;
-use schematic_schema::schematic_runtime::{EndpointSpec, Method};
+use schematic_schema::gitea::{ListPullRequestsRequest, ListPullRequestsRequestState};
+use schematic_schema::schematic_runtime::{EndpointSpec, Method, QueryValue};
 
 let parts = ListPullRequestsRequest::new("own er", "repo")
-    .with_sort("newest".to_string())
-    .with_state("open closed".to_string())
+    .with_state(ListPullRequestsRequestState::Closed)
     .into_parts()?;
 assert_eq!(parts.method, Method::GET);
 assert_eq!(parts.path, "/repos/own%20er/repo/pulls");
-// Declared order (state comes before sort), values not encoded.
-assert_eq!(
-    parts.query,
-    vec![
-        ("state".to_string(), "open closed".to_string()),
-        ("sort".to_string(), "newest".to_string()),
-    ]
-);
+assert_eq!(parts.query, vec![("state".to_string(), QueryValue::from("closed"))]);
 ```
 
 A Gitea client sends that request as
-`GET /api/v1/repos/own%20er/repo/pulls?state=open%20closed&sort=newest`.
+`GET /api/v1/repos/own%20er/repo/pulls?state=closed`. OpenAI's usage
+endpoints require `start_time`, so it is a `new()` argument:
+`UsageCostsRequest::new(1_700_000_000)`.
 
 A parameter that the endpoint's pagination strategy adopts, such as this
-endpoint's `page` and `limit`, is not a field: the pager writes it after the
-request's own query. See [Pagination](../pagination.md#adopted-parameters).
+endpoint's `page` and `limit`, is not a field and never a `new()` argument,
+even when the provider marks it required: the pager writes it after the
+request's own query, and an ordinary send carries the strategy's first-page
+value. See [Pagination](../pagination.md#adopted-parameters).
+
+### Array forms
+
+The parameter's `style` and `explode` choose how an array is sent. Given
+`tags = ["a,b", "c"]`:
+
+| Style | `explode` | On the wire |
+| --- | --- | --- |
+| `Form` | `true` | `tags=a%2Cb&tags=c` (one pair per element) |
+| `Form` | `false` | `tags=a%2Cb,c` |
+| `SpaceDelimited` | `false` | `tags=a%2Cb%20c` |
+| `PipeDelimited` | `false` | `tags=a%2Cb%7Cc` |
+
+Each element is encoded once before the elements are joined, so a delimiter
+inside an element stays escaped. An unset optional array sends nothing; an
+empty array sends `tags=`. `into_parts()` returns a delimited array as one
+`QueryValue::Delimited` pair holding the unencoded elements.
+
+`ParamDef::new` declares `Form` with `explode: false`; the OpenAPI importer
+records OpenAPI's default for an absent `explode`, which is `true` for
+`form` style and `false` otherwise.
 
 ### Encoding rules
 
@@ -125,17 +156,25 @@ characters (`A-Z a-z 0-9 - _ . ~`) becomes `%XX` with uppercase hex.
 | `a+b` | `a%2Bb` |
 | `x%y` | `x%25y` (a `%` is always encoded; values are never decoded) |
 | `ünï` | `%C3%BCn%C3%AF` (UTF-8 bytes) |
-| empty string | `state=` |
+| empty string | `ref=` |
 
-Array parameters repeat the key, one pair per element:
-`include=a&include=b`. An array of `serde_json::Value` sends each element's
-JSON text, so a string element arrives quoted (`include=%22a%22`).
-Generation rejects a query parameter whose type is an array of arrays
-(`query-parameter`), since an element that is itself an array has no
-single text value.
+A number is sent in its decimal form, a boolean as `true` or `false`, and an
+enum as its wire value (`as_str()`).
 
-A test compares the request lines the generated clients put on the wire,
-covering every case on this page, with a recorded baseline.
+### Parameters the Rust client cannot send
+
+Some declarations have no serialization in the Rust client: a JSON value, an
+array of arrays or of JSON values, `DeepObject` or `Simple` style, a
+`SpaceDelimited` or `PipeDelimited` single value, and an exploded delimited
+array. An **optional** parameter of that kind is left out of the request
+type, and generation reports a `query-parameter` warning for the Rust output
+naming the API, endpoint, and parameter. A **required** one is a
+`query-parameter` error, because no request without it could be correct. The
+OpenAPI and Postman exports keep the parameter as declared.
+
+A test compares the request lines the generated clients put on the wire
+with a recorded baseline, and another sends every form above through a
+generated client to a local server.
 
 ### Path templates that already contain a query
 

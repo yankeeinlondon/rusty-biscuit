@@ -111,7 +111,7 @@ impl EndpointSpec for GetItem {
             return Err(InvalidArgument::new("id must not be empty"));
         }
         let mut parts = RequestParts::new(Method::GET, format!("/items/{}", self.id));
-        parts.query = self.tags.into_iter().map(|tag| ("tag".to_string(), tag)).collect();
+        parts.query = self.tags.into_iter().map(|tag| ("tag".to_string(), tag.into())).collect();
         Ok(parts)
     }
 }
@@ -221,7 +221,7 @@ fn an_endpoint_declares_its_identity_codec_and_request_parts() {
     assert_eq!(parts.path, "/items/7");
     assert_eq!(
         parts.query,
-        [("tag", "b"), ("tag", "a"), ("tag", "b")].map(|(name, value)| (name.to_string(), value.to_string()))
+        [("tag", "b"), ("tag", "a"), ("tag", "b")].map(|(name, value)| (name.to_string(), value.into()))
     );
     assert!(parts.headers.is_empty());
     assert_eq!(parts.body, RequestBody::Empty);

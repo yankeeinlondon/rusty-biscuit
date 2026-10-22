@@ -140,7 +140,7 @@ macro_rules! endpoint {
             #[allow(dead_code, reason = "only some fixtures take ordinary inputs")]
             pub fn with_query(query: &[(&str, &str)]) -> Self {
                 let mut parts = ::schematic_runtime::RequestParts::new(::http::Method::GET, $path);
-                parts.query = query.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect();
+                parts.query = query.iter().map(|(name, value)| ((*name).to_owned(), (*value).into())).collect();
                 Self(parts)
             }
         }

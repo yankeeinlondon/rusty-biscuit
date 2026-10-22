@@ -86,6 +86,17 @@ const FIXTURE_COVERAGE: &[(&str, &[&str])] = &[
             "next-link-pager",
             "adopted-parameters",
             "required-adopted-defaults",
+            "required-query-beside-adopted",
+        ],
+    ),
+    (
+        "FixtureQuery",
+        &[
+            "required-query-parameters",
+            "query-enums",
+            "exploded-and-delimited-arrays",
+            "all-optional-default",
+            "unserializable-query-left-out",
         ],
     ),
 ];
@@ -157,6 +168,7 @@ pub struct EntryLinkPage {
 }
 "#,
     ),
+    ("fixture_query", ""),
 ];
 
 fn endpoint(id: &str, method: RestMethod, path: &str, response: ApiResponse) -> Endpoint {
@@ -174,7 +186,7 @@ fn named_param(name: &str, param_type: QueryParamType) -> ParamDef {
         description: None,
         param_type,
         explode: false,
-        style: ParamStyle::Simple,
+        style: ParamStyle::Form,
     }
 }
 
@@ -207,7 +219,9 @@ fn pages_fixture() -> RestApi {
     let required = |name| ParamDef { rust_name: None, secret: false, pager_managed: false, required: true, ..int(name) };
     let mut list_required =
         endpoint("ListRequired", RestMethod::Get, "/required", ApiResponse::json_vec_type("Entry"));
-    list_required.params = Some(located_params(vec![required("page"), required("limit")], vec![], vec![]));
+    // `scope` is required and no strategy adopts it: the one `new()` argument.
+    let scope = ParamDef { required: true, ..named_param("scope", QueryParamType::String) };
+    list_required.params = Some(located_params(vec![required("page"), scope, required("limit")], vec![], vec![]));
     let scan_entries = endpoint("ScanEntries", RestMethod::Get, "/scan", ApiResponse::json_vec_type("Entry"));
 
     let mut api = fixture_api(
@@ -479,7 +493,51 @@ fn fixture_apis() -> Vec<RestApi> {
         settings,
         names,
         pages_fixture(),
+        query_fixture(),
     ]
+}
+
+/// A query parameter with every field the generator reads.
+fn query_param(name: &str, required: bool, param_type: QueryParamType, style: ParamStyle, explode: bool) -> ParamDef {
+    ParamDef { required, style, explode, ..named_param(name, param_type) }
+}
+
+/// Every supported query form (PD8): required scalars and enums, optional
+/// numbers and booleans, exploded and delimited arrays of strings and enums
+/// whose values hold the delimiters, and a JSON value the client leaves out;
+/// beside it an all-optional request that keeps `Default`.
+fn query_fixture() -> RestApi {
+    let strings = || QueryParamType::Array(Box::new(QueryParamType::String));
+    let enums = |values: &[&str]| QueryParamType::Enum(values.iter().map(|value| value.to_string()).collect());
+    let mut find = endpoint("Find", RestMethod::Get, "/find", ApiResponse::Empty);
+    find.params = Some(located_params(
+        vec![
+            query_param("q", true, QueryParamType::String, ParamStyle::Form, false),
+            query_param("kind", true, enums(&["plain", "ext-ra"]), ParamStyle::Form, false),
+            query_param("n", false, QueryParamType::Integer, ParamStyle::Form, true),
+            query_param("ratio", false, QueryParamType::Number, ParamStyle::Form, true),
+            query_param("flag", false, QueryParamType::Boolean, ParamStyle::Form, true),
+            query_param("tags", false, strings(), ParamStyle::Form, true),
+            query_param("csv", false, strings(), ParamStyle::Form, false),
+            query_param("spaced", false, strings(), ParamStyle::SpaceDelimited, false),
+            query_param("piped", false, strings(), ParamStyle::PipeDelimited, false),
+            query_param("kinds", false, QueryParamType::Array(Box::new(enums(&["a,b", "c|d", "e f"]))), ParamStyle::Form, false),
+            query_param("marks", false, QueryParamType::Array(Box::new(enums(&["x", "y"]))), ParamStyle::Form, true),
+            query_param("meta", false, QueryParamType::Json, ParamStyle::Form, true),
+        ],
+        vec![],
+        vec![],
+    ));
+    let mut browse = endpoint("Browse", RestMethod::Get, "/browse", ApiResponse::Empty);
+    browse.params = Some(located_params(
+        vec![
+            query_param("page", false, QueryParamType::Integer, ParamStyle::Form, true),
+            query_param("sort", false, enums(&["asc", "desc"]), ParamStyle::Form, true),
+        ],
+        vec![],
+        vec![],
+    ));
+    fixture_api("FixtureQuery", "fixture_query", AuthStrategy::None, vec![find, browse])
 }
 
 /// Checkout state the guard could plausibly disturb, compared before and
@@ -551,6 +609,9 @@ use schematic_schema::fixture_policy_key::{FixturePolicyKey, PingRequest};
 use schematic_schema::fixture_query_key::{FixtureQueryKey, ListThingsRequest};
 use schematic_schema::fixture_names::FixtureNames;
 use schematic_schema::fixture_pages::FixturePages;
+use schematic_schema::fixture_query::{
+    BrowseRequest, BrowseRequestSort, FindRequest, FindRequestKind, FindRequestKinds, FindRequestMarks, FixtureQuery,
+};
 use schematic_schema::fixture_settings::{Echo, EchoRequest, FixtureSettings, MovedRequest};
 use schematic_schema::prelude::*;
 use schematic_schema::schematic_runtime::{AuthMethod, ErrorKind, Outcome, RedirectRefusal, TransportErrorKind};
@@ -1017,7 +1078,7 @@ async fn an_endpoint_method_sends_its_values_and_awaits_to_the_data() {
         .unwrap();
     assert_eq!(list.items, [Widget { id: "a".to_string(), name: "n".to_string() }]);
     let request = only_request(&server).await;
-    assert_eq!(query(&request), "limit=5&q=x&tag=a&tag=b");
+    assert_eq!(query(&request), "limit=5&q=x&tag=a,b", "a form array without explode is comma-delimited");
     assert!(header(&request, "authorization").is_empty(), "the per-call setting reached the send");
 
     let full = client.list_widgets().full().await.unwrap();
@@ -1278,17 +1339,110 @@ async fn required_adopted_parameters_are_sent_once_by_an_ordinary_send_and_by_th
         .await;
     let client = FixturePages::new().base_url(server.uri()).build().unwrap();
 
-    let entries = client.list_required().await.unwrap();
+    // `new()` takes only `scope`: `page` and `limit` are required too, but
+    // the strategy adopts them.
+    let entries = client.list_required("team a").await.unwrap();
     assert!(entries.is_empty(), "an ordinary send returns the endpoint's own response");
-    let page = client.list_required().page(3).page_size(5).fetch_page().await.unwrap();
+    let page = client.list_required("team a").page(3).page_size(5).fetch_page().await.unwrap();
     assert_eq!(page.number, 1);
 
     let received = server.received_requests().await.unwrap();
     let queries: Vec<String> = received.iter().map(query).collect();
     assert_eq!(
         queries,
-        ["page=1&limit=25", "page=3&limit=5"],
+        ["scope=team%20a&page=1&limit=25", "scope=team%20a&page=3&limit=5"],
         "the ordinary send carries the first page and the authored size; the pager replaces both"
+    );
+}
+
+#[tokio::test]
+async fn every_page_carries_the_required_value_beside_the_changing_adopted_ones() {
+    use wiremock::matchers::query_param;
+    let server = MockServer::start().await;
+    for (page, body) in [("1", r#"[{"id":"one"}]"#), ("2", r#"[{"id":"two"}]"#)] {
+        Mock::given(query_param("page", page))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+    }
+    Mock::given(any()).respond_with(ResponseTemplate::new(200).set_body_string("[]")).mount(&server).await;
+    let client = FixturePages::new().base_url(server.uri()).build().unwrap();
+
+    let items = client.list_required("x,y").collect_all().await.unwrap();
+
+    let ids: Vec<&str> = items.iter().map(|entry| entry.id.as_str()).collect();
+    assert_eq!(ids, ["one", "two"]);
+    let queries: Vec<String> = server.received_requests().await.unwrap().iter().map(query).collect();
+    assert_eq!(
+        queries,
+        ["scope=x%2Cy&page=1&limit=25", "scope=x%2Cy&page=2&limit=25", "scope=x%2Cy&page=3&limit=25"]
+    );
+}
+
+#[tokio::test]
+async fn query_values_reach_the_wire_in_their_declared_form() {
+    let server = start_server().await;
+    let client = FixtureQuery::new().base_url(server.uri()).build().unwrap();
+    let strings = |values: &[&str]| values.iter().map(|value| value.to_string()).collect::<Vec<_>>();
+
+    client
+        .find("a b&c=d/é", FindRequestKind::ExtRa)
+        .n(-3)
+        .ratio(0.5)
+        .flag(false)
+        .tags(strings(&["a,b", "c d", ""]))
+        .csv(strings(&["a,b", "c%2C", "ü"]))
+        .spaced(strings(&["x y", "z"]))
+        .piped(strings(&["p|q", "r"]))
+        .kinds(vec![FindRequestKinds::Ab, FindRequestKinds::Cd, FindRequestKinds::EF])
+        .marks(vec![FindRequestMarks::X, FindRequestMarks::Y])
+        .await
+        .unwrap();
+
+    let request = only_request(&server).await;
+    assert_eq!(
+        query(&request),
+        "q=a%20b%26c%3Dd%2F%C3%A9&kind=ext-ra&n=-3&ratio=0.5&flag=false\
+         &tags=a%2Cb&tags=c%20d&tags=\
+         &csv=a%2Cb,c%252C,%C3%BC\
+         &spaced=x%20y%20z\
+         &piped=p%7Cq%7Cr\
+         &kinds=a%2Cb,c%7Cd,e%20f\
+         &marks=x&marks=y",
+        "each element is encoded once; a delimiter inside an element stays escaped"
+    );
+}
+
+#[tokio::test]
+async fn unset_values_are_omitted_and_empty_arrays_are_sent_empty() {
+    let server = start_server().await;
+    let client = FixtureQuery::new().base_url(server.uri()).build().unwrap();
+
+    client.find("x", FindRequestKind::Plain).await.unwrap();
+    let empty = FindRequest::new("x", FindRequestKind::Plain)
+        .with_tags(vec![])
+        .with_csv(vec![])
+        .with_spaced(vec![])
+        .with_piped(vec![])
+        .with_kinds(vec![])
+        .with_marks(vec![]);
+    client.send(empty).await.unwrap();
+    // A setter replaces a required value.
+    client.send(FindRequest::new("x", FindRequestKind::Plain).with_q("y".to_string())).await.unwrap();
+    // An all-optional request keeps `Default`.
+    client.send(BrowseRequest::default()).await.unwrap();
+    client.send(BrowseRequest::default().with_sort(BrowseRequestSort::Desc).with_page(2)).await.unwrap();
+
+    let queries: Vec<String> = server.received_requests().await.unwrap().iter().map(query).collect();
+    assert_eq!(
+        queries,
+        [
+            "q=x&kind=plain",
+            "q=x&kind=plain&tags=&csv=&spaced=&piped=&kinds=&marks=",
+            "q=y&kind=plain",
+            "",
+            "page=2&sort=desc",
+        ]
     );
 }
 
@@ -1407,6 +1561,9 @@ const REQUEST_SIDE_TESTS: &[&str] = &[
     "generated_paging_runs_only_the_global_hook_before_items_and_continuations",
     "generated_pager_retains_api_evidence_and_explicitly_retries",
     "required_adopted_parameters_are_sent_once_by_an_ordinary_send_and_by_the_pager",
+    "every_page_carries_the_required_value_beside_the_changing_adopted_ones",
+    "query_values_reach_the_wire_in_their_declared_form",
+    "unset_values_are_omitted_and_empty_arrays_are_sent_empty",
     "a_generated_session_opens_pages_and_closes_inside_its_scope",
     "typed_registration_paths_preserve_nullable_nested_wire_shape",
 ];
@@ -1768,6 +1925,66 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
         "E0599",
         "with_client_and_base_url",
     ),
+    (
+        "a request with a required query value has no Default",
+        "fn misuse() {
+            let _ = schematic_schema::fixture_query::FindRequest::default();
+        }",
+        "E0599",
+        "default",
+    ),
+    (
+        "a request with a required query value used where Default is required",
+        "fn needs_default<T: Default>() {}
+        fn misuse() {
+            needs_default::<schematic_schema::fixture_query::FindRequest>();
+        }",
+        "E0277",
+        "Default",
+    ),
+    (
+        "new() without every required query value",
+        "fn misuse() {
+            let _ = schematic_schema::fixture_query::FindRequest::new(\"q\");
+        }",
+        "E0061",
+        "2 arguments",
+    ),
+    (
+        "an endpoint method without every required query value",
+        "fn misuse(client: schematic_schema::fixture_query::FixtureQuery) {
+            let _ = client.find(\"q\");
+        }",
+        "E0061",
+        "2 arguments",
+    ),
+    (
+        "a string where a query enum is required",
+        "fn misuse() {
+            let _ = schematic_schema::fixture_query::FindRequest::new(\"q\", \"plain\");
+        }",
+        "E0308",
+        "FindRequestKind",
+    ),
+    (
+        "a required query value has no call-type setter",
+        "fn misuse(client: schematic_schema::fixture_query::FixtureQuery) {
+            let _ = client.find(\"q\", schematic_schema::fixture_query::FindRequestKind::Plain).kind(
+                schematic_schema::fixture_query::FindRequestKind::ExtRa,
+            );
+        }",
+        "E0599",
+        "kind",
+    ),
+    (
+        "a query value the client cannot serialize has no setter",
+        "fn misuse() {
+            let _ = schematic_schema::fixture_query::FindRequest::new(\"q\", schematic_schema::fixture_query::FindRequestKind::Plain)
+                .with_meta(Default::default());
+        }",
+        "E0599",
+        "with_meta",
+    ),
 ];
 
 /// What every misuse file imports; the control below proves these imports
@@ -1852,6 +2069,14 @@ fn slow_generated_types_reject_misuse_at_compile_time() {
             client.send(ListWidgetsRequest::default()).full().await.unwrap();
         let _ = response.data();
         let _ = FixtureBearer::new().mutate_response::<ListWidgetsRequest, _>(|_, _| Ok(()));
+        // An all-optional request keeps `Default`; a required query value
+        // goes through `new()`.
+        fn needs_default<T: Default>() {}
+        needs_default::<schematic_schema::fixture_query::BrowseRequest>();
+        let _ = schematic_schema::fixture_query::FindRequest::new(
+            \"q\",
+            schematic_schema::fixture_query::FindRequestKind::Plain,
+        );
     }";
     fresh.add_test_file("misuse_control", &format!("{MISUSE_PRELUDE}{control}\n"));
     fresh.add_test_file("endpoint_methods_control", ENDPOINT_METHODS_CONTROL);
@@ -2102,11 +2327,11 @@ use std::net::TcpListener;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use schematic_schema::gitea::{GetGitTreeRequest, Gitea, ListPullRequestsRequest};
+use schematic_schema::gitea::{GetGitTreeRequest, Gitea, ListPullRequestsRequest, ListPullRequestsRequestSort, ListPullRequestsRequestState};
 use schematic_schema::gitlab::{GetRepositoryFileRequest, GitLab};
-use schematic_schema::openai::{CreateResponseRequest, GetResponseRequest, DeleteResponseRequest, CancelResponseRequest, CompactconversationRequest, GetinputtokencountsRequest, ListInputItemsRequest, ListConversationItemsRequest, OpenAI};
+use schematic_schema::openai::{CreateResponseRequest, GetResponseRequest, DeleteResponseRequest, CancelResponseRequest, CompactconversationRequest, GetinputtokencountsRequest, ListInputItemsRequest, ListConversationItemsRequest, ListConversationItemsRequestOrder, OpenAI, UsageCostsRequest, UsageCostsRequestBucketWidth, UsageCostsRequestGroupBy};
 use schematic_schema::prelude::*;
-use schematic_schema::schematic_runtime::{EndpointSpec, Method, RequestBody};
+use schematic_schema::schematic_runtime::{EndpointSpec, Method, QueryValue, RequestBody};
 
 fn start_recorder() -> (String, mpsc::Receiver<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -2146,16 +2371,12 @@ async fn capture_query_request_lines() {
     let gitea = Gitea::new().base_url(format!("{base}/api/v1")).build().unwrap();
 
     // `page` and `limit` are pager-managed, so they travel through the pager.
+    // Enum values are sent by their wire spelling, in declaration order.
     let mut scalars = ListPullRequestsRequest::new("own er", "re+po%");
-    scalars.state = Some("open closed".to_string());
-    scalars.sort = Some("ünï+%&=/?#".to_string());
+    scalars.state = Some(ListPullRequestsRequestState::Closed);
+    scalars.sort = Some(ListPullRequestsRequestSort::Recentupdate);
     let _ = gitea.send(scalars).credential(key.clone()).pager().page(2).page_size(1).fetch_page().await;
-    record("ordered-scalars-reserved-unicode");
-
-    let mut empty = ListPullRequestsRequest::new("o", "r");
-    empty.state = Some(String::new());
-    let _ = gitea.send(empty).credential(key.clone()).full().await;
-    record("empty-value");
+    record("ordered-enum-scalars");
 
     let _ = gitea.send(ListPullRequestsRequest::new("o", "r")).credential(key.clone()).full().await;
     record("no-query");
@@ -2182,18 +2403,14 @@ async fn capture_query_request_lines() {
     let gitlab = GitLab::new().base_url(format!("{base}/api/v4")).build().unwrap();
     let _ = gitlab
         .send(
-            GetRepositoryFileRequest::new("group/project", "dir/file name.rs").with_git_ref("feature/x y+z".to_string()),
+            GetRepositoryFileRequest::new("group/project", "dir/file name.rs", "feature/x y+z"),
         )
         .credential(key.clone())
         .full()
         .await;
     record("legacy-embedded-query-with-placeholder");
-    let omitted = GetRepositoryFileRequest::new("group/project", "dir/file name.rs");
-    assert!(omitted.clone().into_parts().unwrap().query.is_empty());
-    let _ = gitlab.send(omitted).credential(key.clone()).full().await;
-    record("file-ref-omitted");
     for (label, git_ref) in [("file-ref-unicode", "ünï+%&=/?#"), ("file-ref-empty", "")] {
-        let request = GetRepositoryFileRequest::new("group/project", "dir/file name.rs").with_git_ref(git_ref.to_string());
+        let request = GetRepositoryFileRequest::new("group/project", "dir/file name.rs", git_ref);
         let parts = request.clone().into_parts().unwrap();
         assert_eq!(parts.path, "/projects/group%2Fproject/repository/files/dir%2Ffile%20name.rs");
         assert_eq!(parts.query, pairs(&[("ref", git_ref)]));
@@ -2204,19 +2421,24 @@ async fn capture_query_request_lines() {
     let openai = OpenAI::new().base_url(format!("{base}/v1")).build().unwrap();
     let token = Credential::access_token("test-token");
     let mut items = ListConversationItemsRequest::new("conv 1");
-    items.order = Some("a+b".to_string());
-    items.include = Some(vec![
-        serde_json::json!("a b"),
-        serde_json::json!("c+d"),
-        serde_json::json!(""),
-        serde_json::json!("é"),
-    ]);
+    items.order = Some(ListConversationItemsRequestOrder::Desc);
     let _ = openai.send(items).credential(token.clone()).pager().page_size(5).after("x%y").fetch_page().await;
+    record("declared-enum-then-pager-cursor");
+
+    // A required value, exploded string and enum arrays, and an enum scalar.
+    let usage = UsageCostsRequest::new(1_700_000_000)
+        .with_bucket_width(UsageCostsRequestBucketWidth::V1d)
+        .with_project_ids(vec!["a b".to_string(), "c+d".to_string(), String::new(), "é".to_string()])
+        .with_group_by(vec![UsageCostsRequestGroupBy::ProjectId, UsageCostsRequestGroupBy::LineItem]);
+    let _ = openai.send(usage).credential(token.clone()).full().await;
     record("repeated-array-keys");
+
+    let empty = UsageCostsRequest::new(0).with_project_ids(Vec::new());
+    let _ = openai.send(empty).credential(token.clone()).full().await;
+    record("empty-array");
 
     let mut beta = ListInputItemsRequest::new("resp 1");
     beta.beta = Some(true);
-    beta.include = Some(vec![serde_json::json!("x y")]);
     let _ = openai.send(beta).credential(token.clone()).pager().page_size(3).fetch_page().await;
     record("legacy-embedded-query-plus-declared");
 
@@ -2253,29 +2475,28 @@ async fn capture_query_request_lines() {
     std::fs::write(out, lines.join("\n") + "\n").expect("write captured lines");
 }
 
-fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
-    list.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+fn pairs(list: &[(&str, &str)]) -> Vec<(String, QueryValue)> {
+    list.iter().map(|(k, v)| (k.to_string(), QueryValue::from(*v))).collect()
 }
 
 #[test]
 fn into_parts_returns_unencoded_query_pairs_apart_from_the_path() {
     let mut scalars = ListPullRequestsRequest::new("own er", "re+po%");
-    scalars.state = Some("open closed".to_string());
-    scalars.sort = Some("ünï+%&=/?#".to_string());
+    scalars.state = Some(ListPullRequestsRequestState::Closed);
+    scalars.sort = Some(ListPullRequestsRequestSort::Recentupdate);
     let parts = scalars.into_parts().unwrap();
     assert_eq!(parts.method, Method::GET);
     assert_eq!(parts.path, "/repos/own%20er/re%2Bpo%25/pulls");
     assert_eq!(parts.body, RequestBody::Empty);
-    assert_eq!(parts.query, pairs(&[("state", "open closed"), ("sort", "ünï+%&=/?#")]));
+    assert_eq!(parts.query, pairs(&[("state", "closed"), ("sort", "recentupdate")]));
     assert!(
         !parts.headers.iter().any(|(name, _)| ["state", "sort"].contains(&name.as_str())),
         "query parameters must not travel as headers: {:?}",
         parts.headers
     );
 
-    let mut empty = ListPullRequestsRequest::new("o", "r");
-    empty.state = Some(String::new());
-    assert_eq!(empty.into_parts().unwrap().query, pairs(&[("state", "")]));
+    let empty = UsageCostsRequest::new(0).with_project_ids(Vec::new());
+    assert_eq!(empty.into_parts().unwrap().query, pairs(&[("start_time", "0"), ("project_ids", "")]));
 
     let parts = ListPullRequestsRequest::new("o", "r").into_parts().unwrap();
     assert_eq!((parts.path.as_str(), parts.query), ("/repos/o/r/pulls", vec![]));
@@ -2284,7 +2505,7 @@ fn into_parts_returns_unencoded_query_pairs_apart_from_the_path() {
     tree.recursive = Some(true);
     let parts = tree.into_parts().unwrap();
     assert_eq!((parts.path.as_str(), parts.query), ("/repos/o/r/git/trees/a%20b", pairs(&[("recursive", "true")])));
-    let parts = GetRepositoryFileRequest::new("group/project", "dir/file name.rs").with_git_ref("feature/x y+z".to_string())
+    let parts = GetRepositoryFileRequest::new("group/project", "dir/file name.rs", "feature/x y+z")
         .into_parts()
         .unwrap();
     assert_eq!(
@@ -2292,18 +2513,21 @@ fn into_parts_returns_unencoded_query_pairs_apart_from_the_path() {
         ("/projects/group%2Fproject/repository/files/dir%2Ffile%20name.rs", pairs(&[("ref", "feature/x y+z")]))
     );
 
-    let mut items = ListConversationItemsRequest::new("conv 1");
-    items.include = Some(vec![serde_json::json!("a b"), serde_json::json!("")]);
-    let parts = items.into_parts().unwrap();
-    assert_eq!(parts.path, "/conversations/conv%201/items");
-    assert_eq!(parts.query, pairs(&[("include", "\"a b\""), ("include", "\"\"")]));
+    let usage = UsageCostsRequest::new(5)
+        .with_project_ids(vec!["a b".to_string(), String::new()])
+        .with_group_by(vec![UsageCostsRequestGroupBy::ApiKeyId]);
+    let parts = usage.into_parts().unwrap();
+    assert_eq!(parts.path, "/organization/costs");
+    assert_eq!(
+        parts.query,
+        pairs(&[("start_time", "5"), ("project_ids", "a b"), ("project_ids", ""), ("group_by", "api_key_id")])
+    );
 
     let mut beta = ListInputItemsRequest::new("resp 1");
     beta.beta = Some(true);
-    beta.include = Some(vec![serde_json::json!("x y")]);
     let parts = beta.into_parts().unwrap();
     assert_eq!(parts.path, "/responses/resp%201/input_items");
-    assert_eq!(parts.query, pairs(&[("include", "\"x y\""), ("beta", "true")]));
+    assert_eq!(parts.query, pairs(&[("beta", "true")]));
 }
 "#;
 

@@ -339,8 +339,15 @@ fn endpoint_names(
     let pager = pager_forwards(api, endpoint);
     let endpoint = pager_view(api, endpoint);
     let is_pager_control = |name: &str| pager.as_ref().is_some_and(|pager| pager.has_control(name));
+    let request_type = format!("{}{suffix}", endpoint.id);
+    // A required query value is an argument of the endpoint method, not a
+    // setter.
+    let optional_query = extract_query_params(&endpoint.params, &request_type)
+        .into_iter()
+        .filter(|param| !param.required)
+        .collect();
     let located = [
-        (ParamLocation::Query, extract_query_params(&endpoint.params)),
+        (ParamLocation::Query, optional_query),
         (ParamLocation::Header, extract_header_params(&endpoint.params)),
         (ParamLocation::Cookie, extract_cookie_params(&endpoint.params)),
     ];
@@ -368,7 +375,6 @@ fn endpoint_names(
         }
     }
 
-    let request_type = format!("{}{suffix}", endpoint.id);
     EndpointNames {
         endpoint_id: endpoint.id.clone(),
         call_type: call_type_name(&request_type),

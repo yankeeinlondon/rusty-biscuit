@@ -210,28 +210,38 @@ pub(super) fn typed_path_args(fields: &[PathField]) -> Vec<PathArg> {
 
 /// Generates a `new()` constructor method body for the request struct.
 ///
-/// The constructor requires all path parameters and the body (if present),
-/// providing compile-time enforcement of required fields.
+/// The constructor takes the path parameters, then `required_query` in
+/// declaration order, then the body (if present), providing compile-time
+/// enforcement of required fields; every `optional_params` field starts as
+/// `None`.
 ///
 /// ## Returns
 ///
-/// - For structs with path params or body: method body for `new()` (no impl wrapper)
+/// - For structs with path params, required query params, or body: method
+///   body for `new()` (no impl wrapper)
+/// - For structs with only optional params: a `new()` with no arguments
 /// - For empty structs (no params, no body): empty `TokenStream` (use `Default`)
 pub(super) fn generate_new_method(
     path_args: &[PathArg],
-    query_params: &[QueryParamInfo],
+    required_query: &[QueryParamInfo],
+    optional_params: &[QueryParamInfo],
     has_body: bool,
     body_type: Option<&str>,
 ) -> TokenStream {
-    let params: Vec<_> = path_args
+    let mut params: Vec<_> = path_args
         .iter()
         .map(|PathArg { name, ty, .. }| quote! { #name: #ty })
         .collect();
+    params.extend(required_query.iter().map(|param| {
+        let name = format_ident!("{}", param.field_name());
+        let ty = param.arg_type();
+        quote! { #name: #ty }
+    }));
 
-    let path_field_inits: Vec<_> = path_args.iter().map(|arg| &arg.init).collect();
+    let mut required_inits: Vec<_> = path_args.iter().map(|arg| arg.init.clone()).collect();
+    required_inits.extend(required_query.iter().map(QueryParamInfo::arg_init));
 
-    // Initialize query params to None
-    let query_field_inits: Vec<_> = query_params
+    let optional_inits: Vec<_> = optional_params
         .iter()
         .map(|qp| {
             let name = format_ident!("{}", qp.field_name());
@@ -241,33 +251,43 @@ pub(super) fn generate_new_method(
 
     if has_body {
         let body_ty = type_name_to_tokens(body_type.unwrap_or("Body"));
+        let doc = if required_query.is_empty() {
+            " Creates a new request with the required path parameters and body."
+        } else {
+            " Creates a new request with the required path and query parameters and body."
+        };
         quote! {
-            /// Creates a new request with the required path parameters and body.
+            #[doc = #doc]
             pub fn new(#(#params,)* body: #body_ty) -> Self {
                 Self {
-                    #(#path_field_inits,)*
-                    #(#query_field_inits,)*
+                    #(#required_inits,)*
+                    #(#optional_inits,)*
                     body,
                 }
             }
         }
-    } else if !path_args.is_empty() {
+    } else if !params.is_empty() {
+        let doc = match (path_args.is_empty(), required_query.is_empty()) {
+            (false, true) => " Creates a new request with the required path parameters.",
+            (true, false) => " Creates a new request with the required query parameters.",
+            _ => " Creates a new request with the required path and query parameters.",
+        };
         quote! {
-            /// Creates a new request with the required path parameters.
+            #[doc = #doc]
             pub fn new(#(#params),*) -> Self {
                 Self {
-                    #(#path_field_inits,)*
-                    #(#query_field_inits,)*
+                    #(#required_inits,)*
+                    #(#optional_inits,)*
                 }
             }
         }
-    } else if !query_params.is_empty() {
-        // No path params but has query params - need to initialize them
+    } else if !optional_params.is_empty() {
+        // No required values but optional ones - need to initialize them
         quote! {
             /// Creates a new request with default values.
             pub fn new() -> Self {
                 Self {
-                    #(#query_field_inits,)*
+                    #(#optional_inits,)*
                 }
             }
         }

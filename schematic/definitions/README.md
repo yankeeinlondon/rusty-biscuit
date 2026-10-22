@@ -55,6 +55,14 @@ API defaults, and endpoint `.pagination(Collection)` assignments. Gitea's
 repository-file endpoint uses the wire query name `ref` with the Rust name
 `git_ref`; route paths contain no query strings.
 
+GitHub declares its rate-limit headers (`x-ratelimit-limit`,
+`x-ratelimit-remaining`, `x-ratelimit-reset` in epoch seconds, and
+`retry-after`); this is documentation metadata, and nothing retries. Bitbucket
+and EMQX Basic keep their username and password variable lists inside
+`AuthStrategy::Basic`. Required query parameters, query enums, and array
+`style`/`explode` flags in these definitions shape the generated constructors
+and wire form; see [request inputs](../docs/generation/request-side.md).
+
 OpenAI's 258 endpoints are [imported](../docs/io/import-openapi.md) from the
 vendored document. Reimport with `just -f schematic/justfile import-openai`;
 its handwritten pagination overlay is preserved. Generate client and export

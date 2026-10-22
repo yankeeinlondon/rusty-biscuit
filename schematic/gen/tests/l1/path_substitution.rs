@@ -399,7 +399,7 @@ fn path_params_are_substituted_without_declared_query_params() {
         "the path must not receive the declared query:\n{code}"
     );
     assert!(
-        code.contains(r#"query.push(("state".to_string(), value.to_string()))"#),
+        code.contains(r#"query.push(("state".to_string(), value.to_string().into()))"#),
         "the declared query should be a separate pair:\n{code}"
     );
 }

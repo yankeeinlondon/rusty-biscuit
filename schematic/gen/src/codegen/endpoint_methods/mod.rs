@@ -48,9 +48,9 @@ use schematic_define::{Endpoint, RestApi};
 use crate::codegen::api_struct::api_tag_name;
 use crate::codegen::pagination::{KnobForward, PagerForwards};
 use crate::codegen::request_structs::path_params::typed_path_fields;
-use crate::codegen::request_structs::request_body_type_name;
+use crate::codegen::request_structs::{query_example_arg, request_body_type_name};
 use crate::codegen::request_structs::shared::{
-    param_field_name, query_param_type_to_rust_type, type_name_to_tokens,
+    extract_query_params, param_field_name, type_name_to_tokens,
 };
 use crate::parser::extract_path_params;
 
@@ -90,7 +90,8 @@ pub fn generate_endpoint_methods(api: &RestApi) -> TokenStream {
 
 /// How a caller calls `endpoint` on a client bound to `client`, for docs:
 /// `client.get_item("item_id")`, with each untyped path parameter's name as
-/// its value, a plausible value of each typed one, and `body` for a body.
+/// its value, a plausible value of each typed path and required query
+/// parameter, and `body` for a body.
 pub(crate) fn example_invocation(api: &RestApi, endpoint: &Endpoint, client: &str) -> String {
     let names = resolve_names(api);
     let (_, names) = api
@@ -106,6 +107,15 @@ pub(crate) fn example_invocation(api: &RestApi, endpoint: &Endpoint, client: &st
             .map(|param| format!("\"{}\"", param_field_name(param)))
             .collect(),
     };
+    // Adopted pagination parameters are never arguments.
+    let endpoint = crate::codegen::pagination::pager_view(api, endpoint);
+    let endpoint = endpoint.as_ref();
+    args.extend(
+        extract_query_params(&endpoint.params, &names.request_type)
+            .iter()
+            .filter(|param| param.required)
+            .map(|param| query_example_arg(param).0),
+    );
     if request_body_type_name(api, endpoint).is_some() {
         args.push("body".to_string());
     }
@@ -114,12 +124,13 @@ pub(crate) fn example_invocation(api: &RestApi, endpoint: &Endpoint, client: &st
 
 /// The type a setter takes: the type of the request's `with_*` method.
 pub(crate) fn setter_type(setter: &SetterName) -> TokenStream {
-    query_param_type_to_rust_type(&setter.param.param_type)
+    setter.param.rust_type()
 }
 
 /// The required arguments of `endpoint`, whose request type is
 /// `request_type`, in `{Endpoint}Request::new` order: each path parameter
-/// (typed ones in first-occurrence template order), then the body.
+/// (typed ones in first-occurrence template order), then each required
+/// query parameter in declaration order, then the body.
 fn required_args(api: &RestApi, endpoint: &Endpoint, request_type: &str) -> Vec<RequiredArg> {
     let mut args: Vec<RequiredArg> = match typed_path_fields(endpoint, request_type) {
         Some(fields) => fields
@@ -139,6 +150,16 @@ fn required_args(api: &RestApi, endpoint: &Endpoint, request_type: &str) -> Vec<
             })
             .collect(),
     };
+    args.extend(
+        extract_query_params(&endpoint.params, request_type)
+            .into_iter()
+            .filter(|param| param.required)
+            .map(|param| RequiredArg {
+                name: param.field_name(),
+                ty: param.arg_type(),
+                role: format!("the required `{}` query parameter", param.name),
+            }),
+    );
     if let Some(body) = request_body_type_name(api, endpoint) {
         args.push(RequiredArg {
             name: "body".to_string(),

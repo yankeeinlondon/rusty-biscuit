@@ -95,8 +95,10 @@ Details that matter in practice:
   assembled it, so a credential is never carried over by accident. When the
   policy allows the credential for the target, it is attached again; when
   it does not, every secret header (including `Cookie`) and secret query
-  value is removed. A relative `Location` is resolved before any credential
-  is added, so it never inherits a query-string key.
+  pair is removed; the other query pairs are kept byte for byte, so a
+  delimited value such as `tags=a%2Cb,c` keeps its literal `,`. A relative
+  `Location` is resolved before any credential is added, so it never
+  inherits a query-string key.
 - **Methods.** A 301 or 302 in reply to `POST`, and a 303 in reply to
   anything but `HEAD`, continue as `GET` without the body. A 307 or 308
   replays the same method and body.

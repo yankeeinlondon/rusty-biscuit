@@ -46,7 +46,7 @@ impl schematic_runtime::EndpointSpec for CreateSpeechRequest {
         let path = format!(
             "/v1/text-to-speech/{}", urlencoding::encode(& self.voice_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -108,7 +108,7 @@ impl schematic_runtime::EndpointSpec for StreamSpeechRequest {
             "/v1/text-to-speech/{}/stream", urlencoding::encode(& self.voice_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -172,7 +172,7 @@ impl schematic_runtime::EndpointSpec for CreateSpeechWithTimestampsRequest {
             "/v1/text-to-speech/{}/with-timestamps", urlencoding::encode(& self.voice_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -236,7 +236,7 @@ impl schematic_runtime::EndpointSpec for StreamSpeechWithTimestampsRequest {
             "/v1/text-to-speech/{}/stream/with-timestamps", urlencoding::encode(& self
             .voice_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -305,12 +305,12 @@ impl schematic_runtime::EndpointSpec for ListVoicesRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/v2/voices".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page_size {
-            query.push(("page_size".to_string(), value.to_string()));
+            query.push(("page_size".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.page_token {
-            query.push(("page_token".to_string(), value.to_string()));
+            query.push(("page_token".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -370,7 +370,7 @@ impl schematic_runtime::EndpointSpec for GetVoiceRequest {
         let path = format!(
             "/v1/voices/{}", urlencoding::encode(& self.voice_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -429,7 +429,7 @@ impl schematic_runtime::EndpointSpec for DeleteVoiceRequest {
         let path = format!(
             "/v1/voices/{}", urlencoding::encode(& self.voice_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -465,7 +465,7 @@ impl schematic_runtime::EndpointSpec for GetDefaultVoiceSettingsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/v1/voices/settings/default".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -524,7 +524,7 @@ impl schematic_runtime::EndpointSpec for GetVoiceSettingsRequest {
         let path = format!(
             "/v1/voices/{}/settings", urlencoding::encode(& self.voice_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -581,7 +581,7 @@ impl schematic_runtime::EndpointSpec for UpdateVoiceSettingsRequest {
             "/v1/voices/{}/settings/edit", urlencoding::encode(& self.voice_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -639,7 +639,7 @@ impl schematic_runtime::EndpointSpec for GetVoiceSampleAudioRequest {
             "/v1/voices/{}/samples/{}/audio", urlencoding::encode(& self.voice_id
             .to_string()), urlencoding::encode(& self.sample_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -692,7 +692,7 @@ impl schematic_runtime::EndpointSpec for DeleteVoiceSampleRequest {
             "/v1/voices/{}/samples/{}", urlencoding::encode(& self.voice_id.to_string()),
             urlencoding::encode(& self.sample_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -774,7 +774,7 @@ impl schematic_runtime::EndpointSpec for AddVoiceSampleRequest {
         let path = format!(
             "/v1/voices/{}/samples", urlencoding::encode(& self.voice_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -810,7 +810,7 @@ impl schematic_runtime::EndpointSpec for ListSharedVoicesRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/v1/shared-voices".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -871,7 +871,7 @@ impl schematic_runtime::EndpointSpec for AddSharedVoiceRequest {
             "/v1/voices/add/{}/{}", urlencoding::encode(& self.public_user_id
             .to_string()), urlencoding::encode(& self.voice_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -930,7 +930,7 @@ impl schematic_runtime::EndpointSpec for CreatePvcVoiceRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/v1/voices/pvc".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -993,7 +993,7 @@ impl schematic_runtime::EndpointSpec for UpdatePvcVoiceRequest {
         let path = format!(
             "/v1/voices/pvc/{}", urlencoding::encode(& self.voice_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1056,7 +1056,7 @@ impl schematic_runtime::EndpointSpec for TrainPvcVoiceRequest {
         let path = format!(
             "/v1/voices/pvc/{}/train", urlencoding::encode(& self.voice_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1115,7 +1115,7 @@ impl schematic_runtime::EndpointSpec for CreateSoundEffectRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/v1/sound-generation".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1158,7 +1158,7 @@ impl schematic_runtime::EndpointSpec for ListModelsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/v1/models".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1219,7 +1219,7 @@ impl schematic_runtime::EndpointSpec for CreateSingleUseTokenRequest {
         let path = format!(
             "/v1/single-use-token/{}", urlencoding::encode(& self.token_type.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1255,7 +1255,7 @@ impl schematic_runtime::EndpointSpec for GetHistoryRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/v1/history".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1316,7 +1316,7 @@ impl schematic_runtime::EndpointSpec for GetHistoryItemRequest {
         let path = format!(
             "/v1/history/{}", urlencoding::encode(& self.history_item_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1377,7 +1377,7 @@ impl schematic_runtime::EndpointSpec for DeleteHistoryItemRequest {
         let path = format!(
             "/v1/history/{}", urlencoding::encode(& self.history_item_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1437,7 +1437,7 @@ impl schematic_runtime::EndpointSpec for GetHistoryItemAudioRequest {
             "/v1/history/{}/audio", urlencoding::encode(& self.history_item_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1487,7 +1487,7 @@ impl schematic_runtime::EndpointSpec for DownloadHistoryItemsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/v1/history/download".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1530,7 +1530,7 @@ impl schematic_runtime::EndpointSpec for GetUsageStatsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/v1/usage/character-stats".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1566,7 +1566,7 @@ impl schematic_runtime::EndpointSpec for GetUserRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/v1/user".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1602,7 +1602,7 @@ impl schematic_runtime::EndpointSpec for GetUserSubscriptionRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/v1/user/subscription".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1664,7 +1664,7 @@ impl schematic_runtime::EndpointSpec for GetResourceRequest {
             "/v1/workspace/resources/{}", urlencoding::encode(& self.resource_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1721,7 +1721,7 @@ impl schematic_runtime::EndpointSpec for ShareResourceRequest {
             "/v1/workspace/resources/{}/share", urlencoding::encode(& self.resource_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1785,7 +1785,7 @@ impl schematic_runtime::EndpointSpec for UnshareResourceRequest {
             "/v1/workspace/resources/{}/unshare", urlencoding::encode(& self.resource_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1849,7 +1849,7 @@ impl schematic_runtime::EndpointSpec for CopyResourceToWorkspaceRequest {
             "/v1/workspace/resources/{}/copy-to-workspace", urlencoding::encode(& self
             .resource_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1892,7 +1892,7 @@ impl schematic_runtime::EndpointSpec for ListServiceAccountsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/v1/service-accounts".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1956,7 +1956,7 @@ impl schematic_runtime::EndpointSpec for ListServiceAccountApiKeysRequest {
             "/v1/service-accounts/{}/api-keys", urlencoding::encode(& self
             .service_account_user_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2013,7 +2013,7 @@ impl schematic_runtime::EndpointSpec for CreateApiKeyRequest {
             "/v1/service-accounts/{}/api-keys", urlencoding::encode(& self
             .service_account_user_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2082,7 +2082,7 @@ impl schematic_runtime::EndpointSpec for UpdateApiKeyRequest {
             .service_account_user_id.to_string()), urlencoding::encode(& self.api_key_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2146,7 +2146,7 @@ impl schematic_runtime::EndpointSpec for DeleteApiKeyRequest {
             .service_account_user_id.to_string()), urlencoding::encode(& self.api_key_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2182,7 +2182,7 @@ impl schematic_runtime::EndpointSpec for ListWebhooksRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/v1/workspace/webhooks".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2234,7 +2234,7 @@ impl schematic_runtime::EndpointSpec for CreateWebhookRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/v1/workspace/webhooks".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2298,7 +2298,7 @@ impl schematic_runtime::EndpointSpec for UpdateWebhookRequest {
             "/v1/workspace/webhooks/{}", urlencoding::encode(& self.webhook_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -2367,7 +2367,7 @@ impl schematic_runtime::EndpointSpec for DeleteWebhookRequest {
             "/v1/workspace/webhooks/{}", urlencoding::encode(& self.webhook_id
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,

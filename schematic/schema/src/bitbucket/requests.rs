@@ -45,7 +45,7 @@ impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
             "/repositories/{}/{}", urlencoding::encode(& self.workspace.to_string()),
             urlencoding::encode(& self.repo_slug.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -127,12 +127,12 @@ impl schematic_runtime::EndpointSpec for GetSourceRequest {
             urlencoding::encode(& self.commit.to_string()), urlencoding::encode(& self
             .path.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.pagelen {
-            query.push(("pagelen".to_string(), value.to_string()));
+            query.push(("pagelen".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -208,12 +208,12 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
             "/repositories/{}/{}/pullrequests", urlencoding::encode(& self.workspace
             .to_string()), urlencoding::encode(& self.repo_slug.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.state {
-            query.push(("state".to_string(), value.to_string()));
+            query.push(("state".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -275,7 +275,7 @@ impl schematic_runtime::EndpointSpec for GetPullRequestRequest {
             .to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -349,9 +349,9 @@ impl schematic_runtime::EndpointSpec for ListPullRequestCommentsRequest {
             .workspace.to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -418,9 +418,9 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
             "/repositories/{}/{}/issues", urlencoding::encode(& self.workspace
             .to_string()), urlencoding::encode(& self.repo_slug.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -480,7 +480,7 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
             .to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -554,9 +554,9 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
             .workspace.to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -631,9 +631,9 @@ impl schematic_runtime::EndpointSpec for ListIssueChangesRequest {
             .to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -693,7 +693,7 @@ impl schematic_runtime::EndpointSpec for GetBranchRequest {
             .to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.name.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -759,9 +759,9 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
             "/repositories/{}/{}/refs/tags", urlencoding::encode(& self.workspace
             .to_string()), urlencoding::encode(& self.repo_slug.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -821,7 +821,7 @@ impl schematic_runtime::EndpointSpec for GetTagRequest {
             .to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.name.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -887,9 +887,9 @@ impl schematic_runtime::EndpointSpec for ListDownloadsRequest {
             "/repositories/{}/{}/downloads", urlencoding::encode(& self.workspace
             .to_string()), urlencoding::encode(& self.repo_slug.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -949,7 +949,7 @@ impl schematic_runtime::EndpointSpec for GetDownloadRequest {
             .to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.filename.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1027,9 +1027,9 @@ impl schematic_runtime::EndpointSpec for ListWorkspaceReposRequest {
         let path = format!(
             "/repositories/{}", urlencoding::encode(& self.workspace.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {

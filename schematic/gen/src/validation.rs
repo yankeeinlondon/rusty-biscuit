@@ -52,6 +52,8 @@ use serde_json::Value;
 use crate::codegen::endpoint_methods::{call_type_name, resolve_names};
 use crate::codegen::request_structs::param_enums::variant_collisions;
 use crate::codegen::request_structs::path_params::{PathValue, typed_path_fields};
+use crate::codegen::request_structs::shared::{extract_query_params, query_shape};
+use crate::codegen::pagination::pager_view;
 use crate::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use crate::errors::GeneratorError;
 use crate::export::resolve_module_name;
@@ -393,6 +395,7 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
         check_request_struct_fields(api, endpoint, diagnostics);
         check_raw_body_content_type(api, endpoint, diagnostics);
         check_sent_params(api, endpoint, diagnostics);
+        check_query_shapes(api, endpoint, diagnostics);
     }
 
     check_pagination(api, diagnostics);
@@ -753,13 +756,80 @@ fn check_sent_params(api: &RestApi, endpoint: &Endpoint, diagnostics: &mut Vec<V
                 &param.param_type,
                 QueryParamType::Array(inner) if matches!(**inner, QueryParamType::Array(_))
             );
-            if nested {
+            // A query parameter's shape, nested arrays included, is
+            // checked by `check_query_shapes`.
+            if nested && feature != Feature::QueryParameter {
                 push(format!(
                     "{location} parameter `{}` is an array of arrays, which has no {location} \
                      serialization",
                     param.name
                 ));
             }
+        }
+    }
+}
+
+/// Checks the query parameters of the endpoint's request type, which leaves
+/// out the parameters its pagination strategy adopts.
+///
+/// A parameter whose type, style, and `explode` have no Rust serialization
+/// is left out of the request type: a warning when it is optional, an error
+/// when it is required, since no request could then be correct. An enum must
+/// have values, and its values must generate distinct variants.
+fn check_query_shapes(api: &RestApi, endpoint: &Endpoint, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    let viewed = pager_view(api, endpoint);
+    let Some(params) = &viewed.params else {
+        return;
+    };
+    let mut push = |severity, feature, message: String| {
+        diagnostics.push(ValidationDiagnostic::new(
+            severity,
+            &api.name,
+            Some(&endpoint.id),
+            feature,
+            Output::Rust,
+            message,
+        ));
+    };
+    for param in &params.query {
+        let name = &param.name;
+        match query_shape(param, "") {
+            Err(declared) if param.required => push(
+                Severity::Error,
+                Feature::QueryParameter,
+                format!(
+                    "required query parameter `{name}` is {declared}, which the Rust client cannot \
+                     serialize"
+                ),
+            ),
+            Err(declared) => push(
+                Severity::Warning,
+                Feature::QueryParameter,
+                format!(
+                    "query parameter `{name}` is {declared}, which the Rust client cannot serialize; \
+                     it is left out of the request type"
+                ),
+            ),
+            Ok(shape) => match shape.enum_type() {
+                Some((_, [])) => push(
+                    Severity::Error,
+                    Feature::QueryParameter,
+                    format!("query parameter `{name}` declares an enum with no values"),
+                ),
+                Some((_, values)) => {
+                    for (variant, wire_values) in variant_collisions(values) {
+                        push(
+                            Severity::Error,
+                            Feature::GeneratedNameCollision,
+                            format!(
+                                "query parameter `{name}` enum values `{}` all generate the variant `{variant}`",
+                                wire_values.join("`, `")
+                            ),
+                        );
+                    }
+                }
+                None => {}
+            },
         }
     }
 }
@@ -1052,6 +1122,16 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
                         api: &api.name,
                         endpoint: Some(&endpoint.id),
                         role: format!("the `{}` path-parameter enum of {}::{}", path.wire, api.name, endpoint.id),
+                    });
+                }
+            }
+            let viewed = pager_view(api, endpoint);
+            for param in extract_query_params(&viewed.params, &format!("{}{suffix}", endpoint.id)) {
+                if let Some((type_name, _)) = param.shape.as_ref().and_then(|shape| shape.enum_type()) {
+                    emitted.entry(type_name.to_string()).or_default().push(Owner {
+                        api: &api.name,
+                        endpoint: Some(&endpoint.id),
+                        role: format!("the `{}` query-parameter enum of {}::{}", param.name, api.name, endpoint.id),
                     });
                 }
             }
