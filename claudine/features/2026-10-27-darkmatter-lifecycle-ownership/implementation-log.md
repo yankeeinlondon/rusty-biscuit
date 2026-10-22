@@ -457,14 +457,482 @@ skills_files_updated_during_phase_4:
     - .claude/skills/darkmatter/library-surfaces.md
     - .claude/skills/darkmatter/lifecycle.md
     - .claude/skills/darkmatter/schema.md
-message_to_agent: |-
-    Phase 4 is done; read the "## Phase 4" log sections before Phase 5. Key facts:
-    - md host: `darkmatter/lib/src/lifecycle/md_host.rs` (profile, `MdStackHost`, `MdShellRunner`, `MdDiagnostics`, `drive` over `Run`) and CLI `darkmatter/cli/src/commands/compose/lifecycle.rs`. Only a root document authoring a core event key takes the lifecycle path. Tolerance is `UnknownVerbPolicy::IgnoreUnprovided(UNPROVIDED_VERBS)` (inert `Ignored` nodes, warned once per reached occurrence); Claudine stays `Reject`. CLI tests: `darkmatter/cli/tests/l1/compose_lifecycle.rs` (27). `md compose` has no `--dry-run` flag; "dry runs fire nothing" is proven only for report-only `--shell`.
-    - Global catalog: `darkmatter/schemas/darkmatter.yaml` (+ partials incl. new `timing.yaml`) is embedded via `embedded.rs::SHIPPED`; loader `darkmatter/lib/src/markdown/schemas/catalog.rs` (`GlobalCatalog`, `is_global_catalog`, `host_catalogs`). `darkmatter/docs/schemas/darkmatter.yaml` is deleted. Claudine host catalog: `claudine/schemas/globals.yaml`, embedded by `claudine/lib/src/composition/schema/globals.rs`.
-    - Editor projection still to do: DMLS uses the baseline `BindingView` for `seq`/`loop`/`group` availability (no per-event availability yet), and DMLS silently drops a host catalog that fails to load.
-    - Triggers: `kind: schema-trigger`, top-level list AND, `group:` OR, `any:`/`trigger-schema` are `SchemaError::TriggerRenamed`; a trigger with no `$schema` now loads as matcher-only. `--no-trigger-schemas` is rejected in `darkmatter/cli/src/main.rs::reject_renamed_flags`. Spelling guard: `darkmatter/lib/tests/l1/trigger_spelling_guard.rs` (allowlist fails when stale). Phase 6 docs must update its allowlisted `definition.md`/skill text if they change.
-    - Schema projection (Phase 5) is not started: Darkmatter's baseline does not yet type `initialize`/`composed`/... with md action unions.
-    - Known load-sensitive tests: dmls `searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back`, claudine `prewarm::worker::tests::a_successful_or_no_op_preparation_counts_as_done`. Both pass alone.
+source_files_during_phase_5:
+    - claudine/cli/tests/l1/lifecycle_root_preparation.rs
+    - claudine/lib/tests/l1/claudine_schema_parity.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/compose_lifecycle_approval.rs
+    - darkmatter/cli/tests/l1/lifecycle_passive_surfaces.rs
+    - darkmatter/cli/tests/l1/lifecycle_schema_fallback.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/dmls/tests/l1/lifecycle_event_views.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/no_side_effects.rs
+    - darkmatter/lib/src/lifecycle/md_host.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/schemas/embedded.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/tests/l1/lifecycle_passive_compose.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_parity.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/schemas/partials/fm.yaml
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+docs_updated_during_phase_5:
+    - claudine/schemas/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/lifecycle.md
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_6:
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/tests/l1/compose_lifecycle.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/lib/src/lifecycle/actions.rs
+    - darkmatter/lib/src/lifecycle/executor.rs
+    - darkmatter/lib/src/lifecycle/executor/shell.rs
+    - scripts/check-lifecycle-doc-facets.sh
+docs_updated_during_phase_6:
+    - claudine/README.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/schemas.md
+    - darkmatter/README.md
+    - darkmatter/cli/README.md
+    - darkmatter/lib/README.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/schemas/darkmatter-schema.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/schema-targeting.md
+    - darkmatter/docs/topics/side-effects.md
+docs_created_during_phase_6:
+    - darkmatter/docs/topics/lifecycle/error-handling.md
+    - darkmatter/docs/topics/lifecycle/index.md
+skills_files_updated_during_phase_6:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/lifecycle.md
+source_code:
+    - Cargo.lock
+    - claudine/cli/Cargo.toml
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/prep_target.rs
+    - claudine/cli/src/commands/wrap/composition/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline/tests.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/prep_context.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/composition/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_routing.rs
+    - claudine/cli/src/commands/wrap/launch_plan.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/output/error_walker/tests.rs
+    - claudine/cli/tests/fixtures/lifecycle_traces/
+    - claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-document-unauthored.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-document-unauthored.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-document.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-document.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-sequence.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-sequence.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/defer-in-preflight-blocked.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/defer-in-preflight-blocked.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-null.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-null.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-present.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-present.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-hop-limit-after-launch.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-hop-limit-after-launch.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-hop-limit.hop.template
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-hop-limit.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-hop-limit.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-in-initialize.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-in-initialize.target.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-in-initialize.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/resume-in-initialize.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/resume-in-initialize.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/resume-in-preflight-blocked.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/resume-in-preflight-blocked.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize-group-leg.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize-group-leg.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize-root-sequence.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize-root-sequence.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-preflight-blocked.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-preflight-blocked.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-start.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-start.trace
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/cli/tests/l1/ctx_per_run.rs
+    - claudine/cli/tests/l1/error_guards.rs
+    - claudine/cli/tests/l1/error_guards/transport-allow.toml
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - claudine/cli/tests/l1/level1_approval_order_pty.rs
+    - claudine/cli/tests/l1/lifecycle_initialize_zero_attempts.rs
+    - claudine/cli/tests/l1/lifecycle_one_implementation_guard.rs
+    - claudine/cli/tests/l1/lifecycle_renamed_events.rs
+    - claudine/cli/tests/l1/lifecycle_root_preparation.rs
+    - claudine/cli/tests/l1/lifecycle_traces.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/lib/Cargo.toml
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/coordinator/invocation.rs
+    - claudine/lib/src/composition/error/lifecycle_authoring.rs
+    - claudine/lib/src/composition/error/lifecycle_preflight.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/frontmatter_excerpt.rs
+    - claudine/lib/src/composition/lifecycle/audio.rs
+    - claudine/lib/src/composition/lifecycle/binding_checks.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/cancellation.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/context/tests.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/effects.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/guarded_shell_sites.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/shell_templates.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/registry.rs
+    - claudine/lib/src/composition/lifecycle/runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/container_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/grammar.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/parse_config.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/checks.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/schema/globals.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/diagnostics/error_kind.rs
+    - claudine/lib/src/diagnostics/mod.rs
+    - claudine/lib/src/diagnostics/restored.rs
+    - claudine/lib/src/diagnostics/restored/tests.rs
+    - claudine/lib/src/diagnostics/snapshot.rs
+    - claudine/lib/src/harness/runtime.rs
+    - claudine/lib/src/harness/timeout.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/lib/src/mcp/import.rs
+    - claudine/lib/src/reporting/error.rs
+    - claudine/lib/tests/common/lifecycle_ownership_scan.rs
+    - claudine/lib/tests/l1/claudine_schema_parity.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/claudine_schemas_matrix.rs
+    - claudine/lib/tests/l1/claudine_trigger_selection_parity.rs
+    - claudine/lib/tests/l1/diagnostic_detail_conformance.rs
+    - claudine/lib/tests/l1/host_catalog.rs
+    - claudine/lib/tests/l1/lifecycle_control_flow_spike.rs
+    - claudine/lib/tests/l1/lifecycle_lift_ready_guard.rs
+    - claudine/lib/tests/l1/lifecycle_one_implementation_guard.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/path_lookup_guard.rs
+    - claudine/lib/tests/l1/type_scope_ownership_guard.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/globals.yaml
+    - claudine/schemas/inline-compose.yaml
+    - claudine/schemas/lifecycle.yaml
+    - claudine/schemas/sequence.yaml
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/src/args/command.rs
+    - darkmatter/cli/src/args/target.rs
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/cli/src/commands/schema/triggers.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/main.rs
+    - darkmatter/cli/tests/l1/clean_frontmatter.rs
+    - darkmatter/cli/tests/l1/clean_schema.rs
+    - darkmatter/cli/tests/l1/compose_dasherized_identifiers.rs
+    - darkmatter/cli/tests/l1/compose_lifecycle.rs
+    - darkmatter/cli/tests/l1/compose_lifecycle_approval.rs
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/cli/tests/l1/lifecycle_passive_surfaces.rs
+    - darkmatter/cli/tests/l1/lifecycle_schema_fallback.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/cli/tests/l1/schema_trigger_rename.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_baseline_selection.rs
+    - darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+    - darkmatter/cli/tests/l1/standalone_baseline.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/formatting.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/request_timing.rs
+    - darkmatter/dmls/src/router/logging_tests.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/dmls/tests/l1/content_policy_baseline.rs
+    - darkmatter/dmls/tests/l1/host_globals.rs
+    - darkmatter/dmls/tests/l1/lifecycle_event_views.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/no_side_effects.rs
+    - darkmatter/dmls/tests/l1/registry_observability.rs
+    - darkmatter/dmls/tests/l1/registry_preparation.rs
+    - darkmatter/dmls/tests/l1/schema_roots_parity.rs
+    - darkmatter/dmls/tests/l1/searched_candidates.rs
+    - darkmatter/dmls/tests/l1/startup_log_lines.rs
+    - darkmatter/dmls/tests/l1/startup_preparation.rs
+    - darkmatter/dmls/tests/l1/strict_mode_recovery_spike.rs
+    - darkmatter/dmls/tests/l1/workspace_file_list.rs
+    - darkmatter/dmls/tests/l1/workspace_schema_scopes.rs
+    - darkmatter/docs/schemas/darkmatter.yaml
+    - darkmatter/lib/src/lib.rs
+    - darkmatter/lib/src/lifecycle/action_shape.rs
+    - darkmatter/lib/src/lifecycle/actions.rs
+    - darkmatter/lib/src/lifecycle/actions/tests.rs
+    - darkmatter/lib/src/lifecycle/authored_order.rs
+    - darkmatter/lib/src/lifecycle/cancellation.rs
+    - darkmatter/lib/src/lifecycle/cancellation/tests.rs
+    - darkmatter/lib/src/lifecycle/context.rs
+    - darkmatter/lib/src/lifecycle/context/tests.rs
+    - darkmatter/lib/src/lifecycle/control.rs
+    - darkmatter/lib/src/lifecycle/control/tests.rs
+    - darkmatter/lib/src/lifecycle/duration.rs
+    - darkmatter/lib/src/lifecycle/effects.rs
+    - darkmatter/lib/src/lifecycle/effects/tests.rs
+    - darkmatter/lib/src/lifecycle/envelope.rs
+    - darkmatter/lib/src/lifecycle/envelope/tests.rs
+    - darkmatter/lib/src/lifecycle/error.rs
+    - darkmatter/lib/src/lifecycle/executor.rs
+    - darkmatter/lib/src/lifecycle/executor/host.rs
+    - darkmatter/lib/src/lifecycle/executor/outcome.rs
+    - darkmatter/lib/src/lifecycle/executor/shell.rs
+    - darkmatter/lib/src/lifecycle/executor/tests.rs
+    - darkmatter/lib/src/lifecycle/md_host.rs
+    - darkmatter/lib/src/lifecycle/md_host/tests.rs
+    - darkmatter/lib/src/lifecycle/mod.rs
+    - darkmatter/lib/src/lifecycle/parse.rs
+    - darkmatter/lib/src/lifecycle/policy.rs
+    - darkmatter/lib/src/lifecycle/policy/tests.rs
+    - darkmatter/lib/src/lifecycle/preflight.rs
+    - darkmatter/lib/src/lifecycle/preflight/candidates.rs
+    - darkmatter/lib/src/lifecycle/preflight/shell_walk.rs
+    - darkmatter/lib/src/lifecycle/preflight/tests.rs
+    - darkmatter/lib/src/lifecycle/registry.rs
+    - darkmatter/lib/src/lifecycle/registry/tests.rs
+    - darkmatter/lib/src/lifecycle/run.rs
+    - darkmatter/lib/src/lifecycle/run/protocol.rs
+    - darkmatter/lib/src/lifecycle/run_guard.rs
+    - darkmatter/lib/src/lifecycle/run_guard/tests.rs
+    - darkmatter/lib/src/lifecycle/runtime.rs
+    - darkmatter/lib/src/lifecycle/runtime/tests.rs
+    - darkmatter/lib/src/lifecycle/services.rs
+    - darkmatter/lib/src/lifecycle/services/tests.rs
+    - darkmatter/lib/src/lifecycle/shell_template.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/lifecycle/source_map.rs
+    - darkmatter/lib/src/lifecycle/tests.rs
+    - darkmatter/lib/src/lifecycle/validate.rs
+    - darkmatter/lib/src/markdown/cleanup/document.rs
+    - darkmatter/lib/src/markdown/cleanup/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/context/merge.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs
+    - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/embedded.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+    - darkmatter/lib/src/markdown/schemas/tests/clean_quoting.rs
+    - darkmatter/lib/src/markdown/schemas/tests/embedded_sources.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/lint.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/payload_memo_tests.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/tests/content_policy_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/clean_counters.rs
+    - darkmatter/lib/tests/l1/content_policy_disk_baseline.rs
+    - darkmatter/lib/tests/l1/content_policy_embedded_baseline.rs
+    - darkmatter/lib/tests/l1/dependency_direction_guard.rs
+    - darkmatter/lib/tests/l1/feature_review_incident.rs
+    - darkmatter/lib/tests/l1/global_catalog.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/engine.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/mod.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/profiles.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/protocol_tests.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/publisher.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/replay.rs
+    - darkmatter/lib/tests/l1/lifecycle_passive_compose.rs
+    - darkmatter/lib/tests/l1/lifecycle_run_protocol.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_parity.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase5.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase6.rs
+    - darkmatter/lib/tests/l1/meta_schema_repo_schemas.rs
+    - darkmatter/lib/tests/l1/path_lookup_guard.rs
+    - darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+    - darkmatter/lib/tests/l1/schema_phase_validation.rs
+    - darkmatter/lib/tests/l1/schema_roots.rs
+    - darkmatter/lib/tests/l1/schemas_effective_presence.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/trigger_envelope_claim.rs
+    - darkmatter/lib/tests/l1/trigger_input_matrix.rs
+    - darkmatter/lib/tests/l1/trigger_match_grammar.rs
+    - darkmatter/lib/tests/l1/trigger_selection_parity.rs
+    - darkmatter/lib/tests/l1/trigger_spelling_guard.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/schemas/darkmatter.yaml
+    - darkmatter/schemas/partials/context-variables.yaml
+    - darkmatter/schemas/partials/error.yaml
+    - darkmatter/schemas/partials/fm.yaml
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+    - darkmatter/schemas/partials/style.yaml
+    - darkmatter/schemas/partials/timing.yaml
+    - darkmatter/schemas/partials/tracking.yaml
+    - darkmatter/tests/fixtures/schema-triggers/schemas/claudine.trigger.yaml
+    - darkmatter/tests/fixtures/schema-triggers/schemas/inline-compose.trigger.yaml
+    - darkmatter/tests/fixtures/schema-triggers/schemas/sequence.trigger.yaml
+    - docs/drafts/memory.yaml
+    - schemas/memory.yaml
+    - scripts/check-lifecycle-doc-facets.sh
+documentation:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/research-contracts.md
+    - .claude/skills/claudine/validations-and-handlers.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/library-surfaces.md
+    - .claude/skills/darkmatter/lifecycle.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/os/windows-paths.md
+    - claudine/README.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/error-architecture.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/topics/state-management/context-variables.md
+    - claudine/docs/topics/state-management/drift.md
+    - claudine/schemas/README.md
+    - content-policy/docs/topics/policy-lifecycle.md
+    - darkmatter/README.md
+    - darkmatter/cli/README.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/dependencies.md
+    - darkmatter/docs/inline/fm-shell-expansion.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/schemas/darkmatter-schema.md
+    - darkmatter/docs/topics/lifecycle/error-handling.md
+    - darkmatter/docs/topics/lifecycle/index.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/schema-targeting.md
+    - darkmatter/docs/topics/side-effects.md
+    - darkmatter/docs/topics/state-management/context-variables.md
+    - darkmatter/docs/topics/state-management/index.md
+    - darkmatter/lib/README.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-10-27-darkmatter-lifecycle-ownership (6 phases)
@@ -2081,3 +2549,566 @@ All gates ran once, sequentially, after every subagent had finished.
 
 The gates were run, not skipped: this phase changed source in `darkmatter`,
 `darkmatter-cli`, `dmls`, `claudine`, and `claudine-cli`.
+
+## Phase 5
+
+- **Starting revision:** `65165acf8` on `feat/pipeline` (2026-10-21), with
+  Phases 1–4 committed and a clean working tree.
+- **Orchestration:** Wave 10's three strands run as parallel subagents in the
+  shared worktree, each owning a separate set of files:
+  - schema projection: `darkmatter/schemas/**`, `claudine/schemas/**`,
+    `darkmatter/lib/src/markdown/schemas/**`;
+  - editor projection: `darkmatter/dmls/**`;
+  - invocation coverage: `darkmatter/cli/**` tests and
+    `darkmatter/lib/src/lifecycle/**`.
+
+  The lead integrates their work and runs the area gates once, after every
+  strand has finished.
+- **Design decision (cross-host schema references):** Claudine's schema files
+  must reference action definitions that Darkmatter owns, and the references
+  must resolve in three places:
+  - the monorepo checkout on disk;
+  - Claudine's embedded bundle, which is confined to its own files;
+  - the temp-dir repositories the existing Claudine schema tests build, which
+    hold only Claudine's files.
+
+  A relative path to `darkmatter/schemas/…` resolves only in the first. The
+  resolver therefore gains a reserved, location-independent namespace,
+  `Name@darkmatter:<stem>`. It always resolves to the shipped partial
+  `darkmatter/schemas/partials/<stem>.yaml` from Darkmatter's embedded
+  table, the same way `this` is a reserved reference.
+
+### Wave 10 — Schema projection (done)
+
+- **Reserved namespace.** `Name@darkmatter:<stem>` resolves to type `Name`
+  in the shipped partial `darkmatter/schemas/partials/<stem>.yaml`.
+  - The importer can be a disk file, a Darkmatter embedded document, or a
+    host `EmbeddedSchemaBundle` document; in each case the disk is never
+    read.
+  - `resolve.rs` gains `NamespaceKey::Shipped`. A reference inside a shipped
+    partial resolves lexically within the shipped table, even in a disk
+    expansion.
+  - An unknown stem is `SchemaError::NoMatch` naming the reference.
+  - `named_type_reference_path` returns `None` for the form, as it does for
+    `this`.
+  - Unit tests: `resolve.rs` `reserved_namespace` module and `embedded.rs`
+    `reserved_references_name_shipped_partials_only`.
+- **Neutral action definitions.** New types-only partial
+  `darkmatter/schemas/partials/lifecycle.yaml` holds:
+  - `<verb>-short` and `<verb>-long` for every lifecycle verb, including
+    those only Claudine provides (`say`, `retry`, `proxy`, `prep`, `break`, …);
+  - `interpolation` and `count`;
+  - the categories `communicate`, `flow`, `shell` and `expression`;
+  - `bundle`, and `initialize-bundle`, which has no shell under any host.
+- **Claudine references them.** Claudine's `action.yaml` categories and
+  bundles, its `cancelled-*` types, and the loose verbs of `loop` in
+  `lifecycle.yaml` are now mappings whose values reference Darkmatter's
+  per-verb types.
+  - **Why mappings, not aliases:** one-line aliases
+    (`communicate: communicate@darkmatter:lifecycle`) would have changed the
+    "Empty" cells of Claudine's robustness matrix.
+  - **Unchanged resolved JSON:** before the move, the resolved JSON of every
+    export of `action.yaml` (10), `lifecycle.yaml` (40) and
+    `sequence-types.yaml` (12) was dumped, along with the trigger payloads.
+    After the move it is identical, descriptions included. The only
+    difference is the two payload additions below. Claudine stays closed to
+    unknown verbs.
+- **md profile in the baseline.** New partial
+  `darkmatter/schemas/partials/md-lifecycle.yaml`, imported by `fm.yaml` for
+  `initialize`, `composed`, `failed`, `cancelled` and `finalize`.
+  - **Stack shape:** the same list/dictionary and `when`/`then`/`else`
+    structure, typed three levels deep and loose below.
+  - **Item arms:**
+    - md communicate (`stdout`, `stderr`, `info`, `warn`, `success`,
+      `message`);
+    - md flow (`stop`, `skip`, `error`);
+    - `shell`, except in `initialize`;
+    - md expression;
+    - md bundle;
+    - conditional;
+    - a bare verb typed `string(suggest(…))`;
+    - the open unknown-action arm.
+  - **The open arm** is a pattern key that excludes every md verb (`shell`
+    and `info` included) and `when`/`then`/`else`/`no_error`. So
+    `composed: [{say: hi}]` is valid, while a malformed `info` long form,
+    and `shell` in `initialize`, are schema errors.
+- **Claudine's names.** Claudine's `claudine.yaml` payload declares
+  `composed` and `failed` as `null`, with descriptions naming `start` and
+  `blocked`. `match:` is unchanged, so selection parity holds. Claudine's
+  `initialize`, `cancelled` and `finalize` override the baseline's md
+  typing.
+- **Parity tests derived from descriptors:**
+  - `darkmatter::l1 lifecycle_schema_parity` (8 tests): event names come
+    from `md_host::registry()`, and each event × `ActionType` acceptance
+    equals `registry.actions(id)`. The open arm rejects every md verb and
+    admits every `UNPROVIDED_VERBS` entry. The bare-verb suggestions equal
+    the md parser's bare verbs; the lead added that test.
+  - `claudine::l1 claudine_schema_parity` (6 tests): the same checks over
+    `claudine_registry()`. Darkmatter spellings name Claudine's events,
+    Claudine's declarations override the baseline, and Claudine's action
+    types resolve to Darkmatter's neutral definitions.
+- **Performance.** The baseline now inlines five typed stacks. Debug
+  `md schema validate`, hyperfine, 20 runs:
+
+  | Document | Before | First version | Final |
+  |---|---|---|---|
+  | plain | 58.0 ms | 771 ms | 130.1 ms (+72 ms) |
+  | with a stack | 56.7 ms | 622 ms | 143.5 ms (+87 ms) |
+
+  Three changes produced the final numbers:
+  1. `convert.rs` remembers regex patterns that already compiled (about
+     −550 ms).
+  2. The import engine expands each named type once per resolution
+     (`expanded_cache`).
+  3. md conditionals type `then`/`else` with one pattern key, as Claudine's
+     `cancelled` stack already does (about −100 ms).
+
+  The remaining cost is roughly:
+  - 54 ms preparing the catalog, of which about 17 ms is parsing the two
+    partials;
+  - 11 ms lowering;
+  - 24 ms compiling the validator.
+
+  Cutting it further would mean dropping typed levels or not inlining types.
+  Both go against the spec, so this is recorded for review rather than
+  changed.
+- **Departure:** with `then`/`else` as one pattern key in md conditionals,
+  only the parser requires `then`, and DMLS does not complete `then`/`else`
+  under md stacks. This matches Claudine's existing `cancelled` stack.
+- **Changed Darkmatter assertions:**
+  - `shipped_schema_corpus.rs` `CORE_TYPE_USERS`: `shell` moved from
+    Claudine's files to Darkmatter's `lifecycle.yaml`, and the new partials
+    were added.
+  - `embedded.rs`: the shipped-table test lists the two new partials.
+
+  No Claudine assertion was edited.
+
+### Wave 10 — Editor projection (done)
+
+- **Per-event views.** New `darkmatter/dmls/src/overlay/event_views.rs`
+  maps a root key to an md event through `md_host::registry().resolve_key`,
+  so there is no hand list of event names.
+  - **What it covers:** expressions inside a stack value: `{{ … }}` spans at
+    any depth, `when` conditions, and expression-typed values. They are
+    validated, hovered and completed with that event's registry
+    `BindingView`.
+  - **`err`:** reading `err` where it is unavailable is the new error
+    `dm.expression.unavailable_global`, carrying the view's reason. It never
+    falls back to `fm.err`.
+  - **Completion** offers only the globals the event may read.
+- **Host globals** (`seq`, `loop`, `group`) take their shape from the host
+  catalog and are declared `ExecutionDependent`, so they never produce an
+  availability diagnostic.
+  - **Why:** this is the availability Claudine's runtime `binding_view_in`
+    gives when loop and group membership are unknown, and DMLS cannot know
+    membership.
+  - **Where:** the rule is decided in one place (`validation_view`), with a
+    comment. dmls has no Claudine dependency.
+- **A host catalog that fails to load** is now the warning
+  `dm.schema.host_catalog`, naming the file, field and reason. The valid
+  catalogs keep working.
+- **Criterion 13 tests (lead)** in `claudine_schema_discovery.rs`:
+  - `md_and_claudine_type_their_own_event_names`:
+    - under the baseline, a misspelled `info` key in `composed` is an
+      error;
+    - `say` passes;
+    - `start` is untyped;
+    - under Claudine's trigger, `composed` is an error at `/composed` and
+      `start` is typed.
+  - `baseline_stack_items_complete_md_verbs_only`: `info`, `stdout`,
+    `shell`, `set` and `stop` are offered; `say`, `retry`, `notify` and
+    `proxy` are not; `start` offers neither.
+  - `renamed_events_hover_with_the_claudine_name`: the hover on `composed`
+    names `start`, and on `failed` names `blocked`.
+- **Departure, the diagnostic text:** DMLS publishes a schema problem's
+  message without the declared description, whereas `md schema validate`
+  prints it. So the editor shows the guidance naming `start` in hover, not
+  in the diagnostic's own text. Appending the description was tried and
+  reverted: `union_item_editor::a_problem_inside_an_item_is_published_as_the_library_reports_it`
+  pins diagnostic messages to the library's exact text, so the change would
+  have altered existing editor output beyond this phase.
+- **Tests:**
+  - `dmls::l1 lifecycle_event_views` (5 tests);
+  - `no_side_effects::lifecycle_stacks_are_analyzed_and_never_run`
+    (criterion 12, DMLS);
+  - 3 unit tests in `event_views.rs`.
+
+  No existing assertion changed.
+
+### Wave 10 — Invocation coverage (done)
+
+- **Production defect fixed.** Under `md compose`, a document's `$schema`
+  did not type lifecycle shell placeholders: `stamp_lifecycle_shells` passed
+  `owner_schema: None`. As a result, a template approval filled a value the
+  schema rejects, for example `Q7` against `string(min(3))`, and the shell
+  ran.
+  - **Fix:** `md_host::stamp_lifecycle_shells` takes the root `Markdown`
+    and types placeholders by the document's effective schema, through the
+    same `prepare_schemas`/`effective_for` path body `::shell` uses.
+  - **Visibility:** `compose/mod.rs` makes `schema_validation`
+    `pub(crate)`.
+  - **Regression test:**
+    `compose_lifecycle_approval::a_value_the_document_schema_rejects_is_refused_before_the_shell_runs`.
+- **Criterion 22(a), how approval actually works.** An exact approval runs
+  the bytes fixed at preflight and never re-reads the value, as in Claudine.
+  So a `set` in `composed` cannot change what runs, and a `set` in
+  `initialize` invalidates an exact approval of the authored bytes. Tests in
+  `compose_lifecycle_approval` (11 in total):
+  - `an_initialize_set_invalidates_an_exact_approval_of_the_authored_bytes`
+  - `an_exact_approval_runs_its_approved_bytes_whatever_a_composed_set_wrote`
+  - `an_exact_approval_of_the_bytes_a_composed_set_would_produce_is_refused`
+  - typed templates:
+    `a_shape_approved_lifecycle_shell_fills_the_value_a_composed_set_wrote_as_one_argument`,
+    `a_set_array_is_refused_…`, `a_set_null_is_refused_…`
+- **Criterion 23:**
+  - `a_guarded_lifecycle_shell_runs_with_its_value_when_present`
+  - `a_guarded_lifecycle_shell_with_a_null_value_passes_preflight_and_never_runs`
+  - control: `an_unguarded_lifecycle_shell_with_a_null_value_is_refused_at_preflight`
+  - `a_guarded_value_a_set_cleared_fails_the_reached_shell_before_it_runs`:
+    the shell is refused, as under Claudine. md then runs `composed` and
+    `finalize` without `failed`, by md's design.
+- **Criterion 12, the non-DMLS surfaces** (`lifecycle_passive_surfaces`, 10
+  tests):
+  - `md schema validate`, `render`, bare `md <doc>`, `get`, `toc`, `hash`,
+    `graph` and `compose --shell`: none creates a sentinel or prints the
+    marker;
+  - a control row that composes;
+  - a child transcluded by a root with no lifecycle fires nothing;
+  - library: `darkmatter::l1 lifecycle_passive_compose` (2 tests).
+
+  There is no `md read` subcommand; the read-type commands above stand in
+  for it.
+- **Criterion 11, dry runs:** `md compose` has no dry or preview mode other
+  than report-only `--shell`, which is covered.
+- **Schema fallback** (criterion 22, last sentence; `lifecycle_schema_fallback`,
+  4 tests): `say` is valid; a malformed `info` long form is an error under
+  `/composed`; `shell` in `initialize` is an error; `info: hi` is valid.
+- **Criteria 5–7:** every sub-clause already had a test (mapping below), so
+  none were added.
+
+### Integration fix, by the lead
+
+`claudine-cli::l1 lifecycle_root_preparation::a_root_without_read_permission_runs_nothing`
+failed in the first Claudine gate run, and it failed alone too, 3 of 3
+times.
+
+- **Cause:** the error box wraps the temp path. Its width depends on the
+  digit count of the fixture's process counter, which now ends a line on
+  `Permission` and starts the next with `denied`. Phase 4's numbers did not
+  break there.
+- **Fix:** the test now joins the box's continuation lines before matching.
+  This changes how the assertion reads the output, not what it asserts.
+- **Criterion 2:** this test was added by this feature, not before the spec
+  started, so criterion 2 does not cover it.
+
+### Behavior → test mapping (Phase 5)
+
+| Criterion | Evidence |
+|---|---|
+| 5 (host names) | `darkmatter::l1 lifecycle_boundary::protocol_tests::guaranteed_events_keep_their_names_and_an_event_takes_one_name`, `…::darkmatter_spellings_fail_under_a_renaming_host_and_host_only_keys_are_data_under_md`; `registry::tests::every_registration_error_is_typed`; Claudine `parse_config::darkmatter_spellings_of_renamed_events_fail_naming_claudines_spelling`; schema side `claudine_schema_parity::darkmatter_event_names_claudine_spells_differently_name_the_claudine_event` |
+| 6 (registration checks) | `protocol_tests::{registration_rejects_duplicates_darkmatter_names_and_reserved_roots, a_role_registers_only_in_its_position}`; `registry::tests::{an_unknown_position_or_role_spelling_is_a_typed_error, only_the_engine_fires_an_event_and_only_at_its_registered_point, every_registration_error_is_typed}`. Registration is programmatic, so it has no source location |
+| 7 (prototype host) | `lifecycle_boundary::publisher::{the_notification_fires_after_initialize_before_composition_and_its_set_reaches_later_events, a_failed_completion_fires_the_failed_alternative_with_the_typed_failure_as_err, an_explicit_error_in_published_downgrades_only_to_the_registered_target, the_rename_is_honored_in_parsing_and_diagnostics}`; `protocol_tests::{the_core_only_md_profile_has_no_outcome_pair_so_only_failed_holds_the_terminal_slot, an_outcome_pair_needs_two_distinct_registered_alternatives}` |
+| 11 (md compose events) | Phase 4 `compose_lifecycle::*`. Dry runs: md has no dry mode other than report-only `--shell`, which `compose_lifecycle::report_only_shell_mode_…` and `lifecycle_passive_surfaces::compose_shell_report_runs_no_stack` cover |
+| 12 (passive surfaces) | `darkmatter-cli::l1 lifecycle_passive_surfaces::*` (validate, render, bare `md`, get, toc, hash, graph, `--shell`, a transcluded child, a control row); `darkmatter::l1 lifecycle_passive_compose::*`; `dmls::l1 no_side_effects::lifecycle_stacks_are_analyzed_and_never_run` |
+| 13 (editor typing) | `dmls::l1 claudine_schema_discovery::{md_and_claudine_type_their_own_event_names, baseline_stack_items_complete_md_verbs_only, renamed_events_hover_with_the_claudine_name}`; parity: `darkmatter::l1 lifecycle_schema_parity::*`, `claudine::l1 claudine_schema_parity::*` |
+| 14 (global catalog) | Phase 4 `global_catalog::*`, unchanged and passing |
+| 15 (host globals) | Phase 4 `dmls::l1 host_globals::*`; availability: `lifecycle_event_views::host_catalog_globals_are_never_undeclared_or_unavailable` and the `event_views.rs` unit test that a host-catalog global is `ExecutionDependent` in every view, which is Claudine's runtime view when membership is unknown; broken catalog: `lifecycle_event_views::a_broken_host_catalog_is_reported_and_the_others_still_load` |
+| 16–18 (triggers) | Phase 4 tests, unchanged and passing; the trigger `match:` was not edited |
+| 21 (boundaries) | Phase 4 `compose_lifecycle::*` and `md_host::tests`, unchanged and passing |
+| 22 (approval, tolerant parsing, schema fallback) | `compose_lifecycle_approval::*` (11); `lifecycle_schema_fallback::*` (4); Phase 4 ignored-operand and malformed/forbidden-action tests |
+| 23 (narrowing under md) | `compose_lifecycle_approval::{a_guarded_lifecycle_shell_runs_with_its_value_when_present, a_guarded_lifecycle_shell_with_a_null_value_passes_preflight_and_never_runs, an_unguarded_lifecycle_shell_with_a_null_value_is_refused_at_preflight, a_guarded_value_a_set_cleared_fails_the_reached_shell_before_it_runs}` |
+
+### Phase 5 checkpoint and gates
+
+All gates ran sequentially, after every subagent had finished.
+
+- **`cd darkmatter && just test`:** 11,266/11,266 passed (10 skipped).
+  **`just lint`:** pass. **`just check-tier-coverage darkmatter`:** 0
+  stranded.
+- **`cd claudine && just test`:**
+  - First run: 6,742 passed and 1 failed, the wrap-dependent test fixed
+    above.
+  - After the fix: **10,691/10,691 passed** (49 slow, 9 skipped). This
+    includes every lifecycle trace test (`lifecycle_traces`), unchanged and
+    rerun after the schema integration.
+  - **`just lint`:** pass. **`just check-tier-coverage claudine`:** 0
+    stranded.
+- **Dependents:** `cargo check --all-targets` of `biscuit-icon-cli`,
+  `biscuit-speaks-cli`, `messenger`, `claudine-gen`, `playa-cli`,
+  `messenger-cli`, `sniff-cli`, `research` and `claudine-contract`: clean.
+  `cargo nextest run -p claudine-contract`: 48/48.
+- **Cross-OS (native Windows, `build-win-native`):**
+  - `darkmatter-cli`: 1205/1205.
+  - `dmls`: 1290/1290.
+  - `darkmatter`, filtered to `lifecycle schema catalog baseline md_host`:
+    2321/2321.
+  - `claudine`, filtered to `schema parity host_catalog trigger`: 403/403.
+  - `claudine-cli` `lifecycle_root_preparation`: 0 run, since the test is
+    Unix-only.
+
+  The risk was the new CLI tests that put sentinel paths into YAML and spawn
+  processes. All passed on the first attempt.
+- **Load-sensitive, known:** `dmls searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back`
+  failed once in the editor subagent's full dmls run and passes alone; the
+  gate run passed it. The claudine L1 test
+  `every_file_loads_and_every_export_resolves` takes 3.3 s alone, against
+  the 5 s budget.
+- **CI scope:**
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  reports `packages: [claudine, claudine-cli, darkmatter, darkmatter-cli,
+  dmls, test-toolkit]` with `change_class: package`, so the gates were
+  required and were run. `test-toolkit` is listed through its declared
+  source inputs; it was not edited.
+
+#### Checkpoint criteria
+
+Criteria 5–7, 11–18 and 21–22 have passing public-surface evidence (table
+above), and so does 23.
+
+Open for review:
+- the baseline validation cost (+72–87 ms per debug validation);
+- the DMLS diagnostic text, which carries the guidance naming `start` only in
+  hover.
+
+## Phase 6
+
+- **Starting state:** `feat/pipeline` at `65165acf8`. Phase 5's changes are
+  still uncommitted in the working tree, so the tree holds Phases 5 and 6
+  together.
+- **Orchestration (Wave 11):** four parallel subagents, each owning separate
+  files:
+  1. the Darkmatter lifecycle pages, the `md compose` reference, and the
+     Darkmatter READMEs;
+  2. Claudine's lifecycle and schema docs and its README;
+  3. the Darkmatter schema and DMLS docs;
+  4. a review of comment drift in the changed code (comment-only edits).
+
+  The lead updates the skills and the lifecycle doc-facet guard, then runs
+  the gates once, after every subagent has finished.
+
+### Wave 11 — Lifecycle documentation (done)
+
+- **New pages:** `darkmatter/docs/topics/lifecycle/index.md` and
+  `error-handling.md`, both previously empty, now cover:
+  - the five events, the run-order flowchart, and the stack grammar;
+  - the action types and the invariants Darkmatter enforces whatever the
+    host;
+  - the `md` host: the actions it runs, the actions it ignores with a
+    warning, output order, `stop`, `set`, `skip`, shell approval, and passive
+    surfaces;
+  - host registration and renames, with Claudine as the worked example;
+  - failure routing, cancellation, the `err` global, recovery modes, the
+    failure-stage table, terminal downgrade, and the `finalize` rules, with
+    Mermaid diagrams.
+
+  Neither page names a spec.
+- **`md compose` reference:** `darkmatter/docs/cli/compose.md` gains a
+  "Lifecycle Events" section. The three Darkmatter READMEs gain an overview
+  line and a link each.
+- **Claudine host view:** `claudine/docs/topics/flow-control/lifecycle.md`
+  gains:
+  - a "Claudine Is a Lifecycle Host" section;
+  - a "Darkmatter event" column in the event table;
+  - a "How Failures Route" section, with a diagram, covering the
+    failure-stage table, why `blocked` cannot recover, recovery modes,
+    terminal downgrade, and the `finalize` exceptions.
+
+  Its State Machine text no longer says Claudine owns the run guard.
+  `flow-control-reference.md` and `composition.md` were corrected where they
+  called `blocked` a place for recovery. `claudine/README.md` gains a short
+  lifecycle paragraph.
+- **Departures, documented as the code behaves.** The subagents checked each
+  claim against the code, tests, and traces:
+  - **`resume` in a preflight `blocked`** is refused as `ResumeWithoutSession`
+    (`policy.rs::recovery_verdict`, the `resume-in-preflight-blocked` trace).
+    Spec section 8 says `LifecycleSetupPhaseRecoveryUnsupported`. The old
+    reference table repeated the spec's version and was corrected.
+  - **Downgrade modes:** a downgrade from `success` keeps normal recovery,
+    while one from `blocked` runs `failure`/`finalize` as catch-only cleanup.
+  - **A `retry` admitted in `finalize`** runs the retried attempt's own
+    `start` … `finalize`. The old attempt never runs a second `finalize`.
+  - **Under `md`, frontmatter `$( … )` values** are literal text in
+    `initialize` and expanded from `composed` on.
+- **`md` behavior the docs record as it is, open for review:**
+  `MdDiagnostics` classifies nothing, so under `md compose` every `err`
+  facet but `msg` is `null`. The page says so, and labels its `err.code`
+  example "under a classifying host".
+
+### Wave 11 — Schema and editor documentation (done)
+
+- **Reserved references:** `definition.md` gains a "Reserved Darkmatter
+  References" section on `Name@darkmatter:<stem>`, alongside `@this` in the
+  import rules. `local-type-references.md` and `authoring-schemas.md` gain a
+  short paragraph and example each.
+- **Lifecycle typing:** `definition.md` gains "Lifecycle Event Typing", which
+  covers the md profile, the open arm for other hosts' actions, why
+  `then`/`else` aren't completed, host overrides, and a table of the two new
+  partials. `darkmatter/docs/schemas/darkmatter-schema.md` gains a coverage
+  item for the lifecycle events.
+- **`schema-targeting.md`:** the link to a draft file inside a spec directory
+  was removed and the unfinished predicate grammar stated in plain words. The
+  AND/`group` caveat was already accurate.
+- **DMLS docs:** `diagnostics.md` gains rows for `dm.schema.host_catalog` and
+  `dm.expression.unavailable_global`, and its `dm.expression.undeclared_property`
+  row no longer says DMLS supplies no host globals, which had been false since
+  Phase 4. `hover.md`, `autocomplete.md`, `features.md` and
+  `darkmatter/docs/lsp/features.md` gain lifecycle-stack sections.
+- **Claudine schema docs:** `claudine/docs/topics/schemas.md` gains "Verb
+  shapes are Darkmatter's" and "Darkmatter's event names in a Claudine
+  document", which includes the typing table under the baseline versus under
+  Claudine's trigger.
+- **`side-effects.md`** (lead) said side effects "never" run during
+  `md compose`. Lifecycle actions such as `ensure_file` in `initialize` now
+  run there, so the page now says so. Its spec link, and a stray
+  `</content></invoke>` fragment that was already at HEAD, were removed.
+- **Not changed:** four DMLS docs (`diagnostics.md`, `hover.md`,
+  `autocomplete.md`, `features.md`) carry a frontmatter `features:` list
+  naming older specs, such as `2026-07-04-dmls`. The lists predate this
+  change and none names this spec. They are left for one consistent cleanup
+  pass.
+
+### Wave 11 — Comment drift and two defects found while documenting (done)
+
+- **Comment-only fixes:**
+  - `darkmatter/lib/src/lifecycle/actions.rs` (`SideEffectAction`: "Phase 4
+    will dispatch" → "the executor dispatches");
+  - `dmls/src/diagnostics/frontmatter.rs` and `overlay/event_views.rs`
+    (history narration removed);
+  - `dmls/src/diagnostics/nested_span.rs` (the lifecycle parser is
+    Darkmatter's, `LifecycleSignal::ALL` has eight entries, and
+    `LOOP_ITERATION_KEYS` is Darkmatter's);
+  - `claudine/lib/src/composition/lifecycle/mod.rs` (test-import note; the
+    event list now includes `cancelled`).
+
+  The `//!` headers of the Darkmatter lifecycle modules match the code.
+  Claudine's drivers use `LifecycleRunGuard`; `md_host::drive` is the only
+  production caller of `Run`. `check_emission` has no production caller.
+  This matches the darkmatter skill's "Planned" section.
+- **Defect 1: the locked-shell message named Claudine's event under `md`.**
+  It said "move the command to start" under `md`, where the event is
+  `composed`.
+  - **Fix:** `executor.rs::error_or_action` builds the message with
+    `ShellRunError::before_preflight_message(catalog.event_name(Start))`
+    whenever the catalog does not classify the error.
+  - **Why this route:** `Display` keeps the `start` text, which the Claudine
+    traces `shell-locked-blocked` and `shell-relocked-after-proxy` pin.
+    Claudine's catalog spells `Start` as `start`, so its output is
+    byte-identical.
+  - **Regression test:**
+    `darkmatter-cli::l1 compose_lifecycle::a_shell_reached_before_preflight_is_refused_naming_the_md_event_where_shells_unlock`.
+    A missing include routes to `failed`; a whitelisted shell in `failed` is
+    refused naming `composed` and never runs. It fails without the fix,
+    because `Display` says `start`.
+  - **Claudine unchanged:** `darkmatter::l1 lifecycle_boundary` replays all
+    traces, 65/65 passing.
+- **Defect 2: a piped `stdout` action wrote ANSI styling.** On a pipe,
+  `**bold**` became escape codes and an HTML comment was dropped.
+  - **Fix:** the CLI's `TerminalEffects` records whether stdout is a
+    terminal. Off one, the action's text is written as authored, so it joins
+    the Markdown document unchanged.
+  - **Regression test:**
+    `compose_lifecycle::a_piped_stdout_action_writes_its_text_as_authored`.
+    It forces a colored environment (`NO_COLOR` removed, `FORCE_COLOR=1`,
+    `TERM=xterm-256color`) and asserts there is no escape byte and the
+    authored line is exact. A manual `md compose … | od -c` showed `033[1m`
+    before the fix.
+- **Doc guard:** `scripts/check-lifecycle-doc-facets.sh` now also checks the
+  two Darkmatter lifecycle pages by default.
+- **`darkmatter/README.md`'s `hash:`** was already stale at HEAD. It was
+  restamped with `md hash --save`.
+
+### Behavior → test mapping (Phase 6)
+
+| Change | Boundary and tier | Test |
+|---|---|---|
+| The locked-shell message names the host's unlock event (`composed` under `md`) | engine → `md` CLI, F3 L1, spawns the binary | `darkmatter-cli::l1 compose_lifecycle::a_shell_reached_before_preflight_is_refused_naming_the_md_event_where_shells_unlock`. The original text is asserted absent and the marker file never exists |
+| Claudine's locked-shell text is unchanged | engine trace replay, L1 | `darkmatter::l1 lifecycle_boundary::replay::*` (65/65), including the `shell-locked-blocked` and `shell-relocked-after-proxy` traces; Claudine's `lifecycle_traces` in the full gate |
+| A piped `stdout` action writes its text as authored | CLI → stdout pipe, F3 L1, colored environment forced | `compose_lifecycle::a_piped_stdout_action_writes_its_text_as_authored`; `stdout_actions_frame_the_document_and_other_verbs_use_stderr` still passes |
+| The doc-facet guard now also checks the two Darkmatter lifecycle pages | grep script | `cd claudine && just lint-lifecycle-doc-facets` (part of `just lint`) |
+
+There are no new configuration readers, so the input robustness matrix does
+not apply to this phase. Phase 4's matrix evidence stands.
+
+### Wave 12 — Final verification
+
+The gates ran sequentially, after every subagent had finished.
+
+- **`cd darkmatter && just test`:**
+  - **First run:** 11,150 passed and 1 failed, the known load-sensitive
+    `dmls::l1 searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back`.
+    Fail-fast left 117 tests unrun.
+  - **That test alone:** passed 3 of 3 times.
+  - **Full rerun:** **11,268/11,268 passed** (10 skipped).
+- **`just lint` (darkmatter):** pass, including the zed-dmls wasm check.
+- **`just check-tier-coverage darkmatter`:** 0 stranded.
+- **`cd claudine && just test`:** **10,691/10,691 passed** (61 slow, 9
+  skipped). This includes `lifecycle_traces`, both one-implementation
+  guards, `claudine_schema_parity` and the `lifecycle_control_flow_spike`
+  test.
+- **`just lint` (claudine):** pass. The only warning is the macOS linker's
+  existing `__eh_frame` note on the large `claudine` binary.
+- **`just check-tier-coverage claudine`:** 0 stranded.
+- **Spike tests (criterion 19):** both `lifecycle_control_flow_spike`
+  binaries' tests ran in the gates and passed. `spike/model.rs` and
+  `spike/scenarios.rs` were not moved.
+- **Dependents:** `cargo check --all-targets` of `biscuit-icon-cli`,
+  `biscuit-speaks-cli`, `messenger`, `claudine-gen`, `playa-cli`,
+  `messenger-cli`, `sniff-cli`, `research` and `claudine-contract`: clean.
+  The only public API change this phase is the additive
+  `ShellRunError::before_preflight_message`.
+- **L2:** not run. No terminal-subject behavior changed.
+- **Cross-OS:** not run this phase. The code changes are a
+  `std::io::IsTerminal` check and a message helper, neither with an
+  OS-specific path. The new tests never run their whitelisted shell, and a
+  pipe is a non-terminal on every OS. Phase 5's native-Windows runs of
+  `darkmatter-cli` (1205/1205) and `dmls` (1290/1290) are the latest
+  Windows evidence. The spec's `os_failing: windows` was set in Phase 2 for
+  pre-existing failures and stays.
+- **Source guards and removed references:**
+  - `darkmatter/docs/schemas/darkmatter.yaml` does not exist. Its only
+    mention is `embedded.rs`'s test that it is absent from `SHIPPED`.
+  - No active `.yaml`/`.yml` file outside specs and reviews has
+    `kind: trigger-schema`.
+  - `dependency_direction_guard`, `trigger_spelling_guard` and Claudine's
+    two `lifecycle_one_implementation_guard`s ran in the gates.
+- **CI scope:**
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  reports:
+  - `packages: [claudine, claudine-cli, darkmatter, darkmatter-cli, dmls, repo-deps, test-toolkit]`;
+  - `change_class: package`.
+
+  So the gates were required, and they ran. The tree still holds Phase 5's
+  uncommitted changes. `test-toolkit` and `repo-deps` are listed through
+  declared inputs and were not edited. CI scope was not changed.
+
+#### Acceptance criteria
+
+| # | Status | Evidence |
+|---|---|---|
+| 1 | met | Phase 1 gate verdict PASS, recorded before Phase 2 |
+| 2 | met | Claudine suites pass, with only the import/fixture-path edits recorded in Phases 2–3 and the Phase 5 output-wrapping read, which is on a test this feature added. Traces replay identically (`lifecycle_traces`, `lifecycle_boundary::replay`) |
+| 3 | met | `dependency_direction_guard` |
+| 4 | met | both `lifecycle_one_implementation_guard`s |
+| 5–7 | met | Phase 5 mapping |
+| 8 | met | Phase 2–4 shell-invariant tests; this phase's locked-shell regression |
+| 9 | met | Phase 3 preflight host-check tests; sequence approval-order tests unchanged |
+| 10 | met | Phase 3 section-8 tests under `policy.rs` and the trace replays. The docs now describe the routing as the code does, including the `ResumeWithoutSession` departure |
+| 11–18 | met | Phases 4–5 mappings |
+| 19 | met | both spike tests pass, files unmoved |
+| 20 | met | Stage 5 pages written and checked against the code (Wave 11 above). No `docs/` page names this spec, and both lint recipes pass |
+| 21–23 | met | Phases 4–5 mappings |
+
+#### Open for review (not blocking)
+
+- **`err` under `md`:** `md compose` has no diagnostic catalog, so every
+  `err` facet but `msg` is `null`. This is documented as current behavior.
+  A classifying `md` catalog would be new behavior.
+- **Baseline cost:** the typed baseline adds about 72–87 ms per debug
+  `md schema validate` (Phase 5).
+- **DMLS diagnostic text:** DMLS diagnostics omit a property's schema
+  description, so the guidance naming `start` shows in hover only (Phase 5).
+- **Older spec names in DMLS docs:** the frontmatter `features:` lists in
+  four DMLS docs name older specs (Wave 11 above).
+
+**Status:** the implementation is complete and ready for review. It is not
+committed, and the feature directory has not been moved.

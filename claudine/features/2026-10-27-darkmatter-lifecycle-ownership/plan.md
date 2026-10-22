@@ -457,6 +457,482 @@ skills_files_updated_during_phase_4:
     - .claude/skills/darkmatter/library-surfaces.md
     - .claude/skills/darkmatter/lifecycle.md
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_5:
+    - claudine/cli/tests/l1/lifecycle_root_preparation.rs
+    - claudine/lib/tests/l1/claudine_schema_parity.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/compose_lifecycle_approval.rs
+    - darkmatter/cli/tests/l1/lifecycle_passive_surfaces.rs
+    - darkmatter/cli/tests/l1/lifecycle_schema_fallback.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/dmls/tests/l1/lifecycle_event_views.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/no_side_effects.rs
+    - darkmatter/lib/src/lifecycle/md_host.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/schemas/embedded.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/tests/l1/lifecycle_passive_compose.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_parity.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/schemas/partials/fm.yaml
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+docs_updated_during_phase_5:
+    - claudine/schemas/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/lifecycle.md
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_6:
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/tests/l1/compose_lifecycle.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/lib/src/lifecycle/actions.rs
+    - darkmatter/lib/src/lifecycle/executor.rs
+    - darkmatter/lib/src/lifecycle/executor/shell.rs
+    - scripts/check-lifecycle-doc-facets.sh
+docs_updated_during_phase_6:
+    - claudine/README.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/schemas.md
+    - darkmatter/README.md
+    - darkmatter/cli/README.md
+    - darkmatter/lib/README.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/schemas/darkmatter-schema.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/schema-targeting.md
+    - darkmatter/docs/topics/side-effects.md
+docs_created_during_phase_6:
+    - darkmatter/docs/topics/lifecycle/error-handling.md
+    - darkmatter/docs/topics/lifecycle/index.md
+skills_files_updated_during_phase_6:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/lifecycle.md
+source_code:
+    - Cargo.lock
+    - claudine/cli/Cargo.toml
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/prep_target.rs
+    - claudine/cli/src/commands/wrap/composition/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline/tests.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/prep_context.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/composition/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_routing.rs
+    - claudine/cli/src/commands/wrap/launch_plan.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/output/error_walker/tests.rs
+    - claudine/cli/tests/fixtures/lifecycle_traces/
+    - claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-document-unauthored.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-document-unauthored.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-document.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-document.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-sequence.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-sequence.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/defer-in-preflight-blocked.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/defer-in-preflight-blocked.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-null.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-null.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-present.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-present.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-hop-limit-after-launch.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-hop-limit-after-launch.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-hop-limit.hop.template
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-hop-limit.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-hop-limit.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-in-initialize.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-in-initialize.target.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/proxy-in-initialize.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/resume-in-initialize.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/resume-in-initialize.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/resume-in-preflight-blocked.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/resume-in-preflight-blocked.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize-group-leg.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize-group-leg.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize-root-sequence.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize-root-sequence.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-preflight-blocked.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-preflight-blocked.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-start.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-start.trace
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/cli/tests/l1/ctx_per_run.rs
+    - claudine/cli/tests/l1/error_guards.rs
+    - claudine/cli/tests/l1/error_guards/transport-allow.toml
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - claudine/cli/tests/l1/level1_approval_order_pty.rs
+    - claudine/cli/tests/l1/lifecycle_initialize_zero_attempts.rs
+    - claudine/cli/tests/l1/lifecycle_one_implementation_guard.rs
+    - claudine/cli/tests/l1/lifecycle_renamed_events.rs
+    - claudine/cli/tests/l1/lifecycle_root_preparation.rs
+    - claudine/cli/tests/l1/lifecycle_traces.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/lib/Cargo.toml
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/coordinator/invocation.rs
+    - claudine/lib/src/composition/error/lifecycle_authoring.rs
+    - claudine/lib/src/composition/error/lifecycle_preflight.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/frontmatter_excerpt.rs
+    - claudine/lib/src/composition/lifecycle/audio.rs
+    - claudine/lib/src/composition/lifecycle/binding_checks.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/cancellation.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/context/tests.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/effects.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/guarded_shell_sites.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/shell_templates.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/registry.rs
+    - claudine/lib/src/composition/lifecycle/runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/container_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/grammar.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/parse_config.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/checks.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/schema/globals.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/diagnostics/error_kind.rs
+    - claudine/lib/src/diagnostics/mod.rs
+    - claudine/lib/src/diagnostics/restored.rs
+    - claudine/lib/src/diagnostics/restored/tests.rs
+    - claudine/lib/src/diagnostics/snapshot.rs
+    - claudine/lib/src/harness/runtime.rs
+    - claudine/lib/src/harness/timeout.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/lib/src/mcp/import.rs
+    - claudine/lib/src/reporting/error.rs
+    - claudine/lib/tests/common/lifecycle_ownership_scan.rs
+    - claudine/lib/tests/l1/claudine_schema_parity.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/claudine_schemas_matrix.rs
+    - claudine/lib/tests/l1/claudine_trigger_selection_parity.rs
+    - claudine/lib/tests/l1/diagnostic_detail_conformance.rs
+    - claudine/lib/tests/l1/host_catalog.rs
+    - claudine/lib/tests/l1/lifecycle_control_flow_spike.rs
+    - claudine/lib/tests/l1/lifecycle_lift_ready_guard.rs
+    - claudine/lib/tests/l1/lifecycle_one_implementation_guard.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/path_lookup_guard.rs
+    - claudine/lib/tests/l1/type_scope_ownership_guard.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/globals.yaml
+    - claudine/schemas/inline-compose.yaml
+    - claudine/schemas/lifecycle.yaml
+    - claudine/schemas/sequence.yaml
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/src/args/command.rs
+    - darkmatter/cli/src/args/target.rs
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/cli/src/commands/schema/triggers.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/main.rs
+    - darkmatter/cli/tests/l1/clean_frontmatter.rs
+    - darkmatter/cli/tests/l1/clean_schema.rs
+    - darkmatter/cli/tests/l1/compose_dasherized_identifiers.rs
+    - darkmatter/cli/tests/l1/compose_lifecycle.rs
+    - darkmatter/cli/tests/l1/compose_lifecycle_approval.rs
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/cli/tests/l1/lifecycle_passive_surfaces.rs
+    - darkmatter/cli/tests/l1/lifecycle_schema_fallback.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/cli/tests/l1/schema_trigger_rename.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_baseline_selection.rs
+    - darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+    - darkmatter/cli/tests/l1/standalone_baseline.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/formatting.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/request_timing.rs
+    - darkmatter/dmls/src/router/logging_tests.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/dmls/tests/l1/content_policy_baseline.rs
+    - darkmatter/dmls/tests/l1/host_globals.rs
+    - darkmatter/dmls/tests/l1/lifecycle_event_views.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/no_side_effects.rs
+    - darkmatter/dmls/tests/l1/registry_observability.rs
+    - darkmatter/dmls/tests/l1/registry_preparation.rs
+    - darkmatter/dmls/tests/l1/schema_roots_parity.rs
+    - darkmatter/dmls/tests/l1/searched_candidates.rs
+    - darkmatter/dmls/tests/l1/startup_log_lines.rs
+    - darkmatter/dmls/tests/l1/startup_preparation.rs
+    - darkmatter/dmls/tests/l1/strict_mode_recovery_spike.rs
+    - darkmatter/dmls/tests/l1/workspace_file_list.rs
+    - darkmatter/dmls/tests/l1/workspace_schema_scopes.rs
+    - darkmatter/docs/schemas/darkmatter.yaml
+    - darkmatter/lib/src/lib.rs
+    - darkmatter/lib/src/lifecycle/action_shape.rs
+    - darkmatter/lib/src/lifecycle/actions.rs
+    - darkmatter/lib/src/lifecycle/actions/tests.rs
+    - darkmatter/lib/src/lifecycle/authored_order.rs
+    - darkmatter/lib/src/lifecycle/cancellation.rs
+    - darkmatter/lib/src/lifecycle/cancellation/tests.rs
+    - darkmatter/lib/src/lifecycle/context.rs
+    - darkmatter/lib/src/lifecycle/context/tests.rs
+    - darkmatter/lib/src/lifecycle/control.rs
+    - darkmatter/lib/src/lifecycle/control/tests.rs
+    - darkmatter/lib/src/lifecycle/duration.rs
+    - darkmatter/lib/src/lifecycle/effects.rs
+    - darkmatter/lib/src/lifecycle/effects/tests.rs
+    - darkmatter/lib/src/lifecycle/envelope.rs
+    - darkmatter/lib/src/lifecycle/envelope/tests.rs
+    - darkmatter/lib/src/lifecycle/error.rs
+    - darkmatter/lib/src/lifecycle/executor.rs
+    - darkmatter/lib/src/lifecycle/executor/host.rs
+    - darkmatter/lib/src/lifecycle/executor/outcome.rs
+    - darkmatter/lib/src/lifecycle/executor/shell.rs
+    - darkmatter/lib/src/lifecycle/executor/tests.rs
+    - darkmatter/lib/src/lifecycle/md_host.rs
+    - darkmatter/lib/src/lifecycle/md_host/tests.rs
+    - darkmatter/lib/src/lifecycle/mod.rs
+    - darkmatter/lib/src/lifecycle/parse.rs
+    - darkmatter/lib/src/lifecycle/policy.rs
+    - darkmatter/lib/src/lifecycle/policy/tests.rs
+    - darkmatter/lib/src/lifecycle/preflight.rs
+    - darkmatter/lib/src/lifecycle/preflight/candidates.rs
+    - darkmatter/lib/src/lifecycle/preflight/shell_walk.rs
+    - darkmatter/lib/src/lifecycle/preflight/tests.rs
+    - darkmatter/lib/src/lifecycle/registry.rs
+    - darkmatter/lib/src/lifecycle/registry/tests.rs
+    - darkmatter/lib/src/lifecycle/run.rs
+    - darkmatter/lib/src/lifecycle/run/protocol.rs
+    - darkmatter/lib/src/lifecycle/run_guard.rs
+    - darkmatter/lib/src/lifecycle/run_guard/tests.rs
+    - darkmatter/lib/src/lifecycle/runtime.rs
+    - darkmatter/lib/src/lifecycle/runtime/tests.rs
+    - darkmatter/lib/src/lifecycle/services.rs
+    - darkmatter/lib/src/lifecycle/services/tests.rs
+    - darkmatter/lib/src/lifecycle/shell_template.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/lifecycle/source_map.rs
+    - darkmatter/lib/src/lifecycle/tests.rs
+    - darkmatter/lib/src/lifecycle/validate.rs
+    - darkmatter/lib/src/markdown/cleanup/document.rs
+    - darkmatter/lib/src/markdown/cleanup/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/context/merge.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs
+    - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/embedded.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+    - darkmatter/lib/src/markdown/schemas/tests/clean_quoting.rs
+    - darkmatter/lib/src/markdown/schemas/tests/embedded_sources.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/lint.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/payload_memo_tests.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/tests/content_policy_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/clean_counters.rs
+    - darkmatter/lib/tests/l1/content_policy_disk_baseline.rs
+    - darkmatter/lib/tests/l1/content_policy_embedded_baseline.rs
+    - darkmatter/lib/tests/l1/dependency_direction_guard.rs
+    - darkmatter/lib/tests/l1/feature_review_incident.rs
+    - darkmatter/lib/tests/l1/global_catalog.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/engine.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/mod.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/profiles.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/protocol_tests.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/publisher.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/replay.rs
+    - darkmatter/lib/tests/l1/lifecycle_passive_compose.rs
+    - darkmatter/lib/tests/l1/lifecycle_run_protocol.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_parity.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase5.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase6.rs
+    - darkmatter/lib/tests/l1/meta_schema_repo_schemas.rs
+    - darkmatter/lib/tests/l1/path_lookup_guard.rs
+    - darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+    - darkmatter/lib/tests/l1/schema_phase_validation.rs
+    - darkmatter/lib/tests/l1/schema_roots.rs
+    - darkmatter/lib/tests/l1/schemas_effective_presence.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/trigger_envelope_claim.rs
+    - darkmatter/lib/tests/l1/trigger_input_matrix.rs
+    - darkmatter/lib/tests/l1/trigger_match_grammar.rs
+    - darkmatter/lib/tests/l1/trigger_selection_parity.rs
+    - darkmatter/lib/tests/l1/trigger_spelling_guard.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/schemas/darkmatter.yaml
+    - darkmatter/schemas/partials/context-variables.yaml
+    - darkmatter/schemas/partials/error.yaml
+    - darkmatter/schemas/partials/fm.yaml
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+    - darkmatter/schemas/partials/style.yaml
+    - darkmatter/schemas/partials/timing.yaml
+    - darkmatter/schemas/partials/tracking.yaml
+    - darkmatter/tests/fixtures/schema-triggers/schemas/claudine.trigger.yaml
+    - darkmatter/tests/fixtures/schema-triggers/schemas/inline-compose.trigger.yaml
+    - darkmatter/tests/fixtures/schema-triggers/schemas/sequence.trigger.yaml
+    - docs/drafts/memory.yaml
+    - schemas/memory.yaml
+    - scripts/check-lifecycle-doc-facets.sh
+documentation:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/research-contracts.md
+    - .claude/skills/claudine/validations-and-handlers.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/library-surfaces.md
+    - .claude/skills/darkmatter/lifecycle.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/os/windows-paths.md
+    - claudine/README.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/error-architecture.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/topics/state-management/context-variables.md
+    - claudine/docs/topics/state-management/drift.md
+    - claudine/schemas/README.md
+    - content-policy/docs/topics/policy-lifecycle.md
+    - darkmatter/README.md
+    - darkmatter/cli/README.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/dependencies.md
+    - darkmatter/docs/inline/fm-shell-expansion.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/schemas/darkmatter-schema.md
+    - darkmatter/docs/topics/lifecycle/error-handling.md
+    - darkmatter/docs/topics/lifecycle/index.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/schema-targeting.md
+    - darkmatter/docs/topics/side-effects.md
+    - darkmatter/docs/topics/state-management/context-variables.md
+    - darkmatter/docs/topics/state-management/index.md
+    - darkmatter/lib/README.md
+completed_phase: 6
+implemented: true
 ---
 
 # Plan: Darkmatter lifecycle ownership
@@ -779,7 +1255,7 @@ assertions remain unchanged; migrated triggers preserve selection. Covers criter
 
 ### Wave 10 — parallel validation strands
 
-- [ ] **Schema projection**
+- [x] **Schema projection**
   - Publish Darkmatter-owned neutral action definitions and md-profile baseline
     unions; Claudine references them and remains closed to unknown verbs.
   - Use suggest for baseline action names. The unknown-action branch excludes
@@ -787,7 +1263,7 @@ assertions remain unchanged; migrated triggers preserve selection. Covers criter
   - Validate shared conditional/bundle structure and existing depth limits; derive
     event-name/action/binding parity from descriptors, not a second manual list.
 
-- [ ] **Editor projection**
+- [x] **Editor projection**
   - After the relevant Phase 4 interfaces are integrated, update DMLS overlay,
     diagnostics, hover, and completion for host names and resolved global catalogs.
   - Prove composed typed/start untyped under baseline; say accepted but unsuggested;
@@ -796,7 +1272,7 @@ assertions remain unchanged; migrated triggers preserve selection. Covers criter
   - Use passive recording services to prove tooling cannot execute stacks, fetch,
     mutate, or accidentally resolve ignored operands.
 
-- [ ] **Invocation coverage**
+- [x] **Invocation coverage**
   - Through each area's `CliProcessFixture`, prove md success/failure/cancellation,
     output channel/order, skip/stop, initialization-created includes, root/child
     identity, unsupported warnings, malformed supported actions, broken writers,
@@ -813,7 +1289,7 @@ Fix drift in production rather than normalizing new behavior into old assertions
 
 ### Wave 11 — parallel documentation
 
-- [ ] **Lifecycle documentation**
+- [x] **Lifecycle documentation**
   - Write Darkmatter lifecycle index and error-handling pages with compact examples
     and Mermaid flows for host driving, failure routing, cancellation, and recovery.
   - Update Claudine lifecycle docs to describe the host, preserving authored names
@@ -821,7 +1297,7 @@ Fix drift in production rather than normalizing new behavior into old assertions
   - Update both READMEs and lifecycle portions of both skills; review comments on
     every behavior-changing symbol for drift.
 
-- [ ] **Schema documentation**
+- [x] **Schema documentation**
   - Update schema definition, authoring, targeting, CLI reference, completions, and
     schema skill topics for catalogs, trigger renames, AND/group OR, and tooling.
   - Change old-baseline transclusions to the fm partial; remove planned/implementation
@@ -831,7 +1307,7 @@ Fix drift in production rather than normalizing new behavior into old assertions
 
 ### Wave 12 — sequential completion audit
 
-- [ ] **Final verification**
+- [x] **Final verification**
   - Run `just test` and `just lint` in both areas, including DMLS and the two spike
     tests in their actual recipe/target coverage. Run affected `just test-l2` only
     for terminal subjects; no terminal/browser focus and no audible playback.

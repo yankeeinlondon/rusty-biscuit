@@ -43,6 +43,8 @@ related:
     - 2026-10-25-loops-and-flow-control
     - 2026-10-28-schema-enhancements
 os_failing: windows
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Darkmatter Owns Lifecycle Events
