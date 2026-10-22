@@ -886,7 +886,9 @@ impl<'a> Lexer<'a> {
     ///
     /// Numbers are always non-negative at the lexer level. Unary minus is
     /// handled in the parser so `5 - 3` tokenizes as three tokens rather than
-    /// being collapsed into `5, -3`.
+    /// being collapsed into `5, -3`. The written digits are admitted before
+    /// they become an `f64`, so a whole literal no `f64` holds exactly
+    /// (`9007199254740993`) is a lexer error at the literal.
     fn read_number(&mut self) -> Result<Token, LexerError> {
         let start_pos = self.pos;
         let mut value = String::new();
@@ -917,10 +919,16 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        value
-            .parse::<f64>()
-            .map(Token::NumberLiteral)
-            .map_err(|_| LexerError::new(format!("Invalid number: '{}'", value), start_pos))
+        match crate::markdown::numeric::admit_number_spelling(&value) {
+            Ok(number) => Ok(Token::NumberLiteral(number)),
+            Err(crate::markdown::numeric::NumberTextError::Admission(reason)) => Err(LexerError::new(
+                format!("Invalid number: '{value}' {reason}"),
+                start_pos,
+            )),
+            Err(crate::markdown::numeric::NumberTextError::NotANumber) => {
+                Err(LexerError::new(format!("Invalid number: '{}'", value), start_pos))
+            }
+        }
     }
 
     /// Whether the `-` at the cursor continues the identifier being scanned.

@@ -25,6 +25,17 @@ if md.has_frontmatter() {
 }
 ```
 
+## Order and Numbers at Load
+
+`serde_json` is built with `preserve_order`, so a parsed frontmatter map (and
+every nested map) keeps written order; `MappingOrders` still records it for
+YAML-only consumers. Anything that publishes alphabetical keys sorts
+explicitly (`Value::sort_all_objects`), as the non-strict frontmatter hash
+does. The YAML loader admits every number through `markdown::numeric`
+(`numeric::load_admitted_yaml`): an inexact whole number, an underflow, a
+non-finite `.inf`/`.nan`, or an integer beyond `u64` is a located load error
+whatever the property's type, and no fallback strategy can hide it.
+
 ## Merge Strategies
 
 Parsing one YAML frontmatter document rejects duplicate keys at every mapping

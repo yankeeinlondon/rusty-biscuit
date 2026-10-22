@@ -128,25 +128,51 @@ pub use prepared::{
 use absence::{AbsenceScope, MissingRootObserver};
 use serde_json::Value;
 
+use crate::markdown::numeric::{self, NumberTextError, NumericAdmissionError};
+
 use crate::catalog::{describe, describe_for_error, suggest, Described};
 
-/// Converts a value to a number for arithmetic operations.
-///
-/// Accepts numbers and parseable strings; rejects booleans, null, arrays,
-/// and objects.
-fn to_number_arithmetic(value: &Value) -> Option<f64> {
-    match value {
-        Value::Number(n) => n.as_f64(),
-        Value::String(s) => s.parse::<f64>().ok(),
-        _ => None,
+/// A value read as an arithmetic operand.
+enum ArithmeticOperand {
+    Number(f64),
+    /// Not a number and not numeric text: booleans, null, arrays, objects,
+    /// and text such as `"pear"`.
+    NotNumeric,
+    /// A number, or numeric text, that admission rejects
+    /// (`"9007199254740993"`).
+    Inadmissible(NumericAdmissionError),
+}
+
+/// Reads a value as an arithmetic operand. Text converts through the one
+/// canonical numeric-text parser, and a stored number is admitted again
+/// because a value supplied from outside the loaders (`--set`) may be an
+/// exact integer no `f64` holds.
+fn arithmetic_operand(value: &Value) -> ArithmeticOperand {
+    let admitted = match value {
+        Value::Number(number) => numeric::admit_json_number(number).map_err(NumberTextError::Admission),
+        Value::String(text) => numeric::admit_number_text(text),
+        _ => Err(NumberTextError::NotANumber),
+    };
+    match admitted {
+        Ok(number) => ArithmeticOperand::Number(number),
+        Err(NumberTextError::NotANumber) => ArithmeticOperand::NotNumeric,
+        Err(NumberTextError::Admission(reason)) => ArithmeticOperand::Inadmissible(reason),
     }
 }
 
 /// Converts an expression value into a number for arithmetic operations,
-/// returning an error message tagged with the originating operator when the
-/// value cannot be represented as a number.
+/// returning an error tagged with the originating operator when the value is
+/// not a number, or carrying the admission reason when it is a number that
+/// cannot be represented.
 fn require_number(value: &Value, op_label: &'static str) -> Result<f64, ExpressionError> {
-    to_number_arithmetic(value).ok_or(ExpressionError::Arithmetic { op: op_label })
+    match arithmetic_operand(value) {
+        ArithmeticOperand::Number(number) => Ok(number),
+        ArithmeticOperand::NotNumeric => Err(ExpressionError::Arithmetic { op: op_label }),
+        ArithmeticOperand::Inadmissible(reason) => Err(ExpressionError::Other {
+            function: op_label.to_string(),
+            message: format!("The number {} {reason}", scalar_string(value)),
+        }),
+    }
 }
 
 /// Converts a value to a number for array indexing.
@@ -162,24 +188,18 @@ fn to_number_index(value: &Value) -> Option<f64> {
 
 /// The value a numeric literal evaluates to. The guard analysis models
 /// literal operands with this, so it must stay the evaluator's only literal
-/// conversion: an integral literal becomes a (saturating) `i64`.
+/// conversion: the lexer already admitted the literal, and it is stored by
+/// [`numeric::json_number`] (a whole value as an integer, never narrowed).
 fn number_literal(n: f64) -> Option<Value> {
-    if n.fract() == 0.0 {
-        return Some(Value::Number(serde_json::Number::from(n as i64)));
-    }
-    serde_json::Number::from_f64(n).map(Value::Number)
+    numeric::json_number(n).map(Value::Number)
 }
 
+/// Stores a computed number; a non-finite result (overflow, `0 / 0`) is an
+/// error, never infinity or a saturated value.
 fn json_number(value: f64) -> Result<Value, String> {
-    if !value.is_finite() {
-        return Err(format!("Arithmetic produced a non-finite number: {value}"));
-    }
-    if value.fract() == 0.0 && value.abs() < (i64::MAX as f64) {
-        return Ok(Value::Number(serde_json::Number::from(value as i64)));
-    }
-    serde_json::Number::from_f64(value)
+    numeric::json_number(value)
         .map(Value::Number)
-        .ok_or_else(|| format!("Unable to represent number: {value}"))
+        .ok_or_else(|| format!("Arithmetic result is not finite: {value}"))
 }
 
 /// Trait for types that can resolve expression variable lookups.
@@ -344,7 +364,7 @@ pub(crate) fn default_format(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
         Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
+        Value::Number(n) => format_json_number(n),
         Value::Bool(b) => b.to_string(),
         other => other.to_string(),
     }
@@ -382,14 +402,16 @@ pub fn is_truthy(value: &Value) -> bool {
 /// Converts a JSON value to a number.
 ///
 /// - `Number` -> `Some(n)`
-/// - `String` -> `Some(n)` if parseable as f64
+/// - `String` -> `Some(n)` when the canonical numeric-text parser
+///   ([`numeric::admit_number_text`]) admits it; `None` for other text,
+///   including `"inf"`, `"NaN"`, and inexact text such as `"9007199254740993"`
 /// - `Bool` -> `Some(1.0)` for true, `Some(0.0)` for false
 /// - `Null` -> `None`
 /// - `Array` | `Object` -> `None`
 pub fn to_number(value: &Value) -> Option<f64> {
     match value {
         Value::Number(n) => n.as_f64(),
-        Value::String(s) => s.parse::<f64>().ok(),
+        Value::String(s) => numeric::admit_number_text(s).ok(),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Null => None,
         Value::Array(_) | Value::Object(_) => None,
@@ -405,23 +427,27 @@ pub fn to_number_coerce(value: &Value) -> f64 {
 ///
 /// - `Null` -> empty string
 /// - `Bool` -> `"true"` or `"false"`
-/// - `Number` -> string representation
+/// - `Number` -> [`numeric::format_number`] (`4.0` is `"4"`); an integer
+///   stored exactly keeps all its digits
 /// - `String` -> the string itself
 /// - `Array` | `Object` -> JSON string representation
 pub fn scalar_string(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
         Value::Bool(b) => b.to_string(),
-        Value::Number(n) => {
-            if let Some(f) = n.as_f64()
-                && f.fract() == 0.0
-            {
-                return format!("{}", f as i64);
-            }
-            n.to_string()
-        }
+        Value::Number(n) => format_json_number(n),
         Value::String(s) => s.clone(),
         Value::Array(_) | Value::Object(_) => value.to_string(),
+    }
+}
+
+/// The text form of a stored number: [`numeric::format_number`] for float
+/// storage (`4.0` is `"4"`, `1e20` has no exponent), and every digit of an
+/// integer stored exactly.
+pub(crate) fn format_json_number(number: &serde_json::Number) -> String {
+    match number.as_f64() {
+        Some(value) if number.is_f64() => numeric::format_number(value),
+        _ => number.to_string(),
     }
 }
 
@@ -624,13 +650,15 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
 }
 
 fn evaluate_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value, ExpressionError> {
+    // Numeric text that admission rejects still counts as numeric here, so
+    // `"9007199254740993" + 1` reports the reason instead of concatenating.
     let mixed_number_and_numeric_string = op == BinaryOp::Add
         && matches!(
             (left, right),
             (Value::Number(_), Value::String(_)) | (Value::String(_), Value::Number(_))
         )
-        && to_number_arithmetic(left).is_some()
-        && to_number_arithmetic(right).is_some();
+        && !matches!(arithmetic_operand(left), ArithmeticOperand::NotNumeric)
+        && !matches!(arithmetic_operand(right), ArithmeticOperand::NotNumeric);
     if op == BinaryOp::Add
         && (left.is_string() || right.is_string())
         && !mixed_number_and_numeric_string
@@ -686,20 +714,9 @@ fn evaluate_index(base: &Value, index: &Value) -> Value {
     match base {
         Value::Null => Value::Null,
         Value::Array(items) => {
-            let Some(n) = to_number_index(index) else {
-                return Value::Null;
-            };
-            if n.fract() != 0.0 {
-                return Value::Null;
-            }
-            let len = items.len() as i64;
-            let idx = n as i64;
-            let resolved = if idx < 0 { len + idx } else { idx };
-            if resolved < 0 || resolved >= len {
-                Value::Null
-            } else {
-                items[resolved as usize].clone()
-            }
+            to_number_index(index)
+                .and_then(|n| resolve_array_index(items.len(), n))
+                .map_or(Value::Null, |resolved| items[resolved].clone())
         }
         Value::Object(map) => match index {
             Value::String(s) => map.get(s).cloned().unwrap_or(Value::Null),
@@ -946,14 +963,19 @@ fn selected_array_index(base: &Value, index: &Value) -> Option<usize> {
     let Value::Array(items) = base else {
         return None;
     };
-    let index = to_number_index(index)?;
+    resolve_array_index(items.len(), to_number_index(index)?)
+}
+
+/// The position an index selects in a list of `len` items, counting a
+/// negative index from the end; `None` for a non-whole or out-of-range index.
+/// Computed in `f64` so a huge index is out of range rather than saturated.
+fn resolve_array_index(len: usize, index: f64) -> Option<usize> {
     if index.fract() != 0.0 {
         return None;
     }
-    let len = items.len() as i64;
-    let index = index as i64;
-    let resolved = if index < 0 { len + index } else { index };
-    (resolved >= 0 && resolved < len).then_some(resolved as usize)
+    let len = len as f64;
+    let resolved = if index < 0.0 { len + index } else { index };
+    (resolved >= 0.0 && resolved < len).then_some(resolved as usize)
 }
 
 fn caller_file_occurrence(expr: &Expr) -> Option<String> {

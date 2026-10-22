@@ -161,14 +161,14 @@ fn build_replacement_rules(state: &EffectiveState) -> Option<Vec<ReplacementRule
 ///
 /// - `null` -> `""`
 /// - `string` -> the string
-/// - `number` -> string representation
+/// - `number` -> its text form (`4.0` is `"4"`)
 /// - `bool` -> `"true"` or `"false"`
 /// - `array/object` -> `None` (not supported)
 fn coerce_to_string(value: &Value) -> Option<String> {
     match value {
         Value::Null => Some(String::new()),
         Value::String(s) => Some(s.clone()),
-        Value::Number(n) => Some(n.to_string()),
+        Value::Number(n) => Some(super::expression::format_json_number(n)),
         Value::Bool(b) => Some(b.to_string()),
         Value::Array(_) | Value::Object(_) => None,
     }

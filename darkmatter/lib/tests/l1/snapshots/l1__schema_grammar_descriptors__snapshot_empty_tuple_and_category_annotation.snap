@@ -1,0 +1,35 @@
+---
+source: darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+expression: "pretty(\"none: 'tuple([])'\\ntagged: 'string(category(Text)) -> A labeled value.'\\n\")"
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "none": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "minItems": 0,
+          "items": false
+        }
+      ]
+    },
+    "tagged": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "A labeled value.",
+      "x-darkmatter-category": "Text"
+    }
+  }
+}

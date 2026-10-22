@@ -10,6 +10,7 @@ and DMLS schema behavior.
 - [Runtime baseline](#runtime-baseline)
 - [Imports and dictionaries](#imports-and-dictionaries)
 - [Named union references](#named-union-references)
+- [Tuples, functions, `|`, and categories](#tuples-functions--and-categories)
 - [Special types](#special-types)
 - [Core types](#core-types-unknown-null-alphanumeric-shell)
 - [Suggestions and DMLS](#suggestions-and-dmls)
@@ -335,10 +336,11 @@ References; Choosing an Arm: Reporting versus Changing Data).
   working. No default is ever inserted.
 - Representation: a bare `U` stays `PropertyDef::Union`. A postfixed reference
   is `PropertyDef::Single(atom)` with `atom.ty == TypeExpr::Union(arms)`
-  (resolver-only; never parsed) and `atom.is_array` for `U[]`. Helpers:
+  and `atom.is_array` for `U[]`; the parser produces the same atom for the
+  grouped spelling `(A | B)[]`, so there is no second encoding. Helpers:
   `PropertyAtom::union_arms()`, `PropertyDef::alternatives()` (`None` for a
   list of a union); the crate-private `is_required`/`is_generated`/
-  `has_default` read through arms. There is no anonymous `(A | B)[]` syntax and no second encoding.
+  `has_default` read through arms.
 - Lowering (`convert.rs`): `type: array` + `items.anyOf` of the flattened
   arms; items get no null arm; the optional `anyOf: [null, …]` wrapper (and a
   use-site description) goes on the property only. A nested postfixed arm
@@ -354,6 +356,26 @@ References; Choosing an Arm: Reporting versus Changing Data).
   when exactly one candidate validates; eager-file rewriting needs exactly one
   validating arm containing an eager `file`; cleanup never repairs inside a
   union.
+
+## Tuples, functions, `|`, and categories
+
+User docs: `darkmatter/docs/topics/schemas/definition.md` (Tuples; The `|`
+Operator and Grouping; Function Signatures; Categories).
+
+- `grammar::parse_type_definition` reads a `|` union into the same
+  `PropertyDef::Union` the YAML list produces; `parse_type_expr` is the
+  one-atom form and rejects a union. `[]` binds tighter than `|`.
+- `TypeExpr::Tuple(TupleType)` lowers to `prefixItems`/`minItems`/`items`;
+  positions get no optional-null wrapper. `TypeExpr::Function` is
+  description-only: `to_json_schema` fails on it with the property path, which
+  is the one choke point keeping functions out of document schemas (the
+  resolver inlines references first). Never emit JSON for a function.
+- `Constraint::Category` lowers to `x-darkmatter-category`; the tagged
+  envelope's `categories:` list (`StandaloneSchemaDocument::categories`)
+  limits names. Duplicate overloads are judged by
+  `signature::duplicate_overload` over canonical binding contracts.
+- Numbers in schema metadata go through `markdown::numeric` admission; an
+  inexact whole number, infinity, or underflow is a grammar error.
 
 ## Special types
 

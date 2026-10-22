@@ -208,11 +208,12 @@ impl PropertyDef {
 
 /// A type expression is a primitive type keyword, an inline object literal
 /// declared with `{ ... }` syntax, a named-type reference (`Name@fileref`
-/// or a bare local `Name`), or, after resolution, the alternatives of a
-/// postfixed union-typed reference.
+/// or a bare local `Name`), a union of alternatives (a grouped `(A | B)[]`,
+/// or after resolution a postfixed union-typed reference), a `tuple`, or a
+/// description-only `function`.
 ///
-/// `TypeExpr` is `Clone` but not `Copy` because the inline-object, import,
-/// and union arms carry owned data.
+/// `TypeExpr` is `Clone` but not `Copy` because every variant but
+/// [`TypeExpr::Primitive`] carries owned data.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeExpr {
     /// Built-in primitive type keyword (`string`, `number`, `object`, etc.).
@@ -247,7 +248,184 @@ pub enum TypeExpr {
     /// the arms rather than copied onto the atom, so an arm lowers exactly as
     /// it does in a property-level union. A bare reference `U` is still
     /// inlined as a [`PropertyDef::Union`].
+    ///
+    /// The parser also produces it for a grouped union followed by `[]`:
+    /// `(string | number)[]` is this variant with `is_array` set, the same
+    /// value a list of a union-typed named type resolves to.
     Union(Vec<PropertyAtom>),
+    /// A positional tuple: `tuple([string, number?, ...number[]])`.
+    Tuple(TupleType),
+    /// A description-only function signature: `function(parameters(...);
+    /// returns(...))`. It never validates data; a document schema that
+    /// reaches one fails to convert.
+    Function(Box<FunctionType>),
+}
+
+/// The positions of a `tuple([...])` type.
+///
+/// Elements are ordered required first, then optional, then at most one
+/// final spread; the parser rejects every other order. An optional position
+/// may be omitted but, when supplied, never accepts `null` unless its type
+/// does: tuple positions get no optional-null wrapper.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TupleType {
+    /// The positional elements, in order.
+    pub elements: Vec<TupleElement>,
+    /// The final spread (`...number[]`): an array-typed atom (`is_array` is
+    /// always set) whose items type every position after the elements.
+    pub spread: Option<Box<PropertyAtom>>,
+}
+
+impl TupleType {
+    /// How many leading positions must be present.
+    pub fn required_len(&self) -> usize {
+        self.elements.iter().filter(|element| !element.optional).count()
+    }
+
+    /// Whether `predicate` holds for some option of some position or for the
+    /// spread.
+    pub fn any_atom(&self, mut predicate: impl FnMut(&PropertyAtom) -> bool) -> bool {
+        self.elements.iter().any(|element| match &element.def {
+            PropertyDef::Single(atom) => predicate(atom),
+            PropertyDef::Union(arms) => arms.iter().any(&mut predicate),
+        }) || self.spread.as_deref().is_some_and(predicate)
+    }
+
+    /// Rebuilds the tuple with each position's definition, and the spread
+    /// (as a single-atom definition), passed through `map` with its index;
+    /// the spread's index is the element count.
+    ///
+    /// ## Errors
+    ///
+    /// The first error `map` returns.
+    pub fn try_map_defs<E>(
+        self,
+        mut map: impl FnMut(usize, PropertyDef) -> Result<PropertyDef, E>,
+    ) -> Result<Self, E> {
+        let count = self.elements.len();
+        let elements = self
+            .elements
+            .into_iter()
+            .enumerate()
+            .map(|(index, element)| {
+                Ok(TupleElement {
+                    def: map(index, element.def)?,
+                    optional: element.optional,
+                })
+            })
+            .collect::<Result<_, E>>()?;
+        let spread = match self.spread {
+            None => None,
+            Some(atom) => Some(Box::new(match map(count, PropertyDef::Single(*atom))? {
+                PropertyDef::Single(atom) => atom,
+                PropertyDef::Union(arms) => PropertyAtom {
+                    ty: TypeExpr::Union(arms),
+                    is_array: true,
+                    constraints: Vec::new(),
+                    array_constraints: Vec::new(),
+                    description: None,
+                },
+            })),
+        };
+        Ok(Self { elements, spread })
+    }
+}
+
+/// One positional element of a [`TupleType`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct TupleElement {
+    /// The element's type; a [`PropertyDef::Union`] for `A | B`.
+    pub def: PropertyDef,
+    /// Whether the position may be omitted (`T?`).
+    pub optional: bool,
+}
+
+/// A `function(...)` signature. Its `category(...)` and file-form
+/// `example(./file)` constraints ride on the enclosing [`PropertyAtom`] as
+/// [`Constraint::Category`] and [`Constraint::Example`]; its `-> description`
+/// is the atom's description.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionType {
+    /// `parameters(...)`.
+    pub parameters: FunctionParameters,
+    /// `returns(...)`: the value returned on success.
+    pub returns: PropertyDef,
+    /// `fallible`: the function may return an error for inputs that bound.
+    pub fallible: bool,
+    /// Inline `example(call => result)` constraints, in authored order.
+    pub examples: Vec<CallExample>,
+}
+
+/// The `parameters(...)` of a [`FunctionType`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum FunctionParameters {
+    /// `parameters(void)`: the function takes no arguments.
+    Void,
+    /// Named parameters, ordered required, then optional, then at most one
+    /// final rest parameter.
+    List(Vec<FunctionParameter>),
+}
+
+impl FunctionParameters {
+    /// The parameters, empty for [`FunctionParameters::Void`].
+    pub fn as_slice(&self) -> &[FunctionParameter] {
+        match self {
+            Self::Void => &[],
+            Self::List(parameters) => parameters,
+        }
+    }
+}
+
+/// One named parameter of a [`FunctionType`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionParameter {
+    /// The parameter's name; documentation only, never part of a binding
+    /// contract.
+    pub name: String,
+    /// The parameter's type. For a rest parameter it types each remaining
+    /// argument.
+    pub def: PropertyDef,
+    /// `name?: T`: the argument may be omitted (but not passed `null` unless
+    /// `T` admits it).
+    pub optional: bool,
+    /// `...name: T`: zero or more trailing arguments of `T`.
+    pub rest: bool,
+}
+
+/// An inline `example(CALL => RESULT)` on a function type.
+///
+/// Equality ignores the spans: they record where the example was authored,
+/// not what it says.
+#[derive(Debug, Clone)]
+pub struct CallExample {
+    /// The authored call, trimmed; it parses as a Darkmatter function-call
+    /// expression.
+    pub call: String,
+    /// Byte span of [`CallExample::call`] in the type-expression string.
+    pub call_span: SourceSpan,
+    /// The expected outcome.
+    pub expected: ExampleOutcome,
+    /// Byte span of the authored result in the type-expression string.
+    pub expected_span: SourceSpan,
+    /// `display-only: REASON`: shown in documentation, never executed.
+    pub display_only: Option<String>,
+}
+
+impl PartialEq for CallExample {
+    fn eq(&self, other: &Self) -> bool {
+        self.call == other.call
+            && self.expected == other.expected
+            && self.display_only == other.display_only
+    }
+}
+
+/// What an inline function example expects its call to produce.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExampleOutcome {
+    /// A literal value, compared structurally.
+    Value(serde_json::Value),
+    /// `=> error`: the call must fail.
+    Error,
 }
 
 /// The [`TypeExpr::Imported`] reference that names the current schema's
@@ -526,11 +704,12 @@ impl SimplifiedType {
         }
     }
 
-    /// Whether `name` is a built-in type keyword. Built-ins win over a local
-    /// named type of the same name, so such a type is reachable only as
-    /// `name@this`.
+    /// Whether `name` is a built-in type keyword, including the structural
+    /// `tuple` and `function`, which have no [`SimplifiedType`] of their own.
+    /// Built-ins win over a local named type of the same name, so such a type
+    /// is reachable only as `name@this`.
     pub fn is_keyword(name: &str) -> bool {
-        Self::from_keyword(name).is_some()
+        Self::from_keyword(name).is_some() || matches!(name, "tuple" | "function")
     }
 
     /// Parses a type keyword. Returns `None` if `keyword` is not a known type.
@@ -680,6 +859,12 @@ pub enum Constraint {
     /// itself validated at schema-load time. Raw authored reference strings are
     /// preserved here; resolution is deferred to `resolve.rs` (Phase 6).
     Example(Vec<String>),
+
+    /// `category(Name)`: documentation metadata available on every type. The
+    /// name is the trimmed raw text and is case-sensitive. On a data type it
+    /// lowers to the `x-darkmatter-category` annotation; a schema file that
+    /// declares `categories:` rejects a name it does not list.
+    Category(String),
 }
 
 impl Constraint {
@@ -711,6 +896,7 @@ impl Constraint {
             Constraint::MinKeys(_) => "min-keys",
             Constraint::MaxKeys(_) => "max-keys",
             Constraint::Example(_) => "example",
+            Constraint::Category(_) => "category",
         }
     }
 }

@@ -5,10 +5,26 @@
 //! EBNF in the schemas spec:
 //!
 //! ```text
-//! type_expr_string := type_expr ( "->" description )?
+//! type_expr_string := union ( "->" description )?
+//! union            := option ( "|" option )*
+//! option           := type_expr | group
+//! group            := "(" union ")" ( "[]" ( "(" arr_constraints ")" )? )?
 //! type_expr        := simple_type
 //!                   | inline_object
+//!                   | tuple
+//!                   | function
 //!                   | reference
+//! tuple            := "tuple" "(" "[" ( element ( "," element )* ","? )? "]"
+//!                     ( ";" item_constraints )? ")"
+//!                     ( "[]" ( "(" arr_constraints ")" )? )?
+//! element          := union "?"? | "..." option        (spread: an array type)
+//! function         := "function" "(" fn_constraint ( ";" fn_constraint )* ";"? ")"
+//!                     ( "[]" ( "(" arr_constraints ")" )? )?
+//! fn_constraint    := "parameters" "(" ( "void" | parameter ( "," parameter )* ) ")"
+//!                   | "returns" "(" union ")" | "category" "(" name ")"
+//!                   | "fallible" | "example" "(" ( arglist | call "=>" result
+//!                     ( ";" "display-only" ":" reason )? ) ")"
+//! parameter        := "..."? identifier "?"? ":" union
 //! simple_type      := type_name ( "(" item_constraints ")" )?
 //!                                ( "[]" ( "(" arr_constraints ")" )? )?
 //! inline_object    := "{" ws* property_list? ws* "}"
@@ -38,6 +54,7 @@
 //! arr_constraints  := constraint ( ";" constraint )*
 //! constraint       := IDENT
 //!                   | IDENT "(" arglist ")"
+//!                   | "category" "(" name ")"      (name: raw text up to `)`)
 //! arglist          := arg ( "," arg )*
 //! arg              := NUMBER | BARE_WORD | SQUOTED | DQUOTED
 //! fileref          := <biscuit-file file reference> | "this"
@@ -60,6 +77,14 @@
 //! `any` parses as `unknown`. An unknown, repeated, or post-`;` option, and a
 //! list without `;` that mixes options and constraints, are grammar errors.
 //!
+//! `[]` binds tighter than `|`, and a group without `[]` joins its options to
+//! the enclosing union, so `(A | B) | C` is `A | B | C` while `(A | B)[]` is
+//! one list atom whose type is [`TypeExpr::Union`]. Tuple elements, function
+//! parameters, and return types are unions without descriptions; ordering and
+//! uniqueness rules for elements and parameters are checked as they are read,
+//! and an inline `example(call => result)` is accepted only on a function.
+//! Numbers in metadata are admitted through [`crate::markdown::numeric`].
+//!
 //! A `pattern_key` (`<string>`, `<starting::P>`, `<ending::S>`, `<pattern::RE>`)
 //! keys a dictionary/pattern-keyed object; see [`PatternKey`].
 //!
@@ -72,12 +97,18 @@
 
 use std::{ops::Range, str::FromStr};
 
+use crate::markdown::compose::expression::{SpannedExpr, SpannedExprKind, parse_spanned};
+use crate::markdown::numeric::{
+    NumberTextError, NumericAdmissionError, admit_number_spelling, format_number, json_number,
+};
 use crate::markdown::schemas::errors::SchemaError;
 
 use super::alphanumeric::AlphanumericOption;
+use super::signature::duplicate_overload;
 use super::types::{
-    Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType,
-    SuggestionCandidate, TypeExpr,
+    CallExample, Constraint, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
+    PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType,
+    SuggestionCandidate, TupleElement, TupleType, TypeExpr,
 };
 
 /// Hard maximum number of nested inline object levels the parser will accept.
@@ -87,9 +118,38 @@ pub const MAX_INLINE_OBJECT_DEPTH: usize = 32;
 /// Parses a single type-and-constraint string into a [`PropertyAtom`].
 ///
 /// `property` is supplied for error reporting only.
+///
+/// ## Errors
+///
+/// [`SchemaError::Grammar`] for invalid grammar, and for a `|` union of more
+/// than one option, which is a definition rather than one atom (see
+/// [`parse_type_definition`]).
 pub fn parse_type_expr(property: &str, input: &str) -> Result<PropertyAtom, SchemaError> {
+    match parse_type_definition(property, input)? {
+        PropertyDef::Single(atom) => Ok(atom),
+        PropertyDef::Union(_) => Err(SchemaError::Grammar {
+            property: property.to_string(),
+            message: "expected one type, found a `|` union".into(),
+            span: 0..input.len(),
+        }),
+    }
+}
+
+/// Parses a type-and-constraint string that may be a `|` union into a
+/// [`PropertyDef`].
+///
+/// `string | number` is the same [`PropertyDef::Union`] as the YAML list
+/// `[string, number]`; a single option is a [`PropertyDef::Single`]. A
+/// trailing `-> description` describes the last option, as it would in the
+/// list form. Two `function` options with the same binding contract are an
+/// error.
+///
+/// ## Errors
+///
+/// [`SchemaError::Grammar`] with the byte span of the offending text.
+pub fn parse_type_definition(property: &str, input: &str) -> Result<PropertyDef, SchemaError> {
     let mut parser = Parser::new(property, input);
-    parser.parse()
+    parser.parse_definition()
 }
 
 // ── Lexer ────────────────────────────────────────────────────────────────
@@ -236,7 +296,8 @@ impl<'a> Lexer<'a> {
     }
 
     /// Attempt to lex a number starting at `self.pos`. Recognises
-    /// `[-]?digits[.digits]`. Returns `None` if the cursor is not at a number.
+    /// `[-]?digits[.digits]`. Returns `None` if the cursor is not at a number
+    /// or at one [`admit_number_spelling`] rejects.
     fn try_read_number(&mut self) -> Option<Token> {
         let start = self.pos;
         let mut cursor = start;
@@ -275,8 +336,10 @@ impl<'a> Lexer<'a> {
         {
             return None;
         }
-        let lex = &self.src[start..cursor];
-        let value: f64 = lex.parse().ok()?;
+        // An inadmissible spelling stays a bare word, so a consumer that needs
+        // a number reports why through `arg_to_number` (and `pattern(...)`
+        // keeps its digits as text).
+        let value = admit_number_spelling(&self.src[start..cursor]).ok()?;
         self.pos = cursor;
         Some(Token {
             tok: Tok::Number(value),
@@ -342,17 +405,73 @@ pub(super) fn inline_description_end(bytes: &[u8], start: usize, end: usize) -> 
     Ok(end)
 }
 
-/// The index of the `,`, `}`, or `->` ending the imported file reference that
-/// starts at `start`, or `end` when none occurs. A reference is opaque: no
-/// punctuation inside it opens a quote or a nesting level.
+/// The index of the `,`, `}`, `|`, or `->` ending the imported file reference
+/// that starts at `start`, or `end` when none occurs. A reference is opaque:
+/// no punctuation inside it opens a quote or a nesting level.
 pub(super) fn file_reference_end(bytes: &[u8], start: usize, end: usize) -> usize {
     (start..end)
         .find(|&index| match bytes[index] {
-            b',' | b'}' => true,
+            b',' | b'}' | b'|' => true,
             b'-' => index + 1 < end && bytes[index + 1] == b'>',
             _ => false,
         })
         .unwrap_or(end)
+}
+
+/// Like [`file_reference_end`] for a reference written inside a group, tuple,
+/// or function signature, where `)`, `]`, `;`, and `?` also end it.
+fn nested_file_reference_end(bytes: &[u8], start: usize, end: usize) -> usize {
+    let top = file_reference_end(bytes, start, end);
+    (start..top)
+        .find(|&index| matches!(bytes[index], b')' | b']' | b';' | b'?'))
+        .unwrap_or(top)
+}
+
+/// The index of the `)` closing the constraint argument list whose `(` is at
+/// `open`, or `None` when it is unterminated. Quotes, parentheses, brackets,
+/// and braces nest, as in an inline example's call and result.
+fn argument_list_end(bytes: &[u8], open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut index = open;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\'' | b'"' => {
+                index = quoted_end(bytes, index, bytes.len())?;
+                continue;
+            }
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return (bytes[index] == b')').then_some(index);
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+/// The first occurrence of `needle` in `bytes[range]` outside quotes and
+/// outside any `(`/`[`/`{` nesting.
+fn find_top_level(bytes: &[u8], range: Range<usize>, needle: &[u8]) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut index = range.start;
+    while index < range.end {
+        match bytes[index] {
+            b'\'' | b'"' => {
+                index = quoted_end(bytes, index, range.end)?;
+                continue;
+            }
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+            _ if depth == 0 && bytes[index..range.end].starts_with(needle) => return Some(index),
+            _ => {}
+        }
+        index += 1;
+    }
+    None
 }
 
 /// Just past the `>` closing the pattern key whose `<` is at `start`, or
@@ -385,6 +504,12 @@ enum ListOwner {
     InlineObject,
     /// A named-type reference, whose target is known only after resolution.
     Reference,
+    /// A `tuple([...])`.
+    Tuple,
+    /// A `function(...)` used as an array (`function(...)[]`).
+    Function,
+    /// A parenthesized union used as an array (`(A | B)[]`).
+    Group,
 }
 
 impl ListOwner {
@@ -403,6 +528,9 @@ impl ListOwner {
             Self::Type(ty) => format!("`{}`", ty.as_keyword()),
             Self::InlineObject => "an inline object".to_string(),
             Self::Reference => "a named-type reference".to_string(),
+            Self::Tuple => "`tuple`".to_string(),
+            Self::Function => "`function`".to_string(),
+            Self::Group => "a grouped union".to_string(),
         };
         if is_array_level {
             format!("{place} arrays")
@@ -447,13 +575,43 @@ fn is_constraint_keyword(name: &str) -> bool {
             | "example"
             | "min-keys"
             | "max-keys"
+            | "category"
     )
+}
+
+/// The deepest nesting of groups, tuples, and function signatures the parser
+/// accepts, so a hostile type expression cannot exhaust the stack.
+pub const MAX_TYPE_NESTING: usize = 32;
+
+/// One alternative read by [`Parser::parse_arm`].
+enum Arm {
+    /// A single type.
+    Atom(PropertyAtom),
+    /// A parenthesized union without `[]`, whose options join the enclosing
+    /// union.
+    Group(Vec<PropertyAtom>),
+}
+
+/// A union's options as a definition: one option is not a union.
+fn arms_to_def(mut arms: Vec<PropertyAtom>) -> PropertyDef {
+    if arms.len() == 1 {
+        PropertyDef::Single(arms.pop().expect("one arm"))
+    } else {
+        PropertyDef::Union(arms)
+    }
 }
 
 struct Parser<'a> {
     property: &'a str,
     src: &'a str,
     lex: Lexer<'a>,
+    /// Inline object depth of the type being read.
+    object_depth: usize,
+    /// Enclosing groups, tuples, and function signatures.
+    nesting: usize,
+    /// Whether the last union read was one parenthesized group, which a
+    /// following `?` applies to as a whole.
+    single_group: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -462,7 +620,29 @@ impl<'a> Parser<'a> {
             property,
             src,
             lex: Lexer::new(src),
+            object_depth: 0,
+            nesting: 0,
+            single_group: false,
         }
+    }
+
+    fn enter(&mut self, at: usize) -> Result<(), SchemaError> {
+        if self.nesting >= MAX_TYPE_NESTING {
+            return self.err(
+                format!("type expressions may not nest more than {MAX_TYPE_NESTING} levels deep"),
+                at..at + 1,
+            );
+        }
+        self.nesting += 1;
+        Ok(())
+    }
+
+    fn leave(&mut self) {
+        self.nesting -= 1;
+    }
+
+    fn starts_with(&self, text: &str) -> bool {
+        self.lex.bytes[self.lex.pos..].starts_with(text.as_bytes())
     }
 
     fn err<T>(&self, message: impl Into<String>, span: Range<usize>) -> Result<T, SchemaError> {
@@ -584,49 +764,619 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse(&mut self) -> Result<PropertyAtom, SchemaError> {
-        // Inline object literal dispatches before primitive-type parsing.
-        self.lex.skip_ws();
-        if self.lex.peek_byte() == Some(b'{') {
-            let shape = self.parse_inline_object_body(0)?;
-            // Postfix `()` and `[]` apply to the inline object as a whole.
-            let (constraints, is_array, array_constraints) =
-                self.parse_postfix_after_inline_object()?;
-            // Top-level description: take the rest of the string (the
-            // top-level field has no surrounding `}` to act as a terminator).
-            let description = self.parse_top_level_description()?;
-            Ok(PropertyAtom {
-                ty: TypeExpr::InlineObject(shape),
-                is_array,
-                constraints,
-                array_constraints,
-                description,
-            })
-        } else {
-            let atom = self.parse_type_expr()?;
-            // Optional description.
+    fn parse_definition(&mut self) -> Result<PropertyDef, SchemaError> {
+        let mut arms = self.parse_union_arms()?;
+        if let Some(description) = self.parse_top_level_description()? {
+            arms.last_mut().expect("a union has an option").description = Some(description);
+        }
+        if let Some(span) = second_suggestion_span(&arms) {
+            return self.err("a property definition may contain at most one `suggest` constraint", span);
+        }
+        if let Some(message) = duplicate_overload(&arms, None) {
+            return self.err(message, 0..self.src.len());
+        }
+        Ok(arms_to_def(arms))
+    }
+
+    /// Reads one or more `|`-separated options. A parenthesized group without
+    /// `[]` contributes its own options.
+    fn parse_union_arms(&mut self) -> Result<Vec<PropertyAtom>, SchemaError> {
+        let mut arms = Vec::new();
+        let mut options = 0;
+        loop {
+            options += 1;
             self.lex.skip_ws();
-            let after = self.lex.pos;
-            let next = self.next_token(LexMode::Outer)?;
-            match next.tok {
-                Tok::Eof => Ok(atom),
-                Tok::Arrow => {
-                    let rest = self.src[self.lex.pos..].trim().to_string();
-                    if rest.is_empty() {
-                        return self.err("`->` must be followed by a description", next.span);
+            let start = self.lex.pos;
+            let grouped = match self.parse_arm()? {
+                Arm::Atom(atom) => {
+                    let categories = atom
+                        .property_constraints()
+                        .filter(|constraint| matches!(constraint, Constraint::Category(_)))
+                        .count();
+                    if categories > 1 {
+                        return self.err("a type may carry at most one `category`", start..self.lex.pos);
                     }
-                    self.lex.pos = self.src.len();
-                    Ok(PropertyAtom {
-                        description: Some(rest),
-                        ..atom
-                    })
+                    arms.push(atom);
+                    false
                 }
-                other => self.err(
-                    format!("expected end of expression or `->`, found `{:?}`", other),
-                    after..next.span.end,
-                ),
+                Arm::Group(group) => {
+                    arms.extend(group);
+                    true
+                }
+            };
+            self.lex.skip_ws();
+            if self.lex.peek_byte() != Some(b'|') {
+                self.single_group = grouped && options == 1;
+                return Ok(arms);
+            }
+            self.lex.pos += 1;
+        }
+    }
+
+    fn parse_arm(&mut self) -> Result<Arm, SchemaError> {
+        self.lex.skip_ws();
+        match self.lex.peek_byte() {
+            Some(b'{') => {
+                let shape = self.parse_inline_object_body(self.object_depth)?;
+                // Postfix `()` and `[]` apply to the inline object as a whole.
+                let (constraints, is_array, array_constraints) =
+                    self.parse_postfix_after_inline_object()?;
+                Ok(Arm::Atom(PropertyAtom {
+                    ty: TypeExpr::InlineObject(shape),
+                    is_array,
+                    constraints,
+                    array_constraints,
+                    description: None,
+                }))
+            }
+            Some(b'(') => self.parse_group(),
+            _ => Ok(Arm::Atom(self.parse_type_expr()?)),
+        }
+    }
+
+    /// Reads `( union )`, optionally followed by `[]` and a container list.
+    fn parse_group(&mut self) -> Result<Arm, SchemaError> {
+        let open = self.lex.pos;
+        self.enter(open)?;
+        self.lex.pos += 1;
+        let mut arms = self.parse_union_arms()?;
+        self.lex.skip_ws();
+        self.expect_byte(b')', "expected `)` to close a grouped type")?;
+        self.leave();
+        self.lex.skip_ws();
+        match self.lex.peek_byte() {
+            Some(b'(') => {
+                return self.err(
+                    "a grouped type takes no constraint list; constrain each option, or the list after `[]`",
+                    self.lex.pos..self.lex.pos + 1,
+                );
+            }
+            Some(b'[') => {}
+            _ => return Ok(Arm::Group(arms)),
+        }
+        let array_constraints = self.parse_array_suffix(ListOwner::Group)?;
+        if arms.len() > 1 {
+            return Ok(Arm::Atom(PropertyAtom {
+                ty: TypeExpr::Union(arms),
+                is_array: true,
+                constraints: Vec::new(),
+                array_constraints,
+                description: None,
+            }));
+        }
+        let mut atom = arms.pop().expect("a group has an option");
+        if atom.is_array || (matches!(atom.ty, TypeExpr::InlineObject(_)) && !atom.constraints.is_empty()) {
+            return self.err(
+                "a list of lists is not supported; group a union of options, as in `(string | number)[]`",
+                open..self.lex.pos,
+            );
+        }
+        atom.is_array = true;
+        atom.array_constraints = array_constraints;
+        Ok(Arm::Atom(atom))
+    }
+
+    /// Reads `[]` and its optional container constraint list; the cursor is
+    /// at `[`.
+    fn parse_array_suffix(&mut self, owner: ListOwner) -> Result<Vec<Constraint>, SchemaError> {
+        self.lex.pos += 1;
+        self.expect(Tok::RBracket)?;
+        self.lex.skip_ws();
+        if self.lex.peek_byte() != Some(b'(') {
+            return Ok(Vec::new());
+        }
+        self.lex.pos += 1;
+        let constraints = self.parse_constraint_list(owner, true)?;
+        self.expect(Tok::RParen)?;
+        Ok(constraints)
+    }
+
+    /// Reads `tuple( [ elements ] ( ; constraints )? )` after the keyword.
+    fn parse_tuple(&mut self, name_span: Range<usize>) -> Result<PropertyAtom, SchemaError> {
+        self.lex.skip_ws();
+        if self.lex.peek_byte() != Some(b'(') {
+            return self.err("`tuple` requires an element list, as in `tuple([string, number])`", name_span);
+        }
+        self.enter(self.lex.pos)?;
+        self.lex.pos += 1;
+        self.lex.skip_ws();
+        self.expect_byte(b'[', "`tuple(...)` takes a bracketed element list, as in `tuple([string, number])`")?;
+        let mut tuple = TupleType::default();
+        loop {
+            self.lex.skip_ws();
+            if self.lex.peek_byte() == Some(b']') {
+                self.lex.pos += 1;
+                break;
+            }
+            let element_start = self.lex.pos;
+            if tuple.spread.is_some() {
+                let message = if self.starts_with("...") {
+                    "a tuple may contain only one spread"
+                } else {
+                    "a spread must be the last tuple element"
+                };
+                return self.err(message, element_start..element_start + 1);
+            }
+            if self.starts_with("...") {
+                self.lex.pos += 3;
+                let mut arms = self.parse_union_arms()?;
+                if arms.len() != 1 {
+                    return self.err(
+                        "a spread names one array type; group a union first, as in `...(string | number)[]`",
+                        element_start..self.lex.pos,
+                    );
+                }
+                let atom = arms.pop().expect("one arm");
+                if !atom.is_array {
+                    return self.err(
+                        "a spread must be an array type, as in `...number[]`",
+                        element_start..self.lex.pos,
+                    );
+                }
+                if !atom.array_constraints.is_empty() {
+                    return self.err(
+                        "a spread takes no list constraints; constrain its items, as in `...number(min(0))[]`",
+                        element_start..self.lex.pos,
+                    );
+                }
+                self.lex.skip_ws();
+                if self.lex.peek_byte() == Some(b'?') {
+                    return self.err(
+                        "`?` cannot follow a spread: a spread already matches zero or more values",
+                        self.lex.pos..self.lex.pos + 1,
+                    );
+                }
+                tuple.spread = Some(Box::new(atom));
+            } else {
+                self.reject_named_element()?;
+                let arms = self.parse_union_arms()?;
+                self.lex.skip_ws();
+                let optional = self.lex.peek_byte() == Some(b'?');
+                if optional {
+                    if arms.len() > 1 && !self.single_group {
+                        return self.err(
+                            "group a union before `?`, as in `(string | number)?`",
+                            self.lex.pos..self.lex.pos + 1,
+                        );
+                    }
+                    self.lex.pos += 1;
+                    self.lex.skip_ws();
+                    if self.lex.peek_byte() == Some(b'|') {
+                        return self.err(
+                            "group a union before `?`, as in `(string | number)?`",
+                            self.lex.pos..self.lex.pos + 1,
+                        );
+                    }
+                } else if tuple.elements.last().is_some_and(|element| element.optional) {
+                    return self.err(
+                        "a required tuple element cannot follow an optional one",
+                        element_start..self.lex.pos,
+                    );
+                }
+                tuple.elements.push(TupleElement {
+                    def: arms_to_def(arms),
+                    optional,
+                });
+            }
+            self.lex.skip_ws();
+            match self.lex.peek_byte() {
+                Some(b',') => self.lex.pos += 1,
+                Some(b']') => {
+                    self.lex.pos += 1;
+                    break;
+                }
+                _ => {
+                    return self.err(
+                        "expected `,` or `]` in a tuple element list",
+                        self.lex.pos..self.lex.pos + 1,
+                    );
+                }
             }
         }
+        self.lex.skip_ws();
+        let mut constraints = Vec::new();
+        if self.lex.peek_byte() == Some(b';') {
+            self.lex.pos += 1;
+            constraints = self.parse_constraint_list(ListOwner::Tuple, false)?;
+            if let Some(invalid) = constraints.iter().find(|constraint| {
+                !matches!(
+                    constraint,
+                    Constraint::Required
+                        | Constraint::Default(_)
+                        | Constraint::Generated
+                        | Constraint::Example(_)
+                        | Constraint::Category(_)
+                )
+            }) {
+                return self.err(
+                    format!("constraint `{}` is not valid on `tuple`", invalid.keyword()),
+                    name_span,
+                );
+            }
+        }
+        self.lex.skip_ws();
+        self.expect_byte(b')', "expected `;` or `)` after a tuple element list")?;
+        self.leave();
+        self.lex.skip_ws();
+        let mut is_array = false;
+        let mut array_constraints = Vec::new();
+        if self.lex.peek_byte() == Some(b'[') {
+            is_array = true;
+            array_constraints = self.parse_array_suffix(ListOwner::Tuple)?;
+        }
+        Ok(PropertyAtom {
+            ty: TypeExpr::Tuple(tuple),
+            is_array,
+            constraints,
+            array_constraints,
+            description: None,
+        })
+    }
+
+    /// Rejects `name: T` and `name?: T` as a tuple element.
+    fn reject_named_element(&mut self) -> Result<(), SchemaError> {
+        let start = self.lex.pos;
+        let (name, span) = self.lex.read_ident();
+        self.lex.skip_ws();
+        if self.lex.peek_byte() == Some(b'?') {
+            self.lex.pos += 1;
+            self.lex.skip_ws();
+        }
+        let named = !name.is_empty() && self.lex.peek_byte() == Some(b':');
+        self.lex.pos = start;
+        if named {
+            return self.err("tuple elements cannot be named; a tuple is positional", span);
+        }
+        Ok(())
+    }
+
+    /// Reads `function( constraint ; ... )` after the keyword.
+    fn parse_function(&mut self, name_span: Range<usize>) -> Result<PropertyAtom, SchemaError> {
+        self.lex.skip_ws();
+        if self.lex.peek_byte() != Some(b'(') {
+            return self.err(
+                "`function` requires a signature, as in `function(parameters(void); returns(string))`",
+                name_span,
+            );
+        }
+        self.enter(self.lex.pos)?;
+        self.lex.pos += 1;
+        let mut parameters = None;
+        let mut returns = None;
+        let mut fallible = false;
+        let mut examples = Vec::new();
+        let mut constraints = Vec::new();
+        loop {
+            self.lex.skip_ws();
+            if self.lex.peek_byte() == Some(b')') {
+                self.lex.pos += 1;
+                break;
+            }
+            let (keyword, keyword_span) = self.lex.read_ident();
+            if keyword.is_empty() {
+                return self.err("expected a function constraint", self.lex.pos..self.lex.pos + 1);
+            }
+            self.lex.skip_ws();
+            let has_args = self.lex.peek_byte() == Some(b'(');
+            let duplicate = match keyword.as_str() {
+                "parameters" => parameters.is_some(),
+                "returns" => returns.is_some(),
+                "fallible" => fallible,
+                "category" => constraints.iter().any(|c| matches!(c, Constraint::Category(_))),
+                _ => false,
+            };
+            if duplicate {
+                return self.err(format!("duplicate `{keyword}` constraint on `function`"), keyword_span);
+            }
+            match (keyword.as_str(), has_args) {
+                ("parameters", true) => {
+                    self.lex.pos += 1;
+                    parameters = Some(self.parse_parameters(keyword_span)?);
+                    self.lex.skip_ws();
+                    self.expect_byte(b')', "expected `)` to close `parameters`")?;
+                }
+                ("returns", true) => {
+                    self.lex.pos += 1;
+                    let arms = self.parse_union_arms()?;
+                    self.lex.skip_ws();
+                    self.expect_byte(b')', "expected `)` after the return type")?;
+                    returns = Some(arms_to_def(arms));
+                }
+                ("category", true) => {
+                    constraints.push(Constraint::Category(self.read_category_name(keyword_span)?));
+                }
+                ("fallible", false) => fallible = true,
+                ("example", true) => match self.parse_example(true, keyword_span)? {
+                    ExampleForm::Inline(example) => examples.push(example),
+                    ExampleForm::Files(files) => constraints.push(Constraint::Example(files)),
+                },
+                ("fallible", true) => return self.err("`fallible` does not take arguments", keyword_span),
+                ("parameters" | "returns" | "category" | "example", false) => {
+                    return self.err(format!("`{keyword}` requires arguments"), keyword_span);
+                }
+                (other, _) => {
+                    return self.err(
+                        format!(
+                            "unknown constraint `{other}` on `function`; a function takes `parameters`, \
+                             `returns`, `category`, `fallible`, and `example`"
+                        ),
+                        keyword_span,
+                    );
+                }
+            }
+            self.lex.skip_ws();
+            match self.lex.peek_byte() {
+                Some(b';') => self.lex.pos += 1,
+                Some(b')') => {
+                    self.lex.pos += 1;
+                    break;
+                }
+                _ => {
+                    return self.err(
+                        "expected `;` or `)` between function constraints",
+                        self.lex.pos..self.lex.pos + 1,
+                    );
+                }
+            }
+        }
+        self.leave();
+        let Some(parameters) = parameters else {
+            return self.err(
+                "a `function` requires `parameters(...)`; write `parameters(void)` for none",
+                name_span,
+            );
+        };
+        let Some(returns) = returns else {
+            return self.err("a `function` requires `returns(...)`", name_span);
+        };
+        self.lex.skip_ws();
+        let mut is_array = false;
+        let mut array_constraints = Vec::new();
+        if self.lex.peek_byte() == Some(b'[') {
+            is_array = true;
+            array_constraints = self.parse_array_suffix(ListOwner::Function)?;
+        }
+        Ok(PropertyAtom {
+            ty: TypeExpr::Function(Box::new(FunctionType {
+                parameters,
+                returns,
+                fallible,
+                examples,
+            })),
+            is_array,
+            constraints,
+            array_constraints,
+            description: None,
+        })
+    }
+
+    /// Reads the inside of `parameters( ... )`, leaving the cursor at `)`.
+    fn parse_parameters(&mut self, keyword_span: Range<usize>) -> Result<FunctionParameters, SchemaError> {
+        self.lex.skip_ws();
+        if self.lex.peek_byte() == Some(b')') {
+            return self.err(
+                "`parameters()` is not valid; write `parameters(void)` for a function without parameters",
+                keyword_span.start..self.lex.pos + 1,
+            );
+        }
+        let start = self.lex.pos;
+        let (word, word_span) = self.lex.read_ident();
+        self.lex.skip_ws();
+        if word == "void" {
+            match self.lex.peek_byte() {
+                Some(b')') => return Ok(FunctionParameters::Void),
+                Some(b':' | b'?') => {}
+                _ => return self.err("`void` cannot be mixed with other parameters", word_span),
+            }
+        }
+        self.lex.pos = start;
+        let mut parameters: Vec<FunctionParameter> = Vec::new();
+        loop {
+            self.lex.skip_ws();
+            if self.lex.peek_byte() == Some(b')') && !parameters.is_empty() {
+                break;
+            }
+            let parameter_start = self.lex.pos;
+            let rest = self.starts_with("...");
+            if rest {
+                self.lex.pos += 3;
+                self.lex.skip_ws();
+            }
+            let (name, name_span) = self.lex.read_ident();
+            if name.is_empty() {
+                return self.err("expected a parameter name", self.lex.pos..self.lex.pos + 1);
+            }
+            self.lex.skip_ws();
+            if name == "void" && !matches!(self.lex.peek_byte(), Some(b':' | b'?')) {
+                return self.err("`void` cannot be mixed with other parameters", name_span);
+            }
+            let optional = self.lex.peek_byte() == Some(b'?');
+            if optional {
+                if rest {
+                    return self.err(
+                        "a rest parameter cannot be optional (`?`): it already accepts zero arguments",
+                        self.lex.pos..self.lex.pos + 1,
+                    );
+                }
+                self.lex.pos += 1;
+                self.lex.skip_ws();
+            }
+            self.expect_byte(b':', "expected `:` after a parameter name")?;
+            let def = arms_to_def(self.parse_union_arms()?);
+            if parameters.iter().any(|parameter| parameter.name == name) {
+                return self.err(format!("duplicate parameter name `{name}`"), name_span);
+            }
+            if parameters.last().is_some_and(|parameter| parameter.rest) {
+                let message = if rest {
+                    "a function may have only one rest parameter"
+                } else {
+                    "a rest parameter must be the last parameter"
+                };
+                return self.err(message, parameter_start..self.lex.pos);
+            }
+            if !optional && !rest && parameters.iter().any(|parameter| parameter.optional) {
+                return self.err(
+                    "a required parameter cannot follow an optional one",
+                    parameter_start..self.lex.pos,
+                );
+            }
+            parameters.push(FunctionParameter { name, def, optional, rest });
+            self.lex.skip_ws();
+            match self.lex.peek_byte() {
+                Some(b',') => self.lex.pos += 1,
+                Some(b')') => break,
+                _ => {
+                    return self.err(
+                        "expected `,` or `)` between parameters",
+                        self.lex.pos..self.lex.pos + 1,
+                    );
+                }
+            }
+        }
+        Ok(FunctionParameters::List(parameters))
+    }
+
+    /// Reads `( Name )` after `category`: the trimmed raw text up to `)`.
+    fn read_category_name(&mut self, keyword_span: Range<usize>) -> Result<String, SchemaError> {
+        let open = self.lex.pos;
+        let Some(close) = (open + 1..self.src.len()).find(|&index| self.lex.bytes[index] == b')') else {
+            return self.err(
+                "unterminated `category(...)` (missing `)`)",
+                keyword_span.start..self.src.len(),
+            );
+        };
+        let name = self.src[open + 1..close].trim();
+        if name.is_empty() {
+            return self.err("`category` requires a name", keyword_span.start..close + 1);
+        }
+        if name.contains('(') {
+            return self.err("a category name cannot contain `(`", open + 1..close);
+        }
+        self.lex.pos = close + 1;
+        Ok(name.to_string())
+    }
+
+    /// Reads `( ... )` after `example`: an inline `call => result` example,
+    /// which only a function signature's own constraint list allows
+    /// (`inline_allowed`), or a list of example files.
+    fn parse_example(
+        &mut self,
+        inline_allowed: bool,
+        keyword_span: Range<usize>,
+    ) -> Result<ExampleForm, SchemaError> {
+        let open = self.lex.pos;
+        let bytes = self.lex.bytes;
+        let Some(close) = argument_list_end(bytes, open) else {
+            return self.err(
+                "unterminated `example(...)` (missing `)`)",
+                keyword_span.start..self.src.len(),
+            );
+        };
+        let Some(arrow) = find_top_level(bytes, open + 1..close, b"=>") else {
+            self.lex.pos += 1;
+            let args = self.parse_arglist()?;
+            self.expect(Tok::RParen)?;
+            if args.is_empty() {
+                return self.err("`example` requires at least one file reference", keyword_span);
+            }
+            return Ok(ExampleForm::Files(args.into_iter().map(|arg| arg.lex).collect()));
+        };
+        if !inline_allowed {
+            return self.err(
+                "an inline `example(call => result)` is valid only on a `function` type; \
+                 other types take example files, as in `example(./example.yaml)`",
+                keyword_span.start..close + 1,
+            );
+        }
+        let call_span = trim_span(self.src, open + 1..arrow);
+        let after = arrow + 2..close;
+        let (result_range, display_only) = match find_top_level(bytes, after.clone(), b";") {
+            None => (after, None),
+            Some(semicolon) => {
+                let tail = trim_span(self.src, semicolon + 1..close);
+                let reason = self.src[tail.clone()]
+                    .strip_prefix("display-only")
+                    .map(str::trim_start)
+                    .and_then(|rest| rest.strip_prefix(':'))
+                    .map(str::trim);
+                match reason {
+                    Some(reason) if !reason.is_empty() => {
+                        (after.start..semicolon, Some(reason.to_string()))
+                    }
+                    _ => {
+                        return self.err(
+                            "expected `display-only: REASON` after `;` in an inline example",
+                            tail,
+                        );
+                    }
+                }
+            }
+        };
+        let expected_span = trim_span(self.src, result_range);
+        let call = &self.src[call_span.clone()];
+        match parse_spanned(call) {
+            Ok(expression) if matches!(expression.kind, SpannedExprKind::FunctionCall { .. }) => {}
+            Ok(_) => {
+                return self.err(
+                    "an example call must be a function call, as in `min(3, 5)`",
+                    call_span,
+                );
+            }
+            Err(error) => {
+                return self.err(
+                    format!("example call `{call}` is not a valid expression: {error}"),
+                    call_span,
+                );
+            }
+        }
+        let result = &self.src[expected_span.clone()];
+        let expected = if result == "error" {
+            ExampleOutcome::Error
+        } else {
+            let value = parse_spanned(result)
+                .map_err(|error| error.to_string())
+                .and_then(|expression| literal_to_json(&expression, result));
+            match value {
+                Ok(value) => ExampleOutcome::Value(value),
+                Err(reason) => {
+                    return self.err(
+                        format!(
+                            "an example result must be a literal (`3`, `\"3\"`, `[1, 2]`, \
+                             `{{a: 1}}`, `null`, `true`) or `error`: {reason}"
+                        ),
+                        expected_span,
+                    );
+                }
+            }
+        };
+        self.lex.pos = close + 1;
+        Ok(ExampleForm::Inline(CallExample {
+            call: call.to_string(),
+            call_span,
+            expected,
+            expected_span,
+            display_only,
+        }))
     }
 
     /// Parses the optional `(value_constraints)`, `[]`, and
@@ -669,6 +1419,13 @@ impl<'a> Parser<'a> {
     fn parse_top_level_description(&mut self) -> Result<Option<String>, SchemaError> {
         self.lex.skip_ws();
         let after = self.lex.pos;
+        if self.lex.peek_byte() == Some(b'?') {
+            return self.err(
+                "`?` marks an optional tuple element or function parameter; a property is \
+                 optional unless it is `required`",
+                after..after + 1,
+            );
+        }
         let next = self.next_token(LexMode::Outer)?;
         match next.tok {
             Tok::Eof => Ok(None),
@@ -833,48 +1590,27 @@ impl<'a> Parser<'a> {
         &mut self,
         depth: usize,
     ) -> Result<PropertyDef, SchemaError> {
+        // The property value is a type expression or `|` union, possibly
+        // with a postfix `-> description` that ends at the outer object's
+        // next `,` or `}` and describes the last option.
+        let saved = self.object_depth;
+        self.object_depth = depth + 1;
+        let arms = self.parse_union_arms();
+        self.object_depth = saved;
+        let mut arms = arms?;
         self.lex.skip_ws();
-        // The property value is a single type expression, possibly with a
-        // postfix `-> description`. Inline object property values cannot
-        // be property-level unions (the YAML-shape layer rejects nested
-        // mapping arms at property positions).
-        let atom = if self.lex.peek_byte() == Some(b'{') {
-            let shape = self.parse_inline_object_body(depth + 1)?;
-            let (constraints, is_array, array_constraints) =
-                self.parse_postfix_after_inline_object()?;
-            // After the closing `}` and any postfix, an inline object
-            // property may also carry a description that terminates at
-            // the next `,` or `}` in the *outer* object's body.
-            let description = if self.lex.peek_byte() == Some(b'-')
-                && self.lex.bytes.get(self.lex.pos + 1).copied() == Some(b'>')
-            {
-                self.lex.pos += 2;
-                Some(self.read_inline_object_description()?)
-            } else {
-                None
-            };
-            PropertyAtom {
-                ty: TypeExpr::InlineObject(shape),
-                is_array,
-                constraints,
-                array_constraints,
-                description,
-            }
-        } else {
-            let mut atom = self.parse_type_expr()?;
-            self.lex.skip_ws();
-            if self.lex.peek_byte() == Some(b'-')
-                && self.lex.bytes.get(self.lex.pos + 1).copied() == Some(b'>')
-            {
-                // Consume the arrow and parse the description with the
-                // inline-object terminator.
-                self.lex.pos += 2;
-                let desc = self.read_inline_object_description()?;
-                atom.description = Some(desc);
-            }
-            atom
-        };
-        Ok(PropertyDef::Single(atom))
+        if self.starts_with("->") {
+            self.lex.pos += 2;
+            let description = self.read_inline_object_description()?;
+            arms.last_mut().expect("a union has an option").description = Some(description);
+        }
+        if let Some(span) = second_suggestion_span(&arms) {
+            return self.err("a property definition may contain at most one `suggest` constraint", span);
+        }
+        if let Some(message) = duplicate_overload(&arms, None) {
+            return self.err(message, 0..self.src.len());
+        }
+        Ok(arms_to_def(arms))
     }
 
     /// Reads a description text from the current position up to (but not
@@ -937,6 +1673,12 @@ impl<'a> Parser<'a> {
         // that `string@this` names a local type called `string`.
         if self.looks_like_import_suffix() {
             return self.parse_named_reference(name, true);
+        }
+
+        match name.as_str() {
+            "tuple" => return self.parse_tuple(name_span),
+            "function" => return self.parse_function(name_span),
+            _ => {}
         }
 
         // Built-in keywords win; any other identifier is a bare local
@@ -1029,7 +1771,7 @@ impl<'a> Parser<'a> {
 
         for constraint in constraints {
             match constraint {
-                Constraint::Required | Constraint::Generated => {}
+                Constraint::Required | Constraint::Generated | Constraint::Category(_) => {}
                 Constraint::Default(value) => {
                     let Some(default) = value.as_str() else {
                         return self.err(
@@ -1201,13 +1943,17 @@ impl<'a> Parser<'a> {
 
     /// Reads the file reference to the right of `@`. Runs to the end of the
     /// current sub-expression, as [`file_reference_end`] bounds it: `->`
-    /// (description arrow), a `,` or `}` (inline-object terminators), or end
-    /// of input.
+    /// (description arrow), a `,`, `}`, or `|`, or end of input; inside a
+    /// group, tuple, or signature also `)`, `]`, `;`, or `?`.
     fn read_fileref(&mut self) -> Result<String, SchemaError> {
         self.lex.skip_ws();
         let start = self.lex.pos;
         let bytes = self.lex.bytes;
-        let pos = file_reference_end(bytes, start, bytes.len());
+        let pos = if self.nesting > 0 {
+            nested_file_reference_end(bytes, start, bytes.len())
+        } else {
+            file_reference_end(bytes, start, bytes.len())
+        };
         let raw = self.src[start..pos].trim();
         if raw.is_empty() {
             return self.err("expected a file reference after `@`", start..pos);
@@ -1475,7 +2221,12 @@ impl<'a> Parser<'a> {
             // Positional member
             let member = match tok.tok {
                 Tok::Ident(s) => s,
-                Tok::Word(s) => s,
+                Tok::Word(s) => {
+                    if let Err(NumberTextError::Admission(reason)) = admit_number_spelling(&s) {
+                        return self.err(format!("enum member `{s}` {reason}"), tok.span);
+                    }
+                    s
+                }
                 Tok::Quoted(s) => s,
                 Tok::Number(n) => format_number(n),
                 other => {
@@ -1580,6 +2331,9 @@ impl<'a> Parser<'a> {
                             tok.span,
                         );
                     }
+                    BareLiteral::RejectedNumber(reason) => {
+                        return self.err(format!("literal value `{raw}` {reason}"), tok.span);
+                    }
                 }
             }
             other => {
@@ -1672,7 +2426,8 @@ impl<'a> Parser<'a> {
                         kw_span,
                     );
                 }
-                let value = arg_to_json(&args[0]);
+                let value = arg_to_json(&args[0])
+                    .or_else(|reason| self.err(inadmissible("default", &args[0], reason), args[0].span.clone()))?;
                 if owner == ListOwner::Type(SimplifiedType::Null)
                     && !is_array_level
                     && !value.is_null()
@@ -1696,11 +2451,7 @@ impl<'a> Parser<'a> {
                         kw_span,
                     );
                 }
-                let n = arg_to_number(&args[0]).ok_or_else(|| SchemaError::Grammar {
-                    property: self.property.to_string(),
-                    message: format!("`min` requires a numeric argument, got `{}`", args[0].lex),
-                    span: args[0].span.clone(),
-                })?;
+                let n = self.numeric_arg("min", &args[0])?;
                 if is_array_level {
                     let n_usize = number_to_usize(n, "min", &args[0], self.property)?;
                     Constraint::MinItems(n_usize)
@@ -1721,11 +2472,7 @@ impl<'a> Parser<'a> {
                         kw_span,
                     );
                 }
-                let n = arg_to_number(&args[0]).ok_or_else(|| SchemaError::Grammar {
-                    property: self.property.to_string(),
-                    message: format!("`max` requires a numeric argument, got `{}`", args[0].lex),
-                    span: args[0].span.clone(),
-                })?;
+                let n = self.numeric_arg("max", &args[0])?;
                 if is_array_level {
                     let n_usize = number_to_usize(n, "max", &args[0], self.property)?;
                     Constraint::MaxItems(n_usize)
@@ -1814,16 +2561,11 @@ impl<'a> Parser<'a> {
                     .collect();
                 Constraint::Scheme(schemes)
             }
-            ("example", true) => {
-                self.lex.pos += 1;
-                let args = self.parse_arglist()?;
-                self.expect(Tok::RParen)?;
-                if args.is_empty() {
-                    return self.err("`example` requires at least one file reference", kw_span);
-                }
-                let refs = args.into_iter().map(|a| a.lex).collect();
-                Constraint::Example(refs)
-            }
+            ("example", true) => match self.parse_example(false, kw_span)? {
+                ExampleForm::Files(refs) => Constraint::Example(refs),
+                ExampleForm::Inline(_) => unreachable!("an inline example outside a signature is an error"),
+            },
+            ("category", true) => Constraint::Category(self.read_category_name(kw_span)?),
             ("min-keys", true) => {
                 self.lex.pos += 1;
                 let args = self.parse_arglist()?;
@@ -1834,14 +2576,7 @@ impl<'a> Parser<'a> {
                         kw_span,
                     );
                 }
-                let n = arg_to_number(&args[0]).ok_or_else(|| SchemaError::Grammar {
-                    property: self.property.to_string(),
-                    message: format!(
-                        "`min-keys` requires a numeric argument, got `{}`",
-                        args[0].lex
-                    ),
-                    span: args[0].span.clone(),
-                })?;
+                let n = self.numeric_arg("min-keys", &args[0])?;
                 Constraint::MinKeys(number_to_usize(n, "min-keys", &args[0], self.property)?)
             }
             ("max-keys", true) => {
@@ -1854,17 +2589,10 @@ impl<'a> Parser<'a> {
                         kw_span,
                     );
                 }
-                let n = arg_to_number(&args[0]).ok_or_else(|| SchemaError::Grammar {
-                    property: self.property.to_string(),
-                    message: format!(
-                        "`max-keys` requires a numeric argument, got `{}`",
-                        args[0].lex
-                    ),
-                    span: args[0].span.clone(),
-                })?;
+                let n = self.numeric_arg("max-keys", &args[0])?;
                 Constraint::MaxKeys(number_to_usize(n, "max-keys", &args[0], self.property)?)
             }
-            ("min-keys" | "max-keys" | "example" | "suggest", false) => {
+            ("min-keys" | "max-keys" | "example" | "suggest" | "category", false) => {
                 return self.err(format!("`{keyword}` requires arguments"), kw_span);
             }
             (other, has_args_) => {
@@ -1889,21 +2617,19 @@ impl<'a> Parser<'a> {
                 Tok::Number(n) => Arg {
                     lex: self.src[tok.span.clone()].to_string(),
                     number: Some(n),
+                    quoted: false,
                     span: tok.span,
                 },
-                Tok::Word(s) => Arg {
+                Tok::Word(s) | Tok::Ident(s) => Arg {
                     lex: s,
                     number: None,
+                    quoted: false,
                     span: tok.span,
                 },
                 Tok::Quoted(s) => Arg {
                     lex: s,
                     number: None,
-                    span: tok.span,
-                },
-                Tok::Ident(s) => Arg {
-                    lex: s,
-                    number: None,
+                    quoted: true,
                     span: tok.span,
                 },
                 other => {
@@ -1941,11 +2667,107 @@ impl<'a> Parser<'a> {
 struct Arg {
     lex: String,
     number: Option<f64>,
+    quoted: bool,
     span: Range<usize>,
 }
 
-fn arg_to_number(arg: &Arg) -> Option<f64> {
-    arg.number.or_else(|| arg.lex.parse().ok())
+/// What `example(...)` held.
+enum ExampleForm {
+    /// `example(./a.yaml, ./b.yaml)`.
+    Files(Vec<String>),
+    /// `example(call => result)`.
+    Inline(CallExample),
+}
+
+/// A constraint argument read as a number: `Ok(None)` for text that is not
+/// one, and the admission failure for a number Darkmatter cannot hold.
+/// `inf` and `NaN` spellings are reported as not finite rather than as text.
+fn arg_to_number(arg: &Arg) -> Result<Option<f64>, NumericAdmissionError> {
+    if let Some(number) = arg.number {
+        return Ok(Some(number));
+    }
+    if arg.quoted {
+        return Ok(None);
+    }
+    match admit_number_spelling(&arg.lex) {
+        Ok(number) => Ok(Some(number)),
+        Err(NumberTextError::Admission(reason)) => Err(reason),
+        Err(NumberTextError::NotANumber) => match arg.lex.parse::<f64>() {
+            Ok(value) if !value.is_finite() => Err(NumericAdmissionError::NotFinite),
+            _ => Ok(None),
+        },
+    }
+}
+
+fn inadmissible(keyword: &str, arg: &Arg, reason: NumericAdmissionError) -> String {
+    format!("`{keyword}({})` is not a usable number: {reason}", arg.lex)
+}
+
+impl Parser<'_> {
+    /// The numeric argument of `keyword`, admitted exactly.
+    fn numeric_arg(&self, keyword: &str, arg: &Arg) -> Result<f64, SchemaError> {
+        match arg_to_number(arg) {
+            Ok(Some(number)) => Ok(number),
+            Ok(None) => self.err(
+                format!("`{keyword}` requires a numeric argument, got `{}`", arg.lex),
+                arg.span.clone(),
+            ),
+            Err(reason) => self.err(inadmissible(keyword, arg, reason), arg.span.clone()),
+        }
+    }
+}
+
+/// The span of `range` without surrounding whitespace.
+fn trim_span(src: &str, range: Range<usize>) -> Range<usize> {
+    let text = &src[range.clone()];
+    let start = range.start + (text.len() - text.trim_start().len());
+    let end = range.end - (text.len() - text.trim_end().len());
+    start..end.max(start)
+}
+
+/// The span of a second `suggest(...)` candidate list among `arms`, which a
+/// property definition may not hold.
+pub(crate) fn second_suggestion_span(arms: &[PropertyAtom]) -> Option<Range<usize>> {
+    arms.iter()
+        .flat_map(|atom| atom.constraints.iter())
+        .filter_map(|constraint| match constraint {
+            Constraint::Suggest(candidates) => candidates.first(),
+            _ => None,
+        })
+        .nth(1)
+        .map(|candidate| candidate.span.clone())
+}
+
+/// Converts the parsed result of an inline example to JSON. Only literals
+/// qualify; numbers are admitted from their written spelling in `src`.
+fn literal_to_json(expression: &SpannedExpr, src: &str) -> Result<serde_json::Value, String> {
+    use serde_json::Value;
+    let number = |spelling: &str| -> Result<Value, String> {
+        let value = admit_number_spelling(spelling).map_err(|error| format!("`{spelling}` {error}"))?;
+        json_number(value)
+            .map(Value::Number)
+            .ok_or_else(|| format!("`{spelling}` is not finite"))
+    };
+    match &expression.kind {
+        SpannedExprKind::StringLiteral(text) => Ok(Value::String(text.clone())),
+        SpannedExprKind::BoolLiteral(flag) => Ok(Value::Bool(*flag)),
+        SpannedExprKind::NumberLiteral(_) => number(&src[expression.span.clone()]),
+        SpannedExprKind::UnaryMinus(inner) if matches!(inner.kind, SpannedExprKind::NumberLiteral(_)) => {
+            number(&format!("-{}", &src[inner.span.clone()]))
+        }
+        SpannedExprKind::Variable(name) if name == "null" => Ok(Value::Null),
+        SpannedExprKind::ArrayLiteral(items) => items
+            .iter()
+            .map(|item| literal_to_json(item, src))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        SpannedExprKind::ObjectLiteral(entries) => entries
+            .iter()
+            .map(|(key, value)| Ok((key.value.clone(), literal_to_json(value, src)?)))
+            .collect::<Result<serde_json::Map<_, _>, String>>()
+            .map(Value::Object),
+        _ => Err(format!("`{}` is not a literal", &src[expression.span.clone()])),
+    }
 }
 
 fn interpret_suggestion(arg: &Arg, ty: SimplifiedType) -> SuggestionCandidate {
@@ -2106,34 +2928,29 @@ fn number_to_usize(
     Ok(n as usize)
 }
 
-fn arg_to_json(arg: &Arg) -> serde_json::Value {
-    if let Some(n) = arg.number {
-        // Parse the exact source spelling first so a large-integer default
-        // (`default(9007199254740993)`) keeps i64/u64 precision — the pre-lexed
-        // f64 `n` has already rounded values past 2^53. Non-JSON-shaped numeric
-        // tokens fall back to that f64.
-        if let Ok(num) = serde_json::Number::from_str(&arg.lex) {
-            return serde_json::Value::Number(num);
-        }
-        if let Some(num) = serde_json::Number::from_f64(n) {
-            return serde_json::Value::Number(num);
-        }
-        return serde_json::Value::String(arg.lex.clone());
+/// A `default(...)` argument as JSON: an admitted number, `true`, `false`,
+/// `null`, or text. A bare number spelling Darkmatter cannot hold is an error
+/// rather than text.
+fn arg_to_json(arg: &Arg) -> Result<serde_json::Value, NumericAdmissionError> {
+    if let Some(number) = arg.number {
+        return Ok(json_number(number)
+            .map(serde_json::Value::Number)
+            .unwrap_or_else(|| serde_json::Value::String(arg.lex.clone())));
     }
-    match arg.lex.as_str() {
+    if arg.quoted {
+        return Ok(serde_json::Value::String(arg.lex.clone()));
+    }
+    Ok(match arg.lex.as_str() {
         "true" => serde_json::Value::Bool(true),
         "false" => serde_json::Value::Bool(false),
         "null" => serde_json::Value::Null,
-        _ => serde_json::Value::String(arg.lex.clone()),
-    }
-}
-
-fn format_number(n: f64) -> String {
-    if n.fract() == 0.0 && n.is_finite() {
-        format!("{}", n as i64)
-    } else {
-        format!("{n}")
-    }
+        text => {
+            if let Err(NumberTextError::Admission(reason)) = admit_number_spelling(text) {
+                return Err(reason);
+            }
+            serde_json::Value::String(text.to_string())
+        }
+    })
 }
 
 /// Classification of an unquoted `literal(...)` value token (Q1 typing rule).
@@ -2146,6 +2963,8 @@ pub(super) enum BareLiteral {
     /// Bare `null` — always an authoring mistake for a literal (an optional
     /// property already accepts `null`), rejected with an actionable error.
     RejectedNull,
+    /// A number spelling Darkmatter cannot hold exactly.
+    RejectedNumber(NumericAdmissionError),
 }
 
 /// Types an unquoted `literal(...)` value token the way YAML would type the
@@ -2157,9 +2976,11 @@ pub(super) fn classify_bare_literal(raw: &str) -> BareLiteral {
         "true" => BareLiteral::Value(serde_json::Value::Bool(true)),
         "false" => BareLiteral::Value(serde_json::Value::Bool(false)),
         "null" => BareLiteral::RejectedNull,
-        _ => BareLiteral::Value(
-            literal_number(raw).unwrap_or_else(|| serde_json::Value::String(raw.to_string())),
-        ),
+        _ => match literal_number(raw) {
+            Some(Ok(value)) => BareLiteral::Value(value),
+            Some(Err(reason)) => BareLiteral::RejectedNumber(reason),
+            None => BareLiteral::Value(serde_json::Value::String(raw.to_string())),
+        },
     }
 }
 
@@ -2171,17 +2992,22 @@ pub(super) fn bare_literal_round_trips_as_string(value: &str) -> bool {
     !matches!(value, "true" | "false" | "null") && literal_number(value).is_none()
 }
 
-/// Parses a numberlike-shaped bare token into a typed JSON number, preserving
-/// integer vs. float. Rejects any spelling that is not `^-?\d+(\.\d+)?$` and
-/// leading-zero integers (`007`), which stay strings (no octal surprises, per
-/// the Q1 ruling).
-fn literal_number(raw: &str) -> Option<serde_json::Value> {
+/// Parses a numberlike-shaped bare token into a typed JSON number admitted
+/// exactly: a whole value is a JSON integer, and a whole value no `f64` holds
+/// is the admission error. `None` for any spelling that is not
+/// `^-?\d+(\.\d+)?$` and for leading-zero integers (`007`), which stay
+/// strings (no octal surprises, per the Q1 ruling).
+fn literal_number(raw: &str) -> Option<Result<serde_json::Value, NumericAdmissionError>> {
     if !is_literal_numberlike(raw) {
         return None;
     }
-    serde_json::Number::from_str(raw)
-        .ok()
-        .map(serde_json::Value::Number)
+    Some(match admit_number_spelling(raw) {
+        Ok(value) => json_number(value)
+            .map(serde_json::Value::Number)
+            .ok_or(NumericAdmissionError::NotFinite),
+        Err(NumberTextError::Admission(reason)) => Err(reason),
+        Err(NumberTextError::NotANumber) => Err(NumericAdmissionError::NotFinite),
+    })
 }
 
 /// Mirrors `^-?\d+(\.\d+)?$` (an optional `-`, one or more integer digits, an

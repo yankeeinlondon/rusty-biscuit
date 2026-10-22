@@ -427,7 +427,8 @@ fn families(atom: &PropertyAtom) -> &'static [Family] {
             _ if crate::markdown::schemas::is_string_like(atom) => &[Family::String],
             _ => ALL_FAMILIES,
         },
-        TypeExpr::Imported { .. } | TypeExpr::Union(_) => ALL_FAMILIES,
+        TypeExpr::Tuple(_) => &[Family::Array],
+        TypeExpr::Imported { .. } | TypeExpr::Union(_) | TypeExpr::Function(_) => ALL_FAMILIES,
     }
 }
 

@@ -309,22 +309,21 @@ fn equality_keeps_constraints_and_numeric_families_it_cannot_pin() {
     assert_eq!(narrowed(&declared, "big == -4.5", Polarity::True, "big"), "literal(-4.5)");
 }
 
-/// The analysis compares the value the evaluator produces for a literal,
-/// not its spelling: integral literals become (saturating) `i64`.
+/// The analysis compares the value the evaluator produces for a literal. A
+/// whole literal no `f64` holds exactly never reaches either: the lexer
+/// rejects it.
 #[test]
 fn literal_numbers_narrow_to_the_value_the_evaluator_compares() {
     let schema = schema("big: number
 ");
     let declared = DeclaredTypes::new(Some(&schema));
     let lookup = Values(HashMap::from([("big".to_string(), json!(9_007_199_254_740_992_u64))]), None);
-    // The parser reads `…993` as the float 2^53, which the evaluator makes
-    // the integer 2^53: equal to a supplied 2^53.
-    assert_eq!(evaluate(&expr("big == 9007199254740993"), &lookup).unwrap(), json!(true));
-    assert_eq!(narrowed(&declared, "big == 9007199254740993", Polarity::True, "big"), "literal(9007199254740992)");
-    // Beyond `i64`, the evaluator's conversion saturates.
-    let lookup = Values(HashMap::from([("big".to_string(), json!(i64::MAX))]), None);
-    assert_eq!(evaluate(&expr("big == 99999999999999999999"), &lookup).unwrap(), json!(true));
-    assert_eq!(narrowed(&declared, "big == 99999999999999999999", Polarity::True, "big"), "literal(9223372036854775807)");
+    assert_eq!(evaluate(&expr("big == 9007199254740992"), &lookup).unwrap(), json!(true));
+    assert_eq!(narrowed(&declared, "big == 9007199254740992", Polarity::True, "big"), "literal(9007199254740992)");
+    for inexact in ["big == 9007199254740993", "big == 99999999999999999999"] {
+        let error = parse(inexact).expect_err(inexact).to_string();
+        assert!(error.contains("cannot be represented exactly"), "{inexact}: {error}");
+    }
 }
 
 #[test]

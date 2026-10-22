@@ -1613,6 +1613,8 @@ fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
                 named_references::reference_spelling(name, reference, atom.is_array)
             }
             TypeExpr::Union(_) => "union".to_string(),
+            TypeExpr::Tuple(_) => "tuple".to_string(),
+            TypeExpr::Function(_) => "function".to_string(),
         };
         if atom.is_array && !matches!(atom.ty, TypeExpr::Imported { .. }) {
             name.push_str("[]");
@@ -1841,6 +1843,8 @@ fn alternative_line(alternative: &PropertyAtom) -> String {
         ),
         // Callers pass flattened alternatives.
         TypeExpr::Union(_) => "- **union".to_string(),
+        TypeExpr::Tuple(_) => "- **tuple".to_string(),
+        TypeExpr::Function(_) => "- **function".to_string(),
     };
     if alternative.is_array && !matches!(alternative.ty, TypeExpr::Imported { .. }) {
         line.push_str("[]");
@@ -1889,6 +1893,13 @@ pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
             format!("Type: **{}{}**", ty.as_keyword(), suffix)
         }
         TypeExpr::InlineObject(_) => "Type: **object**".to_string(),
+        TypeExpr::Tuple(_) | TypeExpr::Function(_) => {
+            let spelled = darkmatter::markdown::schemas::simplified::serialize_property_atom(&PropertyAtom {
+                description: None,
+                ..atom.clone()
+            });
+            format!("Type: **{spelled}**")
+        }
         TypeExpr::Imported { name, reference } => format!(
             "Type: **{}**",
             named_references::reference_spelling(name, reference, atom.is_array)
@@ -2521,7 +2532,9 @@ fn inline_object_shape(def: &PropertyDef, item: bool) -> Option<&SchemaShape> {
         TypeExpr::InlineObject(_)
         | TypeExpr::Primitive(_)
         | TypeExpr::Imported { .. }
-        | TypeExpr::Union(_) => None,
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_) => None,
     })
 }
 

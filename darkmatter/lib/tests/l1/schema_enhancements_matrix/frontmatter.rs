@@ -3,8 +3,7 @@
 //! property, under a schema declaring each archetype; each cell edits that
 //! output once.
 //!
-//! Absent here, because a later task decides them: numeric exactness,
-//! overflow and underflow (Wave 2 Numeric), `numberlike`/`boolish`
+//! Absent here, because a later task decides them: `numberlike`/`boolish`
 //! preservation through containers and numeric-text conversion of list or
 //! object members (Wave 3/4), tuple slots and union-arm values (Grammar,
 //! then Schema adapter), and every JSON value-loading surface's duplicate
@@ -115,6 +114,38 @@ const CELLS: &[Cell] = &[
         Composes("7|2|02134|On|false", || vec![("meta", Some(Value::Null))]),
     ),
     cell("meta nested duplicate", DuplicateLine("level: 3"), ParseFails),
+    // numeric admission: a native number no `f64` holds exactly, or that is
+    // not finite, fails to load; quoted, it stays text and fails the type.
+    cell("n 2^53 + 1", Set("n", " 9007199254740993"), ParseFails),
+    cell("n -(2^53 + 1)", Set("n", " -9007199254740993"), ParseFails),
+    cell("n 2^53 + 1 decimal", Set("n", " 9007199254740993.0"), ParseFails),
+    cell("n 2^53 + 1 exponent", Set("n", " 9.007199254740993e15"), ParseFails),
+    cell("n beyond u64", Set("n", " 99999999999999999999"), ParseFails),
+    cell("n underflow", Set("n", " 1e-400"), ParseFails),
+    cell("n inf", Set("n", " .inf"), ParseFails),
+    cell("n nan", Set("n", " .nan"), ParseFails),
+    cell("values element underflow", Replace("- 2", "- 1e-400"), ParseFails),
+    // YAML reads `1e400` as text, not a number.
+    cell("n overflow", Set("n", " 1e400"), ValidationFails),
+    cell("n quoted 2^53 + 1", Set("n", " \"9007199254740993\""), ValidationFails),
+    cell(
+        "n 2^53",
+        Set("n", " 9007199254740992"),
+        Composes("9007199254740992|2|02134|On|false", || vec![("n", Some(json!(9_007_199_254_740_992_u64)))]),
+    ),
+    cell(
+        "n -2^53",
+        Set("n", " -9007199254740992"),
+        Composes("-9007199254740992|2|02134|On|false", || vec![("n", Some(json!(-9_007_199_254_740_992_i64)))]),
+    ),
+    cell(
+        "n quoted 2^53",
+        Set("n", " \"9007199254740992\""),
+        Composes("9007199254740992|2|02134|On|false", || vec![("n", Some(json!(9_007_199_254_740_992_u64)))]),
+    ),
+    cell("n decimal", Set("n", " 0.1"), Composes("0.1|2|02134|On|false", || vec![("n", Some(json!(0.1)))])),
+    cell("n exponent", Set("n", " 1e3"), Composes("1000|2|02134|On|false", || vec![("n", Some(json!(1000.0)))])),
+    cell("maybe whole float", Set("maybe", " 4.0"), Composes("7|4|02134|On|false", || vec![("maybe", Some(json!(4.0)))])),
     // whole frontmatter
     cell("trailing garbage", Append("]\n"), ParseFails),
     cell("document end then content", Append("...\nother: 1\n"), ParseFails),

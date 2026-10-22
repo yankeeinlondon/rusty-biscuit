@@ -11,15 +11,20 @@ use std::fmt::Write;
 
 use super::{
     alphanumeric::AlphanumericOptions,
-    types::{Constraint, PropertyAtom, SimplifiedType, TypeExpr},
+    types::{
+        CallExample, Constraint, ExampleOutcome, FunctionParameters, FunctionType, PropertyAtom,
+        PropertyDef, SimplifiedType, TupleType, TypeExpr,
+    },
 };
+use crate::markdown::numeric::format_number;
 
 /// Serialise `atom` into a string suitable for re-parsing via
 /// [`grammar::parse_type_expr`].
 ///
 /// Only passively parsed atoms round-trip. A resolved [`TypeExpr::Union`]
-/// (an expanded postfixed union reference) serializes to a display form,
-/// `[arm, arm][]`, that the grammar does not accept.
+/// without `[]` (an expanded postfixed union reference) serializes to its
+/// options in parentheses, which re-parse as a union of those options rather
+/// than one atom.
 ///
 /// [`grammar::parse_type_expr`]: super::grammar::parse_type_expr
 pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
@@ -86,16 +91,21 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
                 out.push_str(reference);
             }
         }
-        // Display only: the resolver alone produces a union type, and the
-        // bracketed arm list is not a parseable type expression.
+        // `(A | B)[]`, the parsed list of a union.
         TypeExpr::Union(arms) => {
-            out.push('[');
+            out.push('(');
             let rendered: Vec<String> = arms.iter().map(serialize_property_atom).collect();
-            out.push_str(&rendered.join(", "));
-            out.push(']');
-            if atom.is_array {
-                out.push_str("[]");
-            }
+            out.push_str(&rendered.join(" | "));
+            out.push(')');
+            write_array_suffix(&mut out, atom);
+        }
+        TypeExpr::Tuple(tuple) => {
+            write_tuple(&mut out, tuple, &atom.constraints);
+            write_array_suffix(&mut out, atom);
+        }
+        TypeExpr::Function(function) => {
+            write_function(&mut out, function, &atom.constraints);
+            write_array_suffix(&mut out, atom);
         }
     }
 
@@ -105,6 +115,124 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
     }
 
     out
+}
+
+/// Serialise `def` as a type expression: a [`PropertyDef::Union`] is written
+/// with `|`, which re-parses to the same union. Only the last option's
+/// description survives, as only it can be written in that form.
+pub fn serialize_property_def(def: &PropertyDef) -> String {
+    match def {
+        PropertyDef::Single(atom) => serialize_property_atom(atom),
+        PropertyDef::Union(arms) => arms
+            .iter()
+            .map(serialize_property_atom)
+            .collect::<Vec<_>>()
+            .join(" | "),
+    }
+}
+
+fn write_array_suffix(out: &mut String, atom: &PropertyAtom) {
+    if atom.is_array {
+        out.push_str("[]");
+        if !atom.array_constraints.is_empty() {
+            out.push('(');
+            out.push_str(&render_constraints(&atom.array_constraints, None));
+            out.push(')');
+        }
+    }
+}
+
+/// A nested definition, parenthesized when `?` must apply to all of it.
+fn write_optional_def(out: &mut String, def: &PropertyDef, optional: bool) {
+    let text = serialize_property_def(def);
+    if optional && matches!(def, PropertyDef::Union(_)) {
+        out.push('(');
+        out.push_str(&text);
+        out.push(')');
+    } else {
+        out.push_str(&text);
+    }
+    if optional {
+        out.push('?');
+    }
+}
+
+fn write_tuple(out: &mut String, tuple: &TupleType, constraints: &[Constraint]) {
+    out.push_str("tuple([");
+    let mut first = true;
+    for element in &tuple.elements {
+        if !first {
+            out.push_str(", ");
+        }
+        first = false;
+        write_optional_def(out, &element.def, element.optional);
+    }
+    if let Some(spread) = &tuple.spread {
+        if !first {
+            out.push_str(", ");
+        }
+        out.push_str("...");
+        out.push_str(&serialize_property_atom(spread));
+    }
+    out.push(']');
+    if !constraints.is_empty() {
+        out.push_str("; ");
+        out.push_str(&render_constraints(constraints, None));
+    }
+    out.push(')');
+}
+
+fn write_function(out: &mut String, function: &FunctionType, constraints: &[Constraint]) {
+    out.push_str("function(parameters(");
+    match &function.parameters {
+        FunctionParameters::Void => out.push_str("void"),
+        FunctionParameters::List(parameters) => {
+            for (index, parameter) in parameters.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                if parameter.rest {
+                    out.push_str("...");
+                }
+                out.push_str(&parameter.name);
+                if parameter.optional {
+                    out.push('?');
+                }
+                out.push_str(": ");
+                out.push_str(&serialize_property_def(&parameter.def));
+            }
+        }
+    }
+    out.push_str("); returns(");
+    out.push_str(&serialize_property_def(&function.returns));
+    out.push(')');
+    if function.fallible {
+        out.push_str("; fallible");
+    }
+    for example in &function.examples {
+        out.push_str("; ");
+        write_call_example(out, example);
+    }
+    if !constraints.is_empty() {
+        out.push_str("; ");
+        out.push_str(&render_constraints(constraints, None));
+    }
+    out.push(')');
+}
+
+fn write_call_example(out: &mut String, example: &CallExample) {
+    out.push_str("example(");
+    out.push_str(&example.call);
+    out.push_str(" => ");
+    match &example.expected {
+        ExampleOutcome::Error => out.push_str("error"),
+        ExampleOutcome::Value(value) => out.push_str(&value.to_string()),
+    }
+    if let Some(reason) = &example.display_only {
+        out.push_str("; display-only: ");
+        out.push_str(reason);
+    }
+    out.push(')');
 }
 
 fn write_inline_object(out: &mut String, shape: &super::types::SchemaShape, is_array: bool) {
@@ -120,25 +248,11 @@ fn write_inline_object(out: &mut String, shape: &super::types::SchemaShape, is_a
         // PropertyAtom and prefix with a single space so the produced
         // `{ name: <atom> }` form re-parses. Whitespace inside braces is
         // stripped by the grammar parser (Decision #2).
-        let serialized = serialize_property_atom(def_single_atom(def));
-        out.push_str(&serialized);
+        out.push_str(&serialize_property_def(def));
     }
     out.push('}');
     if is_array {
         out.push_str("[]");
-    }
-}
-
-fn def_single_atom(def: &super::types::PropertyDef) -> &PropertyAtom {
-    match def {
-        super::types::PropertyDef::Single(atom) => atom,
-        // Property-level unions are not supported inside inline objects by
-        // this feature. Fall back to using the first arm so serialization
-        // stays total; the output may not round-trip on re-parse, which is
-        // an acceptable signal.
-        super::types::PropertyDef::Union(arms) => arms
-            .first()
-            .expect("property-level union inside an inline object must have at least one arm"),
     }
 }
 
@@ -272,6 +386,9 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>
             write_default_value(out, value, ty);
             out.push(')');
         }
+        Constraint::Category(name) => {
+            let _ = write!(out, "category({name})");
+        }
     }
 }
 
@@ -351,14 +468,6 @@ fn needs_quoting(value: &str) -> bool {
         || value
             .chars()
             .any(|c| c.is_whitespace() || matches!(c, ',' | ';' | '(' | ')' | '\'' | '"'))
-}
-
-fn format_number(n: f64) -> String {
-    if n.fract() == 0.0 && n.is_finite() && n.abs() < 1e16 {
-        format!("{}", n as i64)
-    } else {
-        format!("{n}")
-    }
 }
 
 #[cfg(test)]

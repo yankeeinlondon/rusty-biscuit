@@ -16,6 +16,7 @@ pub mod grammar;
 mod lint;
 pub mod query;
 mod serialize;
+mod signature;
 mod source;
 mod standalone;
 mod subtype;
@@ -34,7 +35,7 @@ pub use query::{
     Alternative, SuggestionItem, SuggestionQuery, flattened_alternatives, suggestions_for_def,
     suggestions_for_path,
 };
-pub use serialize::serialize_property_atom;
+pub use serialize::{serialize_property_atom, serialize_property_def};
 pub use source::{
     SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaReferenceSite, SchemaSourceId,
     SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaUnionRejection,
@@ -45,11 +46,12 @@ pub use source::{
 };
 pub(crate) use source::locate_frontmatter_value;
 pub use standalone::{
-    StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
+    SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
 };
 pub use types::{
-    Constraint, LOCAL_REFERENCE, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
-    SimplifiedSchema, SimplifiedType, SuggestionCandidate, TypeExpr,
+    CallExample, Constraint, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
+    LOCAL_REFERENCE, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
+    SimplifiedSchema, SimplifiedType, SuggestionCandidate, TupleElement, TupleType, TypeExpr,
 };
 #[cfg(feature = "work-counters")]
 pub use yaml_scalar::alias_search_work;
@@ -317,7 +319,7 @@ fn parse_property_definition_at_depth(
     nested_object_depth: usize,
 ) -> Result<PropertyDef, SchemaError> {
     match value {
-        YamlValue::String(s) => Ok(PropertyDef::Single(grammar::parse_type_expr(name, s)?)),
+        YamlValue::String(s) => grammar::parse_type_definition(name, s),
         // The YAML null scalar (`null`, `Null`, `NULL`, `~`, or an empty
         // value) at a type position is the `null` type, as is the string
         // `"null"`. A root `$schema` or root-union arm never reaches here.
@@ -339,9 +341,20 @@ fn parse_property_definition_at_depth(
             let mut arms = Vec::with_capacity(items.len());
             for (idx, item) in items.iter().enumerate() {
                 match item {
-                    YamlValue::String(s) => {
-                        arms.push(grammar::parse_type_expr(name, s)?);
-                    }
+                    // A list option is one type; `A | B` inside a list would
+                    // be a second spelling of the same union.
+                    YamlValue::String(s) => match grammar::parse_type_definition(name, s)? {
+                        PropertyDef::Single(atom) => arms.push(atom),
+                        PropertyDef::Union(_) => {
+                            return Err(SchemaError::Grammar {
+                                property: name.to_string(),
+                                message: format!(
+                                    "property-level union arm[{idx}] is itself a `|` union; list each option separately"
+                                ),
+                                span: 0..s.len(),
+                            });
+                        }
+                    },
                     YamlValue::Null => arms.push(PropertyAtom::bare(SimplifiedType::Null)),
                     // A mapping arm lowers to an inline object shape, so a
                     // sequence union may mix type-expression strings with
@@ -373,20 +386,19 @@ fn parse_property_definition_at_depth(
                     span: 0..0,
                 });
             }
-            if let Some(candidate) = arms
-                .iter()
-                .flat_map(|atom| atom.constraints.iter())
-                .filter_map(|constraint| match constraint {
-                    Constraint::Suggest(candidates) => candidates.first(),
-                    _ => None,
-                })
-                .nth(1)
-            {
+            if let Some(span) = grammar::second_suggestion_span(&arms) {
                 return Err(SchemaError::Grammar {
                     property: name.to_string(),
                     message: "a property definition may contain at most one `suggest` constraint"
                         .into(),
-                    span: candidate.span.clone(),
+                    span,
+                });
+            }
+            if let Some(message) = signature::duplicate_overload(&arms, None) {
+                return Err(SchemaError::Grammar {
+                    property: name.to_string(),
+                    message,
+                    span: 0..0,
                 });
             }
             Ok(PropertyDef::Union(arms))

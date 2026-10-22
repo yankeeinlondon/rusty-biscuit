@@ -275,7 +275,10 @@ fn project_one(index: usize, name: &str, def: &PropertyDef) -> ContextVariableDe
     let base = match &atom.ty {
         TypeExpr::Primitive(ty) => *ty,
         // `ctx.*` never authors an inline object or import; fall back defensively.
-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => SimplifiedType::Object,
+        TypeExpr::InlineObject(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_) => SimplifiedType::Object,
         // Only the resolver produces a union type, and the base schema is
         // parsed passively, so no `ctx.*` atom carries one. The drift guard
         // `projected_descriptors_match_base_schema` fails on any non-primitive.

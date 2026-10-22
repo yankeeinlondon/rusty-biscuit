@@ -1,5 +1,22 @@
 # Darkmatter Dependencies
 
+## `serde_json` Features
+
+`darkmatter` declares three `serde_json` features itself rather than relying
+on feature unification from other crates:
+
+- `preserve_order` keeps every JSON map in written (insertion) order, so
+  frontmatter values, `with:` overlays, expression results such as
+  `as_json5`, and SimplifiedSchema → JSON Schema output keep the order the
+  author wrote. Cargo unifies the feature into every package that links
+  `darkmatter`. Outputs that publish alphabetical keys sort explicitly:
+  `md schema validate --format json`, the non-strict frontmatter hash used by
+  `md hash`, Claudine's OpenCode/Kilo inline config, and `sniff`'s JSON
+  output.
+- `raw_value` and `float_roundtrip` let the JSON loaders read each number's
+  written text and parse it exactly, which numeric admission needs (see
+  [Numbers](./topics/numbers.md)).
+
 ## Remote URL Referencing
 
 - `biscuit-file` with the `fetch` feature supplies the shared HTTP fetch

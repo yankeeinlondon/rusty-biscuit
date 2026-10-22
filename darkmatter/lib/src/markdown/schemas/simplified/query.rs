@@ -263,7 +263,11 @@ fn descend<'a>(root: &'a SchemaShape, ancestors: &[&str]) -> Option<&'a SchemaSh
 fn inline_object_shape(def: &PropertyDef) -> Option<&SchemaShape> {
     atoms_of(def).iter().find_map(|atom| match &atom.ty {
         TypeExpr::InlineObject(inner) => Some(inner),
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => None,
+        TypeExpr::Primitive(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_) => None,
     })
 }
 

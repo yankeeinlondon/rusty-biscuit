@@ -347,7 +347,7 @@ impl EffectiveState {
             None => String::new(),
             Some(Value::Null) => String::new(),
             Some(Value::String(s)) => s,
-            Some(Value::Number(n)) => n.to_string(),
+            Some(Value::Number(n)) => super::super::expression::format_json_number(&n),
             Some(Value::Bool(b)) => b.to_string(),
             Some(v) => v.to_string(),
         }

@@ -229,8 +229,17 @@ fn compact_explicit_mapping_pair_projects_property_union_spans() {
 }
 
 #[test]
-fn source_aware_v1_presentation_boundary_is_closed() {
-    let source = "$schema: |\n  ./other.yaml\n";
+fn source_aware_presentation_boundary_is_closed() {
+    // Literal and folded block scalars are inside the source-aware grammar:
+    // multi-line type expressions such as `function(...)` signatures are
+    // written in them.
+    let block = "$schema: |-\n  ./other.yaml\n";
+    let document = parse_standalone_schema_document(block, Path::new("/w/schema.yaml"))
+        .expect("a block scalar projects")
+        .expect("the pure envelope claims the document");
+    assert!(matches!(document.declaration, SchemaDeclaration::Reference(_)));
+
+    let source = "$schema: !!str ./other.yaml\n";
     let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(source).expect("valid YAML fixture");
     let payload = yaml
         .as_mapping()
@@ -238,11 +247,11 @@ fn source_aware_v1_presentation_boundary_is_closed() {
         .expect("schema payload");
     assert!(
         parse_schema_declaration(payload).is_ok(),
-        "the source-free semantic authority accepts the block-scalar value"
+        "the source-free semantic authority accepts the tagged value"
     );
 
     let error = parse_standalone_schema_document(source, Path::new("/w/schema.yaml"))
-        .expect_err("block scalars are outside the frozen v1 source-aware grammar");
+        .expect_err("tags are outside the source-aware grammar");
     assert!(matches!(error, SchemaError::SchemaDocument { .. }), "{error:?}");
     assert!(
         error

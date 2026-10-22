@@ -266,6 +266,14 @@ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
         // item) conforms when some arm accepts it; the container's own
         // markers and array constraints are checked by `type_conforms`.
         TypeExpr::Union(arms) => arms.iter().any(|arm| type_conforms(arm, value)),
+        // A tuple conforms by length; its positions are checked by full
+        // validation, not by a trigger condition.
+        TypeExpr::Tuple(tuple) => value.as_array().is_some_and(|items| {
+            items.len() >= tuple.required_len()
+                && (tuple.spread.is_some() || items.len() <= tuple.elements.len())
+        }),
+        // A function describes a callable; no frontmatter value is one.
+        TypeExpr::Function(_) => false,
         TypeExpr::InlineObject(shape) => {
             let Some(map) = value.as_object() else {
                 return false;

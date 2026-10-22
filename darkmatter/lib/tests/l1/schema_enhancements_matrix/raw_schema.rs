@@ -10,10 +10,13 @@
 //! back with the same serializer that produced the fixture, so each cell
 //! differs from the control by exactly one value.
 //!
+//! The numeric-token cells edit the control's text instead, since a decoded
+//! value has already lost the written spelling they test.
+//!
 //! Absent here, because a pending ruling or a later task decides them:
 //! duplicate keys in `.json` (R3; last-wins today), `enum: []` and
-//! `prefixItems: []` (R7), conversion controls (Wave 3 Conversion core and
-//! Wave 4 Schema adapter), and lossless numeric tokens (Wave 2 Numeric).
+//! `prefixItems: []` (R7), and conversion controls (Wave 3 Conversion core
+//! and Wave 4 Schema adapter).
 
 use std::path::Path;
 
@@ -492,4 +495,95 @@ fn raw_yaml_schema_keyword_matrix() {
     ];
     assert_ne!(whole_document[2].1, detected, "the duplicate edit must change the control");
     walk(Format::Yaml, detected, keywords, &whole_document);
+}
+
+/// One textual edit of a numeric token in the keyword control.
+struct NumericCell {
+    label: &'static str,
+    find: &'static str,
+    replace: &'static str,
+    /// `Some(reason)`: the schema fails to load naming the reason; `None`: it
+    /// loads.
+    rejects: Option<&'static str>,
+}
+
+const fn numeric(label: &'static str, find: &'static str, replace: &'static str, rejects: Option<&'static str>) -> NumericCell {
+    NumericCell { label, find, replace, rejects }
+}
+
+const INEXACT: Option<&str> = Some("cannot be represented exactly");
+const UNDERFLOW: Option<&str> = Some("a non-zero value would become 0");
+const NOT_FINITE: Option<&str> = Some("not finite");
+
+/// Walks numeric-token cells, each one edit of the keyword control's text,
+/// validating `maximum: 7` (valid only when the bound is raised).
+fn walk_numeric_tokens(format: Format, control: &str, cells: &[NumericCell]) {
+    let workspace = tempfile::tempdir().expect("matrix workspace");
+    let dir = workspace.path();
+    let mut index = 0;
+    let mut failures = Vec::new();
+    assert_eq!(run_cell(dir, format, &mut index, control, "maximum: 7").ok(), Some(false), "control");
+    for cell in cells {
+        assert_eq!(control.matches(cell.find).count(), 1, "{}: `{}` must occur once", cell.label, cell.find);
+        let text = control.replacen(cell.find, cell.replace, 1);
+        let result = run_cell(dir, format, &mut index, &text, "maximum: 7");
+        let ok = match (cell.rejects, &result) {
+            (Some(reason), Err(error @ SchemaError::SchemaDocument { .. })) => error.to_string().contains(reason),
+            (None, Ok(_)) => true,
+            _ => false,
+        };
+        if !ok {
+            failures.push(format!("{}: expected {:?}, got {result:?}", cell.label, cell.rejects));
+        }
+    }
+    assert!(failures.is_empty(), "{} cell(s) failed:\n\n{}", failures.len(), failures.join("\n\n"));
+}
+
+#[test]
+fn raw_json_schema_numeric_token_matrix() {
+    let keywords = include_str!("../../fixtures/schema_enhancements_matrix/keywords.schema.json");
+    let cells = [
+        numeric("maximum 2^53 + 1 decimal", "\"maximum\": 5", "\"maximum\": 9007199254740993.0", INEXACT),
+        numeric("minimum underflow", "\"minimum\": {\n      \"minimum\": 5", "\"minimum\": {\n      \"minimum\": 1e-400", UNDERFLOW),
+        numeric("exclusiveMaximum 2^53 + 1 exponent", "\"exclusiveMaximum\": 5", "\"exclusiveMaximum\": 9.007199254740993e15", INEXACT),
+        numeric("exclusiveMinimum -(2^53 + 1)", "\"exclusiveMinimum\": 5", "\"exclusiveMinimum\": -9007199254740993", INEXACT),
+        numeric("multipleOf underflow", "\"multipleOf\": 2", "\"multipleOf\": 1e-400", UNDERFLOW),
+        numeric("enum member 2^53 + 1", "\"b\"\n      ]", "9007199254740993\n      ]", INEXACT),
+        numeric("const beyond u64", "\"const\": \"a\"", "\"const\": 99999999999999999999", INEXACT),
+        numeric("default 2^53 + 1", "\"default\": \"x\"", "\"default\": 9007199254740993", INEXACT),
+        numeric("maximum 2^53", "\"maximum\": 5", "\"maximum\": 9007199254740992", None),
+        numeric("maximum decimal", "\"maximum\": 5", "\"maximum\": 7.5", None),
+        numeric("multipleOf decimal", "\"multipleOf\": 2", "\"multipleOf\": 0.1", None),
+        numeric("enum member exponent", "\"b\"\n      ]", "1e3\n      ]", None),
+        numeric("default -(2^53)", "\"default\": \"x\"", "\"default\": -9007199254740992", None),
+    ];
+    walk_numeric_tokens(Format::Json, keywords, &cells);
+
+    // `serde_json` itself rejects an overflowing token before admission runs;
+    // the load still fails, as an unrecognized schema.
+    let workspace = tempfile::tempdir().expect("matrix workspace");
+    let overflow = keywords.replacen("\"maximum\": 5", "\"maximum\": 1e400", 1);
+    let result = run_cell(workspace.path(), Format::Json, &mut 0, &overflow, "maximum: 7");
+    assert!(matches!(result, Err(SchemaError::AmbiguousReferenced { .. })), "{result:?}");
+}
+
+#[test]
+fn raw_yaml_schema_numeric_token_matrix() {
+    let keywords = include_str!("../../fixtures/schema_enhancements_matrix/keywords.schema.yaml");
+    let cells = [
+        numeric("maximum inf", "maximum: 5", "maximum: .inf", NOT_FINITE),
+        numeric("maximum nan", "maximum: 5", "maximum: .nan", NOT_FINITE),
+        numeric("exclusiveMaximum -inf", "exclusiveMaximum: 5", "exclusiveMaximum: -.inf", NOT_FINITE),
+        numeric("minimum underflow", "  minimum:\n    minimum: 5", "  minimum:\n    minimum: 1e-400", UNDERFLOW),
+        numeric("exclusiveMinimum 2^53 + 1 decimal", "exclusiveMinimum: 5", "exclusiveMinimum: 9007199254740993.0", INEXACT),
+        numeric("multipleOf 2^53 + 1", "multipleOf: 2", "multipleOf: 9007199254740993", INEXACT),
+        numeric("enum member beyond u64", "enum:\n    - a\n    - b", "enum:\n    - a\n    - 99999999999999999999", INEXACT),
+        numeric("const 2^53 + 1 exponent", "const: a", "const: 9.007199254740993e15", INEXACT),
+        numeric("default -(2^53 + 1)", "default: x", "default: -9007199254740993", INEXACT),
+        numeric("maximum 2^53", "maximum: 5", "maximum: 9007199254740992", None),
+        numeric("maximum exponent", "maximum: 5", "maximum: 1e3", None),
+        numeric("multipleOf decimal", "multipleOf: 2", "multipleOf: 0.1", None),
+        numeric("const quoted 2^53 + 1", "const: a", "const: '9007199254740993'", None),
+    ];
+    walk_numeric_tokens(Format::Yaml, keywords, &cells);
 }

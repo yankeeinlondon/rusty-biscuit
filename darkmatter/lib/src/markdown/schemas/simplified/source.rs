@@ -512,6 +512,12 @@ fn project_located_property_suggestions(
     }
     match (definition, &located.kind) {
         (PropertyDef::Single(atom), _) => project_located_atom_suggestions(atom, located),
+        (PropertyDef::Union(atoms), LocatedKind::Scalar(scalar)) => {
+            for atom in atoms {
+                project_atom_suggestions(atom, scalar, 0)?;
+            }
+            Ok(())
+        }
         (PropertyDef::Union(atoms), LocatedKind::Sequence(items)) if atoms.len() == items.len() => {
             for (atom, item) in atoms.iter_mut().zip(items) {
                 project_located_atom_suggestions(atom, item)?;
@@ -613,10 +619,10 @@ pub struct SchemaValueEntry {
 /// be dedented as a whole. A slice starting at a block mapping's first key
 /// reads that key at column 0 and its siblings as continuation text.
 ///
-/// The grammar is strict: indentless block sequences and plain scalars
-/// continued onto more-indented lines are followed, and every non-comment
-/// line must belong to the value. Block scalars, tags, multi-line quoted
-/// scalars, and empty (null) values are not.
+/// The grammar is strict: indentless block sequences, literal and folded
+/// block scalars, and plain scalars continued onto more-indented lines are
+/// followed, and every non-comment line must belong to the value. Tags,
+/// multi-line quoted scalars, and empty (null) values are not.
 ///
 /// ## Returns
 ///
@@ -706,9 +712,9 @@ enum LocatorGrammar {
     /// belong to the located node, so a presentation the locator does not
     /// model fails instead of leaving lines unread.
     Strict,
-    /// Frontmatter lookup, which also follows tags, block scalars, multi-line
-    /// quoted scalars, empty (null) values, and compact sequence items wider
-    /// than `- `.
+    /// Frontmatter lookup, which also follows tags, multi-line quoted
+    /// scalars, empty (null) values, and compact sequence items wider than
+    /// `- `.
     Tolerant,
 }
 
@@ -1048,12 +1054,13 @@ impl BlockLocator<'_> {
                 || raw.starts_with(['\'', '"'])
                 || (continues && !raw.starts_with(['[', '{']))
         } else {
-            // Only a plain scalar: a quoted, tagged, anchored, or aliased
-            // first line stays single-line here, so its continuation lines
-            // go unconsumed and the strict grammar rejects the document.
-            continues
-                && !is_block_scalar_header(raw)
-                && !raw.starts_with(['\'', '"', '[', '{', '!', '&', '*'])
+            // A literal or folded block scalar, the form multi-line type
+            // expressions such as `function(...)` signatures are written in,
+            // or a continued plain scalar: a quoted, tagged, anchored, or
+            // aliased first line stays single-line here, so its continuation
+            // lines go unconsumed and the strict grammar rejects the document.
+            is_block_scalar_header(raw)
+                || (continues && !raw.starts_with(['\'', '"', '[', '{', '!', '&', '*']))
         };
         if !multi_line {
             return locate_inline(self.source, range);
@@ -1633,6 +1640,14 @@ fn project_property_source(
             record_atom_span(located, path, source_offset, source_map)?;
             project_atom_source(atom, located, path, source_offset, source_map)
         }
+        (PropertyDef::Union(_), LocatedKind::Scalar(scalar)) => scan_definition_range(
+            definition,
+            scalar,
+            path,
+            0..scalar.decoded().len(),
+            source_offset,
+            source_map,
+        ),
         (PropertyDef::Union(atoms), LocatedKind::Sequence(items)) if atoms.len() == items.len() => {
             for (index, (atom, item)) in atoms.iter().zip(items).enumerate() {
                 let arm_path = path.union_arm(index);
@@ -1752,6 +1767,11 @@ fn scan_expression_range(
     if source.as_bytes().get(expression.start) == Some(&b'{') {
         return scan_constraint_groups(scalar, path, expression, source_offset, source_map);
     }
+    // A grouped union, `(A | B)[]`, names no single type and has no
+    // constraint list of its own.
+    if source.as_bytes().get(expression.start) == Some(&b'(') {
+        return Ok(());
+    }
 
     let name = leading_identifier(source, expression.clone()).ok_or_else(projection_error)?;
     if let Some(at) = find_top_level_byte(
@@ -1857,26 +1877,73 @@ fn project_inline_shape_range(
                     .map(|pattern| &pattern.def)
             })
         });
-        let PropertyDef::Single(atom) = definition.ok_or_else(projection_error)? else {
-            return Err(projection_error());
-        };
-        scan_expression_range(
+        scan_definition_range(
+            definition.ok_or_else(projection_error)?,
             scalar,
             &property_path,
-            definition_span.clone(),
+            definition_span,
             source_offset,
             source_map,
         )?;
-        if let TypeExpr::InlineObject(nested) = &atom.ty {
-            project_inline_shape_range(
-                nested,
-                scalar,
-                &property_path,
-                definition_span,
-                source_offset,
-                source_map,
-            )?;
+    }
+    Ok(())
+}
+
+/// Records the spans of the definition written in `range` of `scalar`: one
+/// type expression, or a `|` union whose options are recorded as union arms.
+/// A union whose written options do not line up with its parsed ones (a
+/// parenthesized group joins its options to the union) records only its
+/// whole span.
+fn scan_definition_range(
+    definition: &PropertyDef,
+    scalar: &DecodedScalar,
+    path: &SchemaSourcePath,
+    range: Range<usize>,
+    source_offset: usize,
+    source_map: &mut SchemaSourceMap,
+) -> Result<(), SchemaError> {
+    let source = scalar.decoded();
+    let atoms = match definition {
+        PropertyDef::Single(atom) => {
+            return scan_atom_range(atom, scalar, path, range, source_offset, source_map);
         }
+        PropertyDef::Union(atoms) => atoms,
+    };
+    let arms = split_top_level(source, range.clone(), ExpressionContext::Expression, b'|');
+    if arms.len() != atoms.len() {
+        return insert_projected(
+            scalar,
+            path,
+            SchemaSpanKind::Atom,
+            trim_local(source, range),
+            source_offset,
+            source_map,
+        );
+    }
+    for (index, (atom, arm)) in atoms.iter().zip(arms).enumerate() {
+        let arm = trim_local(source, arm);
+        let arm_path = path.union_arm(index);
+        insert_projected(scalar, &arm_path, SchemaSpanKind::UnionArm, arm.clone(), source_offset, source_map)?;
+        insert_projected(scalar, &arm_path, SchemaSpanKind::Definition, arm.clone(), source_offset, source_map)?;
+        scan_atom_range(atom, scalar, &arm_path, arm, source_offset, source_map)?;
+    }
+    Ok(())
+}
+
+fn scan_atom_range(
+    atom: &PropertyAtom,
+    scalar: &DecodedScalar,
+    path: &SchemaSourcePath,
+    range: Range<usize>,
+    source_offset: usize,
+    source_map: &mut SchemaSourceMap,
+) -> Result<(), SchemaError> {
+    scan_expression_range(scalar, path, range.clone(), source_offset, source_map)?;
+    let source = scalar.decoded();
+    if let TypeExpr::InlineObject(nested) = &atom.ty
+        && source.as_bytes().get(trim_local(source, range.clone()).start) == Some(&b'{')
+    {
+        project_inline_shape_range(nested, scalar, path, range, source_offset, source_map)?;
     }
     Ok(())
 }
@@ -2331,7 +2398,10 @@ fn atom_has_suggestions(atom: &PropertyAtom) -> bool {
             TypeExpr::InlineObject(shape) => shape.properties.values().any(property_has_suggestions)
                 || shape.pattern_keys.iter().any(|pattern| property_has_suggestions(&pattern.def)),
             TypeExpr::Union(arms) => arms.iter().any(atom_has_suggestions),
-            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => false,
+            TypeExpr::Primitive(_)
+            | TypeExpr::Imported { .. }
+            | TypeExpr::Tuple(_)
+            | TypeExpr::Function(_) => false,
         }
 }
 

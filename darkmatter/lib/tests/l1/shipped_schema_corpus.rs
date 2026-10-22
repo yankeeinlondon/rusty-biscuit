@@ -213,18 +213,17 @@ const EXCEPTIONS: &[Exception] = &[
     exception(
         "claudine/docs/schemas",
         "partials/mutations.yaml",
-        Class::Draft {
-            error: "unknown constraint `parameters(...)`",
-        },
-        "draft `parameters(...)` constraint",
+        Class::EnvelopeRejected,
+        "draft with a `name` header key; its `function(...)` signatures parse",
     ),
     exception(
         "claudine/docs/schemas",
         "partials/functions.yaml",
         Class::Draft {
-            error: "unknown constraint `parameters(...)`",
+            error: "unknown constraint `min-length(...)`",
         },
-        "draft `parameters(...)` constraint; local `number`/`date` collide with built-ins",
+        "draft `min-length(...)` string constraint (the catalog migration normalizes it); \
+         local `number`/`date` collide with built-ins",
     ),
 ];
 

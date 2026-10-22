@@ -131,7 +131,7 @@ pub use simplified::{
     parse_property_definition_with_source, parse_schema_declaration,
     parse_schema_declaration_with_source, suggestions_for_def, suggestions_for_path,
     Alternative, flattened_alternatives,
-    StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
+    SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
     parse_yaml_schema, to_json_schema,
 };
 #[cfg(feature = "work-counters")]

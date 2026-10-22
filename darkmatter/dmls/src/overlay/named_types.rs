@@ -20,7 +20,7 @@ use std::sync::Arc;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::resolve::named_type_reference_path;
 use darkmatter::markdown::schemas::{
-    PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaShape, SchemaSourceMap,
+    PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaError, SchemaShape, SchemaSourceMap,
     SchemaSourcePath,
     SchemaSourcePathSegment, SchemaSpanKind, SimplifiedSchema, StandaloneSchemaDocument, TypeExpr, flow_collection_end,
     parse_property_definition, parse_schema_declaration_with_source, parse_standalone_schema_document,
@@ -155,6 +155,9 @@ pub struct ExternalNamespace {
     pub text: Arc<str>,
     /// The parsed file, or `None` when it is not a standalone schema document.
     pub document: Option<StandaloneSchemaDocument>,
+    /// Why the file is not usable as a schema document: its text is not YAML,
+    /// or its recognized envelope is malformed.
+    pub error: Option<Arc<SchemaError>>,
 }
 
 impl ExternalNamespace {
@@ -228,8 +231,11 @@ impl NamedTypeCatalog {
                     .ok()
                     .flatten()?;
                 let text: Arc<str> = Arc::from(crate::work_counters::read_to_string(&path).ok()?);
-                let document = parse_standalone_schema_document(&text, &path).ok().flatten();
-                Some(ExternalNamespace { target, path, text, document })
+                let (document, error) = match parse_standalone_schema_document(&text, &path) {
+                    Ok(document) => (document, None),
+                    Err(error) => (None, Some(Arc::new(error))),
+                };
+                Some(ExternalNamespace { target, path, text, document, error })
             })
             .collect();
         Self { externals }
@@ -317,7 +323,15 @@ fn collect_atom_targets(atom: &PropertyAtom, targets: &mut BTreeSet<String>) {
                 collect_atom_targets(arm, targets);
             }
         }
-        TypeExpr::Primitive(_) => {}
+        TypeExpr::Tuple(tuple) => {
+            tuple.any_atom(|atom| {
+                collect_atom_targets(atom, targets);
+                false
+            });
+        }
+        // A function signature is description-only; a document schema that
+        // reaches one fails to load before its references matter.
+        TypeExpr::Primitive(_) | TypeExpr::Function(_) => {}
     }
 }
 

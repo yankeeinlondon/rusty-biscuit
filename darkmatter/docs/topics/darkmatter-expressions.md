@@ -351,7 +351,10 @@ the table above says:
 ## Literals and Grouping
 
 - string literals use double or single quotes: `"claude"`, `'claude'`
-- numeric literals: `0`, `1`, `3.14`, `-2`
+- numeric literals: `0`, `1`, `3.14`, `-2`; no exponent (`1e3`) or
+  leading-dot (`.5`) form, and a whole literal must be held exactly by an
+  `f64`: `9007199254740993` is an error ("cannot be represented exactly").
+  See [Numbers](./numbers.md)
 - boolean literals: `true`, `false`
 - parentheses for grouping: `(env.AGENT == "claude" || env.AGENT == "opencode")`
 
@@ -610,10 +613,12 @@ Rules:
 - **Missing values are `null`.** A property that is absent, or present with
   `null`, compares as `null`: `missing == null` is true, and `missing == ''`
   and `missing == 'x'` are false.
-- **Numbers compare by exact value**, with no tolerance. Large integers are
-  compared without rounding through floating point, so the distinct values
-  `9007199254740992` and `9007199254740993` stay unequal when supplied as
-  typed values, and `0 == -0` is true.
+- **Numbers compare by exact value**, with no tolerance, and `0 == -0` is
+  true. Every number a document, schema, or literal supplies is an `f64` held
+  exactly ([Numbers](./numbers.md)), so equality agrees with `<` and `>`.
+  Only a typed value supplied from outside, such as `--set`, can hold an
+  integer no `f64` holds; it is compared without rounding, so
+  `9007199254740992` and a supplied `9007199254740993` stay unequal.
 - **Containers compare recursively** with these same rules.
 - **Schema coercion still applies first.** A value whose schema declares it a
   `number` is coerced before any comparison runs, so a quoted `phase: "3"`
@@ -652,7 +657,8 @@ not strict the way equality is: `5 <= "5"` and `5 >= "5"` both hold, while
 `5 == "5"` is false.
 
 - numbers stay numbers
-- numeric strings are parsed
+- numeric strings are parsed with the [number rules](./numbers.md#arithmetic)
+  (`" 4 "` and `"1_000"` are numbers; `"inf"` and `"9007199254740993"` are not)
 - `true` becomes `1`
 - `false` becomes `0`
 - `null`, arrays, objects, and non-numeric strings become `0`
@@ -676,15 +682,26 @@ two numeric strings.
 {{ "count: " + 5 }}    ⇒ "count: 5"
 {{ 10 * (1 + 2) }}     ⇒ 30
 {{ 7 % 3 }}            ⇒ 1
+{{ 10 / 4 }}           ⇒ 2.5
+{{ 4.5 - 0.5 }}        ⇒ 4
 ```
+
+Arithmetic computes in `f64`, and a whole result displays without a decimal
+suffix and with every digit (`{{ 9007199254740992 + 0 }}` ⇒
+`9007199254740992`); see [Numbers](./numbers.md).
 
 ### Errors
 
 Arithmetic errors fail composition:
 
 - **Division by zero** — `x / 0` and `x % 0` raise an error
+- **Non-finite results** — a result too large for an `f64` (`big * 10` when
+  `big` is the largest finite number) raises "not finite", never infinity
 - **Non-numeric operands** — using `-`, `*`, `/`, or `%` on `null`, booleans,
   arrays, or objects raises an error
+- **Numbers that cannot be represented** — numeric text or a supplied integer
+  no `f64` holds exactly (`"9007199254740993" + 1`) raises "cannot be
+  represented exactly"
 
 ### Remainder Semantics
 

@@ -24,6 +24,10 @@
 //! - **`file` existence posture** is carried by the emitted `format`: bare
 //!   `file` lowers to the lazy `darkmatter-file-reference` (syntax-only),
 //!   `file(eager)` lowers to the eager `darkmatter-file` (resolve + exists).
+//! - **Tuples** lower to `prefixItems` / `minItems` / `items` with no
+//!   optional-null wrapper on positions; **`function`** types are
+//!   description-only and fail conversion, naming the property path.
+//! - **`category(Name)`** lowers to the `x-darkmatter-category` annotation.
 //! - **Root-level unions** with unresolved [`SchemaArm::FileRef`] arms fail
 //!   with [`SchemaError::Convert`] — Phase 3's resolver is expected to inline
 //!   them before invoking the converter.
@@ -37,8 +41,9 @@ use serde_json::{Map, Value, json};
 use super::alphanumeric::AlphanumericOptions;
 use super::types::{
     Constraint, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
-    SimplifiedType, TypeExpr,
+    SimplifiedType, TupleType, TypeExpr,
 };
+use crate::markdown::numeric::json_number;
 use crate::markdown::compose::expression::parse_condition;
 use crate::markdown::schemas::errors::SchemaError;
 use crate::markdown::schemas::file_match::{DARKMATTER_MATCH_KEYWORD, file_match_groups};
@@ -72,7 +77,10 @@ pub(in crate::markdown::schemas) const NUMBERLIKE_PATTERN: &str = r"^-?\d+(\.\d+
 /// - a constraint is applied to a type that doesn't accept it
 ///   (e.g. `integer` on a `string`),
 /// - a property-level union has conflicting `default(...)` values,
-/// - a root-level union arm is an unresolved [`SchemaArm::FileRef`].
+/// - a root-level union arm is an unresolved [`SchemaArm::FileRef`],
+/// - the schema reaches a description-only `function` type, directly or
+///   through a union, array, tuple, or object (named references are inlined
+///   by the resolver before conversion); the error names the property path.
 ///
 /// ## Examples
 ///
@@ -85,7 +93,7 @@ pub(in crate::markdown::schemas) const NUMBERLIKE_PATTERN: &str = r"^-?\d+(\.\d+
 /// assert_eq!(json["type"], "object");
 /// ```
 pub fn to_json_schema(schema: &SimplifiedSchema) -> Result<Value, SchemaError> {
-    let mut root = match schema {
+    let root = match schema {
         SimplifiedSchema::Single(shape) => shape_to_object_schema(shape)?,
         SimplifiedSchema::Union(arms) => union_to_root_schema(arms)?,
     };
@@ -350,11 +358,13 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
     let mut description_val: Option<Value> = None;
     let mut generated_val: Option<Value> = None;
     let mut example_val: Option<Value> = None;
+    let mut category_val: Option<Value> = None;
     if let Value::Object(map) = &mut fragment {
         default_val = map.remove("default");
         description_val = map.remove("description");
         generated_val = map.remove("x-darkmatter-generated");
         example_val = map.remove("x-darkmatter-example");
+        category_val = map.remove(DARKMATTER_CATEGORY_KEYWORD);
     }
 
     let is_optional_scalar_file = matches!(&atom.ty, TypeExpr::Primitive(SimplifiedType::File))
@@ -388,6 +398,9 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
         }
         if let Some(e) = example_val {
             map.insert("x-darkmatter-example".into(), e);
+        }
+        if let Some(category) = category_val {
+            map.insert(DARKMATTER_CATEGORY_KEYWORD.into(), category);
         }
     }
 
@@ -424,8 +437,10 @@ fn atom_fragment_without_null_wrap(
     // (resolved into example objects by `resolve.rs`) and never reach a type
     // fragment builder as a constraint.
     let mut examples: Vec<String> = Vec::new();
+    let mut category: Option<&str> = None;
     for c in atom.property_constraints() {
         match c {
+            Constraint::Category(name) => category = Some(name),
             Constraint::Default(v) => {
                 let value = normalize_json_number(v.clone());
                 match &default_val {
@@ -446,9 +461,26 @@ fn atom_fragment_without_null_wrap(
         }
     }
 
+    // `category(...)` is an annotation on the property, not a constraint any
+    // type builder checks.
+    let value_constraints: Vec<Constraint> = atom
+        .constraints
+        .iter()
+        .filter(|constraint| !matches!(constraint, Constraint::Category(_)))
+        .cloned()
+        .collect();
     let inner = match &atom.ty {
-        TypeExpr::Primitive(ty) => type_fragment(name, *ty, &atom.constraints)?,
-        TypeExpr::InlineObject(shape) => inline_object_fragment(name, shape, &atom.constraints)?,
+        TypeExpr::Primitive(ty) => type_fragment(name, *ty, &value_constraints)?,
+        TypeExpr::InlineObject(shape) => inline_object_fragment(name, shape, &value_constraints)?,
+        TypeExpr::Tuple(tuple) => tuple_fragment(name, tuple)?,
+        TypeExpr::Function(_) => {
+            return Err(SchemaError::Convert {
+                property: name.to_string(),
+                message: "a `function` type is description-only: it describes a callable and \
+                          cannot type a value in a document schema"
+                    .into(),
+            });
+        }
         // The alternatives of each item (with `is_array`) or of a union
         // nested as an arm. Items get no `null` wrapper or empty-file arm,
         // like the items of any array.
@@ -547,9 +579,47 @@ fn atom_fragment_without_null_wrap(
                 Value::Array(examples.into_iter().map(Value::String).collect()),
             );
         }
+        if let Some(category) = category {
+            map.insert(DARKMATTER_CATEGORY_KEYWORD.into(), Value::String(category.to_string()));
+        }
     }
 
     Ok((fragment, required))
+}
+
+/// The annotation a `category(Name)` lowers to on a data type.
+pub const DARKMATTER_CATEGORY_KEYWORD: &str = "x-darkmatter-category";
+
+/// Lowers a tuple to `type: array` with `prefixItems` for its positions,
+/// `minItems` for its required positions, and `items` for what may follow:
+/// `false` for a fixed length, the spread's item schema otherwise.
+///
+/// Positions get the bare fragment, without the optional-null wrapper: an
+/// optional position may be omitted, but a supplied `null` must match its
+/// type. An empty tuple writes no `prefixItems`, which Draft 2020-12 requires
+/// to be non-empty.
+fn tuple_fragment(name: &str, tuple: &TupleType) -> Result<Value, SchemaError> {
+    let mut prefix = Vec::with_capacity(tuple.elements.len());
+    for (index, element) in tuple.elements.iter().enumerate() {
+        prefix.push(pattern_value_schema(&format!("{name}[{index}]"), &element.def)?);
+    }
+    let items = match &tuple.spread {
+        Some(spread) => {
+            let mut item = spread.as_ref().clone();
+            item.is_array = false;
+            item.array_constraints.clear();
+            atom_fragment_without_null_wrap(&format!("{name}[...]"), &item, false)?.0
+        }
+        None => Value::Bool(false),
+    };
+    let mut m = Map::new();
+    m.insert("type".into(), Value::String("array".into()));
+    if !prefix.is_empty() {
+        m.insert("prefixItems".into(), Value::Array(prefix));
+    }
+    m.insert("minItems".into(), json!(tuple.required_len()));
+    m.insert("items".into(), items);
+    Ok(Value::Object(m))
 }
 
 /// Builds the exact non-null schema fragment used to lint one atom's
@@ -985,6 +1055,7 @@ fn apply_array_constraints(
             | Constraint::Default(_)
             | Constraint::Generated
             | Constraint::Example(_)
+            | Constraint::Category(_)
             | Constraint::Eager => {
                 // Hoisted to the property level by `atom_to_schema`.
             }
@@ -1614,41 +1685,24 @@ fn invalid_constraint(property: &str, ty: &str, c: &Constraint) -> SchemaError {
     }
 }
 
-/// Emit a JSON number that prefers integer form when the value is integral.
-/// This keeps snapshots tidy (`0` instead of `0.0`).
+/// Emits a JSON number in its exact form: an integral value as a JSON
+/// integer (`0`, not `0.0`), any other finite value as a float. A
+/// non-finite value, which admission rejects, is written as text.
 fn number_to_json(n: f64) -> Value {
-    if n.is_finite() && n.fract() == 0.0 && (i64::MIN as f64..=i64::MAX as f64).contains(&n) {
-        json!(n as i64)
-    } else if let Some(num) = serde_json::Number::from_f64(n) {
-        Value::Number(num)
-    } else {
-        Value::String(format!("{n}"))
-    }
+    json_number(n).map_or_else(|| Value::String(format!("{n}")), Value::Number)
 }
 
 /// Normalises numeric values inside a default literal so integral floats
-/// (the form the parser emits for `default(3)`) render as `3` rather than
-/// `3.0`. Recurses into arrays/objects defensively even though v1 grammar
-/// only emits scalars.
+/// render as integers. Recurses into arrays/objects defensively even though
+/// the grammar only emits scalars.
 fn normalize_json_number(value: Value) -> Value {
     match value {
-        // An already-integer-typed number (the parser preserves i64/u64 for a
-        // bare literal like `9007199254740993`) is exact — passing it through
-        // `as_f64()` would round it, so return it untouched. Only a genuine
-        // floating representation (the parser's `default(3)` emits `3.0`) is
-        // canonicalized to integer form.
+        // An integer-typed number is already exact.
         Value::Number(n) if n.is_i64() || n.is_u64() => Value::Number(n),
-        Value::Number(n) => {
-            if let Some(f) = n.as_f64()
-                && f.is_finite()
-                && f.fract() == 0.0
-                && (i64::MIN as f64..=i64::MAX as f64).contains(&f)
-            {
-                json!(f as i64)
-            } else {
-                Value::Number(n)
-            }
-        }
+        Value::Number(n) => match n.as_f64().and_then(json_number) {
+            Some(number) => Value::Number(number),
+            None => Value::Number(n),
+        },
         Value::Array(items) => Value::Array(items.into_iter().map(normalize_json_number).collect()),
         Value::Object(map) => Value::Object(
             map.into_iter()
@@ -3187,17 +3241,23 @@ mod schema_plus_phase1 {
     }
 
     #[test]
-    fn literal_large_integer_const_is_exact() {
-        // Bare integer literals beyond f64's 2^53 exact range must reach `const`
-        // verbatim — `normalize_json_number` must not round them through f64.
-        let cases: [(&str, Value); 4] = [
-            ("literal(9007199254740993)", Value::from(9_007_199_254_740_993_i64)),
-            ("literal(9223372036854775807)", Value::from(i64::MAX)),
+    fn literal_large_integer_const_is_exact_or_rejected() {
+        // A whole number is admitted only when an `f64` holds it exactly; the
+        // admitted value reaches `const` as a JSON integer, never rounded.
+        let exact: [(&str, Value); 2] = [
+            ("literal(9007199254740992)", Value::from(9_007_199_254_740_992_i64)),
             ("literal(9223372036854775808)", Value::from(9_223_372_036_854_775_808_u64)),
-            ("literal(18446744073709551615)", Value::from(u64::MAX)),
         ];
-        for (input, expected) in cases {
+        for (input, expected) in exact {
             assert_eq!(atom_value(input)["const"], expected, "const for {input}");
+        }
+        for input in [
+            "literal(9007199254740993)",
+            "literal(9223372036854775807)",
+            "literal(18446744073709551615)",
+        ] {
+            let error = parse_type_expr("test", input).expect_err(input).to_string();
+            assert!(error.contains("cannot be represented exactly"), "{input}: {error}");
         }
     }
 
@@ -3212,21 +3272,25 @@ mod schema_plus_phase1 {
     fn large_integer_default_equal_to_literal_accepted() {
         // An equal large-integer `default(...)` must compile (values compared
         // exactly), and the const survives.
-        let v = atom_value("literal(9007199254740993; default(9007199254740993))");
-        assert_eq!(v["const"], Value::from(9_007_199_254_740_993_i64));
-        assert_eq!(v["default"], Value::from(9_007_199_254_740_993_i64));
+        let v = atom_value("literal(9007199254740992; default(9007199254740992))");
+        assert_eq!(v["const"], Value::from(9_007_199_254_740_992_i64));
+        assert_eq!(v["default"], Value::from(9_007_199_254_740_992_i64));
     }
 
     #[test]
     fn large_integer_default_unequal_to_literal_rejected() {
         let mut atom =
-            parse_type_expr("test", "literal(9007199254740993; default(9007199254740992))")
+            parse_type_expr("test", "literal(9007199254740992; default(9007199254740990))")
                 .expect("parse atom");
         atom.constraints.push(Constraint::Required);
         assert!(
             atom_to_schema("test", &atom).is_err(),
-            "an off-by-one large-integer default must fail schema load"
+            "an unequal large-integer default must fail schema load"
         );
+        let error = parse_type_expr("test", "literal(1; default(9007199254740993))")
+            .expect_err("an inexact default is rejected")
+            .to_string();
+        assert!(error.contains("cannot be represented exactly"), "{error}");
     }
 }
 

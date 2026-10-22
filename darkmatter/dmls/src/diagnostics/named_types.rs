@@ -61,6 +61,9 @@ pub(crate) struct NamedTypeScope<'a> {
 struct ExternalFile {
     text: String,
     document: Option<StandaloneSchemaDocument>,
+    /// Why the file no longer parses as a schema document; its locations
+    /// cannot be projected, so the reason is reported instead.
+    error: Option<SchemaError>,
 }
 
 impl<'a> NamedTypeScope<'a> {
@@ -154,6 +157,18 @@ impl<'a> NamedTypeScope<'a> {
             }
             other => self.target_span(other).or_else(|| self.fallback.clone()),
         };
+        for (path, file) in self.files.borrow().iter() {
+            if let Some(file) = file
+                && let Some(error) = &file.error
+                && let Some(uri) = file_path_to_uri(path)
+            {
+                related.push(related_at(
+                    uri,
+                    LspRange::default(),
+                    &format!("this schema file could not be read again: {error}"),
+                ));
+            }
+        }
         let code_value = if is_named_type_error(error) {
             code::SCHEMA_INVALID_TYPE_DEFINITION
         } else {
@@ -341,8 +356,11 @@ impl<'a> NamedTypeScope<'a> {
             .entry(path.to_path_buf())
             .or_insert_with(|| {
                 let text = crate::work_counters::read_to_string(path).ok()?;
-                let document = parse_standalone_schema_document(&text, path).ok().flatten();
-                Some(Arc::new(ExternalFile { text, document }))
+                let (document, error) = match parse_standalone_schema_document(&text, path) {
+                    Ok(document) => (document, None),
+                    Err(error) => (None, Some(error)),
+                };
+                Some(Arc::new(ExternalFile { text, document, error }))
             })
             .clone()
     }

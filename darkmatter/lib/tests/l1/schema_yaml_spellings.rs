@@ -55,8 +55,9 @@ pub(crate) enum Edit {
 /// The defined outcome of one cell.
 #[derive(Clone, Copy)]
 enum Outcome {
-    /// The classifier declines (`Ok(None)`) and no SimplifiedSchema is applied:
-    /// valid YAML loads as raw JSON Schema, invalid YAML is rejected.
+    /// No SimplifiedSchema is applied. Valid YAML is declined (`Ok(None)`)
+    /// and loads as raw JSON Schema; invalid YAML is a `SchemaDocument` error
+    /// naming the YAML problem, from the classifier and from loading.
     Declines,
     /// A recognized envelope with a malformed payload: `SchemaDocument`, and
     /// normal loading fails.
@@ -426,12 +427,29 @@ fn check_cell(
     let loaded = resolve_schema_with_roots(&json!(format!("./{file_name}")), dir, &[], context);
     match cell.outcome {
         Declines => {
+            let parses = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source).is_ok();
             match &classified {
-                Ok(None) => {}
-                other => return Err(format!("expected the classifier to decline, got {other:?}")),
+                Ok(None) if parses => {}
+                Err(SchemaError::SchemaDocument { message, .. })
+                    if !parses && message.starts_with("not valid YAML") => {}
+                other => {
+                    return Err(format!(
+                        "expected the classifier to {}, got {other:?}",
+                        if parses { "decline" } else { "report the YAML error" }
+                    ));
+                }
+            }
+            if !parses {
+                return match &loaded {
+                    Err(SchemaError::SchemaDocument { message, .. }) if message.contains("not valid YAML") => Ok(()),
+                    other => Err(format!(
+                        "invalid YAML must fail loading with its YAML error, got {:?}",
+                        other.as_ref().map(|resolved| &resolved.json_schema)
+                    )),
+                };
             }
             // Only a YAML mapping has a raw JSON Schema reading; anything else
-            // (invalid YAML, an empty document) is rejected by normal loading.
+            // (an empty document, a scalar) is rejected by normal loading.
             let valid_yaml = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source)
                 .is_ok_and(|value| value.is_mapping());
             match (&loaded, valid_yaml) {
@@ -862,7 +880,36 @@ fn a_continued_definition_projects_through_a_caller_offset() {
     }
 }
 
-/// Every presentation outside the two this grammar accepts still fails at the
+/// Literal and folded block scalars, the presentation multi-line type
+/// expressions such as `function(...)` signatures use, are followed, and the
+/// expression inside projects to its authored bytes.
+#[test]
+fn strict_source_aware_parsing_follows_block_scalars() {
+    let cases: &[(&str, &str)] = &[
+        ("literal block scalar", "$schema:\n  t: |\n    string\n  next: boolean\n"),
+        ("folded block scalar", "$schema:\n  t: >-\n    string(min(1))\n  next: boolean\n"),
+        ("block scalar arm", "$schema:\n  t:\n  - |\n    string\n  - number\n"),
+    ];
+    for (label, source) in cases {
+        let document = parse_standalone_schema_document(source, "/w/schema.yaml")
+            .unwrap_or_else(|error| panic!("{label}: {error}"))
+            .unwrap_or_else(|| panic!("{label}: claimed"));
+        assert!(document.schema().is_some(), "{label}");
+    }
+    let source = "$schema:\n  t: >-\n    string(min(1))\n  next: boolean\n";
+    let document = parse_standalone_schema_document(source, "/w/schema.yaml")
+        .expect("folded block scalar loads")
+        .expect("claimed");
+    let constraint = document
+        .source_map
+        .spans(&SchemaSourcePath::root().property("t"), SchemaSpanKind::Constraint)
+        .first()
+        .cloned()
+        .expect("the constraint inside the block scalar projects");
+    assert_eq!(&source[constraint], "min(1)");
+}
+
+/// Every presentation outside those this grammar accepts still fails at the
 /// projection boundary through the standalone loader, wrapped in
 /// `SchemaDocument`, including when it hides behind a continuation or an
 /// indentless list. Where the source-free parser accepts the value, the
@@ -870,9 +917,6 @@ fn a_continued_definition_projects_through_a_caller_offset() {
 #[test]
 fn strict_source_aware_parsing_keeps_every_other_presentation_closed() {
     let cases: &[(&str, &str)] = &[
-        ("literal block scalar", "$schema:\n  t: |\n    string\n  next: boolean\n"),
-        ("folded block scalar", "$schema:\n  t: >-\n    string(min(1))\n  next: boolean\n"),
-        ("block scalar arm", "$schema:\n  t:\n  - |\n    string\n  - number\n"),
         ("tag", "$schema:\n  t: !!str string\n  next: boolean\n"),
         ("tag on an indentless arm", "$schema:\n  t:\n  - !!str string\n  - number\n  next: boolean\n"),
         ("tag before a continuation", "$schema:\n  t: !!str string -> a\n    b\n  next: boolean\n"),

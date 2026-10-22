@@ -7,6 +7,15 @@
 
 ## Recent Dependency Notes
 
+- `darkmatter` enables `serde_json`'s `preserve_order`, `raw_value`, and
+  `float_roundtrip` features (2026-10-22). `preserve_order` unifies into every
+  package that links `darkmatter` (Claudine, DMLS, `md`, `messenger`,
+  `research`, `sniff-cli`, `playa-cli`, `biscuit-icon-cli`,
+  `biscuit-speaks-cli`), so `serde_json` maps there keep insertion order.
+  Outputs with an alphabetical-key contract sort explicitly (`sniff`'s JSON
+  output, `md schema validate --format json`, the `md hash` frontmatter hash,
+  Claudine's OpenCode/Kilo inline config). No crate is added. See
+  `darkmatter/docs/dependencies.md`.
 - Generated REST clients send through `schematic-runtime` (2026-10-12):
   the regenerated `schematic-schema` depends on `schematic-runtime` and no
   longer on `reqwest`, and re-exports the runtime, so its dependents need no

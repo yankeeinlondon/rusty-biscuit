@@ -588,12 +588,11 @@ fn coerce_to_number(value: &Value) -> Option<Value> {
     if !is_numberlike(s) {
         return None;
     }
-    // Parse through serde_json's own number model so the coerced value is
-    // exactly what the validator would have seen had the literal been written
-    // bare: integral strings become `i64`/`u64` (preserving values above
-    // `i64::MAX`), decimals become `f64`. `is_numberlike` already guaranteed the
-    // `^-?\d+(\.\d+)?$` shape, so this only returns `None` for literals too
-    // large even for `f64`, which then stay strings for the validator to reject.
+    // Admission rejects a value no `f64` holds exactly (`"9007199254740993"`,
+    // `"99999999999999999999"`); it stays text, and validation reports the
+    // type error with the admission reason. An admitted value is stored the
+    // way serde_json reads the bare literal, so `"2.0"` stays a float.
+    crate::markdown::numeric::admit_number_text(s).ok()?;
     serde_json::from_str::<serde_json::Number>(s)
         .ok()
         .map(Value::Number)
@@ -1014,18 +1013,17 @@ mod tests {
     #[test]
     // `3.14` is decimal-coercion test data, not an approximation of π.
     #[allow(clippy::approx_constant)]
-    fn large_integral_strings_match_serde_json_number_model() {
-        // Coercion mirrors serde_json's number parsing: `i64::MAX` stays i64,
-        // `i64::MAX + 1` becomes u64 (rather than being rejected), and the
-        // coerced value equals what the bare literal would deserialize to.
+    fn large_integral_strings_are_admitted_before_coercion() {
+        // An exact whole value keeps serde_json's storage (`2^63` is a u64);
+        // a value no `f64` holds exactly is left as text.
         assert_eq!(
-            coerce_to_number(&json!("9223372036854775807")), // i64::MAX
-            Some(json!(9_223_372_036_854_775_807_i64))
-        );
-        assert_eq!(
-            coerce_to_number(&json!("9223372036854775808")), // i64::MAX + 1
+            coerce_to_number(&json!("9223372036854775808")), // 2^63
             Some(json!(9_223_372_036_854_775_808_u64))
         );
+        assert_eq!(coerce_to_number(&json!("9007199254740992")), Some(json!(9_007_199_254_740_992_u64)));
+        for inexact in ["9007199254740993", "-9007199254740993", "9007199254740993.0", "9223372036854775807", "99999999999999999999"] {
+            assert_eq!(coerce_to_number(&json!(inexact)), None, "{inexact}");
+        }
         assert_eq!(coerce_to_number(&json!("3.14")), Some(json!(3.14)));
     }
 

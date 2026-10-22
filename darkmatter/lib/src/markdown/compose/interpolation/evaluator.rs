@@ -160,19 +160,14 @@ impl EvalValue {
     /// Converts the value to its string representation.
     ///
     /// - `String` -> the string itself
-    /// - `Number` -> string representation (integers without decimal)
+    /// - `Number` -> [`crate::markdown::numeric::format_number`] (`4.0` is
+    ///   `"4"`, never narrowed through an integer)
     /// - `Null` -> empty string
     /// - `Bool` -> `"true"` or `"false"`
     pub fn as_string(&self) -> String {
         match self {
             EvalValue::String(s) => s.clone(),
-            EvalValue::Number(n) => {
-                if n.fract() == 0.0 {
-                    format!("{}", *n as i64)
-                } else {
-                    n.to_string()
-                }
-            }
+            EvalValue::Number(n) => crate::markdown::numeric::format_number(*n),
             EvalValue::Null => String::new(),
             EvalValue::Bool(b) => b.to_string(),
         }
@@ -193,13 +188,13 @@ impl EvalValue {
     /// Attempts to convert the value to a number for comparison.
     ///
     /// - `Number` -> `Some(n)`
-    /// - `String` -> `Some(n)` if parseable as f64
+    /// - `String` -> `Some(n)` when the canonical numeric-text parser admits it
     /// - `Bool` -> `Some(1.0)` for true, `Some(0.0)` for false
     /// - `Null` -> `None`
     pub fn as_number(&self) -> Option<f64> {
         match self {
             EvalValue::Number(n) => Some(*n),
-            EvalValue::String(s) => s.parse::<f64>().ok(),
+            EvalValue::String(s) => crate::markdown::numeric::admit_number_text(s).ok(),
             EvalValue::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
             EvalValue::Null => None,
         }

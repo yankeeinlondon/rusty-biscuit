@@ -182,13 +182,7 @@ impl fmt::Display for Expr {
         match self {
             Expr::Variable(name) => write!(f, "{}", name),
             Expr::StringLiteral(s) => write!(f, "\"{}\"", s),
-            Expr::NumberLiteral(n) => {
-                if n.fract() == 0.0 {
-                    write!(f, "{}", *n as i64)
-                } else {
-                    write!(f, "{}", n)
-                }
-            }
+            Expr::NumberLiteral(n) => f.write_str(&crate::markdown::numeric::format_number(*n)),
             Expr::BoolLiteral(b) => write!(f, "{}", b),
             Expr::ArrayLiteral(items) => {
                 write!(f, "[")?;
@@ -430,6 +424,11 @@ mod tests {
     fn display_number_literal_integer() {
         let expr = Expr::NumberLiteral(42.0);
         assert_eq!(expr.to_string(), "42");
+    }
+
+    #[test]
+    fn display_number_literal_beyond_i64_never_saturates() {
+        assert_eq!(Expr::NumberLiteral(1e20).to_string(), "100000000000000000000");
     }
 
     #[test]

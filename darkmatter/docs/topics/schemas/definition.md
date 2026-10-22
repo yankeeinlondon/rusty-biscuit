@@ -59,11 +59,14 @@ Every property value follows one of four shapes:
 | `{type}({constraints}) -> {description}`   | `slug: string(not-empty;required) -> URL slug`       |
 | `{ prop: type-expr, ... }`                 | `config: "{ host: string(required), port: number }"` |
 | `{ prop: type-expr, ... }[]`               | `entries: "{ foo: string(required) }[]"`             |
+| `{type} \| {type}`                         | `id: "string \| number"`                             |
+| `tuple([{type}, ...])`                     | `point: "tuple([number, number])"`                   |
 
 - **Whitespace** inside `(...)` and inside `{ ... }` is insignificant. Quote the whole scalar so YAML keeps it as a string when whitespace is present.
 - **Multiple constraints** are separated by `;`.
 - **Optional by default** — properties are optional unless `required` appears in the constraint list. An optional property also accepts `null` as a sentinel for absent, so a frontmatter value that resolves to `null` validates the same way as a missing key. A property whose type itself admits `null` (`null`, `unknown`, or a union with one of those arms) is always optional, even when it is marked `required`; see [Null-Admitting Properties](#null-admitting-properties).
 - **Arrays** are written by appending `[]` to the type. Item constraints sit inside the parens that precede the brackets; constraints on the array itself sit in a second parens after the brackets.
+- **Unions** are written with `|` or as a YAML list; both mean the same thing. See [The `|` Operator and Grouping](#the--operator-and-grouping).
 - **Descriptions** (`-> ...`) populate the `description` annotation in the generated JSON Schema. Inside an inline object, a description terminates at the next top-level comma or closing brace (see [Inline Object Literals](#inline-object-literals)). When a property fails validation, its declared description surfaces at the point of failure — in `md schema validate` (pretty and JSON output) and in compose schema-failure blocks (see [Error Rendering](#error-rendering)).
 - **Inline object literals** are an extension of the type-expression grammar. The whole `{ ... }` body is a single string scalar that the string-layer parser recognizes. YAML mapping values at a property position are still errors — quote the mapping as a string to opt into inline object syntax.
 
@@ -100,11 +103,13 @@ $schema:
 | `null`       | Only an explicit `null`, or omission.                                                                  | JSON Schema `{"type": "null"}`. `required` has no effect. Written unquoted (`review: null`, `review: ~`) or as `"null"`. See [`unknown` and `null`](#unknown-and-null). |
 | `alphanumeric` | A string of ASCII letters and digits (`[A-Za-z0-9]`), widened or narrowed by type options.          | Options before `;`, constraints after: `alphanumeric(allow-dashes; min(1))`. Lowers to a string `pattern`. Never coerces numbers or booleans. See [Alphanumeric Strings](#alphanumeric-strings). |
 | `shell`      | A string that holds a shell command: at least one non-whitespace character. Never parsed or run.       | JSON Schema `format: darkmatter-shell`. Constraints and coercion mirror `expression`. See [Shell Commands](#shell-commands). |
+| `tuple`      | A list whose positions each have their own type: `tuple([string, number?, ...boolean[]])`.             | Compiles to `prefixItems`, `minItems`, and `items`. See [Tuples](#tuples).                                                                                                      |
+| `function`   | Nothing: a `function(...)` type describes a callable and never validates data.                         | Legal only in a schema file's `types:`; a document schema that reaches one fails to load. See [Function Signatures](#function-signatures).                                      |
 
 Append `[]` to any type for an array of that type — e.g. `string[]`, `enum(red,green,blue)[]`, `file(match('*.md'))[]`.
 
-`unknown`, `null`, `alphanumeric`, and `shell` are built-in keywords, so a
-bare `shell` always means the built-in type. A local named type that happens
+`unknown`, `null`, `alphanumeric`, `shell`, `tuple`, and `function` are
+built-in keywords, so a bare `shell` always means the built-in type. A local named type that happens
 to share one of these names is referenced explicitly as `shell@this` (see
 [Local Type References](./local-type-references.md)).
 
@@ -157,6 +162,8 @@ is deliberately capped at these authored presentations:
 
 - plain, single-quoted, and double-quoted scalars, where a plain scalar may
   continue onto more-indented lines;
+- literal (`|`, `|-`) and folded (`>`, `>-`) block scalars, the usual way to
+  write a multi-line `function(...)` signature;
 - block and flow sequences, including a block sequence whose `-` sits at the
   same column as its parent key;
 - implicit scalar-key block and flow mappings;
@@ -230,15 +237,15 @@ encoding the editor negotiated (UTF-8 or UTF-16), so a grammar error such as
 `bogus` above is underlined on its own line, not across the whole value.
 
 This is a SimplifiedSchema authoring grammar, not a promise to project every
-presentation accepted by a general YAML parser. Tags, block scalars (`|`,
-`>`), quoted scalars continued across lines, complex keys, explicit
+presentation accepted by a general YAML parser. Tags, quoted scalars
+continued across lines, complex keys, explicit
 flow-mapping keys, directives, and other unlisted YAML presentations are
 outside the v1 source-map and DMLS contract; a schema file that uses one fails
 to load with `could not project SimplifiedSchema expression spans through YAML
 source`. Every non-comment line of a schema value must belong to a presentation
 the grammar recognizes, so an unrecognized one fails rather than being skipped.
-Frontmatter lookup is more tolerant and also follows tags, block scalars, and
-quoted continuations; that does not extend to schema documents. Authors should
+Frontmatter lookup is more tolerant and also follows tags and quoted
+continuations; that does not extend to schema documents. Authors should
 prefer ordinary `key: value` mappings. Expanding this closed boundary requires
 a separately specified feature; discovering another valid-but-unlisted YAML
 spelling is not a production-readiness regression for these meta-types.
@@ -282,6 +289,12 @@ Every type accepts:
   check; the passive phase validator itself checks syntax and presence without
   probing the filesystem.
 - `default(value)` — JSON Schema `default`. Darkmatter does **not** mutate documents; downstream tools and detection honor it.
+- `category(Name)` — documentation metadata. The name is the text up to `)`,
+  trimmed and case-sensitive, and may contain spaces and punctuation
+  (`category(Date Arithmetic)`, `category(CI/CD)`). It emits the
+  `x-darkmatter-category: Name` annotation and never changes what validates.
+  A schema file that declares a [`categories:` list](#categories) only allows
+  the names it lists.
 - `generated` — marks a property whose value the **host tool supplies at compose time** (for example the `ctx.*` context values in the Darkmatter base schema). It emits the `x-darkmatter-generated: true` annotation and suppresses the property's static `required` entry, so an authored document validates before the host fills the value in; the typed (non-null) arm is preserved. `datetime(generated; required)` therefore reads "required once generated", not "must be authored".
 
 `required` and `eager` are independent axes: `required` decides whether the
@@ -401,6 +414,19 @@ while `md schema validate` reports it.
 | `integer`    | Whole numbers only.             | `type: integer`         |
 | `default(n)` | Default value.                  | `default`               |
 | `required`   | Property is required.           | parent `required` entry |
+
+Numbers written in a schema (`min`, `max`, `default`, and the values of
+`literal` and `enum`) must be numbers Darkmatter can hold exactly. A whole
+number that a 64-bit float cannot represent, an infinite value, or a non-zero
+value that would round to zero fails to load, with the reason:
+
+```yaml
+$schema:
+    a: number(min(1.5))                    # fine; a fraction takes the nearest value
+    b: number(default(9007199254740993))   # error: cannot be represented exactly
+    c: number(max(inf))                    # error: not finite
+    d: number(min(1e-400))                 # error: a non-zero value would become 0
+```
 
 ### String Constraints (`string`)
 
@@ -1038,9 +1064,51 @@ The `default(...)` argument is read as a scalar, like every other constraint
 argument, so `default([a])` stores the string `"[a]"`, not a one-item list. A
 list-valued default cannot be written in the type-expression grammar today.
 
-To make a list whose items may each take one of several shapes, name the
+To make a list whose items may each take one of several shapes, group the
+options and add `[]` (`steps: "(string | number)[](min(1))"`), or name the
 union and reference it with `[]`: `steps: step[](min(1))`, where `step` is a
-union-typed named type. See [Named Union References](#named-union-references).
+union-typed named type. Both are the same list. See
+[Named Union References](#named-union-references).
+
+### Tuples
+
+A tuple is a list whose positions have their own types. Each position is
+required unless it ends in `?`, and at most one final `...T[]` spread accepts
+any number of further values of `T`:
+
+```yaml
+$schema:
+    point: "tuple([number, number])"                 # exactly two numbers
+    range: "tuple([date, date?])"                     # one date, or two
+    row:   "tuple([string, ...number[]]; required)"   # a label, then any numbers
+    none:  "tuple([])"                                # only []
+```
+
+- Positions go **required, then optional (`?`), then at most one spread**.
+  Two spreads, a spread before another position, `?` on a spread, and a
+  required position after an optional one are schema-load errors.
+- A spread must be a list type (`...number[]`, `...(string | number)[]`);
+  `...number` is an error.
+- Positions are unnamed: `tuple([x: number])` is an error.
+- A position may be a union. Group it before `?`: `(string | number)?`, since
+  `string | number?` is ambiguous and rejected.
+- A position's type describes the value itself. An optional position may be
+  left out, but a supplied `null` must match its type: `tuple([number?])`
+  accepts `[]` and `[1]` and rejects `[null]`; `tuple([(number | null)?])`
+  accepts all three.
+- Constraints on the tuple follow its element list inside the same
+  parentheses, after `;`. A tuple property is optional like any other.
+
+A tuple compiles to standard JSON Schema: `prefixItems` for the positions,
+`minItems` for the required ones, and `items` for what may follow (`false` for
+a fixed length, the spread's item schema otherwise):
+
+```json
+{ "type": "array",
+  "prefixItems": [{ "type": "number" }, { "type": "number" }],
+  "minItems": 2,
+  "items": false }
+```
 
 ## Inline Object Literals
 
@@ -1174,6 +1242,10 @@ Each referenced file is validated at **schema-load time** — a missing, malform
 2. Target-specific fields such as `parameters` validate against the inherited target shape (for expression-function examples, an array of single-key `name → value` maps).
 
 Resolved example objects are emitted onto the JSON Schema as the `x-darkmatter-example` extension so downstream consumers (`md schema about`, DMLS hover) read them without re-reading disk. Unchanged example files are cached by content hash across warm loads.
+
+A `function` type also takes inline examples, `example(call => result)`; see
+[Function Signatures](#function-signatures). The `=>` tells the two forms apart,
+and the inline form on any other type is a schema-load error.
 
 ### Cross-File Named-Type Imports (`Name@file`)
 
@@ -1491,6 +1563,94 @@ A property-level union may mix a `literal` arm with any other atom — something
 ```yaml
 $schema:
     width: [literal(auto), "number(min(1))"]   # the keyword `auto` or a positive number
+```
+
+### The `|` Operator and Grouping
+
+`|` writes a union inside one type expression, which is how a union appears
+where a YAML list cannot: a tuple position, a function parameter or return
+type, or an inline object property. `id: "string | number"` is exactly the
+same definition as `id: [string, number]` and compiles to the same `anyOf`.
+
+`[]` binds tighter than `|`, and parentheses group, as in TypeScript:
+
+```yaml
+$schema:
+    one:  "string | number[]"     # a string, or a list of numbers
+    many: "(string | number)[]"   # a list whose items are strings or numbers
+```
+
+`(string | number)[]` is the same list as `t[]` for a named type
+`t: [string, number]`, and compiles to one array whose `items` is the
+`anyOf`. A trailing `-> description` describes the last option; to describe
+each option, use the YAML list form. An option of a YAML list union is one
+type, so `[string | number, boolean]` is an error: list each option instead.
+A file reference in `Name@file` ends at `|`, so a path cannot contain `|`.
+
+## Function Signatures
+
+A `function(...)` type describes a callable: what it takes, what it returns,
+and how it is documented. It is **description-only**. It never validates
+data and produces no JSON Schema. It belongs in a schema file's `types:`
+mapping, and may be nested in another function's parameter or return type
+or in a tuple position. A document schema that reaches a function, directly
+or through a named reference, union, list, tuple, or object property, fails
+to load with an error naming the property path.
+
+```yaml
+kind: schema
+types:
+    min: |-
+        function(
+            parameters(a: number, b: number);
+            returns(number);
+            category(Math);
+            example(min(3, 5) => 3);
+            example(min("pear", 5) => error);
+        ) -> Returns the smaller of two numbers.
+```
+
+`parameters(...)` and `returns(...)` are required; the rest are optional.
+Constraints are separated by `;`, and a trailing `;` before `)` is allowed.
+
+| Constraint | Meaning |
+|---|---|
+| `parameters(name: T, ...)` | The arguments, in order. `parameters(void)` for none. |
+| `returns(T)` | The value returned on success; any type, including a union. |
+| `category(Name)` | The documentation category (see [Categories](#categories)). |
+| `fallible` | The function can fail even when its arguments are valid. |
+| `example(call => result)` | An inline example; repeatable (see below). |
+| `example(./file.yaml)` | An example file, as on any type. |
+
+**Parameters.** `name: T` is required, `name?: T` may be omitted, and
+`...name: T` collects zero or more remaining arguments, each of type `T`.
+Required parameters come first, then optional ones, then at most one rest
+parameter, which cannot carry `?`. Names must be unique; they are
+documentation and never change which calls bind. `void` stands alone, and
+`parameters()` is an error. Omission is not null: `age?: number` may be left
+out but rejects `null`, while `age?: number | null` allows both.
+
+**Inline examples.** `example(CALL => RESULT)` shows a call and its expected
+result. `CALL` is a Darkmatter function-call expression. `RESULT` is a
+literal (`3`, `"3"`, `[1, 2]`, `{a: 1}`, `null`, `true`) or the word `error`.
+Add `; display-only: REASON` for an example that cannot run reliably in a
+test, such as one that needs the network.
+
+**Overloads.** A function with several signatures is a union of `function(...)`
+types, written as a YAML list or with `|`. Two overloads whose parameters bind
+exactly the same calls are a schema-load error. Parameter names, descriptions,
+examples, categories, `fallible`, return types, `any` versus `unknown`, and
+the order of union options do not make two signatures different; a local
+named type is compared by its definition:
+
+```yaml
+kind: schema
+types:
+    pr_list:
+        - "function(parameters(count: number(integer; min(1))); returns(string[]))"
+        - "function(parameters(query: object); returns(string[]))"
+        # error if added: binds the same calls as the first overload
+        # - "function(parameters(n: number(min(1); integer)); returns(object))"
 ```
 
 ### Named Union References
@@ -1892,6 +2052,36 @@ types:
 
 The `types` mapping is semantically equivalent to a pure envelope's `$schema` mapping for whole-file use and named imports.
 
+### Categories
+
+A tagged envelope may also declare a `categories:` list beside `types:`. Each
+entry is a name, optionally followed by `-> description`; a description may
+span lines. Documentation shows categories in list order.
+
+```yaml
+kind: schema
+categories:
+    - Math -> Arithmetic on numbers.
+    - Devops
+    - |-
+        Filesystem ->
+        Questions about files and paths.
+types:
+    min: |-
+        function(
+            parameters(a: number, b: number);
+            returns(number);
+            category(Math);
+        ) -> Returns the smaller of two numbers.
+```
+
+When a file declares `categories:`, every `category(X)` in its `types` must
+name a listed category, compared exactly (`math` is not `Math`). Without the
+list any name is accepted, and `categories: []` declares that no category is
+allowed. A blank name, a repeated name, a non-list `categories`, and an entry
+that is not a string are schema-load errors naming the entry, such as
+`categories[1]`.
+
 ### Whole-File References and Named Imports
 
 A Markdown document references a standalone schema file via `$schema`:
@@ -1914,7 +2104,7 @@ $schema:
 
 ### Malformed Envelopes
 
-Once an envelope is recognized, a missing or malformed payload is a schema-document error (`SchemaError::SchemaDocument`). The library does not silently reinterpret the document as ordinary YAML or raw JSON Schema. For the tagged envelope, `kind: schema` claims the document even when `types` is missing, malformed, or accompanied by unsupported top-level keys.
+Once an envelope is recognized, a missing or malformed payload is a schema-document error (`SchemaError::SchemaDocument`). The library does not silently reinterpret the document as ordinary YAML or raw JSON Schema. For the tagged envelope, `kind: schema` claims the document even when `types` is missing, malformed, or accompanied by top-level keys other than `categories`. A file that is not valid YAML at all (for example one with a duplicate key) is also a schema-document error, `not valid YAML: ...`, rather than an unrecognized file.
 
 ### Raw JSON Schema
 
@@ -2189,7 +2379,7 @@ Coercion is **default-on**: there is no opt-in flag and no opt-out / strict-type
 |---|---|---|
 | `boolean` | a string in the set `{true, false, True, False, TRUE, FALSE}` | real boolean (`"true"` → `true`) |
 | `boolish` | same boolish set | real boolean (**normalized** — previously left as a string) |
-| `number` / `integer` | a string matching `^-?\d+(\.\d+)?$` | real number (`"42"` → `42`, `"3.14"` → `3.14`) |
+| `number` / `integer` | a string matching `^-?\d+(\.\d+)?$` | real number (`"42"` → `42`, `"3.14"` → `3.14`); text whose number no `f64` holds exactly (`"9007199254740993"`) stays text and fails the type check with the reason ([Numbers](../numbers.md)) |
 | `numberlike` | a numeric string (same regex) | real number (**normalized** — previously left as a string) |
 | `string` (incl. `date` / `datetime` / `time` / `url` / `email` / `file`) | a `number` or `boolean` scalar | its canonical string (`42` → `"42"`, `true` → `"true"`) |
 | `yaml` | a native mapping / sequence / scalar | its YAML string serialization (validated as YAML) |

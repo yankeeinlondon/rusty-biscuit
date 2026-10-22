@@ -173,8 +173,9 @@ standalone schema file. Four library errors are projected this way:
 | `UnionReference` | `p: choice(max(10))` over `choice: [string, number]` | the consuming reference name | the reference, when it is in another file, and the union's definition (`` `choice` is defined here``), in this buffer or its own file |
 
 - The primary range is the consuming reference's name, for bare, `@this`, and
-  cross-file spellings alike. A `$schema` written as a YAML block scalar
-  cannot be projected, so its diagnostic falls back to the property entry.
+  cross-file spellings alike, including a reference written in a YAML block
+  scalar (`|`, `>-`). A presentation the schema grammar cannot project, such
+  as a quoted value continued across lines, falls back to the property entry.
 - A conflict lists every declaration that took part as
   `relatedInformation`, so the editor can show the inherited `min(5)` in
   `types.yaml` beside the use site's `max(2)`. In a multi-hop chain each
@@ -231,7 +232,7 @@ All items are **eager and self-contained**: every item carries an explicit `text
 
 ### Hover
 
-Hovering a named-type reference (`person`, `person@this`, or `person@./people.yaml`) shows the definition it selects, with local references inside it spelled bare.
+Hovering a named-type reference (`person`, `person@this`, or `person@./people.yaml`) shows the definition it selects, with local references inside it spelled bare. When the referenced file is not valid YAML or its envelope is malformed, the hover shows that file's error instead, so a broken import never reads as a file that defines nothing.
 
 Hovering a schema-declared frontmatter property renders its full declaration — type (including `Name@reference` for imports and `[]` array suffixes), a `literal(...)` pinned value, `Required`, eager timing, enum values, default, and the `->` prose description. The formatting rule is bounded by what LSP hover Markdown can express (color is a theme decision, never ours): **inline-code box = the subject, bold = its type, italic = its enum/default values, plain prose = the description**.
 

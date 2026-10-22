@@ -638,7 +638,7 @@ fn cycles_and_depth_limits_still_apply_through_union_postfixes() {
 // ── Authored references round-trip; resolved unions are display-only ──────
 
 #[test]
-fn authored_union_references_round_trip_and_anonymous_union_arrays_stay_rejected() {
+fn authored_union_references_round_trip_and_union_arrays_share_one_spelling() {
     use darkmatter::markdown::schemas::simplified::{grammar::parse_type_expr, serialize_property_atom};
 
     for authored in [
@@ -667,8 +667,9 @@ fn authored_union_references_round_trip_and_anonymous_union_arrays_stay_rejected
         );
     }
 
-    // The resolved form is a display spelling the grammar refuses, so it can
-    // never be mistaken for an authored expression.
+    // The resolved list of a named union and the grouped spelling
+    // `(A | B)[]` are one representation: the resolved form serializes to
+    // that spelling, which parses back to the same atom.
     let (_dir, root) = temp_root();
     let resolved = resolve_inline(&root, "choice: [string, number]\np: \"choice[](min(1))\"\n")
         .expect("schema resolves");
@@ -677,14 +678,14 @@ fn authored_union_references_round_trip_and_anonymous_union_arrays_stay_rejected
     };
     assert!(matches!(atom.ty, TypeExpr::Union(_)), "{atom:?}");
     let display = serialize_property_atom(atom);
-    assert!(parse_type_expr("p", &display).is_err(), "{display}");
+    assert_eq!(display, "(string | number)[](min(1))");
+    assert_eq!(&parse_type_expr("p", &display).expect(&display), atom);
 
-    // Only a named union takes `[]`; no anonymous spelling is accepted.
-    for anonymous in ["(string | number)[]", "[string, number][]"] {
-        assert!(parse_type_expr("p", anonymous).is_err(), "{anonymous}");
-        let schema = format!("p: \"{anonymous}\"\n");
-        resolve_inline(&root, &schema).expect_err(&schema);
-    }
+    // A bracketed arm list is still not a type expression.
+    let anonymous = "[string, number][]";
+    assert!(parse_type_expr("p", anonymous).is_err(), "{anonymous}");
+    let schema = format!("p: \"{anonymous}\"\n");
+    resolve_inline(&root, &schema).expect_err(&schema);
 }
 
 // ── AC 2 and AC 7: a postfixed alias is still a union target ─────────────

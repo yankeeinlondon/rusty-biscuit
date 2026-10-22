@@ -113,6 +113,17 @@ compare `Value`s with `==` or through rendered text for an expression
 `==`/`!=`; ordering (`<`, `>=`, …) still coerces to numbers. User docs:
 [What a Guard Proves](../../../darkmatter/docs/topics/darkmatter-expressions.md#what-a-guard-proves).
 
+Numbers enter Darkmatter only through `markdown::numeric` (`admit_number_spelling`
+for loader/lexer text, `admit_number_text` for the one lenient text parser,
+`admit_json_number`/`admit_f64` for values without a spelling). A whole number
+must be exact in every spelling, decimals round, underflow and non-finite are
+errors. Expression literals, frontmatter YAML, raw schemas, and SimplifiedSchema
+metadata are admitted at load; operators compute in `f64` with no integer
+casts, and a non-finite result (overflow, `/ 0`, `% 0`) is an error. Store an
+admitted number with `numeric::json_number` and render it with
+`numeric::format_number`; never `as i64`. User docs:
+[Numbers](../../../darkmatter/docs/topics/numbers.md).
+
 Hosts add globals (Claudine's `err`, `timing`, `group`) through the binding
 model in `expression/binding.rs`, never through a lookup override. A root
 resolves as reserved namespace → registered global (available, possibly

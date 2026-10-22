@@ -430,7 +430,11 @@ fn primitive(ty: &TypeExpr) -> Option<SimplifiedType> {
         TypeExpr::Primitive(p) => Some(*p),
         // Inline objects, imported types, and resolved unions do not unify
         // with any other type in detection (detection never produces them).
-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => None,
+        TypeExpr::InlineObject(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_) => None,
     }
 }
 

@@ -334,11 +334,18 @@ fn constant_member(index: &Expr) -> Option<Member> {
     match index {
         Expr::Paren(inner) => constant_member(inner),
         Expr::StringLiteral(key) => Some(Member::Field(key.clone())),
-        Expr::NumberLiteral(number) if number.fract() == 0.0 => Some(Member::Index(*number as i64)),
+        Expr::NumberLiteral(number) => index_literal(*number).map(Member::Index),
         Expr::UnaryMinus(inner) => match inner.as_ref() {
-            Expr::NumberLiteral(number) if number.fract() == 0.0 => Some(Member::Index(-(*number as i64))),
+            Expr::NumberLiteral(number) => index_literal(-*number).map(Member::Index),
             _ => None,
         },
         _ => None,
     }
+}
+
+/// A whole literal within `i64`, never saturated: a larger index is not a
+/// constant step the analysis can follow.
+fn index_literal(number: f64) -> Option<i64> {
+    const LIMIT: f64 = 9_223_372_036_854_775_808.0; // 2^63
+    (number.fract() == 0.0 && (-LIMIT..LIMIT).contains(&number)).then_some(number as i64)
 }

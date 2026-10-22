@@ -257,7 +257,11 @@ fn is_completable(ty: &TypeExpr) -> bool {
         // resolved before completion runs; an unresolved one is not
         // completable here. A union never reaches here: callers read its
         // arms through `flattened_alternatives`.
-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => false,
+        TypeExpr::InlineObject(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_) => false,
     }
 }
 
@@ -275,7 +279,11 @@ fn match_groups(atom: &PropertyAtom) -> Vec<Vec<String>> {
 fn kind_for_atom(atom: &PropertyAtom) -> Option<CompletionKind> {
     let ty = match &atom.ty {
         TypeExpr::Primitive(ty) => *ty,
-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => return None,
+        TypeExpr::InlineObject(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_) => return None,
     };
     match ty {
         SimplifiedType::File => {
@@ -490,7 +498,10 @@ pub fn alternatives_for_def(
             }
             // An unresolved import has no shape to offer; flattening never
             // yields a union.
-            TypeExpr::Imported { .. } | TypeExpr::Union(_) => {}
+            TypeExpr::Imported { .. }
+            | TypeExpr::Union(_)
+            | TypeExpr::Tuple(_)
+            | TypeExpr::Function(_) => {}
         }
     }
     Some(completion)

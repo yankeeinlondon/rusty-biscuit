@@ -237,13 +237,13 @@ fn a_continuation_line_grammar_error_converts_through_the_negotiated_encoding() 
     }
 }
 
-/// When the strict locator cannot read the document (here, a block scalar
-/// for a sibling definition), the token cannot be projected, so the
-/// diagnostic keeps its existing whole-value fallback and code. It is never an
-/// empty or fabricated range.
+/// When the strict locator cannot read the document (here, a quoted scalar
+/// continued across lines for a sibling definition), the token cannot be
+/// projected, so the diagnostic keeps its existing whole-value fallback and
+/// code. It is never an empty or fabricated range.
 #[test]
 fn an_unprojectable_grammar_error_keeps_the_whole_value_fallback() {
-    let text = "kind: schema\ntypes:\n  t: string(min(1);\n    bogus(2))\n  next: |\n    boolean\n";
+    let text = "kind: schema\ntypes:\n  t: string(min(1);\n    bogus(2))\n  next: \"boolean -> a\n    b\"\n";
     let workspace = LspWorkspace::new();
     let mut fixture = start(&workspace, "utf-8");
     let uri = open(&fixture, &workspace, "block-sibling.yaml", text);

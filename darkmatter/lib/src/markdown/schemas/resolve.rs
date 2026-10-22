@@ -755,10 +755,18 @@ fn parse_yaml_referenced_file(
     }
 
     // Treat the file's contents as a raw JSON Schema serialized in YAML.
-    let yaml: YamlValue =
-        serde_yaml_ng::from_str(text).map_err(|_| SchemaError::AmbiguousReferenced {
-            path: path.to_path_buf(),
-        })?;
+    let yaml: YamlValue = crate::markdown::numeric::load_admitted_yaml(text).map_err(|error| {
+        if crate::markdown::numeric::is_yaml_admission_error(&error) {
+            SchemaError::SchemaDocument {
+                path: path.to_path_buf(),
+                message: error.to_string(),
+            }
+        } else {
+            SchemaError::AmbiguousReferenced {
+                path: path.to_path_buf(),
+            }
+        }
+    })?;
     let advisories = missing_simplified_envelope_advisory(&yaml, path)
         .into_iter()
         .collect();
@@ -1147,11 +1155,24 @@ fn resolve_standalone_root_union(
     })
 }
 
+/// ## Errors
+///
+/// [`SchemaError::AmbiguousReferenced`] when the bytes are not a JSON object,
+/// including a number too large for `f64` (`1e400`), and
+/// [`SchemaError::SchemaDocument`] when a number's written value cannot be
+/// admitted (an inexact whole number or an underflow), naming its JSON
+/// Pointer, line, and column.
 fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, SchemaError> {
     let value: Value =
         serde_json::from_slice(bytes).map_err(|_| SchemaError::AmbiguousReferenced {
             path: path.to_path_buf(),
         })?;
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        crate::markdown::numeric::admit_json_text_numbers(text).map_err(|error| SchemaError::SchemaDocument {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })?;
+    }
     if !value.is_object() {
         return Err(SchemaError::AmbiguousReferenced {
             path: path.to_path_buf(),
@@ -1706,6 +1727,10 @@ impl ImportEngine<'_> {
                 hoisted = flat.markers;
                 TypeExpr::Union(flat.arms)
             }
+            TypeExpr::Tuple(tuple) => TypeExpr::Tuple(tuple.try_map_defs(|index, def| {
+                self.expand_property_def(def, current, &path.union_arm(index))
+            })?),
+            TypeExpr::Function(function) => TypeExpr::Function(function),
         };
         let mut atom = PropertyAtom {
             ty,
@@ -3074,7 +3099,8 @@ fn atom_has_imports(atom: &PropertyAtom) -> bool {
         TypeExpr::Imported { .. } => true,
         TypeExpr::InlineObject(shape) => shape_has_imports(shape),
         TypeExpr::Union(arms) => arms.iter().any(atom_has_imports),
-        TypeExpr::Primitive(_) => false,
+        TypeExpr::Tuple(tuple) => tuple.any_atom(atom_has_imports),
+        TypeExpr::Primitive(_) | TypeExpr::Function(_) => false,
     }
 }
 

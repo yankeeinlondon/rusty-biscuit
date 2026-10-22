@@ -121,7 +121,10 @@ fn project_atom(atom: &mut PropertyAtom, phase: SchemaPhase, property_eager: boo
     match &mut atom.ty {
         TypeExpr::InlineObject(shape) => *shape = project_shape(shape, phase),
         TypeExpr::Union(arms) => arms.iter_mut().for_each(|arm| strip_union_arm(arm, phase)),
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => {}
+        TypeExpr::Primitive(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_) => {}
     }
     strip_presence(atom);
 
@@ -144,7 +147,10 @@ fn strip_union_arm(arm: &mut PropertyAtom, phase: SchemaPhase) {
     match &mut arm.ty {
         TypeExpr::InlineObject(shape) => *shape = project_shape(shape, phase),
         TypeExpr::Union(arms) => arms.iter_mut().for_each(|arm| strip_union_arm(arm, phase)),
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => {}
+        TypeExpr::Primitive(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_) => {}
     }
     strip_presence(arm);
 }

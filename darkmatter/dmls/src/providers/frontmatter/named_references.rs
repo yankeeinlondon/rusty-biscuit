@@ -98,8 +98,12 @@ fn reference_definition<'a>(
     Some((reference, definition))
 }
 
-/// Hover on a reference name: the definition it selects and where that is.
+/// Hover on a reference name: the definition it selects and where that is,
+/// or why the file it imports from is not a usable schema document.
 pub(super) fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    if let Some(hover) = unusable_target_hover(ctx, offset) {
+        return Some(hover);
+    }
     let (reference, definition) = reference_definition(ctx, offset)?;
     let (definition, defined_in) = match &definition {
         Definition::Local { definition, .. } => (definition, "this schema".to_string()),
@@ -110,6 +114,21 @@ pub(super) fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let body = format!(
         "{}\n\nDefined in: {defined_in}",
         meta_schema_definition_hover_body(&reference.name, definition)
+    );
+    markup_hover(ctx, reference.name_span, body)
+}
+
+/// Hover on a reference into a file whose text is not YAML or whose envelope
+/// is malformed: the parse error, which would otherwise read as a file that
+/// exports nothing.
+fn unusable_target_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    let declaration = authored_declaration(ctx)?;
+    let reference = declaration.reference_at(ctx.text, offset)?;
+    let external = ctx.overlay?.named_types.get(reference.target.as_deref()?)?;
+    let error = external.error.as_ref()?;
+    let body = format!(
+        "**`{}`**\n\n`{}` is not a usable schema document: {error}",
+        reference.name, external.target
     );
     markup_hover(ctx, reference.name_span, body)
 }

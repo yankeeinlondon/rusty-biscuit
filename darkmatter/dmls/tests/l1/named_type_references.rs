@@ -347,8 +347,10 @@ fn a_missing_name_in_an_inline_schema_is_a_schema_definition_error_at_the_refere
     fixture.shutdown();
 }
 
+/// A block scalar is inside the source-aware grammar, so a reference written
+/// in one is ranged on its own name.
 #[test]
-fn a_block_scalar_reference_falls_back_to_the_property_entry() {
+fn a_block_scalar_reference_is_ranged_on_its_name() {
     let workspace = LspWorkspace::new();
     let text = "---\n$schema:\n  title: >-\n    nope\n---\n\nBody\n";
     let file = write(&workspace, "block.md", text);
@@ -360,8 +362,8 @@ fn a_block_scalar_reference_falls_back_to_the_property_entry() {
     assert_eq!(named.len(), 1, "{diagnostics:?}");
     assert_eq!(
         named[0]["range"],
-        range_of(text, ">-\n    nope\n", 0),
-        "the `title` value holds the reference: {:?}",
+        range_of(text, "nope", 0),
+        "the reference inside the block scalar: {:?}",
         named[0]
     );
     fixture.shutdown();
@@ -728,6 +730,39 @@ fn a_marker_before_the_array_suffix_prepares_and_a_value_constraint_there_is_rep
     assert!(message.contains("`max`") && message.contains("union-typed"), "{message}");
     let related = named[0]["relatedInformation"].as_array().expect("the definition");
     assert_eq!(related[0]["location"]["uri"], json!(canonical_uri(&types.path)));
+
+    fixture.shutdown();
+}
+
+/// An import target that is not YAML at all reports its YAML error, as a
+/// diagnostic and in hover on the reference, instead of reading as a file
+/// that exports nothing.
+#[test]
+fn a_reference_into_a_file_that_is_not_yaml_reports_the_yaml_error() {
+    let workspace = LspWorkspace::new();
+    write(&workspace, "types.yaml", "kind: schema\nkind: schema\ntypes:\n  shared: string\n");
+    let document = write(
+        &workspace,
+        "doc.md",
+        "---\n$schema:\n  count: 'shared@./types.yaml'\n---\n\nBody\n",
+    );
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(workspace.path()));
+    open(&fixture, &document);
+
+    let diagnostics = fixture.wait_for_diagnostics(&document.uri);
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("not valid YAML"))),
+        "the import target's YAML error is a diagnostic: {diagnostics:?}"
+    );
+
+    let hover = request_at(&mut fixture, "textDocument/hover", &document, offset_of(&document.text, "shared@"));
+    let markup = hover["contents"]["value"].as_str().unwrap_or_default();
+    assert!(markup.contains("not valid YAML"), "hover names why the target is unusable: {hover}");
+    assert!(markup.contains("duplicate entry"), "{markup}");
+    assert_eq!(hover["range"], range_of(&document.text, "shared", 0));
 
     fixture.shutdown();
 }

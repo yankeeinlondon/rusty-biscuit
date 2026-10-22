@@ -383,7 +383,9 @@ pub(super) fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<Interact
         | TypeExpr::Imported { .. }
         // A value with several alternatives has no single widget, as for a
         // property-level union.
-        | TypeExpr::Union(_) => None,
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_) => None,
     }
 }
 
@@ -430,6 +432,8 @@ pub(super) fn type_label_for_atom(atom: &PropertyAtom) -> String {
         TypeExpr::InlineObject(_) => format!("object{suffix}"),
         TypeExpr::Imported { name, reference } => format!("{name}{suffix}@{reference}"),
         TypeExpr::Union(_) => format!("union{suffix}"),
+        TypeExpr::Tuple(_) => format!("tuple{suffix}"),
+        TypeExpr::Function(_) => format!("function{suffix}"),
     }
 }
 

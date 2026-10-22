@@ -15,9 +15,14 @@
 //!
 //! An `f64` that reached Darkmatter already rounded can only be checked for
 //! finiteness ([`admit_f64`]); digits lost before that point cannot be
-//! recovered. The user-facing rules are in Darkmatter's numbers topic doc.
+//! recovered. The user-facing rules are in `darkmatter/docs/topics/numbers.md`.
 
 use std::fmt;
+
+mod ingress;
+
+pub use ingress::reject_non_finite_json5;
+pub(crate) use ingress::{admit_json_text_numbers, is_yaml_admission_error, load_admitted_yaml};
 
 /// Why a written or supplied number cannot become a Darkmatter number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,9 +189,17 @@ pub fn parse_boolean_word(text: &str) -> Option<bool> {
 /// The text form of a number: no decimal suffix on a whole value (`4.0` is
 /// `"4"`), every meaningful fractional digit kept, no exponent, and never an
 /// integer cast. Negative zero is `"0"`.
+///
+/// A whole value is written with every digit of the integer it holds
+/// (`2^60` is `"1152921504606846976"`), so the text admits back to the same
+/// number; the shortest round-trip form (`"1152921504606847000"`) names a
+/// different whole number that admission rejects.
 pub fn format_number(value: f64) -> String {
     if value == 0.0 {
         return "0".to_string();
+    }
+    if value.fract() == 0.0 {
+        return format!("{value:.0}");
     }
     format!("{value}")
 }
@@ -435,6 +448,9 @@ mod tests {
         assert_eq!(format_number(9007199254740992.0), "9007199254740992");
         assert_eq!(format_number(1e20), "100000000000000000000");
         assert_eq!(format_number(0.1), "0.1");
+        assert_eq!(format_number(2f64.powi(60)), "1152921504606846976");
+        assert_eq!(admit_number_spelling(&format_number(f64::MAX)), Ok(f64::MAX));
+        assert_eq!(format_number(-2.5e-7), "-0.00000025");
     }
 
     #[test]

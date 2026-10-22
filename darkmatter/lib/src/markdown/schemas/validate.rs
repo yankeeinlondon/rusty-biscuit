@@ -737,6 +737,27 @@ fn datetime_format_message(err: &jsonschema::ValidationError<'_>) -> Option<Stri
     Some(format!("{} is not {noun}", err.instance()))
 }
 
+/// Adds the admission reason to a number type error whose value is numeric
+/// text that cannot become a number (`"9007199254740993"`): coercion leaves
+/// such text unconverted, so the type check is where it fails. `None` for
+/// every other error.
+fn inadmissible_number_message(err: &jsonschema::ValidationError<'_>) -> Option<String> {
+    let ValidationErrorKind::Type { kind } = err.kind() else {
+        return None;
+    };
+    let expects_number = match kind {
+        TypeKind::Single(ty) => matches!(ty, JsonType::Number | JsonType::Integer),
+        TypeKind::Multiple(types) => types.contains(JsonType::Number) || types.contains(JsonType::Integer),
+    };
+    let text = err.instance().as_str()?.to_owned();
+    match crate::markdown::numeric::admit_number_text(&text) {
+        Err(crate::markdown::numeric::NumberTextError::Admission(reason)) if expects_number => {
+            Some(format!("{err}: the number {reason}"))
+        }
+        _ => None,
+    }
+}
+
 /// `true` when `err` is the "expected null" type error contributed by the
 /// `{ "type": "null" }` arm of an optional-property wrapper against a non-null
 /// value.
@@ -766,7 +787,9 @@ fn build_problem(
     let (message, file_reference) = match darkmatter_file_reference_outcome(err, anchors) {
         Some((message, diagnostic)) => (message, Some(diagnostic)),
         None => (
-            datetime_format_message(err).unwrap_or_else(|| err.to_string()),
+            datetime_format_message(err)
+                .or_else(|| inadmissible_number_message(err))
+                .unwrap_or_else(|| err.to_string()),
             None,
         ),
     };

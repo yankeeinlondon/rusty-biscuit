@@ -295,7 +295,11 @@ fn arm_discriminant_json(atom: &PropertyAtom) -> Value {
     match &atom.ty {
         TypeExpr::InlineObject(shape) => shape_discriminant_json(shape),
         // `alternatives_of` has already replaced a union type with its arms.
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => {
+        TypeExpr::Primitive(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_) => {
             serde_json::json!({})
         }
     }
