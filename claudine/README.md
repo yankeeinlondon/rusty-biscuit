@@ -143,6 +143,8 @@ claudine compose @prompts/review.md review="review.md" count=3 draft=true
 
 All three commands share a wrapper-grade execution pipeline with full support for environment setup, system prompt resolution, harness detection, structured streaming, and lifecycle-stack recovery.
 
+**Lifecycle events.** A document's frontmatter can react to its own run (`initialize`, `start`, `success`, `failure`, `finalize`, …). The lifecycle grammar and engine are [Darkmatter's](../darkmatter/docs/topics/lifecycle/index.md); Claudine is a host that adds `success`, `failure`, and `loop` and calls Darkmatter's `composed` and `failed` events `start` and `blocked`. See [Lifecycle](docs/topics/flow-control/lifecycle.md).
+
 Shell approval can fix an exact command or authorize a typed command shape,
 such as `template just clean --out {{ string }}/build`. Shape-approved commands
 validate current values and pass each containing word as one argument directly

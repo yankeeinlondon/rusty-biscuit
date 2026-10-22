@@ -200,12 +200,30 @@ merged baseline (validator cache keys on the full resolution context), so
 tests that judge only document schemas pass `--no-baseline-schema` to stay in
 the L1 budget.
 
+The baseline types Darkmatter's five lifecycle events (`initialize`,
+`composed`, `failed`, `cancelled`, `finalize`) with the md profile
+(`partials/md-lifecycle.yaml`): md verbs are typed and offered, and an open
+pattern-key arm that excludes every md verb lets another host's verb (`say`,
+`retry`) pass untyped and unoffered. The neutral shape of every verb, Claudine's
+included, lives in `partials/lifecycle.yaml`. `lib/tests/l1/lifecycle_schema_parity.rs`
+derives events, action types, the open arm's exclusions, and the bare-verb
+`suggest` list from the md registry and parser. The inlined stacks cost about
+70–90 ms per debug validation; the regex memo in `convert.rs` and the import
+engine's `expanded_cache` keep it there.
+
 User docs: `darkmatter/docs/topics/schemas/definition.md` (The Built-in
 Baseline, Selecting the Baseline); Content Policy's typing limits are in the
 `content-policy` skill.
 
 ## Imports and dictionaries
 
+- `Name@darkmatter:<stem>` is reserved: it names type `Name` in the shipped
+  partial `darkmatter/schemas/partials/<stem>.yaml` from `SHIPPED`, whatever
+  the importer is (disk file, embedded document, host bundle), never reading
+  the disk (`NamespaceKey::Shipped`; relative imports inside it stay in
+  `SHIPPED`). `named_type_reference_path` returns `None` for it, as for
+  `this`. Claudine's `action.yaml` uses it to reference Darkmatter's neutral
+  action types.
 - `Name@file` and `Name@this` import named types eagerly with dependency and
   cycle tracking. Dependencies (`imports`, `examples`, `referenced_files`)
   are canonical, existing, content-hashed files; `ResolvedSchema::searched`
@@ -562,5 +580,9 @@ standalone loader refuses it by content, wherever a `$schema` reaches it.
 Hosts declare their own globals in a catalog of the same format
 (`claudine/schemas/globals.yaml`, loaded with `GlobalCatalog::from_documents`
 and the host's requirements). DMLS hovers and completes host globals from the
-catalogs in a document's schema roots (`catalog::host_catalogs`); per-event
-availability stays the host's `BindingView`.
+catalogs in a document's schema roots (`catalog::host_catalogs`), treating
+each as `ExecutionDependent` (DMLS cannot know loop/group membership); a
+catalog that fails to load is a `dm.schema.host_catalog` warning. Inside an
+md event's stack DMLS uses that event's registry `BindingView`
+(`dmls/src/overlay/event_views.rs`), so `err` where the event has none is
+`dm.expression.unavailable_global`.

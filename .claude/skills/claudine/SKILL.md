@@ -379,7 +379,13 @@ leg mutations in declaration order. Body-only steps mask source lifecycle keys
 through data overrides so canonical rereads do not fire container events again. Internal legacy task-stage tests
 construct preflight models directly; they do not authorize old YAML syntax.
 The canonical shipped trigger schema lives in `claudine/schemas/`, not
-Darkmatter's docs tree. See [Sequences](topics/flow-control/sequences.md).
+Darkmatter's docs tree. Action shapes are Darkmatter's: `action.yaml`'s
+categories and bundles, the `cancelled-*` types, and `loop`'s loose verbs are
+mappings whose values reference per-verb types `@darkmatter:lifecycle` (a
+reserved reference that resolves from Darkmatter's embedded partials, so the
+bundle stays self-contained); `claudine/lib/tests/l1/claudine_schema_parity.rs`
+derives event/action parity from `claudine_registry()`. `claudine.yaml`
+declares `composed`/`failed` as `null` with descriptions naming `start`/`blocked`. See [Sequences](topics/flow-control/sequences.md).
 The sequence trigger is `schemas/sequence.yaml` (matches any non-null
 `sequence`; payload `sequence`, `template`, and `fail_fast: null` so a root
 `fail_fast` is reported by name), and it is the only declaration of
@@ -589,7 +595,7 @@ of a topic doc.
 - [Error Architecture](topics/error-architecture.md) — the `Diagnostic`/`BlockError` pair, the discovery seam, effective-diagnostic selection and the `Semantic`/`Transparent` role contract, the snapshot boundary, typed-wrapper rules, and the lossy-boundary audit
 - [Composition](topics/composition.md) — `compose`, `inline-compose`, `sequence`, lifecycle stacks, provider selection
 - [Schemas](topics/schemas.md) — the seven `claudine/schemas/` files (including the `sequence.yaml` trigger and the `sequence-types.yaml` container types), event/action-type permissions, what only the parser checks, disk discovery vs the embedded bundle, and DMLS's disk-only use for diagnostics, completion, and hover; the strict launch policy is in [Composition](topics/composition.md#claudines-trigger-schemas-in-the-launch-verdict)
-- [Lifecycle](topics/flow-control/lifecycle.md) — the seven events, the list/dictionary stack grammar with `when`/`then`/`else`, action forms, `err`/`timing`/`current` globals, validation errors
+- [Lifecycle](topics/flow-control/lifecycle.md) — Claudine as a host of Darkmatter's lifecycle (renames, registrations, how failures route, the `finalize` exceptions), the seven events, the list/dictionary stack grammar with `when`/`then`/`else`, action forms, `err`/`timing`/`current` globals, validation errors. The host-neutral model (Darkmatter's five events, host registration, the `md` host, recovery modes) is `darkmatter/docs/topics/lifecycle/index.md` and `error-handling.md`
 - [Flow Control](topics/flow-control/flow-control.md) and [Flow Control Reference](topics/flow-control/flow-control-reference.md) — the `stop`/`skip`/`error`/`retry`/`resume`/`proxy`/`defer` directives, per-event runtime limits, retry/resume re-entry, `proxy` handoffs and the `with:` overlay
 - [Timeouts](topics/timeouts.md) — the two timeout rules, four env vars, precedence, termination path, the post-exit stream-reader wait (`stream_reader_timeout`), the single output worker that keeps a blocked terminal from stalling the parser or the wrapper (`wrap/output_worker.rs`; run output is a queued frame, and once a run creates the worker every diagnostic — `crate::log`, signal notices, `--perf`, tracing, the panic hook, the library's `render::console` lines — is one too, through `crate::terminal_gate::write`; signal handlers never write the terminal), exit reasons, and the three runaway content guards
 - [Signal Handling](topics/signal-handling.md) — user Ctrl+C vs wrapper-driven SIGTERM/SIGKILL, the unified wait loop, termination labels (`Aborted`/`Interrupted`/`TimedOut`), non-interactive ladder, Windows parity

@@ -110,6 +110,16 @@ Darkmatter's **SimplifiedSchema**:
   mismatches, constraint violations, missing required keys, unknown keys,
   invalid file references, invalid `suggest(...)` candidates, malformed
   standalone schema envelopes, and `style.*` problems.
+- **Lifecycle stacks** — md's lifecycle events (`initialize`, `composed`,
+  `failed`, `cancelled`, `finalize`) are typed by the baseline, so their items
+  complete and validate as md's actions, and an action md does not provide
+  passes without being offered. Expressions inside a stack are checked,
+  hovered, and completed with that event's globals: reading `err` where the
+  event has no failure is `dm.expression.unavailable_global`. Host-catalog
+  globals (Claudine's `seq`, `loop`, `group`) are always accepted, and a host
+  catalog that fails to load is the warning `dm.schema.host_catalog`. See
+  [Diagnostics](./diagnostics.md), [Hover](./hover.md), and
+  [Autocomplete](./autocomplete.md#lifecycle-stacks).
 
 Claudine (and any other tool) activates as **pure configuration**: point a
 `[schema.extensions.*]` entry at a schema file and a set of globs. There is no

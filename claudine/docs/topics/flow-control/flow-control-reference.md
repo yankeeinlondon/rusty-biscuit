@@ -10,12 +10,12 @@ Placement is checked once, at parse time: `skip` is accepted only in `initialize
 |-------|---------|----------|---------|
 | `initialize` | `LifecycleSetupPhaseRecoveryUnsupported` | `ResumeWithoutSession` | Full handoff |
 | `start`, `success`, `failure`, `finalize` | Full | Full, given a live session | Full handoff |
-| `blocked` (from compose pre-flight) | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` |
+| `blocked` | `LifecycleSetupPhaseRecoveryUnsupported` | `ResumeWithoutSession` | `LifecycleSetupPhaseRecoveryUnsupported` |
 | `loop` (the iteration gate) | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` |
 
 `stop` works in every event. `error` is rejected in `cancelled`. Recovery in the `finalize` after cancellation raises a typed cancellation-recovery error and launches no work. `defer` fails with `LifecycleDeferNotImplemented` in every event until its scheduler exists. `break` and `prep` run in every event except `cancelled`, and in the loop gate; see [`break` and `prep` in detail](#break-and-prep-in-detail).
 
-The unsupported cells have no re-entry point to return to, so they raise a typed error instead of quietly doing nothing. Put those recoveries on `start`, `success`, `failure`, or `finalize`.
+The unsupported cells have no re-entry point to return to, so they raise a typed error instead of quietly doing nothing. Put those recoveries on `start`, `success`, `failure`, or `finalize`. A refused recovery in a document's `blocked` does not fire `failure`: `finalize` runs with the original error, and the refusal becomes the run's reported error. `blocked` refuses recovery whether it came from pre-flight or from a proxy handoff refused after `start`; see [Lifecycle — How Failures Route](lifecycle.md#how-failures-route).
 
 A `proxy` from `initialize` is a real handoff, not a reduced pre-launch path. The coordinator that tracks the active document sits above both the document loop and the provider harness, so the target is prepared exactly as a directly invoked document would be.
 

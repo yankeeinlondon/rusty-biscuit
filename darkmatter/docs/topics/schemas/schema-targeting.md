@@ -62,10 +62,8 @@ In the example:
 - looked at from the top level array's standpoint we have 3 match expressions which ALL must evaluate to `true` for the schema to be activated.
 
 
-The draft schema for a `schema-trigger` is defined in `SimplifiedSchema` grammar
-in [schema-target.yaml](../../../../claudine/features/2026-10-28-schema-enhancements/drafts/schema-target.yaml). Its filename also
-retains the earlier terminology; its unfinished predicate grammar is not an
-implemented contract.
+There is no published schema for a `schema-trigger` document yet: the
+predicate grammar above is unfinished and is not an implemented contract.
 
 For unconditional exported schemas and importable types-only libraries, see
 [External Schemas](./authoring-schemas.md#external-schemas).

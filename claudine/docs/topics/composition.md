@@ -1642,13 +1642,13 @@ A document that still declares any of these keys fails composition with a typed 
 |-------------|-------------|
 | `pre_checks` | the `initialize` or `start` lifecycle stack |
 | `post_checks` | the `success` or `finalize` lifecycle stack |
-| `handle_<event>` (e.g. `handle_timeout`, `handle_inline_body_unchanged`) | the `blocked` or `failure` lifecycle recovery actions |
+| `handle_<event>` (e.g. `handle_timeout`, `handle_inline_body_unchanged`) | the `failure` lifecycle recovery actions (`blocked` reports, but cannot recover) |
 | `handle` | a lifecycle `shell` action or other lifecycle action |
 | `deviate` | a lifecycle `shell` action plus a recovery action (`retry`, `resume`, etc.) |
 
 The scan runs before lifecycle event blocks are parsed, so the diagnostic names the removed DSL key rather than falling through to generic unknown-field handling. Like every frontmatter-rooted composition error, it appends a focused, syntax-highlighted excerpt of the frontmatter around the removed key under a TTY.
 
-**Verification** that the agentic loop actually did the work it claimed (the old `post_checks` role) now belongs in the `success` or `finalize` stack: guard a `when:` clause and raise an `Error` lifecycle action when the contract is unmet. **Recovery** (the old `handle_*` role) belongs in a `failure`/`blocked` stack — or any other event's, since flow control is universal — via `retry`, `resume`, or `proxy`. See [Flow Control](flow-control/flow-control.md) for the full directive catalog.
+**Verification** that the agentic loop actually did the work it claimed (the old `post_checks` role) now belongs in the `success` or `finalize` stack: guard a `when:` clause and raise an `Error` lifecycle action when the contract is unmet. **Recovery** (the old `handle_*` role) belongs in a `failure` stack — or another event's, such as `success` or `finalize` — via `retry`, `resume`, or `proxy`. `blocked` cannot recover; see [Lifecycle — How Failures Route](flow-control/lifecycle.md#how-failures-route). See [Flow Control](flow-control/flow-control.md) for the full directive catalog.
 
 ## Timeouts
 
@@ -1779,7 +1779,7 @@ loss to its `session_end` record; see
 
 ### Recovery
 
-Recovery is expressed through the lifecycle stacks, not a separate handler DSL. `failure` and `blocked` are its natural homes, but recovery is **not limited to them** — flow control is universal, so a `success` stack can `resume` an agent that finished cleanly without producing what it promised, and a `finalize` stack can `retry` an error the terminal event downgraded. The available recovery actions are:
+Recovery is expressed through the lifecycle stacks, not a separate handler DSL. `failure` is its natural home, but recovery is **not limited to it**, so a `success` stack can `resume` an agent that finished cleanly without producing what it promised, and a `finalize` stack can `retry` an error the terminal event downgraded. `blocked` is the exception: it refuses every recovery (see [Lifecycle — How Failures Route](flow-control/lifecycle.md#how-failures-route)). The available recovery actions are:
 
 - **`retry`** — re-run the prompt with a fresh provider attempt. Its re-entry point is derived from whether the provider had launched, not from the event that asked for it.
 - **`resume`** — resume the agent session with its context intact and a follow-up message (provider must support session resume; pre-launch there is no session, and it surfaces `ResumeWithoutSession`).

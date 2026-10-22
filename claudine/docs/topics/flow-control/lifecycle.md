@@ -29,22 +29,55 @@ This page covers every event, how to write its actions, and what each action
 can read. [Flow Control](flow-control.md) explains the directives (`retry`,
 `proxy`, …) in depth.
 
+## Claudine Is a Lifecycle Host
+
+The lifecycle grammar (events, action lists, `when`/`then`/`else`, bundles)
+and the engine that fires events and routes failures belong to
+[Darkmatter](../../../../darkmatter/docs/topics/lifecycle/index.md). Darkmatter
+defines five document events: `initialize`, `composed`, `failed`, `cancelled`,
+and `finalize`. A program that runs documents is a **host**: it registers its
+own events and may rename two of Darkmatter's. Claudine:
+
+- registers `success` and `failure`, the paired terminal outcomes of the agent
+  run, which fire after composition;
+- registers `loop`, the iteration gate that runs after `finalize`;
+- renames `composed` to `start` and `failed` to `blocked`.
+
+`initialize`, `cancelled`, and `finalize` are guarantees Darkmatter makes to
+every host, so no host can rename them. Each event has exactly one name in a
+host, with no aliases: in a Claudine document, a `composed:` or `failed:` key
+is a parse error that names `start` or `blocked` instead (see
+[Validation](#validation)). The reverse also holds: run with `md compose`, a
+document's `start:`, `success:`, or `loop:` key is ordinary frontmatter data.
+
+```yaml
+# review.md, run with `claudine compose`
+start:                    # Darkmatter's `composed`
+  - say: "starting the review"
+blocked:                  # Darkmatter's `failed`
+  - warn: "review could not start: {{ err.msg }}"
+```
+
+What you write in a Claudine document is unchanged by this split. Claudine's
+failure routing has a few rules the plain Darkmatter model does not; they are
+listed in [How Failures Route](#how-failures-route).
+
 ## Lifecycle Properties
 
 Seven frontmatter properties are lifecycle events. An eighth, `loop`, is the
 loop's configuration, and can carry lifecycle actions of its own (see
 [Loop Gate Concerns](#loop-gate-concerns)).
 
-| Property | Document | Sequence or group container |
-|----------|----------|-----------------------------|
-| `initialize` | After shell-free frontmatter bootstrap, before body discovery, shell preflight, and schema validation | When reached, before preparation; the root sequence initializes before static preflight. Shell-free. |
-| `start` | Pre-flight checks passed; immediately before provider invocation | Preparation passed; immediately before children start. |
-| `success` | The provider completed and the completion verdict passed | Children settled with a successful container outcome. |
-| `blocked` | Preparation failed before the provider spawned | Container preparation failed before children started. |
-| `failure` | Provider or completion verdict failed | An unhandled child failure reached this container. |
-| `cancelled` | Cleanup after sibling-failure cancellation or Ctrl-C | Descendants settled after cancellation, before owner cleanup. |
-| `finalize` | Once after the terminal event, unless skipped or transferred by recovery | Once after the final attempt; successful results publish afterward. |
-| `loop` | Loop configuration and lifecycle gate after `finalize` | A group's or sequence's loop gate runs after each pass's `finalize`, as a document's does. |
+| Property | Darkmatter event | Document | Sequence or group container |
+|----------|------------------|----------|-----------------------------|
+| `initialize` | `initialize` | After shell-free frontmatter bootstrap, before body discovery, shell preflight, and schema validation | When reached, before preparation; the root sequence initializes before static preflight. Shell-free. |
+| `start` | `composed`, renamed | Pre-flight checks passed; immediately before provider invocation | Preparation passed; immediately before children start. |
+| `success` | Claudine's own | The provider completed and the completion verdict passed | Children settled with a successful container outcome. |
+| `blocked` | `failed`, renamed | Preparation failed before the provider spawned (see [the failure-stage table](#which-event-a-failure-selects)) | Container preparation failed before children started. |
+| `failure` | Claudine's own | Provider or completion verdict failed | An unhandled child failure reached this container. |
+| `cancelled` | `cancelled` | Cleanup after sibling-failure cancellation or Ctrl-C | Descendants settled after cancellation, before owner cleanup. |
+| `finalize` | `finalize` | Once after the terminal event, unless skipped or transferred by recovery | Once after the final attempt; successful results publish afterward. |
+| `loop` | Claudine's own | Loop configuration and lifecycle gate after `finalize` | A group's or sequence's loop gate runs after each pass's `finalize`, as a document's does. |
 
 `cancelled` accepts communications (`say`/`speak`, `effect`, `message`,
 `notify`, `stdout`, `stderr`, `info`, `warn`, `success`), expression side
@@ -126,6 +159,118 @@ active document, including its frontmatter. If it does so after the inline
 closure's stamp, keeping that stamp coherent is the author's responsibility, as
 it always was. See
 [Composition — Completion Verdict](../composition.md#completion-verdict).
+
+## How Failures Route
+
+Darkmatter's [lifecycle error handling](../../../../darkmatter/docs/topics/lifecycle/error-handling.md)
+describes the general model: which event a failure fires, what an event may do
+about it, and when `finalize` runs. Claudine follows that model with the
+additions below. They describe a document; containers have their own rules in
+[Sequence and group containers](#sequence-and-group-containers).
+
+```mermaid
+flowchart TD
+    I["initialize"] --> P{"preflight passes?"}
+    P -- "no" --> B["blocked"]
+    P -- "yes" --> S["start"]
+    S -- "proxy refused before launch" --> B
+    S --> L["launch, provider, completion verdict"]
+    L -- "passes" --> OK["success"]
+    L -- "fails" --> F["failure"]
+    OK -- "explicit error" --> F
+    B -- "explicit error" --> F
+    OK --> Z["finalize"]
+    B --> Z
+    F --> Z
+    F -- "accepted retry or resume:<br/>no finalize, no second initialize" --> P
+```
+
+### Which event a failure selects
+
+Claudine reports where a failure happened and whether the provider launched;
+the engine picks the event. A failure while preparing fires `blocked` only
+while no provider has launched. Every other failure fires `failure`.
+
+| What failed | Event |
+|---|---|
+| Composition, preflight, or a Claudine preflight check: a denied shell audit, the launch schema verdict, agent resolution, an include missing after `initialize` | `blocked` |
+| Internal setup before the provider launched, such as materializing the document or parsing a proxy target's lifecycle | `blocked` |
+| A refused proxy handoff (a cycle, a target that does not resolve, no owning coordinator) before the provider launched, **even when `start` already fired** | `blocked` |
+| Launch construction, the part of an attempt before the provider is spawned, after `start` | `failure` |
+| A `resume` refused as session-incompatible after the attempt re-entered at `start` | `failure` |
+| The provider fails, or the completion verdict fails | `failure` |
+| A refused handoff after the provider launched | `failure` |
+
+The third row means `blocked` can follow `start`. Under `md compose`, the
+`failed` event never follows `composed`.
+
+```yaml
+start:
+  - proxy: "./missing.md"   # the target does not resolve
+blocked:
+  - warn: "{{ err.code }}"  # composition.invalid_file_reference
+```
+
+This runs `initialize`, `start`, `blocked`, then `finalize`, and exits `1`
+without launching a provider. Because `start` unlocked shells, that `blocked`
+and `finalize` may run `shell` actions; a `blocked` reached from preflight
+cannot.
+
+### `blocked` cannot recover
+
+A document's `blocked` has no attempt to re-enter and, before launch, no
+session to continue. `retry` and `proxy` there are refused with
+`LifecycleSetupPhaseRecoveryUnsupported`, and `resume` with
+`ResumeWithoutSession`. The refusal does not fire `failure`: `finalize` runs
+with the original error as `err`, and the refusal then becomes the error the
+run reports. A `retry` or `resume` that asks for zero attempts is ignored.
+
+### Normal recovery and catch-only cleanup
+
+The engine runs `failure` and `finalize` in one of two modes,
+chosen by how the event was reached, never by what the event contains:
+
+- **Normal recovery.** `success`, `failure`, or `finalize` reached in the
+  ordinary way may end in `retry`, `resume`, or `proxy`, and Claudine carries
+  the recovery out (`blocked` refuses it, as above).
+- **Catch-only cleanup.** When an earlier event could not finish (a guard or a
+  `{{ … }}` span failed to evaluate, an action failed in `initialize`,
+  `start`, or `blocked`, an explicit `error` fired in one of those, or a
+  recovery was refused), the following `failure` and `finalize` run as cleanup.
+  Their actions run, but a recovery directive they end in is not dispatched.
+
+If a cleanup event itself fails to evaluate, its error replaces the earlier
+one: the next cleanup event reads it as `err`, and the run reports it.
+
+### An explicit `error` downgrades `success` and `blocked`
+
+`success` and `failure` are a pair, and `error` in `success` or `blocked` moves
+the run's terminal outcome to `failure`, so the `failure` stack runs next.
+Communications the first stack already emitted are not undone.
+
+- From `success`, `failure` runs with normal recovery, so it (or `finalize`)
+  can still `retry`, `resume`, or `proxy`. The
+  [verify-then-retry example](#verify-an-artifact-on-success-then-retry-once-from-finalize)
+  relies on this.
+- From `blocked`, `failure` and `finalize` run as catch-only cleanup.
+
+### `finalize` is not an unconditional `finally`
+
+`finalize` closes a document's lifecycle once per loop iteration. It runs
+after success, failure, `blocked`, `break`, and cancellation (after
+`cancelled`). Exactly four directives prevent it:
+
+- `skip` (in `initialize`) ends the run with no `finalize`.
+- `proxy` hands off before the source's `finalize`, which never runs; the
+  target runs its own lifecycle.
+- An accepted `retry` or `resume` re-enters at once without the current
+  attempt's `finalize`; `finalize` runs once when the lifecycle ends.
+
+Two more rules keep `finalize` from repeating:
+
+- A recovery chosen inside `finalize` happens after that `finalize` ran. The
+  old attempt never gets a second `finalize`; the new attempt has its own.
+- An error inside `finalize` fails the run without running `finalize` again.
 
 ## Writing an Event
 
@@ -1445,7 +1590,7 @@ The `effect` verb accepts a kebab-case name from the built-in catalog. Names are
 
 ## State Machine
 
-Claudine uses a `LifecycleRunGuard` to enforce correct state transitions and guarantee terminal signals are emitted.
+Claudine drives Darkmatter's `LifecycleRunGuard` (`darkmatter::lifecycle::run_guard`) to enforce correct state transitions and guarantee terminal signals are emitted. The signals below use Claudine's event names.
 
 ### Signal States
 

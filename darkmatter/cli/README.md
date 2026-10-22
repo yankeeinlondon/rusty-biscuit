@@ -191,6 +191,8 @@ md compose README.md --perf
 
 During `compose`, Darkmatter supports both body `::shell ...` directives and top-level frontmatter `$(...)` expressions. Both use the same whitelist/blacklist and approval flow. Frontmatter shell expansion stores trimmed `stdout` only; body shell expansion stores combined `stdout` + `stderr`. Use `--shell` to inspect the shell commands discovered across the compose tree before approving or executing them.
 
+A root document that authors `initialize`, `composed`, `failed`, `cancelled`, or `finalize` runs those lifecycle stacks around composition. See [Lifecycle Events](../docs/topics/lifecycle/index.md) and the [`compose` reference](../docs/cli/compose.md#lifecycle-events).
+
 ### Frontmatter Set
 
 ```bash

@@ -1,7 +1,11 @@
 # Claudine schemas
 
-The SimplifiedSchema files that type Claudine's Markdown frontmatter. This YAML
-is the only definition of Claudine's schemas; the files are hand-maintained.
+The SimplifiedSchema files that type Claudine's Markdown frontmatter. The files
+are hand-maintained. The shape of every lifecycle verb is Darkmatter's
+(`darkmatter/schemas/partials/lifecycle.yaml`): these files name those shapes
+with the reserved `darkmatter:` namespace (`say-short@darkmatter:lifecycle`)
+instead of copying them. A `darkmatter:` reference resolves from the schemas
+compiled into Darkmatter, wherever the referring file is.
 Darkmatter discovers the three trigger files through its schema locations, so
 a document under `claudine/` is validated against them in the editor (DMLS) and
 by `md schema validate`. The `claudine` binary embeds the same seven files and
@@ -15,11 +19,11 @@ them.
 
 | File | Kind | Role |
 | --- | --- | --- |
-| `action.yaml` | library (`kind: schema`) | the four action types (`communicate`, `flow`, `shell`, `expression`) and the two dictionary-bundle types (`bundle`, `initialize-bundle`) |
+| `action.yaml` | library (`kind: schema`) | the four action types (`communicate`, `flow`, `shell`, `expression`), the two dictionary-bundle types (`bundle`, `initialize-bundle`), and the `cancelled` selections, each verb's shape referenced from Darkmatter |
 | `lifecycle.yaml` | library (`kind: schema`) | the lifecycle stack types (`stack` and `initialize-stack`, typed three conditional levels deep; `cancelled-stack`, typed at all five levels the parser accepts) and the `loop:` block type |
 | `sequence-types.yaml` | library (`kind: schema`) | the sequence step and container types (`steps`, `step`, `task`, `group`), unrolled to three typed container levels |
 | `linking.yaml` | library (`kind: schema`) | the eleven optional linking keys of a linked skill, command, or agent |
-| `claudine.yaml` | trigger (`kind: schema-trigger`) | applies Claudine's frontmatter catalog to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
+| `claudine.yaml` | trigger (`kind: schema-trigger`) | applies Claudine's frontmatter catalog to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model`; types Darkmatter's `composed` and `failed` as errors that name `start` and `blocked` |
 | `inline-compose.yaml` | trigger (`kind: schema-trigger`) | applies inline-compose's document metadata to a document with a non-null `prompt` and no non-null `sequence` |
 | `sequence.yaml` | trigger (`kind: schema-trigger`) | applies the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`) to a document with a non-null `sequence` |
 | `review.yaml` | standalone schema (`$schema`) | the schema of a specification review document |
@@ -42,7 +46,15 @@ them (`*.yaml`), as regular files, when placing the bundle elsewhere.
 The lifecycle parser in `claudine/lib/src/composition/lifecycle/` remains the
 authority on what can run. Tests in `claudine/lib/tests/l1/claudine_schemas.rs`
 keep the action types aligned with its verb inventory and with Darkmatter's
-side-effect and expression-function catalogs.
+side-effect and expression-function catalogs; `claudine_schema_parity.rs`
+checks the event names and per-event action types against Claudine's event
+registry, and that the action types equal Darkmatter's neutral ones.
+
+Darkmatter's own baseline types its event names (`initialize`, `composed`,
+`failed`, `cancelled`, `finalize`) with the `md` host's verbs. On a document
+this catalog applies to, its declarations of `initialize`, `cancelled`, and
+`finalize` replace the baseline's, and `composed` or `failed` is an error
+whose description names the Claudine event to write instead.
 
 The frontmatter catalog includes `cancelled` on documents and containers. Its
 stack accepts communication, expressions, shells, and `stop`, and rejects

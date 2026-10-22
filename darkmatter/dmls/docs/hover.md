@@ -221,6 +221,33 @@ Not applied yet (**planned**):
 - Host globals (`err`, `timing`, `group`) and nested union members are not
   projected: a guard on `x.kind` narrows only `x.kind`, never `x`.
 
+## Formatting rule: globals inside a lifecycle stack
+
+Inside the value of one of md's lifecycle events (`initialize`, `composed`,
+`failed`, `cancelled`, `finalize`), an expression is hovered with that
+event's binding view, at any depth of the stack: a `{{ … }}` span, a `when`
+condition, or an expression-typed value. A cursor on a global the event
+declares, such as `err`, shows its declaration and whether the event can read
+it, with the reason when it cannot. The event's global wins over a
+frontmatter key of the same name, so the key's static value is not shown:
+
+```yaml
+err: shadow                       # a frontmatter key
+composed:
+    - info: "{{ err.msg }}"       # hover: err is unavailable in composed, and why
+failed:
+    - info: "{{ err.msg }}"       # hover: err is available in failed
+```
+
+Outside every stack, such as `{{ err }}` in the document body, `err` is the
+frontmatter key again and hovers with its static value.
+
+Hover on an event key itself is the ordinary schema hover, so it shows the
+description of whichever schema types the key. Under Claudine's schema, for
+example, `composed` and `failed` hover with the guidance to use Claudine's
+`start` and `blocked`. A schema problem's diagnostic does not repeat that
+description; hover is where it appears.
+
 ## Formatting rule: interpolation literal hover
 
 A cursor anywhere inside an interpolation literal (`{{{ … }}}`) renders an `**Interpolation literal**` block showing the composed output — the inner content wrapped in `{{ … }}` as inline code (a fenced block when multiline, with backtick fences sized to survive content containing backticks) — followed by the note that the content is rendered as literal `{{ … }}` text and is not interpolated. The body is assembled by the pure `literal_hover_markdown` function in `src/providers/dsl.rs`. The hover range is the literal's complete outer `{{{ … }}}` span.

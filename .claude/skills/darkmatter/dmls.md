@@ -428,6 +428,17 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   `hover_markdown*` take a `site: &TypeScope` and refine it with
   `branch_scope`. Lifecycle/task `when` guards do not narrow frontmatter
   actions in DMLS (no host action model); see `dmls/docs/hover.md`.
+- Lifecycle stacks: `overlay/event_views.rs` maps a root key to an md event
+  through `md_host::registry().resolve_key` (never a hand list) and gives
+  every `{{ … }}` span, `when` condition, and expression-typed value inside
+  that stack the event's registry `BindingView`. Completion offers only the
+  globals the event may read; `err` where the event has none is
+  `dm.expression.unavailable_global` (the view's reason, never `fm.err`).
+  Host-catalog globals (`seq`, `loop`, `group`) are `ExecutionDependent` in
+  every view (`validation_view`), and a host catalog that fails to load is the
+  warning `dm.schema.host_catalog`. A schema problem's diagnostic carries the
+  library's message without the declared description; guidance such as
+  "use `start`" on Claudine's `composed` shows in hover only.
 - Matching trigger payloads feed completion and hover as well as
   diagnostics. The editor's property shape is
   `EffectiveSchema::property_shape` (base → extensions → matching trigger

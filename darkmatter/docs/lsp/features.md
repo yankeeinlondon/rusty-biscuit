@@ -160,6 +160,7 @@ This matrix lists every individual Darkmatter feature and the LSP capabilities t
 Frontmatter coverage notes:
 
 - The frontmatter model descends into **sequences**. Each list item is its own entry. Diagnostics, hover, completion, and navigation reach the keys and values inside list items (a lifecycle item's `when`, its `then`/`else` bodies, action operands, `proxy … with` values), and a schema problem inside an array ranges the failing element rather than the whole sequence. The synthetic item marker and index stay silent.
+- Inside md's lifecycle event values (`initialize`, `composed`, `failed`, `cancelled`, `finalize`), every expression — a `{{ … }}` span at any depth, a `when` condition, or an expression-typed value — is validated, hovered, and completed with that event's binding view rather than the baseline's.
 - Frontmatter **string scalars** are scanned for interpolation spans, but only on the surfaces a diagnostic owns. The nested-span rule applies only to Claudine's single-pass lifecycle values and predicates, never to mixed strings or arbitrary whole-value keys.
 - Exact source projection exists only for untagged **plain, single-quoted, and double-quoted** scalars (plus literal `|` blocks for the nested-span rule). Folded `>` blocks, tagged scalars, and aliases keep the generic schema diagnostic or a whole-scalar range and are never given a fabricated expression range or an edit.
 
@@ -193,8 +194,9 @@ Expression diagnostics follow one severity policy:
 |------|----------|-----|
 | `dm.expression.malformed`, schema-typed frontmatter value with exact projection | Error | The schema declares the value is an expression, so a parse failure never evaluates. |
 | `dm.expression.malformed`, document-body span | Warning | A body `{{ … }}` is only *inferred* to be an expression; it may be foreign template syntax. Authors can opt out with `\{{`. |
-| `dm.expression.undeclared_property` | Warning | Advisory: the undeclared document property is valid and `null` unless supplied at runtime. DMLS uses Darkmatter's baseline binding view, so a host global such as Claudine's `err` is reported here too. |
+| `dm.expression.undeclared_property` | Warning | Advisory: the undeclared document property is valid and `null` unless supplied at runtime. Inside an md lifecycle stack the event's binding view declares `err` and `timing`; a global a host catalog declares (Claudine's `seq`, `loop`, `group`) is never reported. |
 | `dm.expression.unknown_function` | Error | The function catalog is closed, so compose fails on the call. |
+| `dm.expression.unavailable_global` | Error | Inside an md lifecycle stack, the event declares the global unavailable (`err` in `composed`), so the read fails when the stack runs. |
 | `dm.expression.nested_span_in_literal` | Error | On a single-pass surface the braces are never interpolated, and Claudine refuses the document. |
 
 The authoritative per-code list is [DMLS diagnostics — Severity](../../dmls/docs/diagnostics.md#severity). A new diagnostic takes its severity from this policy rather than from a neighboring code.

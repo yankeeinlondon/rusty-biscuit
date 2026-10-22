@@ -29,6 +29,14 @@ works the same in an installed binary as in a checkout (see
   watched file is read, no policy is renewed, and no date is stamped. Content Policy's
   [editor guide](../../../content-policy/docs/topics/policy-lifecycle.md#get-help-in-the-editor)
   lists what the schema checks and the values only evaluation rejects.
+- The lifecycle events `md compose` runs (`initialize`, `composed`, `failed`,
+  `cancelled`, and `finalize`), typed with md's actions from the shipped
+  [`md-lifecycle.yaml`](../../schemas/partials/md-lifecycle.yaml) partial,
+  which builds on the neutral action types of
+  [`lifecycle.yaml`](../../schemas/partials/lifecycle.yaml). An action md does
+  not provide passes untyped, and another host's event keys stay ordinary
+  frontmatter; see
+  [Lifecycle Event Typing](../topics/schemas/definition.md#lifecycle-event-typing).
 - The `$schema` property itself, which documents may use to declare their own
   schema or override baseline definitions.
 

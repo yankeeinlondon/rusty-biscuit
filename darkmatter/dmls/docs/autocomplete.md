@@ -89,6 +89,28 @@ steps:
     # offers `text`, not `run`
 ```
 
+### Lifecycle stacks
+
+The items of md's lifecycle events (`initialize`, `composed`, `failed`,
+`cancelled`, `finalize`) complete from the baseline's
+[lifecycle typing](../../docs/topics/schemas/definition.md#lifecycle-event-typing),
+so they offer md's verbs only (`info`, `stdout`, `shell`, `set`, `stop`, …).
+A verb only another host provides, such as `say`, `retry`, `notify`, or
+`proxy`, is accepted there but never offered, and `shell` is not offered in
+`initialize`. A key only another host treats as an event, such as Claudine's
+`start`, is untyped under the baseline and offers neither. `then` and `else`
+are not offered inside these stacks, because md's conditionals type them with
+one pattern key.
+
+```yaml
+composed:
+  - |      # offers `info`, `warn`, `shell`, `set`, `stop`, ...; not `say`
+```
+
+Inside a `{{ … }}` span or a `when` condition in such a stack, the
+interpolation candidates (described below) also include the globals that
+event may read: `err` and its members in `failed`, but not in `composed`.
+
 ### Schema definitions
 
 Inside a schema definition (a standalone schema file, a frontmatter
@@ -124,7 +146,7 @@ without a number.
 
 ## Interpolation completion (`{{ … }}`)
 
-Inside an interpolation, the DSL provider offers four candidate families:
+Inside an interpolation, the DSL provider offers these candidate families:
 
 1. **Frontmatter keys** — the document's own top-level keys, plus the
    top-level properties its own `$schema` declares but leaves unset. A key
@@ -140,6 +162,10 @@ Inside an interpolation, the DSL provider offers four candidate families:
    eight list-formatting functions (`as_csv`, `as_tsv`, `as_space_separated`,
    `as_line_separated`, `as_unordered_list`, `as_ordered_list`, `as_json`,
    `as_json5`).
+5. **Host globals** — every global a host catalog in the document's schema
+   roots declares, such as Claudine's `seq`, `loop`, and `group`.
+6. **Event globals** — inside an md lifecycle stack only, the globals that
+   event may read (see [Lifecycle stacks](#lifecycle-stacks)).
 
 Matching is **prefix-based and case-sensitive**. `{{ ctx.pa }}` offers matching
 `ctx.*` variables; it does not offer the removed `*_list` aliases.

@@ -2,8 +2,6 @@
 
 > **Status: v1 catalog implemented.** The frontmatter, file/directory, and
 > host-policy-gated network verbs ship as `darkmatter::effects::EffectEngine`.
-> The full specification lives in the completed feature
-> [`more-context-variables`](../../features/_completed/2026-03-29-more-context-variables/spec.md).
 
 Side Effects are the counterpart to the read-only [Expression Engine](./darkmatter-expressions.md).
 Where expression functions only *report* on state, side effects **mutate**
@@ -15,14 +13,23 @@ by hard boundaries.
 | | Expression functions | Side effects |
 |---|---|---|
 | Purpose | read / report | mutate |
-| Runs during `md compose`? | yes | **never** |
-| Invoked by | the compose pipeline | an external orchestrator only |
+| Runs during `md compose`? | yes | only from a [lifecycle event](./lifecycle/index.md) action |
+| Invoked by | the compose pipeline | a lifecycle host (`md compose`, Claudine) |
 | Module | `compose::expression` | `effects` (separate) |
 
-Composing a document is **pure** — it never triggers a side effect. The
-side-effect engine is a library surface that only a host invokes at
-well-defined moments — for example, Claudine's
-[lifecycle events](../../../claudine/features/2026-05-12-lifecycle/spec.md).
+Composing a document's body is **pure**: the body and its frontmatter values
+never trigger a side effect. Side effects run only as actions of a
+[lifecycle event](./lifecycle/index.md), which a host fires at well-defined
+moments. `md compose` is such a host, so an `ensure_file` in `initialize` can
+create the file the body then includes:
+
+```yaml
+initialize:
+    - ensure_file: ["notes.md", "# Notes"]   # creates notes.md only if it is missing
+```
+
+Every other surface (`md render`, `md schema validate`, the library compose
+API without a host run, DMLS) stays passive and runs no side effect.
 Darkmatter owns the engine; the host drives it.
 
 ## The Read/Write Seam
@@ -61,9 +68,6 @@ Both enforced inside Darkmatter, both configured by the host:
 Markdown frontmatter writers re-hash a `hash:` property automatically by
 default. Full-file overwrite and deletion are expressly out of scope for v1.
 
-See the [spec](../../features/_completed/2026-03-29-more-context-variables/spec.md)
-for the full technical design, signatures, and host integration surface.
-
 `http_post` uses the same `biscuit-file` fetch policy as compose remote reads,
 so denied hosts are rejected before any network request is attempted.
 
@@ -71,5 +75,4 @@ so denied hosts are rejected before any network request is attempted.
 
 - [Darkmatter Expressions](./darkmatter-expressions.md)
 - [Context Variables](state-management/context-variables.md)
-</content>
-</invoke>
+- [Lifecycle Events](./lifecycle/index.md)

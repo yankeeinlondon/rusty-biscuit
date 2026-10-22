@@ -171,6 +171,20 @@ You can also write `address@this` if you prefer to make that explicit; both
 forms mean the same thing. A type from another file needs its source:
 `address@./address-types.yaml`.
 
+Darkmatter's own reusable types are reached with the reserved source
+`darkmatter:<stem>` instead of a path, so a schema in any repository can use
+them without knowing where Darkmatter is installed:
+
+```yaml
+kind: schema
+types:
+    notice: communicate@darkmatter:lifecycle   # one say/info/warn/… action
+```
+
+See [Reserved Darkmatter References](./definition.md#reserved-darkmatter-references-namedarkmatterstem)
+for the rules, and [Lifecycle Event Typing](./definition.md#lifecycle-event-typing)
+for the lifecycle types Darkmatter ships.
+
 Because every entry is also a property, keep helper types that should not
 become document properties in a separate file and import them by name. A
 document that uses `recipient: address@./address-types.yaml` gains a

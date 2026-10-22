@@ -3,7 +3,11 @@
 Darkmatter owns the lifecycle grammar and engine; a host (today Claudine)
 supplies its names, services, and the work only it can do. The module's `//!`
 docs (`darkmatter/lib/src/lifecycle/mod.rs`) are the map; this page is the
-working summary.
+working summary. User docs: `darkmatter/docs/topics/lifecycle/index.md`
+(events, grammar, the `md` host, host registration) and `error-handling.md`
+(failure routing, `err`, recovery modes, the `finalize` rules); Claudine's
+host view is `claudine/docs/topics/flow-control/lifecycle.md`. Change those
+pages with the behavior.
 
 ## What lives where
 
@@ -21,7 +25,7 @@ working summary.
 | Policy kernel | `policy.rs` | Every lifecycle decision, pure: `recovery_verdict(SubjectKind, signal, control)` (`Admit`/`Ignore`/`Refuse(Refusal)`), `refusal_route` (`FinalizeIfOwed`, `FinalizeIfOwedReadingRefusal`, `FailureThenFinalize`), `failure_event(FailureStage, launched)` (`blocked` or `failure`), `proxy_budget_exhausted(documents_in_chain)` (the chain counts its origin), `refused_recovery(EvaluationMode, control)` (the recovery verb a cleanup refuses). `SubjectKind` is `Document`, `RootSequence`, `Sequence`, or `Group`. `Run`, `ContainerRunner`, and Claudine's drivers call it; Claudine maps a `Refusal` to its error with `CompositionError::from_lifecycle_refusal`, and Claudine's one-implementation guards (`claudine/{lib,cli}/tests/l1/lifecycle_one_implementation_guard.rs`) fail on a Claudine copy of any of these |
 | Routing and admission | `runtime.rs`, `control.rs` | `decide_lifecycle_transition`, `LifecycleCatchProtocol`, `EvaluationMode` (normal recovery, fatal-evaluation, refusal, cancellation cleanup), `ContainerRunner`, `decide_control` |
 | Request/reply driver | `run.rs`, `run/protocol.rs` | `Run::{start, pending, reply, cancel, shell_permission}`; tickets bind run/document/attempt/iteration/generation; a stale, duplicate, foreign, wrong-kind, or post-cancel reply is a `ReplyError` and changes nothing |
-| The `md` host | `md_host.rs` (+ CLI `darkmatter/cli/src/commands/compose/lifecycle.rs`) | Core-only profile (`registry()` is `EventRegistry::md()`, `UnknownVerbPolicy::IgnoreUnprovided(UNPROVIDED_VERBS)`: another host's verb or an unknown one is an inert `Ignored` node, warned once per reached occurrence; every verb `md` runs parses strictly, and per-event action types are enforced); `MdStackHost`, `MdShellRunner` (permission → exact approval per segment → blacklists), `MdDiagnostics` (its `DiagnosticCatalog::event_name` gives `md` spellings in default texts), and `drive`, the request/reply loop over `Run`. Only documents authoring a core event key take the lifecycle path; an `initialize` error is reported as the preparation failure so `failed` runs; a `composed` error or a failed write ends failed without `failed`. Nothing runs unless `drive` is called |
+| The `md` host | `md_host.rs` (+ CLI `darkmatter/cli/src/commands/compose/lifecycle.rs`) | Core-only profile (`registry()` is `EventRegistry::md()`, `UnknownVerbPolicy::IgnoreUnprovided(UNPROVIDED_VERBS)`: another host's verb or an unknown one is an inert `Ignored` node, warned once per reached occurrence; every verb `md` runs parses strictly, and per-event action types are enforced); `MdStackHost`, `MdShellRunner` (permission → exact approval per segment → blacklists), `MdDiagnostics` (its `DiagnosticCatalog::event_name` gives `md` spellings in default texts), and `drive`, the request/reply loop over `Run`. Only documents authoring a core event key take the lifecycle path; an `initialize` error is reported as the preparation failure so `failed` runs; a `composed` error or a failed write ends failed without `failed`. `stamp_lifecycle_shells` types placeholders by the root document's effective schema (as body `::shell` does), so a value the schema rejects is refused before the command runs. Nothing runs unless `drive` is called. The CLI's `TerminalEffects` styles a `stdout` action only when stdout is a terminal; on a pipe the text joins the document as authored. The locked-shell message names the host's unlock event through `DiagnosticCatalog::event_name(Start)` (`executor.rs::error_or_action`), so `md` says `composed` while `ShellRunError::BeforePreflight`'s `Display` keeps Claudine's traced `start`. `MdDiagnostics` classifies nothing, so under `md` every `err` facet but `msg` is `null` |
 
 ## Rules
 

@@ -1197,6 +1197,7 @@ Grammar: `type_ref := ident ('(' constraints ')')? ('[]' ('(' constraints ')')?)
 - `Name[](constraints)@file` — an array of the inlined `Name`, with `constraints` on the array.
 - `Name -> description` — a use-site description replaces the inherited one; omitting it keeps the inherited description.
 - `@this` (or no `@` at all) — the current schema (self-target), including inline top-level documents.
+- `@darkmatter:<stem>` — a type from one of the schema partials Darkmatter ships, wherever the importing schema lives (see [Reserved Darkmatter References](#reserved-darkmatter-references-namedarkmatterstem)).
 
 A constraint list before `[]` (`Name(c)[]`) parses, but only a union-typed named type accepts one, and only its property markers; on any other named type it is a schema error, so write the list's constraints after `[]`. Adding `[]` to a named type that is already an array is an error. A reference to a **union-typed** named type accepts `[]` with list constraints, the `required`, `generated`, and `eager` markers (before or after `[]`), and a description, in all three forms (bare, `@this`, and `Name@file`); any other constraint on it is an error. See [Named Union References](#named-union-references).
 
@@ -1226,6 +1227,45 @@ Rules:
 >
 > The sharing ends when that resolution finishes: nothing is kept between
 > calls, and it reduces copying without promising a fixed end-to-end speedup.
+
+#### Reserved Darkmatter References (`Name@darkmatter:<stem>`)
+
+`Name@darkmatter:<stem>` names the type `Name` in the schema partial
+`darkmatter/schemas/partials/<stem>.yaml` that Darkmatter ships. Like `this`,
+`darkmatter:<stem>` is a reserved word, not a file reference, so it means the
+same thing whoever writes it and wherever the schema lives:
+
+```yaml
+# schemas/notify.yaml, in any repository
+kind: schema
+types:
+    talk: communicate@darkmatter:lifecycle   # exactly one communicate action
+    tally: count@darkmatter:lifecycle        # a non-negative integer or a whole-value {{ … }}
+    steps: md-stack@darkmatter:md-lifecycle -> what md runs for this event
+```
+
+- **The disk is never read.** The partial comes from the copy compiled into
+  the library, whether the importing schema is a file on disk, a schema
+  Darkmatter embeds, or a document in a host's embedded schema bundle. The
+  reference therefore works the same in a checkout, in an installed binary,
+  and in a directory that holds only the host's own files.
+- **The partial's own references stay inside the shipped partials.**
+  `md-lifecycle.yaml` writes `info-short@./lifecycle.yaml`; that always
+  reaches Darkmatter's `lifecycle.yaml`, even when the importing schema's
+  folder holds a `lifecycle.yaml` of its own.
+- **It is not a file dependency.** A shipped partial adds no edge to
+  `ResolvedSchema.imports`, and DMLS does not watch it.
+- **`<stem>` is a bare file stem**, with no folder and no `.yaml`. A stem no
+  shipped partial has (`darkmatter:bogus`, `darkmatter:fm.yaml`,
+  `darkmatter:../fm`) is `SchemaError::NoMatch`, whose message names the whole
+  reference. A known stem without the type is `SchemaError::UnknownNamedType`.
+- Use-site constraints, `[]`, and a `->` description compose exactly as they
+  do on `Name@file`.
+
+Darkmatter ships the partials `fm`, `style`, `context-variables`, `error`,
+`timing`, `lifecycle`, and `md-lifecycle`. The two lifecycle partials are the
+ones written for reuse by other schemas; see
+[Lifecycle Event Typing](#lifecycle-event-typing).
 
 #### Merging use-site constraints
 
@@ -1937,6 +1977,88 @@ on disk:
 
 Resolving the authored `darkmatter.yaml` from a checkout with the ordinary
 disk resolver gives the same typed schema and the same JSON Schema.
+
+### Lifecycle Event Typing
+
+The baseline types the five lifecycle events `md compose` runs: `initialize`,
+`composed`, `failed`, `cancelled`, and `finalize` (see
+[Lifecycle](../lifecycle/index.md) for when each runs and what its actions
+do). `fm.yaml` imports their types from the shipped `md-lifecycle` partial
+through a [reserved reference](#reserved-darkmatter-references-namedarkmatterstem):
+
+```yaml
+initialize: "md-initialize-stack@darkmatter:md-lifecycle -> actions run before the document composes; shell-free"
+composed: "md-stack@darkmatter:md-lifecycle -> actions run after the document composed"
+```
+
+Each event takes a list of actions or a dictionary of verbs, and a list item
+can be a `when`/`then`/`else` conditional. A stack is typed three conditional
+levels deep; a `then`/`else` body below that is accepted loosely, and the
+lifecycle parser still checks it when the stack runs. A list item is one of:
+
+| Item | Example | Typed as |
+|---|---|---|
+| a communicate verb: `stdout`, `stderr`, `info`, `warn`, `success`, `message` | `info: done` or `info: { text: done }` | short form (a string) or closed long form |
+| a flow verb: `stop`, `skip`, `error` | `error: { reason: no title }` | short or closed long form |
+| `shell` (not in `initialize`) | `shell: ./publish.sh` | short or long form |
+| `set`, a side effect, or an expression function | `set: { status: done }` | the key is checked, its arguments are left to the parser |
+| a dictionary of verbs (a bundle) | `{ info: hi, when: draft }` | short forms plus `when` and `no_error` |
+| a conditional | `when: draft` with `then:` / `else:` | `when` is an `expression` |
+| a bare zero-argument verb | `- stop` | a string; completion suggests md's bare verbs |
+| any other action key | `say: hi` | untyped and never suggested |
+
+Action names are offered with `suggest(...)`, not closed with `enum(...)`, so
+the last row is deliberate: an action md does not provide, such as another
+host's `say` or `retry`, passes the schema and `md compose` ignores it with a
+warning. That open arm never matches a verb md provides, nor `when`, `then`,
+`else`, or `no_error`, so a misspelled long form of an md verb, or a `shell`
+in `initialize`, cannot slip through it:
+
+```yaml
+composed:
+    - info: "composed {{ title }}"   # valid
+    - say: hello                     # valid: not an md verb, ignored by md compose
+    - when: draft
+      then:
+          - warn: still a draft      # valid
+failed:
+    - info: { message: oops }        # schema error: info's long form takes `text`
+initialize:
+    - shell: ./prepare.sh            # schema error: no shell in initialize
+```
+
+`then` and `else` share one pattern key in md conditionals, which keeps the
+baseline small enough to prepare for every document. Two consequences: only
+the lifecycle parser, not the schema, requires `then`, and the editor does not
+complete `then`/`else` inside these stacks.
+
+The baseline types only md's own event names. A key that only another host
+gives meaning, such as Claudine's `start` or `blocked`, is ordinary untyped
+frontmatter under the baseline. A host types its own events in its own schema,
+which overrides the baseline like any document schema; Claudine's, for
+example, declares `composed` and `failed` as `null`, with descriptions naming
+its `start` and `blocked`, so a document it handles reports `composed:` as an
+error at `/composed`.
+
+#### The two lifecycle partials
+
+| Partial | Holds | Use it for |
+|---|---|---|
+| `lifecycle` | `<verb>-short` and `<verb>-long` for every verb the lifecycle parser knows, including the verbs only a host provides (`say`, `notify`, `retry`, `proxy`, `prep`, `break`, …); `interpolation` and `count`; the categories `communicate`, `flow`, `shell`, and `expression`, each exactly one verb in short or long form; `bundle`, and `initialize-bundle`, which has no `shell` | building a host's own action types |
+| `md-lifecycle` | md's profile: `md-stack`, `md-initialize-stack`, and the item, conditional, and bundle types they are built from | typing a key with exactly md's actions |
+
+Both are types-only: neither ever applies to a document by itself. `set` and
+the side-effect and expression-function verbs have a short form only. A host
+schema reuses a verb or a category by reference:
+
+```yaml
+kind: schema
+types:
+    start-action:
+        - communicate@darkmatter:lifecycle
+        - shell@darkmatter:lifecycle
+        - "{ say: say-short@darkmatter:lifecycle }"
+```
 
 ### Selecting the Baseline
 

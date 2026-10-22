@@ -16,6 +16,12 @@ prefer. `@` is only needed for a type from another file, such as
 `person@./people.yaml`. A bare reference also survives renaming the file,
 which a `@./this-file.yaml` self-reference does not.
 
+Besides `this`, one other right-hand side is a reserved word rather than a
+file: `darkmatter:<stem>` names a type in one of the schema partials
+Darkmatter ships, such as `count@darkmatter:lifecycle`. It resolves the same
+from any schema, on disk or embedded, and never reads the disk; see
+[Reserved Darkmatter References](./definition.md#reserved-darkmatter-references-namedarkmatterstem).
+
 See [External Schemas](./authoring-schemas.md#external-schemas) for an
 authoring walkthrough and
 [Cross-File Named-Type Imports](./definition.md#cross-file-named-type-imports-namefile)

@@ -186,11 +186,13 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 | `dm.schema.invalid_file_reference` | A `file(...)`-typed value failed to parse, resolve, or match a file. |
 | `dm.schema.invalid_suggestion` | A `suggest(...)` candidate is invalid metadata for its target schema (type, range, integer, length, not-empty, or pattern violation, or unrepresentable number syntax). **Warning.** |
 | `dm.schema.document_malformed` | A recognized standalone SimplifiedSchema envelope is malformed (missing or non-mapping `types`, unsupported tagged-envelope keys, or an invalid payload) and no more precise declaration or definition diagnostic claims the failure. Ranged over the whole schema document. |
+| `dm.schema.host_catalog` | **Warning.** A host global catalog in the document's schema roots (a `kind: schema` file with a `$schema` mapping of globals and no `types`, such as Claudine's `globals.yaml`) failed to load. The message names the file, the field, and the reason; it is placed at the top of the document. The globals that catalog declares are unknown to this document, so expressions reading them are checked as document properties; every catalog that did load keeps working. Source `darkmatter.schema`. |
 | `dm.style.unknown_key` | A `style:` key the style schema does not recognize. |
 | `dm.style.deprecated_key` | A deprecated `style:` key (a canonical replacement exists). |
 | `dm.expression.malformed` | An `expression`-typed value that does not parse. Emitted only for untagged single-line plain and quoted scalars; block and tagged values keep the schema problem. Pending `{{ … }}` / `$(…)` values are deferred. |
-| `dm.expression.undeclared_property` | **Warning (advisory).** A bare root of an `expression`-typed value that is an undeclared document property: valid, of unknown type, and `null` unless supplied at runtime. DMLS classifies against Darkmatter's baseline binding view and supplies no host globals, so Claudine's `err`, `timing`, and `group` are reported like any other undeclared property, beneath a lifecycle event or not. `current` is a reserved namespace and is never reported. |
-| `dm.expression.unknown_function` | **Error.** A call to a function outside Darkmatter's closed catalog, ranged on the function name, in every branch. Compose fails on the call. |
+| `dm.expression.undeclared_property` | **Warning (advisory).** A bare root of an `expression`-typed value that is an undeclared document property: valid, of unknown type, and `null` unless supplied at runtime. A root is classified against the binding view of its site: inside an md lifecycle stack (`initialize`, `composed`, `failed`, `cancelled`, `finalize`) that event's view, which declares `err` and `timing`; elsewhere Darkmatter's baseline view, where `err` and `timing` are document properties like any other. A global a host catalog in the document's schema roots declares (Claudine's `seq`, `loop`, and `group`) is never reported, inside a stack or not. `current` is a reserved namespace and is never reported. |
+| `dm.expression.unknown_function` | **Error.** A call to a function outside Darkmatter's closed catalog, ranged on the function name, in every branch. Compose fails on the call. Also checked in every `{{ … }}` span and `when` condition inside an md lifecycle stack. |
+| `dm.expression.unavailable_global` | **Error.** A read, inside an md lifecycle stack, of a global the event's binding view declares unavailable: `err` in `initialize` or `composed`, which handle no failure. The message names the event and the view's reason. Checked in `{{ … }}` spans at any depth of the stack, `when` conditions, and expression-typed values. It never falls back to a frontmatter key of the same name, so an `err:` key does not silence it. A host-catalog global is never reported, because the editor cannot know whether the stack runs inside a loop or a group. |
 | `dm.expression.nested_span_in_literal` | A `{{ … }}` inside a quoted string literal on a single-pass lifecycle surface — a whole-value verb operand (in a list item, a `then`/`else` body, a dictionary event, or `loop.gate`), a `set` or `with` value, or a `when` / `while` / `until` predicate — where it is never interpolated. A `when` is checked where the Claudine extension types it as an expression: an event's or `loop.gate`'s list items and the items of their `then`/`else` bodies; deeper guards are accepted loosely, and Claudine itself checks them before launch. Offers **Rewrite with + concatenation** when a safe rewrite exists (not for folded or tagged scalars, or a literal that spans lines). |
 
 Every schema-validation diagnostic (`dm.schema.type_mismatch`,
@@ -200,6 +202,10 @@ meta-type `dm.schema.invalid_type_definition`/`invalid_schema_shape`) carries
 the validator's JSON Pointer in `data.instance_path`, beside its range. The
 range alone does not say which list item or field failed: a list item shares
 its line with its first field, and a missing key ranges its parent mapping.
+The message is the validator's own text; unlike `md schema validate`, it does
+not append the failing property's schema description. Hover on the key shows
+that description (for example, the guidance Claudine's schema gives on
+`composed`).
 
 ```yaml
 content_policy:
@@ -281,6 +287,7 @@ The expression family follows one ladder: a **warning** means the construct
 | `dm.expression.malformed` on a body `{{ … }}` span | Warning (the braces may be foreign template syntax) |
 | `dm.expression.undeclared_property` | Warning (advisory: the property is valid) |
 | `dm.expression.unknown_function` | Error (the function catalog is closed) |
+| `dm.expression.unavailable_global` | Error (the read fails when the stack runs) |
 | `dm.expression.nested_span_in_literal` | Error |
 
 ## Ranging

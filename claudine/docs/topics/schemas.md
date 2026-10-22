@@ -90,16 +90,18 @@ document they accept can still be rejected by the parser (see
 
 | File | Kind | Holds |
 |---|---|---|
-| [`action.yaml`](../../schemas/action.yaml) | library (`kind: schema`) | the four action types and the two dictionary-bundle types |
+| [`action.yaml`](../../schemas/action.yaml) | library (`kind: schema`) | the four action types and the two dictionary-bundle types, each verb's shape referenced from Darkmatter |
 | [`lifecycle.yaml`](../../schemas/lifecycle.yaml) | library (`kind: schema`) | the stack types (`stack`, `initialize-stack`, `cancelled-stack`) and the `loop:` block type |
 | [`sequence-types.yaml`](../../schemas/sequence-types.yaml) | library (`kind: schema`) | the sequence step and container types (`steps`, `step`, `task`, `group`) |
 | [`linking.yaml`](../../schemas/linking.yaml) | library (`kind: schema`) | the eleven optional linking keys of a linked skill, command, or agent |
-| [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, applied to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
+| [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, applied to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model`; declares Darkmatter's `composed` and `failed` as errors naming `start` and `blocked` |
 | [`inline-compose.yaml`](../../schemas/inline-compose.yaml) | trigger (`kind: schema-trigger`) | inline-compose's document metadata (`prompt`, `hash`, `last_updated`), applied to a document with a non-null `prompt` and no non-null `sequence` |
 | [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: schema-trigger`) | the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` |
 
 A library reaches a document only through a trigger's imports, so the seven
-files work as one bundle. Copy all of them together.
+files work as one bundle. Copy all of them together. The bundle does not need
+Darkmatter's schema files beside it (see
+[Verb shapes are Darkmatter's](#verb-shapes-are-darkmatters)).
 
 ### When the schemas apply
 
@@ -211,6 +213,68 @@ cancelled:
     - stop                    # valid: ends only this stack
     - retry: 2                # invalid: cancelled allows no retry
 ```
+
+### Verb shapes are Darkmatter's
+
+Darkmatter owns the lifecycle grammar (see
+[Darkmatter Lifecycle](../../../darkmatter/docs/topics/lifecycle/index.md)), so
+it also owns the schema shape of every lifecycle verb, including verbs only
+Claudine runs, such as `say`, `retry`, `proxy`, and `break`. Those shapes live
+in Darkmatter's partial
+[`lifecycle.yaml`](../../../darkmatter/schemas/partials/lifecycle.yaml), as
+`<verb>-short` and `<verb>-long` types. Claudine's `action.yaml` and
+`lifecycle.yaml` choose which verbs each action type and event admits, and
+name each shape instead of copying it:
+
+```yaml
+communicate:
+    say:
+        - say-short@darkmatter:lifecycle
+        - say-long@darkmatter:lifecycle
+```
+
+`Name@darkmatter:<stem>` is a **reserved reference**. It always means type
+`Name` in Darkmatter's shipped partial `<stem>.yaml`, read from the schemas
+compiled into Darkmatter, never from disk. It therefore resolves the same way
+whether the referring file is in the monorepo checkout, embedded in the
+`claudine` binary, or copied into `~/schemas` without Darkmatter's files, where a relative path to
+`darkmatter/schemas/` would not exist. An unknown stem is a schema error
+naming the reference.
+
+### Darkmatter's event names in a Claudine document
+
+Claudine calls Darkmatter's `composed` and `failed` events `start` and
+`blocked` (see [Lifecycle](flow-control/lifecycle.md#claudine-is-a-lifecycle-host)).
+Which names are typed depends on which schemas apply:
+
+| Key | Darkmatter's baseline alone | With Claudine's trigger |
+|---|---|---|
+| `initialize`, `cancelled`, `finalize` | typed with the `md` host's verbs | typed with Claudine's verbs; Claudine's declaration replaces the baseline's |
+| `composed`, `failed` | typed with the `md` host's verbs | declared `null`, so any non-null value is an error |
+| `start`, `blocked` | untyped frontmatter data | typed lifecycle events |
+
+`claudine.yaml` gives the two `null` declarations a description naming the
+event to write instead:
+
+```yaml
+prompt: "review the diff"
+composed:                     # invalid: Claudine names this event `start`
+    - info: "starting"
+```
+
+`md schema validate` prints that description with the error. In the editor,
+DMLS shows it when you hover the key; the diagnostic itself carries only the
+schema error, not the description. The lifecycle parser reports the same
+mistake as `LifecycleRenamedEvent` before anything runs (see
+[Lifecycle — Validation](flow-control/lifecycle.md#validation)).
+
+Two parity tests keep the schemas and the event registry in step:
+`claudine/lib/tests/l1/claudine_schema_parity.rs` checks that Claudine's event
+names and per-event action types match Claudine's registry, that the
+Darkmatter spellings name Claudine's events, that Claudine's declarations
+override the baseline, and that Claudine's action types resolve to
+Darkmatter's definitions. `darkmatter/lib/tests/l1/lifecycle_schema_parity.rs`
+checks the baseline against the `md` host the same way.
 
 ### Single actions, long forms, and bundles
 
@@ -473,7 +537,10 @@ triggers <file>` lists the locations, the shadowed files, and which triggers
 matched.
 
 Anywhere else, install a **complete** bundle of regular files (every file in
-`claudine/schemas/`, so the relative imports resolve) in one of:
+`claudine/schemas/`, so the relative imports resolve) in one of the locations
+below. Darkmatter's own schema files need not be copied: the
+`@darkmatter:lifecycle` references resolve from the copy built into `md`, DMLS,
+and `claudine`.
 
 - the repository root's `schemas/` folder (a real directory, not a symlink)
 - the folder an absolute `SCHEMAS_DIR` names, such as
