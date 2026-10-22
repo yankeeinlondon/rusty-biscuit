@@ -1546,6 +1546,12 @@ Requirements are normative. Implementation ideas are in
 
 ### Spike
 
+These requirements governed how the spikes were run, and the spikes are
+complete (see [Spike status](#spike-status)). R-S8 and R-S9 are confirmed
+again on the real implementation through AC-S6 and AC-S8 (D54). The others
+have no implementation acceptance criterion by design: they constrained the
+spikes only and have nothing left to govern.
+
 - **R-S1.** Build the corpus from (a) Merman's per-family fixtures for every
   family both renderers support and (b) every Mermaid source in the repo's
   existing tests, extracted from inline Rust code.
@@ -1585,7 +1591,7 @@ As of 2026-10-22 (S1, S2, and the Phase 1 records of S3 and the Windows leg):
 | --- | --- |
 | R-S1 | Done, short by the test sources built with `format!`, which cannot be extracted statically (S1) |
 | R-S2, R-S3, R-S5, R-S6, R-S10 | Done (S1) |
-| R-S4 | Done for Merman fixtures (12.2.0); S1's own-diagram references used `mmdc` 11.12.x, so they predate D38. S2 rendered 12.2.0 for its corpus |
+| R-S4 | Done for Merman fixtures (12.2.0); S1's own-diagram references used `mmdc` 11.12.x, so they predate D38. S2 rendered 12.2.0 for its corpus. No follow-up: the decisions S1 informed did not rest on those references, and nothing after the spikes compares against Mermaid.js references (goldens snapshot our own output, D13) |
 | R-S7 | Done: labeled merges keep both parents; adjacent tags overlap exactly as in Mermaid.js (D36) |
 | R-S8 | Done as a replay (S3): 31 captured `worktree` geometry inputs replayed through Merman's layout data. Topology and the line-2193 step check pass; `gathered_graph_lays_out_long_labels`' no-overlap check fails at Merman's fixed 50 px step (fixed by D56). The replay used today's plans, so the cutover confirms it (D54, AC-S6) |
 | R-S9 | Done on macOS, Linux, and Windows for one diagram with host fonts (macOS–Windows identical in Arial; Linux differs by DejaVu substitution). Sets the D42 tolerance; the cutover repeats it with Inter (D54, AC-S8) |
