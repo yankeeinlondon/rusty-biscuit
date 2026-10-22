@@ -139,8 +139,9 @@ commits, or feature closure commands. This plan creates no implementation change
    YAML schema/frontmatter and TOML configuration readers. For JSON readers
    changed for numeric admission or raw schema loading, use rejection of
    duplicate keys as the planned policy; JSON itself does not forbid them,
-   so if an established consumer requires otherwise, record an author ruling
-   before changing that contract. LSP already-decoded objects cannot reveal
+   and an established consumer that requires otherwise keeps its contract
+   (decided 2026-10-22: `inventory/rulings.md` R3, keeping the editor-settings
+   channel as it is). LSP already-decoded objects cannot reveal
    duplicate wire keys; transport validation owns that cell. Do not claim a
    `serde_json::Value` test proves duplicate detection. Inventory supported
    formats first; do not add new formats just to fill a matrix.
@@ -148,22 +149,21 @@ commits, or feature closure commands. This plan creates no implementation change
     return-type inference, recursive type-system expansion, strict-root
     validation, `is_file_type`, callable runtime values, or new CLI strictness
     policy. Rows f–i of the worked example retain this phase's conservative
-    types. Human ledger review remains a pre-merge requirement; non-interactive
-    agents prepare the concrete ledger and report review outstanding, without
-    inventing approval or moving this directory to `_completed`.
+    types. The author reviewed and approved the ledger on 2026-10-22
+    (criterion 13); a later change to a ledger row records what changed and
+    why in the implementation log. Agents never move this directory to
+    `_completed`.
 
-11. **Fixture applicability needs a ruling.** Criterion 10 literally requires
+11. **Fixture applicability (decided 2026-10-22).** Criterion 10 literally requires
     accepted, rejected, and converted-input fixtures for every function. A void
     function has no convertible argument, and preservation-only `unknown`
-    parameters intentionally keep their input. Before declaring that criterion
-    complete, obtain an author ruling on those impossible converted-success
-    cells. Recommend a registry-wide fixture row that explicitly marks the
+    parameters intentionally keep their input. Those impossible converted-success
+    cells are covered by a registry-wide fixture row that explicitly marks the
     impossible success, still runs candidate conversion inputs through normal
     dispatch where arguments exist, and covers actual conversion with registered
     probes. This is an acceptance clarification, not permission to skip a
-    function, narrow the catalog, or weaken its signature. Record unresolved
-    applicability as blocking criterion 10. Also settle duplicate/empty category
-    names here; recommend nonempty unique names while preserving list order.
+    function, narrow the catalog, or weaken its signature. Category names are nonempty
+    and unique, compared exactly, with list order preserved.
 
 ### Wave 1 — Inventory and one-time investigation
 

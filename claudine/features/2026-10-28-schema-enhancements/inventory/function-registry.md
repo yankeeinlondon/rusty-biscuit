@@ -106,8 +106,8 @@ non-string, the same outcome the baseline recorded.
     registered and catalogued in this feature (criteria 7 and 45).
   - **`trim`** is named by the spec's null table and by criterion 43
     (`trim(null)` returns `null`), but **no `trim` function is registered or
-    catalogued**. Criterion 43 cannot pass as written. Needs an author
-    ruling (add `trim`, or change the criterion to another text transform).
+    catalogued**. Decided 2026-10-22: add `trim` as a text transform, so criterion 43
+    passes as written.
     `add` in the family table is illustrative only; arithmetic is an operator,
     not a function.
 - **Draft catalog (`claudine/docs/schemas/partials/functions.yaml`) vs

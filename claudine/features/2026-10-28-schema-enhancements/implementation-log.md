@@ -38,43 +38,10 @@ docs_created_during_phase_1:
 skills_files_updated_during_phase_1: []
 packages:
     - darkmatter
-human_review: true
-human_review_items:
-    - |-
-      **Can a category name appear twice, or be empty? (needed before Phase 2's grammar work)**
-
-      Phase 2 adds a `categories:` list to schema files, which groups functions for documentation. The spec does not say what happens when two entries have the same name, or when a name is blank. The grammar code written in Phase 2 has to pick one answer, and changing it later means rewriting that code and its tests.
-
-      - **Option A — reject both (recommended).** A blank name, or a name that repeats an earlier one, makes the schema file fail to load with an error pointing at the entry. Names compare exactly ("Math" and "math" are different). List order is kept. *Pro:* matches how the old catalog already rejects blank categories and how the spec rejects duplicate parameter names; nothing is silently dropped. *Con:* a small authoring mistake stops the file loading.
-      - **Option B — merge duplicates, first one wins.** *Pro:* forgiving. *Con:* no sensible rule when the two copies have different descriptions; hides mistakes.
-      - **Option C — silently drop blank names.** *Con:* this is the kind of silent filtering the project's input rules forbid.
-
-      I recommend **A**. Say if you would rather compare names case-insensitively, so "Math" and "math" count as the same name.
-    - |-
-      **Four edge cases in how numbers are read (needed before Phase 2's number work)**
-
-      Phase 1's investigation picked how numbers will be checked for exactness: each file reader keeps today's values and also remembers how each number was written, so `9007199254740993` (too large to store exactly) can be rejected instead of silently rounded. A workspace-wide alternative (`serde_json`'s `arbitrary_precision` switch) was rejected because it would change number behavior in 67 crates and still not help YAML. Details: `spikes/numeric-ingress/findings.md`. Four smaller cases need your answer:
-
-      1. **Huge whole numbers in YAML, such as `99999999999999999999`.** Today they make the *whole* frontmatter fail to parse. *Recommended:* keep it an error, but report it on that one field with its location. *Alternative:* report it as "cannot be represented exactly", like the other big numbers. That is more uniform, but it needs a custom YAML read path.
-      2. **Expression literals such as `1e3` or `.5`.** These are not valid in expressions today. *Recommended:* keep it that way; the spec does not add that syntax. *Alternative:* add it (new syntax, more scope).
-      3. **JSON `1e400` (too large to store).** The JSON reader already fails with "number out of range". *Recommended:* accept that load error as the spec's "not finite" outcome. *Alternative:* re-word the error to say "not finite" (cosmetic, extra work).
-      4. **Text declared as `json` that contains `1e400`.** It is rejected today as malformed JSON. *Recommended:* keep that.
-    - |-
-      **Rulings needed later (not blocking Phase 2, but best decided now while you are reviewing)**
-
-      Each has a recommendation in `inventory/rulings.md` or `inventory/function-registry.md`. Replying "approve the recommendations" settles them all.
-
-      - **R1 — some functions cannot have a "converted input" test (blocks acceptance criterion 10, Phase 4).** 34 functions take any value unchanged (for example `is_number`, `file_exists`, `first`) or take no arguments, so a test showing the input being converted is impossible. *Recommended:* mark those cells "impossible", test instead that the input arrives unchanged, and cover conversion with test-only functions. *Alternatives:* weaken those functions' signatures so they convert (changes behavior; not recommended), or drop them from the criterion (forbidden by the plan).
-      - **`trim` does not exist.** The spec's criterion 43 expects `trim(null)` to return `null`, but there is no `trim` function. Add `trim` (recommended, a small string function) or change the criterion.
-      - **121 examples, not 117.** Three functions added four examples after the spec was written. Carry all 121 (recommended).
-      - **R3 — duplicate keys in JSON.** Reject them in raw `.json` schema files and in `json`-typed text (recommended). Keep the editor-settings channel as it is, because an existing test depends on it.
-      - **R4 — editor settings channel.** The spec says `workspace/configuration`, but the language server deliberately uses `didChangeConfiguration`. Read the spec as meaning the existing channel (recommended).
-      - **R5 — some "should fail" cells in the plan contradict documented behavior.** For example `types.x: null` is documented as the `null` type. Keep the documented behavior for ordinary schema files, and apply the stricter rules only in the new function-catalog loader (recommended).
-      - **R7 — two plan cells disagree with the JSON Schema standard (`prefixItems: []`, `enum: []`).** Follow the standard's validator (recommended).
-      - **Ambiguous null behavior for about 20 functions** (for example `is_empty(null)`, `starts_with(null, …)`) and **`has_command(true)`'s draft signature**, which contradicts criterion 44. These are listed in `behavior-ledger.md`; the ledger review is a pre-merge requirement anyway.
+human_review: false
 message_to_agent: |-
   Phase 1 produced only inventory, a numeric spike, and matrix tests; no production code changed. Read these before starting Phase 2 (all under claudine/features/2026-10-28-schema-enhancements/):
-  - inventory/rulings.md (R1-R8) and spikes/numeric-ingress/findings.md "Decisions for the author": check human_review_items / the author's reply for the decisions. Do not implement categories duplicate/empty handling or the four numeric edge cells until they are ruled; the recommendations are written there.
+  - The author approved every recommendation on 2026-10-22 (see "Author Decisions" at the end of this log): inventory/rulings.md R1-R7, the categories rule (reject blank and duplicate names, exact comparison, list order kept), the four numeric edge cells in spikes/numeric-ingress/findings.md, adding `trim`, carrying all 121 examples, and the "ruling requested" proposals in behavior-ledger.md. Implement them as written; they are not open.
   - inventory/ownership.md: Grammar descriptors owns simplified/grammar.rs and convert.rs; Numeric foundations supplies the admission function that Grammar calls at grammar.rs:279 and :1948 (both parse numbers with bare parse::<f64>()). schemas/resolve.rs is unowned in the plan (proposed: Schema adapter, Wave 4); schemas/mod.rs proposed for the integrator. `expr/binding.rs` already exists, so pick another name for the call binder.
   - Numeric seam (selected): a JSON-Pointer -> written-number-text sidecar beside today's serde_json::Value, recorded only for numbers stored as f64 (modeled on MappingOrders). YAML: second guided serde_yaml_ng pass; JSON: RawValue pass; JSON5: json-five round-trip model; expression literals: lexer.rs:921 token text; schema metadata: grammar.rs:1941 Arg.lex. Do NOT enable serde_json/arbitrary_precision. Darkmatter must declare serde_json features raw_value and float_roundtrip itself (today they only arrive via feature unification).
   - Defects owned by Phase 2: standalone.rs:127-130 swallows YAML parse errors into Ok(None) (DMLS drops them at named_types.rs:344 and overlay/named_types.rs:231); coerce.rs:597 rounds large integers silently and its comment is wrong; YAML .inf/.nan and JSON5 1e400 become null, 1e-400 becomes 0, enum members saturate through i64, min(inf) is accepted.
@@ -96,7 +63,7 @@ production code.
 | Contract inventory: criterion → task/test map | `inventory/criteria-map.md`: all 61 criteria (1–59, 33a, 33b) mapped to a plan task, a proposed L1 test identity, and the public result the test observes |
 | Contract inventory: prerequisites | `inventory/prerequisites.md`: checked in code, not by spec status. `core-schema-types`, `union-type-constraints`, `fm-namespace` and `type-narrowing` are all **supplied**; the inline `(A \| B)[]` spelling and the declared-type projection are this feature's own work (Phase 2 Grammar, Phase 5 Variable projection) |
 | Contract inventory: registry and catalog | `inventory/function-registry.md`, enumerated from the registry source: 113 canonical functions (62 pure, 49 context, 2 lazy: `and`/`or`), 75 aliases; the current catalog matches the registry exactly |
-| Contract inventory: behavior ledger | `behavior-ledger.md`: one draft row per canonical function with null family, fixture applicability and preserved/changed status. **Human review outstanding (pre-merge requirement)** |
+| Contract inventory: behavior ledger | `behavior-ledger.md`: one draft row per canonical function with null family, fixture applicability and preserved/changed status. Reviewed and approved by the author on 2026-10-22 |
 | Contract inventory: API/file ownership | `inventory/ownership.md` |
 | Contract inventory: reader fields and matrix expansion | `inventory/reader-matrix.md` (with a "Cell coverage" appendix) |
 | Contract inventory: rulings | `inventory/rulings.md` (R1–R8, all pending the author) |
@@ -231,3 +198,100 @@ Dependent packages: Phase 1 changed only test files and fixtures inside the
 Cross-OS check skipped: the new tests use in-memory fixtures and temp
 directories, with no OS-specific path handling; CI covers the other OSes.
 The `claudine` skill needed no update (no Claudine behavior changed).
+
+## Author Decisions (2026-10-22)
+
+Phase 1 paused for the decisions below. The author approved every
+recommendation as written, so each one is decided:
+
+- **Category names:** option A. A blank or repeated name in `categories:` is a
+  load error at that entry; names compare exactly; list order is kept.
+- **Numeric edge cells:** all four recommendations (a located per-field error
+  for oversized YAML integers; no `1e3`/`.5` expression literals; JSON
+  `1e400`'s load error counts as "not finite"; `json`-typed `1e400` stays
+  malformed JSON).
+- **`inventory/rulings.md` R1–R7:** each recommendation, as written there.
+- **`trim`:** add it as a text transform, so criterion 43 holds as written.
+- **Examples:** carry all 121.
+- **`behavior-ledger.md`:** each row marked "ruling requested" takes its
+  proposed behavior; `has_command` and its analogues take the criterion 44
+  signature (`string | null`). `keys(null)` and `values(null)` return `[]` (signature
+  `object | null`), so a missing map lists nothing.
+- **Wrong kind of value to a yes/no check** (`has_key("hello", "a")`,
+  `has_command(["git"])`): a type error, not `false`. `null` still gives
+  `false`.
+- **Behavior ledger (criterion 13):** the author reviewed and approved the
+  whole ledger on 2026-10-22; the review is recorded at the top of
+  `behavior-ledger.md`.
+
+The items as they were raised:
+
+- **Can a category name appear twice, or be empty? (needed before Phase 2's grammar work)**
+
+  Phase 2 adds a `categories:` list to schema files, which groups functions for documentation. The spec does not say what happens when two entries have the same name, or when a name is blank. The grammar code written in Phase 2 has to pick one answer, and changing it later means rewriting that code and its tests.
+
+  - **Option A — reject both (recommended).** A blank name, or a name that repeats an earlier one, makes the schema file fail to load with an error pointing at the entry. Names compare exactly ("Math" and "math" are different). List order is kept. *Pro:* matches how the old catalog already rejects blank categories and how the spec rejects duplicate parameter names; nothing is silently dropped. *Con:* a small authoring mistake stops the file loading.
+  - **Option B — merge duplicates, first one wins.** *Pro:* forgiving. *Con:* no sensible rule when the two copies have different descriptions; hides mistakes.
+  - **Option C — silently drop blank names.** *Con:* this is the kind of silent filtering the project's input rules forbid.
+
+  I recommend **A**. Say if you would rather compare names case-insensitively, so "Math" and "math" count as the same name.
+- **Four edge cases in how numbers are read (needed before Phase 2's number work)**
+
+  Phase 1's investigation picked how numbers will be checked for exactness: each file reader keeps today's values and also remembers how each number was written, so `9007199254740993` (too large to store exactly) can be rejected instead of silently rounded. A workspace-wide alternative (`serde_json`'s `arbitrary_precision` switch) was rejected because it would change number behavior in 67 crates and still not help YAML. Details: `spikes/numeric-ingress/findings.md`. Four smaller cases need your answer:
+
+  1. **Huge whole numbers in YAML, such as `99999999999999999999`.** Today they make the *whole* frontmatter fail to parse. *Recommended:* keep it an error, but report it on that one field with its location. *Alternative:* report it as "cannot be represented exactly", like the other big numbers. That is more uniform, but it needs a custom YAML read path.
+  2. **Expression literals such as `1e3` or `.5`.** These are not valid in expressions today. *Recommended:* keep it that way; the spec does not add that syntax. *Alternative:* add it (new syntax, more scope).
+  3. **JSON `1e400` (too large to store).** The JSON reader already fails with "number out of range". *Recommended:* accept that load error as the spec's "not finite" outcome. *Alternative:* re-word the error to say "not finite" (cosmetic, extra work).
+  4. **Text declared as `json` that contains `1e400`.** It is rejected today as malformed JSON. *Recommended:* keep that.
+- **Rulings needed later (not blocking Phase 2, but best decided now while you are reviewing)**
+
+  Each has a recommendation in `inventory/rulings.md` or `inventory/function-registry.md`. Replying "approve the recommendations" settles them all.
+
+  - **R1 — some functions cannot have a "converted input" test (blocks acceptance criterion 10, Phase 4).** 34 functions take any value unchanged (for example `is_number`, `file_exists`, `first`) or take no arguments, so a test showing the input being converted is impossible. *Recommended:* mark those cells "impossible", test instead that the input arrives unchanged, and cover conversion with test-only functions. *Alternatives:* weaken those functions' signatures so they convert (changes behavior; not recommended), or drop them from the criterion (forbidden by the plan).
+  - **`trim` does not exist.** The spec's criterion 43 expects `trim(null)` to return `null`, but there is no `trim` function. Add `trim` (recommended, a small string function) or change the criterion.
+  - **121 examples, not 117.** Three functions added four examples after the spec was written. Carry all 121 (recommended).
+  - **R3 — duplicate keys in JSON.** Reject them in raw `.json` schema files and in `json`-typed text (recommended). Keep the editor-settings channel as it is, because an existing test depends on it.
+  - **R4 — editor settings channel.** The spec says `workspace/configuration`, but the language server deliberately uses `didChangeConfiguration`. Read the spec as meaning the existing channel (recommended).
+  - **R5 — some "should fail" cells in the plan contradict documented behavior.** For example `types.x: null` is documented as the `null` type. Keep the documented behavior for ordinary schema files, and apply the stricter rules only in the new function-catalog loader (recommended).
+  - **R7 — two plan cells disagree with the JSON Schema standard (`prefixItems: []`, `enum: []`).** Follow the standard's validator (recommended).
+  - **Ambiguous null behavior for about 20 functions** (for example `is_empty(null)`, `starts_with(null, …)`) and **`has_command(true)`'s draft signature**, which contradicts criterion 44. These are listed in `behavior-ledger.md`; the ledger review is a pre-merge requirement anyway.
+
+## Phase 2
+
+### Integrator step 1: `serde_json` features and `preserve_order` triage
+
+`darkmatter/lib/Cargo.toml` now declares `serde_json` with `preserve_order`,
+`raw_value`, and `float_roundtrip`. Before this change the darkmatter,
+claudine, claudine-cli, darkmatter-cli and dmls build graphs did **not** have
+`preserve_order` (only a whole-workspace build got it, through tauri-build and
+tree-sitter); every package that depends on `darkmatter` now gets it.
+
+Fallout measured with the full darkmatter (lib, CLI, DMLS) and claudine L1
+suites, no fail-fast: 45 darkmatter and 3 claudine failures, every one a key
+order change. Classification:
+
+| Consumer | Contract | Resolution |
+|---|---|---|
+| `md schema validate --format json` | alphabetical keys, pinned byte-for-byte by `schema_validate_legacy_json_output_is_byte_identical` | explicit `sort_all_objects()` before printing |
+| non-strict `md hash` frontmatter hash | persisted in documents; nested keys were sorted | nested values sorted before hashing; new unit test `non_strict_frontmatter_hash_ignores_nested_key_order`; benchmark fixture identities unchanged |
+| `OPENCODE_CONFIG_CONTENT` / `KILO_CONFIG_CONTENT` merge | byte-identical whatever the insertion order | merged value sorted; test now asserts through `merge_overlay` |
+| SimplifiedSchema → JSON Schema (`to_json_schema`) | none (diff-friendly output) | written order is intended; `$schema` now leads the document; 41 snapshots refreshed after a script confirmed each old/new pair is JSON-equal |
+| `as_json5`, frontmatter `serde_json` maps, `WithOverlay::iter`, provider `serialized_field_list` | none; order was an artifact of `BTreeMap` | expectations now state written/declaration order; `WithOverlay::iter` doc comment was stale (said order was sorted) and was rewritten |
+
+`dmls::l1 searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back`
+failed once and passed on rerun alone and in the next full run: load-sensitive,
+not an ordering effect.
+
+Note: the `Cargo.toml` edit was reverted once by something outside this
+session while the first test run was in flight (other sessions share this
+worktree); it was reapplied and re-verified.
+
+### Integrator step 2: numeric admission API (frozen for Wave 2)
+
+New module `darkmatter::markdown::numeric` (`darkmatter/lib/src/markdown/numeric.rs`):
+`admit_number_spelling` (loader/lexer spelling), `admit_number_text` (the one
+lenient text parser), `admit_f64`, `admit_json_number`, `admit_integer`,
+`parse_boolean_word`, `format_number`, `json_number`, and the error types
+`NumericAdmissionError` / `NumberTextError`. Whole-number exactness is
+decided by comparing the written digits with the exact decimal expansion of the
+nearest `f64`, so no big-integer dependency is needed.

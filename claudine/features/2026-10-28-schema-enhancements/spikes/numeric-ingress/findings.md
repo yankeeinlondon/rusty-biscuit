@@ -115,6 +115,8 @@ regression test:
 
 ## Decisions for the author
 
+> **Decided 2026-10-22:** the author approved every recommendation in this section.
+
 These do not block selecting the seam; they decide individual cells in
 Phase 2's numeric task.
 

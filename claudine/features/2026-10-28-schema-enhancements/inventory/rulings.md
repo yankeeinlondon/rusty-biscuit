@@ -2,7 +2,7 @@
 
 Each item below is a contract that `spec.md` and `plan.md` leave open, or that existing code contradicts. Each one needs an **author ruling** before the dependent task starts. The recommendations are the inventory agent's; they are not approvals.
 
-**Status: all rulings are pending author review.** Evidence paths are listed in `ownership.md` and `reader-matrix.md`.
+**Status: decided.** On 2026-10-22 the author approved every recommendation below as written; each one is now the rule to implement. Evidence paths are listed in `ownership.md` and `reader-matrix.md`.
 
 ## R1. Criterion 10 fixtures for void functions and preservation-only parameters (plan rule 11)
 
