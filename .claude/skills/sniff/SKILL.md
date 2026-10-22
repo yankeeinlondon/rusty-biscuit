@@ -148,6 +148,27 @@ cwd and subscription mechanisms stay unsupported (see the `os` skill).
 Every backend shares the per-mechanism `Tally` in `backend.rs`. Contract:
 `sniff/docs/topics/filesystem-query.md`.
 
+**A library that walks a tree before asking who uses it should supply its own
+index** (`TreeIndex::builder(root_identity)` + `entry(relative, kind,
+identity)` → `PathUsageOptions::with_tree_index(Arc)`) instead of letting the
+query walk again; `wt remove` passes its deletion inventory this way. The
+walk and the builder produce the same root-relative `TreeIndex` (root = empty
+path), and paths are joined onto `root.resolved` only for matches and the
+Windows probe list (`TreeIndex::probe_entries`, built once per scan in
+`win32.rs`). Root verification and the recheck still run; a different root
+identity, a file root, or `target_only` is `InvalidOption`. The report's
+`index_provenance` (`walked`/`supplied`/`unknown`) is required at schema 2;
+`PathUsageReport` deserializes through a private `RawReport`
+(`try_from`) so absent-at-schema-1 reads as `unknown`, never `walked`. Keep
+that loader when adding report fields. Tests: the "caller-supplied tree index"
+section of `query/tests.rs`.
+
+`filesystem::space::available_space(path)` is the focused free-space reading
+(nearest existing ancestor, aliases resolved by canonicalization, `f_bavail` /
+`GetDiskFreeSpaceExW` caller quota). It never calls `hardware::storage`
+(device inventory that spawns `diskutil`). Its `SpaceSource` trait is the
+test seam. Contract: `sniff/docs/topics/available-space.md`.
+
 `SniffConfig` remains a compatibility surface, but new code should use request
 plans.
 

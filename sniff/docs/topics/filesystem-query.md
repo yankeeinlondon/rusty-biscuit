@@ -32,7 +32,9 @@ result does not establish that the target is unused.
 flowchart LR
     A[validate options] --> B[resolve root<br/>capture identity]
     B --> C[walk tree once<br/>collect identities]
+    B --> S[or check the caller's<br/>supplied index]
     C --> D[enumerate processes]
+    S --> D
     D --> P[Windows: query holders<br/>of each walked path]
     P --> E[inspect process mechanisms<br/>match by identity]
     D --> E
@@ -60,6 +62,69 @@ on `working_directories`. The coverage record is `not_attempted` when no
 process's working directory was read, and `partial` otherwise. Each process's
 start time is still rechecked after an expired inspection, because that check
 is what attributes the evidence already read to the right process.
+
+## You already walked the tree: supply its index
+
+A caller that has just walked, hashed, copied, or inventoried a tree should
+not pay for a second walk inside the query's budget. Hand the query the index
+you built, and the budget goes to processes instead:
+
+```rust
+use sniff::filesystem::query::{
+    FileIdentity, PathUsageOptions, TreeEntryKind, TreeIndex, query_path_usage,
+};
+use std::sync::Arc;
+
+// Identities you read while walking, without following links.
+let mut builder = TreeIndex::builder(root_identity);
+builder
+    .entry("src", TreeEntryKind::Directory, src_identity)
+    .entry("src/main.rs", TreeEntryKind::File, main_identity)
+    .entry("current", TreeEntryKind::Link, link_identity);
+let index = Arc::new(builder.build()?);
+
+let options = PathUsageOptions::default().with_tree_index(Arc::clone(&index));
+let report = query_path_usage(checkout, &options)?;
+assert_eq!(report.index_provenance, sniff::filesystem::query::IndexProvenance::Supplied);
+```
+
+The rules:
+
+- **Entries are relative to the root**, spelled with native names (no UTF-8
+  conversion), one per path: list every hard-link alias, and a link as itself
+  (`TreeEntryKind::Link`), never its target. The root is implicit. `build()`
+  rejects, naming the entry, an absolute path, a `..` or leading `.`
+  component, an empty path, a path listed twice (`a/b` and `a//b/` are one
+  path), and anything below a link. An empty index is valid: a root with no
+  descendants.
+- **The query still verifies the root.** It resolves the target and reads its
+  identity as usual, then rejects with `invalid_option` an index whose root
+  identity differs, a file target, and `target_only()`. The final root
+  recheck still runs.
+- **An index is a point-in-time capture.** Entries created after you built it
+  are not matched, and the query does not reread its descendants. Callers
+  decide how to handle changes made meanwhile; `wt remove`, for instance,
+  watches the tree from before its capture and confirms its inventory before
+  deleting.
+- **Build once, share freely.** The options hold an `Arc`, so one index can
+  serve several queries of the same tree with no copy; only matched paths are
+  joined onto the root.
+- **Say when it is incomplete.** `builder.partial("why")` makes the report's
+  `tree_identity` coverage `partial` with an `incomplete_tree_index`
+  limitation carrying your reason, which in turn marks every dependent
+  mechanism `partial`.
+
+The report records where the index came from in `index_provenance`:
+`walked` (the query collected it), `supplied`, or `unknown` for a report
+written before the field existed. A supplied index's `tree_identity` coverage
+carries the caller's completeness, `null` counts, and a `reason` saying the
+query did not read its descendants: provenance and coverage are separate, so
+a complete supplied index is never reported as `walked`.
+
+Supplying an index removes only the walk. On Windows the file-side holder
+scan still opens each indexed regular file and directory (never a link), and
+on a large tree that scan can still exhaust the budget; working-directory
+discovery stays unsupported there.
 
 ## Errors versus reports
 
@@ -401,7 +466,13 @@ Problems stay visible instead of reading as "no matches":
 
 ## Serialized form
 
-The report serializes with snake_case keys and `schema_version: 1`.
+The report serializes with snake_case keys and `schema_version: 2`.
+
+- `index_provenance` is `walked`, `supplied`, or `unknown`. It is required in
+  a version 2 report and may not be `null`. A version 1 report, written
+  before the field existed, still loads with `unknown` (never `walked`); one
+  that carries the field may carry only `unknown`, which is how a version 1
+  report reads back after it was loaded and written again.
 
 - Paths, executables, and process names are objects:
   `{"display": "caf�"}` plus, only when `display` cannot reproduce the
@@ -434,4 +505,5 @@ the target; `path_holder_inspections` counts scheduled file-side path inspection
 Buffer retries and lifetime-confirmation queries do not add scheduled paths.
 The descriptor and watch counters stay zero.
 Root resolution also records `filesystem.io.metadata_probes` and
-`filesystem.io.canonicalizations`.
+`filesystem.io.canonicalizations`. With a supplied tree index,
+`tree_walks` and `tree_identity_reads` stay zero.

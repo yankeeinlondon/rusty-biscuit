@@ -1387,6 +1387,310 @@ fn one_tree_walk_serves_every_process_and_no_inventory_runs() {
 }
 
 // ---------------------------------------------------------------------------
+// A caller-supplied tree index
+// ---------------------------------------------------------------------------
+
+fn kind_of(file_type: std::fs::FileType) -> TreeEntryKind {
+    if file_type.is_symlink() {
+        TreeEntryKind::Link
+    } else if file_type.is_dir() {
+        TreeEntryKind::Directory
+    } else if file_type.is_file() {
+        TreeEntryKind::File
+    } else {
+        TreeEntryKind::Other
+    }
+}
+
+/// The index a caller that already walked `root` would supply.
+fn caller_builder(root: &Path) -> TreeIndexBuilder {
+    let mut builder = TreeIndex::builder(id(root));
+    for entry in walkdir::WalkDir::new(root).min_depth(1).follow_links(false) {
+        let entry = entry.unwrap();
+        builder.entry(
+            entry.path().strip_prefix(root).unwrap(),
+            kind_of(entry.file_type()),
+            id(entry.path()),
+        );
+    }
+    builder
+}
+
+fn caller_index(root: &Path) -> std::sync::Arc<TreeIndex> {
+    std::sync::Arc::new(caller_builder(root).build().expect("valid index"))
+}
+
+fn supplied(root: &Path) -> PathUsageOptions {
+    PathUsageOptions::default().with_tree_index(caller_index(root))
+}
+
+#[test]
+fn a_supplied_index_replaces_the_walk_but_the_root_is_still_verified() {
+    let tree = tree();
+    let b = tree.root.join("sub/b.txt");
+    let mut fake = Fake::new(vec![candidate(
+        1,
+        Some(1),
+        vec![found(Mechanism::OpenHandles, vec![handle(&b, 3)])],
+    )]);
+    let options = supplied(&tree.root);
+    let (report, counts) = measure(|| query(&tree.root, &options, &mut fake));
+    use crate::performance::counters::*;
+    assert_eq!(counts.get(QUERY_TREE_WALKS), 0, "{:#?}", counts.all());
+    assert_eq!(counts.get(QUERY_TREE_IDENTITY_READS), 0);
+    assert_eq!(counts.get(QUERY_PROCESS_ENUMERATIONS), 1, "the budget reached processes");
+    assert_eq!(counts.get(QUERY_PROCESS_INSPECTIONS), 1);
+    // Root resolution and the final recheck read the root's metadata.
+    assert!(counts.get(FS_METADATA_PROBES) >= 2, "{:#?}", counts.all());
+    assert!(!has_limitation(&report.limitations, LimitationKind::RootUnverified));
+
+    assert_eq!(report.index_provenance, IndexProvenance::Supplied);
+    assert_eq!(paths(&report.processes[0].evidence[0]), vec![b]);
+    let tree_coverage = coverage(&report, Mechanism::TreeIdentity);
+    assert_eq!(tree_coverage.status, CoverageStatus::Complete);
+    assert_eq!(tree_coverage.scope, CoverageScope::TargetTree);
+    assert_eq!((tree_coverage.attempted, tree_coverage.succeeded), (None, None), "no descendant was read");
+    assert!(tree_coverage.reason.as_deref().unwrap().contains("supplied"), "{tree_coverage:?}");
+    assert_eq!(coverage(&report, Mechanism::Fsevents).status, CoverageStatus::Unsupported);
+    assert_eq!(coverage(&report, Mechanism::OpenHandles).status, CoverageStatus::Complete);
+    assert_eq!(report.outcome, Outcome::Usable);
+}
+
+#[test]
+fn walked_and_supplied_indexes_find_the_same_holders_and_hard_link_aliases() {
+    let tree = tree();
+    let a = tree.root.join("a.txt");
+    let b = tree.root.join("sub/b.txt");
+    let twin = tree.root.join("sub/twin.txt");
+    let outside = tree.sibling.join("alias.txt");
+    std::fs::hard_link(&a, &twin).unwrap();
+    std::fs::hard_link(&a, &outside).unwrap();
+    let processes = || {
+        vec![
+            candidate(1, Some(1), vec![found(Mechanism::OpenHandles, vec![handle(&outside, 3), handle(&tree.sibling.join("c.txt"), 4)])]),
+            candidate(2, Some(2), vec![found(Mechanism::OpenHandles, vec![path_only(&b)])]),
+            candidate(3, Some(3), vec![found(Mechanism::WorkingDirectories, vec![handle(&tree.root.join("sub"), 5)])]),
+        ]
+    };
+    let walked = query(&tree.root, &PathUsageOptions::default(), &mut Fake::new(processes()));
+    let supplied = query(&tree.root, &supplied(&tree.root), &mut Fake::new(processes()));
+    assert_eq!(walked.index_provenance, IndexProvenance::Walked);
+    assert_eq!(supplied.index_provenance, IndexProvenance::Supplied);
+    assert_eq!(supplied.processes, walked.processes);
+    let mut aliases = vec![a, twin];
+    aliases.sort();
+    assert_eq!(paths(&supplied.processes[0].evidence[0]), aliases, "every alias, none preferred");
+    assert_eq!(supplied.processes[0].evidence.len(), 1, "the sibling is out of scope");
+}
+
+#[test]
+fn an_index_for_a_different_root_is_an_invalid_option_and_nothing_runs() {
+    let tree = tree();
+    let options = PathUsageOptions::default().with_tree_index(caller_index(&tree.sibling));
+    let mut fake = Fake::new(vec![candidate(1, Some(1), both_clean())]);
+    let budget = Budget::start(options.deadline()).unwrap();
+    let error = run(&tree.root, &options, &mut fake, &budget, chrono::Utc::now()).unwrap_err();
+    assert!(matches!(&error, PathUsageError::InvalidOption { message } if message.contains("different root")), "{error}");
+    assert!(fake.enumeration.is_some(), "processes were never enumerated");
+}
+
+#[test]
+fn an_index_with_target_only_or_for_a_file_is_an_invalid_option() {
+    let tree = tree();
+    let a = tree.root.join("a.txt");
+    let index = caller_index(&tree.root);
+    let target_only = PathUsageOptions::default().with_tree_index(index.clone()).target_only();
+    let file = PathUsageOptions::default()
+        .with_tree_index(std::sync::Arc::new(TreeIndex::builder(id(&a)).build().unwrap()));
+    for (path, options, needle) in [(&tree.root, target_only, "target_only"), (&a, file, "file")] {
+        let mut fake = Fake::new(Vec::new());
+        let budget = Budget::start(options.deadline()).unwrap();
+        let error = run(path, &options, &mut fake, &budget, chrono::Utc::now()).unwrap_err();
+        assert_eq!(error.kind(), "invalid_option", "{error}");
+        assert!(error.to_string().contains(needle), "{error}");
+        assert!(fake.enumeration.is_some());
+    }
+}
+
+#[test]
+fn a_partial_index_is_reported_as_the_callers_partial_coverage() {
+    let tree = tree();
+    let a = tree.root.join("a.txt");
+    let mut builder = caller_builder(&tree.root);
+    builder.partial("3 entries could not be read during the caller's walk");
+    let options = PathUsageOptions::default().with_tree_index(std::sync::Arc::new(builder.build().unwrap()));
+    let mut fake = Fake::new(vec![candidate(1, Some(1), vec![found(Mechanism::OpenHandles, vec![handle(&a, 3)])])]);
+    let report = query(&tree.root, &options, &mut fake);
+    let tree_coverage = coverage(&report, Mechanism::TreeIdentity);
+    assert_eq!(tree_coverage.status, CoverageStatus::Partial);
+    let declared = &tree_coverage.limitations[0];
+    assert_eq!(declared.kind, LimitationKind::IncompleteTreeIndex);
+    assert_eq!(declared.message, "3 entries could not be read during the caller's walk");
+    let handles = coverage(&report, Mechanism::OpenHandles);
+    assert_eq!(handles.status, CoverageStatus::Partial, "a dependent mechanism inherits the gap");
+    assert!(has_limitation(&handles.limitations, LimitationKind::PrerequisiteIncomplete));
+    assert_eq!(report.index_provenance, IndexProvenance::Supplied);
+}
+
+#[test]
+fn an_empty_index_matches_only_the_root() {
+    let tree = tree();
+    let a = tree.root.join("a.txt");
+    let index = TreeIndex::builder(id(&tree.root)).build().expect("[] is a root with no descendants");
+    assert!(index.is_empty());
+    let options = PathUsageOptions::default().with_tree_index(std::sync::Arc::new(index));
+    let mut fake = Fake::new(vec![candidate(
+        1,
+        Some(1),
+        vec![found(Mechanism::WorkingDirectories, vec![handle(&tree.root, 3), handle(&a, 4)])],
+    )]);
+    let report = query(&tree.root, &options, &mut fake);
+    let evidence = &report.processes[0].evidence;
+    assert_eq!(evidence.len(), 1, "{evidence:#?}");
+    assert_eq!(paths(&evidence[0]), vec![tree.root.clone()], "the root keeps its spelling");
+    assert_eq!(coverage(&report, Mechanism::TreeIdentity).status, CoverageStatus::Complete);
+}
+
+#[test]
+fn a_budget_expiring_during_inspection_stays_visible_with_a_supplied_index() {
+    let tree = tree();
+    let a = tree.root.join("a.txt");
+    let processes = (1..=3)
+        .map(|pid| candidate(pid, Some(u64::from(pid)), vec![found(Mechanism::OpenHandles, vec![handle(&a, 3)])]))
+        .collect();
+    let mut fake = Fake::new(processes);
+    fake.on_inspect = Some(Box::new(|pid, context| {
+        if pid == 1 {
+            context.budget.expire();
+        }
+    }));
+    let report = query(&tree.root, &supplied(&tree.root), &mut fake);
+    assert_eq!(fake.inspected, vec![1]);
+    let handles = coverage(&report, Mechanism::OpenHandles);
+    assert_eq!(handles.status, CoverageStatus::Partial);
+    assert!(has_limitation(&handles.limitations, LimitationKind::BudgetExhausted));
+    assert!(report.budget_exhausted);
+    assert!(has_limitation(&report.limitations, LimitationKind::RootUnverified));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_supplied_link_is_matched_as_itself_and_never_probed_as_its_target() {
+    let tree = tree();
+    let link = tree.root.join("out");
+    std::os::unix::fs::symlink(&tree.sibling, &link).unwrap();
+    let outside = tree.sibling.join("c.txt");
+    let link_object = RawEvidence {
+        object: ObservedObject { identity: Some(id(&link)), path: Some(link.clone()), deleted: false },
+        ..handle(&outside, 4)
+    };
+    let mut fake = Fake::new(vec![candidate(
+        1,
+        Some(1),
+        vec![found(Mechanism::OpenHandles, vec![handle(&outside, 3), link_object])],
+    )]);
+    let index = caller_index(&tree.root);
+    let report = query(&tree.root, &PathUsageOptions::default().with_tree_index(index.clone()), &mut fake);
+    let evidence = &report.processes[0].evidence;
+    assert_eq!(evidence.len(), 1, "the link's target is out of scope: {evidence:#?}");
+    assert_eq!(paths(&evidence[0]), vec![link.clone()]);
+    let probed: Vec<_> = index.probe_entries(&tree.root).into_iter().map(|e| e.path).collect();
+    assert!(!probed.contains(&link), "{probed:?}");
+}
+
+/// The Windows file-side holder scan opens these entries; both indexes must
+/// hand it the same regular files and directories, joined onto the root.
+#[test]
+fn walked_and_supplied_indexes_hand_the_holder_scan_the_same_probe_entries() {
+    let tree = tree();
+    let budget = Budget::start(Duration::from_secs(60)).unwrap();
+    let root = root::resolve(&tree.root, &budget).unwrap();
+    let walked = tree::collect(&root, true, &budget).index;
+    let mut builder = caller_builder(&tree.root);
+    builder
+        .entry("link", TreeEntryKind::Link, FileIdentity::Unix { device: 0, inode: 1 })
+        .entry("socket", TreeEntryKind::Other, FileIdentity::Unix { device: 0, inode: 2 });
+    let supplied = builder.build().unwrap();
+    let entries = |index: &TreeIndex| {
+        let mut entries: Vec<_> = index
+            .probe_entries(&root.resolved)
+            .into_iter()
+            .map(|e| (e.path, e.identity, e.directory))
+            .collect();
+        entries.sort();
+        entries
+    };
+    let expected = entries(&walked);
+    assert_eq!(entries(&supplied), expected, "links and special files are never probed");
+    assert!(expected.contains(&(root.resolved.clone(), root.identity, true)), "the root is probed");
+    assert_eq!(expected.len(), 4, "root, a.txt, sub, sub/b.txt: {expected:#?}");
+}
+
+#[test]
+fn the_index_builder_rejects_each_invalid_entry_by_name() {
+    let identity = |inode| FileIdentity::Unix { device: 1, inode };
+    let build = |entries: &[(&str, TreeEntryKind)]| {
+        let mut builder = TreeIndex::builder(identity(0));
+        for (position, (path, kind)) in entries.iter().enumerate() {
+            builder.entry(*path, *kind, identity(position as u64 + 1));
+        }
+        builder.build()
+    };
+    let file = TreeEntryKind::File;
+    let link = TreeEntryKind::Link;
+    let absolute = std::env::temp_dir().join("x");
+    let absolute = absolute.to_str().unwrap();
+    let cases: Vec<(Vec<(&str, TreeEntryKind)>, TreeIndexError)> = vec![
+        (vec![("a", file), (absolute, file)], TreeIndexError::AbsolutePath { path: absolute.into() }),
+        (vec![("a/../../x", file)], TreeIndexError::ParentTraversal { path: "a/../../x".into() }),
+        (vec![("./a", file)], TreeIndexError::NotNormalized { path: "./a".into() }),
+        (vec![("", file)], TreeIndexError::NotNormalized { path: "".into() }),
+        (vec![("a/b", file), ("a//b/", file)], TreeIndexError::Duplicate { path: "a/b".into() }),
+        (vec![("l", link), ("l/inside", file)], TreeIndexError::BelowLink { path: "l/inside".into(), link: "l".into() }),
+        (vec![("l/deep/inside", file), ("l", link)], TreeIndexError::BelowLink { path: "l/deep/inside".into(), link: "l".into() }),
+    ];
+    for (entries, expected) in cases {
+        let error = build(&entries).unwrap_err();
+        assert_eq!(error, expected, "{entries:?}");
+        assert!(!error.to_string().is_empty());
+    }
+
+    // Controls: a sibling whose name only starts with the link's, and a
+    // name that is a link's prefix, are not below it; `a/./b` is `a/b`.
+    let index = build(&[("l", link), ("l.txt", file), ("lx/y", file), ("a/./b", file)]).unwrap();
+    assert_eq!(index.len(), 4);
+    assert_eq!(index.root(), identity(0));
+    assert_eq!(index.partial_reason(), None);
+    assert_eq!(index.paths(&identity(4), Path::new("/r")), Some(vec![PathBuf::from("/r/a/b")]));
+}
+
+#[test]
+fn the_index_keeps_every_hard_link_alias_and_sorts_them_under_the_root() {
+    let shared = FileIdentity::Unix { device: 1, inode: 9 };
+    let mut builder = TreeIndex::builder(FileIdentity::Unix { device: 1, inode: 1 });
+    builder
+        .entry("z/copy", TreeEntryKind::File, shared)
+        .entry("a", TreeEntryKind::File, shared);
+    let index = builder.build().unwrap();
+    let root = Path::new("/work/app");
+    assert_eq!(index.paths(&shared, root), Some(vec![root.join("a"), root.join("z/copy")]));
+}
+
+#[cfg(unix)]
+#[test]
+fn the_index_keeps_native_names_without_lossy_conversion() {
+    use std::os::unix::ffi::OsStrExt;
+    let name = non_utf8();
+    let identity = FileIdentity::Unix { device: 1, inode: 2 };
+    let mut builder = TreeIndex::builder(FileIdentity::Unix { device: 1, inode: 1 });
+    builder.entry(Path::new("dir").join(&name), TreeEntryKind::File, identity);
+    let index = builder.build().unwrap();
+    let paths = index.paths(&identity, Path::new("/r")).unwrap();
+    assert!(paths[0].as_os_str().as_bytes().ends_with(name.as_bytes()));
+    assert!(paths[0].to_str().is_none(), "never converted through UTF-8");
+}
+
+// ---------------------------------------------------------------------------
 // Serialization
 // ---------------------------------------------------------------------------
 
@@ -1516,7 +1820,8 @@ fn unavailable_fields_serialize_as_explicit_nulls() {
         assert!(uncertain[key].is_null(), "{key}");
     }
     assert_eq!(json["processes"][0]["creation_token"], "18446744073709551615");
-    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["schema_version"], SCHEMA_VERSION);
+    assert_eq!(json["index_provenance"], "walked");
     let evidence = json["processes"][0]["evidence"][0].as_object().unwrap();
     for key in ["watch", "access", "event_only"] {
         assert!(evidence[key].is_null(), "{key}");
@@ -1584,6 +1889,7 @@ fn the_report_reader_rejects_every_malformed_shape_of_its_load_bearing_fields() 
 
     let fields = [
         "/outcome",
+        "/index_provenance",
         "/target/resolved/display",
         "/processes",
         "/processes/0/creation_token",
@@ -1682,4 +1988,51 @@ fn decimal_identifiers_reject_non_canonical_strings() {
     }
     assert_eq!(native::decimal::parse::<u64>("0"), Ok(0));
     assert_eq!(native::decimal::parse::<u64>("18446744073709551615"), Ok(u64::MAX));
+}
+
+/// The loader's exceptions to "every invalid shape is an error" for
+/// `index_provenance`, which the matrix above walks for a current report.
+#[test]
+fn old_reports_load_with_unknown_provenance_and_round_trip() {
+    use serde_json::json;
+    let (_tree, report) = fixture_report();
+    let current = serde_json::to_value(&report).unwrap();
+    let mut old = current.clone();
+    old["schema_version"] = json!(1);
+    old.as_object_mut().unwrap().remove("index_provenance");
+
+    let loaded: PathUsageReport = serde_json::from_value(old.clone()).expect("a version 1 report loads");
+    assert_eq!(loaded.schema_version, 1);
+    assert_eq!(loaded.index_provenance, IndexProvenance::Unknown, "never inferred as walked");
+    assert_eq!(loaded.processes, report.processes);
+
+    // Read, write, read: the old report keeps its version and its unknown
+    // provenance, now written explicitly.
+    let written = serde_json::to_string(&loaded).unwrap();
+    let again: PathUsageReport = serde_json::from_str(&written).expect("rewritten old report loads");
+    assert_eq!(again, loaded);
+    let rewritten = serde_json::to_string(&again).unwrap();
+    assert_eq!(rewritten, written);
+
+    for (cell, value, accepted) in [
+        ("explicit unknown", json!("unknown"), true),
+        ("walked", json!("walked"), false),
+        ("supplied", json!("supplied"), false),
+        ("null", json!(null), false),
+    ] {
+        let mut document = old.clone();
+        document["index_provenance"] = value;
+        let parsed = serde_json::from_value::<PathUsageReport>(document);
+        assert_eq!(parsed.is_ok(), accepted, "schema 1 / {cell}: {parsed:?}");
+    }
+
+    let mut missing = current.clone();
+    missing.as_object_mut().unwrap().remove("index_provenance");
+    let error = serde_json::from_value::<PathUsageReport>(missing).unwrap_err();
+    assert!(error.to_string().contains("index_provenance"), "{error}");
+
+    let mut supplied = report.clone();
+    supplied.index_provenance = IndexProvenance::Supplied;
+    let back: PathUsageReport = serde_json::from_str(&serde_json::to_string(&supplied).unwrap()).unwrap();
+    assert_eq!(back.index_provenance, IndexProvenance::Supplied);
 }

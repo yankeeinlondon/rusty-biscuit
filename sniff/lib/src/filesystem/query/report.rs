@@ -10,7 +10,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Version of the serialized report shape.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// Version 2 added [`PathUsageReport::index_provenance`]. A version 1 report
+/// still loads, with provenance [`IndexProvenance::Unknown`].
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// One observation of the processes associated with a file or directory tree.
 ///
@@ -18,10 +21,12 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// holds while the query runs. An empty `processes` list does not establish
 /// that the target is unused; read `outcome` and `coverage` first.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "RawReport")]
 pub struct PathUsageReport {
     pub schema_version: u32,
     pub target: QueryTarget,
+    /// Who collected the identities this query matched against.
+    pub index_provenance: IndexProvenance,
     pub outcome: Outcome,
     pub started_at: DateTime<Utc>,
     pub finished_at: DateTime<Utc>,
@@ -38,6 +43,91 @@ pub struct PathUsageReport {
     /// Report-wide limitations; mechanism-specific ones live on their
     /// coverage record.
     pub limitations: Vec<Limitation>,
+}
+
+/// Where the in-scope identities a query matched against came from.
+///
+/// Provenance is separate from coverage: a supplied index the caller declared
+/// complete has complete tree coverage, but this query did not read its
+/// descendants, so it is never reported as `walked`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexProvenance {
+    /// This query collected them: the target alone, or its walked tree.
+    Walked,
+    /// The caller supplied them as a [`TreeIndex`](super::TreeIndex).
+    Supplied,
+    /// Read from a version 1 report, written before provenance was recorded.
+    Unknown,
+}
+
+/// The serialized report as read, before its version decides what an absent
+/// provenance means.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawReport {
+    schema_version: u32,
+    target: QueryTarget,
+    // `default` only tells absence apart: `present` makes an explicit `null`
+    // an error instead of `None`, and the version check below decides what
+    // absence means.
+    #[serde(default, deserialize_with = "present")]
+    index_provenance: Option<IndexProvenance>,
+    outcome: Outcome,
+    started_at: DateTime<Utc>,
+    finished_at: DateTime<Utc>,
+    budget_ms: u64,
+    elapsed_us: u64,
+    budget_exhausted: bool,
+    processes: Vec<ProcessRecord>,
+    coverage: Vec<Coverage>,
+    limitations: Vec<Limitation>,
+}
+
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+impl TryFrom<RawReport> for PathUsageReport {
+    type Error = String;
+
+    fn try_from(raw: RawReport) -> Result<Self, String> {
+        let index_provenance = match (raw.schema_version, raw.index_provenance) {
+            (1, None) => IndexProvenance::Unknown,
+            // A version 1 report read and written back keeps its version and
+            // now carries `unknown`; it never names who walked.
+            (1, Some(IndexProvenance::Unknown)) => IndexProvenance::Unknown,
+            (1, Some(other)) => {
+                return Err(format!(
+                    "index_provenance: a schema 1 report cannot record {other:?} provenance"
+                ));
+            }
+            (_, Some(provenance)) => provenance,
+            (version, None) => {
+                return Err(format!(
+                    "index_provenance: missing from a schema {version} report"
+                ));
+            }
+        };
+        Ok(Self {
+            schema_version: raw.schema_version,
+            target: raw.target,
+            index_provenance,
+            outcome: raw.outcome,
+            started_at: raw.started_at,
+            finished_at: raw.finished_at,
+            budget_ms: raw.budget_ms,
+            elapsed_us: raw.elapsed_us,
+            budget_exhausted: raw.budget_exhausted,
+            processes: raw.processes,
+            coverage: raw.coverage,
+            limitations: raw.limitations,
+        })
+    }
 }
 
 /// The queried target as requested and as resolved.
@@ -294,6 +384,8 @@ pub enum LimitationKind {
     /// A watch names an in-scope inode on a different device; the device
     /// encodings may not be comparable on this filesystem.
     DeviceIdentityUnreliable,
+    /// The caller declared its supplied tree index incomplete.
+    IncompleteTreeIndex,
 }
 
 /// One kind of gap, aggregated with a count and a few representative examples.

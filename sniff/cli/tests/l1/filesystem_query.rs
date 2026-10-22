@@ -14,6 +14,7 @@ use chrono::{TimeZone, Utc};
 use serde_json::Value;
 use sniff::filesystem::query::{
     Access, Coverage, CoverageScope, CoverageStatus, Evidence, EvidenceKind, FileIdentity,
+    IndexProvenance,
     Limitation, LimitationExample, LimitationKind, MatchBasis, Mechanism, NativeString, Outcome,
     PathUsageReport, ProcessRecord, QueryTarget, SCHEMA_VERSION, TargetKind, WatchInfo,
 };
@@ -142,6 +143,7 @@ fn usable_report() -> PathUsageReport {
             identity: identity(10),
             recursive: true,
         },
+        index_provenance: IndexProvenance::Walked,
         outcome: Outcome::Usable,
         started_at: Utc.with_ymd_and_hms(2026, 10, 6, 9, 30, 0).unwrap(),
         finished_at: Utc.with_ymd_and_hms(2026, 10, 6, 9, 30, 1).unwrap(),
@@ -525,6 +527,38 @@ fn a_malformed_replay_is_an_error_not_an_empty_report() {
     assert!(stderr(&output).contains(REPLAY_ENV), "{}", stderr(&output));
 }
 
+/// A schema 1 report, written before `index_provenance` existed.
+fn version_1_report_json() -> Value {
+    let mut value = serde_json::to_value(usable_report()).unwrap();
+    let object = value.as_object_mut().unwrap();
+    object.insert("schema_version".into(), Value::from(1));
+    object.remove("index_provenance");
+    value
+}
+
+#[test]
+fn a_version_1_replay_loads_with_unknown_provenance_and_says_so() {
+    let replay = Replay::from_json(&version_1_report_json().to_string());
+    let output = replay.run(&["--json"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let value = json(&output);
+    assert_eq!(value["schema_version"], 1);
+    assert_eq!(value["index_provenance"], "unknown", "never inferred as walked");
+
+    let text = stdout(&replay.run(&["--plain"]));
+    assert!(text.contains("Tree index: unknown"), "{text}");
+}
+
+#[test]
+fn a_current_replay_without_provenance_is_an_error_naming_the_field() {
+    let mut value = version_1_report_json();
+    value["schema_version"] = Value::from(SCHEMA_VERSION);
+    let output = Replay::from_json(&value.to_string()).run(&["--json"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(stdout(&output), "");
+    assert!(stderr(&output).contains("index_provenance"), "{}", stderr(&output));
+}
+
 // ----------------------------------------------------------------------------
 // Live queries against a directory the fixture owns
 // ----------------------------------------------------------------------------
@@ -557,6 +591,8 @@ fn a_live_json_perf_query_is_one_object_and_does_no_inventory() {
     let value = json(&output);
     assert_eq!(value["outcome"], "usable");
     assert_eq!(value["target"]["kind"], "directory");
+    assert_eq!(value["schema_version"], SCHEMA_VERSION);
+    assert_eq!(value["index_provenance"], "walked");
     let counters = value["performance"]["counters"]
         .as_object()
         .expect("structured performance counters");

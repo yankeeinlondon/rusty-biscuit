@@ -270,7 +270,8 @@ impl<S: Source> UsageBackend for ModuleBackend<S> {
         candidates: &[ProcessCandidate<Self::Payload>],
     ) -> Option<(Vec<super::process::Observation>, super::report::Coverage)> {
         let reader = self.source.path_reader()?;
-        let (mut observations, mut coverage) = super::win32_paths::scan(context, &reader);
+        let entries = context.index.probe_entries(&context.root.resolved);
+        let (mut observations, mut coverage) = super::win32_paths::scan(context, &entries, &reader);
         let mut uncertain = Vec::new();
         for observation in &mut observations {
             if let Some(candidate) = candidates.iter().find(|c| c.pid == observation.pid)
@@ -287,7 +288,7 @@ impl<S: Source> UsageBackend for ModuleBackend<S> {
                 // A PID first seen after enumeration needs a second file-side
                 // observation while its new process handle is held; otherwise
                 // its creation time might describe a successor.
-                let entry = context.index.entries.iter().find(|entry| observation.evidence.iter()
+                let entry = entries.iter().find(|entry| observation.evidence.iter()
                     .any(|e| e.observed_path.as_ref().is_some_and(|p| p.as_os_str() == entry.path.as_os_str())));
                 if let Some(entry) = entry
                     && let Ok((identity, pids)) = reader(entry, context.budget)

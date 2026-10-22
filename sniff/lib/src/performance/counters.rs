@@ -53,6 +53,9 @@ pub const FS_READ_DIRS: &str = "filesystem.io.read_dirs";
 /// `canonicalize` calls.
 pub const FS_CANONICALIZATIONS: &str = "filesystem.io.canonicalizations";
 
+/// Native available-space readings taken by `filesystem::space`.
+pub const FS_SPACE_READINGS: &str = "filesystem.space.readings";
+
 // ---------------------------------------------------------------------------
 // Filesystem usage queries (`filesystem::query`)
 // ---------------------------------------------------------------------------

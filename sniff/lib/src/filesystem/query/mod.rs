@@ -47,10 +47,12 @@ pub use identity::FileIdentity;
 pub use native::NativeString;
 pub use options::{DEFAULT_DEADLINE, PathUsageError, PathUsageOptions};
 pub use report::{
-    Access, Coverage, CoverageScope, CoverageStatus, Evidence, EvidenceKind, Limitation,
-    LimitationExample, LimitationKind, MatchBasis, Mechanism, Outcome, PathUsageReport,
-    ProcessRecord, QueryTarget, SCHEMA_VERSION, TargetKind, Truncation, WatchInfo,
+    Access, Coverage, CoverageScope, CoverageStatus, Evidence, EvidenceKind, IndexProvenance,
+    Limitation, LimitationExample, LimitationKind, MatchBasis, Mechanism, Outcome,
+    PathUsageReport, ProcessRecord, QueryTarget, SCHEMA_VERSION, TargetKind, Truncation,
+    WatchInfo,
 };
+pub use tree::{TreeEntryKind, TreeIndex, TreeIndexBuilder, TreeIndexError};
 
 use backend::{
     InspectionContext, InspectionResult, MechanismSupport, ProcessCandidate, Support,
@@ -76,7 +78,10 @@ pub const MAX_EVIDENCE_TOTAL: u64 = 10_000;
 /// descendants (unless [`PathUsageOptions::target_only`] is set).
 ///
 /// The options' deadline is one shared budget for root resolution, the tree
-/// walk, process enumeration, inspection, and identity enrichment. When it
+/// walk, process enumeration, inspection, and identity enrichment. A caller
+/// that already walked the tree can supply its index with
+/// [`PathUsageOptions::with_tree_index`]; the query then skips the walk,
+/// still verifying the root, and spends the budget on processes. When it
 /// expires the query stops scheduling work and returns what it collected,
 /// with incomplete coverage; a native call already running can overrun it.
 ///
@@ -98,7 +103,9 @@ pub const MAX_EVIDENCE_TOTAL: u64 = 10_000;
 /// ## Errors
 ///
 /// Returns [`PathUsageError`] only when no report about a verified target can
-/// be built: invalid options, a missing target, a socket/device/FIFO target, a
+/// be built: invalid options (including a supplied tree index combined with
+/// `target_only`, given for a file, or describing a different root), a
+/// missing target, a socket/device/FIFO target, a
 /// root whose identity cannot be read, or a budget that expired before the
 /// root identity was captured. Every later failure is reported in coverage.
 pub fn query_path_usage(
@@ -137,8 +144,17 @@ pub(crate) fn run<B: UsageBackend>(
     budget: &Budget,
     started_at: DateTime<Utc>,
 ) -> Result<PathUsageReport, PathUsageError> {
+    if options.tree_index().is_some() && !options.recursive() {
+        return Err(PathUsageError::InvalidOption {
+            message: "a tree index describes descendants, so it cannot be combined with target_only"
+                .to_string(),
+        });
+    }
     let root = root::resolve(path, budget)?;
-    let tree = tree::collect(&root, options.recursive(), budget);
+    let tree = match options.tree_index() {
+        Some(index) => tree::supplied(&root, index)?,
+        None => tree::collect(&root, options.recursive(), budget),
+    };
     let tree_partial = tree
         .coverage
         .as_ref()
@@ -271,6 +287,7 @@ pub(crate) fn run<B: UsageBackend>(
     Ok(PathUsageReport {
         schema_version: SCHEMA_VERSION,
         target: target(&root, options.recursive()),
+        index_provenance: tree.provenance,
         outcome,
         started_at,
         finished_at: Utc::now(),
