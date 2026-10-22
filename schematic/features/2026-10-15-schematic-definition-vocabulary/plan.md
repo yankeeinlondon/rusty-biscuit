@@ -13,7 +13,97 @@ docs_created_during_phase_1:
   - schematic/features/2026-10-15-schematic-definition-vocabulary/contracts.md
   - schematic/features/2026-10-15-schematic-definition-vocabulary/inventory.md
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+  - schematic-define
+  - schematic-definitions
+  - schematic-gen
+  - schematic-oauth
+source_files_during_phase_2:
+  - schematic/define/src/auth.rs
+  - schematic/define/src/builders.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/metadata.rs
+  - schematic/define/src/models/aliases.rs
+  - schematic/define/src/models/enums.rs
+  - schematic/define/src/models/mod.rs
+  - schematic/define/src/models/structs.rs
+  - schematic/define/src/oauth.rs
+  - schematic/define/src/openapi/export/info.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/parameters.rs
+  - schematic/define/src/openapi/export/security.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/mappings/parameters.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/params/param_def.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/serde_presence.rs
+  - schematic/define/src/types.rs
+  - schematic/define/src/websocket/mod.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/composition.rs
+  - schematic/define/tests/definition_serde.rs
+  - schematic/define/tests/endpoint_literal_surface.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/define/tests/vocabulary.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/gen/src/asyncapi_import.rs
+  - schematic/gen/src/codegen/api_struct/constructors.rs
+  - schematic/gen/src/codegen/api_struct/fields.rs
+  - schematic/gen/src/codegen/api_struct/tests.rs
+  - schematic/gen/src/codegen/api_struct/variant.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/module_docs.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/export/auth.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/output/assemble/lib_rs.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/src/ws_codegen/client.rs
+  - schematic/gen/src/ws_codegen/docs.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/oauth/src/manager/authorization_code.rs
+  - schematic/oauth/src/manager/mod.rs
+  - schematic/oauth/src/manager/revocation.rs
+  - schematic/oauth/tests/wiremock_flows.rs
+docs_updated_during_phase_2:
+  - schematic/docs/definition-builders.md
+  - schematic/docs/definition-snapshots.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/headers/README.md
+  - schematic/docs/pagination.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/implementation-log.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/schematic-define/SKILL.md
 ---
 
 # Schematic definition vocabulary implementation plan
@@ -60,23 +150,23 @@ Waves are numbered uniquely across the plan. Tasks within one wave may run concu
 
 ### Wave 2: Independent type modules
 
-- [ ] **Define metadata**
+- [x] **Define metadata**
   - Add PD1 rate-limit/retry types and serde contracts in a dedicated definition module. Validate legal HTTP header names, reset units, status bounds 100–599, ordered inclusive ranges, attempts including the initial attempt, positive delays/base, and cap at least base.
   - Test boundary failures and complete value preservation. Endpoint overrides replace the entire declaration; absence inherits. No runtime readers or enforcement.
 
-- [ ] **Reshape OAuth2**
+- [x] **Reshape OAuth2**
   - Replace the flat configuration with the three PD9 per-grant payloads, retaining explicit `grant_type` spellings, optional revocation metadata, scopes, client authentication, and grant accessor behavior.
   - Introduce the authorization-code PKCE type without `NotUsed`. Validate nonempty well-formed URLs, required grant URLs, contradictory non-null fields, and malformed serialized values. Explicitly define treatment of null grant-inapplicable fields in the input ledger.
   - Add compile-fail proof for unrepresentable combinations and loader-facing fixture cases. Own `define/src/oauth.rs`; minimum consumer compilation repairs occur in Wave 3, and complete behavior validation follows in Phase 3.
 
-- [ ] **Bridge composition**
+- [x] **Bridge composition**
   - Extend, never replace, 4a's descriptor carrier if necessary. Add same-context `one_of`, `any_of`, and `all_of` registration and the catalog's serde support. Coordinate context file ownership before concurrent execution.
   - Reject unregistered/foreign-context members, empty lists, and schema-name conflicts. Make explicit structure authoritative and diagnose conflicting registry schemas.
   - Create distinguishable oneOf/anyOf serde fixtures and a struct satisfying allOf; prove serialization/deserialization semantics without assuming an untagged enum guarantees oneOf exclusivity. Log any descriptor extension.
 
 ### Wave 3: Builder integration
 
-- [ ] **Integrate builders**
+- [x] **Integrate builders**
   - Integrate new fields/reexports/prelude and optional builder methods in `define/src/types.rs`, parameter types, and the landed builder/context modules. A single owner edits shared files and makes the minimum mechanical Basic/OAuth2 consumer and fixture adaptations needed to keep all affected packages compiling before this phase closes. Full consumer behavior and export changes follow in Phase 3.
   - Typed paths reuse `ParamDef`: force required/Simple through builders; reject deserialized required=false, non-Simple style, Array/Json, duplicates, empty/duplicate enum values, and sanitized-name collisions. Validate declared names exactly against normalized placeholders; no declarations preserves legacy untyped paths. Repeated placeholders produce one field in first-template-occurrence order.
   - Add endpoint/parameter deprecation, metadata inheritance/replacement, and the author-approved endpoint auth representation. Preserve all prior builder signatures and additive absent-field defaults.
