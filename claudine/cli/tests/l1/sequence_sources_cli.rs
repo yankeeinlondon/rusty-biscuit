@@ -88,73 +88,113 @@ fn source_doc(workspace: &CliProcessFixture, name: &str, source: &str) -> std::p
 // ============================================================================
 
 /// The five supported data formats are one code path above the loader, so a
-/// format that parses must produce the same plan as any other. Asserting
-/// equality between them — rather than five independent expectations — is what
-/// makes a future format-specific divergence visible.
-#[test]
-fn yaml_json_json5_jsonl_and_ndjson_sources_produce_the_same_plan() {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    write(&workspace, "d.yaml", "wrap:\n  items:\n    - one\n    - two\n");
-    write(&workspace, "d.json", r#"{"wrap": {"items": ["one", "two"]}}"#);
-    write(
-        &workspace,
-        "d.json5",
-        "{ wrap: { items: ['one', 'two'] } } // trailing comment\n",
-    );
-    write(
-        &workspace,
-        "d.jsonl",
-        "{\"label\": \"one\"}\n{\"label\": \"two\"}\n",
-    );
-    write(
-        &workspace,
-        "d.ndjson",
-        "{\"label\": \"one\"}\n{\"label\": \"two\"}\n",
-    );
+/// format that parses must produce the same plan as any other. Every row
+/// asserts that one shared plan rather than an expectation of its own, which
+/// is what makes a future format-specific divergence visible.
+mod yaml_json_json5_jsonl_and_ndjson_sources_produce_the_same_plan {
+    use super::*;
 
-    let expected = vec!["one".to_string(), "two".to_string()];
-    for (name, source) in [
+    /// Each format's document name and its `sequence:` source. JSONL/NDJSON
+    /// are always a list at the root, so they take an operator but never an
+    /// offset.
+    const ROWS: [(&str, &str); 5] = [
         ("yaml.md", "\"d.yaml -> wrap.items\""),
         ("json.md", "\"d.json -> wrap.items\""),
         ("json5.md", "\"d.json5 -> wrap.items\""),
-        // JSONL/NDJSON are always a list at the root, so they take an operator
-        // but never an offset.
         ("jsonl.md", "\"d.jsonl::name(label)\""),
         ("ndjson.md", "\"d.ndjson::name(label)\""),
-    ] {
+    ];
+
+    macro_rules! format_tests {
+        ($($test:ident => $name:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_row_produces_the_shared_plan($name); })*
+
+            #[test]
+            fn every_row_has_a_listed_test() {
+                let rows: Vec<&str> = ROWS.iter().map(|(name, _)| *name).collect();
+                assert_eq!(rows, [$($name),*]);
+            }
+        };
+    }
+
+    format_tests! {
+        yaml => "yaml.md",
+        json => "json.md",
+        json5 => "json5.md",
+        jsonl => "jsonl.md",
+        ndjson => "ndjson.md",
+    }
+
+    fn assert_row_produces_the_shared_plan(name: &str) {
+        let (_, source) = ROWS.iter().find(|(row, _)| *row == name).expect("a listed row");
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        write(&workspace, "d.yaml", "wrap:\n  items:\n    - one\n    - two\n");
+        write(&workspace, "d.json", r#"{"wrap": {"items": ["one", "two"]}}"#);
+        write(
+            &workspace,
+            "d.json5",
+            "{ wrap: { items: ['one', 'two'] } } // trailing comment\n",
+        );
+        write(
+            &workspace,
+            "d.jsonl",
+            "{\"label\": \"one\"}\n{\"label\": \"two\"}\n",
+        );
+        write(
+            &workspace,
+            "d.ndjson",
+            "{\"label\": \"one\"}\n{\"label\": \"two\"}\n",
+        );
+
         let doc = source_doc(&workspace, name, source);
         assert_eq!(
             composed_steps(&workspace, &doc, &[]),
-            expected,
+            ["one", "two"],
             "`{source}` should normalize to the same plan as every other format"
         );
     }
 }
 
-#[test]
-fn the_three_operators_each_produce_a_usable_name() {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    write(
-        &workspace,
-        "d.yaml",
-        "colors:\n  data:\n    - color: blue\n      rank: 5\n    - color: green\n      rank: 3\n",
-    );
+/// `map` renames (the source key is gone), `name` copies (it is retained),
+/// and `template` computes. All three answer the same produce-a-name
+/// question, which is why v1 allows exactly one per reference.
+mod the_three_operators_each_produce_a_usable_name {
+    use super::*;
 
-    // `map` renames (the source key is gone), `name` copies (it is retained),
-    // and `template` computes. All three answer the same produce-a-name
-    // question, which is why v1 allows exactly one per reference.
-    let mapped = source_doc(&workspace, "map.md", "\"d.yaml -> colors.data::map(color, name)\"");
-    assert_eq!(composed_steps(&workspace, &mapped, &[]), ["blue", "green"]);
+    fn operator_steps(name: &str, source: &str) -> Vec<String> {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        write(
+            &workspace,
+            "d.yaml",
+            "colors:\n  data:\n    - color: blue\n      rank: 5\n    - color: green\n      rank: 3\n",
+        );
+        let doc = source_doc(&workspace, name, source);
+        composed_steps(&workspace, &doc, &[])
+    }
 
-    let named = source_doc(&workspace, "name.md", "\"d.yaml -> colors.data::name(color)\"");
-    assert_eq!(composed_steps(&workspace, &named, &[]), ["blue", "green"]);
+    #[test]
+    fn map() {
+        assert_eq!(
+            operator_steps("map.md", "\"d.yaml -> colors.data::map(color, name)\""),
+            ["blue", "green"]
+        );
+    }
 
-    let templated = source_doc(
-        &workspace,
-        "template.md",
-        "\"d.yaml -> colors.data::template(color + '-' + rank)\"",
-    );
-    assert_eq!(composed_steps(&workspace, &templated, &[]), ["blue-5", "green-3"]);
+    #[test]
+    fn name() {
+        assert_eq!(
+            operator_steps("name.md", "\"d.yaml -> colors.data::name(color)\""),
+            ["blue", "green"]
+        );
+    }
+
+    #[test]
+    fn template() {
+        assert_eq!(
+            operator_steps("template.md", "\"d.yaml -> colors.data::template(color + '-' + rank)\""),
+            ["blue-5", "green-3"]
+        );
+    }
 }
 
 #[test]
@@ -186,10 +226,12 @@ fn map_removes_the_source_key_while_name_retains_it() {
 /// Every classified string form reaches the sequence through the same
 /// `biscuit_file::ListFormat` classifier. Driving them through the CLI proves
 /// the wiring, not just the classifier's own unit tests.
-#[test]
-fn every_string_list_form_classifies_through_the_real_invocation_path() {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    let cases: &[(&str, &str, &[&str])] = &[
+mod every_string_list_form_classifies_through_the_real_invocation_path {
+    use super::*;
+
+    /// Each form's name, its raw frontmatter value, and the steps it must
+    /// classify into.
+    const ROWS: [(&str, &str, &[&str]); 5] = [
         ("csv", "\"alpha, beta, gamma\"", &["alpha", "beta", "gamma"]),
         ("tsv", "\"alpha\tbeta\"", &["alpha", "beta"]),
         ("lines", "\"alpha\nbeta\"", &["alpha", "beta"]),
@@ -197,7 +239,29 @@ fn every_string_list_form_classifies_through_the_real_invocation_path() {
         ("scalar", "\"solo\"", &["solo"]),
     ];
 
-    for (name, raw, expected) in cases {
+    macro_rules! form_tests {
+        ($($test:ident => $name:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_form_classifies($name); })*
+
+            #[test]
+            fn every_row_has_a_listed_test() {
+                let rows: Vec<&str> = ROWS.iter().map(|(name, _, _)| *name).collect();
+                assert_eq!(rows, [$($name),*]);
+            }
+        };
+    }
+
+    form_tests! {
+        csv => "csv",
+        tsv => "tsv",
+        lines => "lines",
+        spaces => "spaces",
+        scalar => "scalar",
+    }
+
+    fn assert_form_classifies(name: &str) {
+        let (_, raw, expected) = ROWS.iter().find(|(row, _, _)| *row == name).expect("a listed row");
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
         let doc = write(
             &workspace,
             &format!("{name}.md"),
@@ -211,47 +275,63 @@ fn every_string_list_form_classifies_through_the_real_invocation_path() {
     }
 }
 
-#[test]
-fn markdown_list_markers_win_over_line_splitting() {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    // Both bodies are multi-line, so line-separation would also "work" — the
-    // marker precedence rule is what strips the bullets and numbers.
-    let unordered = write(
-        &workspace,
-        "ul.md",
-        "---\nraw: |\n  - alpha\n  - beta\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
-    );
-    assert_eq!(composed_steps(&workspace, &unordered, &[]), ["alpha", "beta"]);
+// Both bodies are multi-line, so line-separation would also "work" — the
+// marker precedence rule is what strips the bullets and numbers.
+mod markdown_list_markers_win_over_line_splitting {
+    use super::*;
 
-    let ordered = write(
-        &workspace,
-        "ol.md",
-        "---\nraw: |\n  1. alpha\n  2. beta\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
-    );
-    assert_eq!(composed_steps(&workspace, &ordered, &[]), ["alpha", "beta"]);
+    #[test]
+    fn unordered() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let unordered = write(
+            &workspace,
+            "ul.md",
+            "---\nraw: |\n  - alpha\n  - beta\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
+        );
+        assert_eq!(composed_steps(&workspace, &unordered, &[]), ["alpha", "beta"]);
+    }
+
+    #[test]
+    fn ordered() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let ordered = write(
+            &workspace,
+            "ol.md",
+            "---\nraw: |\n  1. alpha\n  2. beta\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
+        );
+        assert_eq!(composed_steps(&workspace, &ordered, &[]), ["alpha", "beta"]);
+    }
 }
 
-#[test]
-fn quoted_csv_delimiters_and_crlf_survive_classification() {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    // A naive `split(',')` would produce four entries here, and a naive line
-    // split would leave a trailing `\r` on every name.
-    let doc = write(
-        &workspace,
-        "quoted.md",
-        "---\nraw: \"\\\"alpha, with comma\\\", beta\"\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
-    );
-    assert_eq!(
-        composed_steps(&workspace, &doc, &[]),
-        ["alpha, with comma", "beta"]
-    );
+mod quoted_csv_delimiters_and_crlf_survive_classification {
+    use super::*;
 
-    let crlf = write(
-        &workspace,
-        "crlf.md",
-        "---\nraw: \"alpha\\r\\nbeta\"\nsequence: \"{{ raw }}\"\n---\nStep [{{ seq.name }}].\n",
-    );
-    assert_eq!(composed_steps(&workspace, &crlf, &[]), ["[alpha]", "[beta]"]);
+    /// A naive `split(',')` would produce four entries here.
+    #[test]
+    fn quoted_delimiters() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let doc = write(
+            &workspace,
+            "quoted.md",
+            "---\nraw: \"\\\"alpha, with comma\\\", beta\"\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
+        );
+        assert_eq!(
+            composed_steps(&workspace, &doc, &[]),
+            ["alpha, with comma", "beta"]
+        );
+    }
+
+    /// A naive line split would leave a trailing `\r` on every name.
+    #[test]
+    fn crlf() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let crlf = write(
+            &workspace,
+            "crlf.md",
+            "---\nraw: \"alpha\\r\\nbeta\"\nsequence: \"{{ raw }}\"\n---\nStep [{{ seq.name }}].\n",
+        );
+        assert_eq!(composed_steps(&workspace, &crlf, &[]), ["[alpha]", "[beta]"]);
+    }
 }
 
 // ============================================================================
@@ -261,26 +341,34 @@ fn quoted_csv_delimiters_and_crlf_survive_classification() {
 /// Foreign data is lenient where an authored inline list is strict: scalars
 /// coerce and a nameless object gets an ordinal name. `sequence_errors_cli.rs`
 /// pins the strict half of the same boundary.
-#[test]
-fn a_foreign_source_coerces_scalars_and_names_nameless_objects() {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    let scalars = write(
-        &workspace,
-        "scalars.md",
-        "---\nraw:\n  - 1\n  - 2.5\n  - true\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
-    );
-    assert_eq!(composed_steps(&workspace, &scalars, &[]), ["1", "2.5", "true"]);
+mod a_foreign_source_coerces_scalars_and_names_nameless_objects {
+    use super::*;
 
-    let objects = write(
-        &workspace,
-        "objects.md",
-        "---\nraw:\n  - name: alpha\n  - topic: parsing\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
-    );
-    assert_eq!(
-        composed_steps(&workspace, &objects, &[]),
-        ["alpha", "2"],
-        "a nameless object takes its one-based ordinal"
-    );
+    #[test]
+    fn scalars_coerce() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let scalars = write(
+            &workspace,
+            "scalars.md",
+            "---\nraw:\n  - 1\n  - 2.5\n  - true\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
+        );
+        assert_eq!(composed_steps(&workspace, &scalars, &[]), ["1", "2.5", "true"]);
+    }
+
+    #[test]
+    fn nameless_objects_take_their_ordinal() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let objects = write(
+            &workspace,
+            "objects.md",
+            "---\nraw:\n  - name: alpha\n  - topic: parsing\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
+        );
+        assert_eq!(
+            composed_steps(&workspace, &objects, &[]),
+            ["alpha", "2"],
+            "a nameless object takes its one-based ordinal"
+        );
+    }
 }
 
 #[test]
@@ -318,47 +406,79 @@ fn a_shell_expanded_source_becomes_a_classified_list() {
 /// holding an `@`. The home-pinned case uses the same explicit request-context
 /// seam because native Windows home discovery cannot be isolated by overriding
 /// environment variables in a child process.
-#[test]
-fn file_references_resolve_from_the_authoring_document() {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    write(&workspace, "nested/data.yaml", "items:\n  - nested-hit\n");
-    write(&workspace, "my data/data.yaml", "items:\n  - spaced-hit\n");
-    write(&workspace, "a@b/data.yaml", "items:\n  - at-hit\n");
-    write(&workspace, "tilde.yaml", "items:\n  - tilde-hit\n");
+mod file_references_resolve_from_the_authoring_document {
+    use super::*;
 
-    for (name, source, expected) in [
+    /// Each family's document name, its `sequence:` source, and the one step
+    /// its data file holds.
+    const ROWS: [(&str, &str, &str); 3] = [
         ("relative.md", "\"nested/data.yaml -> items\"", "nested-hit"),
         ("spaced.md", "\"my data/data.yaml -> items\"", "spaced-hit"),
         ("at.md", "\"a@b/data.yaml -> items\"", "at-hit"),
-    ] {
+    ];
+
+    macro_rules! family_tests {
+        ($($test:ident => $name:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_family_resolves($name); })*
+
+            #[test]
+            fn every_row_has_a_listed_test() {
+                let rows: Vec<&str> = ROWS.iter().map(|(name, _, _)| *name).collect();
+                assert_eq!(rows, [$($name),*]);
+            }
+        };
+    }
+
+    family_tests! {
+        relative => "relative.md",
+        path_with_a_space => "spaced.md",
+        path_with_an_at_sign => "at.md",
+    }
+
+    fn workspace() -> CliProcessFixture {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        write(&workspace, "nested/data.yaml", "items:\n  - nested-hit\n");
+        write(&workspace, "my data/data.yaml", "items:\n  - spaced-hit\n");
+        write(&workspace, "a@b/data.yaml", "items:\n  - at-hit\n");
+        write(&workspace, "tilde.yaml", "items:\n  - tilde-hit\n");
+        workspace
+    }
+
+    fn assert_family_resolves(name: &str) {
+        let (_, source, expected) = ROWS.iter().find(|(row, _, _)| *row == name).expect("a listed row");
+        let workspace = workspace();
         let doc = source_doc(&workspace, name, source);
         assert_eq!(
             composed_steps(&workspace, &doc, &[]),
-            [expected],
+            [*expected],
             "`{source}` did not resolve"
         );
     }
 
-    let doc = source_doc(&workspace, "tilde.md", "\"~/tilde.yaml -> items\"");
-    let request_context = biscuit_file::FileResolutionContext::new(workspace.cwd())
-        .with_home_dir(workspace.cwd())
-        .with_source_path(&doc);
-    let source = claudine::composition::resolve_composition_source_in_context(
-        doc.to_str().unwrap(),
-        &request_context,
-    )
-    .unwrap();
-    let plan = claudine::composition::resolve_sequence_plan_with(
-        &source,
-        claudine::composition::SequenceSourceOptions {
-            shell_runner: None,
-            file_resolution_context: &request_context,
-        },
-    )
-    .unwrap()
-    .expect("tilde fixture declares a sequence");
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].name, "tilde-hit");
+    #[test]
+    fn home_pinned() {
+        let workspace = workspace();
+        let doc = source_doc(&workspace, "tilde.md", "\"~/tilde.yaml -> items\"");
+        let request_context = biscuit_file::FileResolutionContext::new(workspace.cwd())
+            .with_home_dir(workspace.cwd())
+            .with_source_path(&doc);
+        let source = claudine::composition::resolve_composition_source_in_context(
+            doc.to_str().unwrap(),
+            &request_context,
+        )
+        .unwrap();
+        let plan = claudine::composition::resolve_sequence_plan_with(
+            &source,
+            claudine::composition::SequenceSourceOptions {
+                shell_runner: None,
+                file_resolution_context: &request_context,
+            },
+        )
+        .unwrap()
+        .expect("tilde fixture declares a sequence");
+        assert_eq!(plan.steps.len(), 1);
+        assert_eq!(plan.steps[0].name, "tilde-hit");
+    }
 }
 
 #[test]
