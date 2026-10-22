@@ -45,9 +45,15 @@ flowchart LR
 ```
 
 Every other reply skips both hooks: non-2xx statuses (including declared
-error bodies), text, binary, and empty endpoints, and every
+error bodies), text, binary, empty, and stream endpoints, and every
 [raw send](./sending-and-responses.md#the-raw-send). The global hook
 therefore only ever sees a body that parsed as JSON.
+
+Two codecs refine this. A multi-shape endpoint runs the global hook only
+when the shape chosen for the reply is JSON. A GraphQL operation's global
+hook sees the whole `{data, errors}` wrapper, and its mutator sees the
+decoded data only when the reply carries no GraphQL errors (see
+[GraphQL](../graphql.md#decoding-a-reply)).
 
 A **pager's page** runs the global hook but not the endpoint's mutator. The
 pager reads items and next-page cursors from the body the global hook
@@ -65,11 +71,13 @@ JSON hook.
 ## Misuse does not compile
 
 A mutator is typed by its endpoint's success type and requires the
-endpoint's codec to support hooks, which only `Json` does (see
+endpoint's codec to support hooks, which `Json`, `GraphQl`, and a
+multi-shape codec whose every shape is JSON do (see
 [Codecs and decoding](./codecs.md#hooks-decode_hooked-and-supportshooks)).
-Registering a mutator for a text, binary, or empty endpoint, for another
-API's request, or with a closure over the wrong value type is a compile
-error, not a runtime surprise.
+Registering a mutator for a text, binary, empty, or stream endpoint, for a
+multi-shape endpoint with a non-JSON shape, for another API's request, or
+with a closure over the wrong value type is a compile error, not a runtime
+surprise.
 
 ## Refusing a reply
 

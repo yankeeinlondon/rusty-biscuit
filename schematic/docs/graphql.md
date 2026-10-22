@@ -76,6 +76,60 @@ endpoint's (see [declared errors](responses-and-errors.md#declared-errors)):
 `RestApi::effective_operation_errors(&operation)` returns the table. GraphQL
 `errors` inside a 2xx reply are separate and are never opted out of.
 
+## Decoding a reply
+
+The runtime's `GraphQl<D>` codec reads the JSON wrapper **before** it decodes
+`data`, so a server's errors are never hidden by data that does not fit `D`.
+Every 2xx status is classified this way and keeps its status:
+
+| `errors` | `data` | Envelope outcome |
+| --- | --- | --- |
+| a non-empty array of valid entries | anything | `Declared(GraphQlOperationError::GraphQl(failure))`; `failure.partial_data` is `Some` only for non-null data that decodes as `D` |
+| absent or `[]` | non-null and decodes as `D` | `Success(D)` |
+| absent or `[]` | absent, `null`, or does not decode | `MalformedSuccess` |
+| `null`, not an array, or any invalid entry | anything | `MalformedSuccess` |
+
+An entry is valid when it has a string `message`; an optional `path` of
+field names and non-negative indices; optional `locations` whose `line` and
+`column` start at 1; and optional `extensions`. Every other member, such as
+GitHub's top-level `"type": "RATE_LIMITED"`, is kept in `GraphQlError::other`.
+Response-level members such as a top-level `extensions` stay readable in the
+envelope's raw body, which every failure keeps.
+
+```rust
+match response.outcome {
+    Outcome::Success(data) => use_data(data),
+    Outcome::Failure(error) => match error.kind {
+        ErrorKind::Declared(GraphQlOperationError::GraphQl(failure)) => {
+            for error in &failure.errors {
+                eprintln!("{error}: {:?}", error.other.get("type"));
+            }
+            if let Some(partial) = failure.partial_data { use_partial(partial) }
+        }
+        ErrorKind::Declared(GraphQlOperationError::Http(http)) => handle_http(http),
+        _ => eprintln!("{error}"),
+    },
+}
+```
+
+A **non-2xx** reply is never read as a wrapper, whatever its media type: it
+takes the operation's HTTP error table like a REST reply, so GitHub's 403
+`{"message": "Resource not accessible …"}` is an HTTP failure. After an HTTP
+opt-out (`H` is `NoDeclaredError`), every non-2xx reply is `Undeclared`, and
+GraphQL errors in a 2xx reply are still declared failures.
+
+Hooks follow the wire: the client's global JSON hook sees the whole wrapper,
+once, on a 2xx reply and never on a non-2xx one; a typed mutator receives
+`&mut D` and runs only after a reply with no errors, so it never touches
+partial data. A hook's refusal is `ErrorKind::Hook` with the original bytes.
+
+The request body is `{"query": document, "variables": …, "operationName": …}`,
+built by `schematic_runtime::graphql::request_body`. The document is sent
+exactly as written; an operation without variables omits `variables`;
+`operationName` is sent only when the operation sets one; and variables that
+do not serialize to a JSON object are refused before anything is sent.
+Generating operation requests that use them is **planned**.
+
 ## Pagination
 
 A connection pages through the existing [pagination model](pagination.md),

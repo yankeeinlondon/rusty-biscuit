@@ -89,17 +89,37 @@ response head, and dropped sends do not count.
 
 ## Streamed bodies
 
-A codec may return a value that keeps reading the body after the send has
-returned, as a stream of items does. Such a value owns the body, and the
-bounds change once it switches to streaming:
+A [stream codec](./codecs.md#streams-sse-ndjson-and-bytestream) returns a
+value that keeps reading the body after the send has returned. Such a value
+owns the body, and the bounds change once it switches to streaming:
 
-- each read must arrive within the per-request timeout of the previous one
-  (an idle bound), so a long stream that keeps delivering is not cut off;
-- the shared deadline, when the send has one, still bounds the whole
-  stream;
+- the per-request timeout becomes an **idle bound between items**: the next
+  item must arrive within it of the previous item, or of the response head
+  for the first. A stream that keeps delivering runs past it, so a stream
+  yielding one item per second outlives a 2 s timeout. Bytes that trickle
+  in without completing an item do not restart it;
+- the shared deadline, when the send has one, bounds the whole stream;
+  neither an item nor a poll extends it;
+- each expiry ends the stream with one terminal item of its own:
+  `StreamError::IdleTimeout` for the idle bound and
+  `StreamError::DeadlineExceeded` for the deadline. It is never a
+  `TransportError`, because the envelope was already returned;
+- bytes the server has already sent are read even when the caller polls
+  late, so a slow consumer never causes an idle timeout while data waits;
 - the envelope's `elapsed` stops when the codec returns the value, about
   the time to the response head, not the end of the body. Every buffered
   reply's `elapsed` includes its body read.
 
-The four built-in codecs all buffer the body, so these rules apply to
-streaming codecs, which are **planned**.
+```mermaid
+sequenceDiagram
+    participant C as Caller
+    participant S as Server
+    S->>C: response head (envelope returned, idle clock starts)
+    S->>C: event 1 (item; idle clock restarts)
+    S-->>C: partial bytes (no item; clock keeps running)
+    Note over C: idle bound passes
+    C->>C: Err(IdleTimeout), then None
+```
+
+Before the head arrives, the usual transport rules apply: a stalled head is
+a `TransportError` with kind `Timeout` or `DeadlineExceeded`.

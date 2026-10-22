@@ -214,7 +214,7 @@ stream, not a library response.
 
 - [futures-util](https://github.com/rust-lang/futures-rs) _v0.3_ [📄](https://docs.rs/futures-util)
 
-    _Default features off; `stream::unfold` adapts the HTTP library's body reads into the `LiveBody` stream._
+    _Default features off; `stream::unfold` adapts the HTTP library's body reads into the `LiveBody` stream and drives the owned, fused SSE, NDJSON, and byte streams without a background task._
 
     _Tags: async, streams_
 
@@ -238,7 +238,7 @@ stream, not a library response.
 
 - [serde](https://github.com/serde-rs/serde) _v1_ [📄](https://serde.rs)
 
-    _`DeserializeOwned`, the bound of the `Json<T>` codec._
+    _`derive` feature: `DeserializeOwned`, the bound of the `Json<T>`, stream, and GraphQL codecs, and the derived decoding of GraphQL error entries; `Serialize` for GraphQL variables._
 
     _Tags: serialization_
 

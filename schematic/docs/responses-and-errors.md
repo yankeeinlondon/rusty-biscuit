@@ -105,6 +105,11 @@ response model v2 shapes`. Storing and generating those shapes is
 **planned**. `Endpoint::success_shapes()` returns the stored response as a
 one-shape list.
 
+The runtime already applies these rules to a reply: the stream codecs and
+the multi-shape `Shapes` codec are described in
+[Codecs and decoding](runtime/codecs.md#several-shapes-shapes), including
+`UnexpectedContentType` for a reply no shape matches.
+
 ## Declared errors
 
 A non-2xx reply is looked up in the endpoint's **effective error table**. The
@@ -149,8 +154,11 @@ assert!(matches!(table.lookup(422).unwrap().shape, ResponseShape::Json(_))); // 
 An endpoint that declares nothing inherits the API defaults. Each error
 entry's JSON type must be registered in the API's context; an unregistered one
 fails API build with `Items endpoint GetItem: unresolved schema reference
-"Problem"`. Generating error decoding from the table is **planned**; today the
-generated client reports every non-2xx reply through its runtime error kinds.
+"Problem"`. The runtime decodes an error body through a `const` error table
+with the same exact-then-narrowest rule (see
+[Codecs and decoding](runtime/codecs.md#declared-error-bodies-errorbody-and-the-error-table));
+generating that table from the definition is **planned**, so today the
+generated client reports every non-2xx reply as `Undeclared`.
 
 ## Stored forms
 

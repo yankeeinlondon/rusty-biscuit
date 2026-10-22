@@ -35,8 +35,14 @@ Pick the right `ApiResponse`, because the generated `EndpointSpec` impl takes it
 
 If an endpoint returns bytes/text but is modeled as JSON, callers get the wrong success type at compile time, and at runtime the `Json` codec reports a `MalformedSuccess` error in the response envelope (body kept).
 
-There is no streaming variant. SSE and NDJSON endpoints are modeled as `Binary`
-and framed by the caller — see `definitions/src/ollama/mod.rs:316`.
+There is no streaming variant in stored definitions yet. SSE and NDJSON
+endpoints are modeled as `Binary` and framed by the caller — see
+`definitions/src/ollama/mod.rs:316`. The runtime already ships the codecs the
+generator will target: `Sse<T, End>`, `Ndjson<T, End>`, `ByteStream`
+(items are `Result<T, StreamError>`), `Shapes<A>` for a multi-shape enum
+implementing `Alternatives`, the `EndpointSpec::ERRORS` table read by
+`ErrorBody::decode_body(alternative, body)`, and `GraphQl<D>` with
+`GraphQlOperationError<D, H>` (see `schematic/docs/runtime/codecs.md`).
 
 ### 1a) Request Bodies Reach the Client (all variants)
 
