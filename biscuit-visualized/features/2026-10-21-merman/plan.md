@@ -199,8 +199,8 @@ carries the same table.
     static" target on `mermaid::MermaidDiagram`; `biscuit-visualized` rewrites
     `font-family` and allows overflow for it; Darkmatter selects and
     sanitizes. The sanitizer admits `<filter>` and `<feDropShadow>` only, with
-    number-or-color attributes, `dx`/`dy`/`stdDeviation` ≤ 20, `flood-opacity`
-    0–1; every other `fe*` primitive stays dropped; local-only `url(#…)`
+    number-or-color attributes besides `id`, `dx`/`dy`/`stdDeviation` ≤ 20,
+    `flood-opacity` 0–1; every other `fe*` primitive stays dropped; local-only `url(#…)`
     unchanged.
     *Differs from Phase 1:* adds feDropShadow admission with caps (Phase 1 left
     `filter`/`fe*` to the sanitizer change).
@@ -290,8 +290,8 @@ and the Windows leg on the real implementation (D54, AC-S6, AC-S8).
 - [x] **Windows PNG leg (R-S9, AC-S8).** On the Windows test host (see `os`
   skill for reach and traps), render the one S1 diagram with the S1 settings and
   record the pixel difference against the macOS and Linux PNGs with the metric
-  used. One host, one diagram; this sets the D13 PNG tolerance. Reuse
-  `spikes/s1-comparison` code; do not widen.
+  used. One host, one diagram; this is the input to the D13 PNG tolerance,
+  which D42 sets. Reuse `spikes/s1-comparison` code; do not widen.
 - [x] **Prerequisite check (ruling 19).** Read
   `2026-10-13-graphics-where-possible` state and `biscuit-terminal`'s Windows
   detection; record what exists, since Q19 and Phase 2's OSC 4 task depend on it.
@@ -502,9 +502,9 @@ of Phase 2 Streams A and C.
   every font file the chain can return, and the **resolved-face identity** of
   D63. Use `biscuit-hash` (`xx_hash`). Cache check happens before parsing
   (pipeline step 4). Tests: an artifact keyed under the old backend id is not
-  served; changing only one palette color / one font file / the post-process
-  version / `MERMAID_FONT` / the injected installed-font set / the fallback
-  order changes the key; a family's CSS-requested font changes the key
+  served; changing only the rewritten source / the output format / one
+  palette color / one font file / the post-process version / `MERMAID_FONT`
+  / the injected installed-font set / the fallback order changes the key; a family's CSS-requested font changes the key
   without parsing; a counter shows font hashing once across two renders.
 - [ ] **SVG post-process module (D33, R-M9, AC-M7).** Keep the gradient-stroke
   fix and the `sans-serif` default; delete `apply_svg_overrides`,

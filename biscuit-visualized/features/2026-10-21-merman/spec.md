@@ -216,6 +216,9 @@ As of 2026-10-21:
   stored Merman baseline (D35), and the consumer changes that the swap needs
   (Darkmatter's static-SVG path and sanitizer, D37; `worktree`'s gitGraph test
   helper; `biscuit-terminal`'s OSC 4 query).
+- The `commitSpacing` gitGraph patch on a branch of Ken's Merman fork, pushed
+  to his GitHub fork and pinned, with the upstream pull request text drafted
+  for Ken to open (D56).
 - Upstream issues for Merman, drafted by the implementation and filed by Ken
   (D34, D52, [Upstream issues](#upstream-issues)).
 - The bundled font, Inter (D40), the Linux-only bundled emoji fallback font,
@@ -257,7 +260,7 @@ As of 2026-10-21:
 | Captures Zed screenshots for the theme review | Ken |
 | Consumers whose tests must pass | `biscuit-terminal` (lib and `bt`), `darkmatter`, `sniff`, `worktree` |
 | Gains the OSC 4 palette query | `biscuit-terminal`, as a dependency of this work |
-| Consumer code changed by this work (pre-authorized, see below) | `darkmatter` (SVG sanitizer allow-list), `worktree` (gitGraph test helper and the rewrites D43 allows), `biscuit-terminal` (OSC 4) |
+| Consumer code changed by this work (pre-authorized, see below) | `darkmatter` (SVG sanitizer allow-list with the drop shadows of D64; selecting the "HTML static" target, D60), `worktree` (gitGraph test helper and the rewrites D43 allows), `biscuit-terminal` (OSC 4) |
 | Delivers native Windows background detection (prerequisite) | `2026-10-13-graphics-where-possible` |
 
 ## Decisions
@@ -1369,7 +1372,7 @@ flowchart TD
 | 5 | Parse | Merman |
 | 6 | Layout, with measurement through our `TextMeasurer`; Merman wraps (D31). 6b: gitGraph geometry from the layout data (D5, D36) | Merman; `biscuit-visualized` (measurer, 6b) |
 | 7 | resvg-safe SVG with `<text>` elements, not paths | Merman |
-| 8 | Post-process: gradient-stroke fix (D33), accent rewrite (D6) | `biscuit-visualized` |
+| 8 | Post-process: gradient-stroke fix and `sans-serif` default for unset fonts (D33), accent rewrite (D6) | `biscuit-visualized` |
 | 9 | Rasterize: usvg converts text to paths using the same chain and fontdb (D32); resvg draws | `biscuit-visualized` (usvg/resvg 0.47) |
 | 10 | Display through `MermaidDiagram` over `biscuit-terminal` | `biscuit-visualized`, `biscuit-terminal` |
 | 10′ | Darkmatter static SVG: the "HTML static" target's font-family rewrite and label overflow (D37, D60), then Darkmatter's sanitizer | `biscuit-visualized`, `darkmatter` |
@@ -1469,8 +1472,9 @@ flowchart TD
     S2 --> K
     V --> FK[Merman fork patch: gitGraph commitSpacing, D56]
     FK --> GG
+    FK --> U
     K -.->|keep mmdr: not taken| RB[Library changes not merged; spikes kept]
-    K -->|Merman| U[Workspace on resvg/usvg 0.47, fontique, bundled Inter, D31, D40]
+    K -->|Merman| U[Workspace on resvg/usvg 0.47, fontique, bundled Inter, Linux Noto Emoji, Merman pinned to the fork commit, D31, D40, D65]
     U --> C[Cutover behind the existing API: measurer, font chain, post-process, D31-D35]
     C --> GG[gitGraph cutover: geometry, D36, D43 rewrite rule, AC-S6 confirmation]
     GG --> CT[All consumer tests pass]
@@ -1529,7 +1533,7 @@ Requirements are normative. Implementation ideas are in
   layout data (tag bounds from the SVG), and run `worktree`'s git graph tests
   against it, recording which assertions pass and which cannot hold.
 - **R-S9.** Record the PNG pixel difference of one diagram rendered on macOS,
-  Linux, and Windows, as input to the D13 tolerance.
+  Linux, and Windows, as input to the D13 PNG tolerance (set by D42).
 - **R-S10.** The spike is a standalone Cargo project under `spikes/` (D11)
   that depends on `biscuit-visualized` by path (D26); no file outside
   `spikes/` changes before Ken's decision (D30).
@@ -1585,9 +1589,9 @@ As of 2026-10-22 (S1, S2, and the Phase 1 records of S3 and the Windows leg):
   Merman's resvg-safe output needs for labels and shapes to render (D14,
   D37). The extension covers Merman's elements only and keeps the
   sanitizer's block on external `url(...)` references. Of the filter
-  family it admits only `<filter>` and `<feDropShadow>`, with attributes
-  limited to numbers and colors, `dx`, `dy`, and `stdDeviation` capped at 20,
-  and `flood-opacity` within 0–1; every other `fe*` primitive is dropped
+  family it admits only `<filter>` and `<feDropShadow>`, with attributes other
+  than `id` limited to numbers and colors, `dx`, `dy`, and `stdDeviation`
+  capped at 20, and `flood-opacity` within 0–1; every other `fe*` primitive is dropped
   (D64).
 - **R-C9a.** In Darkmatter's static-SVG output (`BrowserMermaidMode::StaticSvg`),
   each label's `font-family` starts with the exact face it was measured with,
@@ -1606,13 +1610,14 @@ As of 2026-10-22 (S1, S2, and the Phase 1 records of S3 and the Windows leg):
   and a warning is logged. The budget covers Merman's work only; our
   post-processing and PNG rasterization are outside it (D28).
 - **R-C12.** `docs/` pages describing Mermaid behavior (including
-  `docs/mermaid-gitgraph.md` and the Merman-only family list of D16), the
+  `docs/mermaid-gitgraph.md` unless R-D3 deletes it, and the Merman-only
+  family list of D16), the
   README, the root and area `docs/dependencies.md`, and the
   `biscuit-visualized` skill are updated in the same change, as the
   [Documentation](#documentation) requirements (R-D1–R-D6) set out. The docs
   describe the font-resolution chain and `MERMAID_FONT` (D32), and
-  `docs/mermaid-gitgraph.md` no longer claims Mermaid.js refuses a merge of an
-  empty branch (D36).
+  `docs/mermaid-gitgraph.md`, if kept, no longer claims Mermaid.js refuses a
+  merge of an empty branch (D36).
 - **R-C13.** `worktree`'s gitGraph tests follow D43: topology assertions pass
   unchanged; renderer-mechanics assertions may be rewritten to Merman
   equivalents, and each rewrite is listed in the implementation log with its
@@ -1842,7 +1847,7 @@ of them.
 | AC-C7 | No rasterized SVG contains `foreignObject` | Test over the golden corpus |
 | AC-C8 | Labels of a Merman-rendered diagram survive Darkmatter's sanitizer in the static-SVG opt-in, and the sanitizer still rejects an external `url(...)` | Darkmatter test (R-V7) plus a negative case with an external URL |
 | AC-C8a | Darkmatter's default HTML (`MermaidMode::Off`) still emits `<pre class="mermaid">` with no SVG; in the static-SVG opt-in, every label's `font-family` starts with its measured face followed by the original stack, and label overflow is allowed only there | Darkmatter HTML test per mode; assertion that rasterized SVG carries neither change (R-C9a) |
-| AC-C8b | The sanitizer keeps a Merman drop shadow (`<filter>` with `<feDropShadow>`) whose attributes are numbers or colors within D64's limits; it drops a `<feDropShadow>` with `dx`, `dy`, or `stdDeviation` above 20, a `flood-opacity` outside 0–1, or a non-numeric, non-color attribute; it drops `feImage` and every other `fe*` primitive; an external `url(...)` on `filter=` is still dropped | Darkmatter sanitizer unit tests: one Merman shadow kept; one case per limit at and above the cap; `feImage` and `feTurbulence` rejected; the existing external-URL negative tests unchanged |
+| AC-C8b | The sanitizer keeps a Merman drop shadow (`<filter>` with `<feDropShadow>`) whose attributes other than `id` are numbers or colors within D64's limits; it drops a `<feDropShadow>` with `dx`, `dy`, or `stdDeviation` above 20, a `flood-opacity` outside 0–1, or a non-numeric, non-color attribute; it drops `feImage` and every other `fe*` primitive; an external `url(...)` on `filter=` is still dropped | Darkmatter sanitizer unit tests: one Merman shadow kept; one case per limit at and above the cap; `feImage` and `feTurbulence` rejected; the existing external-URL negative tests unchanged |
 | AC-C9 | A parse error, an unsupported family, and ZenUML each yield the source as a code block | One test per case |
 | AC-C10 | When Merman's part of a render exceeds the time budget, Merman stops within the budget plus a small margin (measured around the Merman call only, not post-processing or rasterization, D28), and the render yields the source as a code block and logs a warning; a `layout_json` (gitGraph geometry) request through the library-level `mermaid::MermaidDiagram` is bounded the same way; a budget set through either type's builder option replaces the 2 s default, and the component's value reaches the library-level type | Tests with a low budget set through the builder option, one on an SVG render through the component and one on a gitGraph geometry request through `mermaid::MermaidDiagram`, asserting the fallback, the warning, and the elapsed time of the Merman call |
 | AC-C11 | The merge repair and its "empty branch" error are gone: a merge of a branch with no commit of its own renders, as in Mermaid.js; a labeled merge keeps both parents | gitGraph tests on the S1 input (`gitgraph_tests.rs:249` at the time of S1) and the S1 labeled-merge cases; layout data shows both parents |
@@ -1860,21 +1865,21 @@ of them.
 | AC-M9 | Inter regular and bold and `OFL.txt` are in `biscuit-visualized/src/assets/fonts/inter/`; with no host font installed, `MERMAID_FONT=Inter` resolves to the bundled face | File check; a test with an empty host font set |
 | AC-M10 | A character the resolved face lacks is drawn and measured in the first installed face, by case-folded family name, that has it; the measurer and the rasterizer pick the same face (D59) | Unit test with an injected font set in which two faces cover the character |
 | AC-M11 | On Linux, with no system emoji face, an emoji label is drawn with Noto Emoji glyphs, not `.notdef` boxes; with an installed emoji face, that face wins over the bundled one; macOS and Windows builds contain no Noto Emoji bytes (D65) | Linux test with an injected font set holding no emoji face (no `.notdef` glyph ids in the shaped run, painted pixels in the glyph box); a Linux test with an injected emoji face asserting it is chosen; a `cfg` review of the asset inclusion |
-| AC-T1 | Each fixed palette produces the expected per-family `ThemeDesignV1`, containing only supported or conditional facets, no node base fill, and Mermaid variables only in gitGraph | Unit tests on the palette → design mapping, checked against `describe_theme_support` |
+| AC-T1 | Each fixed palette produces the expected per-family `ThemeDesignV1`, containing only supported or conditional facets, no node base fill, Mermaid variables only in gitGraph, and every font family it sets ending in `sans-serif` (R-T9) | Unit tests on the palette → design mapping, checked against `describe_theme_support` |
 | AC-T2 | Two diagrams rendered into one HTML document keep their own styles | Test asserting every injected selector is prefixed by its diagram's id |
-| AC-T3 | Un-styled nodes in flowchart, class, sequence, and mindmap receive accent colors, and `classDef`/`style` nodes keep the author's colors | Golden snapshots plus targeted assertions on the SVG's paint attributes |
+| AC-T3 | Un-styled nodes in flowchart, class, sequence, and mindmap receive accent colors, and `classDef`/`style` nodes keep the author's colors; the accent post-process rewrites no paint our palette did not emit (R-T6) | Golden snapshots plus targeted assertions on the SVG's paint attributes |
 | AC-T4 | Every text element in the golden corpus, the derived-palette goldens included, meets 4.5:1 against the fill behind it, whatever its size | Automated contrast test (D18, D45) |
 | AC-T5 | Ken signs off on the themed gallery beside Zed screenshots | Recorded sign-off in the implementation log (human check, not automatable) |
 | AC-T6 | Each family's compiled theme has the expected evidence status and no `unsupported-*` diagnostic other than the circles' known-false `unsupported-paint`, which is allow-listed per family with a comment (D62) | Per-family test (R-V4); review that the allow-list names only that diagnostic |
 | AC-T7 | The precedence surprises are pinned by guard tests | Guard tests (R-V5) |
 | AC-T8 | A theme key the author sets in `%%{init}%%` wins over our compiled theme in the rendered SVG | Test rendering a diagram with an `%%{init}%%` theme variable and asserting the author's value appears (D54) |
-| AC-P1 | OSC 4 parsing accepts the reply forms in the OSC 4 research (`rgb:rrrr/gggg/bbbb`, `rgb:rr/gg/bb`, `#rrggbb`, BEL and ST terminators) | Unit tests on the parser |
+| AC-P1 | OSC 4 parsing accepts the reply forms in the OSC 4 research (`rgb:rrrr/gggg/bbbb`, `rgb:rr/gg/bb`, `#rrggbb`, BEL and ST terminators); a partial or malformed reply yields "unknown" for the missing entries, never an error (R-P2) | Unit tests on the parser |
 | AC-P2 | With no reply, the query returns within its timeout and is not re-sent in the same process | Test with a silent fake TTY; call count |
 | AC-P3 | With no ANSI reply but a known background, accents come from the background; with neither, the fixed palette for the color mode is used | Unit tests on palette resolution with injected detection results |
 | AC-P4 | Changing only a palette color changes the cache key | Cache test |
 | AC-P5 | Non-terminal output and CI send no queries | Test with redirected stdout and `CI` set |
 | AC-P6 | The implementation log records which D46 case applies on native Windows, and the `docs/` palette page states it; if OSC 4 is not carried, native Windows adds no Windows-specific query code and its palette uses background-derived accents | Log entry; docs review; on Windows, a palette-resolution test with a known background and no ANSI reply |
-| AC-V1 | Golden SVG snapshots exist for every family × fixed palette, PNG snapshots for `Dark` and `Default`, and both fail on change beyond the D42 tolerance; they pass on every CI environment with `MERMAID_FONT=Inter`; every code point in a golden input is mapped by Inter | Snapshot suite (`insta`) on Linux, macOS, native Windows, and WSL2; a test comparing golden inputs' code points with Inter's `cmap` |
+| AC-V1 | Golden SVG snapshots exist for every family × fixed palette, PNG snapshots for `Dark` and `Default`; SVG snapshots fail on any change and PNG snapshots on change beyond the D42 tolerance; they pass on every CI environment with `MERMAID_FONT=Inter`; every code point in a golden input is mapped by Inter | Snapshot suite (`insta`) on Linux, macOS, native Windows, and WSL2; a test comparing golden inputs' code points with Inter's `cmap` |
 | AC-V2 | The benchmark recipe runs locally in the release profile, reports median and p95 per family (warm full render and cold one-shot), and on the Linux build host flags a family over 50 ms warm median, a cold render of 500 ms or more, and a regression over 25% against the baseline JSON stored next to the benchmark; no iteration is a cache hit | Running the `just` recipe on the Linux build host; a doctored baseline and a doctored limit each make it flag; the per-iteration cache directory is empty when each timed region starts |
 | AC-V3 | Six derived-palette SVG goldens exist: flowchart, sequence, and gitGraph under the full-ANSI palette and the background-only palette (D47) | Snapshot files; the suite fails on change |
 | AC-V4 | `biscuit-visualized/justfile` defines the canonical recipe set (item 11 of the pre-authorized work); `biscuit-visualized/src/Cargo.toml` has `gates = true` and no `exclusion-class`, `owner`, `reason`, or `expiry`; the goldens and OSC 4 parser tests are L1; `source-inputs` names the fixtures folder only if D42 requires it | `just --list` in `biscuit-visualized/`; `just ci-local --plan` shows the package's L1 cells on each environment, recorded in the log before the gating edit; manifest review |
@@ -2145,7 +2150,7 @@ draft 6 (D66).
   whether any consumer loses it.
 - **gitGraph geometry.** Layout data has no tag bounds and no `commit_step`;
   if the derived spacing or measured tag bounds do not match what `worktree`
-  expects, "worktree tests unchanged" may not hold (AC-S6, D22). The
+  expects, "worktree tests unchanged" may not hold (AC-S6, D43). The
   diagram-wide commit spacing of D36 changes `pos` for every commit in a
   diagram with colliding tags, which `worktree`'s spacing assertions may
   notice. S3's replay confirmed the topology holds and found the spacing
