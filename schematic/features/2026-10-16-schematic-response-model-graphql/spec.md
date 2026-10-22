@@ -1152,8 +1152,8 @@ The spec is "implementation complete, ready for review" when all of these hold:
 
 ## Pre-authorizations
 
-The author must confirm these before the unattended run (D50 item 8); until confirmed,
-none is assumed. Once confirmed, the run may do the following without pausing:
+Confirmed by the author on 2026-10-21 (D50 item 8). The run does the following
+without pausing and logs each use:
 
 - Regenerate `schematic-schema` with the generator, including deleting generated files
   the generator itself reports as obsolete and owned.
