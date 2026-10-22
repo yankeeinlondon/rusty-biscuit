@@ -14,72 +14,31 @@ docs_created_during_phase_1:
 skills_files_updated_during_phase_1:
     - .claude/skills/os/build-hosts.md
 packages: []
-human_review: true
-human_review_items:
-    - |-
-      **How should gitGraph keep long tags from overlapping once Merman draws them?**
-
-      *Why now:* the plan treats this phase as the point where you decide whether
-      `worktree`'s tests may be edited (decision D22). The spec's answer (D36:
-      "space commits wider through the gitGraph config") turns out not to exist:
-      Merman, like Mermaid.js, hard-codes the distance between commits (50 px) and
-      has no setting for it. The next phase (fonts, measurement, terminal palette)
-      does not depend on this, but the cutover phase after it does, and it changes
-      either the spec or a test.
-
-      *What the spike found:* every gitGraph check in `worktree`'s tests holds on
-      Merman's layout data (commit order, lanes, both merge parents, tags, the
-      commit-step check) except one: in `gathered_graph_lays_out_long_labels` a very
-      long branch-name tag overlaps the `main` and `origin/main` tags on the next
-      two commits. Today's renderer avoids it by spacing commits wider (127.6 px);
-      Merman would need about 126 px there.
-
-      Options:
-
-      - **A. Ask Merman upstream for a commit-spacing setting** (and, until it
-        ships, carry a small pinned fork with it). Keeps D36 and the `worktree`
-        tests unchanged. Cons: depends on an outside maintainer or on carrying a
-        fork; a non-Mermaid.js setting.
-      - **B. Widen spacing ourselves after Merman lays out** (shift each commit's
-        x and everything attached to it in our SVG post-process). Keeps the tests
-        unchanged with no upstream wait. Cons: rewriting Merman's SVG geometry is
-        fragile, couples us to its markup, and grows the post-process a lot.
-      - **C. Accept Mermaid.js's behavior (tags may overlap) and edit the one
-        `worktree` assertion**, perhaps with `worktree` shortening or moving very
-        long tag text itself. Simplest and matches the reference renderer. Cons:
-        overlapping labels are a visible regression for long branch names, and
-        it drops a behavior Ken previously chose to keep.
-
-      **Recommendation: A**, filing the upstream request now and carrying the
-      pinned fork only if upstream has not answered by the cutover phase. It is
-      the only option that keeps the agreed behavior without making our
-      post-process own Merman's geometry; Merman already lays out from one
-      constant, so the change is small and easy to review. If a fork is not
-      acceptable, prefer C over B.
 message_to_agent: |-
-  Phase 1 changed no package code. All 19 rulings are recorded in this log
-  under "Rulings"; every one is the plan's suggested default ("assumed")
-  except ruling 6 (no OSC 4 on native Windows: biscuit-terminal's non-Unix
-  OSC query arm is still a stub returning `OscQueryError::Unsupported`, so
-  Windows uses background-derived accents) and ruling 17 (open for Ken).
+  Phase 1 changed no package code. Ken ruled every item on 2026-10-22
+  (spec D40-D66); the "Rulings" table below shows each ruling, its spec
+  decision, and, where it differed, what Phase 1 had recorded. Nothing is
+  open. Ruling 17 is closed by D43 (fixed rewrite rule for worktree's
+  gitGraph tests) and D56 (a `commitSpacing` gitGraph key on Ken's Merman
+  fork). The plan's Phase 2 Stream C does the fork patch before any gitGraph
+  geometry work.
 
   Facts the next phases need:
-  - Merman's gitGraph commit step is a hard-coded 50 px (`COMMIT_STEP` 40 +
-    `LAYOUT_OFFSET` 10 in `merman-render/src/gitgraph.rs`) with no config key,
-    so D36's "wider commit spacing via gitGraph config" cannot be built as
-    written. Do not start Phase 3 Wave 6 (gitGraph geometry) until Ken has
-    answered `human_review_items`. Phase 2 is unaffected.
+  - Stock Merman's gitGraph commit step is a hard-coded 50 px (`COMMIT_STEP`
+    40 + `LAYOUT_OFFSET` 10 in `merman-render/src/gitgraph.rs`) with no
+    config key; D56 adds `commitSpacing` (default 50) on the fork.
   - Geometry from `layout_json` works: see
     `spikes/s3-gitgraph-geometry/src/main.rs` for serde structs over
     `layout.GitGraphDiagram` and SVG `tag-label-bkg` polygon parsing (LR only;
     TB/BT polygons carry a rotate transform).
   - Merman requires `serde_json ^1.0.154`; the workspace lock has 1.0.149, so
-    adding Merman in Phase 2 will bump it.
-  - The ruling-14 Merman feature set (`svg`, `all-diagrams`,
-    `layout-cytoscape`, no defaults) pulls no resvg/usvg/png/ELK crate.
+    adding Merman in Phase 2 bumps it (pre-authorized).
+  - The D58 Merman feature set (`svg`, `all-diagrams`, `layout-cytoscape`,
+    no defaults) pulls no resvg/usvg/png/ELK crate.
   - R-S9: macOS and Windows PNGs are pixel-identical (both Arial); the whole
-    Linux gap is DejaVu substitution (0.27% dark, 0.74% light). Pin the golden
-    font (ruling 9) and use a tolerance near AE ≤ 0.1%, RMSE ≤ 0.005.
+    Linux gap is DejaVu substitution (0.27% dark, 0.74% light). Goldens use
+    the bundled Inter (D40) with AE <= 0.1%, RMSE <= 0.005 on every CI
+    environment (D42).
 ---
 
 # Implementation Log for 2026-10-21-merman (7 phases)
@@ -90,37 +49,39 @@ Phase 1 is rulings and spikes only. No package source changed; the only new
 files are `spikes/s3-gitgraph-geometry/` and the R-S9 Windows record under
 `spikes/s1-comparison/`.
 
-### Rulings (Wave 2)
+### Rulings (Wave 2; ruled by Ken 2026-10-22)
 
-Ken could not be asked in this non-interactive run, so every ruling below is
-the plan's suggested default, marked **assumed**, unless the spikes changed
-the picture (marked **assumed, amended by evidence**). Ken can overrule any
-of them; the phase that first depends on each is named.
+Phase 1 ran non-interactively and first recorded the plan's defaults. Ken
+ruled every item on 2026-10-22; the spec records each as a decision. The
+"Ruling" column is Ken's; the last column shows what Phase 1 had recorded,
+only where it differed.
 
-| # | Topic | Value | Status | Needed by |
-| - | ----- | ----- | ------ | --------- |
-| 1 | Q5 cache key / backend id | Backend id `merman@<12-char rev>+bv1`. Key covers: hash of the compiled per-family design JSON, content hash of every face file the font chain can return for the stacks plus generic families, post-process version, output format, and the **rewritten** source (after the `\n` rewrite) | assumed | Phase 3 Wave 5 |
-| 2 | Q8 CI tiers | SVG goldens and OSC 4 parser tests at L1; PNG comparisons at L1 on Linux/macOS only; `gates = false` promotion is its own change; fixtures added to `source-inputs` only if read through a path CI cannot see | assumed | Phase 6 |
-| 3 | Q11 Unicode/ASCII text fallback | Out of scope; a follow-up spec | assumed | — |
-| 4 | Q16 benchmark | Release profile; Ken's macOS host is the reference; baseline JSON beside the benchmark; cache bypass with a fresh `BISCUIT_VISUALIZED_CACHE_DIR` per iteration outside the timed region. A Linux/Windows reference host is not scheduled | assumed | Phase 6 |
-| 5 | Q18 WCAG "large text" | Measured in SVG user units before scaling: ≥ 24 px, or ≥ 18.66 px bold | assumed | Phase 5/6 |
-| 6 | Q19 OSC 4 on native Windows | **Not on native Windows.** The prerequisite's Windows query arm is still a stub (see ruling 19), so carrying OSC 4 there would need new Windows-specific code. Windows uses background-derived accents; documented as such | assumed, amended by evidence | Phase 2 (OSC 4 task) |
-| 7 | Q20 derived-palette goldens | Yes, SVG only, for flowchart, sequence, gitGraph: one ANSI-derived and one background-only palette | assumed | Phase 6 |
-| 8 | Q21 fixtures location and cap | `biscuit-visualized/src/tests/fixtures/merman/`; the ~20 MB cap applies to `spikes/` and to test fixtures separately | assumed | Phase 3/6 |
-| 9 | Q22 pinned golden fonts | Commit one freely licensed family (regular + bold); a test-only internal way to put a font directory ahead of D32 step 1; golden tests set `MERMAID_FONT` to it; mixed-script cases stay out of goldens (oracle test covers them) | assumed | Phase 6 |
-| 10 | D32 step 4 rule (R-M8) | Among installed faces whose OS/2 table classifies them as sans-serif, prefer regular weight, non-italic, non-condensed; ties broken by smallest case-folded family name, then file path | assumed | Phase 2 Wave 4 |
-| 11 | Fallback-face load order | Chain's resolved face first, then installed faces sorted by case-folded family name; tested per script that has a face on the CI hosts | assumed | Phase 2 Wave 4 |
-| 12 | Tag spacing vs cache check | Spacing computed after the cache check; it is a pure function of the rewritten source and font-file hashes, both already in the key | assumed (but see ruling 17: the spacing mechanism itself is open) | Phase 3 |
-| 13 | Darkmatter measured face per label (D37) | Additive library option on `mermaid::MermaidDiagram` selecting an HTML-static target; the `biscuit-visualized` post-process rewrites each label's `font-family` and overflow; Darkmatter only calls it and sanitizes; rasterized output never gets either change | assumed | Phase 4 |
-| 14 | Merman feature set | `default-features = false`, `["svg", "all-diagrams", "layout-cytoscape"]`; `png`, `native-fonts`, `math` off (math labels show as source). S3 built with exactly this set; see the `png` check below | assumed | Phase 2 Wave 3 |
-| 15 | Interim themes at cutover | Phase 3 maps the four `MermaidTheme` values to Merman built-in theme names; Phase 5 replaces this with compiled designs; never ships as final behavior | assumed | Phase 3 |
-| 16 | `tag_gap` derivation | Clearance between adjacent measured tags implied by the spacing used, derived from the measurer and cross-checked against layout `pos` (AC-C12). Depends on ruling 17's outcome | assumed, blocked on 17 | Phase 3 Wave 6 |
-| 17 | D22 decision point | **Open; needs Ken.** S3 shows all `worktree` gitGraph assertions hold on Merman geometry except one, and that D36's spacing mechanism does not exist in Merman (see R-S8 below). Until Ken decides, AC-C4 ("worktree tests unchanged") stands | **needs Ken** | Phase 3 Wave 6 |
-| 18 | Circles `unsupported-paint` | Allow-list that specific known-false diagnostic per family in R-V4's test, with a comment naming it; the general "no `unsupported-*`" assertion is not weakened | assumed | Phase 5/6 |
-| 19 | Prerequisite state | `2026-10-13-graphics-where-possible` has **not** delivered native Windows background detection: its log shows Phase 1 of 9 done (component move), and `biscuit-terminal/lib/src/discovery/osc_queries/query.rs` answers every query on non-Unix with `OscQueryError::Unsupported` (the `cfg(not(unix))` arm at line 321). Its Phase 4 "Native Windows backend" task is unchecked. The plan proceeds; the release note must record that Windows release waits on it (D7) | recorded | release |
+| # | Topic | Ruling | Status | Spec | Phase 1 had assumed (where different) |
+| - | ----- | ------ | ------ | ---- | ------------------------------------- |
+| 1 | Q5 cache key / backend id | Backend id `merman@<12-char rev>+bv1`. Key: source as rewritten by step 3b, output format, hash of the compiled per-family design JSON, once-per-process content hash of every face file the chain can return (bundled faces included), and the identity (content hash + face index) of the face actually resolved for each requested family and fallback | ruled by Ken 2026-10-22 | D41, D63 | Same, without the resolved-face identity |
+| 2 | Q8 CI tiers | SVG goldens, PNG goldens (AE ≤ 0.1%, RMSE ≤ 0.005), and OSC 4 parser tests at L1 on every CI environment; this work promotes `biscuit-visualized` to gating (`gates = true`, exclusion fields removed); fixtures in `source-inputs` only if read through a path CI cannot see | ruled by Ken 2026-10-22 | D42 | PNG comparisons on Linux/macOS only; `gates = false` promotion left to its own change |
+| 3 | Q11 Unicode/ASCII text fallback | Out of scope; follow-up `2026-10-22-merman-text-fallback` | ruled by Ken 2026-10-22 | D48 | — |
+| 4 | Q16 benchmark | Release profile; reference host is the Linux build host; baseline JSON beside the benchmark; fresh `BISCUIT_VISUALIZED_CACHE_DIR` per iteration outside the timed region | ruled by Ken 2026-10-22 | D44 | Ken's macOS host as the reference |
+| 5 | Q18 contrast | Every text element meets 4.5:1; no large-text exception | ruled by Ken 2026-10-22 | D45 | Large text (≥ 24 px, or ≥ 18.66 px bold, in SVG user units) at 3:1 |
+| 6 | Q19 OSC 4 on native Windows | Not carried: the non-Unix OSC query arm is a stub, so native Windows uses background-derived accents, documented | ruled by Ken 2026-10-22 | D46 | — (Phase 1 reached the same outcome from the evidence) |
+| 7 | Q20 derived-palette goldens | Six SVG goldens: flowchart, sequence, gitGraph × {full ANSI set, background only} | ruled by Ken 2026-10-22 | D47 | — |
+| 8 | Q21 fixtures location and cap | `biscuit-visualized/src/tests/fixtures/merman/`; ~20 MB cap separately for `spikes/` and fixtures; bundled fonts are library source and do not count | ruled by Ken 2026-10-22 | D49 | — |
+| 9 | Q22 golden font | Bundled Inter (regular, bold, OFL 1.1) in `biscuit-visualized/src/assets/fonts/inter/`, compiled in and registered as `Inter`; goldens set `MERMAID_FONT=Inter` | ruled by Ken 2026-10-22 | D40 | A committed test-only font directory put ahead of D32 step 1 by an internal test hook |
+| 10 | D32 step 4 rule (R-M8) | Among installed OS/2 sans-serif faces: regular and bold present, then widest Latin coverage, then proportional over monospace, then alphabetically first family name | ruled by Ken 2026-10-22 | D50 | Regular, non-italic, non-condensed; ties by case-folded family name, then file path |
+| 11 | Fallback-face order | Resolved face, then installed faces by case-folded family name, then (Linux builds only) the bundled Noto Emoji, last | ruled by Ken 2026-10-22 | D59, D65 | Same, without the Linux-only Noto Emoji |
+| 12 | Tag spacing vs cache check | Pre-parse step 3b, before the cache check, so the key covers the rewritten source | ruled by Ken 2026-10-22 | D55 | Spacing computed after the cache check |
+| 13 | Darkmatter measured face per label | Additive "HTML static" target on `mermaid::MermaidDiagram`; `biscuit-visualized` rewrites `font-family` and allows overflow; Darkmatter selects and sanitizes. Sanitizer admits `<filter>` and `<feDropShadow>` only (number-or-color attributes; `dx`, `dy`, `stdDeviation` ≤ 20; `flood-opacity` 0–1); other `fe*` dropped; local-only `url(#…)` unchanged | ruled by Ken 2026-10-22 | D60, D64 | Same target design; `filter`/`fe*` admission left to the sanitizer change |
+| 14 | Merman feature set | `default-features = false`, `["svg", "all-diagrams", "layout-cytoscape"]`; `png`, `native-fonts`, ELK, `math` off | ruled by Ken 2026-10-22 | D58 | — (same set; `math` off now ruled) |
+| 15 | Interim themes at cutover | The four themes map to Merman built-in themes until the palette phase replaces them | ruled by Ken 2026-10-22 | D61 | — |
+| 16 | `tag_gap` derivation | Clearance between adjacent tags produced by the `commitSpacing` written in step 3b, from measured tag widths and layout `pos` | ruled by Ken 2026-10-22 | D56, AC-C12 | Clearance implied by "wider spacing via gitGraph config", blocked on ruling 17 |
+| 17 | D22 decision point | Closed. Fixed rule: topology assertions pass unchanged; renderer-mechanics assertions may be rewritten, each logged with category and reason. `commitSpacing` on Ken's Merman fork keeps `tag_overlaps()` unchanged | ruled by Ken 2026-10-22 | D43, D56 | Open, left for Ken; AC-C4 ("tests unchanged") standing meanwhile |
+| 18 | Circles `unsupported-paint` | Allow-listed per family with a comment naming it; general assertion not weakened | ruled by Ken 2026-10-22 | D62 | — |
+| 19 | Prerequisite state | `2026-10-13-graphics-where-possible` has **not** delivered native Windows detection: its log shows Phase 1 of 9 done, and `biscuit-terminal/lib/src/discovery/osc_queries/query.rs` answers every non-Unix query with `OscQueryError::Unsupported` (the `cfg(not(unix))` arm at line 321). Implementation proceeds; release waits on it | recorded fact; ruled by Ken 2026-10-22 | D7, D46 | — |
+| 20 | Upstream drafts | Six issue drafts (`upstream-issues/01-…md` to `06-…md`; 6 = ER `<br/>` comment clip) and the `commitSpacing` pull request draft; Ken files and opens them during the cutover; agents never post | ruled by Ken 2026-10-22 | D52, D56, D66 | Four issue drafts, filed on Ken's go-ahead |
+| 21 | Emoji fallback font | Noto Emoji (monochrome, regular, TrueType, OFL 1.1), Linux builds only, beside Inter, last fallback; Linux glyph test; goldens exclude emoji | ruled by Ken 2026-10-22 | D65 | — (not covered in Phase 1) |
 
-Ruling 14, `png` check: `cargo tree` of the S3 spike, built with exactly the
-ruling-14 feature set, contains no `resvg`, `usvg`, `tiny-skia`, `fontdb`,
+Ruling 14 (D58), `png` check: `cargo tree` of the S3 spike, built with exactly
+the ruling-14 feature set, contains no `resvg`, `usvg`, `tiny-skia`, `fontdb`,
 `png`, or ELK crate (the only name match is `palette_math`, a color crate), so
 no umbrella feature in that set pulls `png` or a second usvg.
 
@@ -174,7 +135,8 @@ so that effect is not covered here and is first visible in Phase 3.
 
 **Go/no-go for "worktree tests unchanged": no-go as specified.** One
 assertion (`long_labels`' no-overlap) cannot hold without a spacing mechanism
-Merman lacks. Raised for Ken as `human_review_items` (D22 / D36).
+Merman lacks. Raised for Ken (D22 / D36); Ken closed it on 2026-10-22 with
+D43 (fixed rewrite rule) and D56 (`commitSpacing` on his Merman fork).
 
 ### R-S9 / AC-S8: Windows PNG leg
 
@@ -206,14 +168,16 @@ normalized RMSE, same-size pairs only (`scripts/cross_os_diff.py`).
   typeface (0.74% here, up to 3.2% across S1's corpus), and a tolerance that
   loose would hide regressions. This supports ruling 9 (pin the font) and
   ruling 2 (PNG comparisons on Linux/macOS only). One diagram is a thin
-  basis; Phase 6 should confirm on the golden corpus.
+  basis; Phase 6 should confirm on the golden corpus. *(Ken's rulings of
+  2026-10-22: the bundled Inter, D40, and PNG goldens on every CI
+  environment, D42.)*
 - Two Windows traps found were added to the `os` skill
   (`.claude/skills/os/build-hosts.md`, `BUILD_WIN` row).
 
 ### Validation checkpoint 1
 
-- Every ruling has a value or is marked assumed; ruling 17 is explicitly open
-  for Ken.
+- Every ruling had a value; ruling 17 was left for Ken. All were ruled by
+  Ken on 2026-10-22 (see Rulings); ruling 17 is closed by D43 and D56.
 - AC-S6 recorded (R-S8 above) with a go/no-go: **no-go** for "worktree tests
   unchanged" as specified. AC-S8 recorded (R-S9 above).
 - `git status` (below) shows changes only under `spikes/`, this log, the plan,

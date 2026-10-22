@@ -957,8 +957,9 @@ deterministic on every host. Per-host baselines are not used.
   out of the goldens; every code point in a golden input is one Inter maps,
   and mixed-script text is covered by the measured-vs-drawn oracle test
   (R-V8).
-- The same face is what `2026-10-21-mermaid-embedded-font` embeds, and what
-  terminal users select with `MERMAID_FONT=Inter`.
+- The same face is what `2026-10-21-mermaid-embedded-font` embeds when the
+  face the chain resolves may not be embedded or `MERMAID_FONT=Inter` selects
+  it, and what terminal users select with `MERMAID_FONT=Inter`.
 - Adding the files is pre-authorized (item 5 of
   [Pre-authorized preparatory work](#pre-authorized-preparatory-work)).
 
@@ -1010,11 +1011,17 @@ catches a font upgraded in place.
   `biscuit-visualized/src/Cargo.toml`, removing the `promotion-pending`
   exclusion (the `exclusion-class`, `owner`, `reason`, and `expiry` fields,
   which the CI planner rejects on a gating package).
+- The exclusion's recorded reason is a missing canonical `just` recipe set.
+  Promotion is therefore done in this order: first complete the canonical
+  recipe set in `biscuit-visualized/justfile`, then verify with `just
+  ci-local --plan` that the package's cells are planned on each environment,
+  then set `gates = true` (item 11 of
+  [Pre-authorized preparatory work](#pre-authorized-preparatory-work)).
 - `biscuit-visualized/src/tests/fixtures/merman/` is added to
   `[package.metadata.ci.tests] source-inputs` only if tests read it through
   a path CI cannot otherwise see, following `docs/cicd/test-inputs.md` and
   the `rust-testing` skill's spelling of repository reads.
-- These edits are pre-authorized (item 6 of
+- These edits are pre-authorized (items 6 and 11 of
   [Pre-authorized preparatory work](#pre-authorized-preparatory-work)).
 
 ### D43. `worktree` test edits: a fixed rule *(replaces D22's decision point)*
@@ -1424,6 +1431,22 @@ Ken approved the following on 2026-10-22:
     `<feDropShadow>` under the limits of D64 (within item 4's sanitizer
     change).
 
+Ken approved the following on 2026-10-22, after the rulings above:
+
+11. **Canonical `just` recipe set, then gating.** Add to
+    `biscuit-visualized/justfile` every recipe of the canonical set that it
+    lacks or defines only as a stub where a real recipe applies: the set the
+    `rust-testing` skill's "Canonical Just Recipes" table lists (`sanity`,
+    `test`, `slow-tests`, `test-l2`, `test-l3`, `test-browser`, `test-real`,
+    `lint`, `bench`, `coverage`, `doctest`, `fuzz`, `all`) and the recipes
+    other package areas define alongside it (`build`, `check`, `docs`,
+    `lint-fix`), each delegating to the shared `_*` recipes in
+    `just/devops.just` with `--all-features`; a tier the package has no tests
+    for keeps an explicit "not applicable" recipe. Verify with `just ci-local
+    --plan` that the package's L1 cells are planned on each environment and
+    record the output in the implementation log; then make the item 6 edits
+    (`gates = true`, exclusion fields removed). D42 holds the order.
+
 ## Phases
 
 The order follows the original draft. Which Merman-path steps can run in
@@ -1818,8 +1841,8 @@ of them.
 | AC-C6a | The key changes when the rewritten source, the output format, the compiled design JSON, the contents of any font file the chain can return (the bundled Inter included), or the face the chain resolves for a requested family or fallback (D63) change; it is computed before parsing; the font hash is computed once per process | Cache tests changing one input at a time; a test that a family's CSS-requested font changes the key without parsing; tests that changing only `MERMAID_FONT`, only the injected installed-font set, or only the fallback order changes the key; a counter on font hashing across two renders |
 | AC-C7 | No rasterized SVG contains `foreignObject` | Test over the golden corpus |
 | AC-C8 | Labels of a Merman-rendered diagram survive Darkmatter's sanitizer in the static-SVG opt-in, and the sanitizer still rejects an external `url(...)` | Darkmatter test (R-V7) plus a negative case with an external URL |
-| AC-C8b | The sanitizer keeps a Merman drop shadow (`<filter>` with `<feDropShadow>`) whose attributes are numbers or colors within D64's limits; it drops a `<feDropShadow>` with `dx`, `dy`, or `stdDeviation` above 20, a `flood-opacity` outside 0–1, or a non-numeric, non-color attribute; it drops `feImage` and every other `fe*` primitive; an external `url(...)` on `filter=` is still dropped | Darkmatter sanitizer unit tests: one Merman shadow kept; one case per limit at and above the cap; `feImage` and `feTurbulence` rejected; the existing external-URL negative tests unchanged |
 | AC-C8a | Darkmatter's default HTML (`MermaidMode::Off`) still emits `<pre class="mermaid">` with no SVG; in the static-SVG opt-in, every label's `font-family` starts with its measured face followed by the original stack, and label overflow is allowed only there | Darkmatter HTML test per mode; assertion that rasterized SVG carries neither change (R-C9a) |
+| AC-C8b | The sanitizer keeps a Merman drop shadow (`<filter>` with `<feDropShadow>`) whose attributes are numbers or colors within D64's limits; it drops a `<feDropShadow>` with `dx`, `dy`, or `stdDeviation` above 20, a `flood-opacity` outside 0–1, or a non-numeric, non-color attribute; it drops `feImage` and every other `fe*` primitive; an external `url(...)` on `filter=` is still dropped | Darkmatter sanitizer unit tests: one Merman shadow kept; one case per limit at and above the cap; `feImage` and `feTurbulence` rejected; the existing external-URL negative tests unchanged |
 | AC-C9 | A parse error, an unsupported family, and ZenUML each yield the source as a code block | One test per case |
 | AC-C10 | When Merman's part of a render exceeds the time budget, Merman stops within the budget plus a small margin (measured around the Merman call only, not post-processing or rasterization, D28), and the render yields the source as a code block and logs a warning; a `layout_json` (gitGraph geometry) request through the library-level `mermaid::MermaidDiagram` is bounded the same way; a budget set through either type's builder option replaces the 2 s default, and the component's value reaches the library-level type | Tests with a low budget set through the builder option, one on an SVG render through the component and one on a gitGraph geometry request through `mermaid::MermaidDiagram`, asserting the fallback, the warning, and the elapsed time of the Merman call |
 | AC-C11 | The merge repair and its "empty branch" error are gone: a merge of a branch with no commit of its own renders, as in Mermaid.js; a labeled merge keeps both parents | gitGraph tests on the S1 input (`gitgraph_tests.rs:249` at the time of S1) and the S1 labeled-merge cases; layout data shows both parents |
@@ -1854,7 +1877,7 @@ of them.
 | AC-V1 | Golden SVG snapshots exist for every family × fixed palette, PNG snapshots for `Dark` and `Default`, and both fail on change beyond the D42 tolerance; they pass on every CI environment with `MERMAID_FONT=Inter`; every code point in a golden input is mapped by Inter | Snapshot suite (`insta`) on Linux, macOS, native Windows, and WSL2; a test comparing golden inputs' code points with Inter's `cmap` |
 | AC-V2 | The benchmark recipe runs locally in the release profile, reports median and p95 per family (warm full render and cold one-shot), and on the Linux build host flags a family over 50 ms warm median, a cold render of 500 ms or more, and a regression over 25% against the baseline JSON stored next to the benchmark; no iteration is a cache hit | Running the `just` recipe on the Linux build host; a doctored baseline and a doctored limit each make it flag; the per-iteration cache directory is empty when each timed region starts |
 | AC-V3 | Six derived-palette SVG goldens exist: flowchart, sequence, and gitGraph under the full-ANSI palette and the background-only palette (D47) | Snapshot files; the suite fails on change |
-| AC-V4 | `biscuit-visualized/src/Cargo.toml` has `gates = true` and no `exclusion-class`, `owner`, `reason`, or `expiry`; the goldens and OSC 4 parser tests are L1; `source-inputs` names the fixtures folder only if D42 requires it | `just ci-local --plan` shows the package's L1 cells on each environment; manifest review |
+| AC-V4 | `biscuit-visualized/justfile` defines the canonical recipe set (item 11 of the pre-authorized work); `biscuit-visualized/src/Cargo.toml` has `gates = true` and no `exclusion-class`, `owner`, `reason`, or `expiry`; the goldens and OSC 4 parser tests are L1; `source-inputs` names the fixtures folder only if D42 requires it | `just --list` in `biscuit-visualized/`; `just ci-local --plan` shows the package's L1 cells on each environment, recorded in the log before the gating edit; manifest review |
 | AC-U1 | The six upstream issue drafts of D52 (D66) exist as ready-to-paste Markdown files in `upstream-issues/`; no agent has filed them | File check; Ken files them during the cutover phase |
 | AC-D1 | `biscuit-visualized/docs/merman.md` exists and covers every topic R-D1 lists: the Merman overview, the pipeline diagram with steps and owners, the worked example, each listed decision with its reason, each rejected approach with its reason, and the future considerations | Review against the R-D1 list, one tick per item |
 | AC-D2 | `mermaid_diagram.md`, `git_graph.md`, and `graph_expression.md` in `docs/components/` describe post-cutover behavior, including the font chain, `MERMAID_FONT` and the bundled Inter, palettes, OSC 4 with the native Windows case (D46), and the Merman-only families where relevant | Review of each page against the shipped behavior |
