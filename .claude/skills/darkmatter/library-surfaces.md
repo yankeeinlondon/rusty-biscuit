@@ -35,7 +35,7 @@ behavior.
   CLI documentation. Add a function once in the registry and keep parsing,
   evaluation, descriptors, and completion aligned.
 - Author functions in `docs/schemas/expression-functions.yaml` and `ctx.*` in
-  the `ctx:` block of `docs/schemas/darkmatter.yaml`. The function registry
+  the `context` type of `schemas/partials/context-variables.yaml`. The function registry
   panics at load when a cataloged function has no runtime binding, so every
   catalog entry needs a `FunctionBinding` in the same change.
 - Catalog-only parameter types refine `string`: `ip-address` (IPv4, IPv6, or a

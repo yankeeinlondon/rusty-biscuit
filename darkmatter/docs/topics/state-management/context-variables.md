@@ -93,8 +93,8 @@ Variables are organized into capture groups. The expensive I/O for each group ru
 
 The per-variable reference below is **generated** from the schema-derived
 `ctx.*` catalog — the exact output of `md schema about --verbose`. It is
-projected from the base frontmatter schema
-(`darkmatter/docs/schemas/darkmatter.yaml`), so it can never drift from
+projected from the global catalog's `ctx` declaration
+(`darkmatter/schemas/partials/context-variables.yaml`), so it can never drift from
 validation. Do not hand-edit the block between the markers; a parity test
 (`context_variables_doc_matches_generated_catalog`) regenerates it and its
 failure message prints the up-to-date block to paste back.

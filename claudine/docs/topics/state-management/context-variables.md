@@ -188,8 +188,9 @@ The remaining sections are for contributors adding or maintaining variables.
 
 ### Where descriptions and values come from
 
-The context catalog is derived from the `ctx` block in the embedded
-[Darkmatter base schema](../../../../darkmatter/docs/schemas/darkmatter.yaml).
+The context catalog is derived from the `ctx` declaration of Darkmatter's
+embedded global catalog, typed by its
+[context-variables partial](../../../../darkmatter/schemas/partials/context-variables.yaml).
 It supplies each variable's name, type, description, required/generated flags,
 and any default. The
 [catalog module](../../../../darkmatter/lib/src/markdown/compose/context/catalog.rs)

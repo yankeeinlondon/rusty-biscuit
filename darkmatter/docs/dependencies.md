@@ -194,3 +194,7 @@ protocol-focused:
   per-diagnostic body is `biscuit_file::YamlDiagnostic`'s own `Serialize`, so
   the wire format stays pinned to the shared diagnostic vocabulary; the derive
   is only needed for the CLI-local envelope and stage tag that wrap it.
+- `ctrlc` — the Ctrl-C handler of a lifecycle `md compose` run: the first
+  interrupt cancels the run so its `cancelled` and `finalize` stacks still run
+  and it exits 130, and a second one exits at once. Installed only for a
+  document that authors a lifecycle event.

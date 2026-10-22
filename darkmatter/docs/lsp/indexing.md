@@ -282,8 +282,8 @@ trigger:
 | Class | What it is | Example |
 | --- | --- | --- |
 | named schema | a standalone SimplifiedSchema document, usable by `$schema: name.yaml` and by trigger payloads | `prompt.yaml` declaring `kind: object` fields |
-| trigger schema | a file that declares `kind: trigger-schema` and loads | `prompt.trigger.yaml` with `match:` and `$schema:` |
-| failed trigger | a file that declares `kind: trigger-schema` but does not load (bad YAML, bad `match`, or a payload that fails to resolve) | a trigger whose `match:` has a typo, or whose `$schema:` names a missing file |
+| trigger schema | a file that declares `kind: schema-trigger` and loads | `prompt.trigger.yaml` with `match:` and `$schema:` |
+| failed trigger | a file that declares `kind: schema-trigger` but does not load (bad YAML, bad `match`, or a payload that fails to resolve) | a trigger whose `match:` has a typo, or whose `$schema:` names a missing file |
 | unclassified | anything else, including YAML that does not parse and claims no trigger envelope | a half-edited `notes.yaml` |
 
 An unclassified file never fails trigger discovery, so a mid-edit,
@@ -1157,7 +1157,7 @@ The code is `workspace_identifier` in
 | `tree_schemas` | named schemas in folders that serve as a file tree root, `SCHEMAS_DIR`, or home root |
 | `scoped_schemas` | named schemas in folders that serve only as package or package-area roots |
 | `trigger_schemas` | trigger schemas that load, in any searched folder |
-| `failed_triggers` | files that declare `kind: trigger-schema` but fail to load: the envelope does not load, or a prepared scope failed to resolve the payload (a missing or unparseable payload file, or an import or example it names that does not resolve) |
+| `failed_triggers` | files that declare `kind: schema-trigger` but fail to load: the envelope does not load, or a prepared scope failed to resolve the payload (a missing or unparseable payload file, or an import or example it names that does not resolve) |
 | `unclassified` | other YAML files in searched folders |
 | `failed_scopes` | prepared scopes whose last preparation failed |
 | `elapsed_ms` | time spent preparing every startup scope's registry, including loading trigger payloads; the file-list walk, queue waits, and document jobs that ran between startup's scopes are not included |
@@ -1264,7 +1264,7 @@ is `record_failure`, `record_recovery`, and `log_failure` in
 [`overlay/registry.rs`](../../dmls/src/overlay/registry.rs).
 
 ```text
-2026-10-17T10:02:13.552018Z  WARN dmls::overlay::registry: retaining last-good trigger registry scope=/Users/me/repo/docs trigger_file=/Users/me/repo/schemas/prompt.trigger.yaml error=trigger-schema file `/Users/me/repo/schemas/prompt.trigger.yaml` is not valid YAML at line 17, column 93: mapping values are not allowed in this context has_last_good=true
+2026-10-17T10:02:13.552018Z  WARN dmls::overlay::registry: retaining last-good trigger registry scope=/Users/me/repo/docs trigger_file=/Users/me/repo/schemas/prompt.trigger.yaml error=schema-trigger file `/Users/me/repo/schemas/prompt.trigger.yaml` is not valid YAML at line 17, column 93: mapping values are not allowed in this context has_last_good=true
 2026-10-17T10:04:40.008163Z  INFO dmls::overlay::registry: trigger registry recovered scope=/Users/me/repo/docs trigger_file=/Users/me/repo/schemas/prompt.trigger.yaml
 ```
 
@@ -1359,7 +1359,7 @@ elapsed_ms                       dequeue to response sent, including waits
 └── provider_chain_ms            running the feature's providers
 ```
 
-When the document is itself a trigger-schema file being authored,
+When the document is itself a schema-trigger file being authored,
 `trigger_registry_ms` is timed directly under the overlay build. A stage that
 runs more than once in one message, such as a notification that refreshes
 every open document, reports the sum of its runs. In the hover sample above,

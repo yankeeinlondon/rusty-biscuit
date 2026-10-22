@@ -662,7 +662,8 @@ checks, and DMLS's `nested_span.rs` mirrors its path spelling.
   `lifecycle::run::Run` shares; no Claudine driver uses `Run` yet.
 - **Shell modes.** A `shell` command or `set` `$( … )` with a placeholder
   carries a `shell_template::LifecycleShellTemplate` (stamped by
-  `preflight::resolve_lifecycle_shell_commands`); the lifecycle audit settles
+  `preflight::resolve_lifecycle_shell_commands`, which delegates to
+  Darkmatter's `lifecycle::preflight::LifecycleShellSites`); the lifecycle audit settles
   it to resolved bytes or template, or leaves it refusing. Template mode fills
   from the live state, checks the filled chain, and dispatches through
   `ShellRunner::run_structured` (`structured_shell.rs`); a host that approves a

@@ -58,7 +58,7 @@ md clean README.md --baseline-schema project-baseline.yaml
 md clean README.md --no-baseline-schema
 
 # Disable repository trigger schemas
-md clean README.md --no-trigger-schemas
+md clean README.md --no-schema-triggers
 
 # Join wrapped prose, then re-wrap it to 80 columns
 md clean README.md --fixed-width 80
@@ -96,7 +96,7 @@ md README.md --save
 - `--schema <PATH>`: Replace the document's inline or referenced `$schema` layer with an explicit SimplifiedSchema file. Baseline and matching trigger layers still apply beneath it.
 - `--baseline-schema <PATH>`: Replace the default Darkmatter baseline with an explicit SimplifiedSchema file.
 - `--no-baseline-schema`: Disable the default Darkmatter baseline. Conflicts with `--baseline-schema`.
-- `--no-trigger-schemas`: Disable repository trigger discovery and bare-name schema-root lookup.
+- `--no-schema-triggers`: Disable repository trigger discovery and bare-name schema-root lookup.
 
 `--fixed-width` and `--ignore-incidental-newlines` cannot be used together.
 Fixed-width reflow starts by removing the source wrapping that
@@ -171,7 +171,7 @@ order, with later layers taking precedence:
 
 1. The default Darkmatter baseline, an explicit `--baseline-schema`, or no
    baseline when `--no-baseline-schema` is set.
-2. Matching repository trigger schemas, unless `--no-trigger-schemas` is set.
+2. Matching repository trigger schemas, unless `--no-schema-triggers` is set.
 3. The document's inline or referenced `$schema`, replaced by `--schema` when
    that flag is present.
 

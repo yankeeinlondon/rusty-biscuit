@@ -144,8 +144,10 @@ Important contracts:
 Read [schema.md](schema.md) for imports, unions, pattern dictionaries,
 suggestions, triggers, and DMLS schema behavior.
 
-The authored global catalog `darkmatter/schemas/darkmatter.yaml` is not the
-embedded document baseline; see [schema.md](schema.md#authored-global-catalog).
+The global catalog `darkmatter/schemas/darkmatter.yaml` declares every
+global's shape; the built-in baseline is its resolved `fm`. A catalog is
+registered explicitly, never applied as a document schema; see
+[schema.md](schema.md#authored-global-catalog).
 
 ## Remote and cache safety
 

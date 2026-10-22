@@ -50,4 +50,4 @@ works the same in an installed binary as in a checkout (see
 
 ## Schema source
 
-::code ./darkmatter.yaml
+::code ../../schemas/partials/fm.yaml

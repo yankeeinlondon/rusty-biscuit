@@ -42,9 +42,25 @@ interpretation. Remedy it by wrapping the properties under the sole root
 `$schema:` key or under `kind: schema` plus `types:`. Classification is passive:
 it uses the already-parsed YAML value and performs no additional I/O.
 
-Schema-trigger documents use `kind: trigger-schema` (the envelope kind the
+Schema-trigger documents use `kind: schema-trigger` (the envelope kind the
 parser accepts, `triggers/envelope.rs::ENVELOPE_KIND`). Preserve the kinded root
 declaration so Darkmatter and Claudine can select the right schema formally.
+`kind: trigger-schema`, `any:`, and `--no-trigger-schemas` were renamed with no
+alias: the first two are `SchemaError::TriggerRenamed { field, found,
+replacement }`, the flag is a usage error raised by `md`'s argv pre-check
+(`main.rs::reject_renamed_flags`, so completions never offer it). A null or
+non-string `kind` is a `TriggerMatch` error, not ordinary data; no `$schema` is
+a matcher-only trigger (`resolve_trigger_layers` skips it).
+
+Match grammar (`triggers/grammar.rs`): `TriggerEnvelope::conditions` is a
+`MatchConditions` list that ANDs (`MatchConditions::matches`; never `.any()`
+over it); a mapping `match:` is one condition. OR is `MatchExpr::Group` from an
+explicit `group:`; a list entry that is itself a list is rejected. The vacuity
+lint runs once over `MatchConditions::to_expr()`. Every `TriggerMatch` message
+starts with its field (`` `match[1].group[0]`: ``). The input matrix is
+`lib/tests/l1/trigger_input_matrix.rs`; selection parity for migrated files is
+`lib/tests/l1/trigger_selection_parity.rs` and Claudine's
+`claudine_trigger_selection_parity.rs`.
 
 ## Composition and validation
 
@@ -145,18 +161,21 @@ source snapshot, shared by every problem and root-union arm):
 
 ## Runtime baseline
 
-`darkmatter/docs/schemas/darkmatter.yaml` is the runtime baseline. It declares
+The runtime baseline is the resolved `fm` declaration of the global catalog
+`darkmatter/schemas/darkmatter.yaml` (`schemas::catalog::GlobalCatalog::darkmatter()`),
+authored in `darkmatter/schemas/partials/fm.yaml`. That partial declares
 `content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy.yaml"`
-(optional, no default). `schemas/embedded.rs` holds the compiled-in table:
-the baseline (`include_str!`) and `content_policy::EDITOR_SCHEMA`, keyed by
-the virtual repo-relative paths `darkmatter/docs/schemas/darkmatter.yaml` and
-`content-policy/schemas/content-policy.yaml`. Embedded imports resolve
+(optional, no default) and imports `style@./style.yaml` and
+`context@./context-variables.yaml`. `schemas/embedded.rs::SHIPPED` holds the
+compiled-in bundle (catalog, five partials, `content_policy::EDITOR_SCHEMA`)
+keyed by repo-relative virtual paths. Embedded imports resolve
 lexically with `/` (no `~ & ^ $ % @`, URLs, globs, or climbing above the
 root), never touch the disk or network, add no dependency edge (DMLS never
 watches them), and identify as `SchemaSourceId::Embedded`. One
-`BASELINE: OnceLock` prepares and lowers it once per process. Resolving the
-authored file from disk gives the same typed schema and JSON. Installed
-binaries therefore need no schema files.
+`BASELINE: OnceLock` lowers it once per process. Resolving the catalog from
+disk gives the same typed schema and JSON. Installed binaries therefore need
+no schema files. `with_baseline_from_file` (and `BASELINE_SCHEMA`) pointing
+at a global catalog uses its `fm`.
 
 `md schema validate` selection (`cli/src/commands/schema/validate.rs::load_api`),
 first match wins:
@@ -171,7 +190,7 @@ first match wins:
 
 Custom paths resolve in the launch context (`crate::io::resolve_file_path`);
 a failed load is exit 2 with no fallback. Opting out keeps document `$schema`
-and triggers; `--no-trigger-schemas` is independent. JSON `schema` stays null
+and triggers; `--no-schema-triggers` is independent. JSON `schema` stays null
 for a document without `$schema`. Compatibility: `last_updated: not-a-date`
 with no `$schema` now fails validate as it fails compose. Compose keeps
 `--baseline-schema`/`--no-baseline-schema`/the env (live
@@ -469,7 +488,7 @@ For grammar or schema changes, cover:
 - `parse_trigger_envelope_from_str` is the one envelope classifier (discovery,
   embedded bundles, DMLS authoring, payload-cycle checks); never add a
   caller-side pre-check. Unparseable YAML is `Ok(None)` unless a provable
-  column-0 `kind: trigger-schema` line claims it (`claims_envelope` skips lines
+  column-0 `kind: schema-trigger` (or renamed `trigger-schema`) line claims it (`claims_envelope` skips lines
   inside multi-line quoted or block scalars and open flow collections), then
   `SchemaError::TriggerEnvelopeYaml { message, line, column }` (column in
   characters, BOM excluded) with a YAML hint, wrapped in `TriggerLoad` by
@@ -529,10 +548,19 @@ For grammar or schema changes, cover:
 
 ## Authored global catalog
 
-The authored replacement schema entry point is `darkmatter/schemas/darkmatter.yaml`.
-It declares all globals, including `fm` (typed by `partials/fm.yaml`), and imports types from `partials/`.
-Runtime migration is pending: do not confuse the existing embedded document
-baseline with this global catalog. The planned document baseline is its resolved
-`fm` definition; `ctx` and `current` share a context type, and there is no
-`current_env`. Register the global catalog explicitly rather than auto-applying
-its root as frontmatter properties.
+`darkmatter/schemas/darkmatter.yaml` is the one declaration of every global's
+shape: `kind: schema`, `description`, and a `$schema` mapping of `fm`, `ctx`,
+`current`, `env`, `err`, `timing`, mostly named imports from the types-only
+`partials/`. `schemas/catalog.rs` loads it strictly (`GlobalCatalog`,
+`CatalogError { field, reason }`; `DARKMATTER_GLOBALS`): every global
+required, null/empty/wrong kinds rejected, `current` must equal `ctx`,
+duplicate keys and trailing YAML are errors. The `ctx.*` descriptors project
+its `ctx`; `err` and `timing` members equal the runtime
+`LifecycleErrorInfo`/`LifecycleTiming` values. A catalog (`kind: schema` with
+a `$schema` mapping and no `types`) is never a document schema: the
+standalone loader refuses it by content, wherever a `$schema` reaches it.
+Hosts declare their own globals in a catalog of the same format
+(`claudine/schemas/globals.yaml`, loaded with `GlobalCatalog::from_documents`
+and the host's requirements). DMLS hovers and completes host globals from the
+catalogs in a document's schema roots (`catalog::host_catalogs`); per-event
+availability stays the host's `BindingView`.

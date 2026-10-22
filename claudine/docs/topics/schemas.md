@@ -47,7 +47,7 @@ reaches it only through an import such as `stack@./lifecycle.yaml`.
 ### Repo Wide Schemas
 
 A schema can also apply to documents that never mention it. Darkmatter looks
-for **trigger schemas** (files with `kind: trigger-schema`) in five schema
+for **trigger schemas** (files with `kind: schema-trigger`) in five schema
 locations: the document's package `schemas/`, its package area's `schemas/`,
 the repository root's `schemas/`, the folder `SCHEMAS_DIR` names, and
 `~/schemas`. A trigger has a `match:` condition over the frontmatter and a
@@ -94,9 +94,9 @@ document they accept can still be rejected by the parser (see
 | [`lifecycle.yaml`](../../schemas/lifecycle.yaml) | library (`kind: schema`) | the stack types (`stack`, `initialize-stack`, `cancelled-stack`) and the `loop:` block type |
 | [`sequence-types.yaml`](../../schemas/sequence-types.yaml) | library (`kind: schema`) | the sequence step and container types (`steps`, `step`, `task`, `group`) |
 | [`linking.yaml`](../../schemas/linking.yaml) | library (`kind: schema`) | the eleven optional linking keys of a linked skill, command, or agent |
-| [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: trigger-schema`) | Claudine's frontmatter catalog, applied to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
-| [`inline-compose.yaml`](../../schemas/inline-compose.yaml) | trigger (`kind: trigger-schema`) | inline-compose's document metadata (`prompt`, `hash`, `last_updated`), applied to a document with a non-null `prompt` and no non-null `sequence` |
-| [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: trigger-schema`) | the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` |
+| [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, applied to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
+| [`inline-compose.yaml`](../../schemas/inline-compose.yaml) | trigger (`kind: schema-trigger`) | inline-compose's document metadata (`prompt`, `hash`, `last_updated`), applied to a document with a non-null `prompt` and no non-null `sequence` |
+| [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: schema-trigger`) | the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` |
 
 A library reaches a document only through a trigger's imports, so the seven
 files work as one bundle. Copy all of them together.
@@ -136,23 +136,23 @@ events and `loop` select `claudine.yaml` whenever they are set, and are typed
 there, so no key has two declarations to keep in step.
 
 Darkmatter's match grammar does not accept a property-level union inside a
-condition, so each identifying key is written as five single-type arms under
-`any:`, one per non-null YAML type:
+condition, so each identifying key is written as five single-type alternatives
+in a `group:` (OR), one per non-null YAML type:
 
 ```yaml
 match:
-    any:
+    group:
         - start: string(required)
         - start: number(required)
         - start: boolean(required)
         - start: object(required)
         - start: "unknown[](required)"
-        # ... the same five arms for every other identifying key
+        # ... the same five alternatives for every other identifying key
 ```
 
-`inline-compose.yaml` wraps the five `prompt` arms in `all:` beside a `none:`
-of the five `sequence` arms, and `sequence.yaml` matches the five `sequence`
-arms.
+`inline-compose.yaml` wraps a `group:` of the five `prompt` alternatives in
+`all:` beside a `none:` of the five `sequence` alternatives, and
+`sequence.yaml` matches a `group:` of the five `sequence` alternatives.
 
 The payloads declare **no required property**. Selection only adds types where
 a key appears; it never asks for an execution input. `inline-compose` keeps its
@@ -490,7 +490,7 @@ These routes do **not** work:
 - **Symlinking individual files.** Discovery reads regular files only; a
   symlinked `claudine.yaml` is ignored.
 - **Pointing `$schema` at a trigger.** `$schema: claudine.yaml` fails with
-  "trigger-schema file referenced as document schema": triggers activate by
+  "schema-trigger file referenced as document schema": triggers activate by
   placement and match, never by reference.
 - **A `.dmls.toml` extension.** Extension settings configure only the editor,
   never the CLI, and an extension path is loaded like a `$schema` reference,
@@ -574,13 +574,14 @@ parser still enforces the execution rules.
 - Schemas
     - Darkmatter ([all global namespaces](^darkmatter/schemas/darkmatter.yaml))
         - [Frontmatter Base Schema (`fm` namespace)](^darkmatter/schemas/partials/fm.yaml)
-            - [Style Schema (for the `style` property in `fm` namespace)](^darkmatter/schemas/partials/tracking.yaml)
+            - [Style Schema (for the `style` property in `fm` namespace)](^darkmatter/schemas/partials/style.yaml)
         - [Context Variables Schema (`ctx` and `current` namespaces)](^darkmatter/schemas/partials/context-variables.yaml)
         - [Error Schema (`err` namespace)](^darkmatter/schemas/partials/error.yaml)
-        - [Tracking Schema (`tracking` namespace)](^darkmatter/schemas/partials/tracking.yaml)
+        - [Timing Schema (`timing` namespace)](^darkmatter/schemas/partials/timing.yaml)
     - Claudine ([overview of the bundle](../../schemas/README.md))
         - [Frontmatter catalog trigger](../../schemas/claudine.yaml)
         - [Inline-compose trigger](../../schemas/inline-compose.yaml)
+        - [Host globals catalog (`seq`, `loop`, `group`)](../../schemas/globals.yaml)
         - [Action types](../../schemas/action.yaml)
         - [Lifecycle stacks and `loop:`](../../schemas/lifecycle.yaml)
         - [Linking keys](../../schemas/linking.yaml)

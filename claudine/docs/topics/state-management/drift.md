@@ -168,7 +168,7 @@ omissions cannot be found by the current two-table comparison.
 | Concern | Location |
 |---|---|
 | Shared descriptors and example verification modes | [Catalog framework](../../../../darkmatter/lib/src/catalog/mod.rs) |
-| Context schema | [Embedded base schema](../../../../darkmatter/docs/schemas/darkmatter.yaml) |
+| Context schema | [Context variables schema](../../../../darkmatter/schemas/partials/context-variables.yaml) |
 | Context descriptors and checks | [Context catalog](../../../../darkmatter/lib/src/markdown/compose/context/catalog.rs) |
 | Runtime context values | [Capture modules](../../../../darkmatter/lib/src/markdown/compose/context/capture/) |
 | Expression descriptions and checks | [Expression catalog](../../../../darkmatter/lib/src/markdown/compose/expression/catalog/) |

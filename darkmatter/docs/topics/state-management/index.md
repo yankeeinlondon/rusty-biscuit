@@ -68,6 +68,6 @@ In summary, **state** consists of various global variables that are provided by 
 ## Reference
 
 - Schemas
-    - [Darkmatter Base Schema](^darkmatter/schemas/darkmatter.yaml)
-    - [Context Variables](^darkmatter/schemas/context-variables.yaml)
-    - [Other Global Variables](^darkmatter/schemas/global-variables.yaml)
+    - [Darkmatter Global Catalog](^darkmatter/schemas/darkmatter.yaml)
+    - [Context Variables](^darkmatter/schemas/partials/context-variables.yaml)
+    - [Error Schema](^darkmatter/schemas/partials/error.yaml) and [Timing Schema](^darkmatter/schemas/partials/timing.yaml)

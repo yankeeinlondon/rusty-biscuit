@@ -152,6 +152,15 @@ against that, never against `to_string_lossy()`.
     HRESULT-shaped `io::Error` (`0x80070001`, "Incorrect function"), not raw
     error 1.** Match that form to fall back to a byte copy
     (`unsupported_clone` in `worktree/lib/src/include/copy.rs`).
+20. **A long Windows temp path wraps a diagnostic box where macOS does not.**
+    `md`'s error box wraps near 80 columns whatever `COLUMNS` says, and a
+    `C:\Users\…\AppData\Local\Temp\md-fixture-…` path is long enough to push a
+    needle such as `trigger-schema` onto the next row. The box keeps its SGR
+    styling even under `NO_COLOR=1`, and the cross-check log strips it, so the
+    printed failure shows no escape codes although the test saw them at the
+    start of every row. Match against the rows
+    joined after removing escape sequences (`without_escapes` in
+    `darkmatter/cli/tests/l1/schema_trigger_rename.rs`).
 
 ## Worktree include links and junctions
 

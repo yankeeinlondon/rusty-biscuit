@@ -593,7 +593,7 @@ The literal implies its scalar type, so the write-back pass treats it like the c
 
 #### Trigger Matches
 
-`literal` is a pure value-equality constraint (no I/O), so it is permitted in [trigger-schema](#repository-trigger-schemas) match expressions. `kind: literal(spec)` is the idiomatic trigger discriminant, replacing the older `enum(spec)` spelling.
+`literal` is a pure value-equality constraint (no I/O), so it is permitted in [schema-trigger](#repository-trigger-schemas) match expressions. `kind: literal(spec)` is the idiomatic trigger discriminant, replacing the older `enum(spec)` spelling.
 
 ### Expressions
 
@@ -1817,7 +1817,7 @@ file beside the document. The same lookup applies to a bare name in an import
 (`Name@claudine.yaml`) or `example(claudine.yaml)`. A name no root holds is an
 error, which suggests `./claudine.yaml` when a file of that name sits beside the
 document. When no root is searched at all (none of the five folders exists,
-trigger discovery is off with `--no-trigger-schemas`, or `md` is checking a
+trigger discovery is off with `--no-schema-triggers`, or `md` is checking a
 document outside a repository), a bare name resolves like any other bare path.
 No ambient current working directory is read.
 
@@ -1906,8 +1906,9 @@ let api = DarkmatterSchemas::new(context)
 ### The Built-in Baseline
 
 Darkmatter's own frontmatter properties (`title`, `last_updated`, `style`,
-`ctx`, and the rest) are typed by a built-in baseline authored in
-[`docs/schemas/darkmatter.yaml`](../../schemas/darkmatter.yaml) and described
+`ctx`, and the rest) are typed by a built-in baseline: the `fm` declaration of
+the global catalog [`schemas/darkmatter.yaml`](../../../schemas/darkmatter.yaml),
+authored in [`schemas/partials/fm.yaml`](../../../schemas/partials/fm.yaml) and described
 in [`docs/schemas/darkmatter-schema.md`](../../schemas/darkmatter-schema.md).
 It also types `content_policy` by importing Content Policy's editor schema:
 
@@ -1925,8 +1926,8 @@ installed `md` or `dmls` prepares it outside a checkout, with no schema files
 on disk:
 
 - the imports resolve from an internal table keyed by repository-relative
-  virtual paths (`darkmatter/docs/schemas/darkmatter.yaml`,
-  `content-policy/schemas/content-policy.yaml`). A reference is resolved
+  virtual paths (`darkmatter/schemas/darkmatter.yaml`, its partials under
+  `darkmatter/schemas/partials/`, and `content-policy/schemas/content-policy.yaml`). A reference is resolved
   lexically with `/` against the importing path; there is no disk or network
   fallback, so a reference to a path the table does not hold is an error;
 - an embedded document is never a file dependency, so DMLS never watches it
@@ -2017,7 +2018,7 @@ be found or loaded exits `2` and never falls back to the built-in baseline or
 to none.
 
 Opting out removes only the baseline. A document's own `$schema` and matching
-[trigger schemas](#repository-trigger-schemas) still apply, and `--no-trigger-schemas`
+[trigger schemas](#repository-trigger-schemas) still apply, and `--no-schema-triggers`
 turns off triggers independently of the baseline.
 
 **Compatibility.** Because every built-in property is checked by default, a
@@ -2113,7 +2114,7 @@ The same conservative rules apply at every nested level — coercion never fires
 ## CLI: `md schema validate`
 
 ```
-md schema validate <FILE_OR_PROP=VALUE>... [--schema <path> | --no-baseline-schema] [--no-trigger-schemas] [--format pretty|json] [--quiet]
+md schema validate <FILE_OR_PROP=VALUE>... [--schema <path> | --no-baseline-schema] [--no-schema-triggers] [--format pretty|json] [--quiet]
 ```
 
 | Flag                       | Effect                                                                                                 |
@@ -2121,7 +2122,7 @@ md schema validate <FILE_OR_PROP=VALUE>... [--schema <path> | --no-baseline-sche
 | `<FILE_OR_PROP=VALUE>...`  | Markdown files **and/or** `<prop>=<value>` assignments. See [Frontmatter Assignments](#frontmatter-assignments). |
 | `--schema <path>`          | Custom baseline replacing the built-in one, used even when `DARKMATTER_NO_BASELINE_SCHEMA` is set. See [Selecting the Baseline](#selecting-the-baseline). |
 | `--no-baseline-schema`     | Validate with no baseline, ignoring `BASELINE_SCHEMA`. Conflicts with `--schema`.                      |
-| `--no-trigger-schemas`     | Do not discover or apply [trigger schemas](#repository-trigger-schemas). The baseline is unaffected.   |
+| `--no-schema-triggers`     | Do not discover or apply [trigger schemas](#repository-trigger-schemas). The baseline is unaffected.   |
 | `--format pretty`          | Default. Human-readable, Prose-styled output. One block per file; each problem names its [source location](#problem-locations). |
 | `--format json`            | Newline-delimited JSON, one object per file. Pipe-friendly.                                            |
 | `--quiet`                  | Suppress success lines; only failures print.                                                           |
@@ -2548,7 +2549,7 @@ Detection is passive: it derives the supplied context to each document and never
 - `lint_suggestions(&SimplifiedSchema)` — check every `suggest(...)` candidate against its target schema; returns `Vec<SuggestionLintProblem>` (never a `SchemaError` for an invalid candidate).
 - `suggestions_for_path(&SimplifiedSchema, &[&str])` — query lint-valid completion candidates for a property path; returns `Option<SuggestionQuery>` with YAML-safe insertion text.
 - `parse_standalone_schema_document(&str, path)` — classify and parse a standalone YAML file as a SimplifiedSchema authoring document; returns `Option<StandaloneSchemaDocument>` (`None` for ordinary YAML / raw JSON Schema).
-- `darkmatter_base_schema()` — the Darkmatter base frontmatter schema (authored in `docs/schemas/darkmatter.yaml` and compiled in with the schemas it imports; see [The Built-in Baseline](#the-built-in-baseline)) as a `SimplifiedSchema`.
+- `darkmatter_base_schema()` — the Darkmatter base frontmatter schema (the global catalog's `fm`, authored in `schemas/partials/fm.yaml` and compiled in with the schemas it imports; see [The Built-in Baseline](#the-built-in-baseline)) as a `SimplifiedSchema`.
 - `darkmatter_base_json_schema()` — the same base schema compiled to an independently owned Draft 2020-12 JSON Schema value.
 - `darkmatter_base_json_schema_ref()` — a read-only borrow of the process-cached JSON Schema, avoiding a deep clone.
 
@@ -2746,7 +2747,7 @@ The stage is **not** part of the `ComposeOperation` enum — it cannot be exclud
 - `--set` and `--state` overrides are applied **before** validation, so they can fulfill required properties. A document with `spec: ""` plus `--set spec=design.md` validates successfully.
 - The stage **mutates** the document: it coerces schema-recognized top-level scalars to their declared types (see [Type Coercion](#type-coercion)) and **writes the coerced values back** into the frontmatter, so the real types flow to every later stage (shell expansion, page blocks, body interpolation, init-stack conditions) and into the composed output. For example, a `has_spec: "{{spec ? true : false}}"` ternary resolves to the string `"true"` during interpolation and is stored as a real JSON boolean `true` after this stage.
 - A top-level value still holding a `$(...)` shell expression is **skipped** by the write-back — its literal form must survive into shell expansion. Its real type is resolved later at the post-shell re-validation point, which coerces via the same helper.
-- Problems on a whole-value frontmatter shell expression (`$(...)`), or on a key whose `{{ }}` template reads one, are **deferred** *only when frontmatter shell expansion is enabled* — that value has not been computed at validation time, so compose re-validates the post-shell frontmatter against the same effective schema after shell expansion and the second interpolation pass. A `$(...)` that prints an invalid value (for any baseline property, `content_policy` included) therefore fails compose, with or without `--no-trigger-schemas`, which removes trigger schemas but not the post-shell check. (A library caller that re-validates the composed frontmatter itself can take over that verdict with `ComposeOptions::with_caller_owned_post_shell_verdict(true)`; compose still judges result-suffix values and trigger schemas.) Any composition-independent problem fails fast, before a command runs. `$(...)` text compose never expands (`content_policy: ["$(echo X)", TimeSensitive]`, `title: "see $(date)"`) is not deferred, and the post-shell check defers nothing, so such a value is judged as written. When frontmatter shell expansion is **disabled** (e.g. `ComposeOptions::only(&[ComposeOperation::Interpolation])`), no later stage re-resolves those values, so the `$(...)` deferral does not apply and every problem fails fast.
+- Problems on a whole-value frontmatter shell expression (`$(...)`), or on a key whose `{{ }}` template reads one, are **deferred** *only when frontmatter shell expansion is enabled* — that value has not been computed at validation time, so compose re-validates the post-shell frontmatter against the same effective schema after shell expansion and the second interpolation pass. A `$(...)` that prints an invalid value (for any baseline property, `content_policy` included) therefore fails compose, with or without `--no-schema-triggers`, which removes trigger schemas but not the post-shell check. (A library caller that re-validates the composed frontmatter itself can take over that verdict with `ComposeOptions::with_caller_owned_post_shell_verdict(true)`; compose still judges result-suffix values and trigger schemas.) Any composition-independent problem fails fast, before a command runs. `$(...)` text compose never expands (`content_policy: ["$(echo X)", TimeSensitive]`, `title: "see $(date)"`) is not deferred, and the post-shell check defers nothing, so such a value is judged as written. When frontmatter shell expansion is **disabled** (e.g. `ComposeOptions::only(&[ComposeOperation::Interpolation])`), no later stage re-resolves those values, so the `$(...)` deferral does not apply and every problem fails fast.
 - Only **authored** text is ever pending. A data value (a data override layer, an expression's result, a decoded literal token) is final, so a problem on it is reported even when its text contains `$(` or `{{`: with `OverrideLayer::data(json!({"count": "$(echo 2)"}))` against `count: number`, validation fails, while the same value as an authored override is deferred and run. A stored literal token is judged by the text it holds.
 - Recursive compose runs validate every child document after its parent `set=` overlay is applied. A child schema failure aborts the parent compose under `fail_fast` (or when the error is structural); otherwise it surfaces as a transclusion warning.
 - The baseline schema participates in transclusion cache keys and the run-local options hash, so cached results are not reused across different baselines.
@@ -2841,10 +2842,10 @@ written. See [Selecting the Baseline](#selecting-the-baseline).
 
 File-backed CLI and DMLS validation discover trigger schemas in the five
 [schema roots](#schema-roots) of the document being checked. A YAML file in
-one of those folders opts into activation by declaring `kind: trigger-schema`:
+one of those folders opts into activation by declaring `kind: schema-trigger`:
 
 ```yaml
-kind: trigger-schema
+kind: schema-trigger
 match:
     all:
         - kind: enum(prompt; required)
@@ -2916,7 +2917,7 @@ patterns `match()` uses, and matches when some positive pattern admits the
 document and no `!` pattern does:
 
 ```yaml
-kind: trigger-schema
+kind: schema-trigger
 match:
     $path:
         - "^docs/**"     # docs/ of the document's package, area, or repository
@@ -2945,22 +2946,40 @@ Property conditions reuse SimplifiedSchema type expressions. A condition
 without `required` is a guard: absence is allowed, but a present value of the
 wrong type defeats the match. `required` makes it a presence gate, except on
 a [null-admitting](#null-admitting-properties) type: `steps: unknown(required)`
-is only a guard and cannot make an arm satisfiable, while
+is only a guard and cannot satisfy the vacuity rule below, while
 `steps: unknown[](required)` is a gate that requires a list. Match-safe
 constraints are limited to structural types plus pure constraints such as
 `required`, `enum`, `pattern`, length/range, item-count, and key-count.
 Stateful or phase-specific constraints (`eager`, imports, `example`,
 `default`, and `generated`) are rejected in trigger matches.
 
-The match grammar supports freely nested `all`, `any`, `none`, and
-`min-match: { count, of }` combinators. A sequence under `match:` is an outer
-OR of independent arms. `$path` is case-sensitive on every OS (see
-[Matching a path with `$path`](#matching-a-path-with-path)). Every arm must
-contain a satisfiable presence gate or `$path`; otherwise the vacuous arm is a
-load error. An empty condition mapping (`{}`) is a load error wherever it
-appears, including as a child of a combinator: `none: [{}]` would otherwise
-make the trigger unmatchable, and `all: [{}, …]` would hide a dropped
-condition.
+The match grammar supports freely nested `all`, `group`, `none`, and
+`min-match: { count, of }` combinators. A list under `match:` is AND: every
+entry must match. OR is always an explicit `group:` mapping whose entries are
+alternatives:
+
+```yaml
+kind: schema-trigger
+match:
+    - kind: enum(claudine; required)
+    - group:
+          - prompt: string(required)
+          - steps: unknown[](required)
+$schema: claudine.yaml
+```
+
+This matches when `kind` is `claudine` **and** `prompt` or `steps` is present.
+A mapping under `match:` is one condition whose sibling keys AND. A list
+entry that is itself a list is a load error (write a `group:`), and the
+removed `any:` combinator is a load error naming `group:`. `$path` is
+case-sensitive on every OS (see
+[Matching a path with `$path`](#matching-a-path-with-path)). Every way of
+satisfying the whole expression must include a satisfiable presence gate or
+`$path`; otherwise the trigger is vacuous and a load error. An empty
+condition mapping (`{}`) is a load error wherever it appears, including as a
+child of a combinator: `none: [{}]` would otherwise make the trigger
+unmatchable, and `all: [{}, …]` would hide a dropped condition. A load error
+names the field it is about, from `match` down: `` `match[1].group[0]` ``.
 
 Effective precedence is caller baseline, matching trigger payloads (schema
 root order and then filename order), then the document's own `$schema`. Trigger
@@ -2970,9 +2989,9 @@ an invalid opted-in envelope rejects the scan, while YAML files that do not
 they are not valid YAML. Library hosts opt in explicitly with
 `DarkmatterSchemas::with_trigger_discovery`; `md compose` and
 `md schema validate` opt in for repository-backed files and accept
-`--no-trigger-schemas`. Use `md schema triggers <file>` to inspect the five
+`--no-schema-triggers`. Use `md schema triggers <file>` to inspect the five
 roots (marking absent folders and an unset or invalid `SCHEMAS_DIR`),
-shadowing, matched arms, and defeat explanations. A root it cannot inspect
+shadowing, each top-level condition's result, and defeat explanations. A root it cannot inspect
 fails the command with the I/O error instead of a listing:
 
 ```text
@@ -2992,27 +3011,34 @@ break trigger discovery, so a scratch file with a syntax error never disables
 the triggers beside it.
 
 - **Valid YAML** claims the envelope when its top-level mapping has
-  `kind: trigger-schema`, however the mapping is written (quoted keys and
-  JSON-style mappings included).
+  `kind: schema-trigger`, however the mapping is written (quoted keys and
+  JSON-style mappings included). A missing `kind`, or any other string
+  (`kind: schema`, `kind: ""`), is ordinary data. `kind: trigger-schema`, the
+  spelling before the rename, is a load error naming `schema-trigger`, never
+  an ignored file; so is a null or non-string `kind` (`kind:`, `kind: 42`).
+- A claimed file without `$schema` is a matcher-only trigger: it loads and
+  matches, so `md schema triggers` lists it, but it layers no schema. An
+  explicit `$schema: null` is a load error.
 - **YAML that does not parse** claims it only when a line declares it the
   conventional way: `kind` at column 0, optional spaces, `:`, then exactly
-  `trigger-schema` (plain, single-quoted, or double-quoted), optionally
-  followed by whitespace and a `#` comment. Windows line endings and an
+  `schema-trigger` (plain, single-quoted, or double-quoted), optionally
+  followed by whitespace and a `#` comment. The same line spelled
+  `trigger-schema` claims it too, and fails with the rename error. Windows line endings and an
   initial byte-order mark make no difference.
 
 | Line in a file that does not parse | Claims the envelope? |
 | --- | --- |
-| `kind: trigger-schema` | yes: a YAML error |
-| `kind: "trigger-schema"  # note` | yes: a YAML error |
-| `kind : 'trigger-schema'` | yes: a YAML error |
-| `  kind: trigger-schema` (indented, so nested) | no: ignored |
-| `kind: trigger-schema-extra` | no: ignored |
-| `# kind: trigger-schema` (commented out) | no: ignored |
-| `kind: trigger-schema` inside a multi-line quoted or block scalar | no: ignored |
+| `kind: schema-trigger` | yes: a YAML error |
+| `kind: "schema-trigger"  # note` | yes: a YAML error |
+| `kind : 'schema-trigger'` | yes: a YAML error |
+| `  kind: schema-trigger` (indented, so nested) | no: ignored |
+| `kind: schema-trigger-extra` | no: ignored |
+| `# kind: schema-trigger` (commented out) | no: ignored |
+| `kind: schema-trigger` inside a multi-line quoted or block scalar | no: ignored |
 | `kind: schema`, or no `kind:` line at all | no: ignored |
 
 This fallback recognizes only a conventional block-mapping declaration. A
-malformed flow mapping (`{kind: trigger-schema, match: …`) or an unusual key
+malformed flow mapping (`{kind: schema-trigger, match: …`) or an unusual key
 spelling is ignored when it does not parse. The limit affects only how a
 broken file is recovered from; valid YAML is classified from its parsed
 mapping as above.
@@ -3023,7 +3049,7 @@ problem and its position (`SchemaError::TriggerEnvelopeYaml`, inside
 file), not the match grammar. With this `schemas/note-trigger.yaml`:
 
 ```yaml
-kind: trigger-schema
+kind: schema-trigger
 match:
     kind: literal(note; required)
 description: Note: a colon here breaks YAML
@@ -3031,7 +3057,7 @@ $schema: note.yaml
 ```
 
 ```text
-trigger-schema file `…/schemas/note-trigger.yaml` is not valid YAML at line 4, column 18:
+schema-trigger file `…/schemas/note-trigger.yaml` is not valid YAML at line 4, column 18:
 mapping values are not allowed in this context
 ```
 
@@ -3041,7 +3067,7 @@ a plain value that contains `: ` or ` #`, or starts with an indicator such
 as `@` or `*`, must be quoted (`description: "Note: a colon here is fine"`).
 DMLS publishes the same error on the trigger file; while the file is open,
 the diagnostic starts at the reported position. Errors in a file that parses (a bad `match`, or none at all)
-are still reported as trigger-schema match or envelope errors.
+are still reported as schema-trigger match or envelope errors.
 
 #### Embedded trigger bundles
 
@@ -3057,7 +3083,7 @@ use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle};
 const BUNDLE: EmbeddedSchemaBundle = EmbeddedSchemaBundle::new(
     "my-tool",
     &[
-        ("my-tool.yaml", include_str!("../schemas/my-tool.yaml")), // kind: trigger-schema
+        ("my-tool.yaml", include_str!("../schemas/my-tool.yaml")), // kind: schema-trigger
         ("steps.yaml", include_str!("../schemas/steps.yaml")),     // kind: schema
     ],
 );
@@ -3074,7 +3100,7 @@ The bundle is the **last** place triggers are looked for:
 flowchart LR
     R["the five schema roots"] --> Q{"does any root hold a file<br/>named like the bundle file?"}
     Q -- yes --> D["the disk file decides;<br/>the bundle file is ignored"]
-    Q -- no --> E{"does the bundle file claim<br/>kind: trigger-schema?"}
+    Q -- no --> E{"does the bundle file claim<br/>kind: schema-trigger?"}
     E -- yes --> T["embedded trigger, layered<br/>after every disk trigger"]
     E -- no --> L["library: an import target only"]
 ```

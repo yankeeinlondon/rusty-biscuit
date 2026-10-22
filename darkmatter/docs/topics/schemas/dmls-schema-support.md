@@ -83,7 +83,7 @@ A few details worth knowing:
   - a watched-file event or a save for a schema-root file, a trigger's payload, or a file the payload imports or uses as an example. The file is re-read and compared by content hash, so a save that changed nothing prepares nothing; a file created in or removed from a schema root or one of those files' folders always counts
   - a save-triggered rescan (clients without a file watcher), a configuration change, or a package-manifest change
 - registries are prepared ahead of the requests that need them. At server start, a background thread prepares the registry of every workspace scope (each workspace folder, and each package and package area the repository's package catalog places inside it) before it lists the workspace files, so a broken trigger in an unopened package is reported at startup and a document in any of those scopes is answered from memory from its first request. The scopes are prepared again after each refresh (a watched or saved schema file, a server rescan, a configuration change, or a package-manifest change), so a newly declared package is prepared without a document opening there. Each document's own registry is prepared on a background worker the first time a request or diagnostics refresh needs it, reusing the prepared scopes' root contents; its schema-dependent requests wait for it, and its diagnostics are published once it is installed, while the server keeps handling edits, cancellation, and shutdown. A document outside every prepared scope gets its roots read then, and the folder's roots are never substituted for its own
-- a YAML file in a schema root that does not parse and does not claim `kind: trigger-schema` is unclassified: it is neither a trigger nor a named schema, and it never breaks trigger discovery for the other files. A file that claims `kind: trigger-schema` but is not valid YAML is a trigger load error, reported on that file as a YAML syntax error at its line and column. A trigger file that fails to load keeps the last good registry serving; a schema root that cannot be read leaves the document without a registry, with a `dm.schema.prepare` error
+- a YAML file in a schema root that does not parse and does not claim `kind: schema-trigger` is unclassified: it is neither a trigger nor a named schema, and it never breaks trigger discovery for the other files. A file that claims `kind: schema-trigger` but is not valid YAML is a trigger load error, reported on that file as a YAML syntax error at its line and column. A trigger file that fails to load keeps the last good registry serving; a schema root that cannot be read leaves the document without a registry, with a `dm.schema.prepare` error
 - a registry failure is logged when its state changes (a new failure, a different one, or a recovery), not on every request; the log lines are listed in [DMLS Indexing](../../lsp/indexing.md)
 - saving a schema file applies the change even while that file is open in the editor; unsaved edits in an open schema file reach the documents that use it only after the save
 - when a schema fails to load, DMLS keeps the **last good** bundle serving completion and hover rather than flapping to nothing mid-keystroke
@@ -100,8 +100,8 @@ Claudine's schemas are an ordinary set of disk files, five of them in
 | `action.yaml` | library (`kind: schema`) | the lifecycle action types and the dictionary-bundle types |
 | `lifecycle.yaml` | library (`kind: schema`) | the lifecycle stack types and the `loop:` block type |
 | `linking.yaml` | library (`kind: schema`) | the linking keys of a skill, command, or agent |
-| `claudine.yaml` | trigger (`kind: trigger-schema`) | Claudine's frontmatter catalog, for a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
-| `inline-compose.yaml` | trigger (`kind: trigger-schema`) | inline-compose's document metadata, for a non-null `prompt` with no non-null `sequence` |
+| `claudine.yaml` | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, for a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
+| `inline-compose.yaml` | trigger (`kind: schema-trigger`) | inline-compose's document metadata, for a non-null `prompt` with no non-null `sequence` |
 
 DMLS needs no configuration for them. A document whose package area is
 `claudine/` finds them through the package-area root, so a misspelled verb, a
@@ -350,7 +350,7 @@ The scorecard: one dimension is the LSP capability, the other is the Darkmatter 
 | Standalone schema documents (`kind: schema`)  | ✅ ¹⁴       | ✅         | ✅    | —            | —               | ❌          | ❌     | —            |
 | `expression`-typed values                     | ✅          | ✅         | ✅    | —            | —               | ❌ ¹⁵       | ❌     | —            |
 | `style.*` keys                                | ✅          | ✅         | ✅    | —            | —               | ❌          | ❌     | ✅           |
-| Trigger envelopes (`kind: trigger-schema`)    | ✅ ¹⁶       | —          | —     | —            | —               | ❌          | ❌     | —            |
+| Trigger envelopes (`kind: schema-trigger`)    | ✅ ¹⁶       | —          | —     | —            | —               | ❌          | ❌     | —            |
 | `ctx.*` generated keys                        | —           | ✅         | ✅    | —            | —               | ❌ ¹⁵       | ❌     | —            |
 
 1. Required keys marked; nested keys offered per the enclosing inline-object shape.

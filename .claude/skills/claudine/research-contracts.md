@@ -83,7 +83,7 @@ Reference a type with `name(required)@this`, `name[](required)@this`, or
 
 | Gate | Command | Checks |
 | --- | --- | --- |
-| Shape | `md schema validate <doc> --no-trigger-schemas` | Types, closed sets, patterns, unknown keys |
+| Shape | `md schema validate <doc> --no-schema-triggers` | Types, closed sets, patterns, unknown keys |
 | Relations | `python3 docs/research/<topic>/_relations.py <doc>` | An identifier names an existing entry; a property required only in some cases; every `unknown` has a gap |
 
 Both run in the prompt's `success` event. A failure raises an error, the

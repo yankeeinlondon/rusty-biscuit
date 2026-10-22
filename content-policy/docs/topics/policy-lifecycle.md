@@ -982,7 +982,7 @@ Templates are checked when they have a value. `md compose` checks a
 DMLS does not report a `{{ … }}` value at all. A whole-value frontmatter shell
 command, `$(…)`, is checked after it runs: `content_policy: "$(cat policy.txt)"`
 fails `md compose` when the command prints anything other than a valid policy
-list, with or without `--no-trigger-schemas`. Shell text that compose never
+list, with or without `--no-schema-triggers`. Shell text that compose never
 runs, such as `$(…)` inside a list item, is judged as written.
 
 In the editor, DMLS completes inside a compact entry, after `rule:` and

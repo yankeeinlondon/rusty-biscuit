@@ -5,12 +5,15 @@ conditions pass. Conditions are set in the `match` property. The filename of
 this topic retains the earlier terminology; the document kind is
 `schema-trigger`.
 
-This topic describes the intended contract, not current implementation. The
-agreed Boolean model is AND between top-level conditions and OR within a group.
-The current implementation uses OR for a top-level list; existing definitions
-require explicit migration to preserve their meaning. The full predicate family
-listed in [Authoring Schemas](./authoring-schemas.md#schema-triggers) is in scope;
-its exact syntax and observation/refresh contracts remain under design review.
+The Boolean model is implemented: a top-level `match:` list is AND, and a
+`group:` is OR (see
+[Repository Trigger Schemas](./definition.md#repository-trigger-schemas) for
+the conditions that load today). The rest of this topic describes the intended
+contract, not current implementation: the full predicate family listed in
+[Authoring Schemas](./authoring-schemas.md#schema-triggers), such as the
+`expression`, `can_execute`, and `file_exists` conditions below, is
+**planned**; its exact syntax and observation/refresh contracts remain under
+design review.
 
 Trigger matching is passive: it checks whether a schema applies without running
 commands or starting runtime actions. Use expressions for document values and

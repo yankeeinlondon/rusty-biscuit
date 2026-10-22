@@ -77,7 +77,33 @@ re-exports them at their old paths and adapts them: `effects.rs`
 (`ClaudineLifecycleEffects`: TTS and messaging configuration), `executor.rs`
 (`StackExecutionContext` is the `LifecycleHost`), `ClaudineRunHost` for the run
 guard, the `*Ext` traits for the old constructors, and `CompositionError`
-twins of `LifecycleError`. `lib/tests/l1/lifecycle_lift_ready_guard.rs` still
+twins of `LifecycleError`. Event names come from the host registry:
+`claudine_registry()` (`composition/lifecycle/registry.rs`) renames
+Darkmatter's `composed`/`failed` to `start`/`blocked` (the Darkmatter spelling
+is `LifecycleRenamedEvent`) and registers `success`/`failure` and `loop`;
+derive event keys from `authored_event_keys()`, never a hand list. The host
+globals `seq`, `loop`, and `group` are declared once in the host catalog
+`claudine/schemas/globals.yaml` (embedded by `composition/schema/globals.rs`,
+`claudine_globals()`/`host_global()`; never a trigger or document schema), and
+`bindings.rs` and the registry take their names from it; Darkmatter's own
+globals (`fm`, `ctx`, `current`, `env`, `err`, `timing`) are declared in
+`darkmatter/schemas/darkmatter.yaml`, whose resolved `fm` is the built-in
+baseline. Trigger files are `kind: schema-trigger`; a top-level `match:` list
+is AND and `group:` is OR. Every
+recovery verdict, refusal route, `blocked`-vs-`failure` choice, and hop budget
+is decided by `darkmatter::lifecycle::policy` (`SubjectKind` carries the
+document/root-sequence/sequence/group differences); a driver calls it and maps
+refusals through `CompositionError::from_lifecycle_refusal`. Pre-launch checks
+run through `composition/preflight/checks.rs` (`claudine_preflight()`,
+`sequence_preflight()`): a `BeforeRun` failure fires no event, an `InRun`
+failure is a preflight failure. The one-implementation guards,
+`lib/tests/l1/lifecycle_one_implementation_guard.rs` (library source) and
+`cli/tests/l1/lifecycle_one_implementation_guard.rs` (CLI source), share the
+scan in `lib/tests/common/lifecycle_ownership_scan.rs` and fail on a Claudine
+definition of a Darkmatter-owned lifecycle item, a `MAX_PROXY_HOPS`
+comparison, a refusal or parser-twin error built outside its one mapping, or an
+unreviewed seam `impl` or registration; a new adapter adds an allowlist entry,
+with its reason, to the guard that scans its file. `lib/tests/l1/lifecycle_lift_ready_guard.rs` still
 reads the moved slice, so the caller injects the effect catalog
 (`LifecycleParseOptions`). Loop values are the host-declared `loop` global
 (`loop.count`, …), supplied to Darkmatter main compose through

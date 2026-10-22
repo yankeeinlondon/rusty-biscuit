@@ -1505,6 +1505,7 @@ the authority. The most common errors:
 | `LifecycleSayConflict` | `say` and `speak` in one dictionary |
 | `LifecycleUnknownEffect` | A literal `effect` name not in the compiled catalog |
 | `LifecycleActionPlacement` | `skip` outside `initialize`, a shell in `initialize`, or a forbidden flow directive in `cancelled` (any branch) |
+| `LifecycleRenamedEvent` | A `composed:` or `failed:` key: Darkmatter's names for the events Claudine calls `start` and `blocked`. The error names the key to write instead |
 | `LifecycleWithUnsupported` | `with` on a verb other than `proxy`, `retry`, and `prep` |
 | `LifecycleNestedSpanInLiteral`, `LifecycleErrNotAvailable` | Described below |
 
