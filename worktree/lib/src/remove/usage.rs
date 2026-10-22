@@ -10,8 +10,12 @@
 //! operation report. A query that could not verify the checkout at all
 //! refuses before anything is moved.
 //!
-//! The query uses Sniff's default options: one shared two-second budget, no
-//! retry, with one exception. When every holder is one of Windows Search's
+//! The query uses Sniff's default options (one shared two-second budget)
+//! plus, before the move, the [`TreeIndex`] built from the removal's own
+//! [`DeletionInventory`](super::observation::inventory::DeletionInventory),
+//! so Sniff spends its budget on processes rather than walking a tree the
+//! removal has already walked. A diagnostic query after a stop is given no
+//! index: it walks what is left. There is no retry, with one exception. When every holder is one of Windows Search's
 //! own processes, identified by its full image path in the system directory
 //! ([`is_windows_search`]), the check waits [`SEARCH_RECHECK_WAIT`] and
 //! queries once more; that second query decides, whatever it finds. Search
@@ -24,18 +28,22 @@
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use sniff::filesystem::query::{
     CoverageStatus, Evidence, EvidenceKind, FileIdentity, Mechanism, NativeString, Outcome,
-    PathUsageError, PathUsageOptions, PathUsageReport, ProcessRecord, query_path_usage,
+    PathUsageError, PathUsageOptions, PathUsageReport, ProcessRecord, TreeIndex, query_path_usage,
 };
 
 /// Where usage reports come from. [`SniffUsage`] queries the host; policy
 /// tests inject reports instead, so they never depend on what the host is
 /// running.
 pub trait UsageSource: Sync {
-    fn query(&self, path: &Path) -> Result<PathUsageReport, PathUsageError>;
+    /// Queries `path`. With `index`, the caller's index of the tree replaces
+    /// Sniff's walk ([`PathUsageOptions::with_tree_index`]); without, Sniff
+    /// walks the tree as it is now.
+    fn query(&self, path: &Path, index: Option<&Arc<TreeIndex>>) -> Result<PathUsageReport, PathUsageError>;
 
     /// The system directory (`%SystemRoot%\System32`) that a Windows Search
     /// holder's image must be in for [`check_usage`] to recheck; `None`
@@ -84,8 +92,12 @@ fn host_system_directory() -> Option<NativeString> {
 pub struct SniffUsage;
 
 impl UsageSource for SniffUsage {
-    fn query(&self, path: &Path) -> Result<PathUsageReport, PathUsageError> {
-        query_path_usage(path, &PathUsageOptions::default())
+    fn query(&self, path: &Path, index: Option<&Arc<TreeIndex>>) -> Result<PathUsageReport, PathUsageError> {
+        let options = match index {
+            Some(index) => PathUsageOptions::default().with_tree_index(Arc::clone(index)),
+            None => PathUsageOptions::default(),
+        };
+        query_path_usage(path, &options)
     }
 }
 
@@ -301,14 +313,21 @@ impl CoverageSummary {
 /// Queries `checkout` through `source` and applies [`assess`]. When every
 /// holder [`is_windows_search`], it waits [`SEARCH_RECHECK_WAIT`] and
 /// queries exactly once more, and that query decides; any other holder in
-/// the first query refuses at once.
+/// the first query refuses at once. Both queries get `index`; each still
+/// verifies the checkout's root itself.
 ///
 /// ## Errors
 ///
-/// [`UsageRefusal::Unverified`] for any [`PathUsageError`];
-/// [`UsageRefusal::InUse`] as [`assess`] decides.
-pub fn check_usage(source: &dyn UsageSource, checkout: &Path, own: &OwnedHandles) -> Result<UsageClearance, UsageRefusal> {
-    let report = source.query(checkout).map_err(UsageRefusal::Unverified)?;
+/// [`UsageRefusal::Unverified`] for any [`PathUsageError`], including an
+/// `index` whose root is not the checkout's; [`UsageRefusal::InUse`] as
+/// [`assess`] decides.
+pub fn check_usage(
+    source: &dyn UsageSource,
+    checkout: &Path,
+    own: &OwnedHandles,
+    index: Option<&Arc<TreeIndex>>,
+) -> Result<UsageClearance, UsageRefusal> {
+    let report = source.query(checkout, index).map_err(UsageRefusal::Unverified)?;
     let in_use = match assess(report, own) {
         Err(UsageRefusal::InUse(in_use)) => in_use,
         decided => return decided,
@@ -318,7 +337,7 @@ pub fn check_usage(source: &dyn UsageSource, checkout: &Path, own: &OwnedHandles
     };
     source.pause(SEARCH_RECHECK_WAIT);
     let recheck = SearchRecheck { first: in_use.report, held, waited: SEARCH_RECHECK_WAIT, rechecked_at: SystemTime::now() };
-    let report = source.query(checkout).map_err(UsageRefusal::Unverified)?;
+    let report = source.query(checkout, index).map_err(UsageRefusal::Unverified)?;
     match assess(report, own) {
         Ok(mut clearance) => {
             clearance.search_recheck = Some(recheck);

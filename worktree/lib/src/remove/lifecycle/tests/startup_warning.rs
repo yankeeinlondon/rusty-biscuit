@@ -24,7 +24,7 @@ fn with_startup<R>(
         })
     };
     let slow_startup = |startup: Duration| calls.lock().unwrap().push((startup, untouched()));
-    body(&Environment { usage: &Usage::clear(), interrupted: &|| false, observe: &observe, slow_startup: &slow_startup })
+    body(&Environment { usage: &Usage::clear(), space: &Space::plenty(), interrupted: &|| false, observe: &observe, slow_startup: &slow_startup })
 }
 
 fn first_attempt(fixture: &Fixture, startup: Option<Duration>, calls: &Calls) -> Removal {

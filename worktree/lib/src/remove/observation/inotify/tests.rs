@@ -194,7 +194,7 @@ fn sniff_sees_the_watches_until_the_session_ends() {
     let _ = observation.drain(&|| false);
     assert_eq!(thread_count(), threads, "the adapter starts no thread");
 
-    match check_usage(&SniffUsage, &fixture.checkout, &OwnedHandles::default()) {
+    match check_usage(&SniffUsage, &fixture.checkout, &OwnedHandles::default(), None) {
         Err(UsageRefusal::InUse(in_use)) => {
             let own = in_use.holders.iter().find(|holder| holder.pid == std::process::id()).expect("this process holds the watches");
             assert!(own.evidence.iter().all(|evidence| evidence.kind == EvidenceKind::WatchRegistration), "{own:?}");
@@ -204,11 +204,11 @@ fn sniff_sees_the_watches_until_the_session_ends() {
 
     let mut own = OwnedHandles::default();
     observation.register_handles(&mut own);
-    let clearance = check_usage(&SniffUsage, &fixture.checkout, &own).expect("registered watches are excluded");
+    let clearance = check_usage(&SniffUsage, &fixture.checkout, &own, None).expect("registered watches are excluded");
     assert_eq!(clearance.own_handles_excluded, 2, "the checkout and its subdirectory");
 
     drop(observation);
-    let clearance = check_usage(&SniffUsage, &fixture.checkout, &OwnedHandles::default()).expect("no watch survives the session");
+    let clearance = check_usage(&SniffUsage, &fixture.checkout, &OwnedHandles::default(), None).expect("no watch survives the session");
     assert_eq!(clearance.own_handles_excluded, 0);
     assert_eq!(thread_count(), threads);
 }

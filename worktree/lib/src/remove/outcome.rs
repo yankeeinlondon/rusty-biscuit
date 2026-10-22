@@ -16,7 +16,12 @@ use super::recovery::journal::JournalEntry;
 
 /// Version of the [`OperationReport`] serialization. Bump it with any change
 /// to the persisted shape.
-pub const REPORT_VERSION: u32 = 5;
+///
+/// Version 6 embeds Sniff usage reports of schema 2, which say where their
+/// tree index came from; version 5 added [`OperationReport::observation`].
+/// Reports of versions 4 and 5 still read (their Sniff reports with
+/// `unknown` index provenance). An older `wt` need not read a newer report.
+pub const REPORT_VERSION: u32 = 6;
 
 /// The most activity observations a report lists. Later ones are counted in
 /// [`Truncation::activity_omitted`]; the deletion journal itself is never

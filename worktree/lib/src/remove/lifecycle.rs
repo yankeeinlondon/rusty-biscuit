@@ -9,14 +9,18 @@
 //! 2. activity [`observation`](super::observation) starts and the
 //!    [`DeletionInventory`] is captured, so no window exists in which a new
 //!    writer is seen by neither;
-//! 3. the decisive [`check_usage`] runs, excluding only the observer's own
-//!    registered handles (and rechecking once when only Windows Search
-//!    held files);
+//! 3. the decisive [`check_usage`] runs on the inventory's
+//!    [`tree_index`](DeletionInventory::tree_index) instead of walking the
+//!    checkout again, excluding only the observer's own registered handles
+//!    (and rechecking once, on the same index, when only Windows Search held
+//!    files);
 //! 4. the approval's bindings are read again (the branch tip and the consent
 //!    fingerprint), the inventory is confirmed against everything observed
 //!    so far, and the index is bound ([`bind_index`]);
-//! 5. [`RecoveryStore::begin`] makes the record and the inventory durable,
-//!    and one last drain refuses anything that changed since;
+//! 5. [`RecoveryStore::begin`] sizes the journal from the inventory, refuses
+//!    when the space available cannot hold it, and makes the record and the
+//!    inventory durable, and one last drain refuses anything that changed
+//!    since;
 //! 6. [`move_to_quarantine`], then the move's own events are explained
 //!    (the original moved away, the quarantine moved in, the rewritten admin
 //!    `gitdir`) before [`delete_content`](super::observation::deletion::delete_content)
@@ -73,6 +77,7 @@ use super::recovery::OperationId;
 use super::recovery::journal::{EntryState, summarize};
 use super::recovery::lock::LockError;
 use super::recovery::record::{BranchBinding, IntendedAction, Phase, RECORD_VERSION, RecoveryRecord, RepositoryBinding};
+use super::recovery::space::SpaceSource;
 use super::recovery::store::{BookkeepingWarning, Operation, RecoveryStore, StoreError};
 use super::remote::delete_remote_branch;
 use super::remove_local_branch;
@@ -190,6 +195,9 @@ pub type StartObservation<'a> = dyn Fn(Targets, bool, &dyn Fn() -> bool) -> Resu
 /// What the lifecycle asks of its surroundings. Tests inject each.
 pub struct Environment<'a> {
     pub usage: &'a dyn UsageSource,
+    /// Read before an attempt's journal is written, which refuses when the
+    /// journal cannot fit ([`RecoveryStore::begin`], [`RecoveryStore::reopen`]).
+    pub space: &'a dyn SpaceSource,
     /// Polled once before the move, where it refuses with nothing changed,
     /// at every deletion entry boundary, where it stops the removal, and by
     /// every wait for change delivery, which it ends at once: before the
@@ -285,7 +293,12 @@ impl Refusal {
         match self {
             Self::Inventory(InventoryRefusal::Coverage(_)) | Self::Observation(_) => ExitClass::Blocked,
             Self::Store(error) => match error {
-                StoreError::Storage { .. } | StoreError::Io(_) | StoreError::JournalWrite(_) => ExitClass::Blocked,
+                StoreError::Storage { .. }
+                | StoreError::Io(_)
+                | StoreError::JournalWrite(_)
+                | StoreError::JournalSize(_)
+                | StoreError::InsufficientSpace { .. }
+                | StoreError::SpaceUnknown { .. } => ExitClass::Blocked,
                 StoreError::Lock(LockError::Busy | LockError::Storage(_) | LockError::Io(_)) => ExitClass::Blocked,
                 StoreError::Pending(_) | StoreError::Record { .. } | StoreError::Journal { .. } | StoreError::InventoryMismatch => {
                     ExitClass::Refused
@@ -415,11 +428,12 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
         Err(refusal) => return refuse(Refusal::Inventory(refusal)),
     };
     timeline.push(event(Step::InventoryCaptured, StepResult::Succeeded, Some(format!("{} entries", inventory.entries().len()))));
+    let index = Arc::new(inventory.tree_index());
 
     let mut own = OwnedHandles::default();
     observation.register_handles(&mut own);
     let discovered_at = now_ms();
-    let clearance = match check_usage(env.usage, &plan.original, &own) {
+    let clearance = match check_usage(env.usage, &plan.original, &own, Some(&index)) {
         Ok(clearance) => clearance,
         Err(refusal) => return refuse(Refusal::Usage(refusal)),
     };
@@ -451,7 +465,7 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
         Err(error) => return refuse(Refusal::Store(error)),
     };
     let inventory = Arc::new(inventory);
-    let operation = match store.begin(lock, record, Arc::clone(&inventory)) {
+    let operation = match store.begin(lock, record, Arc::clone(&inventory), env.space) {
         Ok(operation) => operation,
         Err(error) => return refuse(Refusal::Store(error)),
     };
@@ -997,7 +1011,9 @@ impl<'a> Attempt<'a> {
         // is queried; a replacement link is never followed to gather this.
         for (path, at) in [(&self.original, &original), (&self.quarantine, &quarantine)] {
             if matches!(availability::inspect(path), Ok(EntryKind::Directory)) && !matches!(at, Presence::Uninspectable(_)) {
-                let result = match self.env.usage.query(path) {
+                // A fresh walk: the attempt's index describes the checkout
+                // before deletion, not what is left.
+                let result = match self.env.usage.query(path, None) {
                     Ok(report) => DiscoveryResult::Report(Box::new(report)),
                     Err(error) => DiscoveryResult::Failed { kind: error.kind().to_string(), message: error.to_string() },
                 };

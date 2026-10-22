@@ -20,9 +20,11 @@ README's exit-code table together. The pieces it calls are in
 | `consent_state(base, checkout, branch)` | the `(Inventory, fingerprint)` a first attempt's `Approval` binds; runs `git status` |
 | `resume_consent(base, &id) -> ResumeConsent` | a `Quarantined` retry's consent: `raw`, explained `inventory`, `excluded`, bound `fingerprint` |
 
-`Environment` injects the `UsageSource`, the interrupt poll, the observer
-starter (`native_observation`, or `Observation::injected*` in tests), and
-`slow_startup: &dyn Fn(Duration)`. `report_slow_startup` calls that hook at
+`Environment` injects the `UsageSource`, the `SpaceSource` that `begin` and
+`reopen` read before writing a journal (`NativeSpace` in the CLI; tests use
+`Space::plenty()` or `Space::reading(..)`, which records each path asked),
+the interrupt poll, the observer starter (`native_observation`, or
+`Observation::injected*` in tests), and `slow_startup: &dyn Fn(Duration)`. `report_slow_startup` calls that hook at
 most once per attempt, right after the observer starts and before the move
 (on a resumed attempt, before further deletion), when
 `ObservationDiagnostics::startup_ms` exceeds `SLOW_STARTUP` (1 s); the CLI
@@ -34,10 +36,12 @@ a no-op or a recording closure.
 ## Order (do not reorder)
 
 `plan_move` → no pending record for this admin name → observer start →
-`DeletionInventory::capture` → `register_handles` + `check_usage` →
+`DeletionInventory::capture` → `tree_index()` (one `Arc<TreeIndex>` per
+attempt) → `register_handles` + `check_usage(.., Some(&index))` →
 `recheck` (tip, then `consent_state` fingerprint and dirty list; on resume
 `resume_consent`'s) → drain +
-`confirm_unchanged(.., admin_allowed = true)` → `bind_index` → `begin` →
+`confirm_unchanged(.., admin_allowed = true)` → `bind_index` → `begin`
+(sizes the journal, then the space check) →
 drain + `confirm_unchanged(.., admin_allowed = false)` → `move_to_quarantine`
 → `moved_to_quarantine()` → drain and explain the move's own events →
 `delete_content` → `unregister_quarantine` → original's copy record → branch
@@ -233,8 +237,12 @@ registration from the admin `gitdir` (`registration_state`), then:
   `Injector` is reachable) and `Usage` (a fake `UsageSource` with a holder,
   an outcome, `exhausted`, and `fail_after`; `Usage::search_first(first,
   then)` answers `then` after the first query, sets a fake system directory,
-  and records `pause` calls instead of sleeping). Its `system_directory`
+  and records `pause` calls instead of sleeping; `indexes()` is the tree index
+  each query got). Its `system_directory`
   defaults to `None` on every host, so no other case rechecks on Windows.
+  `with_space` runs a case under a scripted free-space reading;
+  `tests/large_checkout.rs` holds the index handoff, the space refusals, and
+  the resume of report versions 4 and 5.
 - **Crash injection:** `run_with(.., hook)` returns `Err(Crashed)` when the
   hook returns `true` at a `Boundary` (`Begun`, `Moved`, `ContentRemoved`,
   `Unregistered`, `BranchesDone`). `DeletionBatch(n)` cannot crash in-process;

@@ -29,7 +29,7 @@ use std::path::{Component, Path, PathBuf};
 use cap_std::ambient_authority;
 use cap_std::fs::{Dir, Metadata};
 use serde::{Deserialize, Serialize};
-use sniff::filesystem::query::{FileIdentity, NativeString};
+use sniff::filesystem::query::{FileIdentity, NativeString, TreeEntryKind, TreeIndex};
 
 use super::{CoverageLost, Drain, Scope};
 
@@ -124,8 +124,8 @@ pub enum InventoryRefusal {
 }
 
 /// The approved content of one checkout.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "InventoryRecord", into = "InventoryRecord")]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "InventoryRecord")]
 pub struct DeletionInventory {
     root: FileIdentity,
     /// Parents before children; each directory's children in byte order.
@@ -134,11 +134,25 @@ pub struct DeletionInventory {
 }
 
 /// The persisted form, validated by [`DeletionInventory::try_from`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InventoryRecord {
     root: FileIdentity,
     entries: Vec<InventoryEntry>,
+}
+
+/// [`InventoryRecord`] borrowed, so writing an inventory as large as the
+/// checkout never copies it.
+#[derive(Serialize)]
+struct InventoryRecordRef<'a> {
+    root: &'a FileIdentity,
+    entries: &'a [InventoryEntry],
+}
+
+impl Serialize for DeletionInventory {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        InventoryRecordRef { root: &self.root, entries: &self.entries }.serialize(serializer)
+    }
 }
 
 impl TryFrom<InventoryRecord> for DeletionInventory {
@@ -180,12 +194,6 @@ impl TryFrom<InventoryRecord> for DeletionInventory {
     }
 }
 
-impl From<DeletionInventory> for InventoryRecord {
-    fn from(inventory: DeletionInventory) -> Self {
-        Self { root: inventory.root, entries: inventory.entries }
-    }
-}
-
 /// Whether `path` is non-empty and made only of normal components.
 pub(crate) fn is_plain_relative(path: &Path) -> bool {
     !path.as_os_str().is_empty()
@@ -214,6 +222,25 @@ impl DeletionInventory {
     /// approves when the checkout's content is already gone.
     pub(crate) fn empty(root: FileIdentity) -> Self {
         Self { root, entries: Vec::new(), index: HashMap::new() }
+    }
+
+    /// This inventory as Sniff's [`TreeIndex`], for a usage query that
+    /// should not walk the checkout again. It describes the checkout when it
+    /// was captured, as the inventory does.
+    pub fn tree_index(&self) -> TreeIndex {
+        let mut builder = TreeIndex::builder(self.root);
+        for entry in &self.entries {
+            let kind = match entry.shape {
+                Shape::File { .. } => TreeEntryKind::File,
+                Shape::Directory { .. } => TreeEntryKind::Directory,
+                Shape::Link { .. } => TreeEntryKind::Link,
+            };
+            builder.entry(entry.path.as_path(), kind, entry.identity);
+        }
+        // `try_from` admits only plain relative paths, each once, each in a
+        // listed directory, so nothing is below a link: everything the
+        // builder refuses.
+        builder.build().expect("a validated inventory is a valid tree index")
     }
 
     /// The checkout directory's identity, which the move preserves.
@@ -328,6 +355,11 @@ impl DeletionInventory {
 
 #[cfg(test)]
 impl DeletionInventory {
+    /// An inventory of exactly `entries`, validated as a persisted one is.
+    pub(crate) fn of_entries(root: FileIdentity, entries: Vec<InventoryEntry>) -> Result<Self, &'static str> {
+        Self::try_from(InventoryRecord { root, entries })
+    }
+
     /// An inventory of `files` (and the directories holding them) under a
     /// root with identity `root`, with made-up identities, for tests of the
     /// journal format.

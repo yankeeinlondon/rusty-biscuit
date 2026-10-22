@@ -38,6 +38,7 @@ use crate::remove::recovery::OperationId;
 use crate::remove::inventory::bind_excluded;
 use crate::remove::recovery::journal::{EntryState, summarize};
 use crate::remove::recovery::record::{BranchBinding, RecoveryRecord, RepositoryBinding};
+use crate::remove::recovery::space::NativeSpace;
 use crate::remove::recovery::store::{RecoveryStore, StoreError};
 use crate::remove::usage::OwnedHandles;
 use crate::worktree::{WorktreeEntry, parse_worktree_list};
@@ -244,7 +245,7 @@ pub fn release_unstarted(base: &Path, id: &OperationId) -> Result<(), Refusal> {
     }
     let (expected, _) = current_binding(&record).map_err(Refusal::Store)?;
     let recovered = store.recover(id, &expected, |_| Ok(true)).map_err(Refusal::Store)?;
-    let operation = store.reopen(lock, id, &expected, Arc::new(recovered.inventory)).map_err(Refusal::Store)?;
+    let operation = store.reopen(lock, id, &expected, Arc::new(recovered.inventory), &NativeSpace).map_err(Refusal::Store)?;
     operation.discard().map_err(Refusal::Store)
 }
 
@@ -400,7 +401,7 @@ impl<'r, 'a> Resumed<'r, 'a> {
     {
         let id = &self.record.operation_id;
         let earlier = self.store.read_report(id);
-        let operation = self.store.reopen(lock, id, &self.expected, inventory).map_err(Refusal::Store)?;
+        let operation = self.store.reopen(lock, id, &self.expected, inventory, self.env.space).map_err(Refusal::Store)?;
         let mut attempt = Attempt::new(
             self.request.base,
             self.env,
@@ -460,10 +461,11 @@ impl<'r, 'a> Resumed<'r, 'a> {
             Ok(inventory) => inventory,
             Err(refusal) => return refuse(Refusal::Inventory(refusal)),
         };
+        let index = Arc::new(inventory.tree_index());
         let mut own = OwnedHandles::default();
         observation.register_handles(&mut own);
         let discovered_at = now_ms();
-        let clearance = match check_usage(self.env.usage, quarantine, &own) {
+        let clearance = match check_usage(self.env.usage, quarantine, &own, Some(&index)) {
             Ok(clearance) => clearance,
             Err(refusal) => return refuse(Refusal::Usage(refusal)),
         };

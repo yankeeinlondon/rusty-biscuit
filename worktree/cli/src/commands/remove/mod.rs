@@ -59,6 +59,7 @@ use worktree::remove::safety::{
 };
 use worktree::remove::missing::{MissingCheckout, MissingRefusal, remove_missing_record};
 use worktree::remove::repair::{self, RepairRefusal};
+use worktree::remove::recovery::space::NativeSpace;
 use worktree::remove::usage::SniffUsage;
 use worktree::remove::{
     CheckoutState, Inventory, PrepareRefusal, branch_tip, collect_inventory, prepare, remove_local_branch,
@@ -781,6 +782,7 @@ fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), W
     let interrupted = || window.interrupted();
     let env = Environment {
         usage: &usage,
+        space: &NativeSpace,
         interrupted: &interrupted,
         observe: &native_observation,
         slow_startup: &|startup| print(terminal, recovery::slow_startup_markup(startup)),

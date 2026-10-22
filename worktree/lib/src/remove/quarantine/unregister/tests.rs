@@ -15,7 +15,7 @@ use crate::remove::observation::inventory::DeletionInventory;
 use crate::remove::observation::{ObserverOptions, Root, Targets};
 use crate::remove::quarantine::association::{MovePlan, move_to_quarantine, plan_move};
 use crate::remove::recovery::OperationId;
-use crate::remove::recovery::journal::{self, DEFAULT_JOURNAL_LIMIT, EntryState, JournalWriter};
+use crate::remove::recovery::journal::{self, EntryState, JournalWriter};
 use crate::remove::test_support::{TestRepo, link_dir};
 use crate::worktree::WorktreeEntry;
 
@@ -91,7 +91,9 @@ impl Setup {
 
     fn delete(&self, observation: &mut Observation, inventory: Arc<DeletionInventory>) -> Vec<u8> {
         let sink = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let mut writer = JournalWriter::start(SharedSink(Arc::clone(&sink)), &OperationId::parse(&"0".repeat(32)).unwrap(), inventory, DEFAULT_JOURNAL_LIMIT).unwrap();
+        let operation = OperationId::parse(&"0".repeat(32)).unwrap();
+        let limit = journal::journal_size(&operation, &inventory).unwrap().batches;
+        let mut writer = JournalWriter::start(SharedSink(Arc::clone(&sink)), &operation, inventory, limit).unwrap();
         let deletion = delete_content(observation, &mut writer, &|| false, DeletionOptions::default());
         assert!(deletion.stop.is_none(), "{:?}", deletion.stop);
         sink.lock().unwrap().clone()

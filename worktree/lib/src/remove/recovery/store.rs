@@ -7,9 +7,12 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::journal::{self, DEFAULT_JOURNAL_LIMIT, EntryState, JournalEntry, JournalInvalid, JournalLog, JournalWriteError, JournalWriter};
+use super::journal::{
+    self, EntryState, JournalEntry, JournalInvalid, JournalLog, JournalSizeOverflow, JournalWriteError, JournalWriter,
+};
 use super::lock::{self, LOCKS_DIR, LockError, OperationLock};
 use super::record::{self, Phase, RecordInvalid, RecoveryRecord, RepositoryBinding};
+use super::space::SpaceSource;
 use super::storage::{self, StorageProblem};
 use super::OperationId;
 use crate::remove::observation::inventory::DeletionInventory;
@@ -46,6 +49,19 @@ pub enum StoreError {
     PhaseOrder,
     #[error(transparent)]
     JournalWrite(#[from] JournalWriteError),
+    #[error(transparent)]
+    JournalSize(#[from] JournalSizeOverflow),
+    /// The new attempt's journal does not fit in the space available; nothing
+    /// of the attempt was written.
+    #[error(
+        "{} has {available} bytes available, but this removal's deletion journal needs {needed}",
+        path.display()
+    )]
+    InsufficientSpace { path: PathBuf, needed: u64, available: u64 },
+    /// The space available could not be read, so the journal is not known to
+    /// fit; nothing of the attempt was written.
+    #[error("the space available at {} could not be read, so this removal's deletion journal ({needed} bytes) is not known to fit: {reason}", path.display())]
+    SpaceUnknown { path: PathBuf, needed: u64, reason: String },
     #[error(transparent)]
     Io(#[from] io::Error),
 }
@@ -120,11 +136,20 @@ impl RecoveryStore {
     /// operation, before anything is mutated. Refuses while another operation
     /// on the same worktree record is pending, and while any record cannot be
     /// read, since an unreadable record could describe this worktree.
+    ///
+    /// The journal's batch limit is computed from `inventory`
+    /// ([`journal::journal_size`]). Before anything of the operation is
+    /// written, `space` must show room for the journal's header, inventory,
+    /// and every batch, plus the record; otherwise this refuses with
+    /// [`StoreError::InsufficientSpace`] or [`StoreError::SpaceUnknown`] and
+    /// no operation directory exists. The reading reserves nothing: a later
+    /// write can still fail and is handled as any journal write failure.
     pub fn begin(
         &self,
         lock: OperationLock,
         record: RecoveryRecord,
         inventory: Arc<DeletionInventory>,
+        space: &dyn SpaceSource,
     ) -> Result<Operation, StoreError> {
         let id = record.operation_id.clone();
         record.validate().map_err(|reason| StoreError::Record { id: id.to_string(), reason })?;
@@ -146,6 +171,11 @@ impl RecoveryStore {
             }
         }
 
+        let size = journal::journal_size(&id, &inventory)?;
+        let record_json = record.to_json();
+        let needed = size.total().and_then(|journal| journal.checked_add(record_json.len() as u64)).ok_or(JournalSizeOverflow)?;
+        ensure_space(space, &self.root, needed)?;
+
         let staging = self.root.join(format!(".{id}.tmp"));
         let dir = self.operation_dir(&id);
         let staged = (|| -> Result<(), StoreError> {
@@ -153,8 +183,8 @@ impl RecoveryStore {
             let file = storage::create_private_file(&staging.join(JOURNAL_FILE))?;
             // Closed before the rename: Windows refuses to rename a
             // directory with an open file anywhere inside it.
-            drop(JournalWriter::start(file, &id, Arc::clone(&inventory), DEFAULT_JOURNAL_LIMIT)?);
-            storage::write_durable(&staging.join(RECORD_FILE), &record.to_json())?;
+            drop(JournalWriter::start(file, &id, Arc::clone(&inventory), size.batches)?);
+            storage::write_durable(&staging.join(RECORD_FILE), &record_json)?;
             storage::sync_dir(&staging)?;
             fs::rename(&staging, &dir)?;
             storage::sync_dir(&self.root)?;
@@ -169,7 +199,7 @@ impl RecoveryStore {
         // From here the operation is durable and pending; a failure leaves it
         // for recovery.
         let file = storage::open_append(&dir.join(JOURNAL_FILE))?;
-        let journal = JournalWriter::after_header(file, inventory, DEFAULT_JOURNAL_LIMIT);
+        let journal = JournalWriter::after_header(file, inventory, size.batches);
         Ok(Operation { dir, record, journal, _lock: lock })
     }
 
@@ -217,12 +247,20 @@ impl RecoveryStore {
     /// is complete and flushed under a hidden name, and is then replaced by a
     /// rename. A crash or failure at any point before that leaves the
     /// previous attempt recoverable and authorizes nothing new.
+    ///
+    /// As in [`RecoveryStore::begin`], the new journal's limit is computed
+    /// from `inventory`, and before anything is archived or created `space`
+    /// must show room for the new journal plus, when the previous journal
+    /// needs a new archive copy, its full length (an identical newest archive
+    /// costs nothing). A refusal leaves the previous journal and every
+    /// archive as they were.
     pub fn reopen(
         &self,
         lock: OperationLock,
         id: &OperationId,
         expected: &RepositoryBinding,
         inventory: Arc<DeletionInventory>,
+        space: &dyn SpaceSource,
     ) -> Result<Operation, StoreError> {
         let record = self.read_record(id)?;
         if record.completed_phase == Phase::Completed {
@@ -241,14 +279,21 @@ impl RecoveryStore {
         let previous = storage::read_private_file(&current).map_err(storage_error(&current))?;
         // The held lock keeps every other `wt` out of this operation's
         // directory.
-        archive_journal(&dir, &previous)?;
+        let archive = archive_target(&dir, &previous);
+        let size = journal::journal_size(id, &inventory)?;
+        let archived_bytes = if archive.is_some() { previous.len() as u64 } else { 0 };
+        let needed = size.total().and_then(|journal| journal.checked_add(archived_bytes)).ok_or(JournalSizeOverflow)?;
+        ensure_space(space, &dir, needed)?;
+        if let Some(archive) = archive {
+            storage::write_durable(&archive, &previous)?;
+        }
         fault::at(ReopenStep::Archived, &current)?;
         let next = storage::temp_beside(&current)?;
         let staged = (|| -> Result<(), StoreError> {
             let file = storage::create_private_file(&next)?;
             fault::at(ReopenStep::Created, &next)?;
             // Closed before the rename, as in `begin`.
-            drop(JournalWriter::start(file, id, Arc::clone(&inventory), DEFAULT_JOURNAL_LIMIT)?);
+            drop(JournalWriter::start(file, id, Arc::clone(&inventory), size.batches)?);
             fault::at(ReopenStep::Initialized, &next)?;
             Ok(storage::publish(&next, &current)?)
         })();
@@ -259,7 +304,7 @@ impl RecoveryStore {
             return Err(error);
         }
         let file = storage::open_append(&current)?;
-        let journal = JournalWriter::after_header(file, inventory, DEFAULT_JOURNAL_LIMIT);
+        let journal = JournalWriter::after_header(file, inventory, size.batches);
         Ok(Operation { dir, record, journal, _lock: lock })
     }
 
@@ -420,19 +465,26 @@ impl Operation {
     }
 }
 
-/// Keeps `journal` (the bytes of `dir`'s current journal) as the next
-/// `journal-<n>.jsonl`, written durably, unless the newest archive already
-/// holds exactly these bytes: a retry whose `reopen` stopped after archiving
-/// the same journal.
-fn archive_journal(dir: &Path, journal: &[u8]) -> Result<(), StoreError> {
+/// Where `journal` (the bytes of `dir`'s current journal) is kept: the next
+/// unused `journal-<n>.jsonl`, or `None` when the newest archive already
+/// holds exactly these bytes (a retry whose `reopen` stopped after archiving
+/// the same journal). Writes nothing.
+fn archive_target(dir: &Path, journal: &[u8]) -> Option<PathBuf> {
     let generation = |n: u32| archive_path(dir, n);
     let unused = (1..)
         .find(|&n| matches!(fs::symlink_metadata(generation(n)), Err(error) if error.kind() == io::ErrorKind::NotFound))
         .expect("an unused generation exists");
-    if unused > 1 && storage::read_private_file(&generation(unused - 1)).is_ok_and(|newest| newest == journal) {
-        return Ok(());
+    let identical = unused > 1 && storage::read_private_file(&generation(unused - 1)).is_ok_and(|newest| newest == journal);
+    (!identical).then(|| generation(unused))
+}
+
+/// Refuses unless `space` reads at least `needed` bytes available at `path`.
+fn ensure_space(space: &dyn SpaceSource, path: &Path, needed: u64) -> Result<(), StoreError> {
+    match space.available_bytes(path) {
+        Ok(available) if available >= needed => Ok(()),
+        Ok(available) => Err(StoreError::InsufficientSpace { path: path.to_path_buf(), needed, available }),
+        Err(reason) => Err(StoreError::SpaceUnknown { path: path.to_path_buf(), needed, reason }),
     }
-    Ok(storage::write_durable(&generation(unused), journal)?)
 }
 
 /// The `n`th archived journal of the operation in `dir`.

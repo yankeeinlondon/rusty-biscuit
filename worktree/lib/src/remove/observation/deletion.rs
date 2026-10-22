@@ -10,7 +10,8 @@
 //!   descended through and an approved link is removed, never its target;
 //! - deletion goes one depth level at a time; each level is journaled in
 //!   batches of one directory's entries (at most
-//!   [`MAX_BATCH_ENTRIES`](crate::remove::recovery::journal::MAX_BATCH_ENTRIES)),
+//!   [`MAX_BATCH_ENTRIES`](crate::remove::recovery::journal::MAX_BATCH_ENTRIES))
+//!   in the order [`BatchPlan`] fixes,
 //!   and the observer is drained after each level (and every
 //!   [`DeletionOptions::drain_every`] entries), so changes below a directory
 //!   are delivered before that directory is removed (FSEvents may otherwise
@@ -30,7 +31,7 @@
 //! [`ReportNote::ConcurrentWriteLimit`] states this in every report of a
 //! removal that deleted anything.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -43,7 +44,11 @@ use sniff::filesystem::query::NativeString;
 use super::inventory::{self, Change, Content, DeletionInventory, InventoryEntry, InventoryRefusal, LookError, Shape};
 use super::{CoverageLost, EventKind, Observation, ObservationStage, Scope};
 use crate::remove::outcome::{ActivityKind, ActivityLocation, ObservedActivity, OperationReport, RemovalOutcome, ReportNote};
-use crate::remove::recovery::journal::{EntryKind, JournalSink, JournalWriteError, JournalWriter, MAX_BATCH_ENTRIES, PlannedEntry, ResultState};
+use crate::remove::recovery::journal::{EntryKind, JournalSink, JournalWriteError, JournalWriter, PlannedEntry, ResultState};
+
+mod plan;
+
+pub(crate) use plan::BatchPlan;
 
 /// How many entries may be processed between two drains, on every platform.
 /// The interval is checked after each journal batch, so a drain can come up
@@ -199,29 +204,21 @@ struct Engine<'a, S: JournalSink> {
     externally_absent: Vec<PathBuf>,
 }
 
-/// The entries of one directory, by depth then directory, deepest first.
-type Levels<'a> = BTreeMap<usize, BTreeMap<PathBuf, Vec<&'a InventoryEntry>>>;
-
 impl<S: JournalSink> Engine<'_, S> {
     fn run(&mut self) -> Result<(), Stop> {
         let root = self.open_root()?;
         // Anything between the move and now.
         self.drain_and_check(&root)?;
 
-        let (content, git): (Vec<&InventoryEntry>, Vec<&InventoryEntry>) =
-            self.inventory.entries().iter().partition(|entry| !entry.path.as_path().starts_with(".git"));
-        for entries in [content, git] {
-            for (_, directories) in levels(&entries).into_iter().rev() {
-                for (_, children) in directories {
-                    for batch in children.chunks(MAX_BATCH_ENTRIES) {
-                        self.batch(&root, batch)?;
-                        if self.since_drain >= self.options.drain_every {
-                            self.drain_and_check(&root)?;
-                        }
-                    }
+        let plan = BatchPlan::of(self.inventory);
+        for level in plan.levels() {
+            for batch in level {
+                self.batch(&root, batch)?;
+                if self.since_drain >= self.options.drain_every {
+                    self.drain_and_check(&root)?;
                 }
-                self.drain_and_check(&root)?;
             }
+            self.drain_and_check(&root)?;
         }
 
         // Closed first: Windows cannot remove a directory this process holds.
@@ -533,16 +530,6 @@ enum Resolution {
 pub(crate) fn own_move(kinds: &[EventKind], cumulative_kinds: bool) -> bool {
     let away = |kind: &EventKind| matches!(kind, EventKind::MovedFrom | EventKind::Removed);
     if cumulative_kinds { kinds.iter().any(away) } else { kinds.iter().all(away) }
-}
-
-fn levels<'a>(entries: &[&'a InventoryEntry]) -> Levels<'a> {
-    let mut levels: Levels<'a> = BTreeMap::new();
-    for entry in entries {
-        let path = entry.path.as_path();
-        let parent = path.parent().unwrap_or(Path::new("")).to_path_buf();
-        levels.entry(path.components().count()).or_default().entry(parent).or_default().push(entry);
-    }
-    levels
 }
 
 fn activity_kind(change: Change) -> ActivityKind {

@@ -16,7 +16,7 @@ use crate::remove::observation::injected::{Injector, Scripted};
 use crate::remove::observation::{ObserverOptions, Root, Targets};
 use crate::remove::quarantine::rename::rename_no_replace;
 use crate::remove::recovery::OperationId;
-use crate::remove::recovery::journal::{self, EntryState, JournalLog};
+use crate::remove::recovery::journal::{self, EntryState, JournalLog, MAX_BATCH_ENTRIES};
 use crate::remove::test_support::link_dir;
 
 /// An in-memory journal that can fail its `n`th append.
@@ -123,7 +123,8 @@ impl Fixture {
     }
 
     fn journal(&self, sink: Memory) -> JournalWriter<Memory> {
-        JournalWriter::start(sink, &operation(), Arc::clone(&self.inventory), journal::DEFAULT_JOURNAL_LIMIT).unwrap()
+        let limit = journal::journal_size(&operation(), &self.inventory).unwrap().batches;
+        JournalWriter::start(sink, &operation(), Arc::clone(&self.inventory), limit).unwrap()
     }
 
     fn q(&self, relative: &str) -> PathBuf {

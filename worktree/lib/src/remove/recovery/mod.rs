@@ -53,6 +53,7 @@
 pub mod journal;
 pub mod lock;
 pub mod record;
+pub mod space;
 pub mod store;
 
 pub(crate) mod storage;

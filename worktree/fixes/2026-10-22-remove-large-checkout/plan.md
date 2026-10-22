@@ -8,7 +8,63 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+    - sniff
+    - sniff-cli
+    - worktree
+    - worktree-cli
+source_files_during_phase_2:
+    - sniff/lib/src/filesystem/space.rs
+    - sniff/lib/src/filesystem/mod.rs
+    - sniff/lib/src/performance/counters.rs
+    - sniff/lib/src/filesystem/query/tree.rs
+    - sniff/lib/src/filesystem/query/report.rs
+    - sniff/lib/src/filesystem/query/options.rs
+    - sniff/lib/src/filesystem/query/mod.rs
+    - sniff/lib/src/filesystem/query/matching.rs
+    - sniff/lib/src/filesystem/query/win32.rs
+    - sniff/lib/src/filesystem/query/win32_paths.rs
+    - sniff/lib/src/filesystem/query/tests.rs
+    - sniff/lib/src/filesystem/git/changed_paths_tests.rs
+    - sniff/cli/src/output/filesystem/query.rs
+    - sniff/cli/tests/l1/filesystem_query.rs
+docs_updated_during_phase_2:
+    - sniff/docs/topics/filesystem-query.md
+    - sniff/docs/cli/filesystem_query.md
+docs_created_during_phase_2:
+    - sniff/docs/topics/available-space.md
+skills_files_updated_during_phase_2:
+    - .claude/skills/sniff/SKILL.md
+source_files_during_phase_3:
+    - worktree/lib/src/remove/observation/deletion.rs
+    - worktree/lib/src/remove/observation/deletion/plan.rs
+    - worktree/lib/src/remove/observation/deletion/tests.rs
+    - worktree/lib/src/remove/observation/inventory.rs
+    - worktree/lib/src/remove/observation/fsevents/tests.rs
+    - worktree/lib/src/remove/observation/inotify/tests.rs
+    - worktree/lib/src/remove/observation/read_directory_changes/tests.rs
+    - worktree/lib/src/remove/recovery/journal.rs
+    - worktree/lib/src/remove/recovery/mod.rs
+    - worktree/lib/src/remove/recovery/space.rs
+    - worktree/lib/src/remove/recovery/store.rs
+    - worktree/lib/src/remove/recovery/store/tests.rs
+    - worktree/lib/src/remove/usage.rs
+    - worktree/lib/src/remove/usage/tests.rs
+    - worktree/lib/src/remove/lifecycle.rs
+    - worktree/lib/src/remove/lifecycle/resume.rs
+    - worktree/lib/src/remove/lifecycle/tests.rs
+    - worktree/lib/src/remove/lifecycle/tests/large_checkout.rs
+    - worktree/lib/src/remove/lifecycle/tests/resume_consent.rs
+    - worktree/lib/src/remove/lifecycle/tests/startup_warning.rs
+    - worktree/lib/src/remove/outcome.rs
+    - worktree/lib/src/remove/quarantine/unregister/tests.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/tests/remove_usage_refusal.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/lifecycle.md
+    - .claude/skills/worktree/remove.md
 ---
 
 # Plan: `wt remove` of a built checkout finishes in one run
@@ -138,23 +194,23 @@ Two independent waves can run concurrently; both are in `sniff/`.
 
 ### Wave 1: Focused available-space query (parallel with Wave 2)
 
-- [ ] **Space query API**
+- [x] **Space query API**
     - Add the path-based query described in Ruling 5 under the filesystem
       area, with a platform seam for tests.
     - Resolve the actual path including ancestor aliases (symlinks,
       firmlinks, junctions, mount points); no string-prefix volume matching.
     - Report space available to the calling user.
-- [ ] **Space query tests** (L1, through the seams)
+- [x] **Space query tests** (L1, through the seams)
     - Path to filesystem resolution, alias ancestors, a store on a different
       filesystem than the checkout, nonexistent leaf resolved via nearest
       existing ancestor, and error mapping.
     - Prove neither the storage device inventory nor any subprocess is invoked.
-- [ ] **Docs**: storage API docs entry: the query, errors, "a reading is not a
+- [x] **Docs**: storage API docs entry: the query, errors, "a reading is not a
   reservation".
 
 ### Wave 2: Supplied tree index and provenance (parallel with Wave 1)
 
-- [ ] **Public TreeIndex builder** (depends on the Phase 1 survey)
+- [x] **Public TreeIndex builder** (depends on the Phase 1 survey)
     - Expose `TreeIndex` plus a constructor/builder taking the root identity
       and entries of `(relative path, kind, identity)`, with no dependency on
       caller types.
@@ -165,21 +221,21 @@ Two independent waves can run concurrently; both are in `sniff/`.
     - Sniff's own walk must produce the same type; one matcher only.
     - Keep the Windows regular-file/directory probe entries; never probe links
       as targets.
-- [ ] **Option on `PathUsageOptions`**
+- [x] **Option on `PathUsageOptions`**
     - Takes the prebuilt index (shared reference/`Arc`, validated once before the
       query; no per-query conversion or clone of the whole tree).
     - Reject: root identity differs (invalid-option `PathUsageError`);
       `target_only`; file root.
     - When set, skip the walk. Root verification and final consistency checks
       stay in the budget; the saved time goes to process enumeration.
-- [ ] **Provenance and coverage in the report**
+- [x] **Provenance and coverage in the report**
     - Add `walked` | `supplied` | `unknown` provenance; a caller may declare the
       index partial and Sniff reports partial coverage. Sniff never claims to
       have verified a supplied descendant. Process-mechanism coverage and
       outcome stay library-owned.
     - Bump schema version; old reports load with `unknown` (Ruling 2). Update
       the CLI JSON contract, schema fixtures, round-trip tests.
-- [ ] **Tests** (existing fake usage backend + performance counters)
+- [x] **Tests** (existing fake usage backend + performance counters)
     - Zero tree walks and zero descendant identity reads during a supplied
       query; root verification still happens.
     - Walked vs. supplied indexes of the same tree: same holders and
@@ -187,7 +243,7 @@ Two independent waves can run concurrently; both are in `sniff/`.
     - Invalid paths, wrong root, partial coverage, invalid target scope, links,
       Windows probe-entry behavior; unsupported mechanisms stay unsupported;
       budget exhaustion in process inspection stays visible.
-- [ ] **Docs**: `sniff/docs/topics/filesystem-query.md` (lead with "you already
+- [x] **Docs**: `sniff/docs/topics/filesystem-query.md` (lead with "you already
   walked the tree"; builder, root requirement, point-in-time limit, provenance,
   old-report compatibility, unchanged Windows limits) and the `sniff` skill.
 
@@ -216,7 +272,7 @@ differ, `unwrap_or_default()`, `.ok()` on parses.
 
 ### Validation checkpoint
 
-- [ ] `cd sniff && just test && just lint` pass; no `walked` default appears
+- [x] `cd sniff && just test && just lint` pass; no `walked` default appears
   anywhere for old reports.
 
 ---
@@ -225,18 +281,18 @@ differ, `unwrap_or_default()`, `.ok()` on parses.
 
 ### Wave 1: Shared planner and computed bound (Rust, `worktree/lib`)
 
-- [ ] **Extract batch planner**
+- [x] **Extract batch planner**
     - Move the deletion engine's batching (content first, `.git` last; deepest
       first, then directory order; chunks of `MAX_BATCH_ENTRIES`; entry order
       inside a directory preserved; no grouping by parent alone) into a shared
       function used by both the engine and the sizer. State and test the "each
       entry planned at most once per attempt" invariant.
-- [ ] **Bound computation**
+- [x] **Bound computation**
     - Serialize each planned batch with its actual number (from 1), newline
       included, intent plus worst-case (`ExternallyAbsent`) results, via a
       counting writer or one reusable buffer; checked arithmetic; inventory data
       only (no filesystem access).
-- [ ] **Tests**: all cases in the spec's "Computed bound" and "Former size
+- [x] **Tests**: all cases in the spec's "Computed bound" and "Former size
   ceiling" bullets (short/long paths, JSON escaping, non-UTF-8 names on
   applicable platforms, hard links, empty inventory, many small directories,
   >`MAX_BATCH_ENTRIES` siblings, `.git` separation, digit transitions, exact fit,
@@ -245,13 +301,13 @@ differ, `unwrap_or_default()`, `.ok()` on parses.
 
 ### Wave 2: Wiring and refusal (depends on Wave 1 of this phase and Phase 2 Wave 1)
 
-- [ ] **Store limits**
+- [x] **Store limits**
     - `RecoveryStore::begin`/`reopen` compute the limit from the attempt's
       inventory and pass it to `JournalWriter::start`; remove
       `DEFAULT_JOURNAL_LIMIT`. Keep `LimitReached` and the `begin_batch` reserve;
       render as an internal limit (Ruling 7). Tests that exercise
       `LimitReached` still pass an explicit small limit.
-- [ ] **Free-space check**
+- [x] **Free-space check**
     - Before publishing the first attempt, and before archiving or creating
       the replacement on retry, compare the needed bytes (Ruling 4) with the
       reading. Failures use the existing storage-refusal path (exit 4), naming
@@ -260,7 +316,7 @@ differ, `unwrap_or_default()`, `.ok()` on parses.
       branch intact. Retry: no further deletion, archive, or replacement; prior
       evidence still reads. Do not credit space deletion may free.
     - Injection seam for readings.
-- [ ] **Tests**: wiring (initial and resumed writers get inventory-derived
+- [x] **Tests**: wiring (initial and resumed writers get inventory-derived
   limits); resume after a confirmed tracked-file deletion needs no renewed
   consent and no `discard_files`, `.git` last, only approved branch actions;
   refusal cases from the spec's "Free-space refusal" bullet, including the
@@ -271,19 +327,19 @@ differ, `unwrap_or_default()`, `.ok()` on parses.
 
 ### Wave 3: Usage handoff and report version (depends on Phase 2 Wave 2)
 
-- [ ] **Index conversion**
+- [x] **Index conversion**
     - Convert `DeletionInventory` to Sniff's `TreeIndex` once per attempt
       (step 2 → step 3, and the fresh surviving inventory on quarantined retry).
       The Windows Search recheck reuses that attempt's index and still verifies
       the root. Keep the observer-handle exclusions and removal policy as they
       are; keep the index construction *before* event drain/confirmation and
       journal sizing ordering as the spec states.
-- [ ] **UsageSource**: extend it so preflight receives the index and diagnostics
+- [x] **UsageSource**: extend it so preflight receives the index and diagnostics
   after a stop do not (they query current leftovers with a fresh walk).
-- [ ] **Report version 6**: embed the new Sniff reports, retain loading of
+- [x] **Report version 6**: embed the new Sniff reports, retain loading of
   versions 4 and 5, document that older binaries need not read new reports. Old
   journals keep their format; the limit is attempt-local, not stored.
-- [ ] **Tests**: preflight, resumed preflight and Windows recheck get the index;
+- [x] **Tests**: preflight, resumed preflight and Windows recheck get the index;
   diagnostics don't; with deterministic budget and backend seams the process
   enumeration is reached without a walk (no assertion of full coverage from the
   live host); load v4/v5 reports and old journals then resume with the newly
@@ -291,7 +347,7 @@ differ, `unwrap_or_default()`, `.ok()` on parses.
 
 ### Validation checkpoint
 
-- [ ] `cd worktree && just test && just lint` pass; grep for
+- [x] `cd worktree && just test && just lint` pass; grep for
   `DEFAULT_JOURNAL_LIMIT` returns nothing but historical docs.
 
 ---

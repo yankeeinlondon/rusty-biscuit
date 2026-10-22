@@ -16,7 +16,7 @@ use std::time::Duration;
 use serde_json::json;
 use sniff::filesystem::query::{
     Evidence, EvidenceKind, FileIdentity, MatchBasis, Mechanism, NativeString, PathUsageError, PathUsageReport,
-    ProcessRecord,
+    ProcessRecord, TreeIndex,
 };
 
 use super::*;
@@ -26,6 +26,7 @@ use crate::remove::observation::injected::{Injector, Scripted};
 use crate::remove::observation::{CoverageLost, EventKind, ObservationStage, Root};
 use crate::remove::outcome::{BranchState, EntryCounts, MAX_REPORTED_DELETED};
 use crate::remove::recovery::journal::EntryState;
+use crate::remove::recovery::space::NativeSpace;
 use crate::remove::recovery::store::fault::{self as store_fault, Fault};
 use crate::remove::recovery::store::{JOURNAL_FILE, RECORD_FILE, REPORT_FILE, ReopenStep};
 use crate::remove::test_support::TestRepo;
@@ -157,6 +158,8 @@ struct Usage {
     /// default, whatever the host) never rechecks.
     system: Option<&'static str>,
     queries: AtomicUsize,
+    /// The index each query was given, in order.
+    indexes: Mutex<Vec<Option<Arc<TreeIndex>>>>,
     pauses: Mutex<Vec<Duration>>,
 }
 
@@ -170,6 +173,7 @@ impl Usage {
             fail_after: None,
             system: None,
             queries: AtomicUsize::new(0),
+            indexes: Mutex::new(Vec::new()),
             pauses: Mutex::new(Vec::new()),
         }
     }
@@ -183,6 +187,37 @@ impl Usage {
     fn pauses(&self) -> Vec<Duration> {
         self.pauses.lock().unwrap().clone()
     }
+
+    fn indexes(&self) -> Vec<Option<Arc<TreeIndex>>> {
+        self.indexes.lock().unwrap().clone()
+    }
+}
+
+/// A scripted free-space reading, recording each path it was asked about.
+struct Space {
+    available: Result<u64, &'static str>,
+    asked: Mutex<Vec<PathBuf>>,
+}
+
+impl Space {
+    fn plenty() -> Self {
+        Self::reading(Ok(u64::MAX))
+    }
+
+    fn reading(available: Result<u64, &'static str>) -> Self {
+        Self { available, asked: Mutex::new(Vec::new()) }
+    }
+
+    fn asked(&self) -> Vec<PathBuf> {
+        self.asked.lock().unwrap().clone()
+    }
+}
+
+impl SpaceSource for Space {
+    fn available_bytes(&self, path: &Path) -> Result<u64, String> {
+        self.asked.lock().unwrap().push(path.to_path_buf());
+        self.available.map_err(String::from)
+    }
 }
 
 impl UsageSource for Usage {
@@ -194,8 +229,9 @@ impl UsageSource for Usage {
         self.pauses.lock().unwrap().push(wait);
     }
 
-    fn query(&self, path: &Path) -> Result<PathUsageReport, PathUsageError> {
+    fn query(&self, path: &Path, index: Option<&Arc<TreeIndex>>) -> Result<PathUsageReport, PathUsageError> {
         let earlier = self.queries.fetch_add(1, Ordering::SeqCst);
+        self.indexes.lock().unwrap().push(index.cloned());
         if self.fail_after.is_some_and(|after| earlier >= after) {
             return Err(PathUsageError::RootIdentity { path: path.to_path_buf(), source: io::Error::other("injected") });
         }
@@ -319,8 +355,19 @@ impl Observers {
 /// Runs `body` with an environment over `usage`, injected observers, and
 /// `interrupted`.
 fn with_env<R>(usage: &Usage, observers: &Observers, interrupted: &dyn Fn() -> bool, body: impl FnOnce(&Environment<'_>) -> R) -> R {
+    with_space(usage, observers, interrupted, &Space::plenty(), body)
+}
+
+/// [`with_env`] whose free-space readings come from `space`.
+fn with_space<R>(
+    usage: &Usage,
+    observers: &Observers,
+    interrupted: &dyn Fn() -> bool,
+    space: &Space,
+    body: impl FnOnce(&Environment<'_>) -> R,
+) -> R {
     let observe = |targets, moved, _interrupted: &dyn Fn() -> bool| observers.start(targets, moved);
-    body(&Environment { usage, interrupted, observe: &observe, slow_startup: &|_| {} })
+    body(&Environment { usage, space, interrupted, observe: &observe, slow_startup: &|_| {} })
 }
 
 fn run(fixture: &Fixture, approval: &Approval, branches: &BranchActions, usage: &Usage, observers: &Observers, hook: &mut Hook<'_>) -> Result<Removal, Crashed> {
@@ -414,7 +461,7 @@ fn native_a_removal_runs_end_to_end_and_closes_its_record() {
     let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
 
     recorder::start_recording();
-    let removal = remove_checkout(&request, &Environment { usage: &usage, interrupted: &|| false, observe: &native_observation, slow_startup: &|_| {} });
+    let removal = remove_checkout(&request, &Environment { usage: &usage, space: &NativeSpace, interrupted: &|| false, observe: &native_observation, slow_startup: &|_| {} });
     let calls = recorder::finish_recording();
 
     let finished = finished(removal);
@@ -707,7 +754,7 @@ fn unavailable_observation_is_an_environment_limit() {
     let entry = fixture.entry();
     let (approval, branches) = (fixture.approval(), BranchActions::default());
     let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
-    let refusal = refused(remove_checkout(&request, &Environment { usage: &usage, interrupted: &|| false, observe: &observe, slow_startup: &|_| {} }));
+    let refusal = refused(remove_checkout(&request, &Environment { usage: &usage, space: &NativeSpace, interrupted: &|| false, observe: &observe, slow_startup: &|_| {} }));
     assert!(matches!(refusal, Refusal::Observation(_)), "{refusal:?}");
     assert_eq!(refusal.exit_class(), ExitClass::Blocked);
     assert_eq!(usage.queries.load(Ordering::SeqCst), 0, "no discovery without observation");
@@ -776,7 +823,7 @@ fn an_interrupt_while_observation_starts_refuses_as_an_interrupt() {
     let (approval, branches) = (fixture.approval(), BranchActions::default());
     let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
 
-    let refusal = refused(remove_checkout(&request, &Environment { usage: &usage, interrupted: &|| true, observe: &observe, slow_startup: &|_| {} }));
+    let refusal = refused(remove_checkout(&request, &Environment { usage: &usage, space: &NativeSpace, interrupted: &|| true, observe: &observe, slow_startup: &|_| {} }));
 
     assert!(matches!(refusal, Refusal::Interrupted), "{refusal:?}");
     assert_eq!(refusal.exit_class(), ExitClass::Failure);
@@ -1594,7 +1641,7 @@ fn lifecycle_child_blocks_mid_deletion() {
     let branches = BranchActions { local: Some(LocalBranchDeletion { name: BRANCH.into(), expected_tip: tip }), remote: None };
     let request = RemovalRequest { base: &base, entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
     let usage = Usage::clear();
-    let env = Environment { usage: &usage, interrupted: &|| false, observe: &native_observation, slow_startup: &|_| {} };
+    let env = Environment { usage: &usage, space: &NativeSpace, interrupted: &|| false, observe: &native_observation, slow_startup: &|_| {} };
     let _ = run_with(&request, &env, &mut |boundary| {
         if boundary == Boundary::DeletionBatch(2) {
             println!("{CHILD_READY}");
@@ -1649,7 +1696,7 @@ fn native_a_killed_removal_is_found_and_resumed_by_its_original_name() {
     let fresh = fixture.resume_approval(&id);
     let request = ResumeRequest { base: &fixture.base(), id: &id, approval: Some(&fresh), record: None, branches: &fixture.delete_branch() };
     let usage = Usage::clear();
-    let resumed = finished(resume(&request, &Environment { usage: &usage, interrupted: &|| false, observe: &native_observation, slow_startup: &|_| {} }));
+    let resumed = finished(resume(&request, &Environment { usage: &usage, space: &NativeSpace, interrupted: &|| false, observe: &native_observation, slow_startup: &|_| {} }));
     assert_removed(&fixture, &resumed);
     assert!(!fixture.branch_exists());
     let archived = fixture.store().operation_dir(&id).join("journal-1.jsonl");
@@ -1657,5 +1704,6 @@ fn native_a_killed_removal_is_found_and_resumed_by_its_original_name() {
     assert!(fixture.store().operation_dir(&id).join(REPORT_FILE).is_file());
 }
 
+mod large_checkout;
 mod resume_consent;
 mod startup_warning;

@@ -379,7 +379,7 @@ fn sniff_sees_nothing_of_the_session() {
     let mut own = OwnedHandles::default();
     observation.register_handles(&mut own);
 
-    let clearance = check_usage(&SniffUsage, &fixture.checkout, &own).expect("an unregistered FSEvents session does not refuse");
+    let clearance = check_usage(&SniffUsage, &fixture.checkout, &own, None).expect("an unregistered FSEvents session does not refuse");
     assert_eq!(clearance.own_handles_excluded, 0);
 }
 

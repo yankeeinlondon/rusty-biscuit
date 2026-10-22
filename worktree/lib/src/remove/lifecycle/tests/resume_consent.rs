@@ -99,6 +99,43 @@ fn a_retry_asks_nothing_for_tracked_files_its_own_deletions_removed() {
     assert_eq!((readme.attempt, readme.state), (1, EntryState::Deleted));
 }
 
+/// The same at the scale of a built checkout: more tracked files than one
+/// batch holds, deleted over several batches before the stop, need no
+/// renewed consent; the retry leaves `.git` until last and performs only the
+/// approved branch action.
+#[test]
+fn a_retry_asks_nothing_for_tracked_files_deleted_over_several_batches() {
+    use crate::remove::recovery::journal::MAX_BATCH_ENTRIES;
+
+    let fixture = fixture();
+    let tracked: Vec<String> = (0..MAX_BATCH_ENTRIES + 44).map(|n| format!("src/f{n:03}.rs")).collect();
+    fs::create_dir(fixture.gone.join("src")).unwrap();
+    for path in &tracked {
+        fs::write(fixture.gone.join(path), "tracked\n").unwrap();
+    }
+    fixture.repo.git_in(&fixture.gone, &["add", "src"]);
+    fixture.repo.git_in(&fixture.gone, &["commit", "-q", "-m", "add src"]);
+    let mut gone: Vec<&str> = tracked.iter().map(String::as_str).collect();
+    gone.push(README);
+    let id = first_stopped_when_gone(&fixture, &gone);
+
+    let consent = resume_consent(&fixture.base(), &id).unwrap();
+    assert_eq!(excluded(&consent), sorted(&gone));
+    assert!(!consent.inventory.needs_consent(), "{:?}", consent.inventory.dirty);
+
+    let resumed = finished_resume(&fixture, &id, Some(&without_consent(fixture.resume_approval(&id))), None, &fixture.delete_branch(), &Observers::default());
+    assert_removed(&fixture, &resumed);
+    assert!(!fixture.branch_exists(), "the approved branch deletion ran");
+    assert_eq!(resumed.report.branches.len(), 1, "only the approved branch action: {:?}", resumed.report.branches);
+    let first: Vec<_> = resumed.report.journal_entries.iter().filter(|entry| entry.attempt == 1).collect();
+    let tracked_batches: HashSet<u64> =
+        first.iter().filter(|entry| entry.path.as_path().starts_with("src")).map(|entry| entry.batch).collect();
+    assert!(tracked_batches.len() >= 2, "the tracked files spanned several batches: {tracked_batches:?}");
+    let last = resumed.report.journal_entries.iter().max_by_key(|entry| (entry.attempt, entry.batch)).unwrap();
+    assert_eq!(last.path.as_path(), Path::new(".git"), "`.git` goes last");
+    assert!(first.iter().all(|entry| entry.path.as_path() != Path::new(".git")));
+}
+
 /// Each attempt's confirmed deletions are read: the third attempt's consent
 /// excludes what the first and the second deleted.
 #[test]

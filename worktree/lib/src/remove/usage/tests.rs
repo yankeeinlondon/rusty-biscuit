@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use serde_json::json;
 use sniff::filesystem::query::{
-    Coverage, CoverageScope, MatchBasis, Truncation, WatchInfo,
+    Coverage, CoverageScope, IndexProvenance, MatchBasis, Truncation, WatchInfo,
 };
 
 use super::*;
@@ -329,7 +329,7 @@ struct Scripted<F: Fn() -> Result<PathUsageReport, PathUsageError> + Sync> {
 }
 
 impl<F: Fn() -> Result<PathUsageReport, PathUsageError> + Sync> UsageSource for Scripted<F> {
-    fn query(&self, _path: &Path) -> Result<PathUsageReport, PathUsageError> {
+    fn query(&self, _path: &Path, _index: Option<&Arc<TreeIndex>>) -> Result<PathUsageReport, PathUsageError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         (self.answer)()
     }
@@ -351,7 +351,7 @@ fn every_query_error_refuses_as_unverified_without_a_retry() {
         let expected = make(path.clone()).kind();
         let source = Scripted { answer: || Err(make(path.clone())), calls: AtomicUsize::new(0) };
 
-        let result = check_usage(&source, &path, &own());
+        let result = check_usage(&source, &path, &own(), None);
 
         assert!(
             matches!(&result, Err(UsageRefusal::Unverified(error)) if error.kind() == expected),
@@ -361,20 +361,25 @@ fn every_query_error_refuses_as_unverified_without_a_retry() {
     }
 
     let source = Scripted { answer: || Ok(report("unsupported")), calls: AtomicUsize::new(0) };
-    assert!(check_usage(&source, &path, &own()).is_ok());
+    assert!(check_usage(&source, &path, &own(), None).is_ok());
     assert_eq!(source.calls.load(Ordering::SeqCst), 1);
 }
 
 /// Through the real Sniff query: a process standing in a subdirectory of the
 /// checkout refuses and is named by PID; the empty tree beside it clears.
+/// The checkout's own inventory as the tree index finds the same holder
+/// without a walk, and an index of another tree is never used for it.
 #[test]
 fn a_real_query_names_a_process_working_in_the_checkout() {
     let dir = tempfile::tempdir().unwrap();
     let held = dir.path().join("held");
     let inside = held.join("sub");
     std::fs::create_dir_all(&inside).unwrap();
+    std::fs::write(inside.join("file.rs"), "fn main() {}\n").unwrap();
     let free = dir.path().join("free");
     std::fs::create_dir(&free).unwrap();
+    let inventory = crate::remove::observation::inventory::DeletionInventory::capture(&held, &[]).unwrap();
+    let index = Arc::new(inventory.tree_index());
     // Spawned directly, not through `cmd /C`: killing `cmd` would leave its
     // `ping` child holding the directory.
     #[cfg(windows)]
@@ -402,21 +407,32 @@ fn a_real_query_names_a_process_working_in_the_checkout() {
         holder.stdout.as_mut().unwrap().read_exact(&mut first).unwrap();
     }
 
-    let refused = check_usage(&SniffUsage, &held, &OwnedHandles::default());
-    let cleared = check_usage(&SniffUsage, &free, &OwnedHandles::default());
+    let refused = check_usage(&SniffUsage, &held, &OwnedHandles::default(), None);
+    let supplied = check_usage(&SniffUsage, &held, &OwnedHandles::default(), Some(&index));
+    let cleared = check_usage(&SniffUsage, &free, &OwnedHandles::default(), None);
+    let elsewhere = check_usage(&SniffUsage, &free, &OwnedHandles::default(), Some(&index));
 
     let _ = holder.kill();
     let _ = holder.wait();
-    let refusal = in_use(refused);
-    let found = refusal.holders.iter().find(|h| h.pid == holder.id()).unwrap_or_else(|| panic!("{refusal:#?}"));
-    // Windows sees the directory handle a working directory holds; Unix sees
-    // the working directory itself.
-    #[cfg(unix)]
-    assert!(found.evidence.iter().any(|e| e.kind == EvidenceKind::WorkingDirectory), "{found:#?}");
-    #[cfg(windows)]
-    assert!(!found.evidence.is_empty(), "{found:#?}");
+    for (result, provenance) in [(refused, IndexProvenance::Walked), (supplied, IndexProvenance::Supplied)] {
+        let refusal = in_use(result);
+        assert_eq!(refusal.report.index_provenance, provenance);
+        let found = refusal.holders.iter().find(|h| h.pid == holder.id()).unwrap_or_else(|| panic!("{refusal:#?}"));
+        // Windows sees the directory handle a working directory holds; Unix
+        // sees the working directory itself.
+        #[cfg(unix)]
+        assert!(found.evidence.iter().any(|e| e.kind == EvidenceKind::WorkingDirectory), "{found:#?}");
+        #[cfg(windows)]
+        assert!(!found.evidence.is_empty(), "{found:#?}");
+        let enumeration = refusal.report.coverage.iter().find(|c| c.mechanism == Mechanism::ProcessEnumeration).expect("listed");
+        assert_ne!(enumeration.status, CoverageStatus::NotAttempted, "{provenance:?}: processes were reached");
+    }
     let cleared = cleared.unwrap_or_else(|refusal| panic!("{refusal:?}"));
     assert_eq!(cleared.report.target.kind, sniff::filesystem::query::TargetKind::Directory);
+    assert!(
+        matches!(&elsewhere, Err(UsageRefusal::Unverified(error)) if error.kind() == "invalid_option"),
+        "an index of another root: {elsewhere:?}"
+    );
 }
 
 /// Through the real Sniff query: a checkout that is gone by the time of the
@@ -425,7 +441,7 @@ fn a_real_query_names_a_process_working_in_the_checkout() {
 fn a_real_query_of_a_vanished_checkout_refuses() {
     let dir = tempfile::tempdir().unwrap();
 
-    let result = check_usage(&SniffUsage, &dir.path().join("gone"), &OwnedHandles::default());
+    let result = check_usage(&SniffUsage, &dir.path().join("gone"), &OwnedHandles::default(), None);
 
     assert!(matches!(result, Err(UsageRefusal::Unverified(PathUsageError::MissingTarget { .. }))), "{result:?}");
 }
@@ -515,7 +531,7 @@ impl Sequence {
 }
 
 impl UsageSource for Sequence {
-    fn query(&self, path: &Path) -> Result<PathUsageReport, PathUsageError> {
+    fn query(&self, path: &Path, _index: Option<&Arc<TreeIndex>>) -> Result<PathUsageReport, PathUsageError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         match &self.answers[call.min(self.answers.len() - 1)] {
             Some(processes) => Ok(with(report("usable"), processes.clone())),
@@ -549,7 +565,7 @@ fn only_windows_search_in_the_system_directory_is_rechecked() {
     for (row, system, first) in rows {
         let source = Sequence::new(system, vec![Some(first), Some(Vec::new())]);
 
-        let refusal = in_use(check_usage(&source, &path, &own()));
+        let refusal = in_use(check_usage(&source, &path, &own(), None));
 
         assert!(refusal.search_recheck.is_none(), "{row}");
         assert_eq!(source.counts(), (1, 0), "{row}: no pause and no second query");
@@ -565,7 +581,7 @@ fn the_one_recheck_decides() {
     let search_only = || Some(vec![search_process(6808)]);
 
     let cleared = Sequence::new(Some(SYSTEM32), vec![search_only(), Some(Vec::new())]);
-    let clearance = check_usage(&cleared, &path, &own()).unwrap_or_else(|refusal| panic!("{refusal:?}"));
+    let clearance = check_usage(&cleared, &path, &own(), None).unwrap_or_else(|refusal| panic!("{refusal:?}"));
     let recheck = clearance.search_recheck.expect("the recheck is recorded");
     assert_eq!((recheck.held, recheck.waited), (1, SEARCH_RECHECK_WAIT));
     assert_eq!(recheck.first.processes[0].pid, 6808);
@@ -574,17 +590,17 @@ fn the_one_recheck_decides() {
     assert_eq!(cleared.counts(), (2, 1));
 
     let still = Sequence::new(Some(SYSTEM32), vec![search_only(), search_only()]);
-    let refusal = in_use(check_usage(&still, &path, &own()));
+    let refusal = in_use(check_usage(&still, &path, &own(), None));
     assert!(refusal.search_recheck.is_some());
     assert_eq!(still.counts(), (2, 1), "Search again at the recheck is never rechecked again");
 
     let other = Sequence::new(Some(SYSTEM32), vec![search_only(), Some(vec![node()])]);
-    let refusal = in_use(check_usage(&other, &path, &own()));
+    let refusal = in_use(check_usage(&other, &path, &own(), None));
     assert_eq!(refusal.holders[0].pid, 8124);
     assert_eq!(other.counts(), (2, 1));
 
     let failed = Sequence::new(Some(SYSTEM32), vec![search_only(), None]);
-    assert!(matches!(check_usage(&failed, &path, &own()), Err(UsageRefusal::Unverified(_))));
+    assert!(matches!(check_usage(&failed, &path, &own(), None), Err(UsageRefusal::Unverified(_))));
     assert_eq!(failed.counts(), (2, 1));
 }
 

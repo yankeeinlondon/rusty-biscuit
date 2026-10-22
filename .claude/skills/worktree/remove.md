@@ -393,11 +393,26 @@ the ones that cost time.
 - **Journal (version 2):** line 2 is the operation-start `DeletionInventory`,
   written by `begin` in the staging directory, so an operation always has
   one. A batch may only plan inventory entries, with the same kind; the
-  reader refuses anything else. The size limit counts batch lines only (the
-  inventory is as large as the checkout).
+  reader refuses anything else.
+- **Journal limit is computed, never a constant.** `journal_size(id,
+  inventory)` serializes, with the writer's own `Line` serializer into a
+  counting writer, every batch `BatchPlan::of(inventory)` gives (the engine
+  iterates the same plan, so the grouping cannot differ): intent plus the
+  all-`externally_absent` results line, batch numbers from 1, newlines
+  included, checked arithmetic. `begin` and `reopen` pass `batches` as the
+  writer's limit; the header and inventory lines never count against it. A
+  fixed 64 MiB limit once stopped real built-checkout removals at about 136,000
+  entries (494 bytes per entry under `target/`).
+- **Space check before writing.** `begin` needs header + inventory line +
+  batch bound + record bytes at the store root; `reopen` needs the new
+  journal plus the previous journal's length unless the newest archive is
+  already byte-identical (`archive_target` decides without writing).
+  `StoreError::InsufficientSpace`/`SpaceUnknown` (exit 4) leave no operation
+  directory, archive, or replacement. A reading is not a reservation.
 - **Journal:** an intent is refused (`LimitReached`, nothing written) unless the
   worst-case results line for the batch would still fit, so a confirmation is
-  never lost to the size limit. An unterminated last line is a torn write and is
+  never lost to the limit; with a computed limit only a `wt` defect reaches it,
+  and its message says so without a byte count. An unterminated last line is a torn write and is
   ignored. An intent without results replays its absent entries as `Uncertain`
   and its present ones as `Planned`.
 - **Robustness matrices** for both formats are in `recovery/store/tests.rs`.
@@ -414,9 +429,14 @@ the ones that cost time.
 
 ## Usage check (`remove::usage`)
 
-The decisive check before the move: `check_usage(source, checkout, own)`
-queries once through a `UsageSource` (`SniffUsage` uses Sniff's default
-options; tests inject reports) and `assess` applies the policy. The one
+The decisive check before the move: `check_usage(source, checkout, own,
+index)` queries once through a `UsageSource` (`SniffUsage` uses Sniff's
+default options plus `with_tree_index` when given one; tests inject reports)
+and `assess` applies the policy. Preflight passes the attempt's
+`DeletionInventory::tree_index()`, so Sniff skips its walk and spends the
+budget on processes; diagnostics after a stop pass `None` and walk the
+leftovers. An index whose root is not the checkout's is Sniff's
+`invalid_option`, so `Unverified`. The one
 exception is a second query when only Windows Search held files
 ([lifecycle.md](lifecycle.md#order-do-not-reorder)). Any evidence
 left after exclusion is `UsageRefusal::InUse`; any `PathUsageError` is

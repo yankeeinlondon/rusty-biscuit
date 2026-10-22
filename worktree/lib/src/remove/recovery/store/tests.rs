@@ -11,6 +11,18 @@ use crate::remove::recovery::journal::{EntryKind, EntryState, JournalEntry, Plan
 use super::fault::{self, Fault};
 use crate::remove::recovery::record::{BranchBinding, IntendedAction, RECORD_VERSION};
 
+/// A reading with room for any journal.
+const PLENTY: Space = Space(Ok(u64::MAX));
+
+/// A scripted free-space reading.
+struct Space(Result<u64, &'static str>);
+
+impl SpaceSource for Space {
+    fn available_bytes(&self, _path: &Path) -> Result<u64, String> {
+        self.0.map_err(String::from)
+    }
+}
+
 struct Fixture {
     _dir: TempDir,
     common: PathBuf,
@@ -114,7 +126,7 @@ fn inventory() -> Arc<DeletionInventory> {
 
 fn begin(f: &Fixture, record: RecoveryRecord) -> Operation {
     let lock = f.store.lock(&record.repository).unwrap();
-    f.store.begin(lock, record, inventory()).unwrap()
+    f.store.begin(lock, record, inventory(), &PLENTY).unwrap()
 }
 
 fn file(path: &str) -> PlannedEntry {
@@ -175,7 +187,7 @@ fn a_held_lock_refuses_a_second_removal_and_a_stale_lock_file_does_not() {
 fn the_lock_covers_only_the_worktree_it_was_taken_for() {
     let f = fixture();
     let lock = f.store.lock(&binding(&f, "wt1")).unwrap();
-    assert!(matches!(f.store.begin(lock, record(&f, "wt2"), inventory()), Err(StoreError::WrongLock)));
+    assert!(matches!(f.store.begin(lock, record(&f, "wt2"), inventory(), &PLENTY), Err(StoreError::WrongLock)));
     assert!(f.store.pending().unwrap().is_empty());
 }
 
@@ -188,7 +200,7 @@ fn a_pending_record_blocks_a_new_operation_on_the_same_worktree_only() {
 
     let again = record(&f, "wt1");
     let lock = f.store.lock(&again.repository).unwrap();
-    match f.store.begin(lock, again, inventory()) {
+    match f.store.begin(lock, again, inventory(), &PLENTY) {
         Err(StoreError::Pending(id)) => assert_eq!(id, first.operation_id),
         other => panic!("expected the pending record to block: {:?}", other.map(|op| op.id().clone())),
     }
@@ -206,7 +218,7 @@ fn an_unreadable_record_blocks_every_new_operation() {
 
     let other = record(&f, "wt2");
     let lock = f.store.lock(&other.repository).unwrap();
-    assert!(matches!(f.store.begin(lock, other, inventory()), Err(StoreError::Record { .. })));
+    assert!(matches!(f.store.begin(lock, other, inventory(), &PLENTY), Err(StoreError::Record { .. })));
     let pending = f.store.pending().unwrap();
     assert_eq!(pending.len(), 1);
     assert!(matches!(pending[0].record, Err(StoreError::Record { .. })));
@@ -259,7 +271,7 @@ fn a_record_that_cannot_be_created_leaves_no_operation() {
     let saved = record(&f, "wt1");
     let lock = f.store.lock(&saved.repository).unwrap();
     fs::set_permissions(f.store.root(), fs::Permissions::from_mode(0o500)).unwrap();
-    let result = f.store.begin(lock, saved, inventory());
+    let result = f.store.begin(lock, saved, inventory(), &PLENTY);
     fs::set_permissions(f.store.root(), fs::Permissions::from_mode(0o700)).unwrap();
     assert!(matches!(result, Err(StoreError::Io(_))));
     let names: Vec<_> = fs::read_dir(f.store.root()).unwrap().map(|entry| entry.unwrap().file_name()).collect();
@@ -648,7 +660,7 @@ fn begin_refuses_an_inventory_of_another_checkout() {
     let saved = record(&f, "wt1");
     let lock = f.store.lock(&saved.repository).unwrap();
     let other = Arc::new(DeletionInventory::listing(identity(4), &["a"]));
-    assert!(matches!(f.store.begin(lock, saved.clone(), other), Err(StoreError::InventoryMismatch)));
+    assert!(matches!(f.store.begin(lock, saved.clone(), other, &PLENTY), Err(StoreError::InventoryMismatch)));
     assert!(f.store.pending().unwrap().is_empty(), "nothing was saved");
 }
 
@@ -672,7 +684,7 @@ fn deleted_a() -> Vec<JournalEntry> {
 
 fn reopen(f: &Fixture, saved: &RecoveryRecord) -> Result<Operation, StoreError> {
     let lock = f.store.lock(&saved.repository).unwrap();
-    f.store.reopen(lock, &saved.operation_id, &saved.repository, inventory())
+    f.store.reopen(lock, &saved.operation_id, &saved.repository, inventory(), &PLENTY)
 }
 
 /// Every shape `reopen` can leave when it stops part-way: the previous
@@ -780,7 +792,7 @@ fn earlier_attempts_keep_their_deletions_and_uncertainty_without_double_counting
     survivors["entries"].as_array_mut().unwrap().retain(|entry| !["a", "d/a"].contains(&entry["path"]["display"].as_str().unwrap()));
     let lock = f.store.lock(&saved.repository).unwrap();
     let survivors: DeletionInventory = serde_json::from_value(survivors).unwrap();
-    let mut op = f.store.reopen(lock, &saved.operation_id, &saved.repository, Arc::new(survivors)).unwrap();
+    let mut op = f.store.reopen(lock, &saved.operation_id, &saved.repository, Arc::new(survivors), &PLENTY).unwrap();
     op.journal().begin_batch(vec![file("d/b")]).unwrap();
     op.journal().finish_batch(&[ResultState::Deleted]).unwrap();
 
@@ -821,4 +833,135 @@ fn a_discarded_operation_is_never_left_pending_without_its_journal() {
     reopen(&f, &other).unwrap().discard().unwrap();
     assert!(!dir.exists());
     assert!(!f.store.root().join(format!(".{}.discarded", other.operation_id)).exists());
+}
+
+fn reopen_with(f: &Fixture, saved: &RecoveryRecord, space: &Space) -> Result<Operation, StoreError> {
+    let lock = f.store.lock(&saved.repository).unwrap();
+    f.store.reopen(lock, &saved.operation_id, &saved.repository, inventory(), space)
+}
+
+/// The names in `dir`.
+fn names(dir: &Path) -> BTreeSet<String> {
+    fs::read_dir(dir).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect()
+}
+
+/// Each attempt's writer accepts exactly the batch bytes its own inventory
+/// can need: the first attempt's, then a retry's smaller one.
+#[test]
+fn begin_and_reopen_limit_their_journals_to_their_own_inventories_bound() {
+    let f = fixture();
+    let saved = record(&f, "wt1");
+    let first = journal::journal_size(&saved.operation_id, &inventory()).unwrap();
+    let mut op = begin(&f, saved.clone());
+    assert_eq!(op.journal().limit(), first.batches);
+    drop(op);
+
+    let mut survivors = inventory_value();
+    survivors["entries"].as_array_mut().unwrap().retain(|entry| entry["path"]["display"] != "a");
+    let survivors: Arc<DeletionInventory> = Arc::new(serde_json::from_value(survivors).unwrap());
+    let retry = journal::journal_size(&saved.operation_id, &survivors).unwrap();
+    assert!(retry.batches < first.batches);
+    let lock = f.store.lock(&saved.repository).unwrap();
+    let mut op = f.store.reopen(lock, &saved.operation_id, &saved.repository, survivors, &PLENTY).unwrap();
+    assert_eq!(op.journal().limit(), retry.batches);
+}
+
+/// A first attempt needs its whole journal plus the record. One byte short,
+/// or no reading at all, refuses before any operation directory (or its
+/// staging directory) exists; exactly enough begins.
+#[test]
+fn begin_refuses_before_writing_when_the_journal_cannot_fit() {
+    let f = fixture();
+    let saved = record(&f, "wt1");
+    let size = journal::journal_size(&saved.operation_id, &inventory()).unwrap();
+    let needed = size.total().unwrap() + saved.to_json().len() as u64;
+    let before = names(f.store.root());
+
+    for space in [Space(Ok(needed - 1)), Space(Err("statvfs failed"))] {
+        let lock = f.store.lock(&saved.repository).unwrap();
+        match f.store.begin(lock, saved.clone(), inventory(), &space) {
+            Err(StoreError::InsufficientSpace { path, needed: asked, available }) => {
+                assert_eq!((path, asked, available), (f.store.root().to_path_buf(), needed, needed - 1));
+            }
+            Err(StoreError::SpaceUnknown { path, needed: asked, reason }) => {
+                assert_eq!((path, asked, reason.as_str()), (f.store.root().to_path_buf(), needed, "statvfs failed"));
+            }
+            other => panic!("expected a space refusal, got {:?}", other.map(|op| op.id().clone())),
+        }
+        assert!(f.store.pending().unwrap().is_empty());
+        let after = names(f.store.root());
+        assert!(after.difference(&before).all(|name| name == LOCKS_DIR), "{after:?}: only the lock's bookkeeping may appear");
+    }
+
+    let lock = f.store.lock(&saved.repository).unwrap();
+    let op = f.store.begin(lock, saved.clone(), inventory(), &Space(Ok(needed))).unwrap();
+    assert_eq!(op.journal_entries(|_| Ok(true)).unwrap(), Vec::new());
+    assert_eq!(f.store.pending().unwrap().len(), 1);
+}
+
+/// A retry needs its new journal plus a copy of the previous one. Short of
+/// that, or without a reading, it refuses before archiving or creating
+/// anything: the previous journal, its confirmed deletion, and the absence
+/// of any archive or hidden replacement all stay as they were.
+#[test]
+fn reopen_refuses_before_archiving_or_replacing_when_the_journal_cannot_fit() {
+    let f = fixture();
+    let (saved, previous) = stopped_after_deleting_a(&f);
+    let dir = f.store.operation_dir(&saved.operation_id);
+    let size = journal::journal_size(&saved.operation_id, &inventory()).unwrap();
+    let needed = size.total().unwrap() + previous.len() as u64;
+    let before = names(&dir);
+
+    for space in [Space(Ok(needed - 1)), Space(Err("no such volume"))] {
+        match reopen_with(&f, &saved, &space) {
+            Err(StoreError::InsufficientSpace { path, needed: asked, .. }) => assert_eq!((path, asked), (dir.clone(), needed)),
+            Err(StoreError::SpaceUnknown { path, needed: asked, .. }) => assert_eq!((path, asked), (dir.clone(), needed)),
+            other => panic!("expected a space refusal, got {:?}", other.map(|op| op.id().clone())),
+        }
+        assert_eq!(names(&dir), before, "nothing archived or created");
+        assert_eq!(fs::read(dir.join(JOURNAL_FILE)).unwrap(), previous);
+        let recovered = f.store.recover(&saved.operation_id, &saved.repository, |_| Ok(false)).unwrap();
+        assert_eq!(recovered.entries, deleted_a(), "the earlier evidence still reads");
+    }
+
+    drop(reopen_with(&f, &saved, &Space(Ok(needed))).unwrap());
+    assert_eq!(fs::read(dir.join("journal-1.jsonl")).unwrap(), previous);
+}
+
+/// When an earlier stopped retry already archived these exact bytes, no
+/// new copy is written, so none is counted.
+#[test]
+fn an_already_identical_archive_adds_nothing_to_the_space_a_retry_needs() {
+    let f = fixture();
+    let (saved, previous) = stopped_after_deleting_a(&f);
+    let injected = fault::inject(|step, _| (step == ReopenStep::Archived).then_some(Fault::Crash));
+    assert!(reopen(&f, &saved).is_err());
+    drop(injected);
+    let dir = f.store.operation_dir(&saved.operation_id);
+    assert_eq!(fs::read(dir.join("journal-1.jsonl")).unwrap(), previous);
+
+    let needed = journal::journal_size(&saved.operation_id, &inventory()).unwrap().total().unwrap();
+    assert!(matches!(
+        reopen_with(&f, &saved, &Space(Ok(needed - 1))),
+        Err(StoreError::InsufficientSpace { needed: asked, .. }) if asked == needed
+    ));
+    drop(reopen_with(&f, &saved, &Space(Ok(needed))).unwrap());
+    assert!(!dir.join("journal-2.jsonl").exists());
+}
+
+/// A reading is not a reservation: with exactly enough space read, a write
+/// that then fails still leaves the previous attempt as the crash rules
+/// promise.
+#[test]
+fn a_sufficient_reading_then_a_failed_write_leaves_the_previous_attempt_recoverable() {
+    let f = fixture();
+    let (saved, previous) = stopped_after_deleting_a(&f);
+    let dir = f.store.operation_dir(&saved.operation_id);
+    let needed = journal::journal_size(&saved.operation_id, &inventory()).unwrap().total().unwrap() + previous.len() as u64;
+    let injected = fault::inject(|step, _| (step == ReopenStep::Initialized).then_some(Fault::Fail));
+    assert!(matches!(reopen_with(&f, &saved, &Space(Ok(needed))), Err(StoreError::Io(_))));
+    drop(injected);
+    assert_eq!(fs::read(dir.join(JOURNAL_FILE)).unwrap(), previous);
+    let recovered = f.store.recover(&saved.operation_id, &saved.repository, |_| Ok(false)).unwrap();
+    assert_eq!(recovered.entries, deleted_a());
 }

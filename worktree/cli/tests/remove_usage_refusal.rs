@@ -12,7 +12,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::terminal::Terminal;
 use serde_json::{Value, json};
-use sniff::filesystem::query::{NativeString, PathUsageError, PathUsageReport};
+use sniff::filesystem::query::{NativeString, PathUsageError, PathUsageReport, TreeIndex};
 use worktree::remove::usage::{CoverageSummary, OwnedHandles, UsageRefusal, UsageSource, assess, check_usage};
 use worktree_cli::commands::remove::usage::{coverage_note, refusal_markup, usage_refusal};
 
@@ -246,7 +246,7 @@ fn refusals_exit_3_and_offer_no_override() {
 struct SearchStaysOpen;
 
 impl UsageSource for SearchStaysOpen {
-    fn query(&self, _path: &Path) -> Result<PathUsageReport, PathUsageError> {
+    fn query(&self, _path: &Path, _index: Option<&std::sync::Arc<TreeIndex>>) -> Result<PathUsageReport, PathUsageError> {
         let search = process(
             6808,
             Some("SearchProtocolHost.exe"),
@@ -269,7 +269,7 @@ impl UsageSource for SearchStaysOpen {
 fn a_refusal_after_the_windows_search_recheck_says_so() {
     let note = "The first check found only Windows Search, so wt waited 500 ms and checked once more";
 
-    let refusal = check_usage(&SearchStaysOpen, Path::new(TARGET), &OwnedHandles::default()).expect_err("still held");
+    let refusal = check_usage(&SearchStaysOpen, Path::new(TARGET), &OwnedHandles::default(), None).expect_err("still held");
     let rechecked = render(refusal_markup(&refusal, "fix-path-spelling", "fix/path-spelling"));
     let ordinary = refused(report("usable", vec![process(1, Some("x"), Some("x"), vec![evidence("open_handle", "open_handles", &[TARGET])])], &[], false));
     let ordinary = render(refusal_markup(&ordinary, "fix-path-spelling", "fix/path-spelling"));

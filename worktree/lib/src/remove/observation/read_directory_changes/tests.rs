@@ -265,7 +265,7 @@ fn sniff_sees_nothing_of_the_session() {
     let _ = observation.drain(&|| false);
     let mut own = OwnedHandles::default();
     observation.register_handles(&mut own);
-    let clearance = check_usage(&SniffUsage, &fixture.checkout, &own).expect("the parent and admin handles are outside the checkout");
+    let clearance = check_usage(&SniffUsage, &fixture.checkout, &own, None).expect("the parent and admin handles are outside the checkout");
     assert_eq!(clearance.own_handles_excluded, 0);
 }
 
