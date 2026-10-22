@@ -64,7 +64,10 @@ fn a_root_without_read_permission_runs_nothing() {
         assert!(std::fs::read(&root).is_err(), "the root stayed readable after chmod 000");
         "doc.md".into()
     });
-    assert!(stderr.contains("failed to load Markdown") && stderr.contains("Permission denied"), "{stderr}");
+    // The error box wraps at a width the temp path's length decides, so its
+    // continuation lines are joined before matching.
+    let joined = stderr.split('\n').map(|line| line.trim_start_matches(['┃', ' '])).collect::<Vec<_>>().join(" ");
+    assert!(joined.contains("failed to load Markdown") && joined.contains("Permission denied"), "{stderr}");
 }
 
 #[test]

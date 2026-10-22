@@ -27,6 +27,10 @@
 //! differs: an embedded document's imports resolve lexically against the
 //! embedded table by repository-relative virtual path, never against the disk,
 //! the network, or the request's context, and record no dependency edges.
+//!
+//! A reference in the reserved form `Name@darkmatter:<stem>` names a type of
+//! the shipped partial `darkmatter/schemas/partials/<stem>.yaml` from any
+//! schema, on disk or embedded, and resolves only against the shipped table.
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -237,7 +241,8 @@ pub fn resolve_yaml_schema_with_roots(
 ///
 /// This is the resolver's own target selection, exposed so an editor can find
 /// the file that defines a referenced type without a second lookup rule.
-/// `this` names no file and returns `None`.
+/// `this` and a reserved `darkmatter:<stem>` reference (a shipped partial)
+/// name no file and return `None`.
 ///
 /// ## Errors
 ///
@@ -251,7 +256,7 @@ pub fn named_type_reference_path(
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Option<PathBuf>, SchemaError> {
-    if reference.trim() == "this" {
+    if reference.trim() == "this" || embedded::reserved_stem(reference).is_some() {
         return Ok(None);
     }
     named_type_file_path(reference, base_dir, schema_roots, request_context, &mut BTreeSet::new())
@@ -1192,7 +1197,7 @@ const MAX_IMPORT_DEPTH: usize = 32;
 /// root has no path, so it uses a dedicated sentinel; a file namespace is
 /// keyed by the canonicalized path of the file it was loaded from, and an
 /// embedded one by its virtual path, which never equals a host path.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum NamespaceKey {
     /// The inline document `$schema` (or a root-union arm) — the top-level
     /// schema being resolved, which has no on-disk path of its own.
@@ -1202,6 +1207,10 @@ enum NamespaceKey {
     /// An embedded schema document, keyed by its virtual path. Its imports
     /// resolve only against the embedded table.
     Embedded(String),
+    /// A shipped partial reached through the reserved `darkmatter:<stem>`
+    /// namespace, keyed by its virtual path. Its imports resolve only among
+    /// the shipped documents, whatever the expansion's namespace source.
+    Shipped(String),
 }
 
 impl NamespaceKey {
@@ -1210,7 +1219,7 @@ impl NamespaceKey {
         match self {
             Self::Root => SchemaSourceId::InlineDocument,
             Self::File(path) => SchemaSourceId::File(path.clone()),
-            Self::Embedded(path) => SchemaSourceId::Embedded(path.clone()),
+            Self::Embedded(path) | Self::Shipped(path) => SchemaSourceId::Embedded(path.clone()),
         }
     }
 }
@@ -1250,6 +1259,16 @@ struct ImportEngine<'a> {
     namespace_cache: HashMap<PathBuf, CachedNamespace>,
     /// Parsed embedded namespaces keyed by virtual path.
     embedded_cache: HashMap<String, Arc<IndexMap<String, PropertyDef>>>,
+    /// Parsed shipped partials keyed by virtual path, apart from
+    /// `embedded_cache`: a host table may register its own document under a
+    /// shipped path.
+    shipped_cache: HashMap<String, Arc<IndexMap<String, PropertyDef>>>,
+    /// Each named type expanded so far, by `(namespace, name)`, before any
+    /// use-site postfix. A definition's expansion depends only on its own
+    /// namespace, so a type inlined at many sites (the baseline's lifecycle
+    /// stacks) is expanded once. Only successful expansions are kept; a cycle
+    /// through a type is found at its first expansion.
+    expanded_cache: HashMap<(NamespaceKey, String), ExpandedDef>,
 }
 
 /// Where an expansion reads the namespaces its imports name. This is all that
@@ -1293,6 +1312,7 @@ struct NamedReference {
 /// use-site merge needs to report where contradictory values were declared.
 /// A union carries none: a postfix over a union keeps the arms verbatim, and
 /// an arm default it lifts takes its arm's position in the definition.
+#[derive(Clone)]
 enum ExpandedDef {
     Single(Box<PropertyAtom>, AtomProvenance),
     Union(Vec<PropertyAtom>),
@@ -1501,6 +1521,8 @@ fn expand_imports(
         source,
         namespace_cache: HashMap::new(),
         embedded_cache: HashMap::new(),
+        shipped_cache: HashMap::new(),
+        expanded_cache: HashMap::new(),
     };
     let expanded = engine.expand_schema(schema, &current, root)?;
     searched.extend(engine.searched);
@@ -1745,26 +1767,32 @@ impl ImportEngine<'_> {
         };
 
         let frame = (target.key.clone(), reference.name.clone());
-        if self.stack.contains(&frame) {
-            return Err(SchemaError::ImportCycle {
-                chain: self.describe_cycle(&reference.name),
-            });
-        }
-        self.stack.push(frame);
         let definition_path = SchemaSourcePath::root().property(reference.name.as_str());
-        let base = match def {
-            PropertyDef::Single(atom) => self.expand_atom(atom, &target, &definition_path)?,
-            PropertyDef::Union(arms) => {
-                self.expand_union_arms(arms, &target, &definition_path)?.into_expanded()
+        let base = if let Some(expanded) = self.expanded_cache.get(&frame) {
+            expanded.clone()
+        } else {
+            if self.stack.contains(&frame) {
+                return Err(SchemaError::ImportCycle {
+                    chain: self.describe_cycle(&reference.name),
+                });
             }
-        };
-        self.stack.pop();
+            self.stack.push(frame.clone());
+            let base = match def {
+                PropertyDef::Single(atom) => self.expand_atom(atom, &target, &definition_path)?,
+                PropertyDef::Union(arms) => {
+                    self.expand_union_arms(arms, &target, &definition_path)?.into_expanded()
+                }
+            };
+            self.stack.pop();
 
-        let base = match &target.key {
-            NamespaceKey::File(file) => self.rehome_examples(base, file)?,
-            // An embedded definition's examples are rejected once the
-            // embedded schema is lowered (`prepare_embedded_schema`).
-            NamespaceKey::Root | NamespaceKey::Embedded(_) => base,
+            let base = match &target.key {
+                NamespaceKey::File(file) => self.rehome_examples(base, file)?,
+                // An embedded definition's examples are rejected once the
+                // embedded schema is lowered (`prepare_embedded_schema`).
+                NamespaceKey::Root | NamespaceKey::Embedded(_) | NamespaceKey::Shipped(_) => base,
+            };
+            self.expanded_cache.insert(frame, base.clone());
+            base
         };
         let definition = SchemaReferenceSite {
             source: target.key.source_id(),
@@ -1807,10 +1835,13 @@ impl ImportEngine<'_> {
     }
 
     /// Resolves the namespace named on the right of `@`. `this` targets the
-    /// current namespace; any other value is a `biscuit-file` reference resolved
-    /// relative to `current.base_dir` (mirroring `$schema` file-ref resolution).
-    /// Bare-name references (no path component) resolve against the schema-root
-    /// context nearest-first when roots are configured (Phase 3).
+    /// current namespace, and `darkmatter:<stem>` a shipped partial
+    /// ([`embedded::SHIPPED_NAMESPACE`]); a reference written inside a shipped
+    /// partial resolves lexically among the shipped documents. Any other value
+    /// is a `biscuit-file` reference resolved relative to `current.base_dir`
+    /// (mirroring `$schema` file-ref resolution). Bare-name references (no
+    /// path component) resolve against the schema-root context nearest-first
+    /// when roots are configured (Phase 3).
     fn resolve_namespace(
         &mut self,
         reference: &str,
@@ -1823,6 +1854,24 @@ impl ImportEngine<'_> {
                 base_dir: current.base_dir.clone(),
                 named_types: Arc::clone(&current.named_types),
             });
+        }
+        if let Some(stem) = embedded::reserved_stem(trimmed) {
+            let document = embedded::shipped_partial(stem).ok_or_else(|| SchemaError::NoMatch {
+                reference: trimmed.to_string(),
+                bare_name: false,
+            })?;
+            return self.shipped_namespace(document.path);
+        }
+        if let NamespaceKey::Shipped(importer) = &current.key {
+            let target = embedded::resolve_path(importer, reference).map_err(|reason| SchemaError::SchemaDocument {
+                path: PathBuf::from(importer),
+                message: format!("embedded import `{trimmed}`: {reason}"),
+            })?;
+            let document = embedded::find(embedded::SHIPPED, &target).ok_or_else(|| SchemaError::SchemaDocument {
+                path: PathBuf::from(importer),
+                message: format!("embedded import `{trimmed}`: `{target}` is not a shipped schema document"),
+            })?;
+            return self.shipped_namespace(document.path);
         }
         let path = match &self.source {
             NamespaceSource::Files { schema_roots, context } => {
@@ -1910,6 +1959,30 @@ impl ImportEngine<'_> {
         };
         Ok(Namespace {
             key: NamespaceKey::Embedded(target),
+            base_dir: PathBuf::new(),
+            named_types,
+        })
+    }
+
+    /// The shipped partial registered at `path` as a namespace. An embedded
+    /// expansion records it in its read set; a disk expansion records no
+    /// dependency edge, since a shipped document is an immutable build input
+    /// and names no host file.
+    fn shipped_namespace(&mut self, path: &str) -> Result<Namespace, SchemaError> {
+        if matches!(self.source, NamespaceSource::Embedded { .. }) {
+            self.dependencies.insert(PathBuf::from(path));
+        }
+        let named_types = match self.shipped_cache.get(path) {
+            Some(cached) => Arc::clone(cached),
+            None => {
+                let document = embedded::find(embedded::SHIPPED, path).expect("the caller found the shipped document");
+                let named_types = Arc::new(named_types_from_text(document.text, Path::new(document.path))?);
+                self.shipped_cache.insert(path.to_string(), Arc::clone(&named_types));
+                named_types
+            }
+        };
+        Ok(Namespace {
+            key: NamespaceKey::Shipped(path.to_string()),
             base_dir: PathBuf::new(),
             named_types,
         })
@@ -5235,6 +5308,8 @@ mod shared_type_tables {
             },
             namespace_cache: HashMap::new(),
             embedded_cache: HashMap::new(),
+            shipped_cache: HashMap::new(),
+            expanded_cache: HashMap::new(),
         }
     }
 
@@ -5483,6 +5558,140 @@ mod shared_type_tables {
             named_type_reference_path("./missing.yaml", dir.path(), &[], &context),
             Err(SchemaError::NoMatch { .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod reserved_namespace {
+    //! `Name@darkmatter:<stem>` names a type of a shipped partial whoever
+    //! writes it: a disk schema, a Darkmatter embedded document, or a host
+    //! bundle document. References inside the partial resolve among the
+    //! shipped documents, also during a disk expansion.
+
+    use super::*;
+
+    fn yaml(input: &str) -> YamlValue {
+        serde_yaml_ng::from_str(input).expect("yaml parse")
+    }
+
+    /// The property names of the object `json` lowers to, or of its
+    /// non-null `anyOf` arm.
+    fn keys(json: &Value) -> BTreeSet<String> {
+        let object = json["anyOf"]
+            .as_array()
+            .and_then(|arms| arms.iter().find(|arm| arm["type"] == "object"))
+            .unwrap_or(json);
+        object["properties"].as_object().expect("an object").keys().cloned().collect()
+    }
+
+    #[test]
+    fn a_disk_schema_reaches_a_shipped_partial_and_records_no_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = FileResolutionContext::new(dir.path());
+        let resolved = resolve_yaml_schema(&yaml("talk: communicate@darkmatter:lifecycle\n"), dir.path(), &context)
+            .expect("the reserved reference resolves");
+        assert!(keys(&resolved.json_schema["properties"]["talk"]).contains("say"));
+        assert!(resolved.referenced_files.is_empty(), "{:?}", resolved.referenced_files);
+        assert!(resolved.imports.is_empty(), "a shipped partial is no file dependency: {:?}", resolved.imports);
+    }
+
+    #[test]
+    fn a_disk_library_file_reaches_a_shipped_partial_from_any_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("a/b");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("types.yaml"), "kind: schema\ntypes:\n  tally: count@darkmatter:lifecycle\n").unwrap();
+        let context = FileResolutionContext::new(dir.path());
+        let resolved = resolve_yaml_schema(&yaml("n: tally@./a/b/types.yaml\n"), dir.path(), &context)
+            .expect("the library's reserved reference resolves");
+        let arms = resolved.json_schema["properties"]["n"]["anyOf"].as_array().expect("count is a union");
+        assert!(arms.iter().any(|arm| arm["type"] == "integer"), "{arms:?}");
+        assert!(arms.iter().any(|arm| arm["pattern"].is_string()), "count's `interpolation` arm resolved locally");
+        assert_eq!(resolved.imports, vec![canonical_path(&nested.join("types.yaml"))]);
+    }
+
+    #[test]
+    fn relative_references_inside_a_reached_partial_stay_in_the_shipped_table() {
+        // md-lifecycle.yaml names its verbs `info-short@./lifecycle.yaml`;
+        // the importer's folder holds a decoy that must not be read.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("lifecycle.yaml"), "kind: schema\ntypes:\n  info-short: number\n").unwrap();
+        let context = FileResolutionContext::new(dir.path());
+        let resolved =
+            resolve_yaml_schema(&yaml("talk: md-communicate@darkmatter:md-lifecycle\n"), dir.path(), &context)
+                .expect("the partial's own imports resolve");
+        let talk = &resolved.json_schema["properties"]["talk"];
+        let object = talk["anyOf"].as_array().and_then(|arms| arms.iter().find(|arm| arm["type"] == "object")).unwrap_or(talk);
+        let info = object["properties"]["info"].to_string();
+        assert!(info.contains("\"string\"") && !info.contains("\"number\""), "{info}");
+        assert!(resolved.imports.is_empty(), "{:?}", resolved.imports);
+    }
+
+    #[test]
+    fn a_darkmatter_embedded_document_reaches_a_shipped_partial() {
+        let (resolved, reads) = prepare_embedded_inline_schema(
+            &yaml("talk: communicate@darkmatter:lifecycle\n"),
+            embedded::SHIPPED[0].path,
+            embedded::SHIPPED,
+            "",
+        )
+        .expect("resolves in the shipped table");
+        assert!(keys(&resolved.json_schema["properties"]["talk"]).contains("info"));
+        assert!(reads.contains(&PathBuf::from("darkmatter/schemas/partials/lifecycle.yaml")), "{reads:?}");
+    }
+
+    #[test]
+    fn a_host_bundle_document_reaches_a_shipped_partial_outside_its_bundle() {
+        let documents = [EmbeddedDocument {
+            path: "host/actions.yaml",
+            text: "kind: schema\ntypes:\n  talk: communicate@darkmatter:lifecycle\n",
+        }];
+        let (resolved, _) = prepare_embedded_inline_schema(
+            &yaml("talk: talk@./actions.yaml\n"),
+            "host/trigger.yaml",
+            &documents,
+            "host",
+        )
+        .expect("the bundle's reserved reference resolves");
+        assert!(keys(&resolved.json_schema["properties"]["talk"]).contains("say"));
+        // A plain relative climb out of the bundle is still refused.
+        let escape = prepare_embedded_inline_schema(
+            &yaml("talk: communicate@../darkmatter/schemas/partials/lifecycle.yaml\n"),
+            "host/trigger.yaml",
+            &documents,
+            "host",
+        );
+        assert!(escape.is_err(), "{escape:?}");
+    }
+
+    #[test]
+    fn an_unknown_stem_is_an_error_naming_the_reference() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = FileResolutionContext::new(dir.path());
+        for reference in ["darkmatter:bogus", "darkmatter:", "darkmatter:../fm", "darkmatter:fm.yaml"] {
+            let error = resolve_yaml_schema(&yaml(&format!("x: \"t@{reference}\"\n")), dir.path(), &context)
+                .expect_err("an unknown stem fails");
+            let SchemaError::NoMatch { reference: named, .. } = &error else {
+                panic!("`{reference}`: {error:?}")
+            };
+            assert_eq!(named, reference);
+            assert!(error.to_string().contains(reference), "{error}");
+        }
+        let embedded = prepare_embedded_inline_schema(&yaml("x: t@darkmatter:bogus\n"), "host/a.yaml", &[], "host");
+        assert!(matches!(embedded, Err(SchemaError::NoMatch { .. })), "{embedded:?}");
+        let missing_type = resolve_yaml_schema(&yaml("x: nope@darkmatter:lifecycle\n"), dir.path(), &context);
+        assert!(
+            matches!(&missing_type, Err(SchemaError::UnknownNamedType { name, .. }) if name == "nope"),
+            "{missing_type:?}"
+        );
+    }
+
+    #[test]
+    fn a_reserved_reference_names_no_host_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = FileResolutionContext::new(dir.path());
+        assert_eq!(named_type_reference_path("darkmatter:lifecycle", dir.path(), &[], &context).unwrap(), None);
+        assert_eq!(named_type_reference_path(" darkmatter:bogus ", dir.path(), &[], &context).unwrap(), None);
     }
 }
 

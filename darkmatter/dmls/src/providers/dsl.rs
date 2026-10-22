@@ -253,13 +253,50 @@ fn interpolation_candidates(
 }
 
 /// The host catalogs in the document's schema roots; none without a
-/// resolution context. A catalog that fails to load contributes nothing.
+/// resolution context. A catalog that fails to load contributes no globals
+/// here; [`diagnostics`] reports it ([`host_catalog_diagnostics`]).
 pub(crate) fn host_catalogs(ctx: &DocumentContext) -> Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog> {
-    ctx.file_context()
-        .map(|context| {
-            darkmatter::markdown::schemas::catalog::host_catalogs(context).into_iter().filter_map(Result::ok).collect()
-        })
-        .unwrap_or_default()
+    host_catalog_results(ctx).0
+}
+
+/// The host catalogs in the document's schema roots that loaded, and the
+/// load failures of the others.
+fn host_catalog_results(
+    ctx: &DocumentContext,
+) -> (
+    Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
+    Vec<darkmatter::markdown::schemas::catalog::CatalogError>,
+) {
+    let mut loaded = Vec::new();
+    let mut failed = Vec::new();
+    if let Ok(context) = ctx.file_context() {
+        for result in darkmatter::markdown::schemas::catalog::host_catalogs(context) {
+            match result {
+                Ok(catalog) => loaded.push(catalog),
+                Err(error) => failed.push(error),
+            }
+        }
+    }
+    (loaded, failed)
+}
+
+/// One `dm.schema.host_catalog` warning per host catalog that failed to load,
+/// at the top of the document: its globals are unknown here, so expressions
+/// reading them are validated as document properties. The message is the
+/// catalog error, which names the file, the field, and the reason.
+fn host_catalog_diagnostics(
+    failed: &[darkmatter::markdown::schemas::catalog::CatalogError],
+    out: &mut Vec<Diagnostic>,
+) {
+    for error in failed {
+        out.push(diagnostic(
+            Range::default(),
+            DiagnosticSeverity::WARNING,
+            code::SCHEMA_HOST_CATALOG,
+            source::SCHEMA,
+            format!("host {error}; the globals it declares are not known to this document"),
+        ));
+    }
 }
 
 fn lower_candidates(candidates: impl IntoIterator<Item = expressions::ExprCompletion>) -> Vec<CompletionCandidate> {
@@ -646,12 +683,14 @@ pub fn folding_ranges(ctx: &DocumentContext) -> Vec<FoldingRange> {
 /// All Layer-3 DSL diagnostics for the document.
 pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
     let mut out = Vec::new();
+    let (catalogs, failed_catalogs) = host_catalog_results(ctx);
+    host_catalog_diagnostics(&failed_catalogs, &mut out);
     unknown_directive_diagnostics(ctx, &mut out);
     malformed_option_diagnostics(ctx, &mut out);
     block_pairing_diagnostics(ctx, &mut out);
     disclosure_diagnostics(ctx, &mut out);
     transclusion_diagnostics(ctx, &mut out);
-    expression_diagnostics(ctx, &mut out);
+    expression_diagnostics(ctx, catalogs, &mut out);
     shell_diagnostics(ctx, &mut out);
     fence_language_diagnostics(ctx, &mut out);
     out
@@ -878,9 +917,15 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
 /// only *inferred* to be an expression (foreign template syntax is common in
 /// prose), and an undeclared property is valid and may be supplied at runtime.
 /// A call to an unknown function is an `ERROR`: compose fails on it.
-fn expression_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
+fn expression_diagnostics(
+    ctx: &DocumentContext,
+    catalogs: Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
+    out: &mut Vec<Diagnostic>,
+) {
     let body_base = body_base(ctx.text);
-    let known_roots = KnownRoots::for_document(ctx);
+    let known_roots = KnownRoots::with_catalogs(ctx, catalogs);
+    // The body is outside every lifecycle stack.
+    let view = known_roots.as_ref().map(|known_roots| known_roots.view(None));
     for interpolation in expressions::interpolations(ctx.text, body_base) {
         match expressions::parse(&interpolation.text) {
             Err(error) => {
@@ -913,10 +958,10 @@ fn expression_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
                         ));
                     }
                 }
-                let Some(known_roots) = &known_roots else {
+                let (Some(known_roots), Some(view)) = (&known_roots, &view) else {
                     continue;
                 };
-                for finding in known_roots.findings(&expr, &interpolation.text, expressions::parse, None) {
+                for finding in known_roots.findings(view, &expr, &interpolation.text, expressions::parse, None) {
                     let span = finding_span(&finding);
                     if let Some(range) =
                         ctx.source_map.byte_range_to_lsp(base + span.start..base + span.end)
@@ -931,8 +976,9 @@ fn expression_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
 
 /// The classification for `dm.expression.undeclared_property`, computed once
 /// per diagnostics pass and shared by the body-interpolation and
-/// frontmatter-expression providers: Darkmatter's baseline [`BindingView`]
-/// plus this document's frontmatter and schema membership.
+/// frontmatter-expression providers: the [`BindingView`] of each expression's
+/// site ([`Self::view`]) plus this document's frontmatter and schema
+/// membership.
 ///
 /// Only exists when the document has frontmatter (so the intended variable
 /// set is known); on a frontmatter-less document every bare identifier could
@@ -946,19 +992,33 @@ fn expression_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
 ///
 /// [`BindingView`]: darkmatter::markdown::compose::expression::BindingView
 pub(crate) struct KnownRoots<'a> {
-    view: darkmatter::markdown::compose::expression::BindingView,
+    catalogs: Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
     ast: &'a crate::overlay::FrontmatterAst,
     shape: darkmatter::markdown::schemas::SchemaShape,
 }
 
 impl<'a> KnownRoots<'a> {
     pub(crate) fn for_document(ctx: &DocumentContext<'a>) -> Option<Self> {
+        Self::with_catalogs(ctx, host_catalogs(ctx))
+    }
+
+    /// [`Self::for_document`] with the document's already-loaded host catalogs.
+    fn with_catalogs(
+        ctx: &DocumentContext<'a>,
+        catalogs: Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
+    ) -> Option<Self> {
         let ast = ctx.overlay.and_then(|overlay| overlay.ast.as_ref())?;
-        Some(Self {
-            view: darkmatter::markdown::compose::expression::BindingView::baseline(),
-            ast,
-            shape: frontmatter::known_shape(ctx),
-        })
+        Some(Self { catalogs, ast, shape: frontmatter::known_shape(ctx) })
+    }
+
+    /// The view of an expression in `event`'s lifecycle stack, or outside
+    /// every stack for `None`; see
+    /// [`validation_view`](crate::overlay::event_views::validation_view).
+    pub(crate) fn view(
+        &self,
+        event: Option<darkmatter::lifecycle::registry::EventId>,
+    ) -> darkmatter::markdown::compose::expression::BindingView {
+        crate::overlay::event_views::validation_view(event, &self.catalogs)
     }
 
     fn is_key(&self, name: &str) -> bool {
@@ -968,6 +1028,7 @@ impl<'a> KnownRoots<'a> {
     /// See [`expressions::undeclared_property_findings`].
     pub(crate) fn findings(
         &self,
+        view: &darkmatter::markdown::compose::expression::BindingView,
         expr: &darkmatter::markdown::compose::expression::SpannedExpr,
         source: &str,
         reparse: fn(
@@ -985,7 +1046,7 @@ impl<'a> KnownRoots<'a> {
             |root| {
                 expressions::is_undeclared_property(
                     root,
-                    &self.view,
+                    view,
                     |name| self.ast.entry_by_dotted(name).is_some(),
                     |name| self.shape.properties.contains_key(name),
                 )

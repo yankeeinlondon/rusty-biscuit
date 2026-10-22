@@ -2,6 +2,12 @@
 # `fm` definition is the built-in document baseline that compose,
 # `md schema validate`, and DMLS apply. Document schemas override these
 # properties on conflict.
+#
+# The five lifecycle events are typed with the `md` host profile
+# (md-lifecycle.yaml), named through the reserved `darkmatter:` namespace so
+# the profile always comes from the shipped schemas. A host that names an
+# event differently, or provides other verbs, declares its own types in its
+# schemas, which override these.
 kind: schema
 types:
     fm:
@@ -34,3 +40,9 @@ types:
             - "string[] -> Ordered epilogue references inserted after the body during transclusion."
         ignore_invalid: "boolish -> Allows invalid transclusion references to be left in place as warnings instead of aborting composition."
         interpolate_code_blocks: "boolish -> Enables interpolation inside fenced code blocks. Disabled by default so code examples stay literal."
+
+        initialize: "md-initialize-stack@darkmatter:md-lifecycle -> actions run before the document composes; shell-free"
+        composed: "md-stack@darkmatter:md-lifecycle -> actions run after the document composed"
+        failed: "md-stack@darkmatter:md-lifecycle -> actions run when the run failed"
+        cancelled: "md-stack@darkmatter:md-lifecycle -> actions run when the run is cancelled"
+        finalize: "md-stack@darkmatter:md-lifecycle -> actions run last, whatever the outcome"

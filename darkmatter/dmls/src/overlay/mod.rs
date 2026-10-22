@@ -16,6 +16,7 @@
 
 pub mod directives;
 pub mod doc_links;
+pub mod event_views;
 pub mod expressions;
 pub mod frontmatter;
 pub mod named_types;

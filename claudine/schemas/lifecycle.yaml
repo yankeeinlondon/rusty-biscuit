@@ -132,164 +132,151 @@ types:
         on_rate_limit: "enum(pause, abort, continue) -> what to do when the provider reports a rate limit; a document loop only"
         gate: "stack -> the lifecycle stack run after each iteration; never beside loose verb keys"
         no_error: "boolean -> keep the loop running when one of the loose actions fails"
-        say: "string -> speak the text aloud through text-to-speech"
-        speak: "string -> alias of say"
-        effect: "string -> play the named sound effect from the effect catalog"
-        message: "string -> send the text to the configured messaging routes"
-        notify: "string -> show the text as a desktop notification"
-        stderr: "string -> write the text to standard error"
-        stdout: "string -> write the text to standard output"
-        info: "string -> print the text as an informational status line"
-        warn: "string -> print the text as a warning status line"
-        success: "string -> print the text as a success status line"
-        stop:
-            - null
-            - "unknown[](max(0)) -> stop the remaining actions of this stack"
-        skip:
-            - null
-            - "unknown[](max(0)) -> skip the provider run (the parser allows skip only in initialize)"
-        error:
-            - null
-            - "unknown[](max(0))"
-            - "string -> fail the run with this reason"
-        proxy: "string -> hand the run to the target prompt: a file reference such as @prompts/next.md or a whole-value interpolation"
-        retry:
-            - null
-            - "unknown[](max(0))"
-            - "count@./action.yaml -> re-read and re-run the document at most this many times"
-        resume: "string -> send this follow-up message into the live session"
-        defer: "string -> planned: defer the run by this delay; the parser accepts it but the runtime does not run it yet"
-        break:
-            - null
-            - "unknown[](max(0))"
-            - "string -> end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event"
-        prep: "string(not-empty) -> run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
-        shell: "shell -> run a shell command (never in initialize)"
-        set: "object -> assign runtime values: a mapping of destinations to values (no long form, no no_error)"
-        append_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
-        append_jsonl: "unknown -> Darkmatter side effect; the parser checks its arguments"
-        append_line: "unknown -> Darkmatter side effect; the parser checks its arguments"
-        decrement_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
-        delete_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
-        ensure_dir: "unknown -> Darkmatter side effect; the parser checks its arguments"
-        ensure_file: "unknown -> Darkmatter side effect; the parser checks its arguments"
-        http_post: "unknown -> Darkmatter side effect; the parser checks its arguments"
-        increment_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
-        merge_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
-        prepend_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
-        set_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
-        abs: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        absolute: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        and: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        as_csv: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        as_json: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        as_json5: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        as_line_separated: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        as_markdown: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        as_ordered_list: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        as_space_separated: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        as_tsv: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        as_unordered_list: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        basename: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        basename_without_index: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        branch_exists_on_remote: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        camel_case: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        can_execute: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        capitalize: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        cicd: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        cicd_list: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        code_link: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        contains: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        date: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        date_delta: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        decrement_file_index: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        dir_leading: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        dirname: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        ends_with: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        ensure_leading: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        ensure_trailing: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        ext: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        file_exists: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        file_index: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        file_trailing: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        find_files: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        find_first_index: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        find_last_index: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        first: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        frontmatter: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        has_agentic_cli: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        has_alias: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        has_binary: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        has_builtin_function: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        has_command: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        has_key: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        has_local_skill: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        has_skill: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        has_user_function: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        increment_file_index: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        ipv4: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        ipv6: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_array: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_date: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_date_time: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_date_time_utc: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_date_utc: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_empty: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_indexed_file: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_integer: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_negative: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_null: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_number: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_object: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_positive: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_string: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_this_month: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_this_month_utc: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_this_year: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_this_year_utc: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_today: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_today_utc: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_tomorrow: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_tomorrow_utc: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_yesterday: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        is_yesterday_utc: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        join: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        kebab_case: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        last: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        length: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        link: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        lower: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        markdown_body_empty: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        markdown_title: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        min: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        newer_than: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        number: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        older_than: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        or: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        package: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        package_area: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        parent_dir: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        pascal_case: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        ping: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        ping_under: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        pr: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        pr_list: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        predict_conflicts: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        recent_commits: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        relative: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        remote_vendor: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        replace: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        replace_first: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        replace_last: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        round: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        snake_case: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        starts_with: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        terminal: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        title_case: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        try_frontmatter: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        upper: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        validate_schema: "unknown -> Darkmatter expression function; the parser checks its arguments"
-        without_date: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        say: say-short@darkmatter:lifecycle
+        speak: speak-short@darkmatter:lifecycle
+        effect: effect-short@darkmatter:lifecycle
+        message: message-short@darkmatter:lifecycle
+        notify: notify-short@darkmatter:lifecycle
+        stderr: stderr-short@darkmatter:lifecycle
+        stdout: stdout-short@darkmatter:lifecycle
+        info: info-short@darkmatter:lifecycle
+        warn: warn-short@darkmatter:lifecycle
+        success: success-short@darkmatter:lifecycle
+        stop: stop-short@darkmatter:lifecycle
+        skip: skip-short@darkmatter:lifecycle
+        error: error-short@darkmatter:lifecycle
+        proxy: proxy-short@darkmatter:lifecycle
+        retry: retry-short@darkmatter:lifecycle
+        resume: resume-short@darkmatter:lifecycle
+        defer: defer-short@darkmatter:lifecycle
+        break: break-short@darkmatter:lifecycle
+        prep: prep-short@darkmatter:lifecycle
+        shell: shell-short@darkmatter:lifecycle
+        set: set-short@darkmatter:lifecycle
+        append_frontmatter: side-effect-verb@darkmatter:lifecycle
+        append_jsonl: side-effect-verb@darkmatter:lifecycle
+        append_line: side-effect-verb@darkmatter:lifecycle
+        decrement_frontmatter: side-effect-verb@darkmatter:lifecycle
+        delete_frontmatter: side-effect-verb@darkmatter:lifecycle
+        ensure_dir: side-effect-verb@darkmatter:lifecycle
+        ensure_file: side-effect-verb@darkmatter:lifecycle
+        http_post: side-effect-verb@darkmatter:lifecycle
+        increment_frontmatter: side-effect-verb@darkmatter:lifecycle
+        merge_frontmatter: side-effect-verb@darkmatter:lifecycle
+        prepend_frontmatter: side-effect-verb@darkmatter:lifecycle
+        set_frontmatter: side-effect-verb@darkmatter:lifecycle
+        abs: expression-function-verb@darkmatter:lifecycle
+        absolute: expression-function-verb@darkmatter:lifecycle
+        and: expression-function-verb@darkmatter:lifecycle
+        as_csv: expression-function-verb@darkmatter:lifecycle
+        as_json: expression-function-verb@darkmatter:lifecycle
+        as_json5: expression-function-verb@darkmatter:lifecycle
+        as_line_separated: expression-function-verb@darkmatter:lifecycle
+        as_markdown: expression-function-verb@darkmatter:lifecycle
+        as_ordered_list: expression-function-verb@darkmatter:lifecycle
+        as_space_separated: expression-function-verb@darkmatter:lifecycle
+        as_tsv: expression-function-verb@darkmatter:lifecycle
+        as_unordered_list: expression-function-verb@darkmatter:lifecycle
+        basename: expression-function-verb@darkmatter:lifecycle
+        basename_without_index: expression-function-verb@darkmatter:lifecycle
+        branch_exists_on_remote: expression-function-verb@darkmatter:lifecycle
+        camel_case: expression-function-verb@darkmatter:lifecycle
+        can_execute: expression-function-verb@darkmatter:lifecycle
+        capitalize: expression-function-verb@darkmatter:lifecycle
+        cicd: expression-function-verb@darkmatter:lifecycle
+        cicd_list: expression-function-verb@darkmatter:lifecycle
+        code_link: expression-function-verb@darkmatter:lifecycle
+        contains: expression-function-verb@darkmatter:lifecycle
+        date: expression-function-verb@darkmatter:lifecycle
+        date_delta: expression-function-verb@darkmatter:lifecycle
+        decrement_file_index: expression-function-verb@darkmatter:lifecycle
+        dir_leading: expression-function-verb@darkmatter:lifecycle
+        dirname: expression-function-verb@darkmatter:lifecycle
+        ends_with: expression-function-verb@darkmatter:lifecycle
+        ensure_leading: expression-function-verb@darkmatter:lifecycle
+        ensure_trailing: expression-function-verb@darkmatter:lifecycle
+        ext: expression-function-verb@darkmatter:lifecycle
+        file_exists: expression-function-verb@darkmatter:lifecycle
+        file_index: expression-function-verb@darkmatter:lifecycle
+        file_trailing: expression-function-verb@darkmatter:lifecycle
+        find_files: expression-function-verb@darkmatter:lifecycle
+        find_first_index: expression-function-verb@darkmatter:lifecycle
+        find_last_index: expression-function-verb@darkmatter:lifecycle
+        first: expression-function-verb@darkmatter:lifecycle
+        frontmatter: expression-function-verb@darkmatter:lifecycle
+        has_agentic_cli: expression-function-verb@darkmatter:lifecycle
+        has_alias: expression-function-verb@darkmatter:lifecycle
+        has_binary: expression-function-verb@darkmatter:lifecycle
+        has_builtin_function: expression-function-verb@darkmatter:lifecycle
+        has_command: expression-function-verb@darkmatter:lifecycle
+        has_key: expression-function-verb@darkmatter:lifecycle
+        has_local_skill: expression-function-verb@darkmatter:lifecycle
+        has_skill: expression-function-verb@darkmatter:lifecycle
+        has_user_function: expression-function-verb@darkmatter:lifecycle
+        increment_file_index: expression-function-verb@darkmatter:lifecycle
+        ipv4: expression-function-verb@darkmatter:lifecycle
+        ipv6: expression-function-verb@darkmatter:lifecycle
+        is_array: expression-function-verb@darkmatter:lifecycle
+        is_date: expression-function-verb@darkmatter:lifecycle
+        is_date_time: expression-function-verb@darkmatter:lifecycle
+        is_date_time_utc: expression-function-verb@darkmatter:lifecycle
+        is_date_utc: expression-function-verb@darkmatter:lifecycle
+        is_empty: expression-function-verb@darkmatter:lifecycle
+        is_indexed_file: expression-function-verb@darkmatter:lifecycle
+        is_integer: expression-function-verb@darkmatter:lifecycle
+        is_negative: expression-function-verb@darkmatter:lifecycle
+        is_null: expression-function-verb@darkmatter:lifecycle
+        is_number: expression-function-verb@darkmatter:lifecycle
+        is_object: expression-function-verb@darkmatter:lifecycle
+        is_positive: expression-function-verb@darkmatter:lifecycle
+        is_string: expression-function-verb@darkmatter:lifecycle
+        is_this_month: expression-function-verb@darkmatter:lifecycle
+        is_this_month_utc: expression-function-verb@darkmatter:lifecycle
+        is_this_year: expression-function-verb@darkmatter:lifecycle
+        is_this_year_utc: expression-function-verb@darkmatter:lifecycle
+        is_today: expression-function-verb@darkmatter:lifecycle
+        is_today_utc: expression-function-verb@darkmatter:lifecycle
+        is_tomorrow: expression-function-verb@darkmatter:lifecycle
+        is_tomorrow_utc: expression-function-verb@darkmatter:lifecycle
+        is_yesterday: expression-function-verb@darkmatter:lifecycle
+        is_yesterday_utc: expression-function-verb@darkmatter:lifecycle
+        join: expression-function-verb@darkmatter:lifecycle
+        kebab_case: expression-function-verb@darkmatter:lifecycle
+        last: expression-function-verb@darkmatter:lifecycle
+        length: expression-function-verb@darkmatter:lifecycle
+        link: expression-function-verb@darkmatter:lifecycle
+        lower: expression-function-verb@darkmatter:lifecycle
+        markdown_body_empty: expression-function-verb@darkmatter:lifecycle
+        markdown_title: expression-function-verb@darkmatter:lifecycle
+        min: expression-function-verb@darkmatter:lifecycle
+        newer_than: expression-function-verb@darkmatter:lifecycle
+        number: expression-function-verb@darkmatter:lifecycle
+        older_than: expression-function-verb@darkmatter:lifecycle
+        or: expression-function-verb@darkmatter:lifecycle
+        package: expression-function-verb@darkmatter:lifecycle
+        package_area: expression-function-verb@darkmatter:lifecycle
+        parent_dir: expression-function-verb@darkmatter:lifecycle
+        pascal_case: expression-function-verb@darkmatter:lifecycle
+        ping: expression-function-verb@darkmatter:lifecycle
+        ping_under: expression-function-verb@darkmatter:lifecycle
+        pr: expression-function-verb@darkmatter:lifecycle
+        pr_list: expression-function-verb@darkmatter:lifecycle
+        predict_conflicts: expression-function-verb@darkmatter:lifecycle
+        recent_commits: expression-function-verb@darkmatter:lifecycle
+        relative: expression-function-verb@darkmatter:lifecycle
+        remote_vendor: expression-function-verb@darkmatter:lifecycle
+        replace: expression-function-verb@darkmatter:lifecycle
+        replace_first: expression-function-verb@darkmatter:lifecycle
+        replace_last: expression-function-verb@darkmatter:lifecycle
+        round: expression-function-verb@darkmatter:lifecycle
+        snake_case: expression-function-verb@darkmatter:lifecycle
+        starts_with: expression-function-verb@darkmatter:lifecycle
+        terminal: expression-function-verb@darkmatter:lifecycle
+        title_case: expression-function-verb@darkmatter:lifecycle
+        try_frontmatter: expression-function-verb@darkmatter:lifecycle
+        upper: expression-function-verb@darkmatter:lifecycle
+        validate_schema: expression-function-verb@darkmatter:lifecycle
+        without_date: expression-function-verb@darkmatter:lifecycle
     cancelled-stack:
         - cancelled-item-1[]
         - cancelled-bundle@./action.yaml

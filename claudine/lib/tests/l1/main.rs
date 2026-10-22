@@ -37,3 +37,4 @@ mod tts_phase1_contract;
 mod tts_phase5_contract;
 mod type_scope_ownership_guard;
 mod typed_stream_protocols;
+mod claudine_schema_parity;

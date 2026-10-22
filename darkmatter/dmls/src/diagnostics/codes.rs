@@ -18,6 +18,7 @@
 //! | `dm.expression.malformed`, document-body span | `WARNING` | A body `{{ … }}` is only inferred to be an expression. |
 //! | `dm.expression.undeclared_property` | `WARNING` | Advisory: the property is valid and `null` unless supplied at runtime. |
 //! | `dm.expression.unknown_function` | `ERROR` | The function catalog is closed, so compose fails on the call. |
+//! | `dm.expression.unavailable_global` | `ERROR` | The event's view declares the global unavailable, so the read fails when the stack runs. |
 //! | `dm.expression.nested_span_in_literal` | `ERROR` | Its surfaces never re-interpolate the literal. |
 //!
 //! Design: `claudine/fixes/2026-09-13-better-static-analysis/spec.md` (D7).
@@ -109,6 +110,9 @@ pub mod code {
     /// schema's type, range, integer, length, not-empty, or pattern constraint,
     /// or uses invalid decimal syntax or an unsupported lossless representation.
     pub const SCHEMA_INVALID_SUGGESTION: &str = "dm.schema.invalid_suggestion";
+    /// A host global catalog in the document's schema roots failed to load,
+    /// so the globals it declares are not known to this document's analysis.
+    pub const SCHEMA_HOST_CATALOG: &str = "dm.schema.host_catalog";
     /// A recognized standalone SimplifiedSchema envelope is malformed (missing
     /// or non-mapping `types`, unsupported tagged-envelope keys, or an invalid
     /// payload).
@@ -145,6 +149,9 @@ pub mod code {
     pub const EXPRESSION_UNDECLARED_PROPERTY: &str = "dm.expression.undeclared_property";
     /// A call to a function outside Darkmatter's closed function catalog.
     pub const EXPRESSION_UNKNOWN_FUNCTION: &str = "dm.expression.unknown_function";
+    /// A read, inside a lifecycle stack, of a global the event's binding view
+    /// declares unavailable (`err` outside an error event).
+    pub const EXPRESSION_UNAVAILABLE_GLOBAL: &str = "dm.expression.unavailable_global";
     /// A `{{ … }}` span inside a quoted string literal on a single-pass
     /// lifecycle surface, where it is never interpolated.
     pub const EXPRESSION_NESTED_SPAN_IN_LITERAL: &str = "dm.expression.nested_span_in_literal";

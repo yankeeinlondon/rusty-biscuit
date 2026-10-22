@@ -97,3 +97,6 @@ mod standalone_baseline;
 mod test_layout;
 mod toc;
 mod validate_refs;
+mod compose_lifecycle_approval;
+mod lifecycle_passive_surfaces;
+mod lifecycle_schema_fallback;

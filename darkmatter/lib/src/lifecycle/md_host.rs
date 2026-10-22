@@ -43,7 +43,8 @@ use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
 use crate::effects::EffectEngine;
-use crate::markdown::Frontmatter;
+use crate::markdown::schemas::SimplifiedSchema;
+use crate::markdown::{Frontmatter, Markdown};
 use crate::markdown::compose::expression::{
     AuthoredMode, Availability, BindingError, BindingView, ExpressionError, ResolutionContext, RuntimeBinding,
     ScopeId, UnavailabilityReason, UnavailableBinding, is_reserved_namespace, prepare_value, static_variable_reads,
@@ -221,25 +222,42 @@ impl ShellAuditBindings for MdShellAuditBindings {
 /// Fixes every lifecycle shell site's bytes or typed template against
 /// `effective_frontmatter`, in `request`'s captured context.
 ///
+/// A placeholder is typed by `document`'s effective schema, as a body
+/// `::shell` placeholder is, so a template-mode command refuses a value that
+/// schema rejects when it runs.
+///
 /// ## Errors
 ///
 /// [`PreflightError`] for a late, missing, or malformed placeholder.
 pub fn stamp_lifecycle_shells(
     config: &mut LifecycleConfig,
     effective_frontmatter: &Value,
+    document: &Markdown,
     request: &ComposeRequest,
     source_path: &Path,
 ) -> Result<(), PreflightError> {
+    let owner_schema = super::shell_template::lifecycle_shell_has_placeholders(config)
+        .then(|| document_schema(document, request))
+        .flatten();
     let sites = LifecycleShellSites {
         effective_frontmatter,
         context: request.options().context(),
         source_path,
         registry: registry(),
-        owner_schema: None,
+        owner_schema: owner_schema.as_ref(),
         bindings: &MdShellAuditBindings,
         options: None,
     };
     sites.stamp(config, || Ok(request.local_expression_resolution_context()))
+}
+
+/// `document`'s effective schema projection under `request`, or `None` when
+/// it has none or it does not resolve; composition reports that.
+fn document_schema(document: &Markdown, request: &ComposeRequest) -> Option<SimplifiedSchema> {
+    crate::markdown::compose::schema_validation::prepare_schemas(document, request, &mut None)
+        .ok()
+        .and_then(|schemas| schemas.effective_for(document))
+        .and_then(|effective| effective.simplified)
 }
 
 /// The lifecycle's shell commands and sites as extra sources of the

@@ -84,6 +84,7 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
                 schema_problem_diagnostics(ctx, ast, bundle, &report, &expression_values, &mut out);
                 style_diagnostics(ctx, ast, &mut out);
                 expression_diagnostics(ctx, ast, &report, &expression_values, &mut out);
+                stack_expression_diagnostics(ctx, ast, &expression_values, &mut out);
             }
         }
         SchemaOutcome::Ready(None) => {}
@@ -735,6 +736,7 @@ fn expression_diagnostics(
             }
             Ok(parsed) => {
                 settled.insert(expression_span);
+                let event = crate::overlay::event_views::stack_event(&path);
                 for (name, span) in crate::overlay::expressions::unknown_function_calls(&parsed, expression) {
                     let doc_span = value.project(span).unwrap_or_else(|| value.expression_span());
                     if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
@@ -750,7 +752,21 @@ fn expression_diagnostics(
                 let Some(known_roots) = &known_roots else {
                     continue;
                 };
+                let view = known_roots.view(event);
+                for (span, message) in crate::overlay::expressions::unavailable_global_reads(&parsed, &view) {
+                    let doc_span = value.project(span).unwrap_or_else(|| value.expression_span());
+                    if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
+                        out.push(diagnostic(
+                            range,
+                            DiagnosticSeverity::ERROR,
+                            source::FRONTMATTER,
+                            code::EXPRESSION_UNAVAILABLE_GLOBAL,
+                            message,
+                        ));
+                    }
+                }
                 let findings = known_roots.findings(
+                    &view,
                     &parsed,
                     expression,
                     crate::overlay::expressions::parse_condition,
@@ -788,6 +804,72 @@ fn expression_diagnostics(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Expression diagnostics for the `{{ … }}` spans and `when` guards inside
+/// lifecycle stack values that are not Expression-typed values (those are
+/// [`expression_diagnostics`]'), each classified against its event's view
+/// ([`KnownRoots::view`](crate::providers::dsl::KnownRoots::view)): an unknown
+/// function and a read of a global the event makes unavailable are errors, an
+/// undeclared document property a warning. A span or guard that does not
+/// parse is left to the runtime; a stale tree reports nothing.
+fn stack_expression_diagnostics(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    expression_values: &[ExpressionValue<'_>],
+    out: &mut Vec<Diagnostic>,
+) {
+    if ctx.overlay.is_some_and(|overlay| overlay.stale) {
+        return;
+    }
+    let Some(known_roots) = crate::providers::dsl::KnownRoots::for_document(ctx) else {
+        return;
+    };
+    let typed: std::collections::HashSet<usize> = expression_values.iter().map(|value| value.index).collect();
+    let stacks = crate::overlay::event_views::stack_expressions(ctx.text, ast, |index| typed.contains(&index));
+    let mut views = std::collections::HashMap::new();
+    for expression in stacks {
+        let Ok(parsed) = expression.parse() else {
+            continue;
+        };
+        let view = views.entry(expression.event).or_insert_with(|| known_roots.view(Some(expression.event)));
+        let mut push = |span: std::ops::Range<usize>, severity, code_value: &str, message: String| {
+            if let Some(range) = ctx.source_map.byte_range_to_lsp(expression.range(span)) {
+                out.push(diagnostic(range, severity, source::FRONTMATTER, code_value, message));
+            }
+        };
+        for (name, span) in crate::overlay::expressions::unknown_function_calls(&parsed, &expression.text) {
+            push(
+                span,
+                DiagnosticSeverity::ERROR,
+                code::EXPRESSION_UNKNOWN_FUNCTION,
+                crate::overlay::expressions::unknown_function_message(&name),
+            );
+        }
+        for (span, message) in crate::overlay::expressions::unavailable_global_reads(&parsed, view) {
+            push(span, DiagnosticSeverity::ERROR, code::EXPRESSION_UNAVAILABLE_GLOBAL, message);
+        }
+        let quote = ctx
+            .text
+            .get(expression.entry.value_span.start..)
+            .and_then(|value| value.chars().next())
+            .filter(|first| matches!(first, '\'' | '"'));
+        let findings = known_roots.findings(view, &parsed, &expression.text, expression.dialect.parser(), quote);
+        for finding in findings {
+            let span = crate::providers::dsl::finding_span(&finding).clone();
+            // A fix edits authored bytes, so it rides only on an exact range
+            // whose text is the expression's.
+            let doc_span = expression.range(span.clone());
+            let finding = if expression.is_exact() && ctx.text.get(doc_span.clone()) == expression.text.get(span) {
+                finding
+            } else {
+                without_fix(finding)
+            };
+            if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
+                out.push(crate::providers::dsl::undeclared_property_diagnostic(range, source::FRONTMATTER, &finding));
             }
         }
     }

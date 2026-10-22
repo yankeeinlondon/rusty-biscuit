@@ -38,8 +38,7 @@ use super::error::CompositionError;
 use self::actions::{
     LifecycleAction, LifecycleNode,
 };
-// The lifecycle tests reach these through `super::*`; the context-free
-// emission that used them in this module moved with the run guard.
+// Only the lifecycle tests use these, through `super::*`.
 #[cfg(test)]
 use self::actions::{CommunicationChannel, LifecycleActionKind};
 #[cfg(test)]
@@ -121,7 +120,7 @@ fn claudine_parse_options<'a>(
 /// Parses lifecycle configuration from composition frontmatter.
 ///
 /// Every event (`initialize`, `start`, `success`, `blocked`, `failure`,
-/// `finalize`) and the `loop:` block's lifecycle concerns parse into an
+/// `finalize`, `cancelled`) and the `loop:` block's lifecycle concerns parse into an
 /// ordered [`LifecycleNode`] stack on [`LifecycleConfig::stacks`]. Literal
 /// `effect` names are checked against the embedded Playa catalog here, so an
 /// unknown name fails before anything runs; a `{{ … }}` name is checked when

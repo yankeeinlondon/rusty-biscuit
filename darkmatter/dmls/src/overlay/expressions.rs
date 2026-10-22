@@ -12,7 +12,7 @@ use darkmatter::markdown::compose::context::{
     ContextVariableDescriptor, context_variable_descriptors,
 };
 use darkmatter::markdown::compose::expression::{
-    BinaryOp, ExpressionError, ExpressionFinder, ExpressionFunctionDescriptor, ExpressionLintKind,
+    Availability, BinaryOp, BindingError, ExpressionError, ExpressionFinder, ExpressionFunctionDescriptor, ExpressionLintKind,
     ParseError,
     ParseMode, SpannedExpr, SpannedExprKind, expression_function_descriptors,
     BindingView, ReservedRootDescriptor, RootMembers, ScopedType, Shape, TypeScope, branch_scope,
@@ -26,6 +26,9 @@ use darkmatter::markdown::schemas::{DecodedScalar, decode_scalar};
 use darkmatter::markdown::span::SourceSpan;
 use serde::{Deserialize, Serialize};
 
+use darkmatter::lifecycle::registry::EventId;
+
+use crate::overlay::event_views::{event_globals, event_name};
 use crate::overlay::{FmEntry, FmScalarStyle, FmValueKind, FrontmatterAst};
 
 /// One `{{{ … }}}` interpolation literal with a document-relative span.
@@ -328,6 +331,11 @@ impl FrontmatterInterpolation<'_> {
     /// The authored `{{ … }}` range, else the whole scalar.
     pub fn outer_span(&self) -> SourceSpan {
         self.projection.range(self.outer.clone())
+    }
+
+    /// Where [`text`](Self::text) starts in the scalar's analyzed text.
+    pub fn analyzed_start(&self) -> usize {
+        self.inner.start
     }
 
     /// The exact authored range of the trimmed inner expression.
@@ -929,6 +937,72 @@ pub fn host_global_candidates(partial: &str, catalogs: &[GlobalCatalog]) -> Vec<
     items
 }
 
+/// The hover block for a global the `md` registry declares for `event` (`err`,
+/// `timing`) or one of its members: the declaration's description, its
+/// availability in that event, and the member's shape from Darkmatter's
+/// global catalog. `None` when the event's view does not declare the root.
+pub fn event_global_hover(name: &str, event: EventId) -> Option<String> {
+    let (root, member) = match name.split_once('.') {
+        Some((root, member)) => (root, Some(member)),
+        None => (name, None),
+    };
+    let global = event_globals(event).global(root)?;
+    let mut block = format!(
+        "**`{root}`** — {}\n\nIn `{}`: {}",
+        global.description(),
+        event_name(event),
+        global.availability()
+    );
+    if let Some(member) = member
+        && let Some(def) = GlobalCatalog::darkmatter()
+            .global(root)
+            .and_then(|declaration| declaration.member(member.split('.').next().unwrap_or(member)))
+    {
+        block.push_str(&format!("\n\n**`{root}.{member}`** — {}", member_summary(def)));
+    }
+    Some(block)
+}
+
+/// Completion candidates for the globals `event` may read: each root its view
+/// declares and does not make unavailable, and, once `partial` names one and
+/// a `.`, its members from Darkmatter's global catalog.
+pub fn event_global_candidates(partial: &str, event: EventId) -> Vec<ExprCompletion> {
+    let mut items = Vec::new();
+    for global in event_globals(event).globals() {
+        if matches!(global.availability(), Availability::Unavailable(_)) {
+            continue;
+        }
+        let root = global.root();
+        if root.starts_with(partial) {
+            items.push(ExprCompletion {
+                label: root.to_string(),
+                insert_text: root.to_string(),
+                kind: ExprCompletionKind::ReservedRoot,
+                detail: Some("lifecycle global".to_string()),
+                documentation: event_global_hover(root, event),
+            });
+        }
+        let shape = GlobalCatalog::darkmatter().global(root).and_then(|declaration| declaration.shape());
+        if let Some(member) = partial.strip_prefix(root).and_then(|rest| rest.strip_prefix('.'))
+            && let Some(shape) = shape
+        {
+            for (key, def) in &shape.properties {
+                if key.starts_with(member) {
+                    let label = format!("{root}.{key}");
+                    items.push(ExprCompletion {
+                        label: label.clone(),
+                        insert_text: label,
+                        kind: ExprCompletionKind::ContextVariable,
+                        detail: Some("lifecycle global member".to_string()),
+                        documentation: Some(member_summary(def)),
+                    });
+                }
+            }
+        }
+    }
+    items
+}
+
 /// The Markdown body of a **value-dialect** expression hover — the body `{{ }}`
 /// interpolation hover. `expr_offset` is the cursor's byte offset into
 /// `expression`; `site` is the type scope enclosing the whole expression (its
@@ -953,6 +1027,7 @@ pub fn hover_markdown(
         site,
         frontmatter_scalar,
         schema_property,
+        None,
     )
 }
 
@@ -975,6 +1050,32 @@ pub fn hover_markdown_condition(
         site,
         frontmatter_scalar,
         schema_property,
+        None,
+    )
+}
+
+/// The expression hover for an expression inside `event`'s lifecycle stack,
+/// parsed with `parser`: identical to [`hover_markdown`] and
+/// [`hover_markdown_condition`], except that a root the event's view declares
+/// ([`event_global_hover`]) shadows a same-named frontmatter key, as it does
+/// when the stack runs.
+pub fn hover_markdown_in_event(
+    parser: fn(&str) -> Result<SpannedExpr, ParseError>,
+    expression: &str,
+    expr_offset: usize,
+    site: &TypeScope<'_>,
+    frontmatter_scalar: impl Fn(&str) -> Option<String>,
+    schema_property: impl Fn(&str) -> Option<String>,
+    event: EventId,
+) -> String {
+    hover_markdown_from(
+        parser(expression),
+        expression,
+        expr_offset,
+        site,
+        frontmatter_scalar,
+        schema_property,
+        Some(event),
     )
 }
 
@@ -999,6 +1100,7 @@ fn hover_markdown_from(
     site: &TypeScope<'_>,
     frontmatter_scalar: impl Fn(&str) -> Option<String>,
     schema_property: impl Fn(&str) -> Option<String>,
+    event: Option<EventId>,
 ) -> String {
     let mut value = match &parsed {
         Ok(expr) => format!("**Expression**\n\n`{}`", expr.erase()),
@@ -1043,6 +1145,9 @@ fn hover_markdown_from(
         // A reserved root shadows a same-named frontmatter key, so its catalog
         // description wins over any static value.
         value.push_str(&format!("\n\n**`{}`** — {}", root.name, root.description));
+    } else if let Some(block) = event.and_then(|event| event_global_hover(&name, event)) {
+        // An event's global shadows a same-named frontmatter key.
+        value.push_str(&format!("\n\n{block}"));
     } else if let Some(member) = frontmatter_member {
         if let Some(scalar) = frontmatter_scalar(member) {
             value.push_str(&format!("\n\nStatic value: `{scalar}` (from frontmatter `{member}`)"));
@@ -1121,9 +1226,8 @@ pub fn type_text(ty: &ScopedType) -> String {
 /// property, or expression function names. The single authority for the check
 /// so the body-interpolation and frontmatter-expression diagnostics agree.
 ///
-/// DMLS passes [`BindingView::baseline`]: it supplies no host descriptors, so
-/// a host global such as Claudine's `err` reads as a document property here.
-/// Any dotted path is treated as declared; callers pass a root. The caller
+/// DMLS passes the view [`validation_view`](crate::overlay::event_views::validation_view)
+/// builds for the expression's site. Any dotted path is treated as declared; callers pass a root. The caller
 /// supplies frontmatter-key and schema-property membership.
 pub fn is_undeclared_property(
     name: &str,
@@ -1156,6 +1260,23 @@ pub fn unknown_function_calls(expr: &SpannedExpr, source: &str) -> Vec<(String, 
                 let span = if source.get(name_span.clone()) == Some(name.as_str()) { name_span } else { call };
                 Some((name, span))
             }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Each read in `expr` of a global `view` declares unavailable, as `(span,
+/// message)`: Darkmatter's passive [`validate_expression`] decides, and the
+/// message is its error, which names the scope and the view's reason. A
+/// same-named frontmatter key is never read in its place.
+pub fn unavailable_global_reads(expr: &SpannedExpr, view: &BindingView) -> Vec<(SourceSpan, String)> {
+    validate_expression(expr, view)
+        .into_iter()
+        .filter_map(|(span, error)| match error {
+            ExpressionError::Binding(binding) => match *binding {
+                BindingError::Unavailable(unavailable) => Some((span, unavailable.to_string())),
+                _ => None,
+            },
             _ => None,
         })
         .collect()

@@ -187,3 +187,5 @@ mod type_scope_ownership_guard;
 mod unknown_identifier_warning;
 mod url_root_identity;
 mod yaml_block_parity;
+mod lifecycle_passive_compose;
+mod lifecycle_schema_parity;

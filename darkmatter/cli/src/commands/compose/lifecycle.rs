@@ -99,7 +99,7 @@ pub(super) fn run(compose: LifecycleCompose<'_>) -> Result<()> {
     let interrupted = install_interrupt_handler();
     ignore_broken_pipe_signal();
     let term = Terminal::default();
-    let effects = TerminalEffects { term: &term };
+    let effects = TerminalEffects { term: &term, stdout_is_terminal: std::io::stdout().is_terminal() };
     let mut host = ComposeHost::new(compose, bootstrap, &effects, interrupted);
     let config = host.config.clone();
     let end = md_host::drive(&mut host, &config);
@@ -168,6 +168,9 @@ fn ignore_broken_pipe_signal() {}
 /// Lifecycle communication on the terminal.
 struct TerminalEffects<'t> {
     term: &'t Terminal,
+    /// Off a terminal, stdout carries the Markdown document, so a `stdout`
+    /// action's line joins it as authored rather than styled.
+    stdout_is_terminal: bool,
 }
 
 impl TerminalEffects<'_> {
@@ -185,7 +188,8 @@ impl LifecycleEffects for TerminalEffects<'_> {
         let mut stdout = std::io::stdout().lock();
         // A closed stdout fails the document write, which the run reports;
         // an action's own line is not an operation of its own.
-        let _ = writeln!(stdout, "{}", render_prose_line(text, self.term)).and_then(|()| stdout.flush());
+        let line = if self.stdout_is_terminal { render_prose_line(text, self.term) } else { text.to_string() };
+        let _ = writeln!(stdout, "{line}").and_then(|()| stdout.flush());
     }
 
     fn stderr(&self, _signal: LifecycleSignal, text: &str) {
@@ -317,7 +321,7 @@ impl<'a> ComposeHost<'a> {
         }
 
         let effective = Value::Object(self.live.lock().expect("live frontmatter lock").clone());
-        md_host::stamp_lifecycle_shells(&mut self.config, &effective, &self.request, &self.source_path)
+        md_host::stamp_lifecycle_shells(&mut self.config, &effective, self.md, &self.request, &self.source_path)
             .map_err(|error| ("shell", Report::new(error)))?;
 
         // `set` values from `initialize` are data to the first composition.

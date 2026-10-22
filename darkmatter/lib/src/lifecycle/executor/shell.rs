@@ -61,6 +61,18 @@ pub enum ShellRunError {
     },
 }
 
+impl ShellRunError {
+    /// [`Self::BeforePreflight`]'s message naming the event where shells
+    /// unlock by `unlock_event`, the host's spelling of `composed`. The
+    /// `Display` text names Claudine's `start`, which Claudine's recorded
+    /// traces pin.
+    pub fn before_preflight_message(unlock_event: &str) -> String {
+        format!(
+            "shell commands are forbidden during initialize and before preflight completes; move the command to {unlock_event} or a later event"
+        )
+    }
+}
+
 /// Abstraction over running an approved shell command.
 ///
 /// Lifecycle shell actions are audited against the host's command policy

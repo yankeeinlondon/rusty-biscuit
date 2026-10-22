@@ -336,6 +336,14 @@ impl<'a> StackExecutor<'a> {
     /// [`LifecycleErrorInfo::from_error_or_action_with`] in this executor's
     /// catalog.
     fn error_or_action(&self, verb: impl Into<String>, error: &(dyn StdError + 'static)) -> LifecycleErrorInfo {
+        // The locked-shell text names the event where shells unlock, which
+        // only the host can spell.
+        if matches!(error.downcast_ref::<ShellRunError>(), Some(ShellRunError::BeforePreflight))
+            && self.catalog.select(error).is_none()
+        {
+            let unlock_event = self.catalog.event_name(LifecycleSignal::Start);
+            return self.action_failure(verb, ShellRunError::before_preflight_message(unlock_event));
+        }
         LifecycleErrorInfo::from_error_or_action_with(self.catalog, verb, error)
     }
 

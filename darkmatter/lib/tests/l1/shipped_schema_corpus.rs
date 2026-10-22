@@ -234,10 +234,15 @@ const EXCEPTIONS: &[Exception] = &[
 const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
     // Zero-argument verbs take `null` or an empty `unknown[]`, generated verbs
     // and loose bodies are `unknown`, and `shell` types the shell command.
-    ("claudine/schemas/action.yaml", &["null", "shell", "unknown"]),
-    ("claudine/schemas/lifecycle.yaml", &["null", "shell", "unknown"]),
-    // The hash payload.
-    ("claudine/schemas/claudine.yaml", &["unknown"]),
+    ("darkmatter/schemas/partials/lifecycle.yaml", &["null", "shell", "unknown"]),
+    // The md profile's open keys and loose bodies.
+    ("darkmatter/schemas/partials/md-lifecycle.yaml", &["unknown"]),
+    // `cancelled-stop`'s short forms; the rest is referenced from Darkmatter.
+    ("claudine/schemas/action.yaml", &["null", "unknown"]),
+    // Loose bodies and loop-action values.
+    ("claudine/schemas/lifecycle.yaml", &["unknown"]),
+    // The hash payload, and the `null`-typed Darkmatter event names.
+    ("claudine/schemas/claudine.yaml", &["null", "unknown"]),
     // Step outputs, loop results, and leg payloads are any value.
     ("claudine/schemas/globals.yaml", &["unknown"]),
     ("claudine/schemas/inline-compose.yaml", &["unknown"]),

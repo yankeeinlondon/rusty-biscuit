@@ -5,12 +5,15 @@
 //! imports Content Policy's editor schema, with ordinary relative references.
 //! Resolving them from a table of embedded texts lets an installed binary
 //! prepare the catalog and its baseline without a checkout. This is
-//! a source for shipped schemas only: user `$schema` references never consult
-//! it, and an embedded import never falls back to the disk or the network.
+//! a source for shipped schemas only: a user `$schema` reaches it solely
+//! through the reserved namespace (`SHIPPED_NAMESPACE`,
+//! `Name@darkmatter:<stem>`), and an embedded import never falls back to the
+//! disk or the network.
 //!
 //! A host can also supply an [`EmbeddedSchemaBundle`] of trigger schemas and
 //! their libraries. Its documents use the same lexical resolution, keyed by
-//! `{bundle}/{file name}` and confined to that bundle.
+//! `{bundle}/{file name}` and confined to that bundle; the reserved namespace
+//! is the one way out of it.
 
 use crate::markdown::schemas::errors::SchemaError;
 
@@ -21,7 +24,9 @@ use crate::markdown::schemas::errors::SchemaError;
 /// each document's plain file name (`claudine.yaml`) with its text. Within a
 /// bundle, documents address each other with relative references
 /// (`stack@./lifecycle.yaml`) that resolve lexically among the bundle's own
-/// files, never on the disk. Darkmatter ships no bundle of its own; a host
+/// files, never on the disk, and name Darkmatter's shipped partials with the
+/// reserved namespace (`say-short@darkmatter:lifecycle`). Darkmatter ships no
+/// bundle of its own; a host
 /// registers one with
 /// [`DarkmatterSchemas::with_embedded_trigger_bundle`](super::DarkmatterSchemas::with_embedded_trigger_bundle).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -148,9 +153,10 @@ pub(crate) struct EmbeddedDocument<'a> {
 /// Virtual path of Content Policy's editor schema.
 pub(crate) const CONTENT_POLICY_PATH: &str = "content-policy/schemas/content-policy.yaml";
 
-/// The shipped documents: Darkmatter's global catalog, its partials, and the
-/// Content Policy editor schema the `fm` partial imports. The runtime
-/// baseline is the catalog's resolved `fm` definition.
+/// The shipped documents: Darkmatter's global catalog, its partials
+/// (including the neutral lifecycle action definitions and the `md` profile's
+/// stacks), and the Content Policy editor schema the `fm` partial imports.
+/// The runtime baseline is the catalog's resolved `fm` definition.
 pub(crate) const SHIPPED: &[EmbeddedDocument<'static>] = &[
     EmbeddedDocument {
         path: super::catalog::DARKMATTER_CATALOG_PATH,
@@ -177,10 +183,41 @@ pub(crate) const SHIPPED: &[EmbeddedDocument<'static>] = &[
         text: include_str!("../../../../schemas/partials/timing.yaml"),
     },
     EmbeddedDocument {
+        path: "darkmatter/schemas/partials/lifecycle.yaml",
+        text: include_str!("../../../../schemas/partials/lifecycle.yaml"),
+    },
+    EmbeddedDocument {
+        path: "darkmatter/schemas/partials/md-lifecycle.yaml",
+        text: include_str!("../../../../schemas/partials/md-lifecycle.yaml"),
+    },
+    EmbeddedDocument {
         path: CONTENT_POLICY_PATH,
         text: content_policy::EDITOR_SCHEMA,
     },
 ];
+
+/// The reserved namespace of a named-type reference to one of Darkmatter's
+/// shipped partials: `Name@darkmatter:<stem>` names the type `Name` in the
+/// [`SHIPPED`] document `darkmatter/schemas/partials/<stem>.yaml`, whoever
+/// writes it and wherever it is written. It names no host file, so the disk
+/// is never consulted, and references inside the partial resolve among the
+/// shipped documents.
+pub(crate) const SHIPPED_NAMESPACE: &str = "darkmatter:";
+
+/// The `<stem>` of a reference written in the reserved form
+/// `darkmatter:<stem>`, or `None` for any other reference.
+pub(crate) fn reserved_stem(reference: &str) -> Option<&str> {
+    reference.trim().strip_prefix(SHIPPED_NAMESPACE)
+}
+
+/// The shipped partial `darkmatter:<stem>` names, or `None` when [`SHIPPED`]
+/// has no partial of that stem.
+pub(crate) fn shipped_partial(stem: &str) -> Option<EmbeddedDocument<'static>> {
+    if !is_plain_segment(stem) || stem.contains('.') {
+        return None;
+    }
+    find(SHIPPED, &format!("darkmatter/schemas/partials/{stem}.yaml"))
+}
 
 /// Looks up the document registered at `path`.
 pub(crate) fn find<'a>(documents: &[EmbeddedDocument<'a>], path: &str) -> Option<EmbeddedDocument<'a>> {
@@ -367,6 +404,20 @@ mod tests {
     }
 
     #[test]
+    fn reserved_references_name_shipped_partials_only() {
+        assert_eq!(reserved_stem(" darkmatter:lifecycle "), Some("lifecycle"));
+        assert_eq!(reserved_stem("./lifecycle.yaml"), None);
+        assert_eq!(reserved_stem("this"), None);
+        for stem in ["lifecycle", "md-lifecycle", "fm", "timing"] {
+            let document = shipped_partial(stem).unwrap_or_else(|| panic!("`{stem}` is shipped"));
+            assert_eq!(document.path, format!("darkmatter/schemas/partials/{stem}.yaml"));
+        }
+        for stem in ["", "bogus", "lifecycle.yaml", "../darkmatter", "partials/fm", ".", "..", "darkmatter"] {
+            assert!(shipped_partial(stem).is_none(), "`{stem}` names no shipped partial");
+        }
+    }
+
+    #[test]
     fn the_shipped_table_registers_exactly_the_catalog_its_partials_and_policy_schema() {
         let paths: Vec<_> = SHIPPED.iter().map(|document| document.path).collect();
         assert_eq!(
@@ -378,6 +429,8 @@ mod tests {
                 "darkmatter/schemas/partials/context-variables.yaml",
                 "darkmatter/schemas/partials/error.yaml",
                 "darkmatter/schemas/partials/timing.yaml",
+                "darkmatter/schemas/partials/lifecycle.yaml",
+                "darkmatter/schemas/partials/md-lifecycle.yaml",
                 CONTENT_POLICY_PATH,
             ]
         );

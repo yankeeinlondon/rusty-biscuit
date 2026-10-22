@@ -811,8 +811,8 @@ pub struct ShellAction {
 /// positional expression arguments.
 ///
 /// The verb catalog is owned by Darkmatter; this model deliberately does not
-/// enumerate it. Phase 4 execution will dispatch by name through the
-/// Darkmatter effect engine.
+/// enumerate it. The executor dispatches it by name through the Darkmatter
+/// effect engine.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SideEffectAction {
     /// The Darkmatter effect verb (e.g. `"set_frontmatter"`, `"ensure_file"`).

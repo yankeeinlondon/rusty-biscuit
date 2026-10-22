@@ -8,6 +8,11 @@
 # application data beside Claudine's controls is kept. `sequence` is declared
 # only by sequence.yaml, which every document with a non-null `sequence`
 # selects.
+#
+# `composed` and `failed` are Darkmatter's names for the events Claudine
+# calls `start` and `blocked`. The payload types them as null, overriding the
+# baseline's `md` stacks, so a value under either is an error whose
+# description names the Claudine event to write instead.
 kind: schema-trigger
 match:
     group:
@@ -93,6 +98,8 @@ $schema:
     failure: "stack@./lifecycle.yaml -> actions run after a failed run"
     cancelled: "cancelled-stack@./lifecycle.yaml -> opt into cancellation; actions run when cancelled"
     finalize: "stack@./lifecycle.yaml -> actions run last, whatever the outcome"
+    composed: "null -> Claudine names this event `start`; write `start:` instead of `composed:`"
+    failed: "null -> Claudine names this event `blocked`; write `blocked:` instead of `failed:`"
     timeout: "string(not-empty) -> the run's overall timeout, such as 30m"
     step_timeout: "string(not-empty) -> the timeout for one sequence step"
     timeout_warn: "string(not-empty) -> when to warn that the run timeout is near"

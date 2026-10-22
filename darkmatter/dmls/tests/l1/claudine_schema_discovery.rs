@@ -526,3 +526,84 @@ fn a_trigger_declared_property_is_not_an_undeclared_expression_root() {
     assert_eq!(undeclared.len(), 1, "{undeclared:?}");
     assert!(undeclared[0].contains("nowhere_declared"), "{undeclared:?}");
 }
+
+/// Criterion 13, diagnostics: under Darkmatter's baseline (outside the
+/// Claudine area) `composed` is typed with the md profile and `start` is not;
+/// a verb only another host provides passes, and a misspelled long-form key of
+/// an md verb does not. Under Claudine's trigger `start` is typed and
+/// `composed` is an error; the hover that explains it names `start`
+/// ([`renamed_events_hover_with_the_claudine_name`]).
+#[test]
+fn md_and_claudine_type_their_own_event_names() {
+    let workspace = LspWorkspace::new();
+    let fixture = Fixture::new(workspace.path());
+    let outside = |name: &str, text: &str| {
+        let path = fixture.repo().join("docs").join(name);
+        write(&path, text);
+        (path, text.to_string())
+    };
+    let md_typo = outside("md-typo.md", "---\ncomposed: [{info: {txet: hi}}]\n---\n\nBody\n");
+    let md_say = outside("md-say.md", "---\ncomposed: [{say: hi}, {info: hi}]\n---\n\nBody\n");
+    let md_start = outside("md-start.md", "---\nstart: [{info: {txet: hi}}]\n---\n\nBody\n");
+    let claudine_text = "---\nprompt: hi\ncomposed: [{info: hi}]\nstart: [{info: {txet: hi}}]\n---\n\nBody\n";
+    let claudine = fixture.document("renamed.md", claudine_text);
+
+    let found = session_diagnostics(
+        &workspace,
+        &fixture,
+        &[
+            (&md_typo.0, &md_typo.1),
+            (&md_say.0, &md_say.1),
+            (&md_start.0, &md_start.1),
+            (&claudine, claudine_text),
+        ],
+    );
+    let [typo, say, start, renamed] = &found[..] else { panic!("{found:?}") };
+    assert!(
+        typo.iter().any(|(path, message)| path.starts_with("/composed/0") && message.contains("txet")),
+        "a misspelled `info` key under `composed` is a schema error: {typo:?}"
+    );
+    assert!(say.is_empty(), "`say` is untyped under the baseline and `info: hi` is valid: {say:?}");
+    assert!(start.is_empty(), "the baseline does not type `start`: {start:?}");
+    assert!(
+        renamed.iter().any(|(path, _)| path == "/composed"),
+        "`composed` is an error under Claudine's schema: {renamed:?}"
+    );
+    assert!(
+        renamed.iter().any(|(path, message)| path.starts_with("/start/0") && message.contains("txet")),
+        "`start` is typed under Claudine's schema: {renamed:?}"
+    );
+}
+
+/// Criterion 13, completion: an md stack item under the baseline offers the
+/// md verbs (`info`) and never a verb only another host provides (`say`);
+/// `start` offers neither, since the baseline does not type it.
+#[test]
+fn baseline_stack_items_complete_md_verbs_only() {
+    let found = editor_answers(&[
+        ("docs/composed.md", "---\ncomposed:\n  - \n---\n", "  - ", Ask::Complete),
+        ("docs/start.md", "---\nstart:\n  - \n---\n", "  - ", Ask::Complete),
+    ]);
+    let [composed, start] = &found[..] else { panic!("{found:?}") };
+    for label in ["info", "stdout", "shell", "set", "stop"] {
+        assert!(has(composed, label), "`{label}` among `composed`'s alternatives: {composed:?}");
+    }
+    for label in ["say", "retry", "notify", "proxy"] {
+        assert!(!has(composed, label), "`{label}` is not offered under the baseline: {composed:?}");
+    }
+    assert!(!has(start, "info") && !has(start, "say"), "`start` is untyped under the baseline: {start:?}");
+}
+
+/// Criterion 13, guidance: under Claudine's trigger, the declaration that
+/// rejects `composed` (and `failed`) names the Claudine event to write
+/// instead, and hover shows it.
+#[test]
+fn renamed_events_hover_with_the_claudine_name() {
+    let found = editor_answers(&[
+        ("composed.md", "---\nprompt: hi\ncomposed: [{info: hi}]\n---\n", "composed", Ask::Hover),
+        ("failed.md", "---\nprompt: hi\nfailed: [{info: hi}]\n---\n", "failed", Ask::Hover),
+    ]);
+    let [composed, failed] = &found[..] else { panic!("{found:?}") };
+    assert!(composed[0].contains("`start`"), "{composed:?}");
+    assert!(failed[0].contains("`blocked`"), "{failed:?}");
+}

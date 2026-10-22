@@ -809,17 +809,28 @@ fn wrap_literal_exclusion(core: &str, literal_names: &[&str]) -> String {
 /// Verifies an emitted pattern compiles under the same regex engine schema
 /// validation uses: `fancy-regex` when the pattern carries a lookaround
 /// (Feature C literal precedence), otherwise the linear `regex` engine.
+///
+/// A pattern that compiled once is remembered for the process: a named type
+/// inlined at many sites (the baseline's lifecycle stacks) emits the same
+/// pattern at each, and compiling a long alternation is not free.
 fn validate_emitted_pattern(
     context: &str,
     key: &PatternKey,
     emitted: &str,
 ) -> Result<(), SchemaError> {
+    static COMPILED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    let compiled = COMPILED.get_or_init(Default::default);
+    if compiled.lock().expect("compiled pattern set poisoned").contains(emitted) {
+        return Ok(());
+    }
     let compiles = if has_lookaround(emitted) {
         fancy_regex::Regex::new(emitted).is_ok()
     } else {
         regex::Regex::new(emitted).is_ok()
     };
     if compiles {
+        compiled.lock().expect("compiled pattern set poisoned").insert(emitted.to_string());
         Ok(())
     } else {
         Err(SchemaError::Convert {

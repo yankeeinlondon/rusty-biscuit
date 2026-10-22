@@ -128,6 +128,32 @@ fn stdout_actions_frame_the_document_and_other_verbs_use_stderr() {
     }
 }
 
+#[test]
+fn a_piped_stdout_action_writes_its_text_as_authored() {
+    let fixture = CliProcessFixture::named("lifecycle-stdout-piped");
+    let doc = fixture.write_file(
+        "cwd/doc.md",
+        "---\ncomposed:\n  - stdout: \"hello **bold** <!-- note -->\"\n---\nthe-document\n",
+    );
+    // A capable, colored terminal environment: only the pipe turns styling off.
+    let output = fixture
+        .command_builder()
+        .host_path()
+        .rendering_input_removed("NO_COLOR")
+        .rendering_input("FORCE_COLOR", "1")
+        .rendering_input("TERM", "xterm-256color")
+        .build()
+        .arg("compose")
+        .arg(&doc)
+        .output()
+        .expect("md runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(!stdout.contains('\u{1b}'), "no escape sequence on a pipe: {stdout:?}");
+    let lines: Vec<&str> = stdout.lines().filter(|line| !line.trim().is_empty()).collect();
+    assert_eq!(lines, ["hello **bold** <!-- note -->", "the-document"], "{stdout:?}");
+}
+
 /// `document` names one action `md` does not run, between two that it does.
 fn assert_skipped_once(name: &str, action: &str, verb: &str) {
     let fixture = CliProcessFixture::named(name);
@@ -226,6 +252,27 @@ fn a_bare_error_in_composed_names_the_md_event() {
     assert_eq!(ran.status, Some(1), "{}", ran.stderr);
     assert!(ran.stderr.contains("lifecycle composed error"), "{}", ran.stderr);
     assert!(!ran.stderr.contains("lifecycle start error"), "{}", ran.stderr);
+}
+
+#[test]
+fn a_shell_reached_before_preflight_is_refused_naming_the_md_event_where_shells_unlock() {
+    let fixture = CliProcessFixture::named("lifecycle-locked-shell");
+    fixture.write_file("cwd/.darkmatter-shell-whitelist", "exact touch locked-marker\n");
+    let doc = fixture.write_file(
+        "cwd/doc.md",
+        "---\nfailed:\n  - info: \"event:failed\"\n  - shell: \"touch locked-marker\"\n\
+         finalize:\n  - info: \"event:finalize {{ err.msg }}\"\n---\n::file ./missing.md\n",
+    );
+    let ran = compose(&fixture, &doc, &[]);
+    assert_ne!(ran.status, Some(0), "{}", ran.stderr);
+    assert_eq!(events(&ran.stderr), ["failed", "finalize"], "{}", ran.stderr);
+    assert!(
+        ran.stderr.contains("move the command to composed or a later event"),
+        "{}",
+        ran.stderr
+    );
+    assert!(!ran.stderr.contains("move the command to start"), "{}", ran.stderr);
+    assert!(!fixture.cwd().join("locked-marker").exists(), "the locked shell never ran");
 }
 
 #[test]

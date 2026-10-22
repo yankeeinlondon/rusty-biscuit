@@ -80,7 +80,14 @@ fn schema_completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem
     match value_cursor(ctx, offset, line_start, trimmed) {
         Some((key, value_partial)) => {
             let ancestors = enclosing_path(ctx, offset, line_start, indent);
-            value_completions(ctx, offset, &ancestors, &key, &value_partial)
+            let root = ancestors.first().map_or(key.as_str(), String::as_str);
+            let event = crate::overlay::event_views::event_of_key(root);
+            if let Some(event) = event
+                && let Some(items) = stack_completions(ctx, offset, &key, &value_partial, event)
+            {
+                return items;
+            }
+            value_completions(ctx, offset, &ancestors, &key, &value_partial, event)
         }
         None if indent == 0 => top_level_key_completions(ctx, ast, offset, trimmed),
         None => {
@@ -766,6 +773,7 @@ fn value_completions(
     ancestors: &[String],
     key: &str,
     partial: &str,
+    event: Option<darkmatter::lifecycle::registry::EventId>,
 ) -> Vec<CompletionItem> {
     let start = offset - partial.len();
     let mut path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
@@ -812,7 +820,7 @@ fn value_completions(
     // Expression-typed arm: the shared catalog completion (see
     // `expression_value_completions`).
     if expression_atom(def).is_some() {
-        items.extend(expression_value_completions(ctx, offset, partial, start));
+        items.extend(expression_value_completions(ctx, offset, partial, start, event));
     }
 
     // Scaffolds from EVERY non-Literal arm (enum members, boolish `true`/`false`,
@@ -920,15 +928,49 @@ fn expression_value_completions(
     offset: usize,
     value_partial: &str,
     value_start: usize,
+    event: Option<darkmatter::lifecycle::registry::EventId>,
 ) -> Vec<CompletionItem> {
     let (token_start, token) = expressions::value_completion_partial(value_partial, value_start);
+    expression_candidates(ctx, token_start, offset, token, event)
+}
+
+/// The shared expression candidates for `token` (typed over
+/// `token_start..offset`): frontmatter keys, `ctx.*`, functions, host
+/// globals, and, inside `event`'s stack, the globals that event may read.
+fn expression_candidates(
+    ctx: &DocumentContext,
+    token_start: usize,
+    offset: usize,
+    token: &str,
+    event: Option<darkmatter::lifecycle::registry::EventId>,
+) -> Vec<CompletionItem> {
     let frontmatter_keys = expression_property_keys(ctx);
     let host = expressions::host_global_candidates(token, &crate::providers::dsl::host_catalogs(ctx));
+    let lifecycle = event.map(|event| expressions::event_global_candidates(token, event)).unwrap_or_default();
     expressions::completion_candidates(token, &frontmatter_keys)
         .into_iter()
+        .chain(lifecycle)
         .chain(host)
         .filter_map(|candidate| expr_completion_item(ctx, token_start, offset, candidate))
         .collect()
+}
+
+/// Completion inside `event`'s lifecycle stack value: inside an open `{{`
+/// span, or in a `when` guard's condition text, the shared expression
+/// candidates with the event's globals. `None` elsewhere in the stack, which
+/// completes like any other value.
+fn stack_completions(
+    ctx: &DocumentContext,
+    offset: usize,
+    key: &str,
+    value_partial: &str,
+    event: darkmatter::lifecycle::registry::EventId,
+) -> Option<Vec<CompletionItem>> {
+    let value_start = offset - value_partial.len();
+    if let Some((token_start, token)) = expressions::completion_partial(value_partial, value_partial.len()) {
+        return Some(expression_candidates(ctx, value_start + token_start, offset, token, Some(event)));
+    }
+    (key == "when").then(|| expression_value_completions(ctx, offset, value_partial, value_start, Some(event)))
 }
 
 /// The document properties an expression may name: the document's top-level
@@ -1098,20 +1140,57 @@ fn expression_value_at<'a>(
 /// is inside the value (a cursor on the key falls through to the schema hover,
 /// which describes the `expression` type itself). The value's own ternary and
 /// `&&`/`||` facts narrow it; no enclosing lifecycle or task `when` does.
+/// Inside a lifecycle stack, the event's globals shadow frontmatter keys
+/// ([`expressions::hover_markdown_in_event`]).
 fn expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, offset: usize) -> Option<Hover> {
     let value = expression_value_at(ctx, ast, offset)?;
     let expr_offset = value.decoded_offset(offset)?;
     let host = crate::providers::dsl::host_catalogs(ctx);
+    let event = crate::overlay::event_views::stack_event(&ast.path_at(value.index));
     let markdown = crate::providers::dsl::with_site_scope(ctx, None, |site| {
-        expressions::hover_markdown_condition(
-            value.expression(),
+        let scalar = |name: &str| frontmatter_scalar(ctx, name);
+        let property =
+            |name: &str| expressions::host_global_hover(name, &host).or_else(|| schema_property_details(ctx, name));
+        match event {
+            Some(event) => expressions::hover_markdown_in_event(
+                expressions::parse_condition,
+                value.expression(),
+                expr_offset,
+                site,
+                scalar,
+                property,
+                event,
+            ),
+            None => expressions::hover_markdown_condition(value.expression(), expr_offset, site, scalar, property),
+        }
+    });
+    markup_hover(ctx, value.expression_span(), markdown)
+}
+
+/// Hover on a `{{ … }}` span or `when` guard inside a lifecycle stack value
+/// that is not an Expression-typed value: the shared expression hover, with
+/// the globals of the stack's event
+/// ([`expressions::hover_markdown_in_event`]). Unguarded, like every
+/// frontmatter site.
+fn stack_expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, offset: usize) -> Option<Hover> {
+    let typed: Vec<usize> = expression_values(ctx, ast).iter().map(|value| value.index).collect();
+    let expression = crate::overlay::event_views::stack_expressions(ctx.text, ast, |index| typed.contains(&index))
+        .into_iter()
+        .find(|expression| expression.reach().contains(&offset))?;
+    let expr_offset = expression.text_offset(offset).unwrap_or(0).min(expression.text.len());
+    let host = crate::providers::dsl::host_catalogs(ctx);
+    let markdown = crate::providers::dsl::with_site_scope(ctx, None, |site| {
+        expressions::hover_markdown_in_event(
+            expression.dialect.parser(),
+            &expression.text,
             expr_offset,
             site,
             |name| frontmatter_scalar(ctx, name),
             |name| expressions::host_global_hover(name, &host).or_else(|| schema_property_details(ctx, name)),
+            expression.event,
         )
     });
-    markup_hover(ctx, value.expression_span(), markdown)
+    markup_hover(ctx, expression.reach().clone(), markdown)
 }
 
 /// The static scalar value of a top-level frontmatter key, for expression hover.
@@ -1396,6 +1475,9 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     // (parsed form + `ctx.*`/function catalog); a cursor on its key falls
     // through to the schema hover describing the `expression` type.
     if let Some(hover) = expression_hover(ctx, ast, offset) {
+        return Some(hover);
+    }
+    if let Some(hover) = stack_expression_hover(ctx, ast, offset) {
         return Some(hover);
     }
 
