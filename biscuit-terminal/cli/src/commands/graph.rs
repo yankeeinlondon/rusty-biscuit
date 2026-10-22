@@ -193,6 +193,7 @@ pub fn display_graph(
                 print!("{}", graph.render(terminal));
                 Ok(())
             })?;
+            crate::hints::emit_terminal_route_hint(terminal);
             return Ok(());
         }
         Err(error) => return handle_graph_error(error, &graph.fallback_code_block(), source, terminal),

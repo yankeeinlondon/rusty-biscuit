@@ -165,6 +165,14 @@ Measured with `fsevent-sys` 4.1 at latency 0:
   watched-path event, and treats anything later as arriving in a later drain
   (`worktree/lib/src/remove/observation/fsevents.rs`). A round costs ~11 ms
   idle, up to ~650 ms under suite load.
+- **Wait without the blocking flush, but keep flushing.** `FlushSync` blocks
+  for as long as fseventsd takes, so a wait cannot check a deadline or Ctrl-C
+  while inside it. `FSEventStreamFlushAsync` returns at once and may be called
+  from another thread than the run loop's. One async flush per marker round is
+  not enough: the stream then holds the marker for its latency (0.1 s in
+  `wt`), which made each round ~100 ms and the macOS observation tests about
+  7x slower. Re-issue it every ~1 ms while waiting (`wt` does this in the
+  wait's park step).
 - **`FSEventStreamStart` returns before events are routed.** Confirm with one
   marker before relying on the stream.
 - **Removing or renaming a directory replaces its pending child events** in
@@ -182,6 +190,45 @@ Measured with `fsevent-sys` 4.1 at latency 0:
   watched, so watch both names before the move. Avoid a recursive watch on a
   shared parent: every sibling's activity reaches the stream, and a busy
   sibling (a build) is enough to make FSEvents drop events.
+
+### A stuck fseventsd delays every stream
+
+Every FSEvents stream on the host goes through one fseventsd, so its health is
+a host condition, not a repository defect. Two failure modes have been seen
+with `wt remove`:
+
+- **fseventsd stuck in its own path matching.** After 26 days of uptime, its
+  notify thread was pinned at one full core in its path-matching loop while
+  system-wide event volume was tiny (about 5 events a second; `sample`
+  showed `strncmp` under a mutex). Events took more than 10 s to arrive
+  (`wt remove`'s marker waits stalled), and quitting nine apps that watch
+  files changed nothing. Overall CPU looked low, because the busy thread was
+  a single efficiency-core thread, so nothing pointed at fseventsd. A
+  restart brought it to 0.1 % CPU and same-second delivery.
+- **A healthy fseventsd still drops under a fast deletion burst.** About
+  6,600 to 7,000 deletions a second made FSEvents drop events (which flags
+  fired was not recorded then; `FsEventsDropped` now keeps them). Drops are
+  intermittent: a later 12-run comparison deleted at up to 11,000 entries a
+  second with no drop, and draining more often than every 2,048 entries
+  (`DEFAULT_DRAIN_EVERY`) only made deletion slower. No drain interval
+  prevents a drop.
+
+Diagnose by hand:
+
+```bash
+ps -o %cpu,etime -p "$(pgrep fseventsd)"   # CPU (lifetime average) and uptime
+top -o cpu                                 # current CPU; or Activity Monitor
+sudo sample fseventsd 5                    # optional: the hot thread's stack
+```
+
+High CPU alone does not establish the diagnosis; it needs slow delivery too
+(for example a `delivery_stalled` loss in a `wt remove` report). An
+administrator can restart it with `sudo killall fseventsd`; launchd restarts
+it at once. **That is system-wide:** every FSEvents client (Spotlight, Time
+Machine, editors, file watchers, build tools) may miss events from around the
+restart or rescan. It is a manual troubleshooting step only: never script it,
+never run it from a test or recipe, and never have `wt` do it. The user-facing
+version is in `worktree/docs/cli/remove.md` ("When fseventsd is slow").
 
 ### Reading other processes' descriptors and cwd
 
@@ -370,3 +417,15 @@ codes before you match libtest output. lldb refuses Apple-signed platform
 binaries but attaches to ones you built. Pick the binary with the same `-p`
 selection the recipe uses; feature unification can otherwise give you a
 different artifact.
+
+## Zellij in tests: long `$TMPDIR` rejects every session name
+
+Zellij 0.45.1 on macOS derives its socket directory from `$TMPDIR`
+(`/var/folders/…/T/zellij-<uid>/…`) and then rejects any `--session` name
+with "session name must be less than 0 characters" (measured 2026-10-21).
+Give a test session a short `ZELLIJ_SOCKET_DIR` (a temp dir under `/tmp`),
+and pass the same variable to `kill-session` and `delete-session`. A fresh
+socket directory also means first-run state, so Zellij shows its "About
+Zellij" tips popup over the pane; start it with a `--config` file holding
+`show_startup_tips false` and `show_release_notes false`. See
+`biscuit-terminal/lib/tests/level2/level2_graphics_probe_wezterm.rs`.

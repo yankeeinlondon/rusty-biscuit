@@ -9,7 +9,7 @@ Terminal capability detection, rendering utilities, and inline image display for
 | `clap` | No | Derive `clap::ValueEnum` on enums for CLI integration with shell completions |
 | `image` | No | SVG images and graphical horizontal rules, rasterized with `resvg` |
 
-> **Note:** Image rendering via [viuer](https://crates.io/crates/viuer) is always available (unconditional dependency).
+> **Note:** Raster image rendering (Kitty and iTerm2 formats) is always available; the `image` feature adds SVG input and graphical rules.
 
 ### When to use the `clap` feature
 
@@ -31,7 +31,7 @@ This derives `clap::ValueEnum` on supported enums, enabling:
 ## Capabilities
 
 - **Terminal App Detection**: Recognize 13+ terminal emulators with capability profiles
-- **Image Rendering**: Inline images via Kitty/iTerm2 protocols with security guards
+- **Image Rendering**: Inline images via Kitty/iTerm2/Sixel, chosen by a detected [graphics route](../docs/discovery/graphics-routes.md), with security guards
 - **Diagram Hook**: Render-tree hook through which a caller (for example `biscuit-visualized`) draws Mermaid fences
 - **OS Detection**: Identify operating system and Linux distribution
 - **Repo Detection**: Detect git repo root and monorepo status via `sniff`
@@ -95,13 +95,16 @@ fn main() {
 - `utils::text` - Content length calculation (escape-aware)
 - `utils::multiplex` - Multiplexing detection
 
-Live terminal queries (colors, window pixels, cursor position) cost a terminal
-that never answers one short wait per process; see
+Live terminal queries (colors, the graphics probe, window pixels, cursor
+position) cost a terminal that never answers one short wait per process. A
+program with its own input loop builds its `Terminal` with
+`Terminal::builder().probe(ProbeMode::Off)` (or runs under
+`BISCUIT_TERMINAL_PROBE=off`) so construction queries nothing; see
 [`docs/discovery/terminal-queries.md`](../docs/discovery/terminal-queries.md).
 
 ## Terminal Images (TerminalImage)
 
-`TerminalImage` renders inline images using the Kitty graphics protocol with automatic iTerm2 handling and a graceful text fallback.
+`TerminalImage` renders inline images in the format chosen by the terminal's graphics route, with a text fallback.
 
 ### Width syntax
 
@@ -112,9 +115,20 @@ that never answers one short wait per process; see
 
 ### Protocol selection
 
-- Kitty-capable terminals (Kitty, WezTerm, Ghostty, etc.): use Kitty protocol
-- iTerm2: uses iTerm’s native inline images even if iTerm advertises Kitty, to avoid Kitty-path failures
-- Others / unsupported: falls back to alt text
+`Terminal::new()` resolves a `graphics_route` once from the environment, and
+asks the terminal (the graphics probe) only when the environment cannot
+decide: the format (Kitty, iTerm2, Sixel, or none), how sure it is, and why. Every image
+rendered with that `Terminal` follows it.
+
+- Kitty-family terminals (Kitty, Ghostty, WezTerm, Warp, Konsole): Kitty protocol
+- iTerm2, mintty, cterm: iTerm2's native inline images (iTerm2 accepts Kitty but mishandles it)
+- Sixel terminals (Windows Terminal 1.22+, Zellij, a tmux 3.4+ that draws Sixel itself, or a DA1 reply reporting Sixel): Sixel, composited onto the terminal's background
+- No usable format: half-blocks on a truecolor, Unicode terminal (`render_with_half_blocks`, used by `render`/`display`), else the alt text
+- `BISCUIT_GRAPHICS` (`auto`, `kitty`, `iterm2`, `sixel`, `none`) forces or disables a format; `BISCUIT_GRAPHICS_TRANSPORT` (`auto`, `direct`, `tmux`) declares a tmux layer
+
+See [Graphics Routes](../docs/discovery/graphics-routes.md) for the full
+resolution order, SSH, tmux, Zellij, and Windows rules, and
+[`TerminalImage`](../docs/components/terminal_image.md) for `render_with_route`.
 
 ### Aspect ratio handling
 
@@ -125,14 +139,14 @@ that never answers one short wait per process; see
 
 - Default behavior uses `c=` (columns only) so Kitty preserves aspect ratio.
 - WezTerm requires `c=` + `r=` (both columns and rows) for correct aspect ratio; Kitty/Ghostty use `c=` only.
-- `render_to_terminal()` handles cursor positioning per terminal: Kitty/Ghostty auto-advance and overshoot by 1 row (corrected with CUU), Wezterm doesn't auto-advance (explicit CUD + CR applied).
+- `render_with_route()` handles cursor positioning per terminal: Kitty/Ghostty auto-advance and overshoot by 1 row (corrected with CUU), Wezterm doesn't auto-advance (explicit CUD + CR applied).
 - Usually does not append a trailing newline; it may append one line feed when bottom-of-screen scroll compensation is needed.
 
 ### iTerm2 specifics
 
-- Forces iTerm path when `TERM_PROGRAM=iTerm.app`, even if Kitty is advertised.
+- iTerm2 gets this format even if Kitty is advertised; only `BISCUIT_GRAPHICS=kitty` sends Kitty to iTerm2.
 - Uses `inline=1;preserveAspectRatio=1;width=<user spec>;size=auto`.
-- `render_to_terminal()` sends the original image without pre-resizing, letting iTerm2 handle scaling natively for better accuracy. Corrects auto-advance overshoot with CUU(1).
+- `render_with_route()` sends the original image without pre-resizing, letting iTerm2 handle scaling natively for better accuracy. Corrects auto-advance overshoot with CUU(1).
 
 ### Inline layout notes (TwoColumn)
 
@@ -162,7 +176,7 @@ assert!(options.is_size_allowed(1_024));
 
 ### Image rendering architecture
 
-All image rendering is string-based: `render()`, `render_optimistic()`, and `render_to_terminal()` return escape sequences as strings. `render_to_terminal()` applies terminal-aware cursor management by saving/restoring cursor position, explicitly advancing rows by computed image height, and normalizing to column 0 with a trailing `\r`. It usually avoids trailing newlines, but may append one line feed when bottom-of-screen scroll compensation is needed. The Kitty graphics protocol is bidirectional — terminals respond with `\x1b_Gi=<id>;OK\x1b\\` after receiving image data. To prevent this response from appearing as garbage text, all Kitty sequences include `q=2` (quiet mode) which suppresses terminal responses entirely.
+All image rendering is string-based: `render()`, `render_optimistic()`, and `render_with_route()` return escape sequences as strings (or, from `render_with_route()`, the alt-text fallback). The pixel path applies terminal-aware cursor management by saving/restoring cursor position, explicitly advancing rows by computed image height, and normalizing to column 0 with a trailing `\r`. It usually avoids trailing newlines, but may append one line feed when bottom-of-screen scroll compensation is needed. The Kitty graphics protocol is bidirectional — terminals respond with `\x1b_Gi=<id>;OK\x1b\\` after receiving image data. To prevent this response from appearing as garbage text, all Kitty sequences include `q=2` (quiet mode) which suppresses terminal responses entirely.
 
 ### Gotchas and notes
 
@@ -172,7 +186,7 @@ All image rendering is string-based: `render()`, `render_optimistic()`, and `ren
 
 ### Display Notes
 
-**Aspect Ratio Preservation**: `render_to_terminal()` preserves aspect ratio using terminal-aware rendering:
+**Aspect Ratio Preservation**: `render_with_route()` preserves aspect ratio using terminal-aware rendering:
 
 - **Kitty/Ghostty**: Specifies only `c=` (columns), letting the terminal calculate rows from the image's native aspect ratio.
 - **Wezterm**: Specifies both `c=` and `r=` (columns and rows) since Wezterm requires explicit row count for correct proportions. Height is calculated from `cell_size()` (falls back to 8×16 px).
@@ -197,9 +211,9 @@ let term_image = TerminalImage::new(&png_path)?
 let term_image = TerminalImage::new(&png_path)?
     .with_width(ImageWidth::Fill);  // Full terminal width
 
-// Render to terminal
+// Render for the terminal's graphics route (pixels, or the alt text)
 let terminal = Terminal::new();
-term_image.render_to_terminal(&terminal)?;
+print!("{}", term_image.render_with_route(&terminal)?.into_text());
 ```
 
 ### Width Specification Parsing
@@ -243,11 +257,11 @@ The library detects these terminal emulators:
 | Konsole | Kitty | Yes | Yes |
 | Foot | None | Yes | Yes |
 | Contour | None | Yes | Yes |
-| VS Code | Kitty* | Yes | Yes |
+| VS Code | None* | Yes | Yes |
 | Warp | Kitty | Yes | Yes |
 | Wast | Kitty | No | No |
 
-\* Requires `terminal.integrated.enableImages` and GPU acceleration enabled in VS Code settings.
+\* The graphics route does not identify VS Code (`TERM_PROGRAM=vscode`); with `terminal.integrated.enableImages` on, `BISCUIT_GRAPHICS=iterm2` can force a format it renders.
 
 ## OS Detection
 

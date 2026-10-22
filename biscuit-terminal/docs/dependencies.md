@@ -64,11 +64,15 @@
 
     _Tags: image, graphics_
 
-- [viuer](https://github.com/atanunq/viuer) _v0.11_
+- [icy_sixel](https://github.com/mkrueger/icy_sixel) _v0.7_
 
-    _Terminal image viewer supporting Kitty and iTerm2 graphics protocols._
+    _Sixel encoder for the Sixel graphics route. Its own quantizer
+    (`quantette`, Wu's method) builds the bounded 256-color palette;
+    `TerminalImage` turns dithering off so the output is deterministic. No
+    cargo feature: Sixel is one of the route's formats, like Kitty and
+    iTerm2. About 82 KB of a stripped release binary._
 
-    _Tags: terminal, images, graphics_
+    _Tags: image, graphics, sixel_
 
 ### Logging & Tracing
 

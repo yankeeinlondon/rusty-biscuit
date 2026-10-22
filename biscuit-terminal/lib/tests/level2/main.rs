@@ -7,4 +7,10 @@
 //! not declared below never compiles; `test_layout.rs` rejects one.
 
 #[cfg(unix)]
+mod level2_graphics_probe_wezterm;
+#[cfg(unix)]
+mod level2_graphics_tmux;
+#[cfg(unix)]
 mod level2_terminal_osc_wezterm;
+#[cfg(windows)]
+mod level2_windows_console_query;

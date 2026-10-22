@@ -142,6 +142,21 @@ impl Inventory {
     }
 }
 
+/// A fingerprint bound to both views of a resumed checkout: `raw`, the
+/// [`Inventory::fingerprint`] of everything `git status` lists, and the
+/// dirty paths taken out of consent. Equal digests mean equal raw state and
+/// equal exclusions.
+pub(crate) fn bind_excluded(raw: &str, excluded: &[PathBuf]) -> String {
+    let mut excluded: Vec<&PathBuf> = excluded.iter().collect();
+    excluded.sort_by(|a, b| a.as_os_str().as_encoded_bytes().cmp(b.as_os_str().as_encoded_bytes()));
+    let mut record = Record::default();
+    record.field(b"raw").field(raw.as_bytes());
+    for path in excluded {
+        record.field(b"excluded").field(path.as_os_str().as_encoded_bytes());
+    }
+    record.digest()
+}
+
 /// Collects the inventory of the worktree at `worktree`, running git from
 /// `base` (see [`crate::git::git_from`]).
 ///

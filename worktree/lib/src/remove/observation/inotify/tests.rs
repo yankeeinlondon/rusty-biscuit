@@ -42,7 +42,7 @@ fn feed(adapter: &mut Inotify, targets: &Targets, root: Root, path: &str, mask: 
 fn feed_id(adapter: &mut Inotify, targets: &Targets, id: i32, mask: EventMask, name: Option<&str>) -> Drain {
     let mut sink = Sink { targets, capacity: usize::MAX, events: Vec::new(), lost: None };
     adapter.translate(id, mask, name.map(OsStr::new), SystemTime::now(), &mut sink);
-    Drain { events: sink.events, lost: sink.lost }
+    Drain { events: sink.events, lost: sink.lost, interrupted: false }
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn an_ignored_watch_is_loss_unless_its_directory_was_deleted_or_released() {
     let fixture = new_fixture();
     let mut adapter = Inotify::start(&fixture.targets, fixture.targets.original()).unwrap();
     let id = adapter.watches.iter().find(|(_, watch)| watch.root == Root::Admin).map(|(id, _)| *id).unwrap();
-    adapter.release_admin();
+    adapter.release_admin(&|| false);
     for mask in [EventMask::MODIFY, EventMask::DELETE_SELF, EventMask::IGNORED] {
         let drain = feed_id(&mut adapter, &fixture.targets, id, mask, Some("index"));
         assert_eq!((drain.lost, drain.events.len()), (None, 0), "{mask:?}");
@@ -143,12 +143,12 @@ fn the_kernel_queue_overflowing_between_drains_is_coverage_loss() {
         return;
     }
     let fixture = new_fixture();
-    let mut observation = Observation::start(fixture.targets.clone(), ObserverOptions { queue_capacity: usize::MAX }).unwrap();
+    let mut observation = Observation::start(fixture.targets.clone(), ObserverOptions { queue_capacity: usize::MAX, ..ObserverOptions::default() }, &|| false).unwrap();
     // Each file queues IN_CREATE, IN_MODIFY, and IN_CLOSE_WRITE.
     for index in 0..limit / 3 + 100 {
         fs::write(fixture.checkout.join(format!("f{index}")), b"x").unwrap();
     }
-    assert_eq!(observation.drain().lost, Some(CoverageLost::Overflow));
+    assert_eq!(observation.drain(&|| false).lost, Some(CoverageLost::Overflow));
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn the_instance_limit_is_a_setup_failure() {
             Err(error) => break error,
         }
     };
-    let result = Observation::start(fixture.targets.clone(), ObserverOptions::default());
+    let result = Observation::start(fixture.targets.clone(), ObserverOptions::default(), &|| false);
     drop(held);
     assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &original) }, 0);
 
@@ -190,8 +190,8 @@ fn thread_count() -> usize {
 fn sniff_sees_the_watches_until_the_session_ends() {
     let fixture = new_fixture();
     let threads = thread_count();
-    let mut observation = Observation::start(fixture.targets.clone(), ObserverOptions::default()).unwrap();
-    let _ = observation.drain();
+    let mut observation = Observation::start(fixture.targets.clone(), ObserverOptions::default(), &|| false).unwrap();
+    let _ = observation.drain(&|| false);
     assert_eq!(thread_count(), threads, "the adapter starts no thread");
 
     match check_usage(&SniffUsage, &fixture.checkout, &OwnedHandles::default()) {

@@ -9,10 +9,10 @@ use std::io::{BufRead, BufReader, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use super::*;
-use crate::remove::observation::injected::Injector;
+use crate::remove::observation::injected::{Injector, Scripted};
 use crate::remove::observation::{ObserverOptions, Root, Targets};
 use crate::remove::quarantine::rename::rename_no_replace;
 use crate::remove::recovery::OperationId;
@@ -106,9 +106,20 @@ impl Fixture {
         (observation, injector)
     }
 
+    /// [`Fixture::injected`] whose drains wait for a marker on a virtual
+    /// clock; the move's labeling and the first drain are confirmed at once,
+    /// later drains only as the test scripts.
+    fn confirming(&self) -> (Observation, Injector) {
+        let (mut observation, injector) = Observation::injected_confirming(self.targets(), ObserverOptions::default());
+        injector.at(Duration::ZERO, Scripted::Acknowledge);
+        self.move_to_quarantine(&mut observation);
+        injector.at(Duration::ZERO, Scripted::Acknowledge);
+        (observation, injector)
+    }
+
     fn move_to_quarantine(&self, observation: &mut Observation) {
         rename_no_replace(&self.original, &self.quarantine).unwrap();
-        observation.moved_to_quarantine();
+        observation.moved_to_quarantine(&|| false);
     }
 
     fn journal(&self, sink: Memory) -> JournalWriter<Memory> {
@@ -219,6 +230,54 @@ fn drains_follow_depth_levels_and_the_bound_not_entries() {
     // `.git`), two at the 250-entry bound inside level 2, and one after the
     // quarantine itself is removed; never one per entry or per batch.
     assert_eq!(injector.drains(), 1 + 6 + 2 + 1, "drains");
+}
+
+/// `.git` and 600 files in one directory: batches of 256, 256, and 88.
+fn flat_600(checkout: &Path, _outside: &Path) {
+    fs::write(checkout.join(".git"), b"gitdir: x\n").unwrap();
+    let flat = checkout.join("flat");
+    fs::create_dir(&flat).unwrap();
+    for n in 0..600 {
+        fs::write(flat.join(format!("{n:03}.o")), b"").unwrap();
+    }
+}
+
+/// Deletes `fixture` until the first drain after the engine's starting one,
+/// which stalls; returns the loss the observer recorded and the deletion.
+fn stall_at_the_second_drain(fixture: &Fixture, options: DeletionOptions) -> (crate::remove::observation::ObservationLoss, Deletion) {
+    let (mut observation, _injector) = fixture.confirming();
+    let (deletion, _log) = run(fixture, &mut observation, options, &mut |_| {});
+    assert!(matches!(deletion.stop, Some(Stop::CoverageLost(CoverageLost::DeliveryStalled { .. }))), "{:?}", deletion.stop);
+    (observation.diagnostics().loss.expect("the stall is recorded"), deletion)
+}
+
+/// The default interval is 2,048 entries on every platform; the loss a
+/// drain receives during deletion carries the entries processed since the
+/// previous drain.
+#[test]
+fn the_default_drain_interval_is_2048_on_every_platform() {
+    let fixture = Fixture::with(flat_600);
+
+    let (loss, deletion) = stall_at_the_second_drain(&fixture, DeletionOptions::default());
+
+    assert_eq!(DEFAULT_DRAIN_EVERY, 2048);
+    assert_eq!(loss.stage, crate::remove::observation::ObservationStage::Deletion);
+    // 600 entries never reach the interval, so only the level's end drains.
+    assert_eq!(loss.entries_since_drain, Some(600));
+    assert_eq!(deletion.deleted.len(), 600, "nothing is deleted past the stalled drain");
+}
+
+/// The interval is checked after each whole batch, so a drain comes at most
+/// one batch minus one entry after it.
+#[test]
+fn a_drain_overshoots_its_interval_by_at_most_one_batch_minus_one_entry() {
+    let fixture = Fixture::with(flat_600);
+    let drain_every = 257;
+
+    let (loss, _deletion) = stall_at_the_second_drain(&fixture, DeletionOptions { drain_every, ..DeletionOptions::default() });
+
+    // 256 is one short; the drain waits for the second batch, at 512.
+    assert_eq!(loss.entries_since_drain, Some((drain_every + MAX_BATCH_ENTRIES - 1) as u64));
 }
 
 #[test]
@@ -471,6 +530,42 @@ fn an_interrupt_stops_at_the_next_entry_boundary() {
     assert!(fixture.q("target/debug/deps/b.o").is_file());
 }
 
+/// The interrupt ends a drain's wait for delivery at once, not at the stall
+/// limit, and nothing after that drain is deleted.
+#[test]
+fn an_interrupt_ends_a_drain_wait_and_nothing_more_is_deleted() {
+    let fixture = Fixture::new();
+    let (mut observation, injector) = fixture.confirming();
+    injector.at(Duration::from_secs(5), Scripted::Interrupt);
+    let sink = Memory::default();
+    let mut writer = fixture.journal(sink.clone());
+
+    let deletion = delete_content(&mut observation, &mut writer, &|| injector.interrupted(), DeletionOptions::default());
+
+    assert!(matches!(deletion.stop, Some(Stop::Interrupted)), "{:?}", deletion.stop);
+    assert!(!deletion.deleted.is_empty(), "the first level was deleted before the drain that waited");
+    assert!(injector.elapsed() < Duration::from_secs(6), "ended at the interrupt, not a limit: {:?}", injector.elapsed());
+    assert!(fixture.q("README.md").is_file() && fixture.q(".git").is_file(), "later levels are kept");
+}
+
+/// A drain whose delivery stalls is lost coverage: deletion stops there and
+/// keeps everything not yet deleted.
+#[test]
+fn a_stalled_drain_stops_deletion_as_lost_coverage() {
+    let fixture = Fixture::new();
+    let (mut observation, injector) = fixture.confirming();
+
+    let (deletion, _log) = run(&fixture, &mut observation, DeletionOptions::default(), &mut |_| {});
+
+    match &deletion.stop {
+        Some(Stop::CoverageLost(CoverageLost::DeliveryStalled { waited, watch: None })) => assert_eq!(*waited, Duration::from_secs(30)),
+        other => panic!("expected a stall, got {other:?}"),
+    }
+    assert_eq!(deletion.stop.as_ref().unwrap().outcome(), RemovalOutcome::StateUnverified);
+    assert_eq!(injector.elapsed(), Duration::from_secs(30));
+    assert!(fixture.q("README.md").is_file() && fixture.q(".git").is_file(), "remaining content is preserved");
+}
+
 #[test]
 fn a_journal_that_cannot_record_an_intent_stops_before_its_batch() {
     let fixture = Fixture::new();
@@ -561,7 +656,7 @@ impl Drop for Writer {
 }
 
 fn native(fixture: &Fixture, options: ObserverOptions) -> Observation {
-    let mut observation = Observation::start(fixture.targets(), options).expect("observation starts");
+    let mut observation = Observation::start(fixture.targets(), options, &|| false).expect("observation starts");
     fixture.move_to_quarantine(&mut observation);
     observation
 }
@@ -639,7 +734,7 @@ fn native_a_full_queue_stops_with_lost_coverage() {
             fs::write(checkout.join("flat").join(n.to_string()), b"").unwrap();
         }
     });
-    let mut observation = native(&fixture, ObserverOptions { queue_capacity: 8 });
+    let mut observation = native(&fixture, ObserverOptions { queue_capacity: 8, ..ObserverOptions::default() });
     let options = DeletionOptions { drain_every: usize::MAX, ..DeletionOptions::default() };
     let (deletion, _log) = run(&fixture, &mut observation, options, &mut |_| {});
     assert!(matches!(deletion.stop, Some(Stop::CoverageLost(CoverageLost::QueueFull { capacity: 8 }))), "{:?}", deletion.stop);

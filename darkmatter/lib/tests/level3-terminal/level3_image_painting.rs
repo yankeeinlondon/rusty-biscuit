@@ -128,7 +128,7 @@ fn level3_rich_image_node_paints_distinctive_pixels() {
 
     // Rich tier on an iTerm2-capable TTY (WezTerm renders iTerm2 graphics).
     let mut term = Terminal::new_optimistic(120);
-    term.image_support = ImageSupport::ITerm;
+    term.graphics_route = ImageSupport::ITerm.into();
     term.is_tty = true;
     let mut context = TerminalRenderContext::from_terminal(&term);
     context.graphics_mode = GraphicsMode::Rich;

@@ -1299,7 +1299,7 @@ pub(crate) fn interpolate_pieces(
 }
 
 /// Normalize a path to absolute without following symlinks.
-fn normalize_absolute(path: &Path, cwd: &Path) -> PathBuf {
+pub(crate) fn normalize_absolute(path: &Path, cwd: &Path) -> PathBuf {
     if path.is_absolute() {
         normalize_components(path)
     } else {

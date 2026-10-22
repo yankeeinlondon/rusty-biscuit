@@ -27,7 +27,7 @@ pub enum ImagePlaceholder {
     Block,
 }
 
-use crate::discovery::detection::{ColorDepth, ColorMode, ImageSupport};
+use crate::discovery::detection::{ColorDepth, ColorMode};
 use crate::terminal::Terminal;
 use crate::utils::layout::Layout;
 
@@ -75,8 +75,6 @@ pub struct TerminalRenderContext {
     pub inline_code_background: Option<(u8, u8, u8)>,
     /// Whether the terminal renders OSC8 hyperlinks.
     pub hyperlinks: bool,
-    /// The terminal image-protocol support level.
-    pub image_support: ImageSupport,
     /// Whether the terminal renders Unicode glyphs correctly.
     pub supports_unicode: bool,
     /// The base layout applied to block-level output.
@@ -168,7 +166,7 @@ pub struct TerminalRenderContext {
 impl TerminalRenderContext {
     /// Builds a context from an already-detected [`Terminal`].
     ///
-    /// Width, color depth, hyperlink support, image support, and Unicode
+    /// Width, color depth, hyperlink support, and Unicode
     /// support are copied from the terminal; the layout defaults to
     /// [`Layout::default`]. The `available_width` is initialized to the
     /// terminal width and `current_indent` to 0.
@@ -184,7 +182,6 @@ impl TerminalRenderContext {
             inline_code_color: None,
             inline_code_background: None,
             hyperlinks: term.osc_link_support,
-            image_support: term.image_support.clone(),
             supports_unicode: term.supports_unicode,
             layout: Layout::default(),
             terminal: Terminal::from(term),

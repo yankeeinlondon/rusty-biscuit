@@ -1,6 +1,6 @@
 # GraphExpression
 
-Renders graph diagrams inline in the terminal as raster images. Parses graph expressions (e.g., `a -> b -> c`) using multiple input syntaxes, lays them out with this crate's graph renderer, and displays them through `biscuit-terminal`'s `TerminalImage` using the terminal's image protocol.
+Renders graph diagrams inline in the terminal as raster images. Parses graph expressions (e.g., `a -> b -> c`) using multiple input syntaxes, lays them out with this crate's graph renderer, and displays them through `biscuit-terminal`'s `TerminalImage` using the terminal's image protocol (Kitty, iTerm2, or Sixel).
 
 Requires the `terminal` feature; import it from `biscuit_visualized::components`.
 
@@ -41,8 +41,19 @@ let graph = GraphExpression::for_terminal("a -> b\nb -> c", GraphInputSyntax::Au
 | `GraphExpression::inverted_for_terminal(source, syntax)` | Use the opposite terminal theme with an opaque surface |
 | `.with_orientation(GraphOrientation)` | Set layout direction (LR, TB, etc.) |
 | `.with_title(str)` | Add a diagram title |
+| `.with_background(Background)` | What paints behind the graph (`Theme`, `Transparent`, or `Solid { r, g, b }`) |
 | `.try_render(&Terminal)` | Fallible render returning `GraphRenderResult` |
 | `.left_margin(Margin)` | Set left margin |
+
+### Background
+
+`for_terminal` draws with `Background::Transparent`, so Kitty and iTerm2 composite the graph over the terminal's own background. `parse`, `inverted_for_terminal`, and `inverted(..)` use `Background::Theme`, the theme's opaque surface color. `with_background` overrides either (import `Background` from `biscuit_visualized::artifact`); `with_transparent_background(bool)` remains as a shorthand where `false` means `Theme`.
+
+On a Sixel route a `Transparent` graph is rasterized on `Background::Solid` with the terminal's measured background (an OSC 11 reply). Without a measurement it stays transparent: the Sixel encoder leaves its transparent pixels unset and blends only antialiased edges onto the estimated background, so no box is painted. An explicitly requested `Theme` or `Solid` background is kept. The artifact cache keys on the background, so a Sixel raster and a Kitty raster of the same graph are separate cache entries.
+
+### Display Size
+
+The graph is rasterized once, at its final display size. The width (for example the default `ImageWidth::Percent(0.5)`) resolves once to columns, with the layout's margins taken into account, and the PNG is that many columns times the measured cell width in pixels, or the 8x16 fallback cell when the terminal reports none. Its height is padded with blank rows below the drawing up to a whole number of cell rows. The image is then displayed at exactly those resolved columns; the width is not resolved a second time against the full terminal width. Those PNG bytes reach Kitty and iTerm2 unchanged (a Sixel route decodes and re-encodes them), so the terminal shows the raster 1:1 in exactly the columns and rows it reserves. The size is measured on every render, so after a terminal or font resize the next render produces a new raster. See [DOT graph rendering](../dot-graph.md#resolution-tuning-for-terminal-display) for the rasterizer side.
 
 ### Input Syntaxes
 

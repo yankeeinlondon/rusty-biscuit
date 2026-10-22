@@ -7,6 +7,11 @@
 
 ## Recent Dependency Notes
 
+- `biscuit-terminal` adds `icy_sixel` 0.7 (2026-10-21) as a normal
+  dependency, with no cargo feature, for the Sixel graphics route. It brings
+  `quantette` (with `kmeans`) and `palette` into the lockfile, plus second
+  copies of `rand` (0.10), `rand_core` (0.10), and `syn` (3.0) next to the
+  versions already in the graph.
 - The diagram dependency direction flips (2026-10-21): `biscuit-terminal`
   drops `biscuit-visualized`, and its `image` feature now gates only `resvg`
   (SVG images and graphical rules). `biscuit-visualized` gains an optional
@@ -556,7 +561,7 @@ This is a Rust workspace with the following modules:
 
 - [biscuit-terminal](./biscuit-terminal) _v0.1.0_
 
-    _Terminal detection, image rendering (viuer), mermaid diagrams, and capability queries._
+    _Terminal detection, image rendering, mermaid diagrams, and capability queries._
 
     _Tags: workspace, library, terminal_
 
@@ -1106,12 +1111,6 @@ This is a Rust workspace with the following modules:
     _Imaging library providing basic image processing and native Rust encoders/decoders for common formats._
 
     _Tags: image, processing, encoding_
-
-- [viuer](https://github.com/atanunq/viuer) _v0.11_ [📄](https://docs.rs/viuer)
-
-    _Display images in the terminal using iTerm, Kitty graphics protocols, or lower half blocks._
-
-    _Tags: terminal, image, rendering_
 
 ### Internationalization
 

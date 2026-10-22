@@ -1,5 +1,5 @@
 use crate::{
-    artifact::{OutputFormat, RenderRequest},
+    artifact::{Background, OutputFormat, RenderRequest},
     graph::{
         EdgeKind, GraphBuilder, GraphColorTheme, GraphDiagram, GraphExpression, GraphInputSyntax,
         GraphOrientation,
@@ -198,7 +198,8 @@ fn graph_diagram_render_produces_file() {
         format: OutputFormat::Svg,
         scale: 1,
         target_width: None,
-        transparent_background: false,
+        row_height: None,
+        background: Background::Theme,
     };
 
     let result = graph.render(&request);
@@ -218,7 +219,8 @@ fn graph_diagram_render_cache_hit_on_second_call() {
         format: OutputFormat::Svg,
         scale: 1,
         target_width: None,
-        transparent_background: false,
+        row_height: None,
+        background: Background::Theme,
     };
 
     // First render
@@ -294,7 +296,8 @@ fn graph_render_cache_separates_scale() {
             format: OutputFormat::Png,
             scale: 1,
             target_width: None,
-            transparent_background: false,
+            row_height: None,
+            background: Background::Theme,
         })
         .unwrap();
     let large = graph
@@ -302,7 +305,8 @@ fn graph_render_cache_separates_scale() {
             format: OutputFormat::Png,
             scale: 3,
             target_width: None,
-            transparent_background: false,
+            row_height: None,
+            background: Background::Theme,
         })
         .unwrap();
 
@@ -320,7 +324,8 @@ fn graph_render_cache_separates_transparency() {
             format: OutputFormat::Svg,
             scale: 1,
             target_width: None,
-            transparent_background: false,
+            row_height: None,
+            background: Background::Theme,
         })
         .unwrap();
     let transparent = graph
@@ -328,7 +333,8 @@ fn graph_render_cache_separates_transparency() {
             format: OutputFormat::Svg,
             scale: 1,
             target_width: None,
-            transparent_background: true,
+            row_height: None,
+            background: Background::Transparent,
         })
         .unwrap();
 
@@ -352,7 +358,8 @@ fn graph_render_opaque_background_uses_theme_surface_color() {
             format: OutputFormat::Svg,
             scale: 1,
             target_width: None,
-            transparent_background: false,
+            row_height: None,
+            background: Background::Theme,
         })
         .unwrap();
     let dark = GraphDiagram::from_expression("a -> b")
@@ -362,7 +369,8 @@ fn graph_render_opaque_background_uses_theme_surface_color() {
             format: OutputFormat::Svg,
             scale: 1,
             target_width: None,
-            transparent_background: false,
+            row_height: None,
+            background: Background::Theme,
         })
         .unwrap();
 
@@ -371,4 +379,51 @@ fn graph_render_opaque_background_uses_theme_surface_color() {
 
     assert!(light_svg.contains("fill=\"#f8fafc\""));
     assert!(dark_svg.contains("fill=\"#020617\""));
+}
+
+/// A solid background replaces the theme's surface in the SVG, and every
+/// background and geometry is its own artifact in both formats.
+#[test]
+#[serial]
+fn graph_render_separates_backgrounds_and_geometry() {
+    let _cache_dir = isolated_cache_dir();
+
+    let graph = GraphDiagram::from_expression("a -> b")
+        .unwrap()
+        .with_color_theme(GraphColorTheme::light());
+    let svg = |background| {
+        let artifact = graph
+            .render(&RenderRequest {
+                format: OutputFormat::Svg,
+                background,
+                ..RenderRequest::default()
+            })
+            .unwrap();
+        std::fs::read_to_string(artifact.path).unwrap()
+    };
+    let solid = svg(Background::Solid { r: 0x12, g: 0x34, b: 0x56 });
+    assert!(solid.contains(r##"<rect width="100%" height="100%" fill="#123456"/>"##), "{solid}");
+    assert!(!solid.contains("#f8fafc"), "{solid}");
+    assert!(svg(Background::Theme).contains(r##"fill="#f8fafc""##));
+
+    let png = RenderRequest::default().with_target_width(160);
+    let requests = [
+        png.clone(),
+        png.clone().with_background(Background::Transparent),
+        png.clone().with_background(Background::Solid { r: 0x12, g: 0x34, b: 0x56 }),
+        png.clone().with_background(Background::Solid { r: 0x65, g: 0x43, b: 0x21 }),
+        png.clone().with_row_height(16),
+        png.clone().with_target_width(161),
+    ];
+    let artifacts: Vec<_> = requests.iter().map(|request| graph.render(request).unwrap()).collect();
+    for (i, a) in artifacts.iter().enumerate() {
+        assert!(!a.cache_hit);
+        for b in &artifacts[i + 1..] {
+            assert_ne!(a.path, b.path);
+        }
+    }
+    // The control: the same request again is the same artifact.
+    let again = graph.render(&png).unwrap();
+    assert!(again.cache_hit);
+    assert_eq!(again.path, artifacts[0].path);
 }

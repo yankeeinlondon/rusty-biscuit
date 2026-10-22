@@ -101,7 +101,7 @@ bt image "photo.jpg|fill"    # Fill available width
 Protocol selection:
 - **Kitty**: Kitty, WezTerm, Ghostty, Konsole, Warp
 - **iTerm2**: iTerm2 (forced even if Kitty advertised)
-- **Fallback**: Alt text for unsupported terminals
+- **Fallback**: half-blocks on a truecolor, Unicode terminal, else alt text (always alt text when piped)
 
 ## Diagram Commands
 
@@ -393,10 +393,17 @@ bt --completions zsh > ~/.zfunc/_bt
   "ligatures_likely": true,
   "color_depth": "TrueColor",
   "color_mode": "Dark",
-  "bg_color": { "r": 30, "g": 30, "b": 46, "hex": "#1e1e2e" },
-  "text_color": { "r": 205, "g": 214, "b": 244, "hex": "#cdd6f4" },
+  "bg_color": { "r": 30, "g": 30, "b": 46, "hex": "#1e1e2e", "source": "measured" },
+  "text_color": { "r": 205, "g": 214, "b": 244, "hex": "#cdd6f4", "source": "measured" },
   "supports_italic": true,
   "image_support": "Kitty",
+  "graphics_route": {
+    "format": "Kitty", "transport": "Direct", "placement": "Ordinary",
+    "confidence": "Known",
+    "reason": { "kind": "Supported", "message": "WezTerm (TERM_PROGRAM=WezTerm) is known to render the Kitty graphics protocol", "fix": null },
+    "needs_measured_cells": false,
+    "needs_cursor_resync": false
+  },
   "underline_support": {
     "straight": true,
     "double": true,
@@ -425,8 +432,11 @@ bt --completions zsh > ~/.zfunc/_bt
 ### Terminal Debugging
 
 ```bash
-# Check why images aren't working
-bt --json | jq '{app, image_support, is_tty}'
+# Check why images aren't working (the route carries the reason)
+bt --json | jq '{app, image_support, is_tty, reason: .graphics_route.reason}'
+# Piped stdout always reports NotATerminal; run `bt` without --json in the
+# terminal to see the route there. `bt` prints a one-line stderr hint when a
+# route's reason has a fix (stderr must be a terminal; once per reason).
 
 # Verify color support
 bt --json | jq '{color_depth, color_mode}'

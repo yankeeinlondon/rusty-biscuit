@@ -13,6 +13,9 @@ mod layout_matrix_support;
 
 mod compose_parity;
 mod filesystem_parity;
+mod graphics_probe_matrix;
+mod graphics_route_matrix;
+mod graphics_tmux_matrix;
 #[cfg(feature = "image")]
 mod horizontal_rule_parity;
 mod html_page_example;
@@ -23,6 +26,7 @@ mod level1_apple_terminal_prose;
 mod level1_clipboard;
 #[cfg(unix)]
 mod level1_cursor;
+mod level1_graphics_probe;
 mod level1_mode_2027;
 #[cfg(unix)]
 mod level1_osc_queries;

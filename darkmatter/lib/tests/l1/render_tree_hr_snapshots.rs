@@ -92,7 +92,7 @@ fn browser_options() -> BrowserRenderOptions {
 /// fixtures carry no code blocks.
 fn terminal_options() -> TerminalRenderOptions {
     let mut term = Terminal::new_optimistic(80);
-    term.image_support = ImageSupport::None;
+    term.graphics_route = ImageSupport::None.into();
     TerminalRenderOptions {
         context: TerminalRenderContext::from_terminal(&term),
         strictness: RenderStrictness::Warn,

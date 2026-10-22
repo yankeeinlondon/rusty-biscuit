@@ -329,3 +329,25 @@ fn cache_key_different_mermaid_backend() {
     assert_ne!(key(MERMAID_BACKEND), key("mermaid-rs-renderer@0.2.x+bv1"));
 }
 
+
+/// `store` renames a staged file into place: storing a key again replaces
+/// the artifact and leaves nothing else behind.
+#[test]
+fn storing_a_key_again_replaces_the_artifact_without_leftovers() {
+    let (cache, _dir) = isolated_cache();
+
+    let first = cache
+        .store(VisualizationKind::Graph, "key", OutputFormat::Png, b"first")
+        .unwrap();
+    let second = cache
+        .store(VisualizationKind::Graph, "key", OutputFormat::Png, b"second")
+        .unwrap();
+
+    assert_eq!(first, second);
+    assert_eq!(std::fs::read(&second).unwrap(), b"second");
+    let entries: Vec<_> = std::fs::read_dir(cache.cache_dir(VisualizationKind::Graph, OutputFormat::Png))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(entries, [std::ffi::OsString::from("key.png")]);
+}

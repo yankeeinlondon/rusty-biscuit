@@ -123,6 +123,7 @@ pub fn handle_mermaid_error(
             // Graceful degradation: output the diagram as a fenced code block
             // so piped/non-TTY consumers still get useful output.
             println!("```mermaid\n{}\n```", instructions);
+            crate::hints::emit_terminal_route_hint(term);
             Ok(())
         }
         MermaidRenderError::Visualization(ref viz_err) => {

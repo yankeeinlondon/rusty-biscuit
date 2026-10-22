@@ -39,6 +39,6 @@ pub use corpus::{CorpusTier, generate_corpus};
 pub use diagnostics::{DiagnosticsScheduler, DiagnosticTier};
 pub use overlay::{DocumentOverlay, OverlayState};
 pub use providers::{DocumentContext, Provider, ProviderRegistry};
-pub use registry_jobs::RegistryJobKind;
+pub use registry_jobs::{RegistryJobKind, StartupPhase};
 pub use router::{RunOptions, ServerError, StartupEvent, StartupHooks, run_server};
 pub use source_map::{PositionEncoding, Region, SourceMap};

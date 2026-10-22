@@ -68,10 +68,10 @@ pub mod types;
 pub use parse::parse_osc_color_response;
 pub use query::query_osc_actual;
 pub use support::{osc10_support, osc11_support, osc12_support};
-pub use types::{DEFAULT_TIMEOUT, OscQueryError, RgbValue};
+pub use types::{ColorSource, DEFAULT_TIMEOUT, OscQueryError, RgbValue};
 
-static BG_COLOR_CACHE: OnceLock<Option<RgbValue>> = OnceLock::new();
-static TEXT_COLOR_CACHE: OnceLock<Option<RgbValue>> = OnceLock::new();
+static BG_COLOR_CACHE: OnceLock<Option<(RgbValue, ColorSource)>> = OnceLock::new();
+static TEXT_COLOR_CACHE: OnceLock<Option<(RgbValue, ColorSource)>> = OnceLock::new();
 
 /// Query background color via OSC 11 heuristics.
 ///
@@ -92,6 +92,15 @@ static TEXT_COLOR_CACHE: OnceLock<Option<RgbValue>> = OnceLock::new();
 /// }
 /// ```
 pub fn bg_color() -> Option<RgbValue> {
+    bg_color_with_source().map(|(color, _)| color)
+}
+
+/// [`bg_color`] and whether the terminal reported it or it was estimated.
+///
+/// Only a reply to the live OSC 11 query is [`ColorSource::Measured`]; under a
+/// multiplexer, in CI, or for a terminal that is not queried, the color is a
+/// `COLORFGBG` or per-app estimate.
+pub fn bg_color_with_source() -> Option<(RgbValue, ColorSource)> {
     *BG_COLOR_CACHE.get_or_init(|| query::query_osc_color(11))
 }
 
@@ -102,6 +111,12 @@ pub fn bg_color() -> Option<RgbValue> {
 /// constructions cost the terminal a single exchange. The explicit
 /// [`text_color_with_timeout`] path stays uncached.
 pub fn text_color() -> Option<RgbValue> {
+    text_color_with_source().map(|(color, _)| color)
+}
+
+/// [`text_color`] and whether the terminal reported it (OSC 10) or it was
+/// estimated.
+pub fn text_color_with_source() -> Option<(RgbValue, ColorSource)> {
     *TEXT_COLOR_CACHE.get_or_init(|| query::query_osc_color(10))
 }
 
@@ -109,6 +124,12 @@ pub fn text_color() -> Option<RgbValue> {
 ///
 /// Note: Cursor color often defaults to the same as foreground text color.
 pub fn cursor_color() -> Option<RgbValue> {
+    cursor_color_with_source().map(|(color, _)| color)
+}
+
+/// [`cursor_color`] and whether the terminal reported it (OSC 12) or it was
+/// estimated. Uncached: every call may query the terminal.
+pub fn cursor_color_with_source() -> Option<(RgbValue, ColorSource)> {
     query::query_osc_color(12)
 }
 

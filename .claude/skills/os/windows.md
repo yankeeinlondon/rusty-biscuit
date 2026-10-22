@@ -181,6 +181,12 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   (CRT `_wopen`, editors, scanners) blocks both with error 5, as does an open
   file inside a directory being renamed. Prefer `std::fs::rename` plus the
   bounded retry above.
+- **Don't mix `tempfile`'s `TempPath` with your own rename.** After
+  `std::fs::rename(&temp_path, dest)`, `TempPath::keep()` fails with os
+  error 2 on Windows only: it clears the temporary attribute on the old path,
+  which is gone. Stage under a unique name with plain `std::fs` instead; a
+  content-addressed store can treat a refused replace as success when the
+  destination already exists (`biscuit-visualized` `FileCache::store`).
 - **A named pipe's name briefly outlives its dropped server.** The kernel
   cancels the pending `ConnectNamedPipe` asynchronously, so a client opening
   the name just after shutdown can connect and then fail mid-RPC with

@@ -58,7 +58,7 @@ impl DiagramRenderer for RecordingDiagrams {
             source: request.source.to_string(),
             node_id: request.attrs.id.clone(),
             available_width: request.available_width,
-            image_support: request.terminal.image_support.clone(),
+            image_support: request.terminal.image_support(),
         });
         self.answer
             .map(str::to_string)

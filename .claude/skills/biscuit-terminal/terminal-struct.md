@@ -35,7 +35,7 @@ pub struct Terminal {
 
     // Feature support
     pub supports_italic: bool,
-    pub image_support: ImageSupport,      // None, Kitty, ITerm
+    pub graphics_route: GraphicsRoute,    // authoritative; image_support() projects it
     pub underline_support: UnderlineSupport,
     pub osc_link_support: bool,
     pub color_depth: ColorDepth,          // None, Minimal, Basic, Enhanced, TrueColor
@@ -90,9 +90,18 @@ let term = Terminal::builder()
 ```
 
 Available builder methods:
-- `app()`, `supports_italic()`, `image_support()`, `underline_support()`
+- `app()`, `supports_italic()`, `image_support()`, `graphics_route()`, `underline_support()`
 - `osc_link_support()`, `is_tty()`, `color_depth()`, `is_ci()`, `is_nerd_font()`
 - `width()`, `height()` (fixed dimensions), `tab_width()`
+- `probe(ProbeMode)`: `ProbeMode::Off` makes construction write nothing to the
+  terminal (colors from `COLORFGBG` / per-terminal defaults / system
+  appearance, route from the environment alone). Use it, or supply a route,
+  for any program with its own input loop; only the first construction in a
+  process probes, so build before the loop starts.
+
+A route supplied with `.graphics_route(..)` or `.image_support(..)` is never
+re-resolved and causes no graphics probe (colors are still queried unless
+`probe(ProbeMode::Off)`).
 
 ## Key Enums
 
@@ -122,10 +131,16 @@ pub enum TerminalApp {
 ```rust
 pub enum ImageSupport {
     None,
-    Kitty,  // Kitty Graphics Protocol (highest quality)
-    ITerm,  // iTerm2 inline images (legacy)
+    Kitty,  // Kitty graphics protocol
+    ITerm,  // iTerm2 OSC 1337 format
+    Sixel,  // DEC Sixel
 }
 ```
+
+`ImageSupport` is a projection of `Terminal::graphics_route`
+(`term.image_support()`); set a route with the builder's `.graphics_route(..)`,
+or `.image_support(..)` for a caller-supplied direct route. Assigning in
+tests: `term.graphics_route = ImageSupport::None.into();`.
 
 ### ColorDepth
 

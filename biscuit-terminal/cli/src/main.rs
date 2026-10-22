@@ -14,6 +14,7 @@ use biscuit_terminal::{
 
 pub mod args;
 pub mod commands;
+pub mod hints;
 pub mod output;
 pub mod types;
 

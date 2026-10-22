@@ -14,6 +14,13 @@
 //! part of a notification's figure; a request that waits for such work
 //! includes the wait, and records it as a [`Wait`].
 //!
+//! `trigger_registry_wait_ms` is the time a request spent parked on trigger
+//! registry jobs: queueing and preparation together, summed over every
+//! interval it was parked (a request requeued behind a stale job parks
+//! again). Each interval ends when the request resumes or is answered
+//! (cancellation, shutdown), so handler work and index waits between them
+//! are not part of it. The field is present only for a request that parked.
+//!
 //! ## Stage nesting
 //!
 //! Stage figures are elapsed times, not a breakdown of the total:
@@ -106,6 +113,16 @@ pub struct RequestTimings {
     waited_for_file_list: AtomicBool,
     waited_for_index: AtomicBool,
     waited_for_trigger_registry: AtomicBool,
+    registry_wait: Mutex<RegistryWait>,
+}
+
+/// The parked intervals of [`RequestTimings::begin_registry_wait`].
+#[derive(Default)]
+struct RegistryWait {
+    /// Closed intervals, summed.
+    total: Duration,
+    /// The start of the interval in progress.
+    parked_since: Option<Instant>,
 }
 
 impl RequestTimings {
@@ -119,6 +136,7 @@ impl RequestTimings {
             waited_for_file_list: AtomicBool::new(false),
             waited_for_index: AtomicBool::new(false),
             waited_for_trigger_registry: AtomicBool::new(false),
+            registry_wait: Mutex::new(RegistryWait::default()),
         }
     }
 
@@ -146,6 +164,39 @@ impl RequestTimings {
             Wait::TriggerRegistry => &self.waited_for_trigger_registry,
         };
         flag.store(true, Ordering::Relaxed);
+    }
+
+    /// Records [`Wait::TriggerRegistry`] and starts a parked interval, unless
+    /// one is already in progress.
+    pub fn begin_registry_wait(&self) {
+        self.record_wait(Wait::TriggerRegistry);
+        let mut wait = self.registry_wait.lock().expect("request timings poisoned");
+        if wait.parked_since.is_none() {
+            wait.parked_since = Some(self.clock.now());
+        }
+    }
+
+    /// Ends the parked interval in progress, if any, adding it to the total.
+    pub fn end_registry_wait(&self) {
+        let now = self.clock.now();
+        let mut wait = self.registry_wait.lock().expect("request timings poisoned");
+        if let Some(since) = wait.parked_since.take() {
+            wait.total += now.saturating_duration_since(since);
+        }
+    }
+
+    /// The summed parked time on trigger registry jobs, including an
+    /// interval still in progress, or `None` when the message never parked.
+    pub fn registry_wait(&self) -> Option<Duration> {
+        if !self.waited(Wait::TriggerRegistry) {
+            return None;
+        }
+        let wait = self.registry_wait.lock().expect("request timings poisoned");
+        let open = wait
+            .parked_since
+            .map(|since| self.clock.now().saturating_duration_since(since))
+            .unwrap_or_default();
+        Some(wait.total + open)
     }
 
     /// The time spent in `stage`, or `None` when it did not run.
@@ -177,6 +228,7 @@ impl std::fmt::Debug for RequestTimings {
             .field("waited_for_file_list", &self.waited(Wait::FileList))
             .field("waited_for_index", &self.waited(Wait::Index))
             .field("waited_for_trigger_registry", &self.waited(Wait::TriggerRegistry))
+            .field("registry_wait", &self.registry_wait())
             .finish()
     }
 }
@@ -219,6 +271,7 @@ macro_rules! completion_event {
             waited_for_file_list = $timings.waited(Wait::FileList),
             waited_for_index = $timings.waited(Wait::Index),
             waited_for_trigger_registry = $timings.waited(Wait::TriggerRegistry),
+            trigger_registry_wait_ms = $timings.registry_wait().map(millis),
             $message
         )
     };
@@ -443,6 +496,55 @@ mod tests {
             assert!(!lines[0].contains("request complete") && !lines[0].contains("slow request"), "{lines:?}");
             assert!(!lines[0].contains(" id="), "{lines:?}");
         }
+    }
+
+    #[test]
+    fn registry_wait_sums_parked_intervals_and_excludes_the_time_between_them() {
+        let clock = manual();
+        let timings = RequestTimings::start(clock.clone());
+        assert_eq!(timings.registry_wait(), None, "never parked");
+        timings.begin_registry_wait();
+        clock.advance(Duration::from_millis(100));
+        timings.end_registry_wait();
+        // Handler work or an index wait between two parked intervals.
+        clock.advance(Duration::from_millis(40));
+        timings.begin_registry_wait();
+        clock.advance(Duration::from_millis(50));
+        timings.end_registry_wait();
+        clock.advance(Duration::from_millis(7));
+        assert_eq!(timings.registry_wait(), Some(Duration::from_millis(150)));
+
+        let id = lsp_server::RequestId::from(4);
+        let ((), logs) = CapturedLogs::scoped(|| request(&id, None).emit(&timings));
+        let line = &logs.lines()[0];
+        for field in ["elapsed_ms=197", "waited_for_trigger_registry=true", "trigger_registry_wait_ms=150"] {
+            assert!(line.contains(field), "missing {field}: {line}");
+        }
+    }
+
+    #[test]
+    fn a_second_begin_keeps_the_interval_in_progress_and_an_end_without_one_does_nothing() {
+        let clock = manual();
+        let timings = RequestTimings::start(clock.clone());
+        timings.end_registry_wait();
+        assert_eq!(timings.registry_wait(), None);
+        timings.begin_registry_wait();
+        clock.advance(Duration::from_millis(30));
+        timings.begin_registry_wait();
+        clock.advance(Duration::from_millis(20));
+        // Still parked: the open interval counts up to now.
+        assert_eq!(timings.registry_wait(), Some(Duration::from_millis(50)));
+        timings.end_registry_wait();
+        timings.end_registry_wait();
+        clock.advance(Duration::from_millis(500));
+        assert_eq!(timings.registry_wait(), Some(Duration::from_millis(50)));
+    }
+
+    #[test]
+    fn a_message_that_never_parked_omits_the_wait_figure() {
+        let lines = emit_after(Duration::from_millis(600));
+        assert!(lines[0].contains("waited_for_trigger_registry=false"), "{lines:?}");
+        assert!(!lines[0].contains("trigger_registry_wait_ms"), "{lines:?}");
     }
 
     #[test]
