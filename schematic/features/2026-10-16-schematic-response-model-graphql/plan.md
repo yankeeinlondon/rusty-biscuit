@@ -7,6 +7,7 @@ yolo: true
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
   - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
 docs_created_during_phase_1:
   - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
 skills_files_updated_during_phase_1: []

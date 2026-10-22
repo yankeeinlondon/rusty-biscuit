@@ -6,6 +6,7 @@ started_phase: "1"
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
   - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
 docs_created_during_phase_1:
   - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
 skills_files_updated_during_phase_1: []
@@ -66,6 +67,9 @@ message_to_agent: |-
   inventories, baseline, and timeout spike were deliberately not performed
   because 4b changes the files they would capture. The prerequisite inventory
   below is a snapshot of the tree on 2026-10-21 and must be refreshed.
+  Phase 1 was rerun once on 2026-10-21 with nothing changed and stopped at
+  the same gate (see "Rerun on 2026-10-21"); do not rerun it again until 4b
+  is landed and reviewed and this spec has refresh_required: false.
 ---
 
 # Implementation Log for 2026-10-16-schematic-response-model-graphql (8 phases)
@@ -152,3 +156,36 @@ Result: `packages: []`, `change_class: documentation`. As the run prompt
 allows, `just test` and `just lint` were **skipped**. No dependent-package
 tests or cross-OS checks apply, because no code changed. The `schematic-define`
 skill needed no update.
+
+### Rerun on 2026-10-21: still blocked
+
+Phase 1 was invoked again without its prerequisite having moved. Before doing
+any work, the gate was re-checked against the tree (HEAD `c135102a4`, the
+previous run's Phase 1 close; clean working tree):
+
+| Check | Result |
+| --- | --- |
+| `2026-10-15-schematic-definition-vocabulary` spec | `implemented: false`, `status: draft-spec`, `refresh_required: true` (unchanged) |
+| its plan | `phase: 2` (Phase 1 of 6 complete, unchanged) |
+| bundle reader/writer in `schematic/define/src` | none (no `bundle` symbol) |
+| endpoint rate-limit / deprecation vocabulary | none (the only `deprecated` hits are OpenAPI parameter/operation fields in `openapi/export` and `openapi/import`) |
+| this spec | `status: draft-spec`, `refresh_required: true` (unchanged) |
+| 4a placeholders | unchanged: `Success(ApiResponse)` at `define/src/builders.rs:48`, `ErrorSet { _private: () }` at `builders.rs:61`, `errors(self, _: ErrorSet)` at `builders.rs:123`, `Endpoint::response: ApiResponse` at `define/src/types.rs:395` |
+
+The three blocking conditions recorded above still hold, so this run stops at
+the same point. No source, test, generated artifact, doc page, or skill
+changed; only this log's rerun section and its `message_to_agent` were
+updated. The prerequisite inventory table above is still accurate as of this
+rerun. The remaining Wave 1 and Wave 2 tasks stay unchecked for the reasons
+already given.
+
+**Process note for the author:** rerunning Phase 1 cannot clear this gate.
+The pipeline should not reinvoke this plan until 4b has landed and been
+reviewed and this spec has been refreshed (`refresh_required: false`).
+
+**Rerun gates.** The changed files are this log and the plan's frontmatter.
+The scope calculator, run after every edit was saved
+(`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`),
+returned `packages: []` and `change_class: documentation`, so `just test` and
+`just lint` were skipped as the run prompt allows. No dependent tests, cross-OS
+checks, or skill updates apply.
