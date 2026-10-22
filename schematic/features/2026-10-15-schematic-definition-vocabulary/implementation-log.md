@@ -17,26 +17,10 @@ packages:
   - schematic-gen
   - schematic-oauth
   - schematic-runtime
+  - schematic-schema
+  - homelab
+  - sniff
 human_review: false
-message_to_agent: |-
-  Phase 4 is complete; all schematic gates pass. Bundles live in
-  define/src/bundle.rs (DefinitionBundle::new/with_models/to_json/from_json)
-  and the CLI has `bundle` and `export-bundle`. The bundle shape is
-  {format_version: 1, api (RestApi with its ordered schemas), models?}: the
-  PD7 bindings/schemas maps were folded into api.schemas (see the log). For
-  Phase 5: the bundle loader re-serializes and rejects any input member the
-  typed value drops, accepting an explicit default only for the keys in
-  OMITTED_DEFAULTS (deprecated, secret, pager_managed, path, explicit). If you
-  add a field with `skip_serializing_if` (for example on ParamDef), add its
-  key there. Then rerun define/tests/definition_bundles.rs and
-  gen/tests/l1/definition_bundles.rs. The committed fixture
-  define/tests/fixtures/bundles/fixture.json must be regenerated when
-  RestApi/ParamDef serialization changes: the drift test writes the fresh
-  copy to $TMPDIR/schematic-bundle-fixture.json. Some bundle_json_matrix
-  cells match "bundle JSON line N column M", so fix their line numbers when
-  the fixture moves. builders::validate_api is now the shared API validation
-  for build() and bundles. The four >5 s ordinary L1 tests seen under heavy
-  host load pass alone in under 3.5 s.
 source_files_during_phase_2:
   - schematic/define/src/auth.rs
   - schematic/define/src/builders.rs
@@ -225,6 +209,278 @@ docs_created_during_phase_4:
   - schematic/docs/io/definition-bundles.md
 skills_files_updated_during_phase_4:
   - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_5:
+  - homelab/lib/src/eversolo.rs
+  - schematic/define/src/openapi/import/mappings/parameters.rs
+  - schematic/define/tests/import_normalization.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/gen/src/codegen/endpoint_methods/mod.rs
+  - schematic/gen/src/codegen/endpoint_methods/names.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_structs/derives.rs
+  - schematic/gen/src/codegen/request_structs/into_parts.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/path_params.rs
+  - schematic/gen/src/codegen/request_structs/query_params.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/endpoint_auth_output.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/openapi/openai.json
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/endpoint.rs
+  - schematic/runtime/src/lib.rs
+  - schematic/runtime/src/pager/request.rs
+  - schematic/runtime/tests/l1/credential_resolution.rs
+  - schematic/runtime/tests/l1/decode_boundary.rs
+  - schematic/runtime/tests/l1/pager_support.rs
+  - schematic/runtime/tests/l1/send.rs
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lib.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+  - sniff/lib/src/remote/gitea.rs
+  - sniff/lib/src/remote/github.rs
+  - sniff/lib/src/remote/gitlab.rs
+docs_updated_during_phase_5:
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/request-side.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/pagination.md
+  - schematic/docs/runtime/origins-and-redirects.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/implementation-log.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_6:
+  - schematic/schema/tests/github_client.rs
+docs_updated_during_phase_6:
+  - .claude/commands/create-schematic-api.md
+  - schematic/define/README.md
+  - schematic/definitions/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/oauth/oauth-schematic-design.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/implementation-log.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+source_code:
+  - homelab/lib/src/eversolo.rs
+  - schematic/define/src/auth.rs
+  - schematic/define/src/builders.rs
+  - schematic/define/src/bundle.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/metadata.rs
+  - schematic/define/src/models/aliases.rs
+  - schematic/define/src/models/enums.rs
+  - schematic/define/src/models/mod.rs
+  - schematic/define/src/models/structs.rs
+  - schematic/define/src/oauth.rs
+  - schematic/define/src/openapi/export/components.rs
+  - schematic/define/src/openapi/export/conversion.rs
+  - schematic/define/src/openapi/export/info.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/parameters.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/security.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/mappings/parameters.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/params/param_def.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/serde_presence.rs
+  - schematic/define/src/types.rs
+  - schematic/define/src/websocket/mod.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/bundle_support/mod.rs
+  - schematic/define/tests/composition.rs
+  - schematic/define/tests/definition_bundles.rs
+  - schematic/define/tests/definition_serde.rs
+  - schematic/define/tests/endpoint_literal_surface.rs
+  - schematic/define/tests/fixtures/bundles/fixture.json
+  - schematic/define/tests/import_normalization.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/define/tests/vocabulary.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/gen/src/asyncapi_import.rs
+  - schematic/gen/src/codegen/api_struct/auth.rs
+  - schematic/gen/src/codegen/api_struct/constructors.rs
+  - schematic/gen/src/codegen/api_struct/fields.rs
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/api_struct/mod.rs
+  - schematic/gen/src/codegen/api_struct/tests.rs
+  - schematic/gen/src/codegen/api_struct/variant.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/docs.rs
+  - schematic/gen/src/codegen/endpoint_methods/mod.rs
+  - schematic/gen/src/codegen/endpoint_methods/names.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/module_docs.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/derives.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_docs.rs
+  - schematic/gen/src/codegen/request_structs/into_parts.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/named_params.rs
+  - schematic/gen/src/codegen/request_structs/param_enums.rs
+  - schematic/gen/src/codegen/request_structs/path_params.rs
+  - schematic/gen/src/codegen/request_structs/query_params.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/errors.rs
+  - schematic/gen/src/export/auth.rs
+  - schematic/gen/src/export/mod.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/collection.rs
+  - schematic/gen/src/export/postman/item.rs
+  - schematic/gen/src/export/postman/request.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/export/vocabulary.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/main.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/output/assemble/lib_rs.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/src/ws_codegen/client.rs
+  - schematic/gen/src/ws_codegen/docs.rs
+  - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/definition_bundles.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/endpoint_auth_output.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/gen/tests/l1/typed_path_output.rs
+  - schematic/gen/tests/l1/vocabulary_exports.rs
+  - schematic/oauth/src/lib.rs
+  - schematic/oauth/src/manager/authorization_code.rs
+  - schematic/oauth/src/manager/client_credentials.rs
+  - schematic/oauth/src/manager/mod.rs
+  - schematic/oauth/src/manager/revocation.rs
+  - schematic/oauth/tests/wiremock_flows.rs
+  - schematic/openapi/github.json
+  - schematic/openapi/openai.json
+  - schematic/postman/github.postman_collection.json
+  - schematic/runtime/src/call.rs
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/credentials.rs
+  - schematic/runtime/src/endpoint.rs
+  - schematic/runtime/src/lib.rs
+  - schematic/runtime/src/options.rs
+  - schematic/runtime/src/pager/request.rs
+  - schematic/runtime/tests/l1/credential_resolution.rs
+  - schematic/runtime/tests/l1/decode_boundary.rs
+  - schematic/runtime/tests/l1/endpoint_auth.rs
+  - schematic/runtime/tests/l1/main.rs
+  - schematic/runtime/tests/l1/metadata_boundary.rs
+  - schematic/runtime/tests/l1/pager_support.rs
+  - schematic/runtime/tests/l1/send.rs
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/mod.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lib.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+  - schematic/schema/tests/github_client.rs
+  - sniff/lib/src/remote/gitea.rs
+  - sniff/lib/src/remote/github.rs
+  - sniff/lib/src/remote/gitlab.rs
+documentation:
+  - .claude/commands/create-schematic-api.md
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - schematic/README.md
+  - schematic/define/README.md
+  - schematic/definitions/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/definition-snapshots.md
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/request-side.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/generation/workflow.md
+  - schematic/docs/headers/README.md
+  - schematic/docs/io/definition-bundles.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/pagination.md
+  - schematic/docs/runtime/README.md
+  - schematic/docs/runtime/building-clients.md
+  - schematic/docs/runtime/calling-an-api.md
+  - schematic/docs/runtime/credentials.md
+  - schematic/docs/runtime/origins-and-redirects.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/contracts.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/implementation-log.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/inventory.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/plan.md
+  - schematic/gen/README.md
+  - schematic/oauth/oauth-schematic-design.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-10-15-schematic-definition-vocabulary (6 phases)
@@ -633,3 +889,244 @@ Not covered as separate cells (same validator as a covered column): every pagina
 **Unfinished or deferred (later phases, not Phase 4 scope):**
 - query required/enum/style fidelity and caller migration (Phase 5);
 - the `schematic-define` README and `create-schematic-api` command pass for bundles, and multi-OS validation (Phase 6).
+
+## Phase 5
+
+### Starting state and orchestration
+
+Phase 4 was committed (`6bb937ca9`), so the working tree at entry was clean and everything below is this phase. No subagents were used: the query analysis is one representation read by every generator path (fields, setters, `new()`, `Default`, `From` impls, endpoint methods, docs, `into_parts`, validation), and the runtime value type it emits had to be designed with it. The dependent migration turned out to be 16 call sites in two crates, too small to fan out.
+
+### Design choices this phase makes
+
+- **Runtime query value (design choice; the spec is silent on the runtime representation).** PD8 needs a literal `,` between elements whose own commas are `%2C` (`tags=a%2Cb,c`). The runtime percent-encoded every query value whole, so no `(String, String)` pair could express that. `RequestParts.query` is now `Vec<(String, QueryValue)>`, where `QueryValue` is `Text(String)` or `Delimited { elements, delimiter: QueryDelimiter::{Comma, Space, Pipe} }`. The runtime remains the only place query bytes are encoded (`QueryValue::encoded`); `From<String>`/`From<&str>` keep `("page".into(), "2".into())` call sites unchanged. This is a change generated code observes, so `schematic_runtime::ABI` and `schematic_gen::RUNTIME_ABI` are 5 (were 4).
+- **Query pairs survive stripping byte for byte (fix found by the new evidence).** `remove_query` (credential/secret stripping on anonymous sends and cross-origin hops) used to decode and re-encode every remaining pair, which would turn a delimited value's literal `,` into `%2C`. It now drops raw `&` segments by decoded name and keeps the rest untouched. The pager's `set_url_query` (a changed size or carried parameter on a followed next link) reuses it: the link's other pairs are now kept byte for byte (previously re-encoded through `form_urlencoded`, contradicting `docs/pagination.md`'s "sent as the provider wrote them"), and the added value uses the runtime encoding (`%20`, previously `+`). No existing test pinned the old forms.
+- **Importer `explode` default (finding, departure, logged for review).** `define/src/openapi/import/mappings/parameters.rs` recorded `explode.unwrap_or(false)`, but OpenAPI 3.0.3 defaults `explode` to `true` for `form` style. Every shipped array query parameter is OpenAI-imported with no `explode` key, so honoring the stored `false` would have switched OpenAI's multi-value filters (`project_ids`, `group_by`, ...) from today's repeated pairs, which OpenAI expects, to comma-joined values. The spec assumed the imported data was right (R12: "acts on data already in the definitions"). Adopted: fix the importer default (`style == Form`) and regenerate OpenAI through its supported recipe, `just import-openai`. The diff is exactly 279 `explode: false` → `explode: true` lines in `definitions/src/openai/mod.rs` (form-style query and cookie parameters; the vendored document declares `explode` only on `simple` headers). This is a definition-source change outside R12's adoption list, made by the importer, not by hand; plan rule 4's "retain unchanged OpenAI authoring sources" is about vocabulary adoption, but the author should confirm. `definition_baseline` gains one narrow normalization (`FORM_EXPLODE_DEFAULT_APIS = ["openai"]`): historical form-style query/cookie `explode: false` reads as `true`, with the touched endpoint fingerprints recomputed; any other difference still fails. The exported `openapi/openai.json` drops the 279 `"explode": false` lines (true is the form default). Not chosen: honoring the data (sends wrong requests) or a generator-side override (two sources of truth).
+- **Unsendable query shapes (adopted default; source: PD8 "output-specific diagnostic" plus the established D10 warning pattern).** JSON values, arrays of arrays or JSON values, `DeepObject`/`Simple` style, a delimited single value, and an exploded delimited array have no Rust serialization. Optional: `query-parameter` Rust **warning** and the parameter is left out of the request type (other outputs unaffected). Required: `query-parameter` Rust **error**, since no correct request exists. The old "array of arrays is an error at every location" rule now covers header and cookie only; a nested query array follows the rule above. Fifteen OpenAI parameters are left out (pinned in `output_validation::OMITTED_RUST_QUERY_PARAMS`): `include` on five conversation/response endpoints and `event_types[]` (arrays of JSON), `metadata` on `ListChatCompletions`, `effective_at` on `ListAuditLogs`, `order` on six list endpoints and `variant` on `RetrieveVideoContent` (all `$ref`'d values the importer maps to JSON), and `ListPaginatedFineTuningJobs` `metadata` (deepObject). Before this phase those were sent as quoted JSON text (`include=%22a%22`), which no provider accepts.
+- **Setters (adopted; source: R9 "setters assign the corresponding shape").** Every query field keeps its request `with_*` setter (a required one assigns `T`). Call types get setters for optional values only; required values are endpoint-method arguments in `new()` order.
+- **Default (decided by D57 item 13; plan wording).** Removed for typed paths (Phase 3) and required non-adopted query fields; kept for all-optional requests, including requests whose only required values are untyped path placeholders, as before.
+- **Empty arrays.** PD8's "an explicit empty array emits `name=`" is applied to exploded arrays too (one `name=` pair), so absence and emptiness differ in every form.
+- **Header and cookie parameters unchanged** (R9): enums stay `String`, `required` is not enforced.
+- **Enum names** follow Phase 3's path rule: `{RequestType}{PascalCase(field name)}`, collision-checked module-wide against request/call/form/path-enum names and grouped APIs.
+- **Not changed:** a non-finite `f64` query value is still sent as its `Display` text (`NaN`); only typed paths check finiteness (PD2). `ParamDef::new` keeps `explode: false`; authors who want repeated pairs set `explode: true`.
+- **Fixture repairs (mechanical).** Four test helpers declared query parameters with `style: Simple` (not a query style), which PD8 now rejects; they now use `Form`. One request-struct test fixture's `named_param` set `required: true` on query parameters meant as optional; that test now sets them optional.
+
+### Wave 8: Query implementation
+
+`QueryParamInfo` (gen `request_structs/shared.rs`) now carries `required` and a `QueryShape` (`query_params.rs`: scalar `String|Integer|Number|Boolean|Enum{type_name, values}` × form `Single|Exploded|Delimited(Comma|Space|Pipe)`), computed once by `extract_query_params(params, request_type)` and read by fields, setters, enums, `new()` (`path_params::generate_new_method`), `From` suppression, derives, doc examples, `into_parts` (`generate_query_binding`, ordinary-send defaults as `QueryValue`), endpoint-method arguments and setter types (`endpoint_methods`), and validation (`check_query_shapes`, group type names). Pager-adopted parameters are already removed by `pager_view` before any of this runs, so R14 needs no separate branch.
+
+### Wave 9: Caller migration
+
+Inventoried consumers rebuilt with `--all-features --all-targets` (`sniff`, `biscuit-speaks`, `homelab`, `eversolo-integration`, `arcam-amp-integration`, `sony-receiver-integration`, `unfolded-integration-helper`, `model-citizen`). Changed callers, each forced by a generated signature:
+
+- `homelab/lib/src/eversolo.rs` (13): every required Eversolo query value moved from a call setter to the endpoint-method argument (`music_seek_to(time_ms)`, `music_set_input(tag)`, `music_set_output(tag)`, `music_set_volume(level)`, `music_set_mute(value)`, `power_set_option(tag)`, `remote_send_key(key)`, `remote_input_text(text)`, `system_set_screen_brightness(index)`, `system_set_knob_brightness(index)`, `system_set_vu_mode(index)`, `system_set_spectrum_mode(index)`, `system_change_vu_display(open_type)`).
+- `sniff/lib/src/remote/github.rs`, `gitea.rs` (1 each): `state` is `ListPullRequestsRequestState`. `gitlab.rs` (2): `state` is `ListMergeRequestsRequestState`; `get_repository_file(project, path, "HEAD")` (GitLab `ref` is required). Wire values unchanged.
+
+These were missed by the first, default-feature dependent build: sniff's remote providers are feature-gated. Recorded in the `schematic-define` skill. No other consumer needed a change; no compatibility mode was introduced; no integration blocker.
+
+### Evidence (requirement → test)
+
+| Behavior | Test | Boundary / rung |
+| --- | --- | --- |
+| `QueryValue` encoding: each element once, literal `,` / `%20` / `%7C` delimiters, empty delimited value, decoded metadata | `runtime/tests/l1/send.rs::delimited_query_values_encode_each_element_once_and_keep_their_delimiter`; doctest on `QueryValue` | real HTTP to wiremock, F2 |
+| Stripping a query credential keeps other pairs byte for byte | `credential_resolution.rs::stripping_a_query_credential_keeps_the_other_pairs_byte_for_byte` | wiremock, F2 |
+| Importer `explode` default per style, explicit values kept (JSON and YAML) | `define/tests/import_normalization.rs::absent_explode_takes_the_openapi_default_for_the_style` | public importer, F1 |
+| Required fields `T`, constructor order path → required query (declaration order) → body, setters assign shape, required always sent / optional only when set, no `Default`, no `From` | `gen/tests/l1/query_params_codegen.rs::required_query_values_follow_the_path_in_declaration_order_and_precede_the_body`, `a_query_only_request_with_a_required_value_has_a_constructor_and_no_default` (control: all-optional keeps `Default`), `a_required_query_value_suppresses_the_single_path_from_impls` | generated source, F1 |
+| Enum naming, wire renames, enum arrays; exploded/comma/space/pipe pushes; empty array `name=` | `enum_query_param_generates_an_enum_named_for_the_request_and_field`, `array_query_param_without_explode_is_one_comma_delimited_pair`, `array_wire_forms_follow_style_and_explode` | generated source, F1 |
+| Unsendable shapes left out (no field, setter, or pair) | `query_values_the_client_cannot_serialize_are_left_out_of_the_request` | generated source, F1 |
+| Diagnostics: every unsendable shape optional → warning, required → error, exports silent; empty enum; variant collision (scalar and array); enum name collision across a grouped module | `gen/tests/l1/output_validation.rs::query_shapes_are_checked_for_the_rust_client_only`, `query_enums_need_values_distinct_variants_and_a_free_type_name`, `nested_arrays_fail_the_rust_client_at_every_parameter_location`, `nested_query_array_leaves_earlier_rust_output_untouched` (now required, so it again proves the Rust-output refusal) | public validation / batch, F1–F2 |
+| Live definitions: exactly the 15 listed OpenAI parameters are left out; no other gap | `live_definitions_have_no_embedded_queries_or_validation_gaps` | all 18 APIs, F2 |
+| Endpoint methods take required query values; optional ones are typed setters; docs and doc example | `gen/src/codegen/endpoint_methods/tests.rs::required_query_values_are_method_arguments_and_optional_ones_typed_setters` | generated source, F1 |
+| Wire through a compiled generated client: required scalar with reserved/Unicode text, enum, number, bool, exploded strings, comma/space/pipe arrays with delimiters inside elements, enum arrays both ways, encoded once | `fresh_output_compile.rs` child `query_values_reach_the_wire_in_their_declared_form` (FixtureQuery) | compiled fixture crate → wiremock, F2 |
+| Unset omitted vs empty arrays `name=`; setter replaces a required value; all-optional `Default` request sends | child `unset_values_are_omitted_and_empty_arrays_are_sent_empty` | F2 |
+| Compile-fail: `Default::default()` and `T: Default` on a required-query request; `new()` / endpoint method missing a required value; string for an enum; no call setter for a required value; no setter for a left-out parameter. Positive: all-optional request satisfies `T: Default` | `slow_generated_types_reject_misuse_at_compile_time` (7 new MISUSES entries, control extended) | compiler, F2 |
+| R14: paginated endpoint with required adopted `page`/`limit` and required non-adopted `scope`: `new()` takes only `scope`; ordinary send, `fetch_page`, and every `collect_all` page carry `scope` with changing `page` | child `required_adopted_parameters_are_sent_once_by_an_ordinary_send_and_by_the_pager`, `every_page_carries_the_required_value_beside_the_changing_adopted_ones` | F2 |
+| R14: OpenAI-style cursor (`after` resumable, required `limit` with sent default) omits both from `new()`; every shipped OpenAI paginated endpoint's `new()` takes no adopted parameter | `query_params_codegen.rs::an_openai_style_pager_keeps_adopted_required_values_out_of_new`, `no_shipped_openai_request_takes_an_adopted_parameter_in_new` | F1 / real definitions |
+| R14: adopted required parameter without a strategy default is rejected naming API, endpoint, strategy, parameter | existing `define/tests/vocabulary.rs::required_pager_managed_parameters_need_a_type_valid_sent_default` | F1 |
+| Pre-split wire baseline over real APIs (Gitea enums, GitLab required `ref`, OpenAI `UsageCosts` required + exploded string/enum arrays + empty array, pager cursor beside a declared enum) | `slow_query_wire_matches_pre_split_baseline` with `gen/tests/fixtures/wire_baseline/query_request_lines.txt` | compiled real crate → raw TCP, F2 |
+| Authoring diff and artifacts | `just migration-check` (definition baseline + artifact drift, 38/38) | F2 |
+
+**Wire baseline changes, each forced by typed values:** `ordered-scalars-reserved-unicode` → `ordered-enum-scalars` (Gitea `state`/`sort` are enums, so free text cannot be sent; reserved/Unicode coverage stays in `file-ref-unicode` and the new FixtureQuery test); `empty-value` (empty enum impossible) → `empty-array` on OpenAI `project_ids`; `file-ref-omitted` removed (GitLab `ref` is required); `repeated-array-keys` moved from OpenAI `include` (now left out) to `UsageCosts`; `legacy-embedded-query-plus-declared` loses its `include` pair. Every other line is byte-identical.
+
+**FixtureBearer `tag`** declared `explode: false` and is now sent `tag=a,b` (was `tag=a&tag=b`); the expectation was updated to the declared form.
+
+### Generated-output differences (R11), per API
+
+- `schema/src/lib.rs`: ABI 4 → 5.
+- Every module with requests: `into_parts` binds `Vec<(String, schematic_runtime::QueryValue)>` and pushes `value.to_string().into()` (type change only, same wire). Applies to anthropic, artificial_analysis, bitbucket, elevenlabs, emqx, huggingface, lmstudio, ollama, samsung_smart_tv, unfolded_circle_core_rest with no other change.
+- eversolo: 13 required query values become `new()` / endpoint-method arguments, no `Default`.
+- gitea: 4 query enums (`ListPullRequests` `state`/`sort`, `ListIssues` `state`/`issue_type`).
+- github: 10 query enums (pull requests, issues, workflow runs, org repos).
+- gitlab: 6 query enums; `GetRepositoryFile` `ref` required (`new(id, file_path, git_ref)`).
+- openai: 61 query enums; 11 `start_time` required (`Usage*`); arrays now explicitly exploded (same wire as before for set values; an explicit empty `Vec` now sends `name=`); 15 parameters left out (listed above).
+- `openapi/openai.json`: 279 `"explode": false` lines removed (importer fix). Postman: no change.
+
+### Phase gates
+
+- `cd schematic && just lint`: PASS.
+- `cd schematic && just test` (run once, no subagents): ordinary L1 **2482/2482 passed** (15 tier-skipped), fresh-output **9/9**, compile-fail **1/1**. No test over 5 s in the ordinary run.
+- `just doctest`: PASS. `just check-tier-coverage schematic`: 0 stranded. New tests carry no tier marker; the gen ones live in `gen/tests/l1/` files already declared in `main.rs`, the define test in an existing autotest, the runtime ones in declared `tests/l1/` files.
+- **Dependents (serial):** `just test homelab` 244/244 (8 skipped). `sniff` (>200 tests) `-E 'test(/remote::/) | test(/gitlab|github|gitea|bitbucket/)'` 209/209. `biscuit-speaks` `-E 'test(/elevenlabs/)'` 51/51. `model-citizen` `-E 'test(ollama) | test(lmstudio)'` 48/48. All eight consumers build with `--all-features --all-targets`; `cargo clippy -p sniff -p homelab --all-features --all-targets -D warnings` clean.
+- **Scope calculator** (repository root, after every edit including plan, log, and skill): `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` → `change_class: package`, `packages: [homelab, schematic-define, schematic-definitions, schematic-gen, schematic-runtime, sniff, test-toolkit, darkmatter]`. Gates were required and were run. `darkmatter` reads the edited skill and docs: `shipped_markdown_*` and `current_root_migration_guard` 4/4. `test-toolkit` is a lint-companion row, as in Phases 3–4; not run locally. sniff's reverse dependencies (`sniff-cli`, `worktree`, ...) see no public sniff change, only internal provider calls.
+- **Cross-OS:** no notable risk. The changes are string encoding, code generation, and test fixtures; no path, process, terminal, or `#[cfg]` code. `just cross-check` not run; host exercised: macOS only. Phase 6 owns the four-environment validation.
+
+**Input robustness smell grep** (changed parse code: `define/src/openapi/import/mappings/parameters.rs`): `parameter_data.explode` is an `Option<bool>` whose absence now takes the format's documented default, proven by the new import test; no `#[serde(default)]`, `unwrap_or_default()`, `filter_map(.. as_str())`, or `.ok()` added on a load-bearing parse. The generator's `extract_query_params` drops unsendable parameters with `filter_map(.. .ok()?)`, which is deliberate and never silent: validation reports every dropped parameter (warning or error), proven by `query_shapes_are_checked_for_the_rust_client_only` and the live-definition list. No bundle field was added, so `OMITTED_DEFAULTS` and the committed bundle fixture are unchanged (bundle tests pass).
+
+**Checkpoint met.** One generated API with required constructor values, typed enums, `Default` only on all-optional requests, and observed wire encoding for every PD8 form; pager exemption and defaults proven; all inventoried callers compile and their tests pass. No compatibility branch; the only definition-source change is the importer-regenerated OpenAI `explode` flags. Last completed phase: 5.
+
+**For review (this phase's choices):**
+- the importer `explode` default fix and the 279-line OpenAI re-import (outside R12's list) with its baseline normalization;
+- `QueryValue` on `RequestParts` (ABI 5) and the byte-preserving `remove_query`/next-link behavior;
+- warning-and-omit for optional unsendable query parameters (15 OpenAI parameters lose their setters) versus error for required ones;
+- call types expose no setter for required query values;
+- the three removed/renamed wire-baseline lines.
+
+**Unfinished or deferred (Phase 6, not Phase 5 scope):** README, skill, and `create-schematic-api` command documentation pass for the whole vocabulary; the R1–R14 evidence ledger; four-environment validation.
+
+## Phase 6
+
+### Starting state and orchestration
+
+Phase 5 was not committed, so the working tree at entry already held Phase 5's changes (62 paths). Phase 6's own edits were told apart from that baseline with a content-hash snapshot taken at entry. No subagents were used: the phase is a documentation pass, an audit, and gate runs that must not overlap.
+
+### Wave 10: Documentation
+
+Earlier phases already rewrote the topic pages (builders, typed registration, OpenAPI/Postman export, extensions, bundles, request side, generated clients, validation, credentials, pagination). This phase did the remaining R13 work and a drift pass:
+
+- `docs/definition-builders.md`: three drifted statements fixed. These were "path parameters remain explicit placeholders" (`path_param` exists), `ParamDef::new` without its query-fidelity effect, and "generated request types retain their existing defaults" (`Default` is now dropped for typed paths and required non-adopted query values). A new `### OAuth2 grants` subsection gives the per-grant table, a builder example, validation, the JSON shape, and the null rule for grant-inapplicable fields. No page showed how a definition declares an OAuth2 grant before.
+- `define/README.md`: an overview of the optional vocabulary. It has one compact example showing constructor order (path in template order, then the required query value) and one line each for public raw-header stripping, metadata-only rate limits, Basic/OAuth2 shapes, composition, and the bundle's isolation limit. It also adds links to bundles, request inputs, and endpoint authentication.
+- `definitions/README.md`: the shipped adoptions (GitHub rate-limit headers, Basic lists for Bitbucket/EMQX, query fidelity acting on definition flags).
+- `oauth/oauth-schematic-design.md`: marked as a historical proposal. Its flat `OAuth2Config` and `env_username` are now deliberate historical mentions, with links to the current pages. The proposal body was not rewritten.
+- `.claude/commands/create-schematic-api.md`: Basic and per-grant OAuth2 shapes; query fidelity (required → constructor argument, enum, `style`/`explode`, and that `ParamDef::new` is comma-delimited with `explode` as a public field, since there is no builder); a compact optional-vocabulary example; "vocabulary methods remain planned" corrected; `just migration-check` added; a note against `cargo test` and on `--all-features --all-targets` dependent builds.
+- `.claude/skills/schematic-define/SKILL.md`: scope lists `OAuth2Config`, `EndpointAuth`, `RateLimit`, `RetryGuidance`, `DefinitionBundle`; `AuthStrategy` lists `OAuth2` with per-grant rules; the extension summary gains `rate_limit`/`retry_guidance` (operation level: the endpoint's own value, absent when inherited); `cargo check --manifest-path schematic/schema/Cargo.toml` replaced with `test-schema`/`lint-schema`/`migration-check`; "response/vocabulary extensions are planned" corrected.
+- `.claude/skills/schematic-define/schematic/SKILL.md`: no longer tells authors to "reserve" `path_param/public/auth/deprecated/rate_limit` (they exist); it now gives the Basic and OAuth2 shapes.
+- Rustdoc/comment drift pass over the changed symbols (`OAuth2Config` and grants, `AuthStrategy::Basic`, `AuthExtension`, `Endpoint` vocabulary fields, request-struct generation, `RequestParts`/`QueryValue`, `remove_query`) found nothing stale. `env_username` survives only as the R5-preserved builder method and its tests. No dependency changed, so `docs/dependencies.md` is untouched.
+- All edited files that `define/tests/authoring_guidance.rs` scans avoid its obsolete-authoring strings.
+
+### Wave 10: Evidence audit (R1–R14 ledger)
+
+Each row names the requirement's closing evidence. Test names are those recorded in the phase that landed them; every cited test file was confirmed present at this phase, and all of them ran in this phase's `just test`.
+
+| Req | Behavior | Closing evidence (phase) | Status |
+| --- | --- | --- | --- |
+| R1 | typed path declarations match placeholders; type/description reach Rust and OpenAPI; GET/DELETE override; repeated/reserved; enum; duplicate/sanitized failures | define `vocabulary.rs` (P2); gen `request_structs::tests`, `param_enums::tests`, `validation::tests`, `typed_path_output::*` (compiled fixture → HTTP), `vocabulary_exports::{shared_get_delete_*, repeated_and_reserved_*, enum_path_*}`, `paths::tests` (P3) | met |
+| R2 | public/replacement endpoint auth; header/query/cookie stripping incl. programmatic and raw-header; missing env; next call unaffected; OpenAPI `security: []`/override schemes; Postman `noauth` | runtime `endpoint_auth::*` (11, wiremock); `endpoint_auth_output::slow_generated_clients_honor_public_and_replacement_endpoint_auth` (compiled client → mock); `vocabulary_exports::{public_endpoint_*, replacement_*, group_merge_*, environment_variable_names_never_become_exported_values}` (P3) | met |
+| R3 | `deprecated` on endpoint/param → docs, OpenAPI, Postman; no attribute; round trip | `vocabulary.rs` serde cells (P2); `request_structs`/`endpoint_methods` deprecation tests, `vocabulary_exports::deprecation_*` (P3); bundle matrix (P4) | met |
+| R4 | rate-limit/retry validated, serialized, exported, documented; runtime never reads | `metadata::tests` (13) + doctests (P2); `vocabulary_exports::metadata_keeps_every_field_at_api_and_endpoint_level`, `module_docs::tests`, `metadata_boundary::the_runtime_neither_reads_nor_acts_on_rate_limit…` (P3); this phase's `rg` of `runtime/src` and `oauth/src` finds no reader | met |
+| R5 | Basic carries lists; no positional password; precedence and fallback order; Bitbucket/EMQX bytes unchanged | P2 builders/types tests, `definition_baseline` normalization controls, `artifact_drift`, `postman_golden::golden_mixed_auth_emqx`; this phase's `rg` finds no `env_auth.first()/[0]/get(0)` password read | met |
+| R6 | `one_of`/`any_of`/`all_of` bound to Rust type; OpenAPI refs; Postman diagnostic; rejections; descriptor round trip | define `composition.rs` (15) (P2); `vocabulary_exports::{composed_components_*, postman_warns_about_each_composed_component_*}`, fresh-output misuse case (P3); bundle fixture with `one_of` (P4) | met |
+| R7 | self-contained bundle; isolated load; determinism; dangling/removed schema; nested/recursive; isolated export | define `definition_bundles.rs` incl. 205-cell `bundle_json_matrix`; gen `definition_bundles.rs` (all 18 APIs, CLI wiring) (P4) | met |
+| R8 | per-grant OAuth2; unrepresentable combinations; URL/PKCE validation; consumers migrated | `oauth::tests`, 3 `compile_fail` doctests (P2); `wiremock_flows.rs` (5 new), `manager::tests`, OpenAPI device-code diagnostic (P3); bundle OAuth2 matrix columns (P4) | met |
+| R9 | required query → `T` + `new()` arg; enums; style/explode; `Default` only all-optional; wire bytes | Phase 5 table (`query_params_codegen`, `output_validation`, `endpoint_methods`, `fresh_output_compile` children, compile-fail MISUSES, `slow_query_wire_matches_pre_split_baseline`) | met |
+| R10 | builder calls preserved; only R12 adoptions change definitions | every shipped definition compiles with unchanged builder calls (the recorded sample per API is the shipped definition itself); this phase's authoring diff check (below) | met |
+| R11 | regeneration explained per API/file; historical snapshot comparison with mutation-negative control; dependents inventoried and migrated | `artifact_drift::*`, `definition_baseline::*` incl. `changed_description_is_detected_at_its_exact_field`; per-API diffs in P3 (GitHub) and P5 (query fidelity, ABI, OpenAI `explode`); `inventory.md` and P5 caller migration | met |
+| R12 | GitHub rate-limit adoption; Bitbucket/EMQX Basic | `github::tests::api_declares_only_the_documented_rate_limit_headers`, `vocabulary_exports::github_rate_limit_adoption_reaches_every_output`, `definition_baseline::adoptions_accept_only_the_named_api_field_and_exact_value` | met |
+| R13 | docs, README, skill, command; doctests; no feature/fix names in docs | this phase (Wave 10 docs) plus P2–P5 topic pages; `just doctest`; drift searches below | met |
+| R14 | adopted required parameters stay out of `new()`; strategy default required and type-valid | `vocabulary.rs::required_pager_managed_parameters_need_a_type_valid_sent_default` (P2); P5 FixturePager children and `no_shipped_openai_request_takes_an_adopted_parameter_in_new` | met |
+
+**Authoring diff check (R10/R12),** `git diff dffcd084e^ -- schematic/definitions/src` (the commit before this feature's first log):
+
+- `openai/mod.rs`: importer output only. It adds 287 `deprecated: false,` lines (P2) and flips 279 `explode: false` → `true` (P5 importer default fix). There are no other changed lines.
+- `github/mod.rs`: the R12 rate-limit adoption (`github_rate_limit()`, `.rate_limit(..)`) and its test.
+- `bitbucket/mod.rs`, `emqx/mod.rs`: the R5 Basic migration to `basic_env(..)`, plus the logged mechanical assertion repairs.
+- `eversolo/mod.rs`: one deleted `env_username.is_none()` assertion (mechanical).
+- No other definition source changed.
+
+**Drift searches (R13).**
+
+- `rg 'env_username|env_auth\[0\]|env_auth\.first\(\)|NotUsed|oauth_scopes'` over Schematic sources returns only intentional hits: the preserved `env_username` builder method and its tests, a HuggingFace bearer assertion, and OAuth tests that prove `NotUsed` is rejected.
+- Flat-OAuth2 field names in docs appear only in the historical-proposal-marked `oauth/oauth-schematic-design.md` and in `docs/io/definition-bundles.md`'s description of grant-inapplicable members.
+- `rg 'features/|fixes/|20[0-9]{2}-[0-9]{2}-[0-9]{2}-'` over the `schematic/docs` pages this feature touched finds no feature or fix reference.
+
+**Unsupported-output diagnostics.**
+
+- `endpoint-auth`, `schema-composition`, and `oauth2-grant` are export warnings; `path-parameter` and `query-parameter` are Rust diagnostics. Each is in `docs/generation/validation.md` and has a test from P3 or P5.
+- `live_definitions_have_no_embedded_queries_or_validation_gaps` pins the only shipped gaps: the 15 OpenAI query parameters left out of the Rust client.
+- Supported targets still generate. `artifact_drift` regenerates Rust, OpenAPI, and Postman for all 18 APIs and compares them with the committed trees.
+
+**Input-robustness smell grep** over the load-bearing parse code (`bundle.rs`, `oauth.rs`, `serde_presence.rs`, `metadata.rs`, `auth.rs`, `params/*`, `types.rs`):
+
+- Every `#[serde(default)]` on a field this spec added pairs with `serde_presence::non_null`, so absent is not conflated with null. The exceptions are a `bool` (absent → false, null is a type error) and `params.path` (`Vec`, absent → empty per the matrix's "Z: legacy untyped paths").
+- OAuth2's grant-owned fields use `Option<Option<T>>` (`nullable`), keeping absent, null, and present apart as PD9 requires.
+- The remaining plain `Option` defaults predate this spec and have documented contracts: `Endpoint.cross_origin` and `pagination`, `AuthPolicy.env_fallback`, and `ParamDef.rust_name`. `definition-builders.md`'s transfer table gives null → inherit/derive. The strict bundle loader still rejects a `null` there, because it refuses explicit null outside schema data.
+- There is no `unwrap_or_default()`, no `filter_map(.. as_str())`, and no swallowed `.ok()` in these files. Phase 5's one deliberate `filter_map(.. .ok()?)` in the generator is reported by validation, never silent.
+
+### Human review agenda (spec items 1–12, consolidated)
+
+Every item is recorded in detail in the phase where it occurred; this is the index for review 1.
+
+1. **Defaults adopted.** All PD defaults were adopted: PD1 (metadata shapes; P2), PD2 (typed paths reuse `ParamDef`; P2), PD3 (`deprecated: bool`; P2), PD4 (public/replacement policy plus the recommended optional endpoint `EnvMapping`, `.auth_with_env_mapping`; P1/P2/P3), PD5 (same-context `one_of`/`any_of`/`all_of`; P2), PD6 (Basic carries `username_env`/`password_env`; P2), PD7 (`DefinitionBundle` v1; P4), PD8 (query fidelity; P5, with warning-and-omit for optional unsendable shapes), PD9 (per-grant `OAuth2Config`, the existing `PkceRequirement` minus `NotUsed`; P2), and PD10 (unconditional landing, no compatibility mode; P5). Adjustments are logged under each phase's "Design choices".
+2. **Rate-limit/retry vocabulary.** The shape is PD1's. Its readers are the OpenAPI `x-schematic` document and operation fields, generated module and request docs, and Postman description lines. GitHub adopts the rate-limit headers only, with no retry guidance. The runtime has no reader, enforced by `metadata_boundary`. **Recommendation: keep.** It has real readers and one real adopter, and removing it is cheap if review prefers. Retry guidance has no shipped adopter: only fixtures exercise it, which is the D49 risk the spec flags.
+3. **Adoption list (R12) and R10 diff check.** See this phase's authoring diff above. Two items go beyond R12's table and need the author's confirmation: importer-regenerated OpenAI lines (`deprecated: false` ×287, P2; `explode` ×279, P5) and mechanical assertion edits (Bitbucket, EMQX, Eversolo).
+4. **Generated-output differences.** GitHub's four rate-limit files (P3). Every REST module's `QueryValue` type change, ABI 4→5, and per-API query-fidelity changes (P5, "Generated-output differences" table). `openapi/openai.json` loses 279 `"explode": false` lines (P5). Every other API is byte-identical.
+5. **Dependents.** The inventory is in `inventory.md` (P1). The edited call sites are 13 in `homelab/lib/src/eversolo.rs` and 4 in `sniff/lib/src/remote/{github,gitea,gitlab}.rs` (P5). This phase adds `schematic/schema/tests/github_client.rs`, migrated to `ListPullRequestsRequestState::Closed`; Phase 5 missed it because `just test-schema` was not run. No `Default` use needed migration outside the generated crate, and no integration blocked unconditional query fidelity.
+6. **Descriptor and `oneOf` bridge.** 4a's descriptor was extended, not replaced: `TypeDesc` gained a private `structure` with a read-only accessor (P2). One fresh-output misuse case was restated as a result (P2, review item 9). A foreign descriptor identical in name, path, and structure is indistinguishable from a local one; this is recorded.
+7. **Basic and OAuth2 shapes.** Final shapes are documented in `docs/definition-builders.md` (including the new `### OAuth2 grants`). The unassigned auth remainder:
+   - the optional-auth variant;
+   - the `auth`/`env_auth` versus `auth_policy`/`env_mapping` dual source;
+   - `schematic-oauth` has no device-code flow;
+   - Unfolded Circle's `env_username` on a Bearer API (kept by a build rule, P2).
+8. **Design choices, deviations, open questions.** These are in each phase's "Design choices" and "For review" lists. The largest:
+   - the replacement-credential ruling (P1–P3);
+   - `client_auth` now honored by `schematic-oauth` (P3);
+   - the importer `explode` default fix (P5);
+   - `QueryValue` on `RequestParts` with the byte-preserving `remove_query` (P5);
+   - warning-and-omit of 15 OpenAI query parameters (P5);
+   - no call setter for required query values (P5);
+   - unbuilt orphaned generator files left in place (P2 finding).
+9. **Tests deleted or replaced.**
+   - `begin_authorization_without_pkce_when_not_used` → `…_sends_pkce_when_only_supported` (P2).
+   - The fresh-output "descriptor carries no structure" misuse case was restated (P2).
+   - Wire-baseline lines were renamed or removed (P5).
+   - The FixtureBearer `tag` expectation now uses the declared form (P5).
+   - This phase replaced no test. It migrated one call in `schema/tests/github_client.rs`.
+   - Doc, skill, and command updates are listed under Wave 10 above.
+10. **Bundles (R7).** PD7 shape, `format_version` 1. Isolation is proven by the define crate, which cannot reach `schematic-definitions`, plus file round trips and a 205-cell matrix (P4). No by-name reference was left unbundled.
+11. **Pager exemption (R14).** Adopted parameters come from the pagination resolver's `adopted_params`, and `pager_view` removes them before request generation. The strategy default is `ManagedRole::sent_default` (for example `PageSize::sent_default(n)`). Every shipped OpenAI paginated endpoint's `new()` omits its adopted parameters (`no_shipped_openai_request_takes_an_adopted_parameter_in_new`). No shipped definition was rejected (P2, P5).
+12. **Hosts and operating systems.** See Wave 11 below.
+
+### Wave 11: Final validation
+
+**Schematic gates (macOS, this host, run once after all edits, no subagents):**
+
+- `just test`: ordinary L1 **2482/2482 passed** (15 tier-skipped); fresh-output **9/9**; compile-fail **1/1**. No L1 test over 5 s.
+- `just lint`: PASS. `just doctest`: PASS (166 + 13 + 44 + 19 + 3 + 2 passed, 2 ignored). `just check-tier-coverage schematic`: 0 stranded.
+- `just test-schema`: **failed at first.** `schema/tests/github_client.rs` passed `"closed".to_string()` to GitHub `ListPullRequests` `state`, which Phase 5 made `ListPullRequestsRequestState` (E0308 ×2). Phase 5 had not run this recipe. Fixed by migrating both calls to `ListPullRequestsRequestState::Closed`. The test's existing `state=closed` query assertion now also proves the enum's wire spelling. Rerun: **55/55 passed**. Its one test over 60 s is the existing trybuild `slow_generated_pager_surface_reports_the_intended_diagnostics` (78 s, `slow_` tier, unchanged by this feature).
+- `just lint-schema`: PASS.
+- `just migration-check` (final temporary regeneration of Rust, OpenAPI, and Postman for all APIs, plus the historical definition comparison): **38/38**. The committed artifacts equal fresh generation, and the only differences from the 4a baseline are those explained per API in Phases 3 and 5. Basic output is unchanged.
+- `just test-l2` was not run: no existing L2 check (the generator's terminal status output) is affected by this feature.
+
+**Dependents (macOS, serial):**
+
+- All eight inventoried consumers build with `cargo build --all-features --all-targets`: `sniff`, `biscuit-speaks`, `homelab`, `eversolo-integration`, `arcam-amp-integration`, `sony-receiver-integration`, `unfolded-integration-helper`, `model-citizen`.
+- `just test homelab`: 244/244 (8 skipped).
+- `sniff --all-features -E 'test(/remote::/) | test(/gitlab|github|gitea|bitbucket/)'`: 209/209.
+- `biscuit-speaks -E 'test(/elevenlabs/)'`: 48/48.
+- `model-citizen -E 'test(ollama) | test(lmstudio)'`: 48/48.
+
+**Other operating systems** (`just cross-check --os all <package>`, the archive-mode L1 suite on the build rigs against this exact local tree):
+
+| Package | Linux (`build-linux`) | native Windows (`build-win-native`) | WSL2 (`build-win`) |
+| --- | --- | --- | --- |
+| schematic-define | 754/754 | 754/754 | 754/754 |
+| schematic-definitions | 568/568 | 568/568 | 568/568 |
+| schematic-gen | 728/728 (17 skipped) | 726/726 (17 skipped) | 728/728 (17 skipped) |
+| schematic-runtime | 397/397 (1 skipped) | 393/393 (5 skipped) | 397/397 (1 skipped) |
+| schematic-oauth | 35/35 | 34/34 | 35/35 |
+
+`schematic-define` was cross-checked before the `schema/tests/github_client.rs` fix. That file belongs to `schematic-schema`, which is outside the workspace, so the define result is unaffected.
+
+**Environment gaps.** Only macOS exercised these:
+
+- the `slow_` fresh-output and compile-fail guards of `schematic-gen`/`schematic-runtime` (outside the L1 archive suite);
+- `just test-schema` and `just lint-schema` (the generated crate is outside the workspace);
+- the dependent packages' tests.
+
+The changes they exercise are code generation and encoding, with no path, process, or `#[cfg]` code, so no OS-specific risk is known. No new CI cells or configuration were added, and no live provider was called.
+
+**Checkpoint met.** The required scoped gates pass. The artifact and snapshot checks are narrow, and the description-mutation negative control still fails as intended. The docs reflect final behavior. All four environments have L1 evidence for every changed Schematic package; the gaps are listed above. No prerequisite, ruling, or authorization is unresolved. **Implementation complete, ready for review.** Nothing was committed, no lifecycle directory moved, and `just complete` was not run.
+
+**Skill update.** The `schematic-define` skill now says that a signature-changing generator change also needs `just test-schema`: the hand-written `schematic/schema/tests/` call generated signatures, and no other gate compiles them. After that edit, `authoring_guidance` (1/1) and darkmatter's `shipped_markdown_*` / `current_root_migration_guard` (4/4) were rerun and pass.
+
+**Scope calculator** (repository root, after every edit including plan, log, spec, and skill): `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` → `change_class: package`, `packages: [homelab, schematic-define, schematic-definitions, schematic-gen, schematic-runtime, sniff, test-toolkit, darkmatter]`. The uncommitted tree includes Phase 5, so these packages are Phases 5–6 together. The gates were required, and they ran (above). `test-toolkit` is the lint-companion row, as in earlier phases, and was not run locally.
+
+Last completed phase: 6. `human_review: false`: no blocking decision remains, and the review items above are for review 1.

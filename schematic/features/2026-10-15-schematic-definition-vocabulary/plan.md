@@ -19,6 +19,9 @@ packages:
   - schematic-gen
   - schematic-oauth
   - schematic-runtime
+  - schematic-schema
+  - homelab
+  - sniff
 source_files_during_phase_2:
   - schematic/define/src/auth.rs
   - schematic/define/src/builders.rs
@@ -207,6 +210,278 @@ docs_created_during_phase_4:
   - schematic/docs/io/definition-bundles.md
 skills_files_updated_during_phase_4:
   - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_5:
+  - homelab/lib/src/eversolo.rs
+  - schematic/define/src/openapi/import/mappings/parameters.rs
+  - schematic/define/tests/import_normalization.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/gen/src/codegen/endpoint_methods/mod.rs
+  - schematic/gen/src/codegen/endpoint_methods/names.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_structs/derives.rs
+  - schematic/gen/src/codegen/request_structs/into_parts.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/path_params.rs
+  - schematic/gen/src/codegen/request_structs/query_params.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/endpoint_auth_output.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/openapi/openai.json
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/endpoint.rs
+  - schematic/runtime/src/lib.rs
+  - schematic/runtime/src/pager/request.rs
+  - schematic/runtime/tests/l1/credential_resolution.rs
+  - schematic/runtime/tests/l1/decode_boundary.rs
+  - schematic/runtime/tests/l1/pager_support.rs
+  - schematic/runtime/tests/l1/send.rs
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lib.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+  - sniff/lib/src/remote/gitea.rs
+  - sniff/lib/src/remote/github.rs
+  - sniff/lib/src/remote/gitlab.rs
+docs_updated_during_phase_5:
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/request-side.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/pagination.md
+  - schematic/docs/runtime/origins-and-redirects.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/implementation-log.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_6:
+  - schematic/schema/tests/github_client.rs
+docs_updated_during_phase_6:
+  - .claude/commands/create-schematic-api.md
+  - schematic/define/README.md
+  - schematic/definitions/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/oauth/oauth-schematic-design.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/implementation-log.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+source_code:
+  - homelab/lib/src/eversolo.rs
+  - schematic/define/src/auth.rs
+  - schematic/define/src/builders.rs
+  - schematic/define/src/bundle.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/metadata.rs
+  - schematic/define/src/models/aliases.rs
+  - schematic/define/src/models/enums.rs
+  - schematic/define/src/models/mod.rs
+  - schematic/define/src/models/structs.rs
+  - schematic/define/src/oauth.rs
+  - schematic/define/src/openapi/export/components.rs
+  - schematic/define/src/openapi/export/conversion.rs
+  - schematic/define/src/openapi/export/info.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/parameters.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/security.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/mappings/parameters.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/params/param_def.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/serde_presence.rs
+  - schematic/define/src/types.rs
+  - schematic/define/src/websocket/mod.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/bundle_support/mod.rs
+  - schematic/define/tests/composition.rs
+  - schematic/define/tests/definition_bundles.rs
+  - schematic/define/tests/definition_serde.rs
+  - schematic/define/tests/endpoint_literal_surface.rs
+  - schematic/define/tests/fixtures/bundles/fixture.json
+  - schematic/define/tests/import_normalization.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/define/tests/vocabulary.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/gen/src/asyncapi_import.rs
+  - schematic/gen/src/codegen/api_struct/auth.rs
+  - schematic/gen/src/codegen/api_struct/constructors.rs
+  - schematic/gen/src/codegen/api_struct/fields.rs
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/api_struct/mod.rs
+  - schematic/gen/src/codegen/api_struct/tests.rs
+  - schematic/gen/src/codegen/api_struct/variant.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/docs.rs
+  - schematic/gen/src/codegen/endpoint_methods/mod.rs
+  - schematic/gen/src/codegen/endpoint_methods/names.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/module_docs.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/derives.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_docs.rs
+  - schematic/gen/src/codegen/request_structs/into_parts.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/named_params.rs
+  - schematic/gen/src/codegen/request_structs/param_enums.rs
+  - schematic/gen/src/codegen/request_structs/path_params.rs
+  - schematic/gen/src/codegen/request_structs/query_params.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/errors.rs
+  - schematic/gen/src/export/auth.rs
+  - schematic/gen/src/export/mod.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/collection.rs
+  - schematic/gen/src/export/postman/item.rs
+  - schematic/gen/src/export/postman/request.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/export/vocabulary.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/main.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/output/assemble/lib_rs.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/src/ws_codegen/client.rs
+  - schematic/gen/src/ws_codegen/docs.rs
+  - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/definition_bundles.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/endpoint_auth_output.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/gen/tests/l1/typed_path_output.rs
+  - schematic/gen/tests/l1/vocabulary_exports.rs
+  - schematic/oauth/src/lib.rs
+  - schematic/oauth/src/manager/authorization_code.rs
+  - schematic/oauth/src/manager/client_credentials.rs
+  - schematic/oauth/src/manager/mod.rs
+  - schematic/oauth/src/manager/revocation.rs
+  - schematic/oauth/tests/wiremock_flows.rs
+  - schematic/openapi/github.json
+  - schematic/openapi/openai.json
+  - schematic/postman/github.postman_collection.json
+  - schematic/runtime/src/call.rs
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/credentials.rs
+  - schematic/runtime/src/endpoint.rs
+  - schematic/runtime/src/lib.rs
+  - schematic/runtime/src/options.rs
+  - schematic/runtime/src/pager/request.rs
+  - schematic/runtime/tests/l1/credential_resolution.rs
+  - schematic/runtime/tests/l1/decode_boundary.rs
+  - schematic/runtime/tests/l1/endpoint_auth.rs
+  - schematic/runtime/tests/l1/main.rs
+  - schematic/runtime/tests/l1/metadata_boundary.rs
+  - schematic/runtime/tests/l1/pager_support.rs
+  - schematic/runtime/tests/l1/send.rs
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/mod.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lib.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+  - schematic/schema/tests/github_client.rs
+  - sniff/lib/src/remote/gitea.rs
+  - sniff/lib/src/remote/github.rs
+  - sniff/lib/src/remote/gitlab.rs
+documentation:
+  - .claude/commands/create-schematic-api.md
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - schematic/README.md
+  - schematic/define/README.md
+  - schematic/definitions/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/definition-snapshots.md
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/request-side.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/generation/workflow.md
+  - schematic/docs/headers/README.md
+  - schematic/docs/io/definition-bundles.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/pagination.md
+  - schematic/docs/runtime/README.md
+  - schematic/docs/runtime/building-clients.md
+  - schematic/docs/runtime/calling-an-api.md
+  - schematic/docs/runtime/credentials.md
+  - schematic/docs/runtime/origins-and-redirects.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/contracts.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/implementation-log.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/inventory.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/plan.md
+  - schematic/gen/README.md
+  - schematic/oauth/oauth-schematic-design.md
+completed_phase: 6
+implemented: true
 ---
 
 # Schematic definition vocabulary implementation plan
@@ -340,7 +615,7 @@ Waves are numbered uniquely across the plan. Tasks within one wave may run concu
 
 ### Wave 8: Query implementation
 
-- [ ] **Generate query contracts**
+- [x] **Generate query contracts**
   - Retain required/style/explode/enum and pager-adoption metadata through request analysis. Update all field, constructor, setter, enum dispatch, serialization, and documentation paths together.
   - Non-adopted required fields are `T` and constructor-required even with authored defaults; optional fields are `Option<T>`. Constructor order is template-ordered paths, declaration-ordered required queries, then body; query-only endpoints get constructors.
   - Remove `Default` for typed paths or required non-pager query fields; keep it for all-optional requests. Adopted fields remain removed and never become constructor arguments; `fetch_page()` is the one-page path.
@@ -349,12 +624,12 @@ Waves are numbered uniquely across the plan. Tasks within one wave may run concu
 
 ### Wave 9: Caller migration and fidelity evidence
 
-- [ ] **Migrate dependents**
+- [x] **Migrate dependents**
   - Partition the Phase 1 call-site inventory by package for concurrent subagent ownership after generated signatures stabilize. This is a fan-out task within the wave; no two owners edit the same crate.
   - Migrate only forced constructor/literal/setter/enum/Default uses, then build and run each affected package's canonical `just test {pkg}`. Include existing unaffected consumers as required by the refreshed dependent inventory.
   - Record every changed caller and the reason. A high call-site count does not authorize a compatibility mode. Any concrete integration blocker is logged as unfinished required work.
 
-- [ ] **Verify query wire**
+- [x] **Verify query wire**
   - Compile fixtures and use generated clients against local mocks to assert exact queries for every PD8 combination, scalar/array enum spellings, delimiters inside values, Unicode, encoded-once values, absence versus empty arrays, and required fields.
   - Add compile-fail checks for missing required arguments and `Default` on typed-path/required-query requests; a positive all-optional fixture must compile with `Default`.
   - Use one paginated fixture with adopted and non-adopted required queries: only the latter is a constructor argument; first and subsequent pages carry valid adopted values. Reject a missing strategy default and assert OpenAI-style adopted fields are absent from `new()`.
@@ -366,26 +641,26 @@ Waves are numbered uniquely across the plan. Tasks within one wave may run concu
 
 ### Wave 10: Documentation and evidence audit
 
-- [ ] **Update documentation**
+- [x] **Update documentation**
   - Update `schematic/define/README.md`, relevant generator/schema/definitions READMEs, headers/OAuth2/Basic pages, `schematic/docs/io/openapi-extensions.md`, and topic pages for the vocabulary and bundle contracts. Give compact examples, including constructor order, public raw-header suppression, metadata-only behavior, isolated bundle limitations, and pager rules; use Mermaid where flow is easier to follow visually.
   - Update `.claude/skills/schematic-define/SKILL.md`, affected Schematic skill guidance, and `.claude/commands/create-schematic-api.md`. Remove drifted positional Basic/flat OAuth examples and obsolete testing commands in the touched workflow guidance.
   - Review changed-symbol rustdoc/comments, preserving useful contracts and removing stale narration. Docs state current behavior without naming/linking feature/fix directories. Update dependency docs only if dependencies actually changed.
 
-- [ ] **Audit coverage**
+- [x] **Audit coverage**
   - Close the R1–R14 evidence ledger; list tests, outputs, callers, matrix coverage, adoptions, descriptor adjustments, and explained artifacts. Review unsupported-output diagnostics and confirm supported targets still generate.
   - Audit load-bearing parse code for defaults/null conflation, `filter_map(..as_str())`, `unwrap_or_default()`, and swallowed `.ok()` errors. Legitimate additive defaults must match explicit matrix contracts and have public-result evidence.
   - Check no positional password lookup, unauthorized stored fields, flat OAuth2 consumers, runtime metadata readers, unexplained output differences, or extra authoring edits remain. Preserve mutation-negative snapshot proof.
 
 ### Wave 11: Final validation
 
-- [ ] **Validate platforms**
+- [x] **Validate platforms**
   - From `schematic/`, run `just test`, `just lint`, `just doctest`, `just test-schema`, and `just lint-schema`. Run isolated fixture compile/compile-fail coverage through the landed harness and nextest-compatible recipe/filter. Some existing convenience recipes still invoke `cargo test`; do not use those consolidated-suite forms.
   - Run `just test {pkg}` from the root for each inventoried dependent and appropriate lint/build checks, including example/bench targets where the change affects them. Use scoped checks rather than a workspace-wide sweep.
   - Reuse qualifying exact-environment passing evidence; otherwise test changed Schematic packages and affected dependents on macOS, Linux, native Windows, and WSL2 via the existing build-host workflow. Read `os` build-host instructions before remote commands; all execution is non-interactive. Archive-safe fixtures resolve repository paths at runtime using test toolkit/harness helpers.
   - Scope OS checks to the same affected behavior; a cross-compile proves compilation only and WSL2 cannot prove native Windows. Record actual commands, hosts, results, and gaps. If a required environment cannot run, report completion incomplete with the concrete blocker.
   - New behavior needs no terminal/browser focus. If existing L2 checks are affected, use only `just test-l2` and background harness spawning. No new CI cells/configuration or live provider validation is required.
 
-- [ ] **Prepare review**
+- [x] **Prepare review**
   - Perform final temporary regeneration and verify committed artifacts match the intended output. The allow-list contains only legitimate documented output changes, with no unexplained exceptions; Basic remains unchanged.
   - Confirm each phase checkbox/checkpoint and log outcome. Include every item from the specification's human review agenda, especially metadata keep/drop recommendation, credential ruling, caller inventory, serialization isolation, pager exemptions, defaults, deviations, and OS evidence.
   - End at **implementation complete, ready for review** only when all required behavior and validation are complete. Do not commit, move the feature, run `just complete`, or mark blocked requirements complete. Subsequent specification refresh is review-cycle work for the author.
