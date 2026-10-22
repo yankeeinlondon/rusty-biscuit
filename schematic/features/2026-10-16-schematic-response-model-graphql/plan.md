@@ -4,6 +4,13 @@ created: 2026-10-11
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1:
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+docs_created_during_phase_1:
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Schematic response model v2 and GraphQL implementation plan
@@ -43,7 +50,7 @@ Execution conventions:
 
 ### Wave 1 — Independent inventories (parallel, read-only)
 
-- [ ] **Prerequisite inventory**
+- [x] **Prerequisite inventory**
   - Read prerequisite logs and review outcomes; map their final API to every refresh note in this spec. Verify authorization separately from feature defaults. Identify the runtime package and whether current area recipes include it.
   - Deliver a contract inventory and prerequisite/authorization status in `implementation-log.md`; coordinator merges parallel findings into that file.
 - [ ] **Consumer inventory**
