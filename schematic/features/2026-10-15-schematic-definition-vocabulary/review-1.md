@@ -13,7 +13,7 @@ findings: []
 observations: []
 recurrence: false
 human_review: true
-human_resolved: false
+human_resolved: true
 has_blocked_findings: false
 blocked: false
 human_in_the_loop:
@@ -98,4 +98,13 @@ These are reported limitations, not findings from a code review:
 
 ## Human rulings
 
-Pending. Record the selected behavior for each of the six items above, then mark `human_resolved: true`. A subsequent review must perform the implementation comparison and verification omitted by this decision-only review.
+Ruled by the author on 2026-10-22. Each recommended option is accepted; the implementation stands unchanged.
+
+1. **Endpoint credential sources:** accept endpoint-specific environment mappings and the implemented precedence (per-call, then compatible client credentials, then environment; incompatible or missing replacement credentials fail before sending). An explicit anonymous call may bypass a replacement policy, as implemented, because the caller chose it.
+2. **Unsupported optional query inputs:** accept omission with named diagnostics for this feature; required unsupported inputs stay generation errors. Support for an omitted parameter is scheduled only when a caller needs it.
+3. **Bundle layout:** accept the implemented version-1 envelope (`format_version`, `api` with ordered schema components and their bindings, optional `models`).
+4. **OpenAI importer correction and mechanical changes:** accept the form-style explode default of true, the 279 regenerated declarations, the narrowed historical-comparison allowance, the `deprecated: false` fields, and the Bitbucket/EMQX/Eversolo assertion edits as part of this migration.
+5. **OAuth client authentication:** retain the implemented behavior; `client_auth` now controls where client credentials are sent.
+6. **Rate-limit and retry metadata:** keep both as implemented. Removing retry guidance would cost another vocabulary change; it can be dropped later if it stays unused.
+
+A subsequent review must still perform the implementation comparison and verification omitted by this decision-only review.
