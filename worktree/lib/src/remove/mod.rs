@@ -13,17 +13,23 @@
 //! locations while that happens and deletes the moved checkout entry by
 //! entry against its operation-start inventory. [`lifecycle`] runs those
 //! steps in order as one removal, and resumes one that stopped.
+//! Its waits, mount boundaries, and filesystem failures are injected through
+//! [`clock`], [`mounts`], and [`faults`], so tests never sleep, mount, or need
+//! privileges.
 //!
 //! Every git call addresses the repository with `git -C` and runs from the
 //! base checkout, never from inside the worktree being removed. The rules are
 //! item 3 of `2026-09-24-ux-improvements`.
 
 pub mod admin_entry;
+pub mod clock;
+pub mod faults;
 pub mod handoff;
 pub mod included;
 pub mod inventory;
 pub mod lifecycle;
 pub mod missing;
+pub mod mounts;
 pub mod observation;
 pub mod outcome;
 pub mod quarantine;

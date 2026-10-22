@@ -3,8 +3,14 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
 #[cfg(windows)]
 use std::process::Command;
+
+use super::clock::{Clock, Slept};
+use super::faults::{FsFaults, FsOp};
+use super::mounts::{Mount, MountInfo};
 
 pub struct TestRepo {
     dir: tempfile::TempDir,
@@ -222,5 +228,105 @@ pub fn link_dir(target: &Path, link: &Path) {
             .status()
             .expect("cmd runs");
         assert!(status.success(), "mklink /J {} {}", link.display(), target.display());
+    }
+}
+
+/// A [`Clock`] that records each requested sleep
+/// instead of taking it, and can cancel from a chosen sleep on.
+#[derive(Debug, Default)]
+pub struct ManualClock {
+    slept: Mutex<Vec<Duration>>,
+    /// Sleeps after this many report cancellation.
+    cancel_after: Option<usize>,
+}
+
+impl ManualClock {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancelled_after(sleeps: usize) -> Self {
+        Self { cancel_after: Some(sleeps), ..Self::default() }
+    }
+
+    /// The sleeps taken, in order; a cancelled one is not listed.
+    pub fn slept(&self) -> Vec<Duration> {
+        self.slept.lock().unwrap().clone()
+    }
+}
+
+impl Clock for ManualClock {
+    fn sleep(&self, duration: Duration, cancelled: &dyn Fn() -> bool) -> Slept {
+        let mut slept = self.slept.lock().unwrap();
+        if cancelled() || self.cancel_after.is_some_and(|after| slept.len() >= after) {
+            return Slept::Cancelled;
+        }
+        slept.push(duration);
+        Slept::Elapsed
+    }
+}
+
+/// A fixed mount table.
+#[derive(Debug, Clone, Default)]
+pub struct FixedMounts(pub Vec<Mount>);
+
+impl MountInfo for FixedMounts {
+    fn mounts(&self) -> std::io::Result<Vec<Mount>> {
+        Ok(self.0.clone())
+    }
+}
+
+/// One scripted fault: fires while `remaining` is `None` (always) or above
+/// zero.
+struct Fault {
+    op: FsOp,
+    path: PathBuf,
+    remaining: Option<usize>,
+    fired: usize,
+    make: fn() -> std::io::Error,
+}
+
+/// [`FsFaults`] from a script of (operation, path)
+/// faults, each temporary (a fixed number of times) or permanent.
+#[derive(Default)]
+pub struct ScriptedFaults {
+    faults: Mutex<Vec<Fault>>,
+}
+
+impl ScriptedFaults {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Fails `op` on `path` the next `count` times, then lets it through.
+    pub fn times(self, op: FsOp, path: &Path, count: usize, make: fn() -> std::io::Error) -> Self {
+        self.push(op, path, Some(count), make)
+    }
+
+    /// Fails every `op` on `path`.
+    pub fn always(self, op: FsOp, path: &Path, make: fn() -> std::io::Error) -> Self {
+        self.push(op, path, None, make)
+    }
+
+    fn push(self, op: FsOp, path: &Path, remaining: Option<usize>, make: fn() -> std::io::Error) -> Self {
+        self.faults.lock().unwrap().push(Fault { op, path: path.to_path_buf(), remaining, fired: 0, make });
+        self
+    }
+
+    /// How many times the fault for `op` on `path` fired.
+    pub fn fired(&self, op: FsOp, path: &Path) -> usize {
+        self.faults.lock().unwrap().iter().filter(|fault| fault.op == op && fault.path == path).map(|fault| fault.fired).sum()
+    }
+}
+
+impl FsFaults for ScriptedFaults {
+    fn inject(&self, op: FsOp, path: &Path) -> Option<std::io::Error> {
+        let mut faults = self.faults.lock().unwrap();
+        let fault = faults.iter_mut().find(|fault| fault.op == op && fault.path == path && fault.remaining != Some(0))?;
+        if let Some(remaining) = &mut fault.remaining {
+            *remaining -= 1;
+        }
+        fault.fired += 1;
+        Some((fault.make)())
     }
 }

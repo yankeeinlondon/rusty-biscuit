@@ -51,6 +51,17 @@ The variable turns a missing-backend skip into a failure.
 
 - Lib unit tests use `remove::test_support::TestRepo` (local bare `origin`, plus
   a `pusher` clone for other people's pushes).
+- Waits, mount boundaries, and filesystem failures go through injected seams,
+  never real sleeps, mounts, or privileges:
+    - `remove::clock::Clock`: `ManualClock` records each sleep and can cancel
+      after N; `Backoff` is tested through it;
+    - `remove::mounts::MountInfo`: `FixedMounts`, including same-device bind
+      mounts. `mounts_within` matches by mount point, never device ID;
+    - `remove::faults::FsFaults`: `ScriptedFaults::times` fails an operation
+      on a path N times (temporary), `::always` fails it every time
+      (permanent).
+
+  The doubles are in `remove/test_support.rs`.
 - `cli/tests/remove.rs` sets `NO_COLOR=1`. Its zero-network tests point origin
   at `http://gitea.test/…` with every proxy variable aimed at a local counting
   listener, since a file-path origin never reaches the PR lookup.
