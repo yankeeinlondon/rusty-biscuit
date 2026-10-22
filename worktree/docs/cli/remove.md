@@ -86,6 +86,10 @@ A process standing in the worktree, holding a file open in it, watching it, or
 running a program from it pauses the removal with exit 3. No flag overrides
 this. Your own shell and the programs that started `wt` are never listed.
 
+**Planned:** an interactive run will list these processes as a warning in the
+confirmation question and delete when you answer yes, instead of pausing. A
+non-interactive run will refuse unless `--force` is given.
+
 ```text
 Removal paused: another process is using feat-x.
 
@@ -481,8 +485,17 @@ than promise that every concurrent write was preserved.
 ### Large, built checkouts
 
 A checkout that has been built, with a `target/` or `node_modules/` of
-hundreds of thousands of entries, is removed in one run like any other. Three
-things make that work.
+hundreds of thousands of entries, is normal for a Rust project. The size of
+its file list never stops a removal. Three things make that work.
+
+On macOS, a removal of such a checkout usually still stops partway, once or
+more. Deleting at full speed outruns fseventsd, which drops change
+notifications, and `wt` stops when it can no longer see every change (see
+[When watching stops](#when-watching-stops)). Running the same command again
+continues where it stopped, without asking anything new. A 500,000-entry
+checkout took three to four runs. **Planned:** a confirmed removal will
+finish in one run on every OS, and losing change notifications will no longer
+stop it.
 
 **The journal has no fixed size.** Every batch is written to the recovery
 record's journal before it is deleted (see
