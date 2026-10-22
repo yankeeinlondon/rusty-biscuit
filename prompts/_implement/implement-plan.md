@@ -33,7 +33,28 @@ spec: |-
     }}
 # The implementation's log file
 log: "{{ dirname(spec || plan) + '/implementation-log.md' }}"
+# `depends_on` entries are `{date}-{name}` directories beside the spec or under
+# its `_completed/` folder. The expression language has no list iteration, so
+# the first three are checked explicitly; a longer list only warns.
+dependency_dir: "{{ spec ? dirname(dirname(spec)) : null }}"
+dependencies: "{{ spec ? frontmatter(spec, 'depends_on') || [] : [] }}"
+dependency_0: "{{ length(dependencies) > 0 ? (file_exists(dependency_dir + '/' + dependencies[0] + '/spec.md') ? dependency_dir + '/' + dependencies[0] + '/spec.md' : file_exists(dependency_dir + '/_completed/' + dependencies[0] + '/spec.md') ? dependency_dir + '/_completed/' + dependencies[0] + '/spec.md' : null) : null }}"
+dependency_1: "{{ length(dependencies) > 1 ? (file_exists(dependency_dir + '/' + dependencies[1] + '/spec.md') ? dependency_dir + '/' + dependencies[1] + '/spec.md' : file_exists(dependency_dir + '/_completed/' + dependencies[1] + '/spec.md') ? dependency_dir + '/_completed/' + dependencies[1] + '/spec.md' : null) : null }}"
+dependency_2: "{{ length(dependencies) > 2 ? (file_exists(dependency_dir + '/' + dependencies[2] + '/spec.md') ? dependency_dir + '/' + dependencies[2] + '/spec.md' : file_exists(dependency_dir + '/_completed/' + dependencies[2] + '/spec.md') ? dependency_dir + '/_completed/' + dependencies[2] + '/spec.md' : null) : null }}"
+unimplemented_dependencies: "{{ (dependency_0 && frontmatter(dependency_0, 'implemented') != true ? '- `' + dependencies[0] + '`\n' : '') + (dependency_1 && frontmatter(dependency_1, 'implemented') != true ? '- `' + dependencies[1] + '`\n' : '') + (dependency_2 && frontmatter(dependency_2, 'implemented') != true ? '- `' + dependencies[2] + '`\n' : '') }}"
 initialize:
+    # A spec built on unimplemented work would stop at its own prerequisite
+    # gate only after a full Phase 1; refuse before launching an agent.
+    - when: "unimplemented_dependencies"
+      then:
+          - message: |-
+                ⏸️  `{{parent_dir(spec)}}` depends on work that is not implemented yet:
+
+                {{unimplemented_dependencies}}
+          - error: "the spec {{spec}} lists `depends_on` entries that are not `implemented: true`; implement them first"
+    - when: "length(dependencies) > 3"
+      then:
+          - warn: "`{{parent_dir(spec)}}` lists {{length(dependencies)}} dependencies; only the first three were checked for `implemented: true`"
     # Fail before Phase 1 rather than discover the open rulings an hour into it.
     - when: "spec && frontmatter(spec, 'needs_rulings') == true"
       then:
