@@ -36,7 +36,7 @@ correctly. Eight strands, in dependency order:
 
 1. **Foundations (done).** Phase 1 ran the two spikes still owed (R-S8
    gitGraph geometry from layout data; R-S9 Windows PNG leg) and checked the
-   prerequisite. Ken ruled every open item on 2026-10-22 (D40–D66).
+   prerequisite. Ken ruled every open item on 2026-10-22 (D40–D69).
 2. **Merman fork patch.** A `commitSpacing` gitGraph config key on a branch of
    Ken's Merman fork, pushed there and pinned (D56, AC-C2a), with the upstream
    pull request drafted for Ken to open.
@@ -68,7 +68,7 @@ correctly. Eight strands, in dependency order:
 ### Successful completion looks like
 
 - Every AC in the spec holds: AC-C1–C13, AC-C2a, AC-C6a, AC-C8a, AC-C8b,
-  AC-C15, AC-M1–M11, AC-T1–T8, AC-P1–P6, AC-V1–V4, AC-U1, AC-D1–D7, and the
+  AC-C15, AC-M1–M11, AC-T1–T9, AC-P1–P6, AC-V1–V4, AC-U1, AC-D1–D7, and the
   cutover confirmations AC-S6 and AC-S8. AC-S4 is recorded (D30); AC-T5 is
   Ken's sign-off.
 - `cargo tree -i mermaid-rs-renderer` is empty; one usvg (0.47) in
@@ -242,6 +242,16 @@ carries the same table.
     glyphs; goldens exclude emoji.
 22. **Documentation — R-D1–R-D6.** The pages, audience rules, and sequencing
     of Phase 7, written as the work proceeds (R-D6).
+23. **Benchmark placement — D67.** A non-member crate at
+    `biscuit-visualized/bench/` (empty `[workspace]`), so CI schedules no
+    `check` cell; `just bench` runs it directly instead of delegating to
+    `_bench` (item 11's exception); the baseline JSON lives there.
+24. **Measurer crates — D68.** `rustybuzz` and `ttf-parser` are direct
+    dependencies of `biscuit-visualized`, pinned to the versions usvg 0.47
+    uses (one copy each in `Cargo.lock`); pre-authorized in item 1.
+25. **Clean-room check — D69, AC-T9.** At final verification a reviewer
+    confirms no Zed copyright or GPL header and no Zed-specific identifiers
+    in the changed code; the log records it.
 
 ### Merman-spec facts the follow-up specs rely on
 
@@ -354,8 +364,10 @@ start together.
   review changed PNG/SVG snapshots. This is the highest blast-radius task in
   the plan; do it alone in its own change.
     - Prerequisite for: font chain, measurer.
-- [ ] **Add fontique, ttf-parser, rustybuzz, Merman (R-C2, D58).** After the
-  usvg upgrade and Stream C's push. `biscuit-visualized` only; Merman as a git
+- [ ] **Add fontique, ttf-parser, rustybuzz, Merman (R-C2, D58, D68).** After
+  the usvg upgrade and Stream C's push. `biscuit-visualized` only;
+  `rustybuzz` and `ttf-parser` pinned to the versions usvg 0.47 uses, so
+  `cargo tree -d` shows one copy of each (pre-authorized: item 1); Merman as a git
   dependency on Ken's fork pinned to the `commitSpacing` commit (exact `rev`),
   with `default-features = false` and `["svg", "all-diagrams",
   "layout-cytoscape"]`; bump workspace `serde_json` to `^1.0.154`. `mmdr`
@@ -736,15 +748,16 @@ promote the package to gating, and add the local speed guard.
   Merman's fonts; keep the size under the ~20 MB cap; Mermaid.js 12.2.0
   references only (D38). Golden inputs use only code points Inter maps, and no
   emoji (D40, D65).
-- [ ] **Benchmark (D12, D35, D44, R-V6, AC-V2).** Release profile; reference
+- [ ] **Benchmark (D12, D35, D44, D67, R-V6, AC-V2).** Release profile; reference
   host is the **Linux build host** (`os` skill); limits apply only there,
-  timings elsewhere are informational. Place it so it creates no CI `bench`
-  check cell (a separate non-member crate or location; Design notes). Reports
+  timings elsewhere are informational. A standalone non-member crate at
+  `biscuit-visualized/bench/` (empty `[workspace]`, D67), so CI schedules no
+  `check` cell for it; the baseline JSON lives there. Reports
   median and p95 per family for warm full render (measure, layout, SVG,
   post-process, raster) and cold one-shot; flags warm median > 50 ms, cold ≥
   500 ms, and > 25% over the stored baseline; each iteration gets a fresh
-  `BISCUIT_VISUALIZED_CACHE_DIR` outside the timed region. Add the `just`
-  recipe. **Baseline JSON loader matrix** (default: located error, nothing
+  `BISCUIT_VISUALIZED_CACHE_DIR` outside the timed region. `just bench` in
+  `biscuit-visualized/justfile` runs the crate directly. **Baseline JSON loader matrix** (default: located error, nothing
   flagged or overwritten): control = real baseline; per-family
   `median_ms`/`p95_ms` absent, `null`, wrong type, `[]`/empty, negative, NaN;
   family missing from baseline (a distinct reported state, not silent pass);
@@ -786,9 +799,9 @@ promote the package to gating, and add the local speed guard.
   `test-browser`, `test-real`, `lint`, `bench`, `coverage`, `doctest`,
   `fuzz`, `all`) plus `build`, `check`, `docs`, and `lint-fix` as other areas
   define them, delegating to `just/devops.just` with `--all-features`; keep an
-  explicit "not applicable" recipe for a tier with no tests, and wire `bench`
-  to the Wave 13 benchmark recipe or keep it a no-op as that task's placement
-  requires (no CI `bench` cell). Several recipes already exist; add only what
+  explicit "not applicable" recipe for a tier with no tests. `bench` is the
+  one exception to delegation: it runs the Wave 13 benchmark crate at
+  `biscuit-visualized/bench/` directly instead of `_bench` (D67). Several recipes already exist; add only what
   is missing. Run `just ci-local --plan` and record in the log that the
   package's L1 cells are planned on each environment. The promotion task
   below starts only after this record exists.
@@ -903,6 +916,11 @@ phases have already written their behavior into these pages (marked
   `cargo tree -i mermaid-rs-renderer` empty; `cargo tree -d` one usvg; Merman
   rev exact on the fork; run `just ci-local --plan` and review the scheduled
   cells before anyone pushes.
+- [ ] **Clean-room check (R-T10, D69, AC-T9).** A reviewer confirms that no
+  file in the change carries a Zed copyright or a GPL header, and that a
+  repository search over the changed code for Zed-specific identifiers (at
+  least `zed-accent`, `mermaid_render`, `inject_css`, `accent_colors`) finds
+  none; record the check and the search in the log.
 - [ ] **Comment-drift pass.** Re-read `///`/`//!` and inline comments in every
   touched file; code wins over comments; record any drift fixed.
 - [ ] **Matrix smell grep.** `#[serde(default)]`, `unwrap_or_default()`,

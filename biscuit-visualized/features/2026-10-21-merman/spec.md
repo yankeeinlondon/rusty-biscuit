@@ -276,7 +276,9 @@ D10, D13, D18, D22, D32, D34, D35, D36, D37, and D39 in place in the same way.
 D63–D66 record Ken's further rulings of 2026-10-22 (the cache key's resolved
 faces, drop shadows in Darkmatter's static SVG, a Linux-only emoji fallback
 font, and a sixth upstream issue); they amend D32, D37, D40, D41, D52, D59,
-and D60 in place.
+and D60 in place. D67–D69 record Ken's rulings of 2026-10-22 on the
+benchmark's placement, the measurer's direct crates, and a clean-room check;
+D67 amends D44 in place.
 
 ### D1. Decision rule: Ken decided from a scorecard, Merman favored *(amended 2026-10-21 by D30)*
 
@@ -1061,7 +1063,10 @@ catches a font upgraded in place.
   `commitSpacing` it passes unchanged, so it needs no rewrite. S3's evidence,
   with the fork patch, is that no topology assertion needs editing.
 
-### D44. Benchmark details *(resolves Q16; amends D35)*
+### D44. Benchmark details *(resolves Q16; amends D35; amended 2026-10-22 by D67)*
+
+> **Amended by D67:** the benchmark is a separate non-member crate at
+> `biscuit-visualized/bench/`, and the baseline JSON is stored there.
 
 - **Profile:** release.
 - **Reference host:** the **Linux build host** (see the `os` skill). The
@@ -1339,6 +1344,35 @@ stored"`) clips by 5–7 px under every measurer (S1, S2), so the defect is in
 Merman's ER layout, not in our measurement. It becomes upstream issue draft
 6 in D52's list, drafted and filed like the other five.
 
+### D67. Benchmark placement: a non-member crate *(amends D44)*
+
+- The R-V6 benchmark is a standalone Cargo project at
+  `biscuit-visualized/bench/` with an empty `[workspace]`, not a workspace
+  member and not a `bench` target of `biscuit-visualized`, so CI schedules
+  no `check` cell for it. Its baseline JSON (D44) is stored there.
+- `just bench` in `biscuit-visualized/justfile` runs that crate directly; it
+  does not delegate to the shared `_bench` recipe (the exception in item 11
+  of [Pre-authorized preparatory work](#pre-authorized-preparatory-work)).
+
+*Rationale:* the benchmark never runs in CI (D12, D35), so a compile-only
+CI cell for it would answer no question.
+
+### D68. Measurer crates are direct dependencies
+
+`rustybuzz` (D31) and `ttf-parser` (D32) are direct dependencies of
+`biscuit-visualized`, pinned to the versions resvg/usvg 0.47 uses (rustybuzz
+0.20 and ttf-parser 0.25 in S2's `Cargo.lock`), so `Cargo.lock` keeps one
+copy of each. Adding them is pre-authorized (item 1 of
+[Pre-authorized preparatory work](#pre-authorized-preparatory-work)).
+
+### D69. Clean-room check at final verification
+
+R-T10 is verified at final verification (AC-T9): a reviewer confirms that
+no file in the change carries a Zed copyright or a GPL header, and that a
+repository search over the changed code for Zed-specific identifiers (at
+least `zed-accent`, `mermaid_render`, `inject_css`, and `accent_colors`)
+finds none. The implementation log records the check.
+
 ## Rendering pipeline
 
 The end-to-end path of one diagram after the cutover, as Ken laid it out on
@@ -1394,7 +1428,10 @@ again; anything else still needs approval.
 1. **Dependencies.** Add the Merman git dependency pinned to a rev (D10) and
    crates.io dev-dependencies such as `criterion`; upgrade resvg/usvg to 0.47
    repo-wide and add `fontique` (D31; Ken's ruling of 2026-10-21, which
-   approves these two changes); bump the workspace's `serde_json` to the
+   approves these two changes); add `rustybuzz` (D31) and `ttf-parser` (D32)
+   as direct dependencies of `biscuit-visualized`, pinned to the versions
+   resvg/usvg 0.47 uses so `Cargo.lock` keeps one copy of each (D68; Ken's
+   ruling of 2026-10-22); bump the workspace's `serde_json` to the
    `^1.0.154` Merman requires (2026-10-22); use network access for
    cargo, the Merman repository, and npm; update `Cargo.lock`, the root
    `docs/dependencies.md`, and `biscuit-visualized/docs/dependencies.md`; remove
@@ -1445,7 +1482,9 @@ Ken approved the following on 2026-10-22, after the rulings above:
     other package areas define alongside it (`build`, `check`, `docs`,
     `lint-fix`), each delegating to the shared `_*` recipes in
     `just/devops.just` with `--all-features`; a tier the package has no tests
-    for keeps an explicit "not applicable" recipe. Verify with `just ci-local
+    for keeps an explicit "not applicable" recipe. Exception (D67): `bench`
+    runs the out-of-package benchmark of R-V6 instead of delegating to
+    `_bench`. Verify with `just ci-local
     --plan` that the package's L1 cells are planned on each environment and
     record the output in the implementation log; then make the item 6 edits
     (`gates = true`, exclusion fields removed). D42 holds the order.
@@ -1455,7 +1494,7 @@ Ken approved the following on 2026-10-22, after the rulings above:
 The order follows the original draft. Which Merman-path steps can run in
 parallel is a planning question. As of 2026-10-22, S0–S3 and the Windows leg
 are done, Ken has chosen Merman (D30), and the rulings of 2026-10-22
-(D40–D66) are recorded. The gitGraph cutover starts with the `commitSpacing`
+(D40–D69) are recorded. The gitGraph cutover starts with the `commitSpacing`
 patch on Ken's fork (D56).
 
 ```mermaid
@@ -1742,13 +1781,14 @@ As of 2026-10-22 (S1, S2, and the Phase 1 records of S3 and the Windows leg):
   nothing else is (D62).
 - **R-V5.** Guard tests pin the precedence surprises in [Risks](#risks), so a
   rev bump that changes them fails a test rather than a look.
-- **R-V6.** A local `just` recipe runs the benchmark (D12, D35) and reports
+- **R-V6.** `just bench` in `biscuit-visualized` runs the benchmark (D12,
+  D35), a non-member crate at `biscuit-visualized/bench/` (D67), and reports
   median and p95 per family for a warm full render (measure, layout, SVG,
   post-process, raster) and for a cold one-shot render, in the release
   profile. On the reference host (the Linux build host, D44) it flags any
   family over 50 ms warm median, a cold render of 500 ms or more, and any
-  family more than 25% slower than the baseline JSON stored next to the
-  benchmark. Each iteration uses a fresh `BISCUIT_VISUALIZED_CACHE_DIR`,
+  family more than 25% slower than the baseline JSON stored in
+  `biscuit-visualized/bench/`. Each iteration uses a fresh `BISCUIT_VISUALIZED_CACHE_DIR`,
   set outside the timed region.
 - **R-V7.** A Darkmatter test renders a diagram to HTML through the
   static-SVG opt-in and asserts its labels survive the sanitizer.
@@ -1812,7 +1852,7 @@ of them.
     - per the repository rules, no document names or links a spec or plan.
 - **R-D5.** `biscuit-visualized/docs/dependencies.md` and the root
   `docs/dependencies.md` record the Merman git dependency and the fork,
-  `fontique`, resvg/usvg 0.47, the Inter font with its license, and the
+  `fontique`, `rustybuzz`, `ttf-parser` (D68), resvg/usvg 0.47, the Inter font with its license, and the
   Linux-only Noto Emoji font with its license (D65), and no longer list
   `mermaid-rs-renderer`. (`allsorts`, the font subsetter, belongs to
   `2026-10-21-mermaid-embedded-font`.) The `biscuit-visualized` and
@@ -1873,6 +1913,7 @@ of them.
 | AC-T6 | Each family's compiled theme has the expected evidence status and no `unsupported-*` diagnostic other than the circles' known-false `unsupported-paint`, which is allow-listed per family with a comment (D62) | Per-family test (R-V4); review that the allow-list names only that diagnostic |
 | AC-T7 | The precedence surprises are pinned by guard tests | Guard tests (R-V5) |
 | AC-T8 | A theme key the author sets in `%%{init}%%` wins over our compiled theme in the rendered SVG | Test rendering a diagram with an `%%{init}%%` theme variable and asserting the author's value appears (D54) |
+| AC-T9 | No file in the change carries a Zed copyright or a GPL header, and a repository search over the changed code for Zed-specific identifiers (at least `zed-accent`, `mermaid_render`, `inject_css`, `accent_colors`) finds none (R-T10, D69) | Reviewer check at final verification, recorded in the implementation log |
 | AC-P1 | OSC 4 parsing accepts the reply forms in the OSC 4 research (`rgb:rrrr/gggg/bbbb`, `rgb:rr/gg/bb`, `#rrggbb`, BEL and ST terminators); a partial or malformed reply yields "unknown" for the missing entries, never an error (R-P2) | Unit tests on the parser |
 | AC-P2 | With no reply, the query returns within its timeout and is not re-sent in the same process | Test with a silent fake TTY; call count |
 | AC-P3 | With no ANSI reply but a known background, accents come from the background; with neither, the fixed palette for the color mode is used | Unit tests on palette resolution with injected detection results |
@@ -1880,7 +1921,7 @@ of them.
 | AC-P5 | Non-terminal output and CI send no queries | Test with redirected stdout and `CI` set |
 | AC-P6 | The implementation log records which D46 case applies on native Windows, and the `docs/` palette page states it; if OSC 4 is not carried, native Windows adds no Windows-specific query code and its palette uses background-derived accents | Log entry; docs review; on Windows, a palette-resolution test with a known background and no ANSI reply |
 | AC-V1 | Golden SVG snapshots exist for every family × fixed palette, PNG snapshots for `Dark` and `Default`; SVG snapshots fail on any change and PNG snapshots on change beyond the D42 tolerance; they pass on every CI environment with `MERMAID_FONT=Inter`; every code point in a golden input is mapped by Inter | Snapshot suite (`insta`) on Linux, macOS, native Windows, and WSL2; a test comparing golden inputs' code points with Inter's `cmap` |
-| AC-V2 | The benchmark recipe runs locally in the release profile, reports median and p95 per family (warm full render and cold one-shot), and on the Linux build host flags a family over 50 ms warm median, a cold render of 500 ms or more, and a regression over 25% against the baseline JSON stored next to the benchmark; no iteration is a cache hit | Running the `just` recipe on the Linux build host; a doctored baseline and a doctored limit each make it flag; the per-iteration cache directory is empty when each timed region starts |
+| AC-V2 | `just bench` in `biscuit-visualized` runs the non-member benchmark crate at `biscuit-visualized/bench/` (D67) locally in the release profile, reports median and p95 per family (warm full render and cold one-shot), and on the Linux build host flags a family over 50 ms warm median, a cold render of 500 ms or more, and a regression over 25% against the baseline JSON stored in `biscuit-visualized/bench/`; no iteration is a cache hit; CI plans no cell for the benchmark crate | Running `just bench` on the Linux build host; `just ci-local --plan` shows no benchmark cell; a doctored baseline and a doctored limit each make it flag; the per-iteration cache directory is empty when each timed region starts |
 | AC-V3 | Six derived-palette SVG goldens exist: flowchart, sequence, and gitGraph under the full-ANSI palette and the background-only palette (D47) | Snapshot files; the suite fails on change |
 | AC-V4 | `biscuit-visualized/justfile` defines the canonical recipe set (item 11 of the pre-authorized work); `biscuit-visualized/src/Cargo.toml` has `gates = true` and no `exclusion-class`, `owner`, `reason`, or `expiry`; the goldens and OSC 4 parser tests are L1; `source-inputs` names the fixtures folder only if D42 requires it | `just --list` in `biscuit-visualized/`; `just ci-local --plan` shows the package's L1 cells on each environment, recorded in the log before the gating edit; manifest review |
 | AC-U1 | The six upstream issue drafts of D52 (D66) exist as ready-to-paste Markdown files in `upstream-issues/`; no agent has filed them | File check; Ken files them during the cutover phase |
@@ -1888,7 +1929,7 @@ of them.
 | AC-D2 | `mermaid_diagram.md`, `git_graph.md`, and `graph_expression.md` in `docs/components/` describe post-cutover behavior, including the font chain, `MERMAID_FONT` and the bundled Inter, palettes, OSC 4 with the native Windows case (D46), and the Merman-only families where relevant | Review of each page against the shipped behavior |
 | AC-D3 | The fate of `docs/mermaid-gitgraph.md` is recorded in the implementation log; if deleted, a repository-wide search finds no link to it outside specs and plans; if kept, it describes post-cutover behavior (no claim that Mermaid.js refuses a merge of an empty branch) | Log entry; repository search; review |
 | AC-D4 | Every touched document passes the R-D4 checklist: each code symbol named is linked to its source and explained in place; every section that describes behavior has at least one example; flows are Mermaid diagrams; all links resolve | Review checklist per document; a link check over the touched documents |
-| AC-D5 | Both `docs/dependencies.md` files list Merman (fork and pin), `fontique`, resvg/usvg 0.47, Inter with OFL 1.1, and the Linux-only Noto Emoji with OFL 1.1, and do not list `mermaid-rs-renderer`; the two agent skills describe Merman rendering | Review; a search for `mermaid-rs-renderer` in docs and skills finds only historical research |
+| AC-D5 | Both `docs/dependencies.md` files list Merman (fork and pin), `fontique`, `rustybuzz`, `ttf-parser`, resvg/usvg 0.47, Inter with OFL 1.1, and the Linux-only Noto Emoji with OFL 1.1, and do not list `mermaid-rs-renderer`; the two agent skills describe Merman rendering | Review; a search for `mermaid-rs-renderer` in docs and skills finds only historical research |
 | AC-D6 | At final verification no **planned** marker remains for shipped behavior | Search of the touched documents for the marker, each hit checked against the shipped code |
 | AC-D7 | No document under `docs/` names or links a spec or plan | Search for `features/`, `fixes/`, and `YYYY-MM-DD-name` patterns in the touched documents |
 
@@ -2030,7 +2071,8 @@ a decision.
 - **Benchmark target and CI.** A `bench` target in `biscuit-visualized` makes
   CI schedule a compile-only `check` cell for it, though the benchmark itself
   never runs in CI. Placing the benchmark elsewhere (for example a separate
-  non-member crate) avoids that cell.
+  non-member crate) avoids that cell; D67 places it at
+  `biscuit-visualized/bench/`.
 - **Drop shadows and Darkmatter's sanitizer.** Merman draws drop shadows with
   `<filter>` and `<feDropShadow>` (in the spikes: `dx`/`dy` of 2 or 4,
   `stdDeviation="0"`, `flood-opacity="0.06"`, and a percentage filter

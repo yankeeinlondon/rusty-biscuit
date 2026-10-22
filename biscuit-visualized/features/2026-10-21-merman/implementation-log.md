@@ -16,7 +16,7 @@ skills_files_updated_during_phase_1:
 packages: []
 message_to_agent: |-
   Phase 1 changed no package code. Ken ruled every item on 2026-10-22
-  (spec D40-D66); the "Rulings" table below shows each ruling, its spec
+  (spec D40-D69); the "Rulings" table below shows each ruling, its spec
   decision, and, where it differed, what Phase 1 had recorded. Nothing is
   open. Ruling 17 is closed by D43 (fixed rewrite rule for worktree's
   gitGraph tests) and D56 (a `commitSpacing` gitGraph key on Ken's Merman
@@ -79,6 +79,9 @@ only where it differed.
 | 19 | Prerequisite state | `2026-10-13-graphics-where-possible` has **not** delivered native Windows detection: its log shows Phase 1 of 9 done, and `biscuit-terminal/lib/src/discovery/osc_queries/query.rs` answers every non-Unix query with `OscQueryError::Unsupported` (the `cfg(not(unix))` arm at line 321). Implementation proceeds; release waits on it | recorded fact; ruled by Ken 2026-10-22 | D7, D46 | — |
 | 20 | Upstream drafts | Six issue drafts (`upstream-issues/01-…md` to `06-…md`; 6 = ER `<br/>` comment clip) and the `commitSpacing` pull request draft; Ken files and opens them during the cutover; agents never post | ruled by Ken 2026-10-22 | D52, D56, D66 | Four issue drafts, filed on Ken's go-ahead |
 | 21 | Emoji fallback font | Noto Emoji (monochrome, regular, TrueType, OFL 1.1), Linux builds only, beside Inter, last fallback; Linux glyph test; goldens exclude emoji | ruled by Ken 2026-10-22 | D65 | — (not covered in Phase 1) |
+| 22 | Benchmark placement | Non-member crate at `biscuit-visualized/bench/` (empty `[workspace]`), no CI cell; `just bench` runs it directly instead of delegating to `_bench` (item 11's exception); baseline JSON there | ruled by Ken 2026-10-22 | D67, R-V6, AC-V2 | — (the plan left the placement and the recipe open) |
+| 23 | Measurer crates | `rustybuzz` and `ttf-parser` as direct dependencies of `biscuit-visualized`, pinned to the versions usvg 0.47 uses (one copy each); pre-authorized in item 1 | ruled by Ken 2026-10-22 | D68, R-D5 | — (the plan added them without pre-authorization) |
+| 24 | Clean-room check | At final verification a reviewer confirms no Zed copyright or GPL header and no Zed-specific identifiers (`zed-accent`, `mermaid_render`, `inject_css`, `accent_colors`, at least) in the changed code; logged | ruled by Ken 2026-10-22 | D69, R-T10, AC-T9 | — (R-T10 had no verifying AC) |
 
 Ruling 14 (D58), `png` check: `cargo tree` of the S3 spike, built with exactly
 the ruling-14 feature set, contains no `resvg`, `usvg`, `tiny-skia`, `fontdb`,
