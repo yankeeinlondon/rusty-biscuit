@@ -1,10 +1,11 @@
 ---
 $schema: feature-review.yaml
+next: "2026-10-13-graphics-where-possible/review-2.md"
 reviewed_by: "codex/gpt-6.1-sol"
 created: "2026-10-21T14:08:03-07:00"
 spec: "2026-10-13-graphics-where-possible/spec.md"
 feature: "2026-10-13-graphics-where-possible/review-1.md"
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-10-13-graphics-where-possible/spec.md`"
 findings:
     - "HT-1 (medium): Hidden-tmux detection sends the plain Kitty query, which retitles a real tmux pane; implement the 2026-10-21 hidden-tmux ruling"
@@ -38,6 +39,8 @@ human_review_items:
         After the code review and repair cycle, perform the terminal checks in `verification.md`. Record terminal and multiplexer versions and the observed result for each setup available to you. Check that images and diagrams are visible, subsequent prompts contain no query text or unwanted blank rows, and tmux images behave as described when resizing or switching windows. Zellij's real-terminal test never ran during implementation because Zellij was unavailable; its live behavior particularly needs verification. These checks were already planned by the specification and are separate from the unresolved pane-title decision.
 has_blocked_findings: false
 blocked: false
+log: "/Volumes/coding/wt/rusty-biscuit/feat-iterm-graphics/biscuit-terminal/features/2026-10-13-graphics-where-possible/log.md"
+implemented_by: "claude/opus"
 ---
 
 # Review 1: human decision required before implementation review

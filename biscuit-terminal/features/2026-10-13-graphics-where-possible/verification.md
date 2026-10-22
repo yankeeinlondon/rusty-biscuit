@@ -59,6 +59,7 @@ not WezTerm's multiplexer).
 
 ```powershell
 bt
+bt image --example
 bt bar-chart --example
 ```
 
@@ -68,6 +69,10 @@ bt bar-chart --example
   SSH server and WezTerm.
 - The chart renders as a picture.
 - No blank rows where the chart should be, and no blank rows below it.
+- After the image and after the chart, the next line (the prompt) starts at
+  column 0, not at the picture's right edge (review 1 LV-5 saw 30 and about
+  68 columns). This also confirms or refutes the diagnosis that the console
+  host dropped the carriage return.
 
 **Result:**
 
@@ -202,17 +207,31 @@ bt image --example
 
 Then resize the pane and switch tmux windows and back.
 
-**Look for:**
+**Look for:** the expected route depends on whether tmux was built with Sixel
+(`tmux display -p '#{sixel_support}'` prints `1`; tmux 3.8 from Homebrew is).
 
-- `Images:` reports format `Kitty`, transport `Tmux`, placement `Ordinary`.
-- The image renders.
-- What you see after resizing and switching matches the documented limits of
-  ordinary placement through tmux (`docs/discovery/graphics-routes.md`,
-  "Known limits of ordinary placement through tmux"): the image may drift on
-  resize or copy-mode scroll and may stay visible over another window after a
-  switch. Record anything worse than that.
-- With `tmux set -g allow-passthrough off`, rerun `bt image --example`: no
-  image, and a hint naming `set -g allow-passthrough on`.
+- **tmux with Sixel** (tmux draws Sixel itself, which takes precedence):
+    - `Images:` reports format `Sixel`, transport `Direct`, confidence
+      `Verified`, with a reason saying tmux draws Sixel itself.
+    - The image renders with no box around it (transparent areas show the
+      pane's background).
+    - It scrolls with the pane and hides on a window switch; resizing or
+      splitting the pane clears it (documented in
+      `docs/discovery/graphics-routes.md`, "Known limits of tmux's own Sixel").
+    - `tmux set -g allow-passthrough off` changes nothing: the image still
+      renders as Sixel.
+    - `BISCUIT_GRAPHICS=kitty bt image --example` with passthrough on gives
+      Kitty, `Tmux`, `Ordinary` instead.
+- **tmux without Sixel**:
+    - `Images:` reports format `Kitty`, transport `Tmux`, placement `Ordinary`.
+    - The image renders.
+    - What you see after resizing and switching matches the documented limits
+      of ordinary placement through tmux (`docs/discovery/graphics-routes.md`,
+      "Known limits of ordinary placement through tmux"): the image may drift
+      on resize or copy-mode scroll and may stay visible over another window
+      after a switch. Record anything worse than that.
+    - With `tmux set -g allow-passthrough off`, rerun `bt image --example`: no
+      image (half-blocks), and a hint naming `set -g allow-passthrough on`.
 
 **Result:**
 
@@ -243,11 +262,12 @@ BISCUIT_GRAPHICS_TRANSPORT=tmux bt image --example
 
 - Either the image renders after the wrapped probe (`Images:` reports
   transport `Tmux`, confidence `Verified`), or there is no image and the
-  stderr hint names `BISCUIT_GRAPHICS_TRANSPORT=tmux`.
-- With the override set, the image renders.
-- Known, not a failure: the pane title may change to text starting `Gi=`,
-  because the unwrapped half of the probe reaches the local tmux, which reads
-  it as a title change. Record whether it happens.
+  stderr hint names both `BISCUIT_GRAPHICS_TRANSPORT=tmux` and
+  `BISCUIT_GRAPHICS_TRANSPORT=direct`.
+- With the `tmux` override set, the image renders.
+- The local tmux pane title does not change: the direct exchange carries DA1
+  alone, so no unwrapped Kitty query (which tmux reads as a title change, text
+  starting `Gi=`) is sent. A title change is a failure.
 
 **Result:**
 
