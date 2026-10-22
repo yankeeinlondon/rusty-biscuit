@@ -34,6 +34,14 @@ spec: |-
 # The implementation's log file
 log: "{{ dirname(spec || plan) + '/implementation-log.md' }}"
 initialize:
+    # Fail before Phase 1 rather than discover the open rulings an hour into it.
+    - when: "spec && frontmatter(spec, 'needs_rulings') == true"
+      then:
+          - message: |-
+                ⏸️  `{{parent_dir(spec)}}` still needs rulings before it can be implemented:
+
+                {{ as_ordered_list(frontmatter(spec, 'required_rulings') || []) }}
+          - error: "the spec {{spec}} sets `needs_rulings: true`; record the rulings (or set `needs_rulings: false`) before running the implementation"
     - ensure_file: "{{log}}"
     - when: "!total_phases || total_phases <= 0"
       then:
@@ -116,6 +124,8 @@ Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan
 ::end-block
 
 ::file "../_headless-orchestration.md"
+
+::file "../_rulings.md"
 
 ## Logging
 
@@ -244,8 +254,9 @@ earlier phase is committed when it succeeds.
 
 Set these properties on the implementation log ({{log}}), never on the spec or plan:
 
-- If something happened during the implementation of this phase (# {{phase}}) that you feel requires human involvement _before_ proceeding onto the next phase for implementation then set `human_review` to `true` (otherwise set to `false`)
-    - this should be kept to a minimum as it will impact flow but when it's necessary it needs to be raised
+- Set `human_review` to `true` only when a **blocking** decision (as defined in "Rulings, Defaults, and Pre-authorizations") stops the next phase; otherwise set it to `false`
+    - `true` ends the unattended run after this phase, so it is never the place for adopted defaults, missing confirmations of listed pre-authorizations, or items the author can settle in review
+    - record adopted defaults and review-worthy observations in the log instead; the author reads them after the run
     - when `human_review` is set to `true` you must also set `human_review_items`:
         - a list of things which the human is expected to weigh in on
         - each item should use the YAML `|-` operator so that the text description is more easily read by a human

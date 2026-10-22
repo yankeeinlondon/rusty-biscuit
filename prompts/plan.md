@@ -70,6 +70,10 @@ Your high level task is to convert the following documents into a high confidenc
 ::block when="spec"
 - If there are any aspects of the specification/design for this feature which you feel are unclear or require rulings on you should make sure that these rulings are explicitly mentioned and are attached to Phase 1
     - add an H3 heading `### Necessary Rules` directly under 
+    - classify each rule as **decided**, **defaulted**, or **blocking** using "Rulings, Defaults, and Pre-authorizations" below, and label it that way
+        - a defaulted rule names the default the implementation adopts; it never tells the implementation to wait for the author
+        - restate the specification's pre-authorizations as granted by starting the run, never as confirmations still to be obtained
+        - keep blocking rules rare: each is a pause in an unattended run
 - After _rulings_ we need to consider if there are "spikes" that should be run to lower the risk for this implementation or to better inform the specification and/or design
     - a spike runs once, before the work it informs; do not schedule it again as a re-check in later phases
     - a performance spike is one host and a quick sample, unless the spec names a known cost that is specific to one OS
@@ -89,6 +93,8 @@ Your high level task is to convert the following documents into a high confidenc
 - plans should ALWAYS start with Phase 1 (not Phase 0 or something else non-standard)
 
 ::file "./_input-robustness.md"
+
+::file "./_rulings.md"
 
 ## Closure
 
