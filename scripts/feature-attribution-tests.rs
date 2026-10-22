@@ -534,6 +534,18 @@ fn aligning_a_fixture_flag_collapses_the_configurations_it_caused() {
 // Reconciliation against a wrapped build
 // ---------------------------------------------------------------------------
 
+/// `scripts/Cargo.toml` of the checkout the tests run in. Nextest remaps the
+/// run-time `CARGO_MANIFEST_DIR` to the consumer of an archive, where the
+/// `build-ci-build` setup script (`.config/nextest.toml`) has just built this
+/// feature set; the compile-time value names the producer's checkout, whose
+/// target directory holds no such build, so the rebuild there was cold.
+fn scripts_manifest() -> PathBuf {
+    std::env::var_os("CARGO_MANIFEST_DIR")
+        .filter(|dir| !dir.is_empty())
+        .map_or_else(|| repo_root().join("scripts"), PathBuf::from)
+        .join("Cargo.toml")
+}
+
 /// A private copy of a freshly built `ci-build`, the wrapper CI's owner and the
 /// timed pass both use.
 ///
@@ -548,7 +560,7 @@ fn wrapper_in(scratch: &Path) -> PathBuf {
         .args(["build", "--message-format=json-render-diagnostics"])
         .args(["--no-default-features", "--features", "build-tools", "--bin", "ci-build"])
         .arg("--manifest-path")
-        .arg(repo_root().join("scripts/Cargo.toml"))
+        .arg(scripts_manifest())
         .output()
         .expect("building ci-build");
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));

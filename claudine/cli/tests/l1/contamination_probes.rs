@@ -282,12 +282,25 @@ fn observed_child_model() -> String {
 }
 
 /// The control. Without it, every probe below could be passing because the
-/// expectations describe a broken run rather than a clean one.
-#[test]
-fn an_uncontaminated_run_matches_the_expectations_every_probe_asserts() {
-    assert_uncontaminated("baseline");
-    assert_eq!(observed_iteration_cap(), AUTHORED_CAP);
-    assert_eq!(observed_child_model(), AUTHORED_MODEL);
+/// expectations describe a broken run rather than a clean one. One test per
+/// observation the probes assert.
+mod an_uncontaminated_run_matches_the_expectations_every_probe_asserts {
+    use super::*;
+
+    #[test]
+    fn outcome() {
+        assert_uncontaminated("baseline");
+    }
+
+    #[test]
+    fn iteration_cap() {
+        assert_eq!(observed_iteration_cap(), AUTHORED_CAP);
+    }
+
+    #[test]
+    fn child_model() {
+        assert_eq!(observed_child_model(), AUTHORED_MODEL);
+    }
 }
 
 /// The launch identity. `claudine wrap` exports `AGENT`, `MODEL`, `YOLO`,
