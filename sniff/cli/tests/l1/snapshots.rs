@@ -175,7 +175,38 @@ fn topics_table_snapshot() {
 #[test]
 fn os_json_snapshot() {
     let stdout = run_stdout(&["os", "--json"]);
-    insta::assert_json_snapshot!("os_json_summary", normalized_os_summary(&stdout));
+    // Normalizers rebuild maps in their own order; the contract is the keys.
+    insta::with_settings!({ sort_maps => true }, {
+        insta::assert_json_snapshot!("os_json_summary", normalized_os_summary(&stdout));
+    });
+}
+
+/// JSON output keeps alphabetical keys at every depth, whether or not
+/// `serde_json/preserve_order` is unified into the build.
+#[test]
+fn json_output_keys_are_sorted_at_every_depth() {
+    fn assert_sorted(value: &Value, path: &str) {
+        match value {
+            Value::Object(map) => {
+                let keys: Vec<&String> = map.keys().collect();
+                let mut sorted = keys.clone();
+                sorted.sort();
+                assert_eq!(keys, sorted, "keys at `{path}` are not sorted");
+                for (key, child) in map {
+                    assert_sorted(child, &format!("{path}/{key}"));
+                }
+            }
+            Value::Array(items) => {
+                for (index, child) in items.iter().enumerate() {
+                    assert_sorted(child, &format!("{path}/{index}"));
+                }
+            }
+            _ => {}
+        }
+    }
+    let stdout = run_stdout(&["os", "--json"]);
+    let json: Value = serde_json::from_str(&stdout).expect("valid JSON");
+    assert_sorted(&json, "");
 }
 
 // ============================================================================
@@ -475,7 +506,10 @@ fn cargo_monorepo_structure_text_snapshot() {
 fn cargo_monorepo_structure_json_snapshot() {
     let (_dir, path) = create_cargo_monorepo_fixture();
     let json = run_repo_structure_json(&path);
-    insta::assert_json_snapshot!("cargo_monorepo_structure_json", stable_topology_json(&json));
+    // Normalizers rebuild maps in their own order; the contract is the keys.
+    insta::with_settings!({ sort_maps => true }, {
+        insta::assert_json_snapshot!("cargo_monorepo_structure_json", stable_topology_json(&json));
+    });
 }
 
 #[test]
@@ -492,10 +526,13 @@ fn cargo_pnpm_monorepo_structure_text_snapshot() {
 fn cargo_pnpm_monorepo_structure_json_snapshot() {
     let (_dir, path) = create_cargo_pnpm_monorepo_fixture();
     let json = run_repo_structure_json(&path);
-    insta::assert_json_snapshot!(
+    // Normalizers rebuild maps in their own order; the contract is the keys.
+    insta::with_settings!({ sort_maps => true }, {
+        insta::assert_json_snapshot!(
         "cargo_pnpm_monorepo_structure_json",
         stable_topology_json(&json)
     );
+    });
 }
 
 #[test]
@@ -512,10 +549,13 @@ fn pnpm_nx_monorepo_structure_text_snapshot() {
 fn pnpm_nx_monorepo_structure_json_snapshot() {
     let (_dir, path) = create_pnpm_nx_monorepo_fixture();
     let json = run_repo_structure_json(&path);
-    insta::assert_json_snapshot!(
+    // Normalizers rebuild maps in their own order; the contract is the keys.
+    insta::with_settings!({ sort_maps => true }, {
+        insta::assert_json_snapshot!(
         "pnpm_nx_monorepo_structure_json",
         stable_topology_json(&json)
     );
+    });
 }
 
 /// A degenerate workspace is no monorepo. `repo structure` reports its root
@@ -852,5 +892,8 @@ fn repo_aggregate_json_snapshot() {
     let (_dir, path) = create_aggregate_fixture();
     let json = run_repo_aggregate_json(&path);
     let stable = redact_base_paths(&stable_aggregate_json(&json), &path);
-    insta::assert_json_snapshot!("repo_aggregate_json", stable);
+    // Normalizers rebuild maps in their own order; the contract is the keys.
+    insta::with_settings!({ sort_maps => true }, {
+        insta::assert_json_snapshot!("repo_aggregate_json", stable);
+    });
 }
