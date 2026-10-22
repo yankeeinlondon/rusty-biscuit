@@ -12,6 +12,7 @@ skills_files_updated_during_phase_1: []
 packages:
   - schematic-define
   - schematic-gen
+  - schematic-runtime
 human_review: false
 source_files_during_phase_2:
   - schematic/define/src/builders.rs
@@ -50,10 +51,54 @@ docs_created_during_phase_2:
 skills_files_updated_during_phase_2:
   - .claude/skills/schematic-define/SKILL.md
 message_to_agent: |-
-  Phase 2 is complete; read "## Phase 2" in this log, especially "Adopted defaults and decisions" and "Finalized public names and construction seams".
-  Key facts for Phase 3: the stored vocabulary is in schematic-define (`response.rs`: ResponseShape, StreamFraming, StreamEnd, JsonTag, SuccessShape, normalize_media_type, default_media_type, validate_success_shapes; `error_table.rs`: StatusMatch, ErrorEntry, ErrorTable::{resolve, lookup}; `graphql.rs`: GraphQlSurface, AddressRule, GraphQlOperation, GraphQlVariables). The runtime's const route and error tables should mirror these rules: selection is 204 -> empty shape, then the shapes declaring the reply status (else the status-less ones), then normalized media type, then JSON tag, then the fallback; error lookup is exact, then narrowest range.
-  Endpoint::response is still ApiResponse. Endpoint build validates every shape set but refuses anything beyond one modifier-free shape ("are stored once Endpoint::response holds response model v2 shapes"); Phase 4 generator fixtures therefore cannot come from built endpoints and should drive adapters from `&[SuccessShape]` directly. Phase 5 replaces that refusal in EndpointBuilder::build(), makes Endpoint::success_shapes() return the stored list, and adds stream item references to Endpoint::json_references().
-  Declared errors (RestApi::errors, Endpoint::errors, no_declared_errors) and RestApi::graphql are already stored and bundled; the generator ignores them until Phases 4 and 7. gen validation already reserves {id}Response/{id}Error enum names and GraphQL request/call names in the module naming space.
+  Phase 3 is complete; read "## Phase 3" in this log, especially "What landed" and "Adopted defaults and decisions".
+  The runtime targets Phase 4 should generate against (all in schematic-runtime, re-exported at the crate root):
+  - single stream shape: `type Decoder = Sse<T, End>` / `Ndjson<T, End>` / `ByteStream`; `type Success = ItemStream<T>` (or `ByteStream`). `End` is a generated unit struct implementing `StreamEnd { const CONDITION: EndCondition; const KEEP: bool }`; use `UntilClose` for connection close. `EndCondition::FieldEquals { path: &[..segments..], value: Scalar::.. }` takes the dotted field split into object keys.
+  - several shapes: a generated enum implementing `Alternatives { const ROUTES: &[Route]; async fn decode_alternative(index, LiveBody) }` (routes in variant order, built with `Route::new(ShapeKind::..).media(normalized).statuses(&[..]).tag(JsonTag::..).fallback()`; media is the effective normalized type, None for empty/fallback), decoded by `Shapes<Enum>`; also `impl JsonAlternatives` when every shape is JSON (that alone makes a mutator compile).
+  - errors: `const ERRORS: &'static [ErrorRoute] = &[ErrorRoute::new(StatusMatch::Exact(404) | StatusMatch::Range { lo, hi }, alternative)]` on EndpointSpec (the old DECLARED_ERROR_STATUSES is gone; default is 400-599 -> 0). The failure type implements `ErrorBody::decode_body(alternative, body)`; runtime impls exist for String, Bytes, (), serde_json::Value; opted-out endpoints use `NoDeclaredError` and `ERRORS = &[]`.
+  - GraphQL: `type Decoder = GraphQl<D>; type Failure = GraphQlOperationError<D, H>`; build the body with `schematic_runtime::graphql::request_body(document, Option<&V>, Option<&str>)` (None variables omits the member), POST with `Accept: application/json`.
+  RUNTIME_ABI/ABI is still 5: bump both (runtime/src/lib.rs `ABI` and gen/src/lib.rs `RUNTIME_ABI`) when generated code first uses these items, then regenerate schematic-schema.
+  New ErrorKind::UnexpectedContentType, BodyReadError::DeadlineExceeded, BuildError::InvalidMaxFrameBytes, DecodeFailureKind::{UnexpectedContentType, Declared}; Client::max_frame_bytes(usize) (default DEFAULT_MAX_FRAME_BYTES = 16 MiB).
+source_files_during_phase_3:
+  - schematic/runtime/Cargo.toml
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/codec.rs
+  - schematic/runtime/src/endpoint.rs
+  - schematic/runtime/src/error.rs
+  - schematic/runtime/src/graphql.rs
+  - schematic/runtime/src/lib.rs
+  - schematic/runtime/src/pager/request.rs
+  - schematic/runtime/src/response.rs
+  - schematic/runtime/src/shapes.rs
+  - schematic/runtime/src/stream.rs
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.stderr
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_stream_endpoint.rs
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_stream_endpoint.stderr
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_mixed_alternatives.rs
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_mixed_alternatives.stderr
+  - schematic/runtime/tests/l1/decode_boundary.rs
+  - schematic/runtime/tests/l1/envelope.rs
+  - schematic/runtime/tests/l1/error_routes.rs
+  - schematic/runtime/tests/l1/graphql.rs
+  - schematic/runtime/tests/l1/main.rs
+  - schematic/runtime/tests/l1/shapes.rs
+  - schematic/runtime/tests/l1/streams.rs
+  - schematic/runtime/tests/l1/support.rs
+  - schematic/runtime/tests/l1/timing.rs
+docs_updated_during_phase_3:
+  - schematic/docs/dependencies.md
+  - schematic/docs/graphql.md
+  - schematic/docs/responses-and-errors.md
+  - schematic/docs/runtime/README.md
+  - schematic/docs/runtime/codecs.md
+  - schematic/docs/runtime/deadlines-and-timeouts.md
+  - schematic/docs/runtime/hooks.md
+  - schematic/docs/runtime/sending-and-responses.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/schematic-define/SKILL.md
 ---
 
 # Implementation Log for 2026-10-16-schematic-response-model-graphql (8 phases)
@@ -1095,3 +1140,236 @@ because its archive guard scans every test source.
 
 The `schematic-define` skill was updated (builder surface, storage rule,
 declared errors, GraphQL, `OMITTED_DEFAULTS`).
+
+## Phase 3
+
+Run of 2026-10-22. Tree: HEAD `6f030fd26` (Phase 2 committed). Implementer:
+`claude/opus`. All work was done in the main session, sequentially: the
+three codec families share `codec.rs`, `client.rs`, `lib.rs`, and the one
+`l1` test binary, so a half-written file from one parallel agent would have
+broken every other agent's build. No subagent ran.
+
+### What landed (`schematic-runtime`)
+
+- **Timing (spike outcome).** `LiveBody` now carries an **idle anchor**: set
+  when the head arrives (`with_stream_bounds`) and moved by a streaming codec
+  through the new public `LiveBody::mark_item()`. A streamed read waits until
+  `min(anchor + per-request timeout, shared deadline)`, so bytes that drip in
+  without completing an item no longer extend the idle bound. A buffered
+  frame is yielded without a read. `tokio::time::timeout_at` polls the read
+  before its timer, so a late poll never manufactures a timeout while data
+  waits. The deadline's expiry on a streamed body is the new
+  `BodyReadError::DeadlineExceeded`; the idle bound stays `TimedOut`.
+- **`stream.rs` (new).** `StreamError { Malformed { raw }, EndedEarly,
+  Interrupted { pending }, IdleTimeout, DeadlineExceeded,
+  FrameLimitExceeded { limit, prefix } }` (frozen names), `is_terminal()`;
+  `Scalar`, `EndCondition { DataLineEquals, EventNamed, FieldEquals { path,
+  value }, ConnectionClose }`, the `StreamEnd` marker trait (`CONDITION`,
+  `KEEP`), `UntilClose`; codecs `Sse<T, E = UntilClose>`,
+  `Ndjson<T, E = UntilClose>`, and `ByteStream` (codec and output); output
+  `ItemStream<T>` (fused `Stream` plus inherent `next()`), all `Send +
+  'static`, none `SupportsHooks`. SSE follows the WHATWG interpretation (LF,
+  CRLF, CR, comments, joined `data:`, BOM, `id`/`retry` ignored, incomplete
+  event at EOF discarded). NDJSON: LF/CRLF, blank lines skipped, final line
+  at EOF decoded. `FRAME_LIMIT_PREFIX_BYTES = 1024`.
+- **Frame limit.** `DEFAULT_MAX_FRAME_BYTES` (16 MiB), managed builder
+  `Client::max_frame_bytes(usize)` (frozen name), `LiveBody::{max_frame_bytes,
+  with_max_frame_bytes}`; zero is refused at validation with the new
+  `BuildError::InvalidMaxFrameBytes`.
+- **`shapes.rs` (new).** `ShapeKind`, `JsonTag { Field { name, value },
+  Array, Object }`, `Route` (`#[non_exhaustive]`, `const` builders `new`,
+  `media`, `statuses`, `tag`, `fallback`), trait `Alternatives` (`ROUTES`,
+  `decode_alternative(index, LiveBody)`), marker `JsonAlternatives`, codec
+  `Shapes<A>` (`SupportsHooks` only for `A: JsonAlternatives`). Selection
+  mirrors define: 204 → the empty route; candidates = routes declaring the
+  status, else status-less ones; normalized `Content-Type` match; several
+  matches → JSON tag read from the body; no match → fallback. Anything left
+  over is the new `ErrorKind::UnexpectedContentType` (status, headers, and
+  whole body kept). The global hook runs only when the chosen route is JSON.
+- **Error table.** `EndpointSpec::ERRORS: &'static [ErrorRoute]` replaces
+  `DECLARED_ERROR_STATUSES` (default: `400–599 → alternative 0`, the old
+  behavior); `StatusMatch { Exact, Range { lo, hi } }` (`contains`, `width`,
+  `Display`), `ErrorRoute { status, alternative }` with
+  `ErrorRoute::lookup` (exact, then narrowest). `ErrorBody::decode_body`
+  now takes `(alternative, body)`; runtime impls for `String`, `Bytes`, `()`,
+  and `serde_json::Value`.
+- **2xx-declared failures.** `DecodeFailure::declared(failure, retained)`
+  (kind `DecodeFailureKind::Declared`, type-erased payload) and
+  `ErrorBody::from_declared` (default `None`); `classify_reply` turns an
+  accepted payload into `ErrorKind::Declared(E)` and a refused one into
+  `MalformedSuccess`.
+- **`graphql.rs` (new).** `GraphQl<D>` (`SupportsHooks`, overrides
+  `decode_hooked`), `GraphQlError { message, path, locations, extensions,
+  other }`, `PathSegment`, `Location` (1-based, validated),
+  `GraphQlFailure<D> { errors, partial_data }`,
+  `GraphQlOperationError<D, H> { GraphQl, Http }` (`ErrorBody` with
+  `DECLARED = H::DECLARED` and `from_declared`), and
+  `graphql::request_body(document, variables, operation_name)`.
+
+### Adopted defaults and decisions
+
+- **decision: the error table lives on `EndpointSpec`, not on the failure
+  type** (source: contract freeze "generated `const` table of `(StatusMatch,
+  alternative)`"). Two endpoints sharing one error type can have different
+  tables. `DECLARED_ERROR_STATUSES` is removed rather than kept beside it
+  (no generated code, pager aside, read it; the pager forwards `ERRORS`).
+- **decision: a 2xx body's declared failure travels type-erased**
+  (`DecodeFailure::declared` + `ErrorBody::from_declared`). Alternatives
+  rejected: an associated-type default on `Decode`/`EndpointSpec` (unstable
+  Rust), and a new required associated type (it would break the committed
+  generated crate before Phase 4 regenerates it). The payload is private to
+  `DecodeFailure`, which keeps its `Clone`/`PartialEq` derives (payload
+  equality is identity).
+- **decision: the codec keeps the spec's name `GraphQl<D>`** rather than
+  `GraphQl<D, H>`; `GraphQlOperationError<D, H>` downcasts the payload.
+- **decision: the runtime end-condition trait is named `StreamEnd`**, as is
+  define's stored enum. The runtime does not depend on define, and generated
+  code names the runtime one by path (`schematic_runtime::StreamEnd`).
+- **adopted default: a fallback does not take a missing or invalid
+  `Content-Type`** (source: R3 "Missing, invalid, conflicting, or unmatched
+  response content types produce `UnexpectedContentType`"; R3c "whose media
+  type no other shape matches"). A missing header is not a media type.
+- **adopted default: an SSE event that the body cuts off before its blank
+  line is discarded** (source: R11b names the WHATWG interpretation as the
+  framing reference). A `data: [DONE]\n` without its blank line therefore
+  ends early. A name-only SSE event (no `data:`) is dispatched only to match
+  an `EventNamed` terminator, otherwise skipped, as WHATWG does.
+- **adopted default: GraphQL member nullability.** `"errors": null` is a
+  malformed wrapper (R37 "malformed wrapper fields"); an entry's `"path":
+  null` or `"locations": null` reads as absent; `data` that is null or absent
+  beside errors gives `partial_data: None`.
+- **decision: a body read failure outranks `UnexpectedContentType`.** When a
+  multi-shape reply must be read to decide (tag) or to keep as evidence and
+  the read breaks, the outcome is `BodyInterrupted` with the bytes received.
+- **decision: `graphql::request_body` lands now.** R35 makes "a non-object
+  value fails before transmission" runtime behavior, and the runtime's
+  module docs keep generated code thin; Phase 4 emits calls to it.
+- **decision: `ABI` stays 5.** Contract freeze: "`ABI` 5 → 6 when the
+  generated code first needs them" (Phase 4). Generated code reads none of
+  the changed items (`DECLARED_ERROR_STATUSES` and `ErrorBody` are unused in
+  `schema/src`), so the committed crate is unaffected.
+- **behavior change:** a streamed body's shared-deadline expiry is now
+  `BodyReadError::DeadlineExceeded` (was `TimedOut`), and a streaming
+  codec must call `mark_item()` for the idle bound to restart. The existing
+  `timing.rs` test-only `Lines` decoder now calls it, and
+  `the_shared_deadline_bounds_a_stream_that_never_goes_idle` asserts the new
+  variant.
+- **mechanical:** `Exchange::Final` boxes its `LiveBody` (clippy
+  `large_enum_variant` after `LiveBody` grew); the runtime's `serde`
+  dependency enables `derive` (GraphQL error entries); the raw-socket
+  `serve` helper moved from `timing.rs` to `support.rs` for reuse.
+
+### Requirement-to-test mapping (Phase 3 scope)
+
+All tests are L1, in the `schematic-runtime` `l1` binary (`autotests =
+false`; each new file is declared in `tests/l1/main.rs`). Boundary: the
+crate's public API: `Decode::decode` on a built `LiveBody` (F1) for framing
+and end matrices, and the managed send's envelope over loopback sockets or
+wiremock (F2) for selection, timing, ownership, errors, GraphQL, and hooks.
+Compile-fail cases are `slow_` trybuild fixtures run by
+`just test-compile-fail`.
+
+| Req | Behavior | Test |
+| --- | --- | --- |
+| R6 | `Send`/owned outputs; usable after the client drops | `streams::{streams_are_owned_and_send, a_stream_outlives_its_client_and_dropping_it_releases_the_connection}` |
+| R7, R11 | envelope before the body ends; first item before the server finishes; delayed first item | `streams::{the_envelope_and_first_item_arrive_before_the_server_finishes, a_delayed_first_item_and_a_real_connection_break_mid_frame}` |
+| R8 | data line consumed (`[DONE]`), event consumed and kept, field kept (Ollama `done` with `eval_count`), nested field consumed, close | `streams::each_end_condition_finishes_cleanly_consuming_or_keeping_its_terminator` |
+| R9 | ended early exactly once; close never ends early; truncated line then ended early; cut-off SSE event | `streams::a_body_that_ends_before_its_terminator_reports_ended_early_once` |
+| R10 | malformed keeps raw bytes and continues; `[DONE]` not malformed; malformed kept terminator ends; non-2xx never a stream | `streams::{a_malformed_item_keeps_its_bytes_and_the_stream_continues, an_error_status_on_a_stream_endpoint_takes_the_error_path_and_skips_the_global_hook}` |
+| R11a | 1 item/s outlives a 2 s timeout; silent and dripping streams time out idle; shared deadline is its own error; pre-head expiry (existing) | `streams::{a_stream_that_delivers_every_second_outlives_a_two_second_timeout, a_silent_stream_and_one_that_only_drips_partial_bytes_both_time_out_idle, the_shared_deadline_ends_a_healthy_stream_with_its_own_error}`; `timing::a_stalled_head_is_a_timeout_whose_text_redacts_the_query` |
+| R11b | every split point incl. inside UTF-8, CRLF/CR, comments, joined data, BOM; NDJSON blank lines and EOF line; interrupted with pending bytes and no ended-early (injected and real socket); frame limit (LiveBody and client builder, bounded prefix, bytes unaffected, zero refused); drop releases the connection | `streams::{sse_events_decode_the_same_whatever_the_chunk_boundaries, ndjson_lines_decode_the_same_whatever_the_chunk_boundaries, a_transport_break_is_interrupted_with_the_pending_frame_and_never_ended_early, a_delayed_first_item_and_a_real_connection_break_mid_frame, a_frame_over_the_limit_ends_the_stream_with_a_bounded_prefix, a_client_frame_limit_bounds_an_unterminated_event_and_zero_is_refused, a_byte_stream_yields_chunks_in_order_and_reports_a_break}` |
+| R11c | provider error event is `Ok(typed item)` | `streams::a_provider_error_event_is_a_typed_item_not_a_stream_error` |
+| R3 | JSON vs SSE by media type, case and parameters ignored; 204 empty without `Content-Type`; missing, invalid, wildcard, conflicting, unmatched → `UnexpectedContentType` with status, headers, raw bytes; same type repeated agrees | `shapes::{json_and_a_stream_are_chosen_by_media_type_ignoring_case_and_parameters, missing_invalid_conflicting_or_unmatched_content_types_are_unexpected_with_evidence}` |
+| R3a | 200 record vs 202 job; other 2xx to status-less shapes; unmatched status → unexpected; chosen-but-undecodable → `MalformedSuccess` | `shapes::declared_statuses_choose_between_json_shapes_and_others_fall_to_status_less_shapes` |
+| R3b | discriminator values, unknown value, missing field, non-JSON, matched-but-malformed; array vs object with leading whitespace; scalar → unexpected | `shapes::json_tags_choose_by_discriminator_or_by_array_versus_object` |
+| R3c | `image/png` → fallback, `application/json` → JSON; missing header not taken | `shapes::a_fallback_takes_a_media_type_no_other_shape_matches` |
+| R3 single, R4 | single shape never checks `Content-Type`; binary with a mismatched type succeeds | `shapes::a_single_shape_endpoint_never_checks_the_content_type` |
+| R12 | stream codecs and mixed alternatives refuse a mutator (compile-fail); all-JSON alternatives run global hook then mutator, refusal keeps original bytes; global hook only on a JSON choice; never on a stream or non-2xx | `tests/fixtures/compile_fail/{mutator_on_a_stream_endpoint, mutator_on_mixed_alternatives}.rs`; `shapes::{an_all_json_enum_runs_a_typed_mutator_after_the_global_hook_and_keeps_original_bytes_on_refusal, the_global_hook_runs_only_when_the_chosen_shape_is_json}`; `streams::an_error_status_on_a_stream_endpoint_takes_the_error_path_and_skips_the_global_hook` |
+| R19 | exact beats ranges, narrower beats wider, order-independent; declared per alternative; undecodable → `MalformedError`; unmatched and opted-out → `Undeclared`; raw body kept; single-shape runtime failure types | `error_routes::{lookup_prefers_an_exact_status_then_the_narrowest_range, the_matched_entry_decodes_its_own_shape_and_everything_else_keeps_its_body, the_runtime_failure_types_decode_text_bytes_empty_and_any_json_under_the_default_table}` |
+| R35, R36 (runtime part) | body members, unit omits `variables`, `operationName` only when set (empty kept), invalid document unchanged, non-object variables refused | `graphql::the_request_body_carries_the_document_unchanged_and_variables_only_as_an_object` |
+| R37 | success; empty errors; 201/206 keep status; errors with undecodable/null/absent data; partial data; 13 malformed wrapper/entry/data cases; 403 → HTTP path (declared and opted out); GraphQL errors declared after opt-out; `into_result` is `Err` | `graphql::{the_wrapper_is_classified_before_typed_data, a_permission_failure_takes_the_http_error_path_not_the_wrapper, graphql_errors_stay_declared_after_an_http_opt_out, sniff_error_fixtures_are_declared_graphql_failures_keeping_github_type}` |
+| R38 | sniff fixtures `success`, `passed`, `changed_head`, `null_rollup`, `partial_errors`, `request_wide_errors`, `rate_limit`, `permission_failure` (each `include_str!` inside its `#[test]`); path segments, locations, extensions, GitHub `type` in `other` | `graphql::{sniff_success_fixtures_decode_as_typed_data, sniff_error_fixtures_are_declared_graphql_failures_keeping_github_type, a_permission_failure_takes_the_http_error_path_not_the_wrapper, the_wrapper_is_classified_before_typed_data}` |
+| R41 | global hook sees the wrapper once per 2xx, never non-2xx; mutator typed `&mut D`, runs only failure-free, never on partial data; refusal keeps original bytes | `graphql::the_global_hook_sees_the_wrapper_once_and_the_mutator_only_failure_free_data` |
+
+**Deferred to the phase that owns the boundary:** R7's "one through a
+generated fixture client", R2/R20 generated types, the wrong-variables
+compile error (needs generated requests), and R12's "no definition carries
+such a hook" scan are Phase 4/5 items (plan Waves 7, 8, 10).
+
+### Input robustness (wire readers)
+
+The new readers are HTTP wire protocols, not configuration, but the GraphQL
+wrapper has load-bearing fields, so its shapes were walked through the
+public envelope (`graphql::the_wrapper_is_classified_before_typed_data`).
+Default outcome: `MalformedSuccess` with the raw body. Exceptions: `errors`
+absent or `[]` means no errors; `data` absent or null beside errors gives no
+partial data; entry `path`/`locations`/`extensions` absent or null mean
+absent. Covered cells: `errors` absent, null, wrong type (object), one
+invalid entry among valid, the only entry invalid, empty; `message` absent
+and wrong type; `path` element negative and fractional; `locations` line 0;
+`data` absent, null, wrong type; wrapper not an object; body not JSON.
+Duplicate wrapper keys are last-wins (`serde_json` `Value`), accepted for a
+wire protocol whose JSON grammar allows them. **Smell grep** over
+`stream.rs`, `shapes.rs`, `graphql.rs`, `endpoint.rs`: the `.ok()` uses are
+`ErrorBody for Value` (None → `MalformedError`, the documented result),
+`partial_data` (decode failure → `None`, R37's rule), and the tag reader
+(not JSON → no tag match → `UnexpectedContentType`, R3b's rule); no
+`#[serde(default)]`, `unwrap_or_default()`, or `filter_map(.. as_str())`.
+
+### Phase 3 gates
+
+The scope calculator, run from the repository root after all edits:
+
+```sh
+git status --porcelain --untracked-files=all | awk '{print $NF}' \
+  | xargs python3 scripts/ci/affected_scope.py
+```
+
+Result: `packages: [schematic-runtime, test-toolkit, darkmatter,
+schematic-define, schematic-gen]`, `change_class: package`. So both gates ran.
+
+- `just lint` (schematic): clean, after one fix: clippy
+  `large_enum_variant` on `Exchange` (boxed `LiveBody`).
+- `just test` (schematic): **2541 passed, 15 skipped** (Phase 2: 2505; the
+  15 skips are the same environment-gated tests), fresh-output 9/9,
+  compile-fail 1/1 (25 trybuild cases, three snapshots new or changed), exit
+  0. No test was reported slow. The slowest new test,
+  `streams::a_stream_that_delivers_every_second_outlives_a_two_second_timeout`,
+  takes about 3 s by contract (R11a's one item per second past a 2 s
+  timeout), inside the 5 s budget.
+- During development, two real defects surfaced and were fixed before the
+  gate: the `unfold`-backed streams panicked when polled after their end (now
+  fused), and the NDJSON framer kept a stale scan offset after its EOF flush.
+- `just check-tier-coverage schematic`: 0 stranded.
+- In-area dependent `just test-schema`: 55/55 passed (one slow under the
+  generated crate's compile; it passed).
+- Dependents of `schematic-schema` (which re-exports the runtime):
+  `cargo check --tests` for `homelab`, `sniff`, `biscuit-speaks`,
+  `eversolo-integration`, `arcam-amp-integration`,
+  `unfolded-integration-helper`, `sony-receiver-integration`, and
+  `model-citizen`: clean. Behavior tests that send through a generated client
+  (the default error table and buffered codecs changed underneath them):
+  `sniff` remote tests 75/75, `homelab` 49/49, `biscuit-speaks` ElevenLabs
+  48/48. None of them names a changed item (`DECLARED_ERROR_STATUSES`,
+  `ErrorBody::decode_body`, `BodyReadError`).
+- `darkmatter` tests that read shipped skills (`shipped_schema_corpus`,
+  `schema_roots`, `schema_phase_validation`, `current_root*`): 55/55.
+- `test-toolkit::archive_path_guard`: `every_allowlist_entry_still_names_a_live_site`
+  passed; **`no_archive_executed_target_bakes_in_a_producer_path` fails,
+  pre-existing and unchanged from Phase 2**: it reports
+  `schematic/definitions/tests/authoring_surface.rs:5` and
+  `schematic/gen/tests/l1/definition_baseline.rs:301`, which this phase did
+  not touch. No new test file is reported (the new repository reads are
+  `include_str!` inside each `#[test]`).
+- Cross-OS check: not run. The change has no path, process, console, or
+  `#[cfg]` code; the new socket tests use dynamic loopback ports and the same
+  patterns as the existing `timing.rs` suite, which CI runs on every OS.
+
+Docs updated: `runtime/codecs.md` (streams, shapes, error table, GraphQL,
+hook implementers), `runtime/deadlines-and-timeouts.md` (idle bound per
+item, distinct expiry errors, sequence diagram), `runtime/sending-and-responses.md`,
+`runtime/hooks.md`, `runtime/README.md` (planned list now covers only
+generation), `responses-and-errors.md` and `graphql.md` (new "Decoding a
+reply" section), and `dependencies.md` (serde `derive`, futures-util use).
+The `schematic-define` skill's streaming note now names the runtime codecs
+the generator will target.

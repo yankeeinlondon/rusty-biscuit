@@ -13,6 +13,7 @@ skills_files_updated_during_phase_1: []
 packages:
   - schematic-define
   - schematic-gen
+  - schematic-runtime
 source_files_during_phase_2:
   - schematic/define/src/builders.rs
   - schematic/define/src/bundle.rs
@@ -48,6 +49,46 @@ docs_created_during_phase_2:
   - schematic/docs/responses-and-errors.md
   - schematic/docs/graphql.md
 skills_files_updated_during_phase_2:
+  - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_3:
+  - schematic/runtime/Cargo.toml
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/codec.rs
+  - schematic/runtime/src/endpoint.rs
+  - schematic/runtime/src/error.rs
+  - schematic/runtime/src/graphql.rs
+  - schematic/runtime/src/lib.rs
+  - schematic/runtime/src/pager/request.rs
+  - schematic/runtime/src/response.rs
+  - schematic/runtime/src/shapes.rs
+  - schematic/runtime/src/stream.rs
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.stderr
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_stream_endpoint.rs
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_stream_endpoint.stderr
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_mixed_alternatives.rs
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_mixed_alternatives.stderr
+  - schematic/runtime/tests/l1/decode_boundary.rs
+  - schematic/runtime/tests/l1/envelope.rs
+  - schematic/runtime/tests/l1/error_routes.rs
+  - schematic/runtime/tests/l1/graphql.rs
+  - schematic/runtime/tests/l1/main.rs
+  - schematic/runtime/tests/l1/shapes.rs
+  - schematic/runtime/tests/l1/streams.rs
+  - schematic/runtime/tests/l1/support.rs
+  - schematic/runtime/tests/l1/timing.rs
+docs_updated_during_phase_3:
+  - schematic/docs/dependencies.md
+  - schematic/docs/graphql.md
+  - schematic/docs/responses-and-errors.md
+  - schematic/docs/runtime/README.md
+  - schematic/docs/runtime/codecs.md
+  - schematic/docs/runtime/deadlines-and-timeouts.md
+  - schematic/docs/runtime/hooks.md
+  - schematic/docs/runtime/sending-and-responses.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
   - .claude/skills/schematic-define/SKILL.md
 ---
 
@@ -206,19 +247,19 @@ Address-rule tag and required `suffix`, replacement, and append-path payloads, p
 
 ### Wave 5 — Independent codecs (parallel after Phase 2)
 
-- [ ] **Stream codecs**
+- [x] **Stream codecs**
   - Implement caller-polled owned SSE, NDJSON, and byte streams. Handle split UTF-8/delimiters, CR/LF, comments, multiline SSE data, blank NDJSON lines, and clean EOF final lines. Match consumed terminators before decoding and support retained terminators.
   - Add distinct malformed, early-close, interrupted, idle-timeout, deadline, and bounded frame-limit errors; preserve safe causes/pending bytes. Integrate the header/idle clock from the spike and expose the managed builder's default 16 MiB limit. Dropping the stream releases the body without spawned work; streams remain usable after dropping the client and are Send.
-- [ ] **Response dispatch**
+- [x] **Response dispatch**
   - Implement multi-shape status/media/204 selection and HTTP error lookup/decode using the frozen tables. Preserve status, headers, original raw buffered bodies, and spec 2 interruption/redaction behavior; produce Declared, MalformedError, Undeclared, or UnexpectedContentType as specified.
   - Add JSON-mutator marker support only for all-JSON multi-shape alternatives; exclude stream/text/binary codecs. Exercise every specificity and single-shape compatibility branch through public envelopes.
-- [ ] **GraphQL decoding**
+- [x] **GraphQL decoding**
   - Implement wrapper-first classification, typed errors with unknown fields, valid paths/locations, usable typed partial data only, and the composite GraphQL/HTTP failure type. Test errors-only, absent/null/bad data, empty/malformed errors, wrong error members, 2xx statuses, HTTP failures and HTTP opt-out.
   - Global JSON hooks see the wrapper once on 2xx; typed mutators run only on failure-free decoded data. Preserve original bytes on hook failures and skip the global hook on non-2xx.
 
 ### Wave 6 — Runtime integration (sequential)
 
-- [ ] **Runtime verification**
+- [x] **Runtime verification**
   - Wire shared exports, codecs, builder options, and manifests. Test R6–R12/R19/R37/R38/R41 through public send/envelope/stream results, including a delayed first item and immediate envelope availability.
   - Prove exactly one terminal error, malformed-item recovery, final retained statistics, final-line EOF, interrupted EOF without EndedEarly, oversize pending frames, and no full-body retention/background consumption. Use synchronized server signals, dynamic ports, and owned cleanup.
   - Prove the required one-item-per-second stream exceeds a 2 s idle timeout while healthy, and a silent stream expires. Keep elapsed-contract L1 cases under the repository 5 s limit; use short controlled durations for other cases and no readiness sleeps/retries. Add compile-time Send/ownership checks and hook compile-fail cases.
