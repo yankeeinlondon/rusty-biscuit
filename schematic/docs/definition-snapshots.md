@@ -22,6 +22,14 @@ Historical fixtures live under `gen/tests/fixtures/definition-baseline/`. Object
 
 The raw corpus measured 8,449,975 bytes. Schema fingerprints reduce the stored corpus to 1,347,051 bytes. Each registry row keeps its component name, Rust path, and position so a failure can identify the affected component. The source-maintained `EXPLAINED` list requires an exact changed leaf and a nonempty cause; wildcard and stale entries fail. Paths include API keys, array positions, endpoint IDs and component names. There are no accepted differences initially; a migration must explain any intentional difference for its exact API, endpoint and field, or registry row. Artifact comparisons always use the current shipped outputs with no exemptions.
 
+Before comparing, the test rewrites the historical JSON for the removal of `RestApi::env_username`, and touches nothing else:
+
+- a `null` `env_username` is removed from every API;
+- for Bitbucket and EmqxBasic only, `"auth": "Basic"` with `env_username: "U"` and at most one `env_auth` name `"P"` becomes `{"Basic": {"username_env": {"names": ["U"]}, "password_env": {"names": ["P"]}}}` with an empty `env_auth`, which is what the old mapping read;
+- for Unfolded Circle Core REST only, its populated `env_username` on a bearer API is removed while the same snapshot's explicit `env_mapping.basic_user` is exactly that one name.
+
+Only then is the API metadata fingerprint recomputed. Any other populated `env_username`, a second historical `env_auth` name on a Basic API, or a new password name in the current definition is still reported at its own leaf.
+
 The explicit capture utility is `cargo run -p schematic-gen --example capture_definition_baseline -- <new-directory>` from the repository root. The destination must be a new directory with an existing parent; existing destinations are refused. Use a new temporary directory to inspect a candidate capture. Replacing historical fixtures is not part of ordinary migration checks.
 
 The retired API exception table, endpoint OAuth scope field, and parameter-level
@@ -49,17 +57,19 @@ These tables define the data-transfer contract for the newly serializable struct
 
 ### RestApi (continued)
 
-| Shape | `auth_policy` | `env_auth` | `env_username` | `headers` | `endpoints` |
-| --- | --- | --- | --- | --- | --- |
-| native control | V | V | V | V | V |
-| absent | N | E | N | E | E |
-| null | N | E | N | E | E |
-| wrong whole type | E | E | E | E | E |
-| one wrong element | — | E | — | E | E |
-| every element wrong | — | E | — | E | E |
-| empty native | V | V | V | V | V |
-| duplicate key | E | E | E | E | E |
-| trailing content | E | E | E | E | E |
+| Shape | `auth_policy` | `env_auth` | `headers` | `endpoints` |
+| --- | --- | --- | --- | --- |
+| native control | V | V | V | V |
+| absent | N | E | E | E |
+| null | N | E | E | E |
+| wrong whole type | E | E | E | E |
+| one wrong element | — | E | E | E |
+| every element wrong | — | E | E | E |
+| empty native | V | V | V | V |
+| duplicate key | E | E | E | E |
+| trailing content | E | E | E | E |
+
+`auth` serializes Basic as `{"Basic": {"username_env": {"names": [..]}, "password_env": {"names": [..]}}}`. Both lists are required: absent, `null`, a wrong type, or any non-string element is an error, and a duplicate key or trailing content rejects. An empty `names` list is valid and means that half of the credential has no environment source.
 
 ### RestApi (continued)
 

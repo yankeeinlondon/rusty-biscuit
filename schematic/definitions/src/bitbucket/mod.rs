@@ -60,7 +60,7 @@ use schematic_define::{DefinitionContext, DefinitionError};
 #[cfg(test)]
 use schematic_define::{ApiResponse, RestMethod};
 use schematic_define::{
-    AuthStrategy, Endpoint, EndpointParams, EnvList, EnvMapping,
+    Endpoint, EndpointParams, EnvList, EnvMapping,
     RestApi,
     pagination::{Collection, LinkSource, PageSize, Strategy, ValueSource},
 };
@@ -215,7 +215,7 @@ fn build_bitbucket_api(ctx: &mut DefinitionContext) -> Result<RestApi, Definitio
         ];
     RestApi::builder(ctx, "Bitbucket", "https://api.bitbucket.org/2.0")
         .describes("Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows")
-        .authentication(AuthStrategy::Basic, vec!["BITBUCKET_APP_PASSWORD".to_string()])
+        .basic_env("BITBUCKET_USERNAME", ["BITBUCKET_APP_PASSWORD"])
         .docs_url("https://developer.atlassian.com/cloud/bitbucket/rest/")
         .module_path("bitbucket")
         .env_mapping(EnvMapping {
@@ -223,7 +223,6 @@ fn build_bitbucket_api(ctx: &mut DefinitionContext) -> Result<RestApi, Definitio
             basic_pass: Some(EnvList::new(vec!["BITBUCKET_APP_PASSWORD".to_string()])),
             ..Default::default()
         })
-        .env_username("BITBUCKET_USERNAME")
         .default_pagination(bitbucket_next_link())
         .endpoints(endpoints)
         .build()
@@ -255,7 +254,7 @@ pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::TypeRef;
+    use schematic_define::{AuthStrategy, TypeRef};
 
     // =============================================
     // api.schemas tests
@@ -321,9 +320,8 @@ mod tests {
     fn api_uses_basic_auth() {
         let api = define_bitbucket_api();
 
-        assert!(matches!(api.auth, AuthStrategy::Basic));
-        assert!(api.env_auth.contains(&"BITBUCKET_APP_PASSWORD".to_string()));
-        assert_eq!(api.env_username, Some("BITBUCKET_USERNAME".to_string()));
+        assert_eq!(api.auth, AuthStrategy::Basic { username_env: EnvList::single("BITBUCKET_USERNAME"), password_env: EnvList::single("BITBUCKET_APP_PASSWORD") });
+        assert!(api.env_auth.is_empty());
     }
 
     #[test]
@@ -483,7 +481,7 @@ mod tests {
             ApiResponse::Json(reference) => assert_eq!(reference, &TypeRef::Named("Branch".into())),
             _ => panic!("Expected JSON response"),
         }
-        assert!(matches!(api.auth, AuthStrategy::Basic));
+        assert!(matches!(api.auth, AuthStrategy::Basic { .. }));
     }
 
     #[test]

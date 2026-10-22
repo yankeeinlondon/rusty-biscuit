@@ -77,7 +77,7 @@ pub fn map_auth(strategy: &AuthStrategy) -> ExportAuth {
             variable: "apiKey".to_string(),
             location: ApiKeyLocation::Header,
         },
-        AuthStrategy::Basic => ExportAuth::Basic {
+        AuthStrategy::Basic { .. } => ExportAuth::Basic {
             username_var: "username".to_string(),
             password_var: "password".to_string(),
         },
@@ -179,7 +179,10 @@ mod tests {
     #[test]
     fn map_auth_basic() {
         assert_eq!(
-            map_auth(&AuthStrategy::Basic),
+            map_auth(&AuthStrategy::Basic {
+                username_env: schematic_define::EnvList::single("USER"),
+                password_env: schematic_define::EnvList::single("PASS"),
+            }),
             ExportAuth::Basic {
                 username_var: "username".to_string(),
                 password_var: "password".to_string(),

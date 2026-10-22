@@ -63,7 +63,7 @@ flowchart LR
 
 API build runs `RestApi::validate_references`: every name must resolve to a registered component, or the build fails with `DefinitionError::UnresolvedReference { api, endpoint, name }`. It also rejects empty, duplicate, or malformed components. Call the same method on a definition read from JSON before using it. A name that exists only nested inside another component has no Rust path of its own and cannot be referenced directly. OpenAPI export writes `Named` as a `$ref`, so Rust qualification never erases component references or wrappers. A root typed `Vec<T>` retains automatic GET list recognition; `Option<Vec<T>>` and nominal collection wrappers still require authored collection information. `Schema { type_name, module_path }` is used only by WebSocket messages. See [typed registration](typed-registration.md).
 
-For authentication, `no_auth()`, `bearer_env(names)`, and `basic_env(username, password_names)` make coherent declarations. `authentication(strategy, names)` supports API keys, parameter keys, OAuth2, and custom bearer headers. The stored auth types are unchanged. A second authentication declaration fails even if it repeats the same strategy. An explicit `env_mapping(mapping)` must agree with each environment value supplied by the auth declaration, in either setter order. For example, declaring `bearer_env(["TOKEN"])` and mapping bearer credentials to `OTHER_TOKEN` fails. Extra mappings support an intentional multi-method `auth_policy(policy)`; that policy remains authoritative through `effective_auth_policy()`.
+For authentication, `no_auth()`, `bearer_env(names)`, and `basic_env(username, password_names)` make coherent declarations. `authentication(strategy, names)` supports API keys, parameter keys, OAuth2, and custom bearer headers. Basic stores its environment inside the strategy: `basic_env("USER", ["PASS", "SECRET"])` stores `AuthStrategy::Basic { username_env: ["USER"], password_env: ["PASS", "SECRET"] }` with an empty `env_auth`, and `authentication(AuthStrategy::Basic { .. }, names)` fails at build when `names` is not empty, so a password never comes from `env_auth`. `env_username(name)` fills an empty Basic `username_env` or must equal it; on any other strategy it is accepted only when the explicit mapping's `basic_user` is exactly `[name]`, and fails otherwise. A second authentication declaration fails even if it repeats the same strategy. An explicit `env_mapping(mapping)` must agree with each environment value supplied by the auth declaration, in either setter order. For example, declaring `bearer_env(["TOKEN"])` and mapping bearer credentials to `OTHER_TOKEN` fails. Extra mappings support an intentional multi-method `auth_policy(policy)`; that policy remains authoritative through `effective_auth_policy()`.
 
 Headers, query parameters, complete parameter sets, documentation URL, version, module path, request suffix, and API cross-origin policy retain the current stored representation and generator precedence. Endpoint headers override matching API headers through the generator's existing merge. Builders preserve declaration order. Endpoint `cross_origin(policy)` replaces the API policy for that endpoint, including redirects and followed pagination links. `allow_origins` accepts only bare HTTP(S) origins, with an optional port and trailing slash; paths, user information, queries and fragments fail API build. Caller policy settings may only tighten each applicable definition policy. Runtime-only origin and redaction settings are not represented as OpenAPI/Postman transport behavior.
 
@@ -84,9 +84,81 @@ let endpoint = Endpoint::get("ReadFile", "/files/{file}")
 
 API `request_id_header("X-Request-ID")` and `secret_header("X-Pin")` normalize names to lowercase and reject invalid HTTP header names. Parameter `secret()` adds its wire name to the predecessor runtime's redaction metadata. The existing auth strategy markers, redaction behavior and explicit `auth_policy` semantics remain authoritative.
 
-`pager_managed()` records an adoption requirement, preserved in serialized definitions. API build resolves the strategy and requires a matching location and wire name with an exposed caller control. A marker alone cannot hide an input. Required managed inputs additionally need a pagination-authored sent default; the existing `pager-managed-required-without-default` diagnostic identifies a missing default. `default_pagination(strategy)` authors an API strategy; `.pagination(Collection)` assigns an endpoint collection, opt-out, or strategy override. Pagination exception tables and legacy parameter pagination fields are removed.
+`pager_managed()` records an adoption requirement, preserved in serialized definitions. API build resolves the strategy and requires a matching location and wire name with an exposed caller control. A marker alone cannot hide an input. Required managed inputs additionally need a pagination-authored sent default that is valid for the declared type (an `Integer` parses as `i64`, a `Number` as a finite `f64`, a `Boolean` is `true` or `false`, an `Enum` value is one of its values, anything else is nonempty); `pager-managed-required-without-default` reports a missing default and `pager-managed-default-invalid` an invalid one, each naming the strategy kind and parameter. `default_pagination(strategy)` authors an API strategy; `.pagination(Collection)` assigns an endpoint collection, opt-out, or strategy override. Pagination exception tables and legacy parameter pagination fields are removed.
 
 New optional fields are omitted when unused, preserving historical definition JSON. Absent/null origin overrides and Rust aliases mean no override/alias; absent marker flags mean false, while null/wrong-type flags are Serde errors. These are definition transfer fields rather than a new configuration format. The later response vocabulary remains **planned**.
+
+## Paths, deprecation, rate limits, and endpoint authentication
+
+These builder calls are optional; a definition that uses none of them builds
+and serializes exactly as before.
+
+```rust
+let endpoint = Endpoint::get("GetIssue", "/repos/{owner}/{repo}/issues/{number}")
+    .describes("Get an issue")
+    .returns_json::<Issue>(&mut ctx)
+    .path_param(ParamDef::path("owner", QueryParamType::String))
+    .path_param(ParamDef::path("repo", QueryParamType::String))
+    .path_param(ParamDef::path("number", QueryParamType::Integer).describes("Issue number"))
+    .deprecated()
+    .rate_limit(RateLimit::new("x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset", ResetUnit::EpochSeconds)?)
+    .public()
+    .build()?;
+```
+
+**Typed path parameters.** `path_param` stores the parameter in
+`EndpointParams::path`, forced required, `Simple` style and not exploded. An
+endpoint with no declarations keeps every placeholder an untyped string. Once
+any is declared, the declared names must equal the placeholders exactly:
+`{+name}` counts as `name`, and a placeholder repeated in the template needs
+one declaration. Build rejects, naming the parameter: a missing or extra
+declaration, a duplicate, `required: false` (never silently corrected), a
+style other than `Simple`, an `Array` or `Json` type, an enum with no values
+or a repeated value, an invalid explicit `rust_name`, and a Rust field shared
+with a query, header, cookie or other path parameter. That field comparison
+uses the explicit `rust_name`, else the wire name with characters outside
+`[A-Za-z0-9_]` replaced by `_`; the generator's `generated-name-collision`
+check, which also snake-cases, stays the complete one.
+`Endpoint::path_placeholders()` lists the placeholder names once each, in
+order of first occurrence.
+
+**Deprecation.** `.deprecated()` on an endpoint or a `ParamDef` sets a flag
+that is omitted from JSON while false. Generated Rust documentation and the
+OpenAPI `deprecated` field are **planned**; no Rust `#[deprecated]` attribute
+will be generated.
+
+**Rate-limit and retry metadata.** `.rate_limit(RateLimit)` and
+`.retry_guidance(RetryGuidance)` exist on the API and endpoint builders. An
+endpoint value replaces the API value whole, never field by field;
+`RestApi::effective_rate_limit(&endpoint)` and `effective_retry_guidance`
+return the value that applies. The values are descriptive: nothing retries,
+sleeps, or enforces them. Build re-validates them, since their fields are
+public. Their export to OpenAPI and generated documentation is **planned**.
+
+**Endpoint authentication.** With no declaration an endpoint inherits the API
+policy. `.public()` makes it unauthenticated; `.auth(policy)` replaces the API
+policy and reads credentials through the API's effective environment
+mapping; `.auth_with_env_mapping(policy, mapping)` replaces that mapping too.
+`RestApi::endpoint_auth(&endpoint)` returns `Inherited`, `Public`, or
+`Replaced` with the policy and mapping that apply. Build rejects:
+
+| Declaration | Error |
+| --- | --- |
+| two of `public`, `auth`, `auth_with_env_mapping` | declared more than once |
+| a policy with no explicit method and no fallback | use `public()` instead |
+| an OAuth2 grant with an invalid URL (endpoint policy, API `auth`, or API `auth_policy`) | the grant's URL error |
+| a bearer fallback without `bearer_token` variables in the mapping | no `bearer_token` variables |
+| an API-key fallback without `api_key` variables for the same header (case-insensitive) | names both headers |
+| a Basic fallback without both `basic_user` and `basic_pass` | names the missing half |
+| a query or cookie API-key fallback, unless it is identical to the API's own and no endpoint mapping is declared | an `EnvMapping` cannot name it |
+
+A policy without an environment fallback needs no mapping. JSON spells the
+field `"auth": "Public"` or
+`"auth": {"Policy": {"policy": {..}, "env_mapping": {..}}}`. Applying the
+resolved policy in generated clients is **planned**.
+
+Each new field is omitted when unset. Absent means inherit, false or empty;
+an explicit `null`, a wrong type, or `{}` for a metadata value is an error.
 
 ## Default allow-list
 

@@ -174,12 +174,19 @@ fn generate_env_mapping(
                 }
             }
         }
-        schematic_define::AuthStrategy::Basic => {
+        // Basic names its own lists; `env_auth` is never a Basic source.
+        schematic_define::AuthStrategy::Basic { username_env, password_env } => {
+            let list = |list: &schematic_define::EnvList| {
+                if list.names().is_empty() { return quote! { None }; }
+                let names = list.names();
+                quote! { Some(schematic_define::EnvList::new(vec![#(#names.to_string()),*])) }
+            };
+            let (basic_user, basic_pass) = (list(username_env), list(password_env));
             quote! {
                 schematic_define::EnvMapping {
                     bearer_token: None,
-                    basic_user: Some(schematic_define::EnvList::new(vec![#(#env_auth.to_string()),*])),
-                    basic_pass: None,
+                    basic_user: #basic_user,
+                    basic_pass: #basic_pass,
                     api_key: None,
                     ..Default::default()
                 }

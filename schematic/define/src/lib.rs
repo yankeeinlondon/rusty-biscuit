@@ -131,9 +131,11 @@ pub mod prelude;
 pub mod request;
 pub mod response;
 pub mod schema;
+mod serde_presence;
 pub mod types;
 pub mod registration;
 pub mod builders;
+pub mod metadata;
 pub mod websocket;
 
 #[cfg(feature = "openapi")]
@@ -141,8 +143,10 @@ pub mod openapi;
 
 // Re-export main types at crate root
 pub use auth::{
-    ApiKeyLocation, AuthMethod, AuthPolicy, AuthStrategy, EnvAuthStrategy, UpdateStrategy,
+    ApiKeyLocation, AuthMethod, AuthPolicy, AuthStrategy, EndpointAuth, EnvAuthStrategy,
+    UpdateStrategy,
 };
+pub use metadata::{Backoff, MetadataError, RateLimit, ResetUnit, RetryGuidance, StatusSelector};
 pub use components::SchemaComponent;
 pub use cross_origin::CrossOrigin;
 pub use headers::{ApiKeyEnv, EnvList, EnvMapping, HeaderError, Headers, SensitiveString};
@@ -150,12 +154,15 @@ pub use models::{
     EnumDef, EnumVariant, FieldDef, ModelCatalog, ModelDef, PrimitiveType, StructDef, TypeAlias,
     TypeRef,
 };
-pub use oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
+pub use oauth::{
+    AuthorizationCodeGrant, ClientCredentialsGrant, DeviceCodeGrant, OAuth2ClientAuthMethod,
+    OAuth2Config, OAuth2ConfigError, OAuth2GrantType, PkceRequirement,
+};
 pub use params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
 pub use request::{ApiRequest, FormField, FormFieldKind};
 pub use response::ApiResponse;
 pub use schema::{Schema, SchemaObject};
-pub use types::{Endpoint, RestApi, RestMethod};
+pub use types::{Endpoint, ResolvedEndpointAuth, RestApi, RestMethod};
 pub use registration::{DefinitionContext, DefinitionError, MapKey, Registration, RustPath, TypeDesc, TypeRegistration};
 pub use websocket::{
     AuthFlowHints, ConnectionLifecycle, ConnectionParam, CorrelationHints, FrameFormat,

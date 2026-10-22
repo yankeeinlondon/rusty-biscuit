@@ -510,7 +510,10 @@ mod tests {
                 header: "X-API-Key".to_string(),
                 value_prefix: None,
             },
-            AuthStrategy::Basic,
+            AuthStrategy::Basic {
+                username_env: crate::EnvList::single("WS_USER"),
+                password_env: crate::EnvList::from_strs(&["WS_PASS", "WS_SECRET"]),
+            },
         ];
 
         for auth in strategies {

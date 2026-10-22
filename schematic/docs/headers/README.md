@@ -42,8 +42,10 @@ the runtime's fallback. `EnvMapping` is the authoritative source:
 - `basic_user` + `basic_pass` for Basic fallback (both must resolve)
 - `api_key` for API-key header fallback
 
-Legacy `RestApi::env_auth` and `RestApi::env_username` are still supported
-as authoring inputs and are normalized into `EnvMapping` first. An API key
+Legacy `RestApi::env_auth` (bearer and API-key fallback chains) and the
+username and password lists carried by `AuthStrategy::Basic` are still
+supported as authoring inputs and are normalized into `EnvMapping` first;
+an explicit `env_mapping` replaces that derived mapping wholesale. An API key
 sent as a query parameter or cookie reads the variables `env_auth` names.
 Each generated module's docs list the variables its client reads.
 

@@ -615,13 +615,17 @@ flowchart TD
     required -->|no| adopted["adopted"]
     required -->|yes| value{"a value to send when<br/>the caller sets none?"}
     value -->|no| missing["pager-managed-required-without-default"]
-    value -->|yes| adoptedreq["adopted; ordinary sends<br/>send that value"]
+    value -->|yes| typed{"valid for the<br/>declared type?"}
+    typed -->|no| invalid["pager-managed-default-invalid"]
+    typed -->|yes| adoptedreq["adopted; ordinary sends<br/>send that value"]
 ```
 
 A required adopted parameter needs a value the pager sends when the caller
 sets none: the first page or offset of the index base, the size's
 `sent_default`, or the keep-alive default. A cursor or partition input has
-none, so it cannot be required. An ordinary `.await` of the endpoint sends
+none, so it cannot be required. The value must also suit the parameter's
+declared type: a size of `50` cannot fill a `Boolean` parameter or an enum
+without a `"50"` value. An ordinary `.await` of the endpoint sends
 that value too; an optional adopted parameter is omitted from an ordinary
 send.
 

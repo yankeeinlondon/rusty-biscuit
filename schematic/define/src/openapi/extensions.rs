@@ -142,13 +142,10 @@ pub struct AuthExtension {
     /// The original AuthStrategy.
     pub strategy: AuthStrategy,
 
-    /// Environment variable names for auth credentials (legacy format).
+    /// Environment variable names for token and key credentials (legacy
+    /// format); Basic carries its own lists inside `strategy`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env_auth: Vec<String>,
-
-    /// Environment variable for Basic auth username.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub env_username: Option<String>,
 }
 
 impl From<AuthExtension> for serde_json::Value {
@@ -394,7 +391,6 @@ mod tests {
         let ext = AuthExtension {
             strategy: AuthStrategy::BearerToken { header: None },
             env_auth: vec!["OPENAI_API_KEY".to_string()],
-            env_username: None,
         };
 
         assert!(matches!(ext.strategy, AuthStrategy::BearerToken { .. }));
@@ -404,13 +400,16 @@ mod tests {
     #[test]
     fn auth_extension_basic_auth() {
         let ext = AuthExtension {
-            strategy: AuthStrategy::Basic,
-            env_auth: vec!["API_PASSWORD".to_string()],
-            env_username: Some("API_USERNAME".to_string()),
+            strategy: AuthStrategy::Basic {
+                username_env: EnvList::single("API_USERNAME"),
+                password_env: EnvList::single("API_PASSWORD"),
+            },
+            env_auth: vec![],
         };
 
-        assert!(matches!(ext.strategy, AuthStrategy::Basic));
-        assert!(ext.env_username.is_some());
+        let json = serde_json::to_string(&ext).unwrap();
+        assert!(json.contains(r#""username_env":{"names":["API_USERNAME"]}"#));
+        assert_eq!(serde_json::from_str::<AuthExtension>(&json).unwrap(), ext);
     }
 
     #[test]
@@ -421,7 +420,6 @@ mod tests {
                 value_prefix: None,
             },
             env_auth: vec!["MY_API_KEY".to_string()],
-            env_username: None,
         };
 
         if let AuthStrategy::ApiKey { header, .. } = &ext.strategy {
@@ -436,7 +434,6 @@ mod tests {
         let ext = AuthExtension {
             strategy: AuthStrategy::BearerToken { header: None },
             env_auth: vec!["TOKEN".to_string()],
-            env_username: None,
         };
 
         let json: serde_json::Value = ext.into();
@@ -453,7 +450,6 @@ mod tests {
                 value_prefix: None,
             },
             env_auth: vec!["KEY1".to_string(), "KEY2".to_string()],
-            env_username: None,
         };
 
         let json = serde_json::to_string(&ext).unwrap();
@@ -492,7 +488,6 @@ mod tests {
         let ext = AuthExtension {
             strategy: AuthStrategy::BearerToken { header: None },
             env_auth: vec![],
-            env_username: None,
         };
         let json = serde_json::to_string(&ext).unwrap();
         assert!(!json.contains("env_auth"));

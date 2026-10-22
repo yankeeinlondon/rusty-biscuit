@@ -23,9 +23,10 @@
 use std::path::Path;
 
 use schematic_define::{
-    ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, CrossOrigin,
-    Endpoint, EndpointParams, FormField, OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType,
-    ParamDef, ParamStyle, PkceRequirement, QueryParamType, RestApi, RestMethod,
+    ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, AuthPolicy, AuthStrategy,
+    AuthorizationCodeGrant, CrossOrigin, Endpoint, EndpointParams, EnvList, FormField,
+    OAuth2ClientAuthMethod, OAuth2Config, ParamDef, ParamStyle, PkceRequirement, QueryParamType,
+    RestApi, RestMethod,
 };
 use schematic_define::pagination::{
     Collection, CursorSource, InputParam, KeepAlive, LinkSource, MoreSignal, PageSize,
@@ -163,11 +164,11 @@ fn endpoint(id: &str, method: RestMethod, path: &str, response: ApiResponse) -> 
 }
 
 fn fixture_api(name: &str, module: &str, auth: AuthStrategy, endpoints: Vec<Endpoint>) -> RestApi {
-    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{name} fixture API"); fixture.base_url = "http://127.0.0.1:1".to_string(); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = vec![format!("{}_TOKEN", module.to_uppercase())]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = Some(module.to_string()); fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::common::components::with_referenced_components(fixture) }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{name} fixture API"); fixture.base_url = "http://127.0.0.1:1".to_string(); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = vec![format!("{}_TOKEN", module.to_uppercase())]; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = Some(module.to_string()); fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::common::components::with_referenced_components(fixture) }
 }
 
 fn named_param(name: &str, param_type: QueryParamType) -> ParamDef {
-    ParamDef { rust_name: None, secret: false, pager_managed: false,
+    ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required: false,
         description: None,
@@ -178,7 +179,7 @@ fn named_param(name: &str, param_type: QueryParamType) -> ParamDef {
 }
 
 fn located_params(query: Vec<ParamDef>, header: Vec<ParamDef>, cookie: Vec<ParamDef>) -> EndpointParams {
-    EndpointParams { query, header, cookie }
+    EndpointParams { path: vec![], query, header, cookie }
 }
 
 /// A page-number default (adopting `page` and `per_page`, keeping `state`),
@@ -382,16 +383,14 @@ fn fixture_apis() -> Vec<RestApi> {
         }],
         env_fallback: None,
     });
-    let oauth = OAuth2Config {
-        grant_type: OAuth2GrantType::AuthorizationCodePkce,
-        authorization_url: Some("http://127.0.0.1:1/authorize".to_string()),
+    let oauth = OAuth2Config::AuthorizationCodePkce(AuthorizationCodeGrant {
+        authorization_url: "http://127.0.0.1:1/authorize".to_string(),
         token_url: "http://127.0.0.1:1/token".to_string(),
         revocation_url: None,
-        device_authorization_url: None,
         default_scopes: vec!["read".to_string()],
         pkce: PkceRequirement::Required,
         client_auth: OAuth2ClientAuthMethod::None,
-    };
+    });
 
     // Secret names, a request-id header, and the tightest cross-origin policy,
     // all from the definition. Neither secret name is a built-in one.
@@ -454,7 +453,7 @@ fn fixture_apis() -> Vec<RestApi> {
         fixture_api(
             "FixtureBasic",
             "fixture_basic",
-            AuthStrategy::Basic,
+            AuthStrategy::Basic { username_env: EnvList::new(vec![]), password_env: EnvList::single("FIXTURE_BASIC_TOKEN") },
             vec![
                 endpoint("DeleteThing", RestMethod::Delete, "/things/{id}", ApiResponse::Empty),
                 endpoint("GetNote", RestMethod::Get, "/note", ApiResponse::Text),
@@ -1601,9 +1600,9 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
         "private",
     ),
     (
-        "a descriptor carries no structure",
-        "fn misuse() { let mut c = schematic_define::DefinitionContext::types_in(\"::models\"); let _ = c.register::<String>().unwrap().structure(schematic_define::TypeRef::Named(\"Model\".into())); }",
-        "E0599",
+        "a descriptor's structure is set only by context composition",
+        "fn misuse() { let mut c = schematic_define::DefinitionContext::types_in(\"::models\"); let mut d = c.register::<String>().unwrap(); d.structure = Some(schematic_define::TypeRef::Named(\"Model\".into())); }",
+        "E0616",
         "structure",
     ),
     (

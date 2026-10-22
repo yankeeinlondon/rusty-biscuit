@@ -2,8 +2,9 @@ use super::auth::{AuthConfig, EnvFallback, Placement, auth_config};
 use super::*;
 use crate::codegen::request_structs::format_generated_code;
 use schematic_define::{
-    ApiKeyEnv, ApiKeyLocation, AuthMethod, AuthPolicy, AuthStrategy, CrossOrigin, EnvAuthStrategy,
-    EnvList, EnvMapping, OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement,
+    ApiKeyEnv, ApiKeyLocation, AuthMethod, AuthPolicy, AuthStrategy, AuthorizationCodeGrant,
+    CrossOrigin, EnvAuthStrategy, EnvList, EnvMapping, OAuth2ClientAuthMethod, OAuth2Config,
+    PkceRequirement,
 };
 
 fn make_api(name: &str, auth: AuthStrategy, env_auth: &[&str]) -> RestApi {
@@ -13,6 +14,11 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: &[&str]) -> RestApi {
             .authentication(auth, env_auth.iter().copied())
             .build().expect("valid API fixture")
     }
+}
+
+fn basic_api(name: &str, username: &[&str], password: &[&str]) -> RestApi {
+    let auth = AuthStrategy::Basic { username_env: EnvList::from_strs(username), password_env: EnvList::from_strs(password) };
+    make_api(name, auth, &[])
 }
 
 fn code(api: &RestApi) -> String {
@@ -26,16 +32,14 @@ fn squash(text: &str) -> String {
 }
 
 fn oauth() -> OAuth2Config {
-    OAuth2Config {
-        grant_type: OAuth2GrantType::AuthorizationCodePkce,
-        authorization_url: Some("https://auth.example.com/authorize".to_string()),
+    OAuth2Config::AuthorizationCodePkce(AuthorizationCodeGrant {
+        authorization_url: "https://auth.example.com/authorize".to_string(),
         token_url: "https://auth.example.com/token".to_string(),
         revocation_url: None,
-        device_authorization_url: None,
         default_scopes: vec![],
         pkce: PkceRequirement::Required,
         client_auth: OAuth2ClientAuthMethod::None,
-    }
+    })
 }
 
 fn env(placement: Placement, vars: &[&str], username_vars: &[&str]) -> Option<EnvFallback> {
@@ -77,7 +81,7 @@ fn an_api_is_one_client_struct_over_a_tag_with_constants_and_an_infallible_new()
 
 #[test]
 fn basic_auth_is_emitted_only_for_an_api_that_accepts_basic() {
-    let basic = code(&make_api("Basic", AuthStrategy::Basic, &["BASIC_PASS"]));
+    let basic = code(&basic_api("Basic", &[], &["BASIC_PASS"]));
     assert!(
         squash(&basic).contains(&squash(
             "pub fn basic_auth(self, username: impl Into<String>, password: impl Into<String>) -> Self { \
@@ -161,8 +165,7 @@ fn every_legacy_strategy_translates_to_the_same_placement_and_variables() {
     let bearer = |header: Option<&str>| Placement::Bearer {
         header: header.map(str::to_string),
     };
-    let mut basic = make_api("Basic", AuthStrategy::Basic, &["PASS"]);
-    basic.env_username = Some("USER".to_string());
+    let basic = basic_api("Basic", &["USER"], &["PASS"]);
     let cases: Vec<(&str, RestApi, AuthConfig)> = vec![
         ("none", make_api("A", AuthStrategy::None, &["IGNORED"]), AuthConfig::default()),
         (
@@ -329,7 +332,7 @@ fn a_mapping_that_names_no_variable_reads_none() {
     assert_eq!(auth_config(&api).env, None);
     assert!(!code(&api).contains("env_fallback"), "{}", code(&api));
 
-    let mut basic = make_api("B", AuthStrategy::Basic, &["PASS"]);
+    let mut basic = basic_api("B", &[], &["PASS"]);
     basic.env_mapping = Some(EnvMapping {
         basic_user: Some(EnvList::single("USER")),
         ..EnvMapping::default()
@@ -339,8 +342,7 @@ fn a_mapping_that_names_no_variable_reads_none() {
 
 #[test]
 fn the_translated_policy_is_emitted_in_runtime_terms() {
-    let mut basic = make_api("Basic", AuthStrategy::Basic, &["PASS"]);
-    basic.env_username = Some("USER".to_string());
+    let basic = basic_api("Basic", &["USER"], &["PASS"]);
     let code = code(&basic);
     for expected in [
         ".auth(",
@@ -405,7 +407,7 @@ fn endpoint_origin_replacement_and_parameter_secrets_use_runtime_metadata() {
         .describes("List entries").returns_empty()
         .build().unwrap();
     endpoint.cross_origin = Some(CrossOrigin::same_origin());
-    let secret = schematic_define::ParamDef {
+    let secret = schematic_define::ParamDef { deprecated: false,
         name: "X-Pin".into(), rust_name: None, secret: true, pager_managed: false,
         required: false, description: None, param_type: schematic_define::QueryParamType::String,
         explode: false, style: schematic_define::ParamStyle::Simple,

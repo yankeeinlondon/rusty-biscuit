@@ -4,12 +4,13 @@ use std::collections::HashSet;
 use std::fmt;
 
 use super::collection::{Collection, Pagination};
-use super::resolve::{AdoptionOutcome, Resolution, param_adoptions, path_params, request_inputs, resolve};
+use super::resolve::{AdoptionOutcome, ParamLocation, Resolution, param_adoptions, path_params, request_inputs, resolve};
 use super::selector::{JsonPath, Step};
 use super::strategy::{
     Boundary, Carry, CountUnit, CursorSource, InputParam, LinkSource, MoreSignal, PageSize,
     PageStrategy, Session, SessionOpen, SessionStep, Strategy, ValueSource,
 };
+use crate::params::{ParamDef, QueryParamType};
 use crate::response::ApiResponse;
 use crate::types::{Endpoint, RestApi, RestMethod};
 
@@ -68,7 +69,11 @@ pub enum PaginationError {
     // Declared parameters
     CollidesWithEndpointParam(String),
     AdoptionWithoutKnob(String),
-    PagerManagedRequiredWithoutDefault(String),
+    /// `strategy` is the adopting strategy's [`PageStrategy::kind_name`].
+    PagerManagedRequiredWithoutDefault { strategy: &'static str, param: String },
+    /// The value the pager sends for a required adopted parameter does not
+    /// parse as the parameter's declared type; `expected` names that type.
+    PagerManagedDefaultInvalid { strategy: &'static str, param: String, value: String, expected: &'static str },
 }
 
 impl PaginationError {
@@ -107,7 +112,8 @@ impl PaginationError {
             Self::InvalidLabel(_) => "invalid-label",
             Self::CollidesWithEndpointParam(_) => "collides-with-endpoint-param",
             Self::AdoptionWithoutKnob(_) => "adoption-without-knob",
-            Self::PagerManagedRequiredWithoutDefault(_) => "pager-managed-required-without-default",
+            Self::PagerManagedRequiredWithoutDefault { .. } => "pager-managed-required-without-default",
+            Self::PagerManagedDefaultInvalid { .. } => "pager-managed-default-invalid",
         }
     }
 
@@ -123,7 +129,8 @@ impl PaginationError {
             Self::UnmatchedManagedParam(_)
             | Self::CollidesWithEndpointParam(_)
             | Self::AdoptionWithoutKnob(_)
-            | Self::PagerManagedRequiredWithoutDefault(_) => PaginationRuleGroup::Parameter,
+            | Self::PagerManagedRequiredWithoutDefault { .. }
+            | Self::PagerManagedDefaultInvalid { .. } => PaginationRuleGroup::Parameter,
             _ => PaginationRuleGroup::Strategy,
         }
     }
@@ -232,10 +239,15 @@ impl fmt::Display for PaginationError {
                 "strategy would adopt declared parameter `{name}` without authoring the knob \
                  that replaces it; author the knob or leave the parameter out of the strategy"
             ),
-            Self::PagerManagedRequiredWithoutDefault(name) => write!(
+            Self::PagerManagedRequiredWithoutDefault { strategy, param } => write!(
                 f,
-                "required parameter `{name}` is pager-managed, so the strategy must author a \
-                 value to send when the caller sets none"
+                "required parameter `{param}` is pager-managed by the `{strategy}` strategy, so \
+                 the strategy must author a value to send when the caller sets none"
+            ),
+            Self::PagerManagedDefaultInvalid { strategy, param, value, expected } => write!(
+                f,
+                "required parameter `{param}` is pager-managed by the `{strategy}` strategy, whose \
+                 default `{value}` is not a valid {expected}"
             ),
         }
     }
@@ -745,11 +757,53 @@ fn endpoint_errors(endpoint: &Endpoint, strategy: &Strategy, primary: bool) -> V
                     errors.push(PaginationError::AdoptionWithoutKnob(adoption.name));
                 }
                 AdoptionOutcome::Adopted if adoption.required && !adoption.has_sent_default => {
-                    errors.push(PaginationError::PagerManagedRequiredWithoutDefault(adoption.name));
+                    errors.push(PaginationError::PagerManagedRequiredWithoutDefault {
+                        strategy: strategy.kind.kind_name(),
+                        param: adoption.name,
+                    });
+                }
+                AdoptionOutcome::Adopted if adoption.required => {
+                    let declared = declared_param(endpoint, adoption.location, &adoption.name);
+                    if let (Some(value), Some(declared)) = (adoption.role.sent_default(strategy), declared)
+                        && let Some(expected) = invalid_sent_default(&declared.param_type, &value)
+                    {
+                        errors.push(PaginationError::PagerManagedDefaultInvalid {
+                            strategy: strategy.kind.kind_name(),
+                            param: adoption.name,
+                            value,
+                            expected,
+                        });
+                    }
                 }
                 AdoptionOutcome::Adopted => {}
             }
         }
     }
     errors
+}
+
+/// The declared plain parameter an adoption names, matched the way
+/// [`param_adoptions`] matched it.
+fn declared_param<'a>(endpoint: &'a Endpoint, location: ParamLocation, name: &str) -> Option<&'a ParamDef> {
+    let params = endpoint.params.as_ref()?;
+    let (defs, any_case) = match location {
+        ParamLocation::Query => (&params.query, false),
+        ParamLocation::Header => (&params.header, true),
+        ParamLocation::Cookie => (&params.cookie, false),
+        ParamLocation::Path => return None,
+    };
+    defs.iter().find(|def| if any_case { def.name.eq_ignore_ascii_case(name) } else { def.name == name })
+}
+
+/// The type a sent default fails to be, or `None` when `value` is valid for
+/// `param_type`. Types without a parse rule only need a nonempty value.
+fn invalid_sent_default(param_type: &QueryParamType, value: &str) -> Option<&'static str> {
+    let (valid, expected) = match param_type {
+        QueryParamType::Integer => (value.parse::<i64>().is_ok(), "integer"),
+        QueryParamType::Number => (value.parse::<f64>().is_ok_and(f64::is_finite), "finite number"),
+        QueryParamType::Boolean => (matches!(value, "true" | "false"), "boolean (`true` or `false`)"),
+        QueryParamType::Enum(values) => (values.iter().any(|allowed| allowed == value), "value of the declared enum"),
+        _ => (!value.is_empty(), "nonempty value"),
+    };
+    (!valid).then_some(expected)
 }

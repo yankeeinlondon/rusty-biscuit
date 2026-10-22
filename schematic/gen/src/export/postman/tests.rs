@@ -18,7 +18,7 @@ use super::variables::merge_variables;
 use super::write_postman;
 
 fn minimal_api() -> RestApi {
-    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "TestApi".to_string(); fixture.description = "A test API".to_string(); fixture.base_url = "https://api.test.com/v1".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.headers = vec![]; fixture.endpoints = vec![]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "TestApi".to_string(); fixture.description = "A test API".to_string(); fixture.base_url = "https://api.test.com/v1".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.headers = vec![]; fixture.endpoints = vec![]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }
 }
 
 #[test]
@@ -560,7 +560,7 @@ fn build_postman_collection_bearer_declares_bearer_token() {
 #[test]
 fn build_postman_collection_basic_declares_username_and_password() {
     let mut api = minimal_api();
-    api.auth = AuthStrategy::Basic;
+    api.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
     let collection = build_postman_collection(&api);
     let keys: Vec<&str> = collection.variable.iter().map(|v| v.key.as_str()).collect();
     assert!(keys.contains(&"baseUrl"));
@@ -709,7 +709,7 @@ fn grouped_uniform_auth_uses_collection_auth_and_no_request_auth() {
 fn grouped_mixed_auth_omits_collection_auth_and_emits_per_request() {
     let mut basic = minimal_api();
     basic.name = "BasicApi".to_string();
-    basic.auth = AuthStrategy::Basic;
+    basic.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
     basic.endpoints = vec![
         endpoint("ListItems", "/items"),
         endpoint("BasicOnly", "/bo"),
@@ -754,7 +754,7 @@ fn grouped_mixed_auth_omits_collection_auth_and_emits_per_request() {
 fn grouped_mixed_auth_declares_both_auth_variable_sets() {
     let mut basic = minimal_api();
     basic.name = "BasicApi".to_string();
-    basic.auth = AuthStrategy::Basic;
+    basic.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
     basic.endpoints = vec![endpoint("X", "/x")];
 
     let mut bearer = minimal_api();
@@ -778,7 +778,7 @@ fn grouped_mixed_auth_declares_both_auth_variable_sets() {
 fn grouped_mixed_auth_disambiguates_duplicate_request_names() {
     let mut basic = minimal_api();
     basic.name = "EmqxBasic".to_string();
-    basic.auth = AuthStrategy::Basic;
+    basic.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
     basic.endpoints = vec![endpoint("ListAlarms", "/alarms")];
 
     let mut bearer = minimal_api();
@@ -815,7 +815,7 @@ fn grouped_mixed_auth_disambiguates_duplicate_request_names() {
 fn grouped_mixed_auth_preserves_unique_request_names() {
     let mut basic = minimal_api();
     basic.name = "EmqxBasic".to_string();
-    basic.auth = AuthStrategy::Basic;
+    basic.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
     basic.endpoints = vec![
         endpoint("ListAlarms", "/alarms"), // duplicated
         endpoint("BasicOnly", "/bo"),      // unique to Basic
@@ -855,7 +855,7 @@ fn grouped_mixed_auth_preserves_unique_request_names() {
 fn build_postman_collection_grouped_mixed_auth_unions_variables() {
     let mut api1 = minimal_api();
     api1.name = "BasicApi".to_string();
-    api1.auth = AuthStrategy::Basic;
+    api1.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
     let mut api2 = minimal_api();
     api2.name = "BearerApi".to_string();
     api2.base_url = "https://api2.test.com/v1".to_string();

@@ -14,8 +14,8 @@
 
 use proc_macro2::TokenStream;
 use schematic_define::{
-    ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, Endpoint, EnvAuthStrategy,
-    OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement, RestApi, RestMethod,
+    ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, AuthorizationCodeGrant, Endpoint,
+    EnvAuthStrategy, OAuth2ClientAuthMethod, OAuth2Config, PkceRequirement, RestApi, RestMethod,
 };
 use schematic_gen::output::assemble::assemble_shared_module;
 use schematic_gen::output::assemble_api_code;
@@ -85,14 +85,12 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
 }
 
 /// Creates a test API with basic auth.
-/// Password comes from env_auth[0].
 fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> RestApi {
     {
         let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), name.to_string(), "https://api.example.com/v1".to_string())
             .describes(format!("{} API", name))
-            .authentication(AuthStrategy::Basic, vec![password_env.to_string()])
+            .basic_env(username_env, [password_env])
             .build().expect("valid API fixture");
-        api.env_username = Some(username_env.to_string());
         api.endpoints = vec![{
             let mut endpoint = Endpoint::new("GetItems".to_string(), RestMethod::Get, "/items".to_string())
                 .describes("Get items".to_string())
@@ -106,16 +104,14 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
 }
 
 fn make_dual_auth_api() -> RestApi {
-    let oauth = OAuth2Config {
-        grant_type: OAuth2GrantType::AuthorizationCodePkce,
-        authorization_url: Some("https://example.com/oauth/authorize".to_string()),
+    let oauth = OAuth2Config::AuthorizationCodePkce(AuthorizationCodeGrant {
+        authorization_url: "https://example.com/oauth/authorize".to_string(),
         token_url: "https://example.com/oauth/token".to_string(),
         revocation_url: None,
-        device_authorization_url: None,
         default_scopes: vec!["read".to_string()],
         pkce: PkceRequirement::Required,
         client_auth: OAuth2ClientAuthMethod::ClientSecretPost,
-    };
+    });
 
     {
         let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "DualAuthApi".to_string(), "https://api.example.com/v1".to_string())

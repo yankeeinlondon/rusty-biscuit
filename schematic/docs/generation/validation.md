@@ -237,7 +237,8 @@ The rules, by feature id:
   `invalid-item-type`, `unknown-item-type`, `alternates-without-primary`,
   `alternates-on-unpaginated`, `duplicate-label`, `invalid-label`.
 - `pagination-parameter`: `collides-with-endpoint-param`,
-  `adoption-without-knob`, `pager-managed-required-without-default`.
+  `adoption-without-knob`, `pager-managed-required-without-default`,
+  `pager-managed-default-invalid`.
 
 An API default's own shape is reported once, with `endpoint=<none>`; each
 endpoint that inherits it is checked only for what depends on the endpoint.

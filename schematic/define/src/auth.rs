@@ -2,8 +2,9 @@
 //!
 //! This module defines the supported authentication methods for API clients.
 //! Each strategy specifies how credentials are applied to HTTP requests.
-//! The actual credential source (environment variables) is configured on
-//! the [`RestApi`](crate::RestApi) struct.
+//! Token and key credential sources (environment variables) are configured
+//! on the [`RestApi`](crate::RestApi) struct; [`AuthStrategy::Basic`] carries
+//! its own username and password lists.
 //!
 //! ## Update Strategy
 //!
@@ -18,13 +19,15 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::headers::{EnvList, EnvMapping};
 use crate::oauth::OAuth2Config;
 
 /// Authentication strategy for an API.
 ///
 /// Defines how authentication credentials are applied to HTTP requests.
-/// The credential sources (environment variables) are specified on the
-/// [`RestApi`](crate::RestApi) struct via `env_auth` and `env_username` fields.
+/// Token and key credential sources (environment variables) are specified on
+/// the [`RestApi`](crate::RestApi) struct via its `env_auth` field; Basic
+/// carries its own username and password environment lists.
 ///
 /// ## Examples
 ///
@@ -62,10 +65,12 @@ use crate::oauth::OAuth2Config;
 /// Basic authentication:
 ///
 /// ```
-/// use schematic_define::AuthStrategy;
+/// use schematic_define::{AuthStrategy, EnvList};
 ///
-/// let auth = AuthStrategy::Basic;
-/// // Username from RestApi::env_username, password from RestApi::env_auth[0]
+/// let auth = AuthStrategy::Basic {
+///     username_env: EnvList::single("API_USERNAME"),
+///     password_env: EnvList::from_strs(&["API_PASSWORD", "API_SECRET"]),
+/// };
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,9 +121,18 @@ pub enum AuthStrategy {
     /// Uses HTTP Basic Authentication with base64-encoded credentials.
     /// Generates: `Authorization: Basic <base64(username:password)>`
     ///
-    /// Username is read from `RestApi::env_username` and password from
-    /// the first element of `RestApi::env_auth` (i.e., `env_auth[0]`).
-    Basic,
+    /// Each list is an ordered fallback chain; every name is kept, not just
+    /// the first. An empty list means that half has no environment source (it
+    /// never supplies an empty credential); an explicit
+    /// [`RestApi::env_mapping`](crate::RestApi::env_mapping) still replaces
+    /// the mapping derived from these lists wholesale. Both fields are
+    /// required when deserializing.
+    Basic {
+        /// Environment variables naming the username, in priority order.
+        username_env: EnvList,
+        /// Environment variables naming the password, in priority order.
+        password_env: EnvList,
+    },
 
     /// API key in a non-header location (query parameter or cookie).
     ///
@@ -168,18 +182,18 @@ pub enum AuthStrategy {
     /// ## Examples
     ///
     /// ```
-    /// use schematic_define::{AuthStrategy, OAuth2Config, OAuth2GrantType, PkceRequirement, OAuth2ClientAuthMethod};
+    /// use schematic_define::{
+    ///     AuthStrategy, AuthorizationCodeGrant, OAuth2ClientAuthMethod, OAuth2Config, PkceRequirement,
+    /// };
     ///
-    /// let auth = AuthStrategy::OAuth2(OAuth2Config {
-    ///     grant_type: OAuth2GrantType::AuthorizationCodePkce,
-    ///     authorization_url: Some("https://github.com/login/oauth/authorize".into()),
+    /// let auth = AuthStrategy::OAuth2(OAuth2Config::AuthorizationCodePkce(AuthorizationCodeGrant {
+    ///     authorization_url: "https://github.com/login/oauth/authorize".into(),
     ///     token_url: "https://github.com/login/oauth/access_token".into(),
     ///     revocation_url: None,
-    ///     device_authorization_url: None,
     ///     default_scopes: vec!["repo".into()],
     ///     pkce: PkceRequirement::Required,
     ///     client_auth: OAuth2ClientAuthMethod::ClientSecretPost,
-    /// });
+    /// }));
     /// ```
     OAuth2(OAuth2Config),
 }
@@ -290,7 +304,7 @@ impl AuthPolicy {
                     value_prefix: value_prefix.clone(),
                 }),
             },
-            AuthStrategy::Basic => Self {
+            AuthStrategy::Basic { .. } => Self {
                 explicit: vec![AuthMethod::Basic],
                 env_fallback: Some(EnvAuthStrategy::Basic),
             },
@@ -319,6 +333,35 @@ impl AuthPolicy {
             _ => None,
         })
     }
+}
+
+/// One endpoint's authentication, overriding its API's; see
+/// [`RestApi::endpoint_auth`](crate::RestApi::endpoint_auth) for resolution.
+///
+/// Serialized as `"Public"` or `{"Policy":{"policy":{..},"env_mapping":{..}}}`;
+/// an absent `env_mapping` reuses the API's effective mapping, and an explicit
+/// null is rejected.
+///
+/// ## Notes
+///
+/// API build rejects a policy accepting no method (use `Public`) and a policy
+/// whose `env_fallback` has no compatible source in the effective mapping.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+// One value per endpoint definition; boxing would only complicate literals.
+#[allow(clippy::large_enum_variant)]
+pub enum EndpointAuth {
+    /// No authentication: no credential is looked up or sent.
+    Public,
+    /// Replaces the API policy; never merged with it.
+    Policy {
+        /// Methods this endpoint accepts.
+        policy: AuthPolicy,
+        /// Replaces the API's effective mapping whole when present.
+        #[serde(default, deserialize_with = "crate::serde_presence::non_null", skip_serializing_if = "Option::is_none")]
+        env_mapping: Option<EnvMapping>,
+    },
 }
 
 /// Location for API key authentication.
@@ -484,16 +527,14 @@ mod tests {
 
     #[test]
     fn auth_policy_from_oauth_strategy_is_explicit_only() {
-        let config = OAuth2Config {
-            grant_type: crate::oauth::OAuth2GrantType::AuthorizationCodePkce,
-            authorization_url: Some("https://example.com/authorize".to_string()),
+        let config = OAuth2Config::AuthorizationCodePkce(crate::oauth::AuthorizationCodeGrant {
+            authorization_url: "https://example.com/authorize".to_string(),
             token_url: "https://example.com/token".to_string(),
             revocation_url: None,
-            device_authorization_url: None,
             default_scopes: vec!["read".to_string()],
             pkce: crate::oauth::PkceRequirement::Required,
             client_auth: crate::oauth::OAuth2ClientAuthMethod::ClientSecretPost,
-        };
+        });
 
         let policy = AuthPolicy::from_auth_strategy(&AuthStrategy::OAuth2(config.clone()));
         assert_eq!(policy.explicit, vec![AuthMethod::OAuth2(config.clone())]);
@@ -635,7 +676,10 @@ mod tests {
 
     #[test]
     fn update_strategy_clone() {
-        let original = UpdateStrategy::ChangeTo(AuthStrategy::Basic);
+        let original = UpdateStrategy::ChangeTo(AuthStrategy::Basic {
+            username_env: EnvList::single("USER"),
+            password_env: EnvList::single("PASS"),
+        });
         let cloned = original.clone();
 
         assert_eq!(original, cloned);
@@ -649,5 +693,79 @@ mod tests {
 
         assert_eq!(a, b);
         assert_ne!(a, c);
+    }
+
+    fn basic(username: &[&str], password: &[&str]) -> AuthStrategy {
+        AuthStrategy::Basic {
+            username_env: EnvList::from_strs(username),
+            password_env: EnvList::from_strs(password),
+        }
+    }
+
+    #[test]
+    fn auth_policy_from_basic_strategy_stays_source_neutral() {
+        let policy = AuthPolicy::from_auth_strategy(&basic(&["U1", "U2"], &["P1", "P2"]));
+        assert_eq!(policy.explicit, vec![AuthMethod::Basic]);
+        assert_eq!(policy.env_fallback, Some(EnvAuthStrategy::Basic));
+    }
+
+    #[test]
+    fn basic_serde_round_trip_is_byte_stable_and_ordered() {
+        let auth = basic(&["U1", "U2"], &["P1", "P2", "P3"]);
+        let first = serde_json::to_string(&auth).unwrap();
+        assert_eq!(
+            first,
+            r#"{"Basic":{"username_env":{"names":["U1","U2"]},"password_env":{"names":["P1","P2","P3"]}}}"#
+        );
+        let read: AuthStrategy = serde_json::from_str(&first).unwrap();
+        assert_eq!(read, auth);
+        assert_eq!(serde_json::to_string(&read).unwrap(), first);
+    }
+
+    #[test]
+    fn basic_serde_accepts_empty_lists_as_no_environment_source() {
+        let auth: AuthStrategy = serde_json::from_str(
+            r#"{"Basic":{"username_env":{"names":[]},"password_env":{"names":[]}}}"#,
+        )
+        .unwrap();
+        assert_eq!(auth, basic(&[], &[]));
+    }
+
+    #[test]
+    fn basic_serde_rejects_malformed_lists_for_each_field() {
+        let valid = r#"{"names":["A"]}"#;
+        let malformed = [
+            None,
+            Some("null"),
+            Some(r#""A""#),
+            Some(r#"["A"]"#),
+            Some(r#"{"names":null}"#),
+            Some(r#"{"names":"A"}"#),
+            Some(r#"{"names":["A",1]}"#),
+            Some(r#"{"names":[1,true]}"#),
+        ];
+        for field in ["username_env", "password_env"] {
+            let other = if field == "username_env" { "password_env" } else { "username_env" };
+            for value in malformed {
+                let json = match value {
+                    None => format!(r#"{{"Basic":{{"{other}":{valid}}}}}"#),
+                    Some(value) => format!(r#"{{"Basic":{{"{field}":{value},"{other}":{valid}}}}}"#),
+                };
+                assert!(serde_json::from_str::<AuthStrategy>(&json).is_err(), "accepted {json}");
+            }
+        }
+    }
+
+    #[test]
+    fn basic_serde_rejects_unit_tag_duplicate_keys_and_trailing_content() {
+        for json in [
+            r#""Basic""#,
+            r#"{"Basic":null}"#,
+            r#"{"Basic":{"username_env":{"names":["A"]},"username_env":{"names":["B"]},"password_env":{"names":["P"]}}}"#,
+            r#"{"Basic":{"username_env":{"names":["A"]},"password_env":{"names":["P"],"names":["Q"]}}}"#,
+            r#"{"Basic":{"username_env":{"names":["A"]},"password_env":{"names":["P"]}}} x"#,
+        ] {
+            assert!(serde_json::from_str::<AuthStrategy>(json).is_err(), "accepted {json}");
+        }
     }
 }

@@ -11,7 +11,6 @@ use quote::quote;
 /// - `env_auth` - environment variable names for credentials
 /// - `auth_strategy` - authentication strategy enum
 /// - `auth_policy` - effective authentication policy
-/// - `env_username` - environment variable for Basic auth username
 /// - `headers` - Headers builder with env mapping
 /// - `api_key_param` - explicit API-key parameter credential, if set
 /// - `variant_hooks` - variant-specific hooks for response customization
@@ -25,8 +24,6 @@ pub(super) fn generate_field_list() -> TokenStream {
         auth_strategy: schematic_define::AuthStrategy,
         /// Effective authentication policy for this API client.
         auth_policy: schematic_define::AuthPolicy,
-        /// Environment variable for Basic auth username.
-        env_username: Option<String>,
         /// Headers builder with environment variable support for credentials.
         headers: schematic_define::Headers,
         /// Explicit `ApiKeyParam` key (query or cookie); never printed by `Debug`.

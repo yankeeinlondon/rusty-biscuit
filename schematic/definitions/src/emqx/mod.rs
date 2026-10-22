@@ -154,8 +154,7 @@ fn build_emqx_basic_api(ctx: &mut DefinitionContext) -> Result<RestApi, Definiti
         RestApi::builder(ctx, "EmqxBasic", "http://localhost:18083/api/v5")
             .describes("EMQX Broker REST API with Basic Authentication (API Key + Secret)"
             )
-            .authentication(AuthStrategy::Basic, vec!["EMQX_API_SECRET".to_string()])
-            .env_username("EMQX_API_KEY".to_string())
+            .basic_env("EMQX_API_KEY", ["EMQX_API_SECRET"])
             .env_mapping(EnvMapping {
             basic_user: Some(EnvList::single("EMQX_API_KEY")),
             basic_pass: Some(EnvList::single("EMQX_API_SECRET")),
@@ -260,9 +259,8 @@ mod tests {
     fn basic_api_uses_basic_auth() {
         let api = define_emqx_basic_api();
 
-        assert!(matches!(api.auth, AuthStrategy::Basic));
-        assert!(api.env_auth.contains(&"EMQX_API_SECRET".to_string()));
-        assert_eq!(api.env_username, Some("EMQX_API_KEY".to_string()));
+        assert_eq!(api.auth, AuthStrategy::Basic { username_env: EnvList::single("EMQX_API_KEY"), password_env: EnvList::single("EMQX_API_SECRET") });
+        assert!(api.env_auth.is_empty());
     }
 
     #[test]
@@ -298,7 +296,6 @@ mod tests {
 
         assert!(matches!(api.auth, AuthStrategy::BearerToken { .. }));
         assert!(api.env_auth.contains(&"EMQX_TOKEN".to_string()));
-        assert!(api.env_username.is_none());
     }
 
     #[test]

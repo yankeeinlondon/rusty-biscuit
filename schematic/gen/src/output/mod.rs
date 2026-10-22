@@ -993,12 +993,11 @@ mod tests {
 
     #[test]
     fn full_pipeline_with_all_auth_strategies() {
-        let test_cases: Vec<(AuthStrategy, Vec<String>, Option<String>)> = vec![
-            (AuthStrategy::None, vec![], None),
+        let test_cases: Vec<(AuthStrategy, Vec<String>)> = vec![
+            (AuthStrategy::None, vec![]),
             (
                 AuthStrategy::BearerToken { header: None },
                 vec!["TOKEN".to_string()],
-                None,
             ),
             (
                 AuthStrategy::ApiKey {
@@ -1006,22 +1005,16 @@ mod tests {
                     value_prefix: None,
                 },
                 vec!["KEY".to_string()],
-                None,
             ),
-            (
-                AuthStrategy::Basic,
-                vec!["PASS".to_string()],
-                Some("USER".to_string()),
-            ),
+            (crate::test_utils::basic_auth(&["USER"], &["PASS"]), vec![]),
         ];
 
-        for (auth, env_auth, env_username) in test_cases {
+        for (auth, env_auth) in test_cases {
             let api = {
                 let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "TestApi".to_string(), "https://test.com".to_string())
                     .describes("Test".to_string())
                     .authentication(auth.clone(), env_auth)
                     .build().expect("valid API fixture");
-                api.env_username = env_username;
                 api.endpoints = vec![{
                     let mut endpoint = Endpoint::new("Test".to_string(), RestMethod::Get, "/test".to_string())
                         .describes("Test endpoint".to_string())

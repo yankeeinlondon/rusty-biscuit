@@ -394,7 +394,7 @@ impl OpenApiImport {
             }
         }
 
-        Ok(RestApi {
+        Ok(RestApi { rate_limit: None, retry_guidance: None,
             name,
             description,
             base_url,
@@ -402,7 +402,6 @@ impl OpenApiImport {
             auth,
             auth_policy: None,
             env_auth: vec![],
-            env_username: None,
             headers: vec![],
             endpoints,
             module_path: self.options.module_path.clone(),
@@ -752,7 +751,7 @@ components:
         let source = OpenApiSource::yaml(yaml);
         let result = OpenApiImport::new(source).build().unwrap();
 
-        assert!(matches!(result.api.auth, crate::auth::AuthStrategy::Basic));
+        assert!(matches!(result.api.auth, crate::auth::AuthStrategy::Basic { .. }));
     }
 
     #[test]

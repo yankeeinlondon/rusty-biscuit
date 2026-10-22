@@ -6,7 +6,7 @@
 //!
 //! ## Core Types
 //!
-//! - [`EndpointParams`] - Collection of parameters for an endpoint (query, header, cookie)
+//! - [`EndpointParams`] - Collection of parameters for an endpoint (query, header, cookie, typed path)
 //! - [`ParamDef`] - Definition of a single parameter
 //! - [`QueryParamType`] - Type of a parameter value
 //! - [`ParamStyle`] - Serialization style for parameter values
@@ -33,7 +33,7 @@
 //!
 //! let params = EndpointParams {
 //!     query: vec![
-//!         ParamDef { rust_name: None, secret: false, pager_managed: false,
+//!         ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
 //!             name: "page".to_string(),
 //!             required: false,
 //!             description: Some("Page number".to_string()),
@@ -41,7 +41,7 @@
 //!             explode: false,
 //!             style: ParamStyle::Form,
 //!         },
-//!         ParamDef { rust_name: None, secret: false, pager_managed: false,
+//!         ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
 //!             name: "limit".to_string(),
 //!             required: false,
 //!             description: Some("Items per page".to_string()),
@@ -52,6 +52,7 @@
 //!     ],
 //!     header: vec![],
 //!     cookie: vec![],
+//!     path: vec![],
 //!
 //! };
 //!
@@ -64,7 +65,8 @@ pub use param_def::{ParamDef, ParamStyle, QueryParamType};
 
 /// Collection of parameters for an endpoint.
 ///
-/// Groups parameters by their location: query string, headers, or cookies.
+/// Groups parameters by their location: query string, headers, cookies, or
+/// typed path placeholders.
 /// Implements `Default` to provide empty parameter collections.
 ///
 /// ## Examples
@@ -86,6 +88,11 @@ pub struct EndpointParams {
     pub header: Vec<ParamDef>,
     /// Cookie parameters.
     pub cookie: Vec<ParamDef>,
+    /// Typed path parameters. Empty keeps every `{placeholder}` an untyped
+    /// string; otherwise the names must equal the path's placeholders, each
+    /// required with the `Simple` style (checked at build).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path: Vec<ParamDef>,
 
 }
 
@@ -117,7 +124,7 @@ impl EndpointParams {
         required: bool,
         description: Option<&str>,
     ) -> Self {
-        self.query.push(ParamDef { rust_name: None, secret: false, pager_managed: false,
+        self.query.push(ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
             name: name.to_string(),
             required,
             description: description.map(|s| s.to_string()),
@@ -173,6 +180,7 @@ mod tests {
             query: vec![],
             header: vec![],
             cookie: vec![],
+            path: vec![],
 
 
         };
@@ -184,7 +192,7 @@ mod tests {
     #[test]
     fn endpoint_params_with_query() {
         let params = EndpointParams {
-            query: vec![ParamDef { rust_name: None, secret: false, pager_managed: false,
+            query: vec![ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "page".to_string(),
                 required: false,
                 description: None,
@@ -194,6 +202,7 @@ mod tests {
             }],
             header: vec![],
             cookie: vec![],
+            path: vec![],
 
 
         };
@@ -203,8 +212,8 @@ mod tests {
 
     #[test]
     fn endpoint_params_with_all_locations() {
-        let params = EndpointParams {
-            query: vec![ParamDef { rust_name: None, secret: false, pager_managed: false,
+        let params = EndpointParams { path: vec![],
+            query: vec![ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "q".to_string(),
                 required: true,
                 description: Some("Search query".to_string()),
@@ -212,7 +221,7 @@ mod tests {
                 explode: false,
                 style: ParamStyle::Form,
             }],
-            header: vec![ParamDef { rust_name: None, secret: false, pager_managed: false,
+            header: vec![ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "X-Request-Id".to_string(),
                 required: false,
                 description: None,
@@ -220,7 +229,7 @@ mod tests {
                 explode: false,
                 style: ParamStyle::Simple,
             }],
-            cookie: vec![ParamDef { rust_name: None, secret: false, pager_managed: false,
+            cookie: vec![ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "session".to_string(),
                 required: true,
                 description: None,
@@ -239,7 +248,7 @@ mod tests {
     fn endpoint_params_pagination_example() {
         let params = EndpointParams {
             query: vec![
-                ParamDef { rust_name: None, secret: false, pager_managed: false,
+                ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
                     name: "page".to_string(),
                     required: false,
                     description: Some("Page number (1-indexed)".to_string()),
@@ -247,7 +256,7 @@ mod tests {
                     explode: false,
                     style: ParamStyle::Form,
                 },
-                ParamDef { rust_name: None, secret: false, pager_managed: false,
+                ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
                     name: "per_page".to_string(),
                     required: false,
                     description: Some("Items per page (default: 20)".to_string()),
@@ -255,7 +264,7 @@ mod tests {
                     explode: false,
                     style: ParamStyle::Form,
                 },
-                ParamDef { rust_name: None, secret: false, pager_managed: false,
+                ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
                     name: "sort".to_string(),
                     required: false,
                     description: Some("Sort order".to_string()),
@@ -266,6 +275,7 @@ mod tests {
             ],
             header: vec![],
             cookie: vec![],
+            path: vec![],
 
 
         };
@@ -277,7 +287,7 @@ mod tests {
     #[test]
     fn endpoint_params_filter_with_arrays() {
         let params = EndpointParams {
-            query: vec![ParamDef { rust_name: None, secret: false, pager_managed: false,
+            query: vec![ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "status".to_string(),
                 required: false,
                 description: Some("Filter by status (multiple allowed)".to_string()),
@@ -291,6 +301,7 @@ mod tests {
             }],
             header: vec![],
             cookie: vec![],
+            path: vec![],
 
 
         };

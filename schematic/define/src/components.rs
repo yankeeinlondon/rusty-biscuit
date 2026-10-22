@@ -25,10 +25,17 @@ pub struct SchemaComponent {
     pub schema: Value,
 }
 
-/// Flatten registrations, given as `(name, rust_path, diagnostic, schema)`,
-/// into components. A registration takes over a same-named nested entry in
-/// place; otherwise first position wins. This ordering is the OpenAPI
-/// `components.schemas` order.
+/// Flatten registrations, given as
+/// `(name, rust_path, diagnostic, schema, composition)`, into components. A
+/// registration takes over a same-named nested entry in place; otherwise
+/// first position wins. This ordering is the OpenAPI `components.schemas`
+/// order.
+///
+/// A `composition` replaces the registration's own schema as the component,
+/// and the own schema's nested definitions are not walked: the composition
+/// references only registered components. A nested copy of the registered
+/// type elsewhere still agrees when it matches the own schema (schemars emits
+/// `anyOf` for an untagged enum bound to `oneOf`).
 ///
 /// ## Errors
 ///
@@ -37,18 +44,27 @@ pub struct SchemaComponent {
 /// with different wire schemas. A registration and its own nested copy
 /// elsewhere compare equal: see [`wire_shape`].
 pub(crate) fn flatten<'a>(
-    registrations: impl Iterator<Item = (&'a str, &'a str, &'a str, &'a Value)>,
+    registrations: impl Iterator<Item = (&'a str, &'a str, &'a str, &'a Value, Option<Value>)>,
 ) -> Result<Vec<SchemaComponent>, DefinitionError> {
     let mut merged = Merged::default();
-    for (name, rust_path, diagnostic, schema) in registrations {
-        let entry = SchemaComponent { name: name.into(), rust_path: Some(rust_path.into()), schema: strip(schema) };
-        let shape = wire_shape(&entry.schema, name, false);
+    for (name, rust_path, diagnostic, schema, composition) in registrations {
+        let own = SchemaComponent { name: name.into(), rust_path: Some(rust_path.into()), schema: strip(schema) };
+        let own_shape = wire_shape(&own.schema, name, false);
+        let composed = composition.is_some();
+        let (entry, shape, alternate) = match composition {
+            Some(composition) => (SchemaComponent { schema: composition.clone(), ..own }, composition, Some(own_shape)),
+            None => (own, own_shape, None),
+        };
         match merged.components.iter().position(|c| c.name == name) {
-            Some(index) if merged.shapes[index].0 != shape => merged.conflict(index, diagnostic.into()),
-            Some(index) => merged.components[index] = entry,
-            None => merged.push(entry, shape, diagnostic.into()),
+            Some(index) if !merged.agrees(index, &shape) && alternate.as_ref().is_none_or(|a| !merged.agrees(index, a)) => merged.conflict(index, diagnostic.into()),
+            Some(index) => {
+                merged.components[index] = entry;
+                merged.shapes[index].0 = shape;
+                merged.alternates[index] = alternate;
+            }
+            None => merged.push(entry, (shape, alternate), diagnostic.into()),
         }
-        merged.nested(schema, name, diagnostic);
+        if !composed { merged.nested(schema, name, diagnostic); }
     }
     if merged.conflicts.is_empty() { Ok(merged.components) } else { Err(DefinitionError::Collisions(merged.conflicts)) }
 }
@@ -58,13 +74,20 @@ pub(crate) fn flatten<'a>(
 struct Merged {
     components: Vec<SchemaComponent>,
     shapes: Vec<(Value, String)>,
+    /// A composed component's own schema shape, which a nested copy may match.
+    alternates: Vec<Option<Value>>,
     conflicts: Vec<DefinitionError>,
 }
 
 impl Merged {
-    fn push(&mut self, component: SchemaComponent, shape: Value, source: String) {
+    fn push(&mut self, component: SchemaComponent, (shape, alternate): (Value, Option<Value>), source: String) {
         self.components.push(component);
         self.shapes.push((shape, source));
+        self.alternates.push(alternate);
+    }
+
+    fn agrees(&self, index: usize, shape: &Value) -> bool {
+        &self.shapes[index].0 == shape || self.alternates[index].as_ref() == Some(shape)
     }
 
     fn conflict(&mut self, index: usize, second: String) {
@@ -84,10 +107,10 @@ impl Merged {
                     let stripped = strip(schema);
                     let shape = wire_shape(&stripped, root_name, true);
                     match self.components.iter().position(|c| &c.name == name) {
-                        Some(index) if self.shapes[index].0 != shape => self.conflict(index, format!("a schema nested in {root}")),
+                        Some(index) if !self.agrees(index, &shape) => self.conflict(index, format!("a schema nested in {root}")),
                         Some(_) => {}
                         None => {
-                            self.push(SchemaComponent { name: name.clone(), rust_path: None, schema: stripped }, shape, format!("a schema nested in {root}"));
+                            self.push(SchemaComponent { name: name.clone(), rust_path: None, schema: stripped }, (shape, None), format!("a schema nested in {root}"));
                             self.nested(schema, root_name, root);
                         }
                     }

@@ -105,9 +105,8 @@ fn repeated_success_and_invalid_required_facts_report_errors() {
 fn auth_forms_preserve_fields_and_explicit_mapping_conflicts_in_both_orders() {
     let ctx = DefinitionContext::types_in("::models");
     let basic = RestApi::builder(&ctx, "API", "https://example.com").describes("API").basic_env("USER", ["PASS", "FALLBACK"]).build().unwrap();
-    assert_eq!(basic.auth, AuthStrategy::Basic);
-    assert_eq!(basic.env_username.as_deref(), Some("USER"));
-    assert_eq!(basic.env_auth, ["PASS", "FALLBACK"]);
+    assert_eq!(basic.auth, AuthStrategy::Basic { username_env: EnvList::single("USER"), password_env: EnvList::from_strs(&["PASS", "FALLBACK"]) });
+    assert!(basic.env_auth.is_empty());
     let bearer = RestApi::builder(&ctx, "API", "https://example.com").describes("API").bearer_env(["OPENAI_API_KEY"]).build().unwrap();
     assert_eq!(bearer.auth, AuthStrategy::BearerToken { header: None });
     assert_eq!(bearer.env_auth, ["OPENAI_API_KEY"]);
@@ -117,12 +116,53 @@ fn auth_forms_preserve_fields_and_explicit_mapping_conflicts_in_both_orders() {
     assert!(matches!(key.auth, AuthStrategy::ApiKey { header, value_prefix: Some(prefix) } if header == "X-Key" && prefix == "token "));
     let none = RestApi::builder(&ctx, "API", "https://example.com").describes("API").no_auth().build().unwrap();
     assert_eq!(none.auth, AuthStrategy::None);
-    assert!(none.env_auth.is_empty() && none.env_username.is_none());
+    assert!(none.env_auth.is_empty());
     let conflict = EnvMapping { bearer_token: Some(EnvList::single("WRONG_KEY")), ..EnvMapping::default() };
     for result in [RestApi::builder(&ctx, "API", "https://example.com").describes("API").env_mapping(conflict.clone()).bearer_env(["OPENAI_API_KEY"]).build(),
         RestApi::builder(&ctx, "API", "https://example.com").describes("API").bearer_env(["OPENAI_API_KEY"]).env_mapping(conflict).build()] {
         assert!(result.unwrap_err().to_string().contains("conflicts"));
     }
+}
+
+#[test]
+fn basic_authentication_rejects_env_auth_so_no_password_comes_from_it() {
+    let ctx = DefinitionContext::types_in("::models");
+    let auth = AuthStrategy::Basic { username_env: EnvList::single("USER"), password_env: EnvList::single("PASS") };
+    let error = RestApi::builder(&ctx, "API", "https://example.com").describes("API").authentication(auth.clone(), ["X"]).build().unwrap_err().to_string();
+    assert!(error.contains("env_auth must be empty"), "{error}");
+    let built = RestApi::builder(&ctx, "API", "https://example.com").describes("API").authentication(auth.clone(), std::iter::empty::<String>()).build().unwrap();
+    assert_eq!(built.auth, auth);
+}
+
+#[test]
+fn env_username_fills_matches_or_rejects_against_declared_authentication() {
+    let ctx = DefinitionContext::types_in("::models");
+    let builder = || RestApi::builder(&ctx, "API", "https://example.com").describes("API");
+    let empty_user = AuthStrategy::Basic { username_env: EnvList::new(vec![]), password_env: EnvList::single("PASS") };
+    for built in [builder().authentication(empty_user.clone(), std::iter::empty::<String>()).env_username("USER").build().unwrap(),
+        builder().env_username("USER").authentication(empty_user, std::iter::empty::<String>()).build().unwrap(),
+        builder().basic_env("USER", ["PASS"]).env_username("USER").build().unwrap()] {
+        assert_eq!(built.auth, AuthStrategy::Basic { username_env: EnvList::single("USER"), password_env: EnvList::single("PASS") });
+    }
+    let listed = AuthStrategy::Basic { username_env: EnvList::from_strs(&["USER", "LOGIN"]), password_env: EnvList::single("PASS") };
+    assert!(builder().authentication(listed, std::iter::empty::<String>()).env_username("USER").build().unwrap_err().to_string().contains("conflicts"));
+    let error = builder().bearer_env(["TOKEN"]).env_username("USER").build().unwrap_err().to_string();
+    assert!(error.contains("requires Basic"), "{error}");
+    let mapping = EnvMapping { bearer_token: Some(EnvList::single("TOKEN")), basic_user: Some(EnvList::single("USER")), ..EnvMapping::default() };
+    assert!(builder().bearer_env(["TOKEN"]).env_mapping(mapping.clone()).env_username("OTHER").build().is_err());
+    let redundant = builder().bearer_env(["TOKEN"]).env_username("USER").env_mapping(mapping.clone()).build().unwrap();
+    assert_eq!(redundant.env_mapping, Some(mapping));
+    assert_eq!(redundant.auth, AuthStrategy::BearerToken { header: None });
+}
+
+#[test]
+fn basic_explicit_mapping_is_checked_against_every_embedded_fallback() {
+    let ctx = DefinitionContext::types_in("::models");
+    let builder = || RestApi::builder(&ctx, "API", "https://example.com").describes("API").basic_env("USER", ["PASS", "FALLBACK"]);
+    let full = EnvMapping { basic_user: Some(EnvList::single("USER")), basic_pass: Some(EnvList::from_strs(&["PASS", "FALLBACK"])), ..EnvMapping::default() };
+    assert_eq!(builder().env_mapping(full.clone()).build().unwrap().default_env_mapping(), full);
+    let first_only = EnvMapping { basic_pass: Some(EnvList::single("PASS")), ..EnvMapping::default() };
+    assert!(builder().env_mapping(first_only).build().unwrap_err().to_string().contains("conflicts"));
 }
 
 #[test]
@@ -382,7 +422,7 @@ fn api_builder_preserves_transfer_metadata_and_authoring_order() {
         .bearer_env(["TOKEN", "TOKEN_FALLBACK"]).docs_url("https://example.com/docs").version("1")
         .module_path("::models").request_suffix("Request").header("X-First", "one").header("X-Second", "two")
         .endpoints([ep.clone()]).default_errors(ErrorSet::none()).build().unwrap();
-    let literal = { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "Fixture".into(); fixture.description = "API".into(); fixture.base_url = "https://example.com".into(); fixture.docs_url = Some("https://example.com/docs".into()); fixture.auth = AuthStrategy::BearerToken { header: None }; fixture.auth_policy = None; fixture.env_auth = vec!["TOKEN".into(), "TOKEN_FALLBACK".into()]; fixture.env_username = None; fixture.headers = vec![("X-First".into(), "one".into()), ("X-Second".into(), "two".into())]; fixture.endpoints = vec![ep]; fixture.module_path = Some("::models".into()); fixture.request_suffix = Some("Request".into()); fixture.version = Some("1".into()); fixture.env_mapping = None; fixture.cross_origin = schematic_define::CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture };
+    let literal = { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "Fixture".into(); fixture.description = "API".into(); fixture.base_url = "https://example.com".into(); fixture.docs_url = Some("https://example.com/docs".into()); fixture.auth = AuthStrategy::BearerToken { header: None }; fixture.auth_policy = None; fixture.env_auth = vec!["TOKEN".into(), "TOKEN_FALLBACK".into()]; fixture.headers = vec![("X-First".into(), "one".into()), ("X-Second".into(), "two".into())]; fixture.endpoints = vec![ep]; fixture.module_path = Some("::models".into()); fixture.request_suffix = Some("Request".into()); fixture.version = Some("1".into()); fixture.env_mapping = None; fixture.cross_origin = schematic_define::CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture };
     assert_eq!(built, literal);
     assert_eq!(serde_json::to_value(built).unwrap(), serde_json::to_value(literal).unwrap());
 }

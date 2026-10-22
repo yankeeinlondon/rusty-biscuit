@@ -131,7 +131,7 @@ mod tests {
     }
 
     fn create_test_api() -> RestApi {
-        RestApi {
+        RestApi { rate_limit: None, retry_guidance: None,
             name: "TestAPI".to_string(),
             description: "Test API description".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -139,7 +139,6 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             auth_policy: None,
             env_auth: vec!["TEST_API_KEY".to_string()],
-            env_username: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
@@ -158,7 +157,7 @@ mod tests {
     }
 
     fn create_test_api_with_endpoints() -> RestApi {
-        RestApi {
+        RestApi { rate_limit: None, retry_guidance: None,
             name: "TestAPI".to_string(),
             description: "Test API description".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -166,10 +165,9 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             auth_policy: None,
             env_auth: vec!["TEST_API_KEY".to_string()],
-            env_username: None,
             headers: vec![],
             endpoints: vec![
-                Endpoint {
+                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
                     id: "ListItems".to_string(),
                     method: RestMethod::Get,
                     path: "/items".to_string(),
@@ -180,7 +178,7 @@ mod tests {
                     params: None,
                     cross_origin: None, pagination: None,
                 },
-                Endpoint {
+                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
                     id: "GetItem".to_string(),
                     method: RestMethod::Get,
                     path: "/items/{item_id}".to_string(),
@@ -302,7 +300,7 @@ mod tests {
 
     #[test]
     fn export_fails_on_unresolved_request_schema_ref() {
-        let api = RestApi {
+        let api = RestApi { rate_limit: None, retry_guidance: None,
             name: "TestAPI".to_string(),
             description: "Test".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -310,9 +308,8 @@ mod tests {
             auth: AuthStrategy::None,
             auth_policy: None,
             env_auth: vec![],
-            env_username: None,
             headers: vec![],
-            endpoints: vec![Endpoint {
+            endpoints: vec![Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
                 id: "Create".to_string(),
                 method: RestMethod::Post,
                 path: "/create".to_string(),
@@ -348,7 +345,7 @@ mod tests {
 
     #[test]
     fn export_fails_on_unresolved_response_schema_ref() {
-        let api = RestApi {
+        let api = RestApi { rate_limit: None, retry_guidance: None,
             name: "TestAPI".to_string(),
             description: "Test".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -356,9 +353,8 @@ mod tests {
             auth: AuthStrategy::None,
             auth_policy: None,
             env_auth: vec![],
-            env_username: None,
             headers: vec![],
-            endpoints: vec![Endpoint {
+            endpoints: vec![Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
                 id: "Get".to_string(),
                 method: RestMethod::Get,
                 path: "/get".to_string(),
@@ -394,7 +390,7 @@ mod tests {
 
     #[test]
     fn export_strips_reserved_marker_from_path_and_params() {
-        let api = RestApi {
+        let api = RestApi { rate_limit: None, retry_guidance: None,
             name: "TestAPI".to_string(),
             description: "Test".to_string(),
             base_url: "https://api.test.com".to_string(),
@@ -402,9 +398,8 @@ mod tests {
             auth: AuthStrategy::None,
             auth_policy: None,
             env_auth: vec![],
-            env_username: None,
             headers: vec![],
-            endpoints: vec![Endpoint {
+            endpoints: vec![Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
                 id: "GetModel".to_string(),
                 method: RestMethod::Get,
                 path: "/models/{+repo_id}".to_string(),
@@ -453,7 +448,7 @@ mod tests {
 
     #[test]
     fn export_succeeds_when_all_refs_are_resolved() {
-        let api = RestApi {
+        let api = RestApi { rate_limit: None, retry_guidance: None,
             name: "TestAPI".to_string(),
             description: "Test".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -461,9 +456,8 @@ mod tests {
             auth: AuthStrategy::None,
             auth_policy: None,
             env_auth: vec![],
-            env_username: None,
             headers: vec![],
-            endpoints: vec![Endpoint {
+            endpoints: vec![Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
                 id: "Create".to_string(),
                 method: RestMethod::Post,
                 path: "/create".to_string(),
@@ -503,7 +497,7 @@ mod tests {
         use openapiv3::ReferenceOr;
 
         let mut api = create_test_api();
-        api.endpoints = vec![Endpoint {
+        api.endpoints = vec![Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
             id: "ListItems".to_string(),
             method: RestMethod::Get,
             path: "/items".to_string(),
@@ -512,7 +506,7 @@ mod tests {
             response: ApiResponse::Empty,
             headers: vec![],
             params: Some(EndpointParams {
-                query: vec![ParamDef { rust_name: None, secret: false, pager_managed: false,
+                query: vec![ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
                     name: "limit".to_string(),
                     required: false,
                     description: Some("Page size".to_string()),
@@ -556,7 +550,7 @@ mod tests {
 
         let mut api = create_test_api();
         api.endpoints = vec![
-            Endpoint {
+            Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
                 id: "GetItem".to_string(),
                 method: RestMethod::Get,
                 path: "/items/{item_id}".to_string(),
@@ -567,7 +561,7 @@ mod tests {
                 params: None,
                 cross_origin: None, pagination: None,
             },
-            Endpoint {
+            Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
                 id: "DeleteItem".to_string(),
                 method: RestMethod::Delete,
                 path: "/items/{item_id}".to_string(),

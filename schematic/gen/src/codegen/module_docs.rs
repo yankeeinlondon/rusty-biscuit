@@ -107,9 +107,9 @@ impl<'a> ModuleDocBuilder<'a> {
             AuthStrategy::ApiKey { header, .. } => {
                 format!("Uses API key authentication via the `{}` header.", header)
             }
-            AuthStrategy::Basic => "Uses HTTP Basic authentication.".to_string(),
+            AuthStrategy::Basic { .. } => "Uses HTTP Basic authentication.".to_string(),
             AuthStrategy::OAuth2(config) => {
-                let flow = match config.grant_type {
+                let flow = match config.grant_type() {
                     schematic_define::OAuth2GrantType::AuthorizationCodePkce => {
                         "Authorization Code with PKCE"
                     }
@@ -117,10 +117,10 @@ impl<'a> ModuleDocBuilder<'a> {
                     schematic_define::OAuth2GrantType::DeviceCode => "Device Code",
                     _ => "OAuth2",
                 };
-                let scopes_info = if config.default_scopes.is_empty() {
+                let scopes_info = if config.default_scopes().is_empty() {
                     String::new()
                 } else {
-                    format!(" Default scopes: `{}`.", config.default_scopes.join("`, `"))
+                    format!(" Default scopes: `{}`.", config.default_scopes().join("`, `"))
                 };
                 format!("Uses OAuth2 authentication ({} flow).{}", flow, scopes_info)
             }
@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn auth_section_basic() {
         let mut api = make_test_api();
-        api.auth = AuthStrategy::Basic;
+        api.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
         let builder = ModuleDocBuilder::new(&api);
         let auth = builder.auth_section();
         assert!(auth.contains("Basic authentication"));

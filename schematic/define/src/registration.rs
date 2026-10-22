@@ -3,7 +3,9 @@
 //! A [`TypeDesc`] is an authoring handle: builders lower it to a
 //! [`TypeRef`] naming components, and API build stores the context's
 //! components on the API (see [`crate::SchemaComponent`]).
-//! The first registration of a canonical Rust type fixes its name and path.
+//! The first registration of a canonical Rust type fixes its name and path,
+//! and, for a composition ([`DefinitionContext::one_of`] and its siblings),
+//! the structure its component exports.
 //!
 //! ```compile_fail
 //! use schematic_define::TypeDesc;
@@ -21,18 +23,25 @@
 use std::{any::{TypeId, type_name}, collections::HashMap, marker::PhantomData};
 use schemars::{JsonSchema, Schema, generate::SchemaSettings};
 use serde_json::Value;
-use crate::{PrimitiveType, SchemaComponent, TypeRef};
+use crate::{ModelCatalog, ModelDef, PrimitiveType, SchemaComponent, TypeAlias, TypeRef};
 
 /// A registered type: the reference builders store, and its Rust spelling.
 ///
-/// Fields are private: registration is the only constructor.
+/// Fields are private: registration is the only constructor. Equality
+/// includes the structure, so a descriptor equals only what its own context
+/// returns for that component.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypeDesc {
     reference: TypeRef,
     rust_path: String,
+    structure: Option<TypeRef>,
 }
 impl TypeDesc {
-    fn new(reference: TypeRef, rust_path: String) -> Self { Self { reference, rust_path } }
+    fn new(reference: TypeRef, rust_path: String) -> Self { Self { reference, rust_path, structure: None } }
+    /// The `oneOf`/`anyOf`/`allOf` a composed component exports in place of its
+    /// Rust type's own schema. `Some` only on the component's own descriptor;
+    /// a container of it, such as `Vec<T>`, is not itself a composition.
+    pub fn structure(&self) -> Option<&TypeRef> { self.structure.as_ref() }
     /// Fully qualified Rust spelling, preserving aliases and container shape.
     pub fn rust_path(&self) -> &str { &self.rust_path }
     /// Wire schema with container shape and nominal component references.
@@ -84,6 +93,22 @@ pub enum DefinitionError {
     /// JSON object keys need a supported Serde string representation.
     #[error("{api} endpoint {endpoint}: unsupported map key {rust_type}")]
     UnsupportedKey { api: String, endpoint: String, rust_type: &'static str },
+    /// A composition must name at least one member.
+    #[error("composition for {target} has no members")]
+    EmptyComposition { target: &'static str },
+    /// Members are component references; containers and primitives have no
+    /// component to reference.
+    #[error("composition for {target}: member {member} is not a nominal component")]
+    NonNominalMember { target: &'static str, member: String },
+    /// A member must be the descriptor this context holds for its component
+    /// name. Descriptors carry no context identity, so a foreign descriptor is
+    /// detected only when its name, Rust path, or structure differs from this
+    /// context's entry, or the name is absent here.
+    #[error("composition for {target}: member \"{name}\" ({rust_path}) is unregistered or from a foreign context")]
+    ForeignMember { target: &'static str, name: String, rust_path: String },
+    /// A member may appear once.
+    #[error("composition for {target}: member \"{name}\" is listed more than once")]
+    DuplicateMember { target: &'static str, name: String },
 }
 
 impl DefinitionError {
@@ -106,14 +131,22 @@ pub struct TypeRegistration {
     name: String,
     path: String,
     schema: Schema,
+    structure: Option<TypeRef>,
 }
 impl TypeRegistration {
     /// Component name, independent of the Rust path.
     pub fn schema_name(&self) -> &str { &self.name }
     /// Fully qualified Rust leaf path.
     pub fn rust_path(&self) -> &str { &self.path }
-    /// Schema generated with the context's OpenAPI-compatible settings.
+    /// Schema generated with the context's OpenAPI-compatible settings. For a
+    /// composition this is the Rust type's own schema; the exported component
+    /// is [`Self::structure`] instead.
     pub fn schema(&self) -> &Schema { &self.schema }
+    /// The composition fixed by the first registration, if any.
+    pub fn structure(&self) -> Option<&TypeRef> { self.structure.as_ref() }
+    fn descriptor(&self) -> TypeDesc {
+        TypeDesc { reference: TypeRef::Named(self.name.clone()), rust_path: self.path.clone(), structure: self.structure.clone() }
+    }
 }
 
 /// Owns canonical registrations and collision diagnostics for one module group.
@@ -122,12 +155,13 @@ pub struct DefinitionContext {
     entries: Vec<TypeRegistration>,
     errors: Vec<DefinitionError>,
     module_path: String,
+    models: ModelCatalog,
 }
 impl DefinitionContext {
     /// State the generated types module once; it must be publicly accessible
     /// from the generated crate. Generated-client compilation proves visibility.
     pub fn types_in(module_path: impl Into<String>) -> Self {
-        Self { entries: Vec::new(), errors: Vec::new(), module_path: module_path.into() }
+        Self { entries: Vec::new(), errors: Vec::new(), module_path: module_path.into(), models: ModelCatalog { module_path: None, types: Vec::new() } }
     }
     #[doc(hidden)]
     pub fn register_nominal<T: Registration>(&mut self) -> Result<TypeDesc, DefinitionError> {
@@ -154,16 +188,104 @@ impl DefinitionContext {
     }
     fn leaf<T: JsonSchema + 'static>(&mut self, path: &str, name: Option<&str>) -> Result<TypeDesc, DefinitionError> {
         if let Some(entry) = self.entries.iter().find(|e| e.identity == TypeId::of::<T>()) {
-            return Ok(TypeDesc::new(TypeRef::Named(entry.name.clone()), entry.path.clone()));
+            return Ok(entry.descriptor());
         }
         let name = name.map(str::to_owned).unwrap_or_else(|| T::schema_name().into_owned());
         if let Some(entry) = self.entries.iter().find(|e| e.name == name) {
             let error = DefinitionError::Collision { schema_name: name, first: entry.diagnostic, second: type_name::<T>() };
-            if !self.errors.contains(&error) { self.errors.push(error.clone()); }
-            return Err(error);
+            return Err(self.record(error));
         }
-        self.entries.push(TypeRegistration { identity: TypeId::of::<T>(), diagnostic: type_name::<T>(), name: name.clone(), path: path.into(), schema: SchemaSettings::openapi3().into_generator().into_root_schema_for::<T>() });
+        self.entries.push(TypeRegistration { identity: TypeId::of::<T>(), diagnostic: type_name::<T>(), name: name.clone(), path: path.into(), schema: SchemaSettings::openapi3().into_generator().into_root_schema_for::<T>(), structure: None });
         Ok(TypeDesc::new(TypeRef::Named(name), path.into()))
+    }
+    fn record(&mut self, error: DefinitionError) -> DefinitionError {
+        if !self.errors.contains(&error) { self.errors.push(error.clone()); }
+        error
+    }
+    /// Bind the hand-written nominal type `T` to `oneOf` its `variants`, which
+    /// this context registered. `T`'s component exports the composition
+    /// instead of its own schema, and the descriptor still names `T`, so
+    /// generated code uses `T`. The author asserts `T`'s Serde representation
+    /// matches; an untagged enum does not prove `oneOf` exclusivity.
+    ///
+    /// The first registration of `T` fixes its entry: repeating the same
+    /// composition returns the same descriptor, and a later `register::<T>()`
+    /// returns the composed one.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use schematic_define::{DefinitionContext, TypeRef, definition_type};
+    /// definition_type!(#[derive(schemars::JsonSchema)] pub struct Cat { pub meows: bool });
+    /// definition_type!(#[derive(schemars::JsonSchema)] pub struct Dog { pub barks: u8 });
+    /// definition_type!(#[derive(schemars::JsonSchema)] #[serde(untagged)] pub enum Pet { Cat(Cat), Dog(Dog) });
+    ///
+    /// let mut ctx = DefinitionContext::types_in("::models");
+    /// let (cat, dog) = (ctx.register::<Cat>()?, ctx.register::<Dog>()?);
+    /// let pet = ctx.one_of::<Pet>([cat, dog])?;
+    /// assert_eq!(pet.rust_path(), "::models::Pet");
+    /// assert!(matches!(pet.structure(), Some(TypeRef::OneOf(_))));
+    /// # Ok::<(), schematic_define::DefinitionError>(())
+    /// ```
+    ///
+    /// ## Errors
+    ///
+    /// [`DefinitionError::NotLeaf`] when `T` is a container or primitive.
+    /// Recorded for [`Self::finish`] as well as returned:
+    /// [`DefinitionError::EmptyComposition`],
+    /// [`DefinitionError::NonNominalMember`],
+    /// [`DefinitionError::ForeignMember`],
+    /// [`DefinitionError::DuplicateMember`], a
+    /// [`DefinitionError::ComponentConflict`] when `T` is already registered
+    /// without this structure, and `T`'s own registration collisions.
+    pub fn one_of<T: Registration>(&mut self, variants: impl IntoIterator<Item = TypeDesc>) -> Result<TypeDesc, DefinitionError> {
+        self.compose::<T>(TypeRef::OneOf, variants)
+    }
+    /// [`Self::one_of`] exporting `anyOf`.
+    ///
+    /// ## Errors
+    ///
+    /// As for [`Self::one_of`].
+    pub fn any_of<T: Registration>(&mut self, variants: impl IntoIterator<Item = TypeDesc>) -> Result<TypeDesc, DefinitionError> {
+        self.compose::<T>(TypeRef::AnyOf, variants)
+    }
+    /// [`Self::one_of`] exporting `allOf`: `T` satisfies every member at once.
+    ///
+    /// ## Errors
+    ///
+    /// As for [`Self::one_of`].
+    pub fn all_of<T: Registration>(&mut self, members: impl IntoIterator<Item = TypeDesc>) -> Result<TypeDesc, DefinitionError> {
+        self.compose::<T>(TypeRef::AllOf, members)
+    }
+    fn compose<T: Registration>(&mut self, kind: fn(Vec<TypeRef>) -> TypeRef, members: impl IntoIterator<Item = TypeDesc>) -> Result<TypeDesc, DefinitionError> {
+        if !T::IS_LEAF { return Err(DefinitionError::NotLeaf); }
+        let target = type_name::<T>();
+        let members: Vec<TypeDesc> = members.into_iter().collect();
+        if members.is_empty() { return Err(self.record(DefinitionError::EmptyComposition { target })); }
+        for (index, member) in members.iter().enumerate() {
+            let TypeRef::Named(name) = &member.reference else {
+                return Err(self.record(DefinitionError::NonNominalMember { target, member: member.rust_path.clone() }));
+            };
+            if !self.entries.iter().any(|e| &e.name == name && e.descriptor() == *member) {
+                return Err(self.record(DefinitionError::ForeignMember { target, name: name.clone(), rust_path: member.rust_path.clone() }));
+            }
+            if members[..index].iter().any(|m| m.reference == member.reference) {
+                return Err(self.record(DefinitionError::DuplicateMember { target, name: name.clone() }));
+            }
+        }
+        let references = members.into_iter().map(TypeDesc::into_type_ref).collect();
+        let structure = kind(references);
+        if let Some(entry) = self.entries.iter().find(|e| e.identity == TypeId::of::<T>()) {
+            if entry.structure.as_ref() == Some(&structure) { return Ok(entry.descriptor()); }
+            let first = match &entry.structure { Some(existing) => format!("{target} as {}", existing.wire_schema()), None => format!("{target} without a composition") };
+            let error = DefinitionError::ComponentConflict { schema_name: entry.name.clone(), first, second: format!("{target} as {}", structure.wire_schema()) };
+            return Err(self.record(error));
+        }
+        T::register(self)?;
+        let entry = self.entries.iter_mut().find(|e| e.identity == TypeId::of::<T>()).ok_or(DefinitionError::NotLeaf)?;
+        entry.structure = Some(structure.clone());
+        self.models.types.push(ModelDef::Alias(TypeAlias { name: entry.name.clone(), description: None, target: structure }));
+        Ok(entry.descriptor())
     }
     /// Fail assembly with every distinct collision seen so far.
     pub fn finish(&self) -> Result<(), DefinitionError> {
@@ -171,6 +293,9 @@ impl DefinitionContext {
     }
     /// Ordered nominal entries, including explicit types unused by endpoints.
     pub fn registrations(&self) -> &[TypeRegistration] { &self.entries }
+    /// Each composition as an alias from its component name to its structure,
+    /// in registration order; empty when nothing is composed.
+    pub fn models(&self) -> &ModelCatalog { &self.models }
     /// Every component this context defines, in registration order, with
     /// nested `$defs` flattened into their own entries.
     ///
@@ -182,7 +307,7 @@ impl DefinitionContext {
     /// schemas give one name different wire schemas.
     pub fn components(&self) -> Result<Vec<SchemaComponent>, DefinitionError> {
         self.finish()?;
-        crate::components::flatten(self.entries.iter().map(|e| (e.name.as_str(), e.path.as_str(), e.diagnostic, e.schema.as_value())))
+        crate::components::flatten(self.entries.iter().map(|e| (e.name.as_str(), e.path.as_str(), e.diagnostic, e.schema.as_value(), e.structure.as_ref().map(TypeRef::wire_schema))))
     }
 }
 

@@ -359,7 +359,7 @@ fn a_required_managed_parameter_needs_a_value_to_send() {
         .page_size(PageSize::new("limit").max(100))
         .build();
     let api = listed(limit_required.clone(), Collection::root().paginate(without_default));
-    assert_eq!(errors(&api), vec![PaginationError::PagerManagedRequiredWithoutDefault("limit".into())]);
+    assert_eq!(errors(&api), vec![PaginationError::PagerManagedRequiredWithoutDefault { strategy: "cursor", param: "limit".into() }]);
 
     let with_default = Strategy::cursor("after", CursorSource::body("next"))
         .page_size(PageSize::new("limit").max(100).sent_default(100))
@@ -375,7 +375,7 @@ fn a_required_managed_parameter_needs_a_value_to_send() {
     // A required cursor has no first value.
     let cursor_required = with_required_query(get("L", "/l", "Vec<T>"), "after");
     let api = listed(cursor_required, Collection::root().paginate(openai_cursor()));
-    assert_eq!(errors(&api), vec![PaginationError::PagerManagedRequiredWithoutDefault("after".into())]);
+    assert_eq!(errors(&api), vec![PaginationError::PagerManagedRequiredWithoutDefault { strategy: "cursor", param: "after".into() }]);
 }
 
 #[test]

@@ -61,7 +61,7 @@ parameters (`EndpointParams.header`/`cookie`) become `with_*` fields sent in
 - `BearerToken { header: Option<String> }`
 - `ApiKey { header: String }`
 - `ApiKeyParam { location: ApiKeyLocation, name: String }`
-- `Basic`
+- `Basic { username_env: EnvList, password_env: EnvList }`
 - `None`
 
 `ApiKeyLocation` supports:
@@ -104,10 +104,14 @@ Do not document or introduce legacy `basic_auth` object shapes.
 
 ### 5) Basic Auth Source of Truth
 
-For `AuthStrategy::Basic`:
+For `AuthStrategy::Basic { username_env, password_env }`:
 
-- Username: `env_username` (or `env_mapping.basic_user`)
-- Password: `env_auth[0]` (or `env_mapping.basic_pass`)
+- Username: every name in `username_env`, in order (or `env_mapping.basic_user`)
+- Password: every name in `password_env`, in order (or `env_mapping.basic_pass`)
+- `env_auth` is never a Basic source and must be empty; an empty list means
+  that half has no environment source
+- `RestApi` has no `env_username` field; the builder's `env_username(name)`
+  fills or must equal Basic's `username_env`
 
 ### 6) API-Level Runtime Policy Fields
 
@@ -427,6 +431,21 @@ external literals cannot compile. `Schema { type_name, module_path }` is used
 only by WebSocket messages. Endpoint oauth_scopes is removed; auth_policy is retained. Read
 `schematic/docs/definition-builders.md` for accepted forms and the Default allow-list.
 
+Optional vocabulary (definition side only; generator, exporter and runtime
+consumers are still planned): `.path_param(ParamDef::path(name, type))` fills
+`EndpointParams::path` (once any is declared, names must equal the
+placeholders; `{+x}` counts as `x`); `.deprecated()` on endpoints and
+`ParamDef`; `.rate_limit(..)`/`.retry_guidance(..)` on API and endpoint (an
+endpoint value replaces the API value whole; read through
+`RestApi::effective_rate_limit`/`effective_retry_guidance`); endpoint
+`.public()`, `.auth(policy)`, `.auth_with_env_mapping(policy, mapping)`
+(at most one; resolve with `RestApi::endpoint_auth`). Build checks a
+replacement policy's env fallback against the endpoint mapping, else the API's
+effective mapping. A required pager-adopted parameter needs a type-valid sent
+default (`pager-managed-default-invalid`). Polymorphic bodies: `ctx.one_of::<T>([..])` / `any_of` / `all_of` over descriptors from the same
+context bind a hand-written serde type to a structure that replaces its
+schemars schema in `components()`; see `schematic/docs/typed-registration.md`.
+
 ## Imported builder assemblies
 
 `import --definitions-out` emits fallible Endpoint/RestApi builders and a public
@@ -474,5 +493,4 @@ README is an overview; its detailed reference lives in
 teaches the same fallible context assembly. Keep these entry points aligned.
 The L1 `authoring_guidance` corpus rejects obsolete REST constructor examples.
 Only four Success forms and ErrorSet::none exist; response/vocabulary extensions
-are planned. Reserve path_param/public/auth/deprecated/rate_limit and success
-stream/content-type names. No selector API is planned here.
+are planned. Reserve success stream/content-type names. No selector API is planned here.

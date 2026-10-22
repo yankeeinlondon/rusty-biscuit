@@ -13,7 +13,7 @@ fn endpoint_literal(ctx: &mut DefinitionContext) -> Endpoint {
         .describes("List releases")
         .returns_json::<Vec<Release>>(ctx)
         .params(EndpointParams {
-            query: vec![ParamDef { rust_name: None, secret: false, pager_managed: false,
+            query: vec![ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
                 name: "per_page".to_string(), required: false, description: None,
                 param_type: QueryParamType::Integer, explode: true, style: ParamStyle::Form,
             }],
@@ -29,7 +29,7 @@ fn endpoint_builder_and_parameter_default_preserve_unpaginated_behavior() {
     let params = endpoint.params.as_ref().unwrap();
     assert_eq!(params.query[0].name, "per_page");
     assert_eq!(
-        EndpointParams {
+        EndpointParams { path: vec![],
             query: vec![],
             header: vec![],
             cookie: vec![],

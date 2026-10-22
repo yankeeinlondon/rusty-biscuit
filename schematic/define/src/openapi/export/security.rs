@@ -40,7 +40,7 @@ pub fn map_security(auth: &AuthStrategy) -> Option<(String, SecurityScheme)> {
                 extensions: IndexMap::new(),
             },
         )),
-        AuthStrategy::Basic => Some((
+        AuthStrategy::Basic { .. } => Some((
             "basicAuth".to_string(),
             SecurityScheme::HTTP {
                 scheme: "basic".to_string(),
@@ -65,16 +65,16 @@ pub fn map_security(auth: &AuthStrategy) -> Option<(String, SecurityScheme)> {
             ))
         }
         AuthStrategy::OAuth2(config) => {
-            let flows = match config.grant_type {
-                crate::oauth::OAuth2GrantType::AuthorizationCodePkce => {
+            let flows = match config {
+                crate::oauth::OAuth2Config::AuthorizationCodePkce(grant) => {
                     let mut scopes = indexmap::IndexMap::new();
-                    for scope in &config.default_scopes {
+                    for scope in &grant.default_scopes {
                         scopes.insert(scope.clone(), String::new());
                     }
                     openapiv3::OAuth2Flows {
                         authorization_code: Some(openapiv3::AuthorizationCodeOAuth2Flow {
-                            authorization_url: config.authorization_url.clone().unwrap_or_default(),
-                            token_url: config.token_url.clone(),
+                            authorization_url: grant.authorization_url.clone(),
+                            token_url: grant.token_url.clone(),
                             refresh_url: None,
                             scopes,
                             extensions: IndexMap::new(),
@@ -82,14 +82,14 @@ pub fn map_security(auth: &AuthStrategy) -> Option<(String, SecurityScheme)> {
                         ..Default::default()
                     }
                 }
-                crate::oauth::OAuth2GrantType::ClientCredentials => {
+                crate::oauth::OAuth2Config::ClientCredentials(grant) => {
                     let mut scopes = indexmap::IndexMap::new();
-                    for scope in &config.default_scopes {
+                    for scope in &grant.default_scopes {
                         scopes.insert(scope.clone(), String::new());
                     }
                     openapiv3::OAuth2Flows {
                         client_credentials: Some(openapiv3::ClientCredentialsOAuth2Flow {
-                            token_url: config.token_url.clone(),
+                            token_url: grant.token_url.clone(),
                             refresh_url: None,
                             scopes,
                             extensions: IndexMap::new(),
@@ -125,7 +125,7 @@ pub(super) fn map_security_requirements(api: &RestApi) -> Vec<SecurityRequiremen
             req.insert("apiKeyAuth".to_string(), vec![]);
             vec![req]
         }
-        AuthStrategy::Basic => {
+        AuthStrategy::Basic { .. } => {
             let mut req = IndexMap::new();
             req.insert("basicAuth".to_string(), vec![]);
             vec![req]
@@ -204,7 +204,10 @@ mod tests {
 
     #[test]
     fn map_security_basic_returns_http_basic() {
-        let auth = AuthStrategy::Basic;
+        let auth = AuthStrategy::Basic {
+            username_env: crate::EnvList::single("USER"),
+            password_env: crate::EnvList::single("PASS"),
+        };
         let (name, scheme) = map_security(&auth).unwrap();
 
         assert_eq!(name, "basicAuth");

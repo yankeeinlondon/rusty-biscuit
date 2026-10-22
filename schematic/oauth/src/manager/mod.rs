@@ -51,19 +51,19 @@ type OAuthClient = oauth2::Client<
 ///
 /// ```no_run
 /// use schematic_oauth::{OAuth2Manager, OAuth2RuntimeConfig, MemoryTokenStore};
-/// use schematic_define::{OAuth2Config, OAuth2GrantType, PkceRequirement, OAuth2ClientAuthMethod};
+/// use schematic_define::{
+///     AuthorizationCodeGrant, OAuth2ClientAuthMethod, OAuth2Config, PkceRequirement,
+/// };
 ///
 /// let config = OAuth2RuntimeConfig {
-///     provider: OAuth2Config {
-///         grant_type: OAuth2GrantType::AuthorizationCodePkce,
-///         authorization_url: Some("https://example.com/authorize".into()),
+///     provider: OAuth2Config::AuthorizationCodePkce(AuthorizationCodeGrant {
+///         authorization_url: "https://example.com/authorize".into(),
 ///         token_url: "https://example.com/token".into(),
 ///         revocation_url: None,
-///         device_authorization_url: None,
 ///         default_scopes: vec!["read".into()],
 ///         pkce: PkceRequirement::Required,
 ///         client_auth: OAuth2ClientAuthMethod::ClientSecretBasic,
-///     },
+///     }),
 ///     client_id: "my_client_id".into(),
 ///     client_secret: Some("my_secret".into()),
 ///     redirect_uri: Some("http://localhost:8080/callback".into()),
@@ -94,22 +94,20 @@ impl OAuth2Manager {
         config: OAuth2RuntimeConfig,
         store: Box<dyn TokenStore>,
     ) -> Result<Self, OAuthError> {
-        let token_url = TokenUrl::new(config.provider.token_url.clone())
+        let token_url = TokenUrl::new(config.provider.token_url().to_string())
             .map_err(|e| OAuthError::Configuration(format!("Invalid token URL: {e}")))?;
 
         let auth_url = config
             .provider
-            .authorization_url
-            .as_ref()
-            .map(|u| AuthUrl::new(u.clone()))
+            .authorization_url()
+            .map(|u| AuthUrl::new(u.to_string()))
             .transpose()
             .map_err(|e| OAuthError::Configuration(format!("Invalid authorization URL: {e}")))?;
 
         let revocation_url = config
             .provider
-            .revocation_url
-            .as_ref()
-            .map(|u| RevocationUrl::new(u.clone()))
+            .revocation_url()
+            .map(|u| RevocationUrl::new(u.to_string()))
             .transpose()
             .map_err(|e| OAuthError::Configuration(format!("Invalid revocation URL: {e}")))?;
 
@@ -185,21 +183,31 @@ mod tests {
     use super::*;
     use crate::store::MemoryTokenStore;
     use schematic_define::{
-        OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement,
+        AuthorizationCodeGrant, ClientCredentialsGrant, OAuth2ClientAuthMethod, OAuth2Config,
+        PkceRequirement,
     };
+
+    fn auth_code_grant() -> AuthorizationCodeGrant {
+        AuthorizationCodeGrant {
+            authorization_url: "https://example.com/authorize".into(),
+            token_url: "https://example.com/token".into(),
+            revocation_url: None,
+            default_scopes: vec!["read".into()],
+            pkce: PkceRequirement::Required,
+            client_auth: OAuth2ClientAuthMethod::ClientSecretBasic,
+        }
+    }
+
+    fn auth_code_config_with(grant: AuthorizationCodeGrant) -> OAuth2RuntimeConfig {
+        OAuth2RuntimeConfig {
+            provider: OAuth2Config::AuthorizationCodePkce(grant),
+            ..auth_code_config()
+        }
+    }
 
     pub(super) fn auth_code_config() -> OAuth2RuntimeConfig {
         OAuth2RuntimeConfig {
-            provider: OAuth2Config {
-                grant_type: OAuth2GrantType::AuthorizationCodePkce,
-                authorization_url: Some("https://example.com/authorize".into()),
-                token_url: "https://example.com/token".into(),
-                revocation_url: None,
-                device_authorization_url: None,
-                default_scopes: vec!["read".into()],
-                pkce: PkceRequirement::Required,
-                client_auth: OAuth2ClientAuthMethod::ClientSecretBasic,
-            },
+            provider: OAuth2Config::AuthorizationCodePkce(auth_code_grant()),
             client_id: "test_client".into(),
             client_secret: Some("test_secret".into()),
             redirect_uri: Some("http://localhost:8080/callback".into()),
@@ -209,16 +217,12 @@ mod tests {
 
     pub(super) fn client_credentials_config() -> OAuth2RuntimeConfig {
         OAuth2RuntimeConfig {
-            provider: OAuth2Config {
-                grant_type: OAuth2GrantType::ClientCredentials,
-                authorization_url: None,
+            provider: OAuth2Config::ClientCredentials(ClientCredentialsGrant {
                 token_url: "https://example.com/token".into(),
                 revocation_url: None,
-                device_authorization_url: None,
                 default_scopes: vec!["api".into()],
-                pkce: PkceRequirement::NotUsed,
                 client_auth: OAuth2ClientAuthMethod::ClientSecretBasic,
-            },
+            }),
             client_id: "service_client".into(),
             client_secret: Some("service_secret".into()),
             redirect_uri: None,
@@ -234,8 +238,10 @@ mod tests {
 
     #[test]
     fn manager_creation_fails_with_invalid_token_url() {
-        let mut config = auth_code_config();
-        config.provider.token_url = "not a url".into();
+        let config = auth_code_config_with(AuthorizationCodeGrant {
+            token_url: "not a url".into(),
+            ..auth_code_grant()
+        });
         let result = OAuth2Manager::new(config, Box::new(MemoryTokenStore::new()));
         assert!(result.is_err());
         let err_msg = format!("{}", result.err().unwrap());
@@ -270,14 +276,16 @@ mod tests {
     }
 
     #[test]
-    fn begin_authorization_without_pkce_when_not_used() {
-        let mut config = auth_code_config();
-        config.provider.pkce = PkceRequirement::NotUsed;
+    fn begin_authorization_sends_pkce_when_only_supported() {
+        let config = auth_code_config_with(AuthorizationCodeGrant {
+            pkce: PkceRequirement::Supported,
+            ..auth_code_grant()
+        });
         let manager = OAuth2Manager::new(config, Box::new(MemoryTokenStore::new())).unwrap();
 
         let session = manager.begin_authorization().unwrap();
-        assert!(session.pkce_verifier.is_none());
-        assert!(!session.authorization_url.contains("code_challenge"));
+        assert!(session.pkce_verifier.is_some());
+        assert!(session.authorization_url.contains("code_challenge="));
     }
 
     #[test]
@@ -381,8 +389,10 @@ mod tests {
 
     #[tokio::test]
     async fn revoke_token_fails_without_stored_token() {
-        let mut config = auth_code_config();
-        config.provider.revocation_url = Some("https://example.com/revoke".into());
+        let config = auth_code_config_with(AuthorizationCodeGrant {
+            revocation_url: Some("https://example.com/revoke".into()),
+            ..auth_code_grant()
+        });
         let manager = OAuth2Manager::new(config, Box::new(MemoryTokenStore::new())).unwrap();
 
         let result = manager.revoke_token().await;

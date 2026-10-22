@@ -15,7 +15,7 @@ use crate::output::assemble::assemble_api_module;
 use crate::validation::validate_rust_client;
 
 fn param(name: &str, required: bool) -> ParamDef {
-    ParamDef { rust_name: None, secret: false, pager_managed: false,
+    ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required,
         description: None,
@@ -33,7 +33,7 @@ fn get(id: &str, path: &str, response: ApiResponse, query: Vec<ParamDef>) -> End
 }
 
 fn api(endpoints: Vec<Endpoint>) -> RestApi {
-    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "Shelf".to_string(); fixture.description = "Shelf API".to_string(); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "Shelf".to_string(); fixture.description = "Shelf API".to_string(); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }
 }
 
 /// A GitHub-like API: page numbers ended by a `Link` relation, a bounded

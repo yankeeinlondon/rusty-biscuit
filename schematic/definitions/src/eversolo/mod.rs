@@ -325,7 +325,6 @@ mod tests {
         let api = define_eversolo_api();
         assert!(matches!(api.auth, AuthStrategy::None));
         assert!(api.env_auth.is_empty());
-        assert!(api.env_username.is_none());
     }
 
     #[test]

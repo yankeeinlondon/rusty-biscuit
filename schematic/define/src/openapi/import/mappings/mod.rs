@@ -14,6 +14,7 @@ use super::naming::{deconflict_name, operation_id_fallback, sanitize_rust_ident}
 use super::resolver::RefResolver;
 use super::{BaseUrlPolicy, OpenApiImportOptions};
 use crate::auth::{ApiKeyLocation, AuthStrategy};
+use crate::headers::EnvList;
 use crate::types::Endpoint;
 use crate::types::RestMethod;
 
@@ -80,7 +81,7 @@ pub fn map_operation(
     let params = parameters::map_parameters(&op.parameters, resolver, &mut diagnostics);
 
     Ok((
-        Endpoint {
+        Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
             id,
             method,
             path: path.to_string(),
@@ -115,7 +116,10 @@ pub fn map_security_scheme(
             let scheme_lower = auth_scheme.to_lowercase();
             match scheme_lower.as_str() {
                 "bearer" => Ok(AuthStrategy::BearerToken { header: None }),
-                "basic" => Ok(AuthStrategy::Basic),
+                "basic" => Ok(AuthStrategy::Basic {
+                    username_env: EnvList::new(vec![]),
+                    password_env: EnvList::new(vec![]),
+                }),
                 _ => Err(format!("Unsupported HTTP auth scheme: {}", auth_scheme)),
             }
         }
@@ -136,28 +140,26 @@ pub fn map_security_scheme(
         SecurityScheme::OAuth2 { flows, .. } => {
             if let Some(auth_code) = &flows.authorization_code {
                 let scopes: Vec<String> = auth_code.scopes.keys().cloned().collect();
-                Ok(AuthStrategy::OAuth2(crate::oauth::OAuth2Config {
-                    grant_type: crate::oauth::OAuth2GrantType::AuthorizationCodePkce,
-                    authorization_url: Some(auth_code.authorization_url.clone()),
-                    token_url: auth_code.token_url.clone(),
-                    revocation_url: None,
-                    device_authorization_url: None,
-                    default_scopes: scopes,
-                    pkce: crate::oauth::PkceRequirement::Required,
-                    client_auth: crate::oauth::OAuth2ClientAuthMethod::ClientSecretBasic,
-                }))
+                Ok(AuthStrategy::OAuth2(crate::oauth::OAuth2Config::AuthorizationCodePkce(
+                    crate::oauth::AuthorizationCodeGrant {
+                        authorization_url: auth_code.authorization_url.clone(),
+                        token_url: auth_code.token_url.clone(),
+                        revocation_url: None,
+                        default_scopes: scopes,
+                        pkce: crate::oauth::PkceRequirement::Required,
+                        client_auth: crate::oauth::OAuth2ClientAuthMethod::ClientSecretBasic,
+                    },
+                )))
             } else if let Some(client_creds) = &flows.client_credentials {
                 let scopes: Vec<String> = client_creds.scopes.keys().cloned().collect();
-                Ok(AuthStrategy::OAuth2(crate::oauth::OAuth2Config {
-                    grant_type: crate::oauth::OAuth2GrantType::ClientCredentials,
-                    authorization_url: None,
-                    token_url: client_creds.token_url.clone(),
-                    revocation_url: None,
-                    device_authorization_url: None,
-                    default_scopes: scopes,
-                    pkce: crate::oauth::PkceRequirement::NotUsed,
-                    client_auth: crate::oauth::OAuth2ClientAuthMethod::ClientSecretBasic,
-                }))
+                Ok(AuthStrategy::OAuth2(crate::oauth::OAuth2Config::ClientCredentials(
+                    crate::oauth::ClientCredentialsGrant {
+                        token_url: client_creds.token_url.clone(),
+                        revocation_url: None,
+                        default_scopes: scopes,
+                        client_auth: crate::oauth::OAuth2ClientAuthMethod::ClientSecretBasic,
+                    },
+                )))
             } else if flows.implicit.is_some() {
                 diagnostics.push(OpenApiDiagnostic::warn(
                     location.to_string(),
@@ -272,7 +274,10 @@ mod tests {
         };
 
         let result = map_security_scheme(&scheme, &mut Vec::new(), "#/test").unwrap();
-        assert!(matches!(result, AuthStrategy::Basic));
+        assert_eq!(result, AuthStrategy::Basic {
+            username_env: EnvList::new(vec![]),
+            password_env: EnvList::new(vec![]),
+        });
     }
 
     #[test]

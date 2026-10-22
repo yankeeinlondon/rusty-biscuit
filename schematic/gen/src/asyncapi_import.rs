@@ -300,7 +300,11 @@ fn infer_auth_strategy(doc: &Value, diagnostics: &mut Vec<OpenApiDiagnostic>) ->
                     .unwrap_or_default()
                     .to_ascii_lowercase();
                 if inner_scheme == "basic" {
-                    return AuthStrategy::Basic;
+                    // AsyncAPI names no Basic credential variables.
+                    return AuthStrategy::Basic {
+                        username_env: schematic_define::EnvList::new(vec![]),
+                        password_env: schematic_define::EnvList::new(vec![]),
+                    };
                 }
                 if inner_scheme == "bearer" {
                     return AuthStrategy::BearerToken { header: None };
@@ -650,7 +654,8 @@ fn write_import_report(
 }
 
 fn default_env_auth(module_path: &str, auth: &AuthStrategy) -> Vec<String> {
-    if matches!(auth, AuthStrategy::None) {
+    // Basic carries its own environment lists; `env_auth` is never its source.
+    if matches!(auth, AuthStrategy::None | AuthStrategy::Basic { .. }) {
         return vec![];
     }
     let upper = module_path.replace('-', "_").to_ascii_uppercase();

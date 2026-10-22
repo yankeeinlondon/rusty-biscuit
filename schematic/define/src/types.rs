@@ -9,9 +9,10 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-use crate::auth::{AuthPolicy, AuthStrategy, EnvAuthStrategy};
+use crate::auth::{AuthPolicy, AuthStrategy, EndpointAuth, EnvAuthStrategy};
 use crate::cross_origin::CrossOrigin;
 use crate::headers::{EnvList, EnvMapping};
+use crate::metadata::{RateLimit, RetryGuidance};
 use crate::pagination::Strategy;
 use crate::params::EndpointParams;
 use crate::request::ApiRequest;
@@ -131,15 +132,11 @@ pub struct RestApi {
     ///
     /// For `BearerToken`, `ApiKey`, and `ApiKeyParam` auth strategies, this is
     /// a fallback chain. The first non-empty env var is used. If none is set,
-    /// the request is sent anonymously.
+    /// the request is sent anonymously. Never a Basic source:
+    /// [`AuthStrategy::Basic`] carries its own username and password lists.
     ///
     /// Example: `vec!["OPENAI_API_KEY".to_string(), "OPENAI_KEY".to_string()]`
     pub env_auth: Vec<String>,
-    /// Environment variable for Basic auth username.
-    ///
-    /// Only used when `auth` is `AuthStrategy::Basic`. The password is read
-    /// from the first element of `env_auth` (i.e., `env_auth[0]`).
-    pub env_username: Option<String>,
     /// Default HTTP headers to include with every request.
     ///
     /// These headers are applied to all endpoints unless overridden by
@@ -168,8 +165,8 @@ pub struct RestApi {
     /// Environment variable mapping for authentication credentials.
     ///
     /// This provides a structured way to configure which environment variables to check
-    /// for authentication credentials. If `None`, the mapping is built from legacy fields
-    /// (`env_auth`, `env_username`) for backward compatibility.
+    /// for authentication credentials. If `None`, the mapping is derived from
+    /// [`Self::auth`] and [`Self::env_auth`]; see [`Self::legacy_env_mapping_for`].
     ///
     /// ## Examples
     ///
@@ -202,6 +199,14 @@ pub struct RestApi {
     /// `None` leaves lists unpaginated. A GET endpoint whose response is an
     /// explicit `Vec<T>` is a list automatically; any other list needs an endpoint collection. See [`crate::pagination::resolve`].
     pub default_pagination: Option<Strategy>,
+    /// Rate-limit headers for every endpoint without its own
+    /// [`Endpoint::rate_limit`]. Descriptive only; nothing enforces it.
+    #[serde(default, deserialize_with = "crate::serde_presence::non_null", skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<RateLimit>,
+    /// Retry guidance for every endpoint without its own
+    /// [`Endpoint::retry_guidance`]. Descriptive only; nothing retries.
+    #[serde(default, deserialize_with = "crate::serde_presence::non_null", skip_serializing_if = "Option::is_none")]
+    pub retry_guidance: Option<RetryGuidance>,
     /// Every schema component of this API's definition context, in
     /// registration order. JSON body references name these; see
     /// [`RestApi::validate_references`].
@@ -211,8 +216,9 @@ pub struct RestApi {
 impl RestApi {
     /// Get the environment variable mapping for this API.
     ///
-    /// If `env_mapping` is set, returns a clone. Otherwise, builds a mapping
-    /// from the legacy fields (`env_auth`, `env_username`) for backward compatibility.
+    /// If `env_mapping` is set, returns a clone (it replaces the derived
+    /// mapping wholesale). Otherwise derives one with
+    /// [`Self::legacy_env_mapping_for`].
     ///
     /// ## Returns
     ///
@@ -260,7 +266,7 @@ impl RestApi {
             return mapping.clone();
         }
 
-        Self::legacy_env_mapping_for(&self.auth, &self.env_auth, self.env_username.as_deref())
+        Self::legacy_env_mapping_for(&self.auth, &self.env_auth)
     }
 
     /// Returns the effective authentication policy for this API.
@@ -274,11 +280,11 @@ impl RestApi {
             .unwrap_or_else(|| AuthPolicy::from_auth_strategy(&self.auth))
     }
 
-    /// Builds an [`EnvMapping`] from the legacy auth fields.
+    /// Builds an [`EnvMapping`] from an authentication strategy and its
+    /// `env_auth` names.
     ///
-    /// This is used by the generator to preserve the existing `env_auth` /
-    /// `env_username` authoring API while routing runtime behavior through
-    /// [`EnvMapping`].
+    /// [`AuthStrategy::Basic`] ignores `env_auth` and yields its own ordered
+    /// lists as `basic_user`/`basic_pass`, each `None` when that list is empty.
     ///
     /// An [`AuthStrategy::ApiKeyParam`] strategy yields an empty mapping:
     /// [`EnvMapping`] only describes header credentials. For an
@@ -286,11 +292,15 @@ impl RestApi {
     /// variables from `env_auth` directly and gives them to the runtime's
     /// environment fallback with a query or cookie placement.
     #[must_use]
-    pub fn legacy_env_mapping_for(
-        auth: &AuthStrategy,
-        env_auth: &[String],
-        env_username: Option<&str>,
-    ) -> EnvMapping {
+    pub fn legacy_env_mapping_for(auth: &AuthStrategy, env_auth: &[String]) -> EnvMapping {
+        if let AuthStrategy::Basic { username_env, password_env } = auth {
+            let present = |list: &EnvList| (!list.names().is_empty()).then(|| list.clone());
+            return EnvMapping {
+                basic_user: present(username_env),
+                basic_pass: present(password_env),
+                ..Default::default()
+            };
+        }
         match AuthPolicy::from_auth_strategy(auth).env_fallback {
             Some(EnvAuthStrategy::BearerToken { .. }) => EnvMapping {
                 bearer_token: (!env_auth.is_empty()).then(|| EnvList::new(env_auth.to_vec())),
@@ -305,14 +315,73 @@ impl RestApi {
             },
             // See the doc comment: parameter keys are not header credentials.
             Some(EnvAuthStrategy::ApiKeyParam { .. }) => EnvMapping::default(),
-            Some(EnvAuthStrategy::Basic) => EnvMapping {
-                basic_user: env_username.map(EnvList::single),
-                basic_pass: env_auth.first().cloned().map(EnvList::single),
-                ..Default::default()
-            },
-            None => EnvMapping::default(),
+            // Basic returned above; nothing else derives a Basic fallback.
+            Some(EnvAuthStrategy::Basic) | None => EnvMapping::default(),
         }
     }
+
+    /// The endpoint's rate-limit declaration if it has one, otherwise this
+    /// API's. A present endpoint value replaces the API value whole.
+    #[must_use]
+    pub fn effective_rate_limit<'a>(&'a self, endpoint: &'a Endpoint) -> Option<&'a RateLimit> {
+        endpoint.rate_limit.as_ref().or(self.rate_limit.as_ref())
+    }
+
+    /// The endpoint's retry guidance if it has one, otherwise this API's. A
+    /// present endpoint value replaces the API value whole.
+    #[must_use]
+    pub fn effective_retry_guidance<'a>(&'a self, endpoint: &'a Endpoint) -> Option<&'a RetryGuidance> {
+        endpoint.retry_guidance.as_ref().or(self.retry_guidance.as_ref())
+    }
+
+    /// Resolves the authentication `endpoint` uses.
+    ///
+    /// An endpoint without [`Endpoint::auth`] inherits
+    /// [`Self::effective_auth_policy`] and [`Self::default_env_mapping`]. A
+    /// replacement policy uses its own mapping when it declares one, which
+    /// replaces the API mapping whole, and otherwise the API's mapping.
+    ///
+    /// ## Notes
+    ///
+    /// [`EnvMapping`] has no slot for a parameter (query or cookie) API key,
+    /// whose variables are always [`Self::env_auth`]. API build accepts such a
+    /// replacement only when it equals the API's own fallback.
+    #[must_use]
+    pub fn endpoint_auth(&self, endpoint: &Endpoint) -> ResolvedEndpointAuth {
+        match &endpoint.auth {
+            None => ResolvedEndpointAuth::Inherited {
+                policy: self.effective_auth_policy(),
+                env_mapping: self.default_env_mapping(),
+            },
+            Some(EndpointAuth::Public) => ResolvedEndpointAuth::Public,
+            Some(EndpointAuth::Policy { policy, env_mapping }) => ResolvedEndpointAuth::Replaced {
+                policy: policy.clone(),
+                env_mapping: env_mapping.clone().unwrap_or_else(|| self.default_env_mapping()),
+            },
+        }
+    }
+}
+
+/// The authentication one endpoint uses, from [`RestApi::endpoint_auth`].
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedEndpointAuth {
+    /// The endpoint declares nothing and uses the API's policy and mapping.
+    Inherited {
+        /// The API's effective policy.
+        policy: AuthPolicy,
+        /// The API's effective environment mapping.
+        env_mapping: EnvMapping,
+    },
+    /// The endpoint is public: no credential is looked up or sent.
+    Public,
+    /// The endpoint's policy replaces the API's.
+    Replaced {
+        /// The endpoint's policy, never merged with the API's.
+        policy: AuthPolicy,
+        /// The endpoint's mapping if declared, otherwise the API's.
+        env_mapping: EnvMapping,
+    },
 }
 
 /// A single API endpoint definition.
@@ -323,7 +392,9 @@ impl RestApi {
 /// ## Path Parameters
 ///
 /// Paths support template parameters using curly braces: `/models/{model}`.
-/// These become fields in the generated request struct.
+/// These become fields in the generated request struct. With no declared
+/// [`EndpointParams::path`] every placeholder is an untyped string; once any
+/// is declared, the declarations must match the placeholders exactly.
 ///
 /// ## Examples
 ///
@@ -403,13 +474,9 @@ pub struct Endpoint {
     /// headers: vec![("anthropic-beta".to_string(), "message-batches-2024-09-24".to_string())]
     /// ```
     pub headers: Vec<(String, String)>,
-    /// Query, header, and cookie parameters for this endpoint.
+    /// Query, header, cookie, and typed path parameters for this endpoint.
     ///
-    /// These parameters are imported from API specifications like OpenAPI and
-    /// define additional request parameters beyond the body and path parameters.
-    ///
-    /// If `None`, the endpoint has no imported parameters (backwards compatible
-    /// with existing endpoint definitions).
+    /// If `None`, the endpoint declares no parameters.
     pub params: Option<EndpointParams>,
     /// Replaces the API policy for this endpoint; callers may only tighten it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -417,6 +484,43 @@ pub struct Endpoint {
     /// Explicit collection shape and pagination policy, overriding API inference.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pagination: Option<crate::pagination::Collection>,
+    /// Replaces [`RestApi::rate_limit`] whole for this endpoint; `None` inherits.
+    #[serde(default, deserialize_with = "crate::serde_presence::non_null", skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<RateLimit>,
+    /// Replaces [`RestApi::retry_guidance`] whole for this endpoint; `None` inherits.
+    #[serde(default, deserialize_with = "crate::serde_presence::non_null", skip_serializing_if = "Option::is_none")]
+    pub retry_guidance: Option<RetryGuidance>,
+    /// The provider marks this operation deprecated. Documentation only: no
+    /// Rust `#[deprecated]` attribute is generated.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deprecated: bool,
+    /// Public, or a policy replacing the API's; `None` inherits. See
+    /// [`RestApi::endpoint_auth`].
+    #[serde(default, deserialize_with = "crate::serde_presence::non_null", skip_serializing_if = "Option::is_none")]
+    pub auth: Option<EndpointAuth>,
+}
+
+impl Endpoint {
+    /// Placeholder names in [`Self::path`], `{+name}` read as `name`, each
+    /// once in order of first occurrence.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use schematic_define::Endpoint;
+    ///
+    /// let endpoint = Endpoint::get("Get", "/{owner}/{+path}/{owner}")
+    ///     .describes("Get").returns_empty().build().unwrap();
+    /// assert_eq!(endpoint.path_placeholders(), ["owner", "path"]);
+    /// ```
+    #[must_use]
+    pub fn path_placeholders(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = Vec::new();
+        for name in crate::pagination::path_params(&self.path) {
+            if !names.contains(&name) { names.push(name); }
+        }
+        names
+    }
 }
 
 #[cfg(test)]
@@ -502,7 +606,6 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             auth_policy: None,
             env_auth: vec!["IGNORED_ENV".to_string()],
-            env_username: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
@@ -513,6 +616,8 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            rate_limit: None,
+            retry_guidance: None,
             schemas: vec![],
             };
 
@@ -534,7 +639,6 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             auth_policy: None,
             env_auth: vec!["OPENAI_API_KEY".to_string(), "OPENAI_KEY".to_string()],
-            env_username: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
@@ -545,6 +649,8 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            rate_limit: None,
+            retry_guidance: None,
             schemas: vec![],
             };
 
@@ -560,16 +666,18 @@ mod tests {
     }
 
     #[test]
-    fn default_env_mapping_builds_basic_auth_from_legacy_fields() {
+    fn default_env_mapping_builds_basic_auth_from_embedded_lists() {
         let api = RestApi {
             name: "TestApi".to_string(),
             description: "Test API".to_string(),
             base_url: "https://api.test.com".to_string(),
             docs_url: None,
-            auth: AuthStrategy::Basic,
+            auth: AuthStrategy::Basic {
+                username_env: EnvList::from_strs(&["API_USERNAME", "API_USER"]),
+                password_env: EnvList::from_strs(&["API_PASSWORD", "API_SECRET", "API_PASS"]),
+            },
             auth_policy: None,
-            env_auth: vec!["API_PASSWORD".to_string()],
-            env_username: Some("API_USERNAME".to_string()),
+            env_auth: vec![],
             headers: vec![],
             endpoints: vec![],
             module_path: None,
@@ -580,14 +688,16 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            rate_limit: None,
+            retry_guidance: None,
             schemas: vec![],
             };
 
         let mapping = api.default_env_mapping();
         assert!(mapping.basic_user.is_some());
-        assert_eq!(mapping.basic_user.unwrap().names(), &["API_USERNAME"]);
+        assert_eq!(mapping.basic_user.unwrap().names(), &["API_USERNAME", "API_USER"]);
         assert!(mapping.basic_pass.is_some());
-        assert_eq!(mapping.basic_pass.unwrap().names(), &["API_PASSWORD"]);
+        assert_eq!(mapping.basic_pass.unwrap().names(), &["API_PASSWORD", "API_SECRET", "API_PASS"]);
         assert!(mapping.bearer_token.is_none());
         assert!(mapping.api_key.is_none());
     }
@@ -602,7 +712,6 @@ mod tests {
             auth: AuthStrategy::None,
             auth_policy: None,
             env_auth: vec![],
-            env_username: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
@@ -613,6 +722,8 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            rate_limit: None,
+            retry_guidance: None,
             schemas: vec![],
             };
 
@@ -630,10 +741,12 @@ mod tests {
             description: "Test API".to_string(),
             base_url: "https://api.test.com".to_string(),
             docs_url: None,
-            auth: AuthStrategy::Basic,
+            auth: AuthStrategy::Basic {
+                username_env: EnvList::single("API_USERNAME"),
+                password_env: EnvList::new(vec![]),
+            },
             auth_policy: None,
-            env_auth: vec![], // Empty env_auth
-            env_username: Some("API_USERNAME".to_string()),
+            env_auth: vec![],
             headers: vec![],
             endpoints: vec![],
             module_path: None,
@@ -644,6 +757,8 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            rate_limit: None,
+            retry_guidance: None,
             schemas: vec![],
             };
 
@@ -680,7 +795,6 @@ mod tests {
             },
             auth_policy: None,
             env_auth: vec![],
-            env_username: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
@@ -691,6 +805,8 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            rate_limit: None,
+            retry_guidance: None,
             schemas: vec![],
             };
 
@@ -720,7 +836,6 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             auth_policy: None,
             env_auth: vec![],
-            env_username: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
@@ -731,6 +846,8 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            rate_limit: None,
+            retry_guidance: None,
             schemas: vec![],
             };
 
@@ -739,5 +856,82 @@ mod tests {
 
         // Should be equal but independent clones
         assert_eq!(mapping1, mapping2);
+    }
+
+    fn basic_api(username: &[&str], password: &[&str]) -> RestApi {
+        RestApi {
+            name: "TestApi".to_string(),
+            description: "Test API".to_string(),
+            base_url: "https://api.test.com".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::Basic {
+                username_env: EnvList::from_strs(username),
+                password_env: EnvList::from_strs(password),
+            },
+            auth_policy: None,
+            env_auth: vec![],
+            headers: vec![],
+            endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
+            version: None,
+            env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            rate_limit: None,
+            retry_guidance: None,
+            schemas: vec![],
+        }
+    }
+
+    #[test]
+    fn legacy_env_mapping_for_basic_keeps_every_ordered_fallback() {
+        let api = basic_api(&["U1", "U2"], &["P1", "P2", "P3"]);
+        let mapping = RestApi::legacy_env_mapping_for(&api.auth, &[]);
+        assert_eq!(mapping.basic_user, Some(EnvList::from_strs(&["U1", "U2"])));
+        assert_eq!(mapping.basic_pass, Some(EnvList::from_strs(&["P1", "P2", "P3"])));
+        assert_eq!(mapping.bearer_token, None);
+        assert_eq!(mapping.api_key, None);
+    }
+
+    #[test]
+    fn legacy_env_mapping_for_basic_never_reads_env_auth_as_password() {
+        let api = basic_api(&["U"], &[]);
+        let mapping = RestApi::legacy_env_mapping_for(&api.auth, &["NOT_A_PASSWORD".to_string()]);
+        assert_eq!(mapping.basic_user, Some(EnvList::single("U")));
+        assert_eq!(mapping.basic_pass, None);
+    }
+
+    #[test]
+    fn default_env_mapping_basic_empty_username_list_yields_no_basic_user() {
+        let mapping = basic_api(&[], &["P1", "P2"]).default_env_mapping();
+        assert_eq!(mapping.basic_user, None);
+        assert_eq!(mapping.basic_pass, Some(EnvList::from_strs(&["P1", "P2"])));
+    }
+
+    #[test]
+    fn default_env_mapping_explicit_mapping_replaces_embedded_basic_lists_wholesale() {
+        let explicit = EnvMapping {
+            basic_pass: Some(EnvList::single("OVERRIDE_PASS")),
+            ..Default::default()
+        };
+        let mut api = basic_api(&["U1", "U2"], &["P1"]);
+        api.env_mapping = Some(explicit.clone());
+        assert_eq!(api.default_env_mapping(), explicit);
+    }
+
+    #[test]
+    fn effective_auth_policy_explicit_policy_wins_over_basic_derivation() {
+        let mut api = basic_api(&["U"], &["P"]);
+        assert_eq!(api.effective_auth_policy(), AuthPolicy::from_auth_strategy(&api.auth));
+        let explicit = AuthPolicy {
+            explicit: vec![crate::auth::AuthMethod::BearerToken { header: None }],
+            env_fallback: None,
+        };
+        api.auth_policy = Some(explicit.clone());
+        assert_eq!(api.effective_auth_policy(), explicit);
+        assert_eq!(api.default_env_mapping().basic_user, Some(EnvList::single("U")));
     }
 }

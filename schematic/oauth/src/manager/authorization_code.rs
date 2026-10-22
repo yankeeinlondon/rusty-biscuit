@@ -1,7 +1,6 @@
 //! Authorization code flow with PKCE support.
 
 use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope};
-use schematic_define::PkceRequirement;
 
 use crate::error::OAuthError;
 use crate::manager::{extract_tokens, OAuth2Manager};
@@ -27,14 +26,11 @@ impl OAuth2Manager {
             auth_request = auth_request.add_scope(Scope::new(scope.clone()));
         }
 
-        let use_pkce = match self.config.provider.pkce {
-            PkceRequirement::Required | PkceRequirement::Supported => true,
-            PkceRequirement::NotUsed => false,
-            // `PkceRequirement` is `#[non_exhaustive]`, so this arm is mandatory.
-            // Default an unknown future variant to PKCE-enabled rather than
-            // silently downgrading to no PKCE, which would be a security regression.
-            _ => true,
-        };
+        // Every `PkceRequirement`, `Supported` included, sends a challenge: a
+        // provider that merely supports PKCE still gains its protection. Only the
+        // authorization-code grant carries one, and other grants have no
+        // authorization URL, so they already failed above.
+        let use_pkce = self.config.provider.pkce().is_some();
 
         let pkce_verifier = if use_pkce {
             let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();

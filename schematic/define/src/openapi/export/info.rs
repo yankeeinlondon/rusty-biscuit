@@ -38,7 +38,7 @@ mod tests {
     use crate::headers::{EnvList, EnvMapping};
 
     fn create_test_api() -> RestApi {
-        RestApi {
+        RestApi { rate_limit: None, retry_guidance: None,
             name: "TestAPI".to_string(),
             description: "Test API description".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -46,7 +46,6 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             auth_policy: None,
             env_auth: vec!["TEST_API_KEY".to_string()],
-            env_username: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,

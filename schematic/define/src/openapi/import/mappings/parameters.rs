@@ -86,7 +86,7 @@ pub fn map_parameter(
         None => QueryParamType::String,
     };
 
-    Some(ParamDef { rust_name: None, secret: false, pager_managed: false,
+    Some(ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
         name: name.clone(),
         required,
         description: description.clone(),

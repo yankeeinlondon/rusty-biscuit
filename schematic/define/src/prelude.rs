@@ -34,9 +34,17 @@
 //! };
 //! ```
 
-pub use crate::auth::{AuthMethod, AuthPolicy, AuthStrategy, EnvAuthStrategy, UpdateStrategy};
+pub use crate::auth::{
+    AuthMethod, AuthPolicy, AuthStrategy, EndpointAuth, EnvAuthStrategy, UpdateStrategy,
+};
+pub use crate::metadata::{
+    Backoff, MetadataError, RateLimit, ResetUnit, RetryGuidance, StatusSelector,
+};
 pub use crate::cross_origin::CrossOrigin;
-pub use crate::oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
+pub use crate::oauth::{
+    AuthorizationCodeGrant, ClientCredentialsGrant, DeviceCodeGrant, OAuth2ClientAuthMethod,
+    OAuth2Config, OAuth2ConfigError, OAuth2GrantType, PkceRequirement,
+};
 pub use crate::pagination::{
     Carry, Collection, CursorLeg, CursorSource, FollowUp, InputParam, KeepAlive, LinkSource,
     MoreSignal, PageSize, Partition,
@@ -46,7 +54,7 @@ pub use crate::params::EndpointParams;
 pub use crate::request::{ApiRequest, FormField, FormFieldKind};
 pub use crate::response::ApiResponse;
 pub use crate::schema::{Schema, SchemaObject};
-pub use crate::types::{Endpoint, RestApi, RestMethod};
+pub use crate::types::{Endpoint, ResolvedEndpointAuth, RestApi, RestMethod};
 pub use crate::websocket::{
     AuthFlowHints, ConnectionLifecycle, ConnectionParam, CorrelationHints, FrameFormat,
     HeartbeatHints, MessageDirection, MessageSchema, ParamType, RequestIdType, WebSocketApi,

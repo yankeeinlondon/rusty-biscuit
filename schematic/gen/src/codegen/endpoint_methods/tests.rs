@@ -19,7 +19,7 @@ fn endpoint(id: &str, method: RestMethod, path: &str, description: &str) -> Endp
 }
 
 fn param(name: &str, param_type: QueryParamType, description: Option<&str>) -> ParamDef {
-    ParamDef { rust_name: None, secret: false, pager_managed: false,
+    ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required: false,
         description: description.map(str::to_string),
@@ -30,7 +30,7 @@ fn param(name: &str, param_type: QueryParamType, description: Option<&str>) -> P
 }
 
 fn api(name: &str, endpoints: Vec<Endpoint>) -> RestApi {
-    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{name} API"); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::BearerToken { header: None }; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{name} API"); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::BearerToken { header: None }; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }
 }
 
 /// The fixture: required arguments in order, every optional-value location,
@@ -44,7 +44,7 @@ fn widgets() -> RestApi {
         "/owners/{owner}/widgets/{widget_id}",
         "Gets *one* widget: `code`, [a link](https://example.com), <b>tags</b> & snake_case_text.\n\nA second paragraph.",
     );
-    get_widget.params = Some(EndpointParams {
+    get_widget.params = Some(EndpointParams { path: vec![],
         query: vec![
             param("limit", QueryParamType::Integer, Some("Results per\n   page.")),
             param("tag", QueryParamType::Array(Box::new(QueryParamType::String)), None),
@@ -612,7 +612,7 @@ fn api_client_methods_are_exactly_the_methods_api_client_emits() {
 #[test]
 fn api_struct_methods_are_exactly_the_methods_generate_api_struct_emits() {
     let mut basic = api("Widgets", vec![]);
-    basic.auth = AuthStrategy::Basic;
+    basic.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
     let code = format_generated_code(&generate_api_struct(&basic)).unwrap();
     let reserved: BTreeSet<String> = API_STRUCT_METHODS.iter().map(ToString::to_string).collect();
     assert_eq!(inherent_fns(&code, "Widgets"), reserved);

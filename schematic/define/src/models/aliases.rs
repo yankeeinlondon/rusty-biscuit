@@ -19,11 +19,13 @@ use super::type_ref::TypeRef;
 ///
 /// assert_eq!(user_id_alias.name, "UserId");
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TypeAlias {
     /// Name of the alias (PascalCase recommended).
     pub name: String,
     /// Human-readable description.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::serde_presence::non_null")]
     pub description: Option<String>,
     /// The target type this alias refers to.
     pub target: TypeRef,

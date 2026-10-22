@@ -1108,7 +1108,7 @@ mod tests {
     }
 
     fn param(name: &str, required: bool) -> ParamDef {
-        ParamDef { rust_name: None, secret: false, pager_managed: false,
+        ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
             name: name.to_string(),
             required,
             description: None,
@@ -1119,7 +1119,7 @@ mod tests {
     }
 
     fn params(query: Vec<ParamDef>, header: Vec<ParamDef>, cookie: Vec<ParamDef>) -> EndpointParams {
-        EndpointParams {
+        EndpointParams { path: vec![],
             query,
             header,
             cookie,

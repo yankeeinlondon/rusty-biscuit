@@ -108,7 +108,7 @@ mod tests {
     use super::*;
 
     fn query_param(name: &str, param_type: QueryParamType, required: bool) -> ParamDef {
-        ParamDef { rust_name: None, secret: false, pager_managed: false,
+        ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
             name: name.to_string(),
             required,
             description: Some(format!("The {name}")),

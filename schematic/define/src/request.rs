@@ -682,7 +682,7 @@ mod tests {
         use crate::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
 
         // Create an API with mixed request types
-        let api = RestApi {
+        let api = RestApi { rate_limit: None, retry_guidance: None,
             name: "FileService".to_string(),
             description: "File upload and management service".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
@@ -690,11 +690,10 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             auth_policy: None,
             env_auth: vec!["FILE_SERVICE_API_KEY".to_string()],
-            env_username: None,
             headers: vec![],
             endpoints: vec![
                 // JSON endpoint
-                Endpoint {
+                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
                     id: "CreateFolder".to_string(),
                     method: RestMethod::Post,
                     path: "/folders".to_string(),
@@ -706,7 +705,7 @@ mod tests {
                     cross_origin: None, pagination: None,
                 },
                 // FormData endpoint with file upload
-                Endpoint {
+                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
                     id: "UploadFile".to_string(),
                     method: RestMethod::Post,
                     path: "/folders/{folder_id}/files".to_string(),
@@ -724,7 +723,7 @@ mod tests {
                     cross_origin: None, pagination: None,
                 },
                 // GET endpoint with no request body
-                Endpoint {
+                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
                     id: "ListFiles".to_string(),
                     method: RestMethod::Get,
                     path: "/folders/{folder_id}/files".to_string(),
@@ -736,7 +735,7 @@ mod tests {
                     cross_origin: None, pagination: None,
                 },
                 // Binary download
-                Endpoint {
+                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
                     id: "DownloadFile".to_string(),
                     method: RestMethod::Get,
                     path: "/files/{file_id}/content".to_string(),

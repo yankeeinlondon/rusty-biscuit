@@ -29,7 +29,7 @@ use jsonschema::Validator;
 use schematic_define::auth::ApiKeyLocation;
 use schematic_define::params::{EndpointParams, QueryParamType};
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, FormField, RestApi, RestMethod,
+    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, FormField, RestApi, RestMethod,
 };
 use schematic_gen::export::postman::{build_postman_collection, build_postman_collection_grouped};
 use serde_json::Value;
@@ -128,7 +128,7 @@ fn rest_api(
     module_path: Option<&str>,
     endpoints: Vec<Endpoint>,
 ) -> RestApi {
-    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} test API", name); fixture.base_url = base_url.to_string(); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = module_path.map(str::to_string); fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::common::components::with_referenced_components(fixture) }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} test API", name); fixture.base_url = base_url.to_string(); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = module_path.map(str::to_string); fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::common::components::with_referenced_components(fixture) }
 }
 
 fn endpoint(
@@ -152,7 +152,7 @@ fn build_mixed_auth_emqx() -> Value {
     let basic_api = rest_api(
         "EmqxBasic",
         "http://localhost:18083/api/v5",
-        AuthStrategy::Basic,
+        AuthStrategy::Basic { username_env: EnvList::new(vec![]), password_env: EnvList::new(vec![]) },
         Some("emqx"),
         vec![
             endpoint(

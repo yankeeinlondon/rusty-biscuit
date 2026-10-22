@@ -10,7 +10,7 @@
 /// ```
 /// use schematic_define::params::{ParamDef, QueryParamType, ParamStyle};
 ///
-/// let param = ParamDef { rust_name: None, secret: false, pager_managed: false,
+/// let param = ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
 ///     name: "tags".to_string(),
 ///     required: false,
 ///     description: Some("Filter by tags".to_string()),
@@ -35,6 +35,10 @@ pub struct ParamDef {
     /// Requires adoption by a resolved pagination strategy at this location.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pager_managed: bool,
+    /// The provider marks this parameter deprecated. Documentation only: no
+    /// Rust `#[deprecated]` attribute is generated.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deprecated: bool,
     /// Whether this parameter is required.
     pub required: bool,
     /// Human-readable description.
@@ -149,13 +153,19 @@ pub enum ParamStyle {
 impl ParamDef {
     pub fn new(name: impl Into<String>, param_type: QueryParamType) -> Self {
         Self { name: name.into(), param_type, required: false, description: None,
-            explode: false, style: ParamStyle::Form, rust_name: None, secret: false, pager_managed: false }
+            explode: false, style: ParamStyle::Form, rust_name: None, secret: false, pager_managed: false, deprecated: false }
+    }
+    /// A typed path parameter: required, `Simple` style, not exploded, as
+    /// [`crate::EndpointBuilder::path_param`] also enforces.
+    pub fn path(name: impl Into<String>, param_type: QueryParamType) -> Self {
+        Self { required: true, style: ParamStyle::Simple, ..Self::new(name, param_type) }
     }
     pub fn required(mut self) -> Self { self.required = true; self }
     pub fn describes(mut self, description: impl Into<String>) -> Self { self.description = Some(description.into()); self }
     pub fn rust_name(mut self, name: impl Into<String>) -> Self { self.rust_name = Some(name.into()); self }
     pub fn secret(mut self) -> Self { self.secret = true; self }
     pub fn pager_managed(mut self) -> Self { self.pager_managed = true; self }
+    pub fn deprecated(mut self) -> Self { self.deprecated = true; self }
 }
 
 #[cfg(test)]
@@ -164,7 +174,7 @@ mod tests {
 
     #[test]
     fn param_def_debug_clone_eq() {
-        let param = ParamDef { rust_name: None, secret: false, pager_managed: false,
+        let param = ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
             name: "limit".to_string(),
             required: false,
             description: Some("Max results".to_string()),
@@ -179,7 +189,7 @@ mod tests {
 
     #[test]
     fn param_def_required() {
-        let param = ParamDef { rust_name: None, secret: false, pager_managed: false,
+        let param = ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
             name: "id".to_string(),
             required: true,
             description: None,
@@ -192,7 +202,7 @@ mod tests {
 
     #[test]
     fn param_def_with_explode() {
-        let param = ParamDef { rust_name: None, secret: false, pager_managed: false,
+        let param = ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
             name: "tags".to_string(),
             required: false,
             description: None,

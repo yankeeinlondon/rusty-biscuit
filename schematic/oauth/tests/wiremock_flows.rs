@@ -7,7 +7,10 @@
 
 use std::sync::Arc;
 
-use schematic_define::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
+use schematic_define::{
+    AuthorizationCodeGrant, ClientCredentialsGrant, OAuth2ClientAuthMethod, OAuth2Config,
+    PkceRequirement,
+};
 use schematic_oauth::{
     FileTokenStore, MemoryTokenStore, OAuth2Manager, OAuth2RuntimeConfig, StoredTokens, TokenStore,
 };
@@ -16,16 +19,14 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn auth_code_config(token_url: String) -> OAuth2RuntimeConfig {
     OAuth2RuntimeConfig {
-        provider: OAuth2Config {
-            grant_type: OAuth2GrantType::AuthorizationCodePkce,
-            authorization_url: Some("https://example.com/authorize".into()),
+        provider: OAuth2Config::AuthorizationCodePkce(AuthorizationCodeGrant {
+            authorization_url: "https://example.com/authorize".into(),
             token_url,
             revocation_url: None,
-            device_authorization_url: None,
             default_scopes: vec!["read".into()],
             pkce: PkceRequirement::Required,
             client_auth: OAuth2ClientAuthMethod::ClientSecretBasic,
-        },
+        }),
         client_id: "test_client".into(),
         client_secret: Some("test_secret".into()),
         redirect_uri: Some("http://localhost:8080/callback".into()),
@@ -35,16 +36,12 @@ fn auth_code_config(token_url: String) -> OAuth2RuntimeConfig {
 
 fn client_credentials_config(token_url: String) -> OAuth2RuntimeConfig {
     OAuth2RuntimeConfig {
-        provider: OAuth2Config {
-            grant_type: OAuth2GrantType::ClientCredentials,
-            authorization_url: None,
+        provider: OAuth2Config::ClientCredentials(ClientCredentialsGrant {
             token_url,
             revocation_url: None,
-            device_authorization_url: None,
             default_scopes: vec!["api".into()],
-            pkce: PkceRequirement::NotUsed,
             client_auth: OAuth2ClientAuthMethod::ClientSecretBasic,
-        },
+        }),
         client_id: "service_client".into(),
         client_secret: Some("service_secret".into()),
         redirect_uri: None,

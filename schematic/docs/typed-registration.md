@@ -149,6 +149,48 @@ components and re-runs `validate_references`, so all members carry identical
 `schemas`. Collisions are checked first, even if the callback swallowed one.
 Shared API variants use one context; isolated modules may reuse component names.
 
+## Polymorphic bodies: `oneOf`, `anyOf`, `allOf`
+
+A hand-written serde type can be bound to a structural composition of types
+registered in the same context. The structure you state is what OpenAPI
+receives, and the Rust generator references your type:
+
+```rust,ignore
+let cat = ctx.register::<Cat>()?;
+let dog = ctx.register::<Dog>()?;
+let pet = ctx.one_of::<Pet>([cat, dog])?; // also any_of, all_of
+// api.schemas: Pet = {"oneOf":[{"$ref":"#/components/schemas/Cat"},
+//                              {"$ref":"#/components/schemas/Dog"}]}
+Endpoint::post("Adopt", "/pets").request_json::<Pet>(&mut ctx) // references Pet
+```
+
+- `oneOf` means exactly one member matches, `anyOf` at least one, `allOf` every
+  member. Matching the Rust serde representation to the declared structure is
+  the author's job: an untagged enum does not by itself prove `oneOf`
+  exclusivity, so give the variants distinguishable shapes. Use a struct that
+  satisfies every member for `allOf`.
+- The composition replaces schemars' own schema for the bound type in
+  `components()`. The returned `TypeDesc` names the bound type, and
+  `TypeDesc::structure()` returns the composition; a structure can only be
+  attached through these methods.
+- Registration fails, and the error is also collected for `finish()`, for an
+  empty member list, a duplicate member, a primitive or container member
+  (`NonNominalMember`), or a member this context did not register
+  (`ForeignMember`). A member must match this context's entry by name, Rust path,
+  and structure; a descriptor carries no context identity, so an identical
+  descriptor from another context is indistinguishable. A bound type that was
+  registered earlier without this composition, or with a different one
+  (including reordered members), is a `ComponentConflict`. Repeating the same
+  composition, or a later plain `register::<Pet>()`, returns the composed
+  descriptor.
+- `DefinitionContext::models()` lists every composition as a
+  `ModelDef::Alias` in registration order. The model catalog types serialize
+  with serde; unknown members and explicit `null` for optional fields are
+  rejected.
+- Postman has no schema-composition declaration; exporting a composition there
+  reports an unsupported-feature diagnostic instead of inventing an example
+  (**planned**).
+
 ## References in transferred definitions
 
 `TypeDesc` is an authoring handle only: it has no Serde derives and no public

@@ -19,8 +19,8 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::{
     ApiKeyLocation, ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, FormField,
-    FormFieldKind, ParamDef, ParamStyle, PrimitiveType, QueryParamType, RestApi, RestMethod,
-    TypeRef,
+    FormFieldKind, OAuth2Config, ParamDef, ParamStyle, PrimitiveType, QueryParamType, RestApi,
+    RestMethod, TypeRef,
 };
 
 use crate::errors::GeneratorError;
@@ -164,7 +164,7 @@ fn rest_api_tokens(api: &RestApi, overlay: Option<&syn::Path>) -> TokenStream {
     let env_auth = string_vec_tokens(&api.env_auth);
     let mut builder = quote! { RestApi::builder(ctx, #name, #base_url).describes(#description).authentication(#auth, #env_auth) };
     for (value, setter) in [
-        (&api.docs_url, "docs_url"), (&api.env_username, "env_username"),
+        (&api.docs_url, "docs_url"),
         (&api.module_path, "module_path"), (&api.request_suffix, "request_suffix"),
         (&api.version, "version"), (&api.request_id_header, "request_id_header"),
     ] {
@@ -327,6 +327,8 @@ fn param_def_tokens(param: &ParamDef) -> TokenStream {
     let required = param.required;
     let secret = param.secret;
     let pager_managed = param.pager_managed;
+    // The importer does not map OpenAPI `deprecated` yet, so this is false.
+    let deprecated = param.deprecated;
     let rust_name = option_string_tokens(param.rust_name.as_deref());
     let description = option_string_tokens(param.description.as_deref());
     let param_type = query_param_type_tokens(&param.param_type);
@@ -340,6 +342,7 @@ fn param_def_tokens(param: &ParamDef) -> TokenStream {
             secret: #secret,
             rust_name: #rust_name,
             pager_managed: #pager_managed,
+            deprecated: #deprecated,
             description: #description,
             param_type: #param_type,
             explode: #explode,
@@ -385,7 +388,11 @@ fn param_style_tokens(style: ParamStyle) -> TokenStream {
 fn auth_strategy_tokens(auth: &AuthStrategy) -> TokenStream {
     match auth {
         AuthStrategy::None => quote! { AuthStrategy::None },
-        AuthStrategy::Basic => quote! { AuthStrategy::Basic },
+        AuthStrategy::Basic { username_env, password_env } => {
+            let username_env = string_vec_tokens(username_env.names());
+            let password_env = string_vec_tokens(password_env.names());
+            quote! { AuthStrategy::Basic { username_env: EnvList::new(#username_env), password_env: EnvList::new(#password_env) } }
+        }
         AuthStrategy::BearerToken { header } => {
             let header = option_string_tokens(header.as_deref());
             quote! { AuthStrategy::BearerToken { header: #header } }
@@ -411,20 +418,36 @@ fn auth_strategy_tokens(auth: &AuthStrategy) -> TokenStream {
             quote! { AuthStrategy::ApiKeyParam { name: #name.to_string(), location: #location } }
         }
         AuthStrategy::OAuth2(config) => {
-            let grant = format_ident!("{}", format!("{:?}", config.grant_type));
-            let pkce = format_ident!("{}", format!("{:?}", config.pkce));
-            let client_auth = format_ident!("{}", format!("{:?}", config.client_auth));
-            let authorization_url = option_string_tokens(config.authorization_url.as_deref());
-            let revocation_url = option_string_tokens(config.revocation_url.as_deref());
-            let device_authorization_url = option_string_tokens(config.device_authorization_url.as_deref());
-            let token_url = &config.token_url;
-            let scopes = string_vec_tokens(&config.default_scopes);
-            quote! { AuthStrategy::OAuth2(OAuth2Config {
-                grant_type: OAuth2GrantType::#grant, authorization_url: #authorization_url,
+            let client_auth = format_ident!("{}", format!("{:?}", config.client_auth()));
+            let token_url = config.token_url();
+            let revocation_url = option_string_tokens(config.revocation_url());
+            let scopes = string_vec_tokens(config.default_scopes());
+            let shared = quote! {
                 token_url: #token_url.to_string(), revocation_url: #revocation_url,
-                device_authorization_url: #device_authorization_url, default_scopes: #scopes,
-                pkce: PkceRequirement::#pkce, client_auth: OAuth2ClientAuthMethod::#client_auth,
-            }) }
+                default_scopes: #scopes, client_auth: OAuth2ClientAuthMethod::#client_auth,
+            };
+            match config {
+                OAuth2Config::AuthorizationCodePkce(grant) => {
+                    let authorization_url = &grant.authorization_url;
+                    let pkce = format_ident!("{}", format!("{:?}", grant.pkce));
+                    quote! { AuthStrategy::OAuth2(OAuth2Config::AuthorizationCodePkce(AuthorizationCodeGrant {
+                        authorization_url: #authorization_url.to_string(), #shared
+                        pkce: PkceRequirement::#pkce,
+                    })) }
+                }
+                OAuth2Config::ClientCredentials(_) => {
+                    quote! { AuthStrategy::OAuth2(OAuth2Config::ClientCredentials(ClientCredentialsGrant {
+                        #shared
+                    })) }
+                }
+                OAuth2Config::DeviceCode(grant) => {
+                    let device_authorization_url = &grant.device_authorization_url;
+                    quote! { AuthStrategy::OAuth2(OAuth2Config::DeviceCode(DeviceCodeGrant {
+                        device_authorization_url: #device_authorization_url.to_string(), #shared
+                    })) }
+                }
+                _ => unreachable!("unsupported imported OAuth2 grant"),
+            }
         }
         _ => quote! { AuthStrategy::None },
     }
@@ -547,17 +570,30 @@ mod tests {
             assert!(code.contains("AuthStrategy::ApiKeyParam"));
             assert!(code.contains("name: \"key\".to_string()"));
         }
-        let config = schematic_define::OAuth2Config {
-            grant_type: schematic_define::OAuth2GrantType::ClientCredentials,
-            authorization_url: None, token_url: "https://example.com/token".into(),
-            revocation_url: None, device_authorization_url: None,
-            default_scopes: vec!["read".into()], pkce: schematic_define::PkceRequirement::NotUsed,
+        let config = OAuth2Config::ClientCredentials(schematic_define::ClientCredentialsGrant {
+            token_url: "https://example.com/token".into(), revocation_url: None,
+            default_scopes: vec!["read".into()],
             client_auth: schematic_define::OAuth2ClientAuthMethod::ClientSecretPost,
-        };
+        });
         let code = render_expr(auth_strategy_tokens(&AuthStrategy::OAuth2(config)));
-        assert!(code.contains("OAuth2GrantType::ClientCredentials"));
+        assert!(code.contains("OAuth2Config::ClientCredentials(ClientCredentialsGrant"));
         assert!(code.contains("https://example.com/token"));
         assert!(code.contains("ClientSecretPost"));
+        assert!(!code.contains("authorization_url") && !code.contains("pkce"));
+
+        let config = OAuth2Config::AuthorizationCodePkce(schematic_define::AuthorizationCodeGrant {
+            authorization_url: "https://example.com/authorize".into(),
+            token_url: "https://example.com/token".into(),
+            revocation_url: Some("https://example.com/revoke".into()),
+            default_scopes: vec![],
+            pkce: schematic_define::PkceRequirement::Supported,
+            client_auth: schematic_define::OAuth2ClientAuthMethod::None,
+        });
+        let code = render_expr(auth_strategy_tokens(&AuthStrategy::OAuth2(config)));
+        assert!(code.contains("OAuth2Config::AuthorizationCodePkce(AuthorizationCodeGrant"));
+        assert!(code.contains("authorization_url: \"https://example.com/authorize\".to_string()"));
+        assert!(code.contains("Some(\"https://example.com/revoke\".to_string())"));
+        assert!(code.contains("PkceRequirement::Supported"));
     }
 
     #[test]
@@ -633,5 +669,18 @@ mod tests {
 
         assert!(code.contains(r#"FormField::text("model")"#));
         assert!(!code.contains(".optional()"));
+    }
+
+    #[test]
+    fn emits_basic_with_its_ordered_environment_lists() {
+        let mut api = sample_api();
+        api.auth = AuthStrategy::Basic {
+            username_env: schematic_define::EnvList::from_strs(&["USER", "LOGIN"]),
+            password_env: schematic_define::EnvList::from_strs(&["PASS", "SECRET"]),
+        };
+        api.env_auth = vec![];
+        let code = rest_api_tokens(&api, None).to_string().replace(' ', "");
+        assert!(code.contains(r#"AuthStrategy::Basic{username_env:EnvList::new(Vec::<String>::from(["USER".to_string(),"LOGIN".to_string()])),password_env:EnvList::new(Vec::<String>::from(["PASS".to_string(),"SECRET".to_string()]))}"#), "{code}");
+        assert!(!code.contains("env_username"));
     }
 }

@@ -294,7 +294,7 @@ fn same_api_duplicate_route_blocks_every_output() {
 }
 
 fn located_param(name: &str, required: bool) -> ParamDef {
-    ParamDef { rust_name: None, secret: false, pager_managed: false,
+    ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required,
         description: Some(format!("{name} input")),
