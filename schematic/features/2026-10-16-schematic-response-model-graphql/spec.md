@@ -31,12 +31,57 @@ message_to_agent: ''
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on:
     - 2026-10-15-schematic-definition-vocabulary
-refresh_required: true
+refresh_required: false
 related: []
 next_spec: 2026-10-17-schematic-websocket
 ---
 
 # Schematic response model v2 and GraphQL
+
+> **Reader's note — refresh, 2026-10-22.** Specs 1–3, 4a
+> (`2026-10-14-schematic-definition-api`), and 4b
+> (`2026-10-15-schematic-definition-vocabulary`) have landed; 4b's review 1 recorded
+> the author's six rulings on 2026-10-22, all accepting the implemented behavior. This
+> refresh binds the spec to the landed code. No requirement is withdrawn; the
+> corrections are:
+>
+> - **Builders.** 4a's response placeholders landed as `Success(ApiResponse)` in
+>   `schematic/define/src/builders.rs` (`Success::json(TypeDesc)`, `text()`, `binary()`,
+>   `empty()`) with `.returns(Success)`, `.returns_json::<T>(ctx)`, `.returns_text()`,
+>   `.returns_binary()`, and `.returns_empty()`. A second `.returns(..)` currently fails
+>   endpoint build ("several success shapes arrive with response model v2"); this spec
+>   lifts that rule. `ErrorSet` has only `ErrorSet::none()` and `.errors(_)` stores
+>   nothing. No shipped definition calls `.errors(..)`, so R24's preserved opt-out has
+>   no existing call sites. Typed registration is `DefinitionContext`
+>   (`define/src/registration.rs`); a registered JSON shape takes a `TypeDesc` from it,
+>   so the `Success::json::<T>()` spelling in examples below is illustrative.
+> - **Definition fields from 4b.** `Endpoint` now also carries `rate_limit`,
+>   `retry_guidance`, `deprecated`, and `auth` (`EndpointAuth`), and `RestApi`
+>   carries `rate_limit` and `retry_guidance` (`define/src/metadata.rs`). The x-schematic
+>   document and operation extensions (`define/src/openapi/extensions.rs`) already carry
+>   rate-limit and retry guidance. Deprecation and endpoint authentication are exported as
+>   standard OpenAPI `deprecated`, `security`, and `securitySchemes` and are not duplicated
+>   in the extension (adopted for R26; see there).
+> - **Bundle.** The definition bundle is `DefinitionBundle` (`define/src/bundle.rs`),
+>   version 1: `format_version`, `api` (ordered schema components with their Rust bindings
+>   inside `api.schemas`), and optional `models` (4b review 1, ruling 3). Its strict
+>   loader rejects unknown members and explicit `null` outside schema data. R44's new
+>   fields extend that loader and its matrix within version 1 (adopted; there are no
+>   external consumers of the format yet).
+> - **Baselines.** 4a's JSON baselines and the historical comparison live in
+>   `schematic/gen/tests/l1/definition_baseline.rs` with fixtures under
+>   `gen/tests/fixtures/definition-baseline/`; the named-change mechanism is its
+>   `adoptions()` list and per-API normalizations. `artifact_drift` and
+>   `definition_bundles` are the other byte comparisons R22 and R44 update.
+> - **Runtime.** `schematic-runtime` (`schematic/runtime`) is at `ABI = 5`; 4b changed
+>   `RequestParts::query` to `Vec<(String, QueryValue)>` to preserve encoded bytes. Spec 2
+>   names used below exist as assumed: `EndpointSpec`, `ErrorBody`, `ErrorKind`,
+>   `NoDeclaredError`, `Decode`, `SupportsHooks`, `send_raw`. This spec increments `ABI`
+>   by one when generated code needs its new runtime items.
+> - **Counts and endpoints.** 18 REST APIs with 539 endpoints (4b inventory); OpenAI has
+>   258. The OpenAI `?beta=true` twins are merged; `GetResponse` returns `BetaResponse`
+>   (R32b). Streaming endpoints are declared with `.returns_binary()` rather than
+>   annotated by comments (problem 1).
 
 ## Problem
 
@@ -46,10 +91,11 @@ Today an endpoint's response is one value of
 facts below come from the parent review, `2026-07-31-macro-review` (sections 5
 and 5b, and decisions D6 and D36-D38), unless marked as checked in code.
 
-1. **Streaming has no representation.** Ollama and LM Studio annotate
-   `ApiResponse::Binary` with `// SSE streaming` or `// Streaming NDJSON`
-   comments (checked: `schematic/definitions/src/ollama/mod.rs` lines 145-327,
-   `schematic/definitions/src/lmstudio/mod.rs` lines 125 and 173). Anthropic's
+1. **Streaming has no representation.** Ollama's and LM Studio's streaming
+   endpoints are declared with `.returns_binary()` and describe their streaming only
+   in prose (checked 2026-10-22: `schematic/definitions/src/ollama/mod.rs` and
+   `schematic/definitions/src/lmstudio/mod.rs`, for example LM Studio's
+   "Chat completion with SSE streaming support"). Anthropic's
    `CreateMessage` declares a plain JSON response that cannot decode once the
    request sets `stream: true`. ElevenLabs' `StreamSpeech` is declared exactly
    like its non-streaming sibling, so the generated method buffers the whole
@@ -120,9 +166,9 @@ ElevenLabs definitions use it.
   `2026-10-15-schematic-definition-vocabulary`, 4b), except to extend them as stated below.
 - Rewriting any definition other than the four named APIs (Ollama, LM Studio,
   Anthropic, ElevenLabs) and the two named endpoints of R32a and R32b (Bitbucket's
-  source endpoint and OpenAI `GetResponse`). The other roughly 519 endpoint
-  literals (OpenAI alone has 265) were rewritten once by spec 4a and are not
-  touched again here.
+  source endpoint and OpenAI `GetResponse`). The other roughly 530 endpoint
+  definitions (539 endpoints in all; OpenAI alone has 258) were rewritten once by
+  spec 4a and are not touched again here.
 - Generating typed convenience wrapper methods per endpoint (D53 rules none are
   generated; nothing in this spec adds or promises them).
 
@@ -648,9 +694,12 @@ compiles; `just lint-schema` passes.
 
 **R26.** The vendor extension (`x-schematic`) serializes the new response vocabulary
 without panicking or dropping fields. It must carry the new response fields, the error
-table, the R3b tags, the fallback marker, shape notes, and (from specs 4a, 4b, and 2) rate-limit, deprecated, auth
-override, endpoint `cross_origin`, and request-id, so that spec 7's subset covers
-them. Reading it back is out of scope (the round trip
+table, the R3b tags, the fallback marker, shape notes, and (from specs 4a, 4b, and 2) rate-limit, endpoint
+`cross_origin`, and request-id, so that spec 7's subset covers them. Rate-limit and retry
+guidance are already carried (4b). *Refresh 2026-10-22, adopted:* deprecation and the
+endpoint auth override are exported by 4b as standard OpenAPI `deprecated`, `security`,
+and `securitySchemes`, which spec 7's mapping treats as authoritative, so the extension
+does not duplicate them. Reading it back is out of scope (the round trip
 is `2026-10-18-schematic-fidelity-polish`).
 *Validated by:* L1 serialization test in `schematic-define`.
 
@@ -757,11 +806,12 @@ a `text/x-rust` file body.
 **R32b. OpenAI `GetResponse` streaming.** `GetResponse`
 (`GET /responses/{response_id}`, whose query parameter `stream` replays the
 response as server-sent events) declares a second success shape: an SSE stream of
-the registered `ResponseStreamEvent`, beside the existing `Response` JSON shape,
-each with a note on its cause. The end condition is taken from OpenAI's
+the registered `BetaResponseStreamEvent`, beside the existing `BetaResponse` JSON
+shape, each with a note on its cause. The end condition is taken from OpenAI's
 documentation (connection close unless a terminator is documented; unverified) and
-its source is logged. If spec 4a merged the beta twin, the beta form follows the
-same rule.
+its source is logged. *Refresh 2026-10-22:* spec 4a merged the beta twins, and
+`GetResponse` landed with `BetaResponse`, so the stream item is the matching
+`BetaResponseStreamEvent` (both in `schematic/definitions/src/openai/types.rs`).
 *Validated by:* L1 definition test; mock-server test receiving each variant.
 
 **R33.** ElevenLabs `StreamSpeech` declares a streaming binary shape so the generated
@@ -954,6 +1004,9 @@ error set and GraphQL operations. Extend the self-contained definition bundle
 introduced by the definition-vocabulary draft: register and serialize success,
 error, stream-item, variables, and GraphQL data schemas and structural models.
 Built-in byte streams and the no-variables unit marker need no catalog entry.
+*Refresh 2026-10-22:* the bundle is 4b's `DefinitionBundle` (`define/src/bundle.rs`,
+`format_version` 1); the new fields extend its strict loader and its input matrix
+within version 1.
 Loading in isolation rejects a dangling reference with API/operation/type context.
 This spec updates JSON baselines only for the response, error, and GraphQL
 fields it introduces, with a per-field explanation (R22).
@@ -1331,7 +1384,7 @@ All five earlier open questions were ruled in D57:
 
 - **Spec 4a's builder surface may not fit.** If the `.returns(...)` and `.errors(...)`
   placeholders were shaped for a narrower vocabulary, widening them could force edits to
-  the roughly 519 endpoint literals (OpenAI alone has 265) that spec 4a already rewrote,
+  the roughly 530 other endpoint definitions (OpenAI alone has 258) that spec 4a already rewrote,
   which D50's condition forbids. Mitigation: phase 1 compares the two and logs a mismatch
   before any edit; widening must leave call sites untouched and spec 4a's source-scan test
   green.
@@ -1447,7 +1500,11 @@ what was chosen, the alternatives considered, and why:
 
 ## Refresh notes
 
-This spec is a draft (`refresh_required: true`). Before its plan runs, refresh it from the
+*Refreshed 2026-10-22 (`refresh_required: false`); see the reader's note at the top for
+what changed. The list below is kept as the checklist that refresh followed; Phase 1
+still verifies each item against the code before Phase 2 edits it.*
+
+This spec was a draft (`refresh_required: true`). Before its plan runs, refresh it from the
 outcomes of the earlier specs' review 1:
 
 - **Spec 2 (runtime and envelope):** the final names and locations of `EndpointSpec`

@@ -8,10 +8,47 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1:
   - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
   - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
-docs_created_during_phase_1:
-  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+  - schematic-define
+  - schematic-gen
+source_files_during_phase_2:
+  - schematic/define/src/builders.rs
+  - schematic/define/src/bundle.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/error_table.rs
+  - schematic/define/src/graphql.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/openapi/export/info.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/response.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/bundle_support/mod.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/definition_bundles.rs
+  - schematic/define/tests/fixtures/bundles/fixture.json
+  - schematic/define/tests/graphql_definitions.rs
+  - schematic/define/tests/response_vocabulary.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+docs_updated_during_phase_2:
+  - schematic/docs/definition-builders.md
+  - schematic/docs/io/definition-bundles.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+docs_created_during_phase_2:
+  - schematic/docs/responses-and-errors.md
+  - schematic/docs/graphql.md
+skills_files_updated_during_phase_2:
+  - .claude/skills/schematic-define/SKILL.md
 ---
 
 # Schematic response model v2 and GraphQL implementation plan
@@ -22,7 +59,7 @@ Replace the single response declaration with success shapes and effective HTTP e
 
 Success means R1–R44, including R3a and R11a–R11c, have observable passing checks; generated artifacts compile and regenerate deterministically; affected dependents pass; and current docs, skills, and the implementation log describe the resulting behavior. Report evidence separately for macOS, Linux, native Windows, and WSL2. Missing required evidence remains pending, even if implementation is otherwise ready for review. The terminal lifecycle state is **implementation complete, ready for review**; the author closes the feature.
 
-This is a plan for the tree after the prerequisite reviews, not an instruction to implement their missing work here. At planning time, the prerequisite specs still say `implemented: false`, the definition still stores `Endpoint::response: ApiResponse`, and no landed runtime package appears under `schematic/`. Phase 1 must reconcile those facts before code changes.
+This is a plan for the tree after the prerequisite reviews, not an instruction to implement their missing work here. As of the 2026-10-22 refresh, every prerequisite has landed and `schematic-runtime` exists at `schematic/runtime`; the definition still stores `Endpoint::response: ApiResponse`, which Phase 5 replaces. Phase 1 verifies the landed contracts before code changes.
 
 Execution conventions:
 
@@ -36,7 +73,7 @@ Execution conventions:
 
 ### Necessary Rules
 
-1. **Prerequisite gate.** Refresh implementation inputs from review 1 of `2026-10-12-schematic-runtime-envelope`, `2026-10-13-schematic-pagination`, `2026-10-14-schematic-definition-api`, and `2026-10-15-schematic-definition-vocabulary`, plus generation-integrity outcomes. Record actual symbols, locations, hooks, deadlines, builder seams, diagnostics, bundle layout, and baseline comparison rules. If the runtime or required builder/registration surface is absent, record a blocked prerequisite and stop implementation with a nonzero outcome; this plan does not silently build those features. Planning itself can finish now.
+1. **Prerequisites — landed (refreshed 2026-10-22).** Specs 1–3 are completed; `2026-10-14-schematic-definition-api` and `2026-10-15-schematic-definition-vocabulary` are implemented, and the latter's review 1 rulings are recorded (all six accept the implemented behavior). The spec's reader's note of 2026-10-22 lists the landed surface. In short: `Success(ApiResponse)` and `ErrorSet::none()` placeholders, plus the `.returns*`/`.errors` builders in `schematic/define/src/builders.rs`, which today reject a second success; `DefinitionContext` in `define/src/registration.rs`; 4b metadata (`rate_limit`, `retry_guidance`, `deprecated`, `EndpointAuth`) in `define/src/metadata.rs` and `types.rs`; `DefinitionBundle` version 1 in `define/src/bundle.rs`; x-schematic extensions in `define/src/openapi/extensions.rs`; baselines in `gen/tests/l1/definition_baseline.rs` (`adoptions()`), `artifact_drift`, and `definition_bundles`; `schematic-runtime` at `ABI = 5` with `RequestParts::query: Vec<(String, QueryValue)>`, `EndpointSpec`, `ErrorKind`, `NoDeclaredError`, `Decode`, `SupportsHooks`, and `send_raw`. Conform to the landed code: where a name, path, or count here differs, follow the code and log the difference. Do not rebuild prerequisite features.
 2. **Authorization — granted.** The author confirmed the spec's pre-authorizations on 2026-10-21: regeneration/deletion of owned output, runtime/test dependencies and lockfile changes, the four provider migrations plus the R32a/R32b endpoint edits, and forced dependent edits. Log each use. The spec's "Not pre-authorized" list still applies. Stale `gen/schematic` removal remains optional and requires proof that it is unreferenced and generator-owned.
 3. **Default adoption.** Adopt D-4–D-31 as written (D-1–D-3 are withdrawn by the author ruling of 2026-10-12, `2026-10-11-schematic-generation-integrity` review 1, item 1) unless prerequisite review outcomes supersede them; record each separately with choice, alternatives, reason, phase, and evidence. D-17 and the end-marker behavior in D-18 are already decided, not new author questions. Names remain proposed except `EndpointSpec`. Conform to landed `Success`, `ErrorSet`, registration, pagination, and runtime contracts rather than inventing replacements.
 4. **Selection and precedence.** Apply R3/R3a: normalized concrete media types, 204-empty priority, status-specific candidate sets before status-less fallback, and `UnexpectedContentType` for an unselectable multi-shape 2xx. Then R3b: JSON shapes sharing a media type are separated by a declared top-level discriminator value or by array versus object; the R3c fallback takes any unmatched media type. Single-shape endpoints remain unchecked by content type and optional statuses. Apply exact-then-narrower-range precedence across the merged error table; endpoint entries replace only identical matches. Equal-width overlapping ranges and duplicate matches at one level fail validation.
@@ -54,28 +91,28 @@ Execution conventions:
 - [x] **Prerequisite inventory**
   - Read prerequisite logs and review outcomes; map their final API to every refresh note in this spec. Verify authorization separately from feature defaults. Identify the runtime package and whether current area recipes include it.
   - Deliver a contract inventory and prerequisite/authorization status in `implementation-log.md`; coordinator merges parallel findings into that file.
-- [ ] **Consumer inventory**
-  - Search all `ApiResponse` readers, endpoint counts by variant, streaming body fields, hooks, public generated types, extension/export/import code, and dependent call sites. Recheck the reported stranded Ollama types and the roughly 519 untouched literals rather than trusting counts.
+- [x] **Consumer inventory**
+  - Search all `ApiResponse` readers, endpoint counts by variant, streaming body fields, hooks, public generated types, extension/export/import code, and dependent call sites. Recheck the reported stranded Ollama types and the roughly 530 untouched endpoint definitions (539 endpoints in all at the 2026-10-22 refresh) rather than trusting counts.
   - Inventory sniff's eight fixtures and check-status document/variables. Search `sniff/lib`, `biscuit-speaks/lib`, `model-citizen/lib`, and all five named homelab crates, plus any additional actual consumers; record zero-reference results.
-- [ ] **Provider inventory**
+- [x] **Provider inventory**
   - Review definitions and research for Ollama, LM Studio, Anthropic, and ElevenLabs. Build an endpoint migration table: old/new success and failure types, shape set and wire tags, framing, terminator/keep, documented provider-error variants, content type/default codec, hook removal, and evidence source.
   - Add the Bitbucket source endpoint and OpenAI `GetResponse` (R32a, R32b) to the table; for Bitbucket, record what the provider sends for a `.json` file versus a directory listing (open research item).
   - Identify streaming or multi-shape definitions outside these and log them without editing them.
 
 ### Wave 2 — Baseline and targeted spike (sequential coordinator)
 
-- [ ] **Baseline capture**
+- [x] **Baseline capture**
   - After Wave 1 clears the gates, create the implementation log with stable feature identifier, `plan.md`, implementer, per-phase source/docs/skill files, packages touched, default decisions, deviations, and review agenda entries.
-  - Regenerate Rust/OpenAPI/Postman into an isolated output directory and compare against the prerequisite-reviewed baseline. Resolve unexplained drift before proceeding; preserve original snapshots and define a field-specific comparison allow-list.
+  - Regenerate Rust/OpenAPI/Postman into an isolated output directory and compare against the committed artifacts as left by `2026-10-15-schematic-definition-vocabulary` (`just migration-check` proves this). Resolve unexplained drift before proceeding; preserve original snapshots and define a field-specific comparison allow-list.
   - Capture public type signatures and untouched definition source files for R24. Run baseline L1 checks for affected Schematic packages, including the actual runtime and generated schema manifest. Preserve existing user changes.
-- [ ] **Timeout spike**
+- [x] **Timeout spike**
   - Once only, before runtime codec work, inspect the landed HTTP transport for a whole-body request timeout that would incorrectly kill a healthy stream. If prior runtime evidence already proves R11a, record that ruling and skip the experiment.
   - Otherwise use one local server and a minimal request with short controlled intervals to demonstrate header timeout, a stream living past that timeout while emitting items, and idle expiry. Record the smallest integration change needed to separate header/idle/shared-deadline bounds. This is a correctness spike, not a benchmark or an HTTP/2/OS matrix; later acceptance tests implement the contract without rerunning the spike.
-- [ ] **Contract freeze**
+- [x] **Contract freeze**
   - Freeze stored field names, runtime codec/error interfaces, generated enum names, diagnostics, and bundle format outcomes. Expand the matrix columns below to the exact landed wire fields, including nested variant payloads and any reused field whose reader changes. Select real-tool positive fixtures and test locations before parser work.
   - Make an R1–R44 ledger naming implementation task, public test boundary, feature flags, and verification command. Record remaining proposed rulings for review 1 without stopping for optional design feedback.
 
-**Validation checkpoint:** prerequisites and authorization are proven; baseline is explained and green; all defaults and scope boundaries are recorded; exact file ownership and input contracts are available for Phase 2. A failed prerequisite gate ends the implementation run here.
+**Validation checkpoint:** the landed prerequisite contracts are verified and authorization is recorded; baseline is explained and green; all defaults and scope boundaries are recorded; exact file ownership and input contracts are available for Phase 2. Only a landed contract that is genuinely absent (not merely renamed or moved) ends the run here; a difference is conformed to and logged.
 
 ### Input Robustness Matrix
 
@@ -151,16 +188,16 @@ Address-rule tag and required `suffix`, replacement, and append-path payloads, p
 
 ### Wave 3 — Stored types (sequential)
 
-- [ ] **Vocabulary types**
+- [x] **Vocabulary types**
   - Add/widen `Success`, stored success shapes, non-exhaustive stream framing, end/keep forms, `StatusMatch`, `ErrorSet`, R3b JSON tags, the R3c fallback marker, and shape notes in `schematic-define`; preserve old response storage until Phase 5. Keep existing `.returns(...)`, `.errors(ErrorSet::none())`, and API defaults call sites working.
   - Add registered GraphQL operation/address primitives and context entry points, including typed variables/data, explicit unit variables, operation name, HTTP error policy, and existing pagination declarations. Do not parse documents.
   - Derive serialization/equality and surrounding Debug/Clone traits; register descriptor closure for success, error, stream items, variables, and data in bundles without registering builtin bytes/unit.
 
 ### Wave 4 — Independent rules (parallel after Wave 3)
 
-- [ ] **Shape validation**
+- [x] **Shape validation**
   - Implement normalized media/status distinguishability and empty/stream constraints; R3b separability (shared discriminator field with distinct canonical scalar values, or one array and one object shape) and R3c fallback limits; spec 1's `(method, path)` duplicate rule stays unchanged. Reuse rules from generator/importer rather than copying them. Cover R1, R3a–R3c, R13a, R16–R18, R23.
-- [ ] **GraphQL validation**
+- [x] **GraphQL validation**
   - Validate registration, shared generated naming collisions after module/suffix resolution, address rules, and Relay/body-path compatibility. Test wrong variables at compile time and unregistered data at definition validation. Extend bundle reference validation and apply frozen matrix cases for these types.
 
 **Validation checkpoint:** definition tests pass with the old stored response path; serialization is deterministic and isolated references resolve; specificity/overlap and inseparable-shape rejection cases produce contextual diagnostics. Record finalized public names and construction seams for runtime and generator work.
