@@ -58,9 +58,12 @@ fn perf_report_rows(fixture: &Fixture, cols: u32, graph: bool) -> Vec<String> {
         ("COLORFGBG", "15;0"),
     ];
     if graph {
+        // The graphics route reads a visible tmux, so the pane's own tmux is
+        // hidden and declared absent for `wt` to route to a direct Ghostty.
         env.push(("TERM_PROGRAM", "ghostty"));
+        env.push(("BISCUIT_GRAPHICS_TRANSPORT", "direct"));
     }
-    let unset_term_program = if graph { "" } else { "-u TERM_PROGRAM" };
+    let unset_terminal = if graph { "-u TMUX -u TMUX_PANE" } else { "-u TERM_PROGRAM" };
     let bin = cargo_bin("wt").display().to_string();
     harness
         .send_text(format!("cd '{}'\n", fixture.linked.display()).as_bytes())
@@ -68,7 +71,7 @@ fn perf_report_rows(fixture: &Fixture, cols: u32, graph: bool) -> Vec<String> {
     harness
         .send_command_with_env(
             &format!(
-                "env {unset_term_program} -u KITTY_WINDOW_ID -u GH_TOKEN -u GITHUB_TOKEN -u GITEA_TOKEN \
+                "env {unset_terminal} -u KITTY_WINDOW_ID -u GH_TOKEN -u GITHUB_TOKEN -u GITEA_TOKEN \
                  -u FORGEJO_TOKEN -u CODEBERG_TOKEN -u WT_SHELL_WRAPPER {bin} list --perf"
             ),
             &env,
