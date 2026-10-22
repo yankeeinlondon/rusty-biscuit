@@ -1,0 +1,116 @@
+{
+  "call": 2,
+  "commit_step": 34.0,
+  "commits": [
+    {
+      "id": "f6a40ee",
+      "index": 0,
+      "lane": "main",
+      "parents": [],
+      "tags": [],
+      "x": 8.0
+    },
+    {
+      "id": "4fa32d5",
+      "index": 1,
+      "lane": "main",
+      "parents": [
+        "f6a40ee"
+      ],
+      "tags": [],
+      "x": 50.0
+    },
+    {
+      "id": "+7",
+      "index": 2,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "4fa32d5"
+      ],
+      "tags": [],
+      "x": 92.0
+    },
+    {
+      "id": "26d6db0",
+      "index": 3,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "+7"
+      ],
+      "tags": [],
+      "x": 134.0
+    },
+    {
+      "id": "a44de6c",
+      "index": 4,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "26d6db0"
+      ],
+      "tags": [],
+      "x": 176.0
+    },
+    {
+      "id": "8a968db",
+      "index": 5,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "a44de6c"
+      ],
+      "tags": [],
+      "x": 218.0
+    },
+    {
+      "id": "14cb7e6",
+      "index": 6,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "8a968db"
+      ],
+      "tags": [],
+      "x": 260.0
+    },
+    {
+      "id": "2bcaab5",
+      "index": 7,
+      "lane": "main",
+      "parents": [
+        "4fa32d5",
+        "14cb7e6"
+      ],
+      "tags": [
+        {
+          "text": "origin/main",
+          "x1": 266.22314453125,
+          "x2": 331.27685546875,
+          "y1": -23.5,
+          "y2": -8.5
+        },
+        {
+          "text": "main",
+          "x1": 266.22314453125,
+          "x2": 331.27685546875,
+          "y1": -39.5,
+          "y2": -24.5
+        }
+      ],
+      "x": 302.0
+    },
+    {
+      "id": "3daabc8",
+      "index": 8,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "14cb7e6"
+      ],
+      "tags": [],
+      "x": 344.0
+    }
+  ],
+  "default_commit_step": 34.0,
+  "height": 178.4940185546875,
+  "mermaid": "gitGraph\n    commit id: \"f6a40ee\"\n    commit id: \"4fa32d5\"\n    branch fix/wt-ux\n    checkout fix/wt-ux\n    commit id: \"+7\" type: HIGHLIGHT\n    commit id: \"26d6db0\"\n    commit id: \"a44de6c\"\n    commit id: \"8a968db\"\n    commit id: \"14cb7e6\"\n    checkout main\n    merge fix/wt-ux id: \"2bcaab5\" tag: \"main\" tag: \"origin/main\"\n    checkout fix/wt-ux\n    commit id: \"3daabc8\"\n    checkout main",
+  "tag_gap": 16.0,
+  "test": "commands__git_graph__tests__gathered_graph_lays_out_continued_after_merge_at_merge",
+  "width": 500.765625
+}

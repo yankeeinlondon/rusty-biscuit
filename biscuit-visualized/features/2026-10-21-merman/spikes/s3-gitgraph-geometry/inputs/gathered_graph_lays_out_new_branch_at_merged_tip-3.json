@@ -1,0 +1,79 @@
+{
+  "call": 3,
+  "commit_step": 34.0,
+  "commits": [
+    {
+      "id": "49e55cd",
+      "index": 0,
+      "lane": "main",
+      "parents": [],
+      "tags": [],
+      "x": 8.0
+    },
+    {
+      "id": "09a6368",
+      "index": 1,
+      "lane": "main",
+      "parents": [
+        "49e55cd"
+      ],
+      "tags": [],
+      "x": 50.0
+    },
+    {
+      "id": "78578be",
+      "index": 2,
+      "lane": "new",
+      "parents": [
+        "09a6368"
+      ],
+      "tags": [],
+      "x": 92.0
+    },
+    {
+      "id": "61e90f7",
+      "index": 3,
+      "lane": "main",
+      "parents": [
+        "09a6368"
+      ],
+      "tags": [],
+      "x": 134.0
+    },
+    {
+      "id": "2543ed2",
+      "index": 4,
+      "lane": "main",
+      "parents": [
+        "61e90f7",
+        "78578be"
+      ],
+      "tags": [
+        {
+          "text": "main",
+          "x1": 155.56494140625,
+          "x2": 189.93505859375,
+          "y1": -23.5,
+          "y2": -8.5
+        }
+      ],
+      "x": 176.0
+    },
+    {
+      "id": "3960026",
+      "index": 5,
+      "lane": "new",
+      "parents": [
+        "78578be"
+      ],
+      "tags": [],
+      "x": 218.0
+    }
+  ],
+  "default_commit_step": 34.0,
+  "height": 162.14212036132812,
+  "mermaid": "gitGraph\n    commit id: \"49e55cd\"\n    commit id: \"09a6368\"\n    branch new\n    checkout new\n    commit id: \"78578be\"\n    checkout main\n    commit id: \"61e90f7\"\n    merge new id: \"2543ed2\" tag: \"main\"\n    checkout new\n    commit id: \"3960026\"\n    checkout main",
+  "tag_gap": 16.0,
+  "test": "commands__git_graph__tests__gathered_graph_lays_out_new_branch_at_merged_tip",
+  "width": 341.9921875
+}

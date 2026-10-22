@@ -1,0 +1,87 @@
+{
+  "call": 1,
+  "commit_step": 57.7119140625,
+  "commits": [
+    {
+      "id": "+1",
+      "index": 0,
+      "lane": "main",
+      "parents": [],
+      "tags": [],
+      "x": 8.0
+    },
+    {
+      "id": "b6ce5e6",
+      "index": 1,
+      "lane": "main",
+      "parents": [
+        "+1"
+      ],
+      "tags": [],
+      "x": 73.7119140625
+    },
+    {
+      "id": "+1 ",
+      "index": 2,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "b6ce5e6"
+      ],
+      "tags": [],
+      "x": 139.423828125
+    },
+    {
+      "id": "ca754df",
+      "index": 3,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "+1 "
+      ],
+      "tags": [],
+      "x": 205.1357421875
+    },
+    {
+      "id": "82d3d6d",
+      "index": 4,
+      "lane": "main",
+      "parents": [
+        "b6ce5e6"
+      ],
+      "tags": [
+        {
+          "text": "main",
+          "x1": 250.41259765625,
+          "x2": 284.78271484375,
+          "y1": -23.5,
+          "y2": -8.5
+        }
+      ],
+      "x": 270.84765625
+    },
+    {
+      "id": "4a3e4e2",
+      "index": 5,
+      "lane": "main",
+      "parents": [
+        "82d3d6d",
+        "ca754df"
+      ],
+      "tags": [
+        {
+          "text": "origin/main",
+          "x1": 300.78271484375,
+          "x2": 365.83642578125,
+          "y1": -23.5,
+          "y2": -8.5
+        }
+      ],
+      "x": 336.5595703125
+    }
+  ],
+  "default_commit_step": 34.0,
+  "height": 160.52572631835938,
+  "mermaid": "gitGraph\n    commit id: \"+1\" type: HIGHLIGHT\n    commit id: \"b6ce5e6\"\n    branch fix/wt-ux\n    checkout fix/wt-ux\n    commit id: \"+1 \" type: HIGHLIGHT\n    commit id: \"ca754df\"\n    checkout main\n    commit id: \"82d3d6d\" tag: \"main\"\n    merge fix/wt-ux id: \"4a3e4e2\" tag: \"origin/main\"",
+  "tag_gap": 16.0,
+  "test": "commands__git_graph__tests__gathered_graph_lays_out_observation_1",
+  "width": 517.037109375
+}
