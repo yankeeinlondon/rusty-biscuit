@@ -61,6 +61,7 @@ validates again on its next use, and clones made earlier keep theirs.
 | Method | Effect |
 | --- | --- |
 | `base_url(url)` | send to `url` instead of the definition's base URL; it must be an absolute HTTP(S) URL with a host and no user information |
+| `graphql_url(url)` | send GraphQL operations to `url` instead of the address the API's rules derive from the base URL; see [GraphQL](../graphql.md#how-a-client-resolves-the-address) |
 | `timeout(duration)` | the per-request timeout (default `DEFAULT_TIMEOUT`, 30 s); see [Deadlines and timeouts](./deadlines-and-timeouts.md) |
 | `connect_timeout(duration)` | bound on establishing a connection |
 | `proxy(url)` | send every request through this proxy |

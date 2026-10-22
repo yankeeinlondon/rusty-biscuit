@@ -91,13 +91,10 @@ How a request struct's fields become a URL, headers, and body is covered by
 
 ## Planned
 
-- **Generated streams, shapes, and GraphQL operations.** The runtime ships
-  server-sent event, NDJSON, and byte stream codecs, a multi-shape codec,
-  and a GraphQL codec (see [Codecs and decoding](./codecs.md)). The
-  generator does not emit them yet, so a streaming endpoint is still
-  modeled as binary and framed by the caller.
-- **Declared error bodies in generated clients.** The runtime decodes an
-  endpoint's declared error bodies on arrival through its error table, and
-  API definitions can declare errors, but the generator does not emit the
-  tables yet. Every generated endpoint uses `NoDeclaredError`, so its
-  error replies arrive as `ErrorKind::Undeclared` with the raw body.
+- **Streams and several shapes in shipped definitions.** The generator emits
+  the stream, multi-shape, and GraphQL codecs (see
+  [Codecs and decoding](./codecs.md#what-generated-code-emits)), but a
+  definition cannot store several success shapes or a stream yet, so a
+  streaming endpoint is still declared binary and framed by the caller.
+  Generated error tables work today; no shipped definition declares errors
+  yet, so their error replies still arrive as `ErrorKind::Undeclared`.

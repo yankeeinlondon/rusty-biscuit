@@ -54,6 +54,68 @@ Runtime-only origin/redaction policies do not become OpenAPI transport rules.
 The supported extension fields, including rate-limit and retry metadata, are
 described in [OpenAPI extensions](openapi-extensions.md).
 
+## Responses
+
+Each operation's `responses` map holds the endpoint's success shapes and its
+resolved error table, one response object per status. Today an endpoint
+stores one shape (several shapes and streams are **planned** for storage; see
+[Responses and errors](../responses-and-errors.md#what-is-stored-today)), and
+the rules below already apply to every shape it declares.
+
+**Success statuses.** A shape exports under the statuses it declares, else
+`204` when it is empty and `200` otherwise. Every shape under one status
+shares that status's response object, one `content` entry per media type:
+
+| Shape | Media key | Schema |
+| --- | --- | --- |
+| JSON | declared, else `application/json` | the referenced component |
+| Text | declared, else `text/plain` | `type: string` |
+| Binary, byte stream | declared, else `application/octet-stream` | `type: string, format: binary` |
+| SSE stream | declared, else `text/event-stream` | the item component |
+| NDJSON stream | declared, else `application/x-ndjson` | the item component |
+| The fallback shape | `*/*` | a (binary) string |
+| Empty | none | none |
+
+A stream's framing and end condition, and anything else the map cannot say,
+are written to the operation's [`x-schematic`](openapi-extensions.md#success-shapes-and-error-entries).
+Two JSON shapes under one status and media type become a `oneOf`; when each
+declares a field tag on the same field, a `discriminator` names it and maps
+each string value to its component. Each shape's note joins the response
+description as `<media type>: <note>`:
+
+```yaml
+"200":
+  description: |-
+    Successful response
+
+    application/json: returned when `stream` is false
+
+    text/event-stream: returned when `stream` is true
+  content:
+    application/json: { schema: { $ref: "#/components/schemas/Message" } }
+    text/event-stream: { schema: { $ref: "#/components/schemas/Event" } }
+```
+
+**Error statuses.** Export writes the endpoint's *resolved* table (API
+defaults, overlaid or opted out by the endpoint), as the client looks it up:
+
+- an exact entry keys its status (`"404"`);
+- a class range (`400-499`, `500-599`) keys `4XX`/`5XX` when it wins every
+  status of its class;
+- a class range that a narrower entry supersedes in part, and every other
+  range, expands into exact statuses, each holding the entry that wins there.
+
+```text
+API defaults 4XX -> Problem, 5XX -> text; endpoint adds 404 -> empty
+exported:    "400" ... "403" -> Problem, "404" -> no content,
+             "405" ... "499" -> Problem, "5XX" -> text
+```
+
+Success statuses are 2xx and error statuses 400-599, so the two never share a
+key. GraphQL operations are not exported: each is reported as the warning
+`<API> operation <id>: GraphQL operation skipped in OpenAPI output` and the
+document is still written.
+
 ## Path parameters, deprecation, and composition
 
 A path parameter declared with `path_param` exports with its type, its

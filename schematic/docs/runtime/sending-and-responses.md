@@ -220,10 +220,10 @@ of the error type's shapes the body decodes as: an exact status first, then
 the narrowest range (see
 [Codecs and decoding](./codecs.md#declared-error-bodies-errorbody-and-the-error-table)).
 The runtime decodes the body before returning, so the caller never runs a
-decode step; a status no entry matches is `Undeclared`. Every endpoint
-generated today uses `NoDeclaredError`, which has no values, so its error
-replies are `Undeclared`. Generating error tables from an API definition's
-declared errors is **planned**.
+decode step; a status no entry matches is `Undeclared`. The generator
+emits that table from the definition's effective errors; an endpoint with no
+declared errors (every shipped endpoint today) uses `NoDeclaredError`, which
+has no values, so its error replies are `Undeclared`.
 
 A redirect status other than 301, 302, 303, 307, and 308 (for example 300
 or 304) is not followed and is reported as a final reply.
@@ -251,8 +251,9 @@ matches none as `UnexpectedContentType`.
 Codecs implement the `Decode` trait, which reads the body as it arrives
 rather than a pre-buffered copy; [Codecs and decoding](./codecs.md)
 describes that contract, the server-sent event, NDJSON, and byte stream
-codecs, the multi-shape codec, and the GraphQL codec. The runtime ships all
-of them; generating endpoints that use them is **planned**.
+codecs, the multi-shape codec, and the GraphQL codec. The generator emits each
+endpoint's codec from its success shapes (see
+[Generated success and failure types](../responses-and-errors.md#generated-success-and-failure-types)).
 
 ## The raw send
 

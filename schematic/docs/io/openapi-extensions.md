@@ -8,8 +8,8 @@ Schematic currently emits two `x-schematic` extension types in exported OpenAPI 
 
 | Extension | Level | Purpose |
 |-----------|-------|---------|
-| `x-schematic` | Document | API-wide configuration (module path, headers, env mapping, rate-limit and retry metadata) |
-| `x-schematic` | Operation | Endpoint-specific metadata (request/response types, headers, an endpoint's own rate-limit and retry metadata) |
+| `x-schematic` | Document | API-wide configuration (module path, headers, env mapping, rate-limit and retry metadata, default error entries) |
+| `x-schematic` | Operation | Endpoint-specific metadata (request/response types, success shapes, error entries, headers, an endpoint's own rate-limit and retry metadata) |
 
 The library also defines a schema-level extension type (`SchematicSchemaExtension`) for Rust type metadata, but the current exporter does not emit schema-level `x-schematic` fields.
 
@@ -44,6 +44,7 @@ x-schematic:
 | `headers` | `array<[string, string]>` | Default headers applied to all endpoints. |
 | `rate_limit` | `object?` | The API's rate-limit headers. Absent when undeclared. See [Rate-Limit and Retry Metadata](#rate-limit-and-retry-metadata). |
 | `retry_guidance` | `object?` | The API's retry guidance. Absent when undeclared. See [Rate-Limit and Retry Metadata](#rate-limit-and-retry-metadata). |
+| `errors` | `array?` | The API's default error entries, as declared. Absent when there are none. See [Success Shapes and Error Entries](#success-shapes-and-error-entries). |
 
 ### Env Mapping
 
@@ -94,6 +95,9 @@ paths:
 | `headers` | `array<[string, string]>` | Endpoint-specific headers. |
 | `rate_limit` | `object?` | The endpoint's own rate-limit headers, which replace the API's whole. Absent when the endpoint inherits the document's value. |
 | `retry_guidance` | `object?` | The endpoint's own retry guidance, which replaces the API's whole. Absent when the endpoint inherits the document's value. |
+| `success` | `array?` | Every success shape, present only when `response` cannot say it all: several shapes, a stream, or any content type, status, tag, fallback, note, or variant name. See [Success Shapes and Error Entries](#success-shapes-and-error-entries). |
+| `errors` | `array?` | The endpoint's own error entries, which overlay the document's `errors`. Absent when there are none. |
+| `no_declared_errors` | `bool?` | `true` when the endpoint opts out of the document's error entries. Absent when false. |
 
 ### Rate-Limit and Retry Metadata
 
@@ -236,6 +240,45 @@ response: Text
 # No content (204)
 response: Empty
 ```
+
+### Success Shapes and Error Entries
+
+The standard `responses` map carries each shape's status, media type, and
+schema (see [Exporting OpenAPI](export-openapi.md#responses)). What it cannot
+carry, such as a stream's end condition or the JSON tag that tells two shapes
+apart, is written here in the definition's own serialized form, so nothing is
+lost. An endpoint with a single plain shape writes no `success` member, which
+keeps existing documents unchanged.
+
+```yaml
+x-schematic:
+  response: Empty
+  success:
+    - shape:
+        Json:
+          Named: Message
+      note: returned when `stream` is false
+    - shape:
+        Stream:
+          framing:
+            Sse:
+              Named: Event
+          end:
+            EventNamed: message_stop
+      note: returned when `stream` is true
+    - shape: Binary
+      fallback: true
+  errors:
+    - status:
+        Exact: 404
+      shape: Empty
+  no_declared_errors: false   # omitted when false
+```
+
+The error entries are the declared levels (document defaults, then the
+endpoint's overlay or opt-out), not the resolved table: the `responses` map
+already shows the resolved table. Reading these members back is not
+supported yet.
 
 ## Schema-Level Extension (Reserved)
 

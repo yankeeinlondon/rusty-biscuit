@@ -49,6 +49,7 @@ Modifiers on a `Success`:
 | `.json_array()`, `.json_object()` | Selects a JSON shape by whether the reply is an array or an object. |
 | `.fallback()` | A text or binary shape taking every media type no other shape matches. It declares no content type. |
 | `.note("returned when ...")` | Documentation only; the client never reads it. |
+| `.variant("Directory")` | Names this shape's variant of the generated success enum (an UpperCamelCase identifier, unique in the endpoint). Only on an endpoint with several shapes. |
 | `.ends_at_data_line("[DONE]")` | An SSE stream ends at the event whose data equals the text (the empty string is allowed). |
 | `.ends_at_event("message_stop")` | An SSE stream ends at the named event. |
 | `.ends_when_field("done", true)` | An SSE or NDJSON stream ends at the item whose field (a dotted path, no `[*]`) equals a string, number, or boolean. |
@@ -101,9 +102,11 @@ and no JSON tag separates them`.
 text, binary, or empty shape with no modifiers there. Anything else (several
 shapes, streams, or a content type, status, tag, or note) passes the rules
 above and is then refused with `... are stored once Endpoint::response holds
-response model v2 shapes`. Storing and generating those shapes is
-**planned**. `Endpoint::success_shapes()` returns the stored response as a
-one-shape list.
+response model v2 shapes`. Storing those shapes is **planned**.
+`Endpoint::success_shapes()` returns the stored response as a one-shape list,
+and the generator and exporters read every endpoint through it, so they
+already handle several shapes and streams (see
+[Generated success and failure types](#generated-success-and-failure-types)).
 
 The runtime already applies these rules to a reply: the stream codecs and
 the multi-shape `Shapes` codec are described in
@@ -156,9 +159,57 @@ entry's JSON type must be registered in the API's context; an unregistered one
 fails API build with `Items endpoint GetItem: unresolved schema reference
 "Problem"`. The runtime decodes an error body through a `const` error table
 with the same exact-then-narrowest rule (see
-[Codecs and decoding](runtime/codecs.md#declared-error-bodies-errorbody-and-the-error-table));
-generating that table from the definition is **planned**, so today the
-generated client reports every non-2xx reply as `Undeclared`.
+[Codecs and decoding](runtime/codecs.md#declared-error-bodies-errorbody-and-the-error-table)),
+which the generator emits from the effective table.
+
+## Generated success and failure types
+
+Each endpoint's request struct implements `EndpointSpec`; its `Success`,
+`Decoder`, and `Failure` follow from the shapes and the effective error table.
+
+| Declared | `Success` | `Decoder` |
+| --- | --- | --- |
+| one JSON shape | the registered type `T` | `Json<T>` |
+| one text, binary, or empty shape | `String`, `bytes::Bytes`, `()` | `Text`, `Binary`, `Empty` |
+| one SSE or NDJSON stream of `T` | `ItemStream<T>` | `Sse<T, End>`, `Ndjson<T, End>` |
+| one byte stream | `ByteStream` | `ByteStream` |
+| several shapes | `{Id}Response` | `Shapes<{Id}Response>` |
+
+`End` is `UntilClose` for a stream that ends at connection close, and
+otherwise a generated unit struct `{Id}End` (`{Id}{Variant}End` for a stream
+inside an enum) whose `StreamEnd` constants hold the terminator and `keep`.
+
+`{Id}Response` has one variant per shape, in declaration order, documented by
+the shape's note. A variant is named by `.variant(..)`, else by its kind
+(`Json`, `Text`, `Binary`, `Empty`, `Stream`); two shapes of one kind take
+their content type's subtype (`application/problem+json` gives `JsonProblem`).
+Names still equal after that fail validation with `name them with
+Success::variant`. The enum implements `Alternatives` (its route table) and,
+only when every shape is JSON, `JsonAlternatives`, which is what lets a typed
+response mutator be registered for the endpoint.
+
+```rust
+// .returns(Success::json(listing).variant("Directory"))
+// .returns(Success::binary().fallback().variant("File"))
+match client.send(GetSourceRequest::new("docs")).full().await?.into_result()? {
+    GetSourceResponse::Directory(listing) => { /* JSON listing */ }
+    GetSourceResponse::File(bytes) => { /* any other media type */ }
+}
+```
+
+`Failure` comes from the effective error table:
+
+| Effective table | `Failure` | `ERRORS` |
+| --- | --- | --- |
+| empty, or opted out | `NoDeclaredError` (every non-2xx is `Undeclared`) | not emitted |
+| one distinct shape | its type: `String`, `bytes::Bytes`, `()`, `serde_json::Value`, or the registered JSON type | one route per entry |
+| several distinct shapes | `{Id}Error`, one variant per shape named after its type | one route per entry, pointing at its variant |
+
+Shapes are distinct by kind, type, and content type. A registered JSON type
+gets one `impl ErrorBody<{Api}Api>` per API module however many endpoints
+fail with it. A lone JSON shape whose Rust type the runtime already decodes
+as something else (`String`, `bytes::Bytes`, `()`) gets the `{Id}Error` enum
+instead, so the body is read as JSON.
 
 ## Stored forms
 
@@ -170,7 +221,7 @@ Every type above serializes to JSON (and loads from a
 | `StatusMatch::exact(404)` | `{"Exact": 404}` |
 | `StatusMatch::class(4)` | `{"Range": {"lo": 400, "hi": 499}}` |
 | an error entry | `{"status": {"Exact": 404}, "shape": "Text", "content_type": "text/html"}` |
-| a success shape | `{"shape": {"Json": {"Named": "Entry"}}, "statuses": [200], "json_tag": "Array", "note": "..."}` |
+| a success shape | `{"shape": {"Json": {"Named": "Entry"}}, "statuses": [200], "json_tag": "Array", "note": "...", "variant": "Entries"}` |
 | an SSE stream | `{"Stream": {"framing": {"Sse": {"Named": "Event"}}, "end": {"EventNamed": "message_stop"}, "keep": true}}` |
 | terminators | `{"DataLineEquals": "[DONE]"}`, `{"FieldEquals": {"field": "done", "value": true}}`, `"ConnectionClose"` |
 

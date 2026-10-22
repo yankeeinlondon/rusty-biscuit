@@ -64,8 +64,52 @@ slash, so a reverse-proxy prefix survives.
 `AddressRule::github()` is those two rules in that order. API build rejects an
 empty rule list, a rule path that does not start with `/` or has an empty
 segment, query, or fragment, and a base URL with a query or fragment.
-Resolving the address in the generated client, and a client-builder override
-of the whole URL, are **planned**.
+### How a client resolves the address
+
+The runtime applies the rules to the client's *effective* base URL, so a
+caller's `base_url(..)` moves the GraphQL address with it, and a caller can
+replace the whole address with `graphql_url(..)` on the client:
+
+```rust
+use schematic_runtime::{AddressRule, ApiDefinition, Client};
+
+const GITHUB: &[AddressRule] = &[
+    AddressRule::ReplaceSuffix { suffix: "/api/v3", with: "/api/graphql" },
+    AddressRule::Append("/graphql"),
+];
+let definition = ApiDefinition::new("https://api.github.com").graphql(GITHUB);
+
+// GraphQL operations go to https://ghe.example/api/graphql.
+let enterprise = Client::<GitHubApi>::new(definition.clone()).base_url("https://ghe.example/api/v3");
+// GraphQL operations go to https://gql.example/graphql.
+let proxied = Client::<GitHubApi>::new(definition).graphql_url("https://gql.example/graphql");
+```
+
+- An operation's request is sent to that address; the request's own path is
+  ignored, and its declared query parameters are still appended.
+- The address is resolved when the client is validated (`build()` or the
+  first send). An override that is not an HTTP(S) URL with a host, carries
+  user information, or carries a fragment fails with
+  `BuildError::InvalidGraphQlUrl`; so does a base URL with a query or
+  fragment when the API declares rules and no override is set.
+- The address is checked against the operation's
+  [cross-origin policy](runtime/origins-and-redirects.md) like a next-page
+  link. A derived address shares the base URL's origin. An override on
+  another origin is refused at send under the default same-origin policy,
+  with `TransportErrorKind::CrossOriginRejected`, unless an `allow_origins`
+  policy for the API or that operation names it.
+- A client whose API declares no rules and that has no override refuses an
+  operation before sending, with `TransportErrorKind::InvalidUrl`.
+
+A generated API's `definition()` carries its rules as `.graphql(&[..])`, and
+its API struct forwards `graphql_url`:
+
+```rust
+let client = GitHub::new()
+    .base_url("https://ghe.example.com/api/v3")   // GraphQL: https://ghe.example.com/api/graphql
+    .graphql_url("https://gql.example.com/graphql") // or replace the derived address whole
+    .build()?;
+```
 
 ## Errors
 
@@ -128,7 +172,36 @@ built by `schematic_runtime::graphql::request_body`. The document is sent
 exactly as written; an operation without variables omits `variables`;
 `operationName` is sent only when the operation sets one; and variables that
 do not serialize to a JSON object are refused before anything is sent.
-Generating operation requests that use them is **planned**.
+
+## Generated operation requests
+
+`schematic-gen` gives each operation a request struct named like an
+endpoint's (`{id}` plus the API's request suffix), in the same module, sent
+with the client's ordinary `send`. Typed variables are its one field, taken by
+`new`; an operation without variables is a unit struct with `new()`. The
+struct carries the document and operation name as constants and implements
+`EndpointSpec` with `METHOD = POST`, `ADDRESS = Address::GraphQl`, an
+`Accept: application/json` header, the `GraphQl<D>` codec, and the failure
+`GraphQlOperationError<D, H>`, where `H` is the type the operation's effective
+HTTP error table generates (as for an endpoint: `NoDeclaredError` when it is
+empty or opted out, the one shape's type, or an `{id}Error` enum).
+
+```rust
+// operation CheckStatus: typed variables, data CheckData, 403 → Problem
+let response = client.send(CheckStatusRequest::new(CheckVars { owner, name, n0: 7 })).full().await?;
+match response.into_result() {
+    Ok(data) => { /* CheckData */ }
+    Err(error) => match error.kind {
+        ErrorKind::Declared(GraphQlOperationError::GraphQl(failure)) => { /* failure.errors, failure.partial_data */ }
+        ErrorKind::Declared(GraphQlOperationError::Http(problem)) => { /* the 403 body as Problem */ }
+        _ => { /* undeclared, malformed, interrupted, … */ }
+    },
+}
+```
+
+A typed response mutator registered for the request receives `&mut D`.
+Operation requests get no endpoint method on the API struct; send the request
+value.
 
 ## Pagination
 
@@ -173,6 +246,7 @@ generated pager is **planned**.
 `graphql` is omitted when the API has no GraphQL surface, `operations` when it
 is empty, and an operation's `errors`, `no_declared_errors`, `operation_name`,
 and `pagination` when unset. `"variables": "Unit"` means no variables.
-Generating operation clients, and the OpenAPI and Postman exporters' skip
-diagnostics for operations, are **planned**; today generation emits nothing
-for an operation.
+The OpenAPI and Postman exporters leave every operation
+out and report each as a `graphql-operation` warning,
+`<API> operation <id>: GraphQL operation skipped in <OpenAPI|Postman> output`;
+the document or collection is still written.

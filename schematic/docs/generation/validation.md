@@ -145,6 +145,7 @@ The same fields are available to code as
 | `oauth2-grant`: the API, or an endpoint's replacement policy, uses an OAuth2 device-code grant, which OpenAPI 3.0 has no flow for; the scheme is left out | | ✓ | | warning |
 | `endpoint-auth`: an endpoint's replacement policy accepts more than one authentication alternative, but a Postman request holds one auth; only the first is exported | | | ✓ | warning |
 | `schema-composition`: an endpoint's JSON body or response names a composed (`oneOf`/`anyOf`/`allOf`) component, which a Postman collection cannot declare; the existing example is kept and none is invented | | | ✓ | warning |
+| `graphql-operation`: the API declares a GraphQL operation, which neither output carries; the endpoint field names the operation, and the message reads `<API> operation <id>: GraphQL operation skipped in <OpenAPI\|Postman> output` | | ✓ | ✓ | warning |
 
 The Rust client sends text and binary bodies, header and cookie parameters,
 and API keys in a query parameter or cookie, so its rules for those features

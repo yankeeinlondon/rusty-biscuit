@@ -67,16 +67,75 @@ assert_eq!(pet.rust_path.as_deref(), Some("items::Pet")); // `Pet` without modul
 | JSON body | Typed model or free-form JSON |
 | multipart / URL-encoded body | Form fields, with file constraints where supported |
 | text / binary body | Raw body with content type |
-| responses | One selected success; other responses remain diagnostic information |
+| responses | One selected success; other responses remain diagnostic information (see [Several success shapes and declared errors](#several-success-shapes-and-declared-errors)) |
 | component / inline schemas | Named models or synthesized model names |
 | oneOf / anyOf | Untagged enum; unnamed members may remain free-form JSON |
 | allOf | Merged schema/model according to import support |
 | nullable | Optional Rust representation |
 | bearer, basic, header/query/cookie API key | Existing auth strategy and environment mapping |
 
-The importer does not implement OpenAPI 3.1 or general multi-success response
-modeling. Full provider HTTP fidelity is not established by a successful import;
-compile the generated crate and test its wire behavior.
+The importer does not implement OpenAPI 3.1. Full provider HTTP fidelity is
+not established by a successful import; compile the generated crate and test
+its wire behavior.
+
+### Response checks
+
+Before mapping, the importer rejects response members that the OpenAPI parser
+would otherwise read loosely, naming the API, operation, and member:
+
+- `responses`, `content`, a media entry's `schema`, and a `discriminator`
+  that is `null` or not an object;
+- a status key other than `default`, `100`-`599`, `1XX`-`5XX`, or an `x-`
+  extension (`"600"`, `"abc"`), and two spellings of one status (`4XX`, `4xx`);
+- a media key that is not `type/subtype` or a media range (`json`), and two
+  spellings of one media type (`application/json`, `Application/JSON`);
+- an empty or non-string `$ref`, an empty `oneOf` or one with a member that
+  is not an object, and an empty or non-string `discriminator.propertyName`;
+- exact duplicate keys anywhere, and trailing content after the document.
+
+```text
+Validation error at 'API Pets endpoint ListPets GET /pets responses':
+Response key `abc` is not `default`, a status 100-599, or a class 1XX-5XX
+```
+
+### Several success shapes and declared errors
+
+`openapi::classify_responses(api, endpoint, &operation.responses, &resolver)`
+maps one operation's responses to success shapes and endpoint error entries.
+`build()` does not use it yet, since an endpoint stores one response today;
+switching the import to it is **planned**.
+
+| Response | Imports as |
+| --- | --- |
+| `text/event-stream` | SSE stream of the schema's component |
+| `application/x-ndjson`, `application/jsonl` | NDJSON stream of the schema's component |
+| `application/json`, `application/*+json` | JSON shape |
+| other `text/*` | text shape with that content type |
+| any other media type | binary shape with that content type |
+| `*/*` | the fallback shape |
+| several media types under one status | one shape each |
+| JSON `oneOf` with a `discriminator`, or of one array and one object | one tagged JSON shape per member |
+| 204 or no `content` | empty shape |
+| exact `400`-`599`, `4XX`, `5XX` | the endpoint's own error entries (never hoisted to the API) |
+
+Media types are compared normalized (`Text/Event-Stream; charset=utf-8` is an
+SSE stream). Identical shapes under several statuses import once; when the
+statuses carry different shapes (apart from a body-less 204), each shape
+declares the statuses it appears under. A stream's end condition cannot be
+inferred from a media type, so it ends at connection close.
+
+Each of these imports with a warning naming the API, operation, and what was
+lost, rather than being guessed:
+
+- a `default`, 1xx, or 3xx response (not imported);
+- a media range other than `*/*` (not imported);
+- a `oneOf` neither a discriminator nor array/object separates (one
+  `serde_json::Value` JSON shape);
+- a JSON body or stream without a named schema (`serde_json::Value`);
+- an error status whose media types need different shapes (the first is
+  kept).
+
+An operation with no representable success is an import error.
 
 ## Importing into `schematic-definitions`
 

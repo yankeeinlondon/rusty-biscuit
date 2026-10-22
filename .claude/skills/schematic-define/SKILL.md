@@ -37,12 +37,14 @@ If an endpoint returns bytes/text but is modeled as JSON, callers get the wrong 
 
 There is no streaming variant in stored definitions yet. SSE and NDJSON
 endpoints are modeled as `Binary` and framed by the caller — see
-`definitions/src/ollama/mod.rs:316`. The runtime already ships the codecs the
-generator will target: `Sse<T, End>`, `Ndjson<T, End>`, `ByteStream`
-(items are `Result<T, StreamError>`), `Shapes<A>` for a multi-shape enum
-implementing `Alternatives`, the `EndpointSpec::ERRORS` table read by
-`ErrorBody::decode_body(alternative, body)`, and `GraphQl<D>` with
-`GraphQlOperationError<D, H>` (see `schematic/docs/runtime/codecs.md`).
+`definitions/src/ollama/mod.rs:316`. The generator already emits the v2
+codecs from `Endpoint::success_shapes()`: `Sse<T, End>`/`Ndjson<T, End>`
+(`ItemStream<T>`), `ByteStream`, `Shapes<{Id}Response>` for several shapes,
+the `EndpointSpec::ERRORS` table with `ErrorBody<{Api}Api>` failure types, and
+GraphQL operation requests (`GraphQl<D>`, `GraphQlOperationError<D, H>`); see
+`schematic/docs/responses-and-errors.md#generated-success-and-failure-types`.
+Until `Endpoint::response` stores shapes, tests reach those paths through the
+hidden `Endpoint::shapes_preview` seam (never serialized, set by no builder).
 
 ### 1a) Request Bodies Reach the Client (all variants)
 
@@ -442,7 +444,7 @@ no_auth/bearer_env/basic_env/authentication choice are required. Repeated auth
 choices fail; explicit env mappings must agree independent of setter order.
 `.returns(Success)` may repeat (JSON/text/binary/empty plus `sse`, `ndjson`,
 `bytes`, and modifiers `content_type`, `status`, `tagged`, `json_array`/`json_object`,
-`fallback`, `note`, `ends_*`, `keep_end`). Build runs `response::validate_success_shapes`
+`fallback`, `note`, `variant`, `ends_*`, `keep_end`). Build runs `response::validate_success_shapes`
 (R1/R3/R3a–c/R23 selection rules), then stores only a lone modifier-free shape in
 `Endpoint::response: ApiResponse` and refuses the rest ("are stored once
 Endpoint::response holds response model v2 shapes"); `Endpoint::success_shapes()` is
@@ -544,6 +546,6 @@ README is an overview; its detailed reference lives in
 `schematic/docs/generation/generated-clients.md`. The create-schematic-api command
 teaches the same fallible context assembly. Keep these entry points aligned.
 The L1 `authoring_guidance` corpus rejects obsolete REST constructor examples.
-Success shapes, declared errors, and GraphQL operations are authored as above;
-storing several shapes and generating their clients, error decoding, and GraphQL
-requests are planned. No selector API is planned here.
+Success shapes, declared errors, and GraphQL operations are authored as above,
+and the generator emits clients for all of them; storing several shapes and
+streams in `Endpoint::response` is planned. No selector API is planned here.

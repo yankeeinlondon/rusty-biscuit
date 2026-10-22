@@ -481,22 +481,29 @@ What each part of the `EndpointSpec` impl means:
 - **`type Api`** scopes the request to its API. An `OpenAI` client accepts
   only requests whose `Api` is `OpenAIApi`, so passing another API's request
   to `send`, `send_raw`, `check_link`, or `mutate_response` does not compile.
-- **`type Success` and `type Decoder`** come from the endpoint's
-  `ApiResponse`. The codec, not the response's `Content-Type`, judges the
-  body: a JSON endpoint that receives HTML reports a `MalformedSuccess` error
-  in the envelope with the body kept, and valid JSON under a misleading
-  `Content-Type` still decodes.
+- **`type Success` and `type Decoder`** come from the endpoint's success
+  shapes. With one shape, the codec, not the response's `Content-Type`,
+  judges the body: a JSON endpoint that receives HTML reports a
+  `MalformedSuccess` error in the envelope with the body kept, and valid JSON
+  under a misleading `Content-Type` still decodes.
 
-  | `ApiResponse` | `Success` | `Decoder` |
-  |---------------|-----------|-----------|
-  | `Json(schema)` | the schema's type | `schematic_runtime::Json<T>` |
-  | `Text` | `String` | `schematic_runtime::Text` |
-  | `Binary` | `bytes::Bytes` | `schematic_runtime::Binary` |
-  | `Empty` | `()` | `schematic_runtime::Empty` |
+  | One shape | `Success` | `Decoder` |
+  |-----------|-----------|-----------|
+  | JSON | the schema's type | `schematic_runtime::Json<T>` |
+  | text | `String` | `schematic_runtime::Text` |
+  | binary | `bytes::Bytes` | `schematic_runtime::Binary` |
+  | empty | `()` | `schematic_runtime::Empty` |
+  | SSE / NDJSON stream | `schematic_runtime::ItemStream<T>` | `Sse<T, End>` / `Ndjson<T, End>` |
+  | byte stream | `schematic_runtime::ByteStream` | the same |
 
-- **`type Failure`** is always `NoDeclaredError`: no definition declares an
-  error body, so every non-2xx reply is an undeclared API error in the
-  envelope.
+  Several shapes generate an `{Id}Response` enum chosen by status, media
+  type, and JSON tag; see
+  [Generated success and failure types](../responses-and-errors.md#generated-success-and-failure-types).
+- **`type Failure`** comes from the effective error table: `NoDeclaredError`
+  (every non-2xx reply is an undeclared API error) when the endpoint declares
+  and inherits nothing or opts out, as in the example above; otherwise the
+  one error shape's type or an `{Id}Error` enum, with a `const ERRORS` table
+  routing each status to it.
 - **`into_parts`** describes the request as a `RequestParts` struct, or
   returns an `InvalidArgument` (a JSON body that fails to serialize, a static
   `Cookie` header that cannot be merged) that the call reports, at `.build()`
@@ -515,6 +522,10 @@ such endpoints generates exactly the `definition()` it always did. The API's sta
 become `.default_header(..)` calls in `new()`; an API-level `Cookie` is
 folded into every endpoint's static headers instead, because the runtime
 refuses a default header that can carry a credential.
+
+Each GraphQL operation of the API gets a request struct of the same kind,
+sent to the API's GraphQL address; see
+[Generated operation requests](../graphql.md#generated-operation-requests).
 
 Each REST endpoint also gets a method on the API struct and a call type that
 wraps the runtime's `Call` (abridged; `ListPullRequests` from GitHub, a

@@ -285,7 +285,7 @@ An explicit environment mapping may leave credential fields unset. An empty mapp
 
 | Method | Accepted now |
 | --- | --- |
-| `returns(Success)` | Repeatable. JSON, text, binary, empty, SSE, NDJSON, or byte-stream shapes with `content_type`, `status`, `tagged`, `json_array`/`json_object`, `fallback`, `note`, `ends_*`, and `keep_end` modifiers. Build validates the set, then stores only a lone shape without modifiers. |
+| `returns(Success)` | Repeatable. JSON, text, binary, empty, SSE, NDJSON, or byte-stream shapes with `content_type`, `status`, `tagged`, `json_array`/`json_object`, `fallback`, `note`, `variant`, `ends_*`, and `keep_end` modifiers. Build validates the set, then stores only a lone shape without modifiers. |
 | `returns_json::<T>(&mut context)` | Typed JSON shorthand; registers T in the supplied context. |
 | `returns_text()`, `returns_binary()`, `returns_empty()` | Shorthands with String, bytes, or unit success. |
 | `errors(ErrorSet)` | Entries overlaying the API defaults (`ErrorSet::new().on(match, shape)`), or `ErrorSet::none()` to opt out of every declared error. |
@@ -293,8 +293,10 @@ An explicit environment mapping may leave credential fields unset. An empty mapp
 | API `graphql(rules)`, `operations(ops)` | A GraphQL surface; see [GraphQL operations](graphql.md). |
 
 `Success`, `ErrorShape`, and `ErrorSet` are non-exhaustive. Storing several
-successes, streams, and success modifiers, and generating declared-error
-decoding and GraphQL clients, are **planned**. Request content-type setters
+successes, streams, and success modifiers is **planned**; declared errors and
+GraphQL operations already generate client code (see
+[Generated success and failure types](responses-and-errors.md#generated-success-and-failure-types)
+and [GraphQL operations](graphql.md#generated-operation-requests)). Request content-type setters
 already work; they do not add success content negotiation. There is no route
 selector API: one endpoint per `(method, path)` declares every shape it can
 reply with.

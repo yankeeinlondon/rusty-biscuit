@@ -133,11 +133,11 @@ time to the response head.
 
 Error replies do not go through the codec. Each endpoint carries a `const`
 error table, `EndpointSpec::ERRORS`, and its `Failure` type implements
-`ErrorBody`. The runtime reads the error body whole, looks the status up in
+`ErrorBody<Api>`, where `Api` is the endpoint's API marker. The runtime reads the error body whole, looks the status up in
 the table, and decodes the body as the shape the matching entry names:
 
 ```rust
-pub trait ErrorBody: Sized + Send + 'static {
+pub trait ErrorBody<A>: Sized + Send + 'static {
     const DECLARED: bool = true;
     // `alternative` is the matched entry's shape index; None → MalformedError
     fn decode_body(alternative: usize, body: &[u8]) -> Option<Self>;
@@ -159,10 +159,25 @@ as alternative 2, and a 400 as alternative 1; a 500 matches nothing and is
 `Undeclared`. The default table sends every 4xx and 5xx status to
 alternative 0, the one shape of a single-shape failure type.
 
-The runtime implements `ErrorBody` for the plain shapes a single-shape table
-can name: `String` (text), `Bytes` (binary), `()` (empty), and
-`serde_json::Value` (any JSON). A registered JSON type, or the enum of a
-table with several distinct shapes, implements it in generated code.
+The runtime implements `ErrorBody<A>` for every API marker `A` for the plain
+shapes a single-shape table can name: `String` (text), `Bytes` (binary), `()`
+(empty), and `serde_json::Value` (any JSON). A registered JSON type, or the
+enum of a table with several distinct shapes, implements it in generated code,
+once per API module, for that module's marker:
+
+```rust
+// In the generated `github` module; `Problem` lives in `schematic-definitions`.
+impl schematic_runtime::ErrorBody<GitHubApi> for ::schematic_definitions::github::Problem {
+    fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
+        serde_json::from_slice(body).ok()
+    }
+}
+```
+
+The marker parameter is what makes that impl legal. Rust's orphan rule
+forbids implementing a trait from one crate for a type from another in a
+third crate, unless a type local to the third crate appears among the trait's
+parameters; the generated marker is that local type.
 `NoDeclaredError` (`DECLARED = false`) makes every error reply
 `Undeclared`, whatever the table says.
 
@@ -375,8 +390,15 @@ constraints, such as `minLength`, `pattern`, or `maximum`, are not checked.
 The OpenAPI importer discards them, and a definition's `Schema` carries only
 a type name, so no generated type knows them.
 
-## Planned
+## What generated code emits
 
-The runtime pieces above are in place; the generator emitting them is
-**planned**. Generated endpoints still use the four buffering codecs, the
-default error table, and `NoDeclaredError`.
+The generator emits these pieces from the definition: the stream codecs and
+end markers, the multi-shape enum with its `Alternatives` routes, the `ERRORS`
+table, the `ErrorBody<{Api}Api>` impls, and GraphQL operation requests (see
+[Generated success and failure types](../responses-and-errors.md#generated-success-and-failure-types)).
+An endpoint that declares one plain shape and no errors keeps a buffering
+codec, the default error table, and `NoDeclaredError`.
+
+Storing several success shapes and streams in a definition is **planned**, so
+today every shipped endpoint is in that last case; a streaming endpoint is
+still declared binary and framed by the caller until its definition migrates.

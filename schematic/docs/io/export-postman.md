@@ -160,6 +160,7 @@ has no field for. Each line appears only when it applies:
 
 | Line | When |
 | --- | --- |
+| ``Response content type: `…`.`` | the endpoint's first success shape declares a content type or is a stream (`text/event-stream`, `application/x-ndjson`, or the declared type); a plain JSON, text, binary, or empty shape adds no line |
 | `Deprecated.` | the endpoint is deprecated |
 | `Deprecated parameters: a, b.` | any path, query, header, or cookie parameter is deprecated |
 | ``Rate limit headers: limit `…`, remaining `…`, reset `…` (unit), retry after `…`.`` | the endpoint has an effective rate limit (its own, else the API's) |
@@ -180,6 +181,13 @@ endpoint whose JSON body or response names a composed component (see
 [typed registration](../typed-registration.md)) reports a
 `schema-composition` warning; the collection is still written, the request
 keeps its existing example, and no example payload is invented.
+
+## GraphQL Operations
+
+A collection does not carry an API's GraphQL operations yet. Each one is
+reported as the warning
+`<API> operation <id>: GraphQL operation skipped in Postman output`, and the
+collection is still written without it.
 
 ## Grouped Collections
 

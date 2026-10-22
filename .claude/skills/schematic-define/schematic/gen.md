@@ -301,10 +301,18 @@ $ schematic-gen validate --api example
 | `import_pipeline.rs` | `run_import()` | OpenAPI import orchestration |
 | `model_gen.rs` | `generate_models()` | Generate types.rs from ModelCatalog |
 
-`codegen/client/`, `codegen/error.rs`, `codegen/request_enum.rs`,
-`codegen/variant.rs`, and `api_struct/{constructors,fields,request_method,variant}.rs`
-are still on disk but no `mod` declares them, so they are not compiled; edits
-there change nothing.
+`codegen/responses.rs` turns `Endpoint::success_shapes()` and
+`RestApi::effective_errors` into each `EndpointSpec`'s `Success`/`Decoder`/
+`Failure`, the `{Id}Response`/`{Id}Error` enums, stream end markers, and
+`ERRORS`; `api_error_body_impls` emits one `ErrorBody<{Api}Api>` per JSON
+error type per API module (the trait takes the API marker because registered
+types live in `schematic-definitions`, outside the orphan rule's reach).
+`codegen/graphql.rs` emits one request struct per GraphQL operation
+(`ADDRESS = Address::GraphQl`) and the definition's `.graphql(&[..])` rules.
+
+`api_struct/{constructors,fields,request_method,variant}.rs` are still on disk
+but no `mod` declares them, so they are not compiled; edits there change
+nothing.
 
 ## Library API
 
