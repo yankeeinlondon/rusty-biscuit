@@ -20,7 +20,9 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 status: draft-spec
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: "2026-10-22"
 review_iterations: 0
 implemented: false
 related:
@@ -39,12 +41,17 @@ still looks for processes using the checkout.
 Success means:
 
 - One `wt remove` of a 500,000-entry checkout, with nothing else wrong,
-  removes the checkout, its registration, and its branch. No retry.
+  removes the checkout and its registration, then performs the approved
+  branch actions. A branch approved for deletion is deleted. No retry.
 - A removal can no longer stop halfway because of the journal's size. When
-  the journal cannot fit on disk, `wt remove` refuses **before the move**,
-  so nothing has changed.
-- On such a checkout, the usage check enumerates processes and inspects
-  their open handles and working directories before anything is moved.
+  a free-space reading shows that the journal cannot fit, `wt remove`
+  refuses **before the move**, leaving the checkout, registration, and branch
+  intact. This check does not reserve space or prevent later disk-full errors.
+- On such a checkout, the usage check reuses the captured inventory instead
+  of spending its budget walking the tree again. It spends the remaining
+  budget on the process checks supported by the host. Coverage still records
+  permissions, unsupported mechanisms, and unfinished inspection; complete
+  discovery is not guaranteed.
 
 ## What happened
 
@@ -116,9 +123,11 @@ built checkout exceeds it. A retry archives the journal and starts a new one
 with a fresh 64 MiB, so every removal finishes eventually. Each attempt costs
 the user a run, a long error message, and a half-removed checkout in between.
 
-The limit protects nothing that the inventory does not already bound. A
-batch may plan only inventory entries, and each entry is deleted once, so
+The deletion engine plans each inventory entry at most once per attempt.
+The writer validates membership and duplicates within a batch, but does not
+itself enforce uniqueness across batches. Given the engine's invariant,
 the largest journal an attempt can write is computable before it starts.
+Keep that invariant explicit in the shared batch planner and its tests.
 
 ### The usage check spends its whole budget walking the tree
 
@@ -151,21 +160,36 @@ usage check.
 ### 1. Size the journal limit from the attempt's inventory
 
 Replace the fixed `DEFAULT_JOURNAL_LIMIT` with a limit computed when an
-attempt's journal is started (`RecoveryStore::begin`, and the retry path that
-reopens a journal). The limit is the batch-line bytes the attempt would need
-if it deleted every entry of its inventory:
+attempt's journal is started (the `worktree` library's
+[RecoveryStore::begin and reopen](../../lib/src/remove/recovery/store.rs),
+which create the initial journal and its retry replacement). The limit is
+the batch-line bytes the attempt would need if it deleted every entry of its
+inventory:
 
-- Group the inventory's entries the way the deletion engine batches them:
-  one directory per batch, at most `MAX_BATCH_ENTRIES` per batch.
+- Share the batch-planning logic with the `worktree` library's
+  [deletion engine](../../lib/src/remove/observation/deletion.rs): ordinary
+  content first, `.git` entries last; within each group, deepest entries
+  first, then directory order, then chunks of at most `MAX_BATCH_ENTRIES`.
+  Keep the existing entry order within each directory. Grouping by parent
+  alone would incorrectly merge the root's content and `.git` batches.
 - For each batch, add the intent line's bytes and the worst-case results
   line's bytes. Use the same serializer and the same worst-case state that
   `begin_batch` reserves today (`ExternallyAbsent`). Do not use a
   per-entry estimate.
-- Batch numbers grow with each batch, so compute their digits from the
-  attempt's batch count, not from a constant.
+- Serialize each batch with its actual consecutive number starting at one,
+  including the newline. Use checked arithmetic for lengths and totals;
+  overflow refuses before the move or before resumed deletion.
+- Count serialized bytes without retaining a second full journal in memory.
+  A counting writer or one temporary batch buffer is sufficient. This pass
+  uses inventory data only: no filesystem walk or content reads.
 
 A retry sizes its limit from that attempt's fresh inventory of surviving
 entries, as it already captures one.
+
+The bound is the sum of worst-case reservations, not the exact byte count
+of an all-`Deleted` journal: `ExternallyAbsent` serializes longer. The
+checkout root itself is not a journaled inventory entry. A shorter result
+line or an early stop may leave unused capacity.
 
 Keep `LimitReached` and the reserve check in `begin_batch`. With a computed
 bound they can only fire because of a defect in `wt` (for example, a batch
@@ -179,23 +203,51 @@ as they do today.
 
 ### 2. Refuse before the move when the journal cannot fit
 
-The journal lives in the repository's `.git` directory, possibly on a
-different volume from the checkout. Before `RecoveryStore::begin` writes
-anything, compare the free space of the volume holding the recovery store
-with the journal's expected total: header, inventory line, and the computed
-batch bound. Get free space through Sniff (its storage discovery in
-`sniff/lib/src/hardware/storage.rs` already reads it), never from a `df`
-process.
+The journal lives under the repository's common Git directory, possibly on a
+different volume from the checkout. Before publishing a new attempt, compare
+available space on the recovery store's filesystem with the additional bytes
+that attempt can require:
 
-If it does not fit, refuse with a `Refusal`: nothing is moved, and the exit
-class is the one other pre-move refusals already use. The planner picks the
-specific class from the existing `Refusal` mapping. Name the volume, the space needed, and the
-space free. A short free-space read is not a guarantee: another writer can
-still fill the disk. A later write error keeps today's behavior: the journal
-is poisoned and deletion stops with every confirmed result kept.
+- First attempt: journal header, inventory line, computed batch bound, and
+  the initial recovery record.
+- Retry: the new journal's header, fresh inventory line, and batch bound,
+  plus the previous journal's full length if a new archive copy is needed.
+  Existing archives already consume disk space and are not counted twice.
+  Check before archiving or creating the replacement; preserve the current
+  journal and all earlier evidence on refusal.
+
+Use the same serialization for counting and writing. This is a check of the
+known journal and initial record writes, not a promise that future report or
+filesystem metadata writes will fit. Do not credit space deletion may free:
+the checkout may be on another filesystem, and hard links may retain blocks.
+
+**Reader's note:** Sniff's existing storage inventory enumerates devices and,
+on macOS, probes device kinds with `diskutil`. That is unnecessary for one
+free-space reading and its filtered mount list is not a reliable way to select
+the filesystem containing an arbitrary path. Add a focused path-based
+available-space query to Sniff instead, using native filesystem APIs and no
+subprocess or full host discovery. Resolve the actual recovery-store path,
+including ancestor aliases; do not select a volume by string prefix. Report
+space available to the calling user, rather than total unallocated space.
+
+Insufficient space or an unavailable space reading is an environmental block
+(exit 4), represented through the existing storage-refusal path. Name the
+recovery-store path, the space needed, and the space available; for a failed
+reading, state why availability could not be established. On a first attempt,
+no operation directory is published and the checkout, registration, and branch
+remain intact. Opening the private store and taking its lock may already have
+created bookkeeping; do not claim the entire store is unchanged. On retry,
+the checkout remains at its existing moved path and no further deletion occurs.
+
+A free-space reading is not a reservation: another writer, quota, or allocation
+failure can still prevent a later write. Preserve today's durable intent and
+results ordering, poison the writer on a write failure, and stop deletion.
+Only durably recorded results are confirmed; a torn results line retains the
+existing uncertain-entry recovery behavior. No preallocation is required.
 
 For scale, `feat/osc-9-4-protocol`'s inventory line was 167 MB and its full
-batch bound would be about 218 MB.
+batch bound would be about 218 MB. These measurements already establish why
+64 MiB is insufficient; no performance spike is needed.
 
 ### 3. Let any caller supply the tree index Sniff would walk
 
@@ -206,43 +258,94 @@ is using it.
 
 So this is a general Sniff capability, not a `wt`-specific hook:
 
-- Sniff gains a public tree index type that any caller can build: the
+- The `sniff` library exposes a public form of its existing
+  [TreeIndex](../../../sniff/lib/src/filesystem/query/tree.rs), which maps
+  file identities to all their in-scope paths. Any caller can build it: the
   target root's identity plus the relative path, kind, and identity of each
   entry beneath it. It is built from values the caller already has, through a
   small constructor or builder, with no dependency on any caller's types.
 - `PathUsageOptions` gains an option that takes this index. When it is set,
-  `query_path_usage` does not walk the tree, and the whole budget goes to
-  process enumeration and inspection.
+  `query_path_usage` does not walk the tree. Root verification and final
+  consistency checks remain within the budget, and the time saved is
+  available to process enumeration and inspection. Build and validate the
+  reusable index before starting the query; do not replace the walk with
+  an equally large per-query conversion or clone.
 - `wt` converts the `DeletionInventory` it captured in step 2 into that
-  index and passes it to the step 3 check. This makes the check's coverage on
-  a built checkout the same as on a small one, with no change to the budget
-  or to the removal's usage policy.
+  index and passes it to the step 3 check, and does the same with the fresh
+  surviving inventory on a quarantined retry. The Windows Search recheck
+  reuses that attempt's index and still verifies the root on each query.
+  The budget and removal policy do not change.
 
 Requirements on the Sniff side:
 
 - The index must describe the same root Sniff verifies. Sniff still resolves
   and verifies the root itself, and it refuses an index whose root identity
-  differs, as a `PathUsageError`.
+  differs, as an invalid-option `PathUsageError`. Constructors reject
+  absolute paths, parent traversal, duplicate relative paths, and descendants
+  below a supplied link. Preserve native names without lossy conversion,
+  every hard-link alias, and link identities without following targets.
+  A supplied descendant index is accepted only for a recursive directory
+  query; reject combinations with `target_only` or a file root.
 - Matching handles against a supplied index must behave exactly as against a
   walked one. Sniff's own walk produces the same type, so there is one index
-  representation and one matcher.
+  representation and one matcher. Preserve the regular-file/directory probe
+  entries used by the Windows file-side holder scan; never probe supplied
+  links as their targets. Supplying an index does not eliminate that scan,
+  which can itself exhaust the budget on a large checkout. Windows working
+  directory discovery remains unsupported.
 - The report records where the index came from (`walked` or `supplied`).
   A supplied index is reported as the caller's coverage, so a partial or stale
   index cannot pass as a complete Sniff walk. A caller may mark its index
-  partial, and Sniff reports that coverage as partial.
+  partial, and Sniff reports that coverage as partial. Provenance and
+  completeness are separate: a caller-declared complete capture may have
+  complete tree coverage, but Sniff must not claim to have verified its
+  descendants. Keep process-mechanism coverage and outcome library-owned.
 - The index describes the tree when the caller captured it, so entries
   created later are not in it. The rustdoc and Sniff's docs state this. A
   caller like `wt`, which watches the tree from before the capture, closes
-  that gap itself; other callers must decide whether they need to.
+  that gap for deletion through its existing event drain and inventory
+  confirmation; it does not make the usage query atomic. Keep those checks
+  after index construction and after journal sizing. Other callers must
+  decide how to handle concurrent changes.
+
+After-stop diagnostic queries keep walking the current leftovers: the
+pre-deletion index must not be reused as if it described the remaining tree.
+Extend the `worktree` library's [UsageSource](../../lib/src/remove/usage.rs),
+the injected source of process reports, so tests can verify that preflight
+receives an index while diagnostics do not. Keep registered observer-handle
+exclusions and the Windows Search recheck policy intact.
 
 The Sniff change follows that package area's own conventions and docs, and
 lands with its own tests in this fix.
+
+### Serialized report compatibility
+
+The supplied-index provenance changes Sniff's serialized usage-report shape.
+Increment its schema version and include an explicit unknown provenance when
+reading a report written before provenance existed; never infer `walked` from
+an absent field. Preserve the existing explicit-null convention for optional
+fields. Update Sniff's CLI JSON contract, schema fixtures, and round-trip tests.
+
+The `worktree` library embeds these reports in durable recovery reports.
+Increment its report version and retain support for previously accepted report
+versions, including version 4 and 5 pending removals. Old journals retain their
+current format and version; the computed limit is attempt-local and is not a
+new journal field. Test loading older reports and journals and then resuming
+with the newly sized journal. Older binaries need not read newly written
+reports; document that direction of compatibility.
 
 ### 4. Say a repeated discovery result once
 
 When the after-stop discovery summary for the moved directory says the same
 thing as the before-move summary, the stop message prints it once and says it
 applies to both paths. Different summaries are printed separately, as today.
+Compare the rendered coverage notes, not whole reports (timestamps and paths
+differ). Merge only the current attempt's preflight and moved-path diagnostic
+notes, and keep their before/after timing explicit: identical limitations do
+not mean the two queries were one observation. Do not merge earlier-attempt
+notes, failed-query messages, or holder evidence. Preserve all discovery runs
+in the saved report.
+
 This is a rendering change in the `worktree-cli` package's
 [recovery messages](../../cli/src/commands/remove/recovery.rs), using the
 existing `biscuit-terminal` components.
@@ -255,42 +358,75 @@ existing `biscuit-terminal` components.
   not needed to fix the defect.
 - Reducing `report.json`'s size. It was 107 MB for `feat/modern-config`.
   Reports already truncate deleted-entry listings (`deleted_omitted`).
+- Guaranteeing complete process discovery, or adding support for mechanisms
+  an OS currently cannot inspect.
 - Changing Sniff's default budget, or the removal policy that a check with
   partial coverage still continues.
 - Speeding up deletion.
 
 ## Verification
 
-Use nextest through each package area's `just test`. Everything below is L1.
-No test opens or focuses a terminal or browser window.
+Use nextest through each package area's `just test`, following the Test
+Toolkit and the repository's `rust-testing` skill. The automated checks below
+are L1 and must stay within its five-second per-test limit. No test opens or
+focuses a terminal or browser window. Use synthetic inventories and counting
+sinks for volume; small real trees prove lifecycle wiring.
 
-- **Computed bound is exact (worktree, L1):** for inventories with short,
-  long, and non-UTF-8 paths (Unix bytes and Windows UTF-16, through
-  `NativeString`), many small directories, and one directory with more than
-  `MAX_BATCH_ENTRIES` entries, deleting every entry fits the computed limit.
-  Deleting with a limit one byte smaller fails with `LimitReached`.
-- **Large-checkout removal (worktree, L1):** a generated checkout whose batch
-  lines exceed 64 MiB is removed in one `remove_checkout`, with the injected
-  observer and usage source. Generate long paths rather than 500,000 files
-  so the test stays fast. A file count is not what triggered the defect;
-  bytes per entry were.
-- **Large-checkout resume (worktree, L1):** stop such a removal partway
-  (injected fault), then resume without `discard_files`. No consent is asked
-  for the tracked files the first attempt deleted. This is the regression for
-  the stale-binary symptom.
-- **Free-space refusal (worktree, L1):** with an injected free-space reading
-  smaller than the expected journal, removal refuses before the move. The
-  checkout, its registration, and the store are unchanged.
-- **Supplied tree index (sniff, L1):** with a supplied index, the query does
-  not walk the tree, reports the index as `supplied`, and still finds a holder
-  of a file inside the target. An index for another root identity is refused.
-  An index marked partial is reported as partial coverage. A walked index and
-  a supplied index of the same tree give the same matches.
-- **Usage coverage (worktree, L1):** the step 3 query receives the step 2
-  inventory. A report from a large generated checkout has process
-  enumeration attempted.
-- **Stop message (worktree-cli, L1):** identical before and after discovery
-  summaries render once; different ones render twice.
+- **Computed bound (worktree):** cover short and long paths, JSON escaping,
+  native non-UTF-8 names, hard links, empty inventories, many small directories,
+  more than `MAX_BATCH_ENTRIES` siblings, `.git` separation, and batch-number
+  digit transitions. Exercise native filename encodings on their applicable
+  platforms; do not require APFS to create invalid UTF-8 names. All planned
+  batches fit the bound for every result state. Replaying all batches with
+  worst-case `ExternallyAbsent` results fits exactly; a one-byte-smaller limit
+  rejects the final reservation. An all-`Deleted` journal need not fill the
+  bound exactly. Checked-size overflow refuses without writes.
+- **Former size ceiling (worktree):** generate a synthetic inventory whose
+  serialized batch bound exceeds 64 MiB. Stream batches through a counting
+  sink rather than retaining the entire log or creating hundreds of thousands
+  of files. Assert there is no `LimitReached` and that emitted bytes stay
+  within the bound. Keep serialization work bounded enough for L1.
+- **Removal and resume wiring (worktree):** use small real checkouts with
+  injected observers and usage reports to prove the initial and resumed
+  writers receive their inventory-derived limits. Stop after a confirmed
+  tracked-file deletion, then resume without `discard_files`; the operation's
+  own confirmed deletions require no renewed consent. Leave `.git` until last
+  and perform only the approved branch actions.
+- **Free-space refusal (worktree):** inject insufficient and unavailable
+  readings. Before the first move, assert checkout, registration, and branch
+  are intact and no pending operation was published. On retry, assert no
+  further deletion, archive, or replacement was written and prior recovery
+  evidence still reads. Cover the previous journal's archive-copy cost and
+  the already-identical archive case. A sufficient reading followed by an
+  injected write failure still follows existing crash-recovery rules.
+- **Focused space query (sniff):** test path-to-filesystem resolution and
+  errors through the platform seams, including ancestor aliases and a store
+  on a different filesystem from the checkout. Prove it invokes neither
+  storage-device inventory nor subprocesses.
+- **Supplied tree index (sniff):** use the existing fake usage backend and
+  performance counters to prove zero tree walks and zero descendant identity
+  reads for index construction inside a query. Root verification remains.
+  Walked and supplied indexes of the same tree find the same holders and
+  hard-link aliases. Cover invalid paths, wrong root identity, partial
+  coverage, invalid target scope, links, and Windows probe-entry behavior.
+  Unsupported mechanisms remain unsupported; budget exhaustion during process
+  inspection remains visible.
+- **Usage handoff (worktree):** verify first-attempt preflight, resumed
+  preflight, and the Windows Search recheck receive the appropriate index.
+  Diagnostics use a fresh query of leftovers. With deterministic budget and
+  backend seams, process enumeration is reached without spending time on a
+  tree walk; do not assert full coverage from the live host's process load.
+- **Compatibility (sniff and worktree):** round-trip new provenance and load
+  old reports with unknown provenance; resume accepted old pending removals
+  without losing earlier reports or confirmed deletion results.
+- **Stop message (worktree-cli):** identical current-attempt coverage notes
+  render once with both time/path contexts; different notes render separately.
+  Earlier attempts, failed queries, and holder evidence are not collapsed.
+
+The 500,000-entry outcome is the real-checkout acceptance case when an
+appropriate disposable built checkout is available, not a mandatory huge
+filesystem fixture in every L1 run. The serializer regression above proves
+the former size ceiling without a timing benchmark or additional hosts.
 
 Cross-platform verification covers `worktree`, `worktree-cli`, and `sniff` on
 macOS, Linux, native Windows, and WSL2 under the repository's existing CI and
@@ -301,14 +437,25 @@ evidence rules.
 - `worktree/docs/cli/remove.md`: the journal no longer limits a removal; the
   free-space refusal and its message; the usage check's coverage on large
   checkouts; one discovery summary when both match.
-- `sniff/docs/`: the tree index type, how a caller builds and supplies one,
+- `sniff/docs/topics/filesystem-query.md`: the tree index type, how a caller builds and supplies one,
   its root requirement, its point-in-time limit, and how the report marks
-  it. Lead with the use case: a caller that has already walked the tree.
+  it, including old-report compatibility and unchanged Windows limitations.
+  Lead with the use case: a caller that has already walked the tree.
+- Sniff's storage API docs: the focused available-space query, its error
+  behavior, and why a reading is not a reservation.
+- `worktree/README.md`: briefly mention support for built checkouts and link
+  to the removal topic; keep detailed rules in `docs/`.
 - `.claude/skills/worktree/remove.md` and `lifecycle.md`: the computed
   journal limit (replacing "the size limit counts batch lines only" as the
   whole story) and the inventory passed to the usage check.
 - `.claude/skills/sniff/`: when a library should supply its own index, so
   future callers that walk a tree first find the option.
+
+## Open Questions
+
+None remain from this review. The decisions above preserve the existing
+advisory usage policy and crash-recovery rules; implementation should not
+turn either into a new guarantee of complete discovery or reserved disk space.
 
 ## Decided Alternatives
 
