@@ -108,7 +108,7 @@ impl Fixture {
 }
 
 fn trigger(path_pattern: &str, payload: &str) -> String {
-    format!("kind: trigger-schema\nmatch:\n  $path: \"{path_pattern}\"\n$schema: {payload}\n")
+    format!("kind: schema-trigger\nmatch:\n  $path: \"{path_pattern}\"\n$schema: {payload}\n")
 }
 
 /// The properties of `document`'s effective schema with trigger discovery in
@@ -470,7 +470,7 @@ fn forbidden_path_prefixes_are_definition_errors_naming_the_pattern() {
 /// The trigger under test: one arm whose only condition is `$path`. Each row
 /// replaces `$PATH_LINE` with one shape of the field.
 const PATH_TRIGGER: &str =
-    "kind: trigger-schema\nmatch:\n$PATH_LINE\n$schema: payload.yaml\n";
+    "kind: schema-trigger\nmatch:\n$PATH_LINE\n$schema: payload.yaml\n";
 
 #[derive(Debug)]
 enum Outcome {
@@ -538,7 +538,7 @@ fn path_field_input_matrix() {
     let trailing: &[(&str, &str, Outcome)] = &[
         (
             "second document",
-            "---\nkind: trigger-schema\nmatch:\n  $path: \"^other/**\"\n$schema: payload.yaml\n",
+            "---\nkind: schema-trigger\nmatch:\n  $path: \"^other/**\"\n$schema: payload.yaml\n",
             Outcome::LoadError(&["more than one document"]),
         ),
         ("invalid trailing content", "extra: [unclosed\n", Outcome::LoadError(&["not valid YAML", "line 5"])),
@@ -1045,7 +1045,7 @@ fn an_unparseable_claimed_schema_root_file_fails_discovery_with_its_yaml_locatio
     let fixture = Fixture::new();
     let schemas = fixture.repo().join("schemas");
     let broken = schemas.join("broken.yaml");
-    write(&broken, "kind: trigger-schema\nmatch:\n  prompt: string(required)\nnotes: a: b\n");
+    write(&broken, "kind: schema-trigger\nmatch:\n  prompt: string(required)\nnotes: a: b\n");
     write(&schemas.join("docs.trigger.yaml"), &trigger("^docs/**", "payload.yaml"));
     write(&schemas.join("payload.yaml"), "$schema:\n  from_trigger: string\n");
     let document = fixture.repo().join("docs/note.md");

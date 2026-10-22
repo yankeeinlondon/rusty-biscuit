@@ -44,7 +44,7 @@ fn init_repository(root: &Path) {
 }
 
 fn trigger(path_pattern: &str, payload: &str) -> String {
-    format!("kind: trigger-schema\nmatch:\n  $path: \"{path_pattern}\"\n$schema: {payload}\n")
+    format!("kind: schema-trigger\nmatch:\n  $path: \"{path_pattern}\"\n$schema: {payload}\n")
 }
 
 /// Writes a trigger named `{name}.trigger.yaml` with payload `{name}.yaml`

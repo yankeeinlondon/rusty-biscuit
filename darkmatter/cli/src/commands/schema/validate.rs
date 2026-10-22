@@ -60,7 +60,7 @@ pub fn run_validate(
     no_baseline_schema: bool,
     format: SchemaValidateFormat,
     quiet: bool,
-    no_trigger_schemas: bool,
+    no_schema_triggers: bool,
     request: &MdRequest,
 ) -> Result<()> {
     let terminal = Terminal::default();
@@ -95,7 +95,7 @@ pub fn run_validate(
     for file in &files {
         let (outcome, document) = match open_argument(file, request) {
             Ok(opened) => {
-                let outcome = validate_one(&api, &opened, &assignments, no_trigger_schemas, request);
+                let outcome = validate_one(&api, &opened, &assignments, no_schema_triggers, request);
                 (outcome, Some(opened.into_path()))
             }
             Err(err) => (FileOutcome::Unopened(err), None),
@@ -194,7 +194,7 @@ fn validate_one(
     api: &DarkmatterSchemas,
     opened: &OpenedArgument,
     assignments: &[Assignment],
-    no_trigger_schemas: bool,
+    no_schema_triggers: bool,
     request: &MdRequest,
 ) -> FileOutcome {
     // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
@@ -215,7 +215,7 @@ fn validate_one(
     };
     let in_repository = document_context.repository_root().is_some();
     let api = api.clone().with_file_resolution_context(document_context);
-    let api = if in_repository && !no_trigger_schemas {
+    let api = if in_repository && !no_schema_triggers {
         match api.with_trigger_discovery() {
             Ok(api) => api,
             Err(err) => return FileOutcome::SchemaError(Box::new(err)),

@@ -940,6 +940,7 @@ fn resolve_standalone_schema(
 /// virtual path inside the repository root, a whole-file reference or
 /// root-union document, or an `example(...)` constraint (which would name a
 /// file on disk).
+#[cfg(test)]
 pub(crate) fn prepare_embedded_schema(
     path: &str,
     documents: &[EmbeddedDocument<'_>],

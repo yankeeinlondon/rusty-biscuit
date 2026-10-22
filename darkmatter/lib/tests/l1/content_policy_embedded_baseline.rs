@@ -58,7 +58,7 @@ fn kind_name(kind: &ValidationProblemKind) -> &'static str {
 
 #[test]
 fn the_runtime_baseline_declares_the_policy_list() {
-    let shipped = include_str!("../../../docs/schemas/darkmatter.yaml");
+    let shipped = include_str!("../../../schemas/partials/fm.yaml");
     assert_eq!(shipped.matches(BASELINE_DECLARATION_LINE).count(), 1);
 }
 
@@ -270,7 +270,7 @@ fn triggers_and_documents_override_the_embedded_declaration_without_name_collisi
     std::fs::write(root.join("schemas/same-names.yaml"), SAME_NAMED_TYPES).expect("types");
     std::fs::write(
         root.join("schemas/review.trigger.yaml"),
-        "kind: trigger-schema\nmatch:\n  review: string(required)\n$schema: review.yaml\n",
+        "kind: schema-trigger\nmatch:\n  review: string(required)\n$schema: review.yaml\n",
     )
     .expect("trigger");
     std::fs::write(

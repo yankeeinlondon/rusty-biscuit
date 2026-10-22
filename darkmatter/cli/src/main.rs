@@ -132,9 +132,33 @@ fn error_chain_prose(e: &color_eyre::Report) -> Prose {
     Prose::new(msg).with_line_breaks(LineBreaks::Hard)
 }
 
+/// Flags renamed with no alias, each with its replacement.
+const RENAMED_FLAGS: &[(&str, &str)] = &[("--no-trigger-schemas", "--no-schema-triggers")];
+
+/// Exits with a usage error when an argument before `--` is a renamed flag.
+///
+/// The check runs before parsing instead of declaring the old flag as a
+/// hidden argument, because dynamic completion still offers a hidden flag
+/// whose prefix is typed; completions must list only the replacement.
+fn reject_renamed_flags(args: impl Iterator<Item = std::ffi::OsString>) {
+    for arg in args.skip(1).take_while(|arg| arg != "--") {
+        let Some(arg) = arg.to_str() else { continue };
+        let flag = arg.split_once('=').map_or(arg, |(flag, _)| flag);
+        if let Some((_, replacement)) = RENAMED_FLAGS.iter().find(|(renamed, _)| *renamed == flag) {
+            Cli::command()
+                .error(
+                    clap::error::ErrorKind::UnknownArgument,
+                    format!("`{flag}` was renamed with no alias; use `{replacement}`"),
+                )
+                .exit();
+        }
+    }
+}
+
 fn run() -> Result<()> {
     color_eyre::install()?;
 
+    reject_renamed_flags(std::env::args_os());
     let cli = Cli::parse();
     init_tracing(cli.debug_level);
 

@@ -266,7 +266,7 @@ md clean README.md --json
 md clean README.md --schema docs.schema.yaml
 md clean README.md --baseline-schema project-baseline.yaml
 md clean README.md --no-baseline-schema
-md clean README.md --no-trigger-schemas
+md clean README.md --no-schema-triggers
 
 # Save cleaned file in place and report delta-style changes
 md clean README.md --save
@@ -299,7 +299,7 @@ findings are rendered as suggestions on stderr and still exit `0`; there is no
 
 Schema precedence is baseline → matching repository triggers → document
 `$schema`. `--baseline-schema` replaces the default Darkmatter baseline,
-`--no-baseline-schema` removes it, `--no-trigger-schemas` disables trigger
+`--no-baseline-schema` removes it, `--no-schema-triggers` disables trigger
 discovery, and `--schema` replaces the document `$schema` layer. Stdin has no
 document path, so trigger discovery is always inert for stdin, while explicit
 schema and baseline flags remain active.

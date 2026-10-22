@@ -40,19 +40,33 @@ pub const RULE_SUGGESTIONS: [&str; 7] = [
     "FileChanged(src/config.rs, @config_fingerprint)",
 ];
 
-/// The baseline declaration the runtime baseline gains, with its import
-/// written relative to `darkmatter/docs/schemas/darkmatter.yaml`.
+/// The baseline declaration the `fm` partial carries, with its import
+/// written relative to `darkmatter/schemas/partials/fm.yaml`.
 pub const BASELINE_DECLARATION_LINE: &str =
-    "    content_policy: \"policy[](min(1))@../../../content-policy/schemas/content-policy.yaml\"\n";
+    "        content_policy: \"policy[](min(1))@../../../content-policy/schemas/content-policy.yaml\"\n";
 
-/// Where the runtime baseline lives, relative to the repository root.
-pub const BASELINE_PATH: &str = "darkmatter/docs/schemas/darkmatter.yaml";
+/// Where the runtime baseline's `fm` definition lives, relative to the
+/// repository root.
+pub const BASELINE_PATH: &str = "darkmatter/schemas/partials/fm.yaml";
+
+/// Where Darkmatter's global catalog lives, relative to the repository root.
+/// The runtime baseline is its resolved `fm` declaration.
+pub const CATALOG_PATH: &str = "darkmatter/schemas/darkmatter.yaml";
+
+/// The catalog's other partials, relative to the repository root, in the
+/// order a caller passes their texts.
+pub const OTHER_PARTIAL_PATHS: [&str; 4] = [
+    "darkmatter/schemas/partials/style.yaml",
+    "darkmatter/schemas/partials/context-variables.yaml",
+    "darkmatter/schemas/partials/error.yaml",
+    "darkmatter/schemas/partials/timing.yaml",
+];
 
 /// Where Content Policy's editor schema lives, relative to the repository
 /// root.
 pub const POLICY_SCHEMA_PATH: &str = "content-policy/schemas/content-policy.yaml";
 
-/// The runtime baseline text, after asserting it carries
+/// The `fm` partial's text, after asserting it carries
 /// [`BASELINE_DECLARATION_LINE`] exactly once. The schema mutations edit that
 /// line, so a baseline that moved or respelled it fails here first.
 pub fn baseline_with_policy(shipped_baseline: &str) -> String {
@@ -554,7 +568,9 @@ pub const LOAD_FAILURES: &[(&str, &str)] = &[
 /// Which schema file a mutation edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchemaFile {
-    /// The runtime baseline, after [`baseline_with_policy`].
+    /// Darkmatter's global catalog, whose `fm` declaration is the baseline.
+    Catalog,
+    /// The baseline's `fm` partial, after [`baseline_with_policy`].
     Baseline,
     /// Content Policy's shipped editor schema.
     Policy,
@@ -660,7 +676,7 @@ const fn probed(
 }
 
 use SchemaExpect::{Control, PrepareFails, RejectsValid, Weakened};
-use SchemaFile::{Baseline, Policy};
+use SchemaFile::{Baseline, Catalog, Policy};
 
 const DECLARATION: &str = BASELINE_DECLARATION_LINE;
 const SHORT_FORM: &str = "  short_form:\n";
@@ -672,25 +688,26 @@ const ACTION_LINE: &str = "    action: \"enum(refresh, archive, remove; required
 /// Every schema mutation, grouped by column. Each column's first row is its
 /// unedited control.
 pub const SCHEMA_MUTATIONS: &[SchemaMutation] = &[
-    // ── baseline `$schema` envelope ──
-    mutation("$schema", "control", Baseline, Edit::Append(""), Control),
-    mutation("$schema", "absent", Baseline, Edit::Replace("\n$schema:\n", "\nnot_schema:\n"), PrepareFails),
-    mutation("$schema", "null", Baseline, Edit::Whole("$schema: null\n"), PrepareFails),
-    mutation("$schema", "empty-value null", Baseline, Edit::Whole("$schema:\n"), PrepareFails),
-    mutation("$schema", "wrong type", Baseline, Edit::Whole("$schema: 5\n"), PrepareFails),
+    // ── catalog `$schema` envelope ──
+    mutation("$schema", "control", Catalog, Edit::Append(""), Control),
+    mutation("$schema", "absent", Catalog, Edit::Replace("\n$schema:\n", "\nnot_schema:\n"), PrepareFails),
+    mutation("$schema", "null", Catalog, Edit::Whole("kind: schema\n$schema: null\n"), PrepareFails),
+    mutation("$schema", "empty-value null", Catalog, Edit::Whole("kind: schema\n$schema:\n"), PrepareFails),
+    mutation("$schema", "wrong type", Catalog, Edit::Whole("kind: schema\n$schema: 5\n"), PrepareFails),
     mutation(
         "$schema",
         "one wrong element",
-        Baseline,
-        Edit::Whole("$schema:\n  - {title: string}\n  - 5\n"),
+        Catalog,
+        Edit::Whole("kind: schema\n$schema:\n  - {title: string}\n  - 5\n"),
         PrepareFails,
     ),
-    mutation("$schema", "every element wrong", Baseline, Edit::Whole("$schema: [1, 2]\n"), PrepareFails),
-    mutation("$schema", "empty mapping", Baseline, Edit::Whole("$schema: {}\n"), Weakened),
-    mutation("$schema", "empty union", Baseline, Edit::Whole("$schema: []\n"), PrepareFails),
-    mutation("$schema", "duplicate key", Baseline, Edit::Append("$schema:\n    title: string\n"), PrepareFails),
-    mutation("$schema", "trailing document", Baseline, Edit::Append("---\nextra: 1\n"), PrepareFails),
-    mutation("$schema", "invalid YAML", Baseline, Edit::Append("  : [\n"), PrepareFails),
+    mutation("$schema", "every element wrong", Catalog, Edit::Whole("kind: schema\n$schema: [1, 2]\n"), PrepareFails),
+    // The catalog declares no globals: a load failure, not an empty baseline.
+    mutation("$schema", "empty mapping", Catalog, Edit::Whole("kind: schema\n$schema: {}\n"), PrepareFails),
+    mutation("$schema", "empty union", Catalog, Edit::Whole("kind: schema\n$schema: []\n"), PrepareFails),
+    mutation("$schema", "duplicate key", Catalog, Edit::Append("$schema:\n    title: string\n"), PrepareFails),
+    mutation("$schema", "trailing document", Catalog, Edit::Append("---\nextra: 1\n"), PrepareFails),
+    mutation("$schema", "invalid YAML", Catalog, Edit::Append("  : [\n"), PrepareFails),
     // ── policy `kind` ──
     mutation("kind", "control", Policy, Edit::Append(""), Control),
     mutation("kind", "absent", Policy, Edit::Replace("\nkind: schema\n", "\n"), PrepareFails),
@@ -749,28 +766,28 @@ pub const SCHEMA_MUTATIONS: &[SchemaMutation] = &[
         "$schema.content_policy",
         "null",
         Baseline,
-        Edit::Replace(DECLARATION, "    content_policy: null\n"),
+        Edit::Replace(DECLARATION, "        content_policy: null\n"),
         RejectsValid,
     ),
     mutation(
         "$schema.content_policy",
         "empty-value null",
         Baseline,
-        Edit::Replace(DECLARATION, "    content_policy:\n"),
+        Edit::Replace(DECLARATION, "        content_policy:\n"),
         RejectsValid,
     ),
     mutation(
         "$schema.content_policy",
         "wrong type",
         Baseline,
-        Edit::Replace(DECLARATION, "    content_policy: 5\n"),
+        Edit::Replace(DECLARATION, "        content_policy: 5\n"),
         PrepareFails,
     ),
     mutation(
         "$schema.content_policy",
         "wrong type bool",
         Baseline,
-        Edit::Replace(DECLARATION, "    content_policy: true\n"),
+        Edit::Replace(DECLARATION, "        content_policy: true\n"),
         PrepareFails,
     ),
     mutation(
@@ -779,7 +796,7 @@ pub const SCHEMA_MUTATIONS: &[SchemaMutation] = &[
         Baseline,
         Edit::Replace(
             DECLARATION,
-            "    content_policy: [\"policy[](min(1))@../../../content-policy/schemas/content-policy.yaml\", 5]\n",
+            "        content_policy: [\"policy[](min(1))@../../../content-policy/schemas/content-policy.yaml\", 5]\n",
         ),
         PrepareFails,
     ),
@@ -787,28 +804,28 @@ pub const SCHEMA_MUTATIONS: &[SchemaMutation] = &[
         "$schema.content_policy",
         "every element wrong",
         Baseline,
-        Edit::Replace(DECLARATION, "    content_policy: [1, 2]\n"),
+        Edit::Replace(DECLARATION, "        content_policy: [1, 2]\n"),
         PrepareFails,
     ),
     mutation(
         "$schema.content_policy",
         "empty string",
         Baseline,
-        Edit::Replace(DECLARATION, "    content_policy: ''\n"),
+        Edit::Replace(DECLARATION, "        content_policy: ''\n"),
         PrepareFails,
     ),
     mutation(
         "$schema.content_policy",
         "empty list",
         Baseline,
-        Edit::Replace(DECLARATION, "    content_policy: []\n"),
+        Edit::Replace(DECLARATION, "        content_policy: []\n"),
         PrepareFails,
     ),
     mutation(
         "$schema.content_policy",
         "empty object",
         Baseline,
-        Edit::Replace(DECLARATION, "    content_policy: {}\n"),
+        Edit::Replace(DECLARATION, "        content_policy: {}\n"),
         RejectsValid,
     ),
     mutation(
@@ -816,8 +833,8 @@ pub const SCHEMA_MUTATIONS: &[SchemaMutation] = &[
         "duplicate key",
         Baseline,
         Edit::Replace(DECLARATION, concat!(
-            "    content_policy: \"policy[](min(1))@../../../content-policy/schemas/content-policy.yaml\"\n",
-            "    content_policy: \"policy[](min(1))@../../../content-policy/schemas/content-policy.yaml\"\n",
+            "        content_policy: \"policy[](min(1))@../../../content-policy/schemas/content-policy.yaml\"\n",
+            "        content_policy: \"policy[](min(1))@../../../content-policy/schemas/content-policy.yaml\"\n",
         )),
         PrepareFails,
     ),
@@ -827,7 +844,7 @@ pub const SCHEMA_MUTATIONS: &[SchemaMutation] = &[
         Baseline,
         Edit::Replace(
             DECLARATION,
-            "    content_policy: \"policy[](min(1)@../../../content-policy/schemas/content-policy.yaml\"\n",
+            "        content_policy: \"policy[](min(1)@../../../content-policy/schemas/content-policy.yaml\"\n",
         ),
         PrepareFails,
     ),
@@ -837,7 +854,7 @@ pub const SCHEMA_MUTATIONS: &[SchemaMutation] = &[
         Baseline,
         Edit::Replace(
             DECLARATION,
-            "    content_policy: \"polcy[](min(1))@../../../content-policy/schemas/content-policy.yaml\"\n",
+            "        content_policy: \"polcy[](min(1))@../../../content-policy/schemas/content-policy.yaml\"\n",
         ),
         PrepareFails,
     ),
@@ -847,7 +864,7 @@ pub const SCHEMA_MUTATIONS: &[SchemaMutation] = &[
         Baseline,
         Edit::Replace(
             DECLARATION,
-            "    content_policy: \"policy[](min(1))@../../content-policy/schemas/content-policy.yaml\"\n",
+            "        content_policy: \"policy[](min(1))@../../content-policy/schemas/content-policy.yaml\"\n",
         ),
         PrepareFails,
     ),
@@ -857,7 +874,7 @@ pub const SCHEMA_MUTATIONS: &[SchemaMutation] = &[
         Baseline,
         Edit::Replace(
             DECLARATION,
-            "    content_policy: \"policy[]@../../../content-policy/schemas/content-policy.yaml\"\n",
+            "        content_policy: \"policy[]@../../../content-policy/schemas/content-policy.yaml\"\n",
         ),
         Control,
         ("content_policy: []\n", Verdict::Accept),
@@ -868,7 +885,7 @@ pub const SCHEMA_MUTATIONS: &[SchemaMutation] = &[
         Baseline,
         Edit::Replace(
             DECLARATION,
-            "    content_policy: \"policy[](min(1))@../../../content-policy/schemas/content-policy.yaml\n",
+            "        content_policy: \"policy[](min(1))@../../../content-policy/schemas/content-policy.yaml\n",
         ),
         PrepareFails,
     ),

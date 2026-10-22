@@ -18,7 +18,7 @@ use dmls::work_counters::work_counts;
 use dmls::{StartupEvent, StartupPhase};
 use serde_json::{Value, json};
 
-const ENVELOPE: &str = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+const ENVELOPE: &str = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
 const PAYLOAD: &str = "$schema:\n  model: Fields@shared/types.yaml\n";
 const SHARED_FIELDS: &str = "$schema:\n  Fields: string\n";
 const NEARER_FIELDS: &str = "$schema:\n  Fields: number\n";

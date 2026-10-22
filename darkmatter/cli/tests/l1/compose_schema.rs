@@ -62,7 +62,7 @@ fn shipped_plan_prompt_anchors_caller_file_from_repository_root() {
             "prompts/plan.md",
             "spec=darkmatter/cli/tests/fixtures/shipped_plan_route/spec.md",
             "--no-baseline-schema",
-            "--no-trigger-schemas",
+            "--no-schema-triggers",
         ])
         .assert()
         .success()
@@ -87,7 +87,7 @@ fn shipped_plan_prompt_anchors_caller_file_from_package_area() {
             "../prompts/plan.md",
             "spec=cli/tests/fixtures/shipped_plan_route/spec.md",
             "--no-baseline-schema",
-            "--no-trigger-schemas",
+            "--no-schema-triggers",
         ])
         .assert()
         .success()
@@ -563,7 +563,7 @@ fn compose_without_an_effective_schema_does_not_synthesize_frontmatter() {
     let (_, fm) = composed_document(
         &process,
         &doc,
-        &["--no-baseline-schema", "--no-trigger-schemas"],
+        &["--no-baseline-schema", "--no-schema-triggers"],
     );
     assert_eq!(fm.len(), 1);
     assert_eq!(fm.get("existing"), Some(&serde_json::json!("value")));

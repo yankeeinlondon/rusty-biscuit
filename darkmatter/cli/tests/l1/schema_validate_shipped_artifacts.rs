@@ -179,7 +179,7 @@ fn each_migrated_trigger_selects_and_validates_its_target() {
     assert_cases(&process, &[], &cases, &documents);
 
     let untriggered: Vec<Case> = cases.iter().map(|(name, frontmatter, ..)| (*name, frontmatter.clone(), true, None)).collect();
-    assert_cases(&process, &["--no-trigger-schemas"], &untriggered, &documents);
+    assert_cases(&process, &["--no-schema-triggers"], &untriggered, &documents);
 }
 
 /// A `state: object(generated; required)` property: authored documents may
@@ -205,5 +205,5 @@ fn generated_required_object_state_stays_an_object() {
     ];
     let documents = write_cases(dir, &cases);
 
-    assert_cases(&process, &["--no-trigger-schemas"], &cases, &documents);
+    assert_cases(&process, &["--no-schema-triggers"], &cases, &documents);
 }

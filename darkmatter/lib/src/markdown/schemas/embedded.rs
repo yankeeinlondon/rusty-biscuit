@@ -1,9 +1,10 @@
 //! Schema documents compiled into the binary, addressed by repository-relative
 //! virtual paths.
 //!
-//! The runtime baseline imports Content Policy's editor schema with an
-//! ordinary relative reference. Resolving it from a table of embedded texts
-//! lets an installed binary prepare the baseline without a checkout. This is
+//! Darkmatter's global catalog imports its partials, and its `fm` partial
+//! imports Content Policy's editor schema, with ordinary relative references.
+//! Resolving them from a table of embedded texts lets an installed binary
+//! prepare the catalog and its baseline without a checkout. This is
 //! a source for shipped schemas only: user `$schema` references never consult
 //! it, and an embedded import never falls back to the disk or the network.
 //!
@@ -144,18 +145,36 @@ pub(crate) struct EmbeddedDocument<'a> {
     pub text: &'a str,
 }
 
-/// Virtual path of Darkmatter's runtime baseline.
-pub(crate) const BASELINE_PATH: &str = "darkmatter/docs/schemas/darkmatter.yaml";
-
 /// Virtual path of Content Policy's editor schema.
 pub(crate) const CONTENT_POLICY_PATH: &str = "content-policy/schemas/content-policy.yaml";
 
-/// The shipped documents: the runtime baseline and the Content Policy editor
-/// schema it imports.
+/// The shipped documents: Darkmatter's global catalog, its partials, and the
+/// Content Policy editor schema the `fm` partial imports. The runtime
+/// baseline is the catalog's resolved `fm` definition.
 pub(crate) const SHIPPED: &[EmbeddedDocument<'static>] = &[
     EmbeddedDocument {
-        path: BASELINE_PATH,
-        text: include_str!("../../../../docs/schemas/darkmatter.yaml"),
+        path: super::catalog::DARKMATTER_CATALOG_PATH,
+        text: include_str!("../../../../schemas/darkmatter.yaml"),
+    },
+    EmbeddedDocument {
+        path: "darkmatter/schemas/partials/fm.yaml",
+        text: include_str!("../../../../schemas/partials/fm.yaml"),
+    },
+    EmbeddedDocument {
+        path: "darkmatter/schemas/partials/style.yaml",
+        text: include_str!("../../../../schemas/partials/style.yaml"),
+    },
+    EmbeddedDocument {
+        path: "darkmatter/schemas/partials/context-variables.yaml",
+        text: include_str!("../../../../schemas/partials/context-variables.yaml"),
+    },
+    EmbeddedDocument {
+        path: "darkmatter/schemas/partials/error.yaml",
+        text: include_str!("../../../../schemas/partials/error.yaml"),
+    },
+    EmbeddedDocument {
+        path: "darkmatter/schemas/partials/timing.yaml",
+        text: include_str!("../../../../schemas/partials/timing.yaml"),
     },
     EmbeddedDocument {
         path: CONTENT_POLICY_PATH,
@@ -243,9 +262,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_baseline_import_climbs_three_directories_to_the_policy_schema() {
+    fn the_fm_partial_import_climbs_three_directories_to_the_policy_schema() {
         assert_eq!(
-            resolve_path(BASELINE_PATH, "../../../content-policy/schemas/content-policy.yaml"),
+            resolve_path("darkmatter/schemas/partials/fm.yaml", "../../../content-policy/schemas/content-policy.yaml"),
             Ok(CONTENT_POLICY_PATH.to_string())
         );
     }
@@ -348,10 +367,21 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_table_registers_exactly_the_baseline_and_policy_schema() {
+    fn the_shipped_table_registers_exactly_the_catalog_its_partials_and_policy_schema() {
         let paths: Vec<_> = SHIPPED.iter().map(|document| document.path).collect();
-        assert_eq!(paths, [BASELINE_PATH, CONTENT_POLICY_PATH]);
+        assert_eq!(
+            paths,
+            [
+                super::super::catalog::DARKMATTER_CATALOG_PATH,
+                "darkmatter/schemas/partials/fm.yaml",
+                "darkmatter/schemas/partials/style.yaml",
+                "darkmatter/schemas/partials/context-variables.yaml",
+                "darkmatter/schemas/partials/error.yaml",
+                "darkmatter/schemas/partials/timing.yaml",
+                CONTENT_POLICY_PATH,
+            ]
+        );
         assert_eq!(find(SHIPPED, CONTENT_POLICY_PATH).map(|d| d.text), Some(content_policy::EDITOR_SCHEMA));
-        assert!(find(SHIPPED, "darkmatter/schemas/darkmatter.yaml").is_none());
+        assert!(find(SHIPPED, "darkmatter/docs/schemas/darkmatter.yaml").is_none());
     }
 }

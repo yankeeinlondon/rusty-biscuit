@@ -53,6 +53,7 @@
 //! [`SchemaError`]: crate::markdown::schemas::errors::SchemaError
 
 pub mod about;
+pub mod catalog;
 mod advisory;
 pub mod clean;
 pub mod coerce;
@@ -141,8 +142,8 @@ pub use roots::{
 };
 pub use embedded::EmbeddedSchemaBundle;
 pub use triggers::{
-    LoadedTrigger, MatchArms, MatchExpr, PathGlobs, PathSubject, ShadowedFile, TriggerEnvelope,
-    TriggerArmTrace, TriggerEvaluation, TriggerRegistry, TriggerSource, TriggerTrace,
+    LoadedTrigger, MatchConditions, MatchExpr, PathGlobs, PathSubject, ShadowedFile, TriggerEnvelope,
+    TriggerConditionTrace, TriggerEvaluation, TriggerRegistry, TriggerSource, TriggerTrace,
     TriggerTraceEntry, evaluate_registry, matched_triggers, parse_trigger_envelope,
     parse_trigger_envelope_from_str, trace_registry, scan, scan_with_embedded,
 };
@@ -160,14 +161,12 @@ static BASELINE: std::sync::OnceLock<ShippedBaseline> = std::sync::OnceLock::new
 
 fn shipped_baseline() -> &'static ShippedBaseline {
     BASELINE.get_or_init(|| {
-        let resolved = resolve::prepare_embedded_schema(embedded::BASELINE_PATH, embedded::SHIPPED)
-            .unwrap_or_else(|error| panic!("the embedded baseline schema must prepare: {error}"));
-        ShippedBaseline {
-            schema: resolved
-                .simplified
-                .expect("an embedded schema is a SimplifiedSchema"),
-            json_schema: Arc::new(resolved.json_schema),
-        }
+        let schema = catalog::GlobalCatalog::darkmatter()
+            .baseline()
+            .expect("Darkmatter's catalog declares `fm`");
+        let json_schema = to_json_schema(&schema)
+            .unwrap_or_else(|error| panic!("the embedded baseline schema must lower: {error}"));
+        ShippedBaseline { schema, json_schema: Arc::new(json_schema) }
     })
 }
 
@@ -181,11 +180,12 @@ fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
 
 /// Returns the Darkmatter baseline frontmatter schema as a [`SimplifiedSchema`].
 ///
-/// The baseline is authored at `darkmatter/docs/schemas/darkmatter.yaml` and
-/// compiled into the library. Its imports, such as `content_policy`'s
-/// Content Policy types, resolve against the other compiled-in schema
-/// documents, never the disk, so the result carries every referenced
-/// definition inline. It is prepared at first call and cached.
+/// The baseline is the resolved `fm` definition of Darkmatter's global
+/// catalog, `darkmatter/schemas/darkmatter.yaml`, compiled into the library
+/// with its partials ([`catalog::GlobalCatalog::darkmatter`]). Its imports,
+/// such as `content_policy`'s Content Policy types, resolve against the other
+/// compiled-in schema documents, never the disk, so the result carries every
+/// referenced definition inline. It is prepared at first call and cached.
 ///
 /// ## Examples
 ///
@@ -244,7 +244,7 @@ pub fn darkmatter_base_json_schema_ref() -> &'static Value {
 /// Top-level entry point for the schemas subsystem.
 ///
 /// Holds the request's file-resolution context, optional baseline schema
-/// configuration, optional trigger-schema configuration, and the process-wide
+/// configuration, optional schema-trigger configuration, and the process-wide
 /// validator cache so repeated validations against the same effective schema
 /// reuse the compiled `jsonschema::Validator`.
 ///
@@ -382,15 +382,30 @@ impl DarkmatterSchemas {
     }
 
     /// Loads a baseline schema from a YAML or JSON file. Uses the same
-    /// disambiguation rule as document `$schema` references.
+    /// disambiguation rule as document `$schema` references, except that a
+    /// global catalog ([`catalog::is_global_catalog`]) contributes its resolved
+    /// `fm` definition, as Darkmatter's built-in baseline does.
     ///
     /// ## Errors
     ///
     /// Propagates [`SchemaError::Io`], [`SchemaError::AmbiguousReferenced`],
-    /// or [`SchemaError::Baseline`] depending on the failure shape.
+    /// or [`SchemaError::Baseline`] depending on the failure shape; a catalog
+    /// that does not load is a [`SchemaError::Baseline`] whose message is the
+    /// field-located [`catalog::CatalogError`].
     pub fn with_baseline_from_file(mut self, path: impl AsRef<Path>) -> Result<Self, SchemaError> {
         let path = path.as_ref();
         let base = path.parent().unwrap_or_else(|| Path::new("."));
+        if std::fs::read_to_string(path).is_ok_and(|text| catalog::is_global_catalog(&text)) {
+            let loaded = catalog::GlobalCatalog::from_file(
+                path,
+                catalog::DARKMATTER_GLOBALS,
+                &self.file_resolution_context,
+            )
+            .map_err(|error| SchemaError::Baseline { message: error.to_string(), source: None })?;
+            let schema = loaded.baseline().expect("Darkmatter's requirements include `fm`");
+            self.set_baseline_json(to_json_schema(&schema)?, Vec::new())?;
+            return Ok(self);
+        }
         // Drive resolution through the file-reference path so YAML/JSON
         // disambiguation matches `$schema` references.
         let yaml_value = serde_yaml_ng::Value::String(path.to_string_lossy().into_owned());
@@ -447,7 +462,7 @@ impl DarkmatterSchemas {
         Ok(())
     }
 
-    /// Enables trigger-schema discovery in the five [schema roots](roots) of
+    /// Enables schema-trigger discovery in the five [schema roots](roots) of
     /// this instance's context, which must be the checked document's own
     /// context.
     ///
@@ -463,7 +478,7 @@ impl DarkmatterSchemas {
     /// ## Errors
     ///
     /// Propagates [`SchemaError::TriggerLoad`] when a trigger file in a
-    /// searched root claims the `kind: trigger-schema` envelope but is
+    /// searched root claims the `kind: schema-trigger` envelope but is
     /// malformed (bad envelope, bad match grammar, vacuous arm).
     pub fn with_trigger_discovery(self) -> Result<Self, SchemaError> {
         let registry =
@@ -522,7 +537,7 @@ impl DarkmatterSchemas {
     /// merges the layers in precedence order:
     ///
     /// 1. The caller-configured baseline (if any).
-    /// 2. Matching trigger-schema payloads — first schema root first,
+    /// 2. Matching schema-trigger payloads — first schema root first,
     ///    filename-lexicographic within a root, then embedded bundle triggers
     ///    (the registry's built-in order). Shadowing is applied before matching
     ///    (a shadowed file is never in the registry).
@@ -579,7 +594,7 @@ impl DarkmatterSchemas {
                     trigger_roots,
                     &self.file_resolution_context,
                 )?;
-                // The document must not directly reference a trigger-schema
+                // The document must not directly reference a schema-trigger
                 // file — triggers activate by placement and match, never by
                 // reference.
                 triggers::assemble::check_document_schema_not_trigger(&r.referenced_files)?;
@@ -679,7 +694,8 @@ impl DarkmatterSchemas {
             evaluations.iter().filter(|eval| eval.matched).count(),
         );
         for (idx, eval) in evaluations.into_iter().enumerate() {
-            if !eval.matched {
+            // A matcher-only trigger (no `$schema`) layers nothing.
+            if !eval.matched || eval.trigger.envelope.payload.is_none() {
                 continue;
             }
             let (json_schema, shape, dependencies, advisories) = if pre_resolved {
@@ -1546,7 +1562,7 @@ pub enum SchemaOriginKind {
     ReferencedFile,
     /// The configured baseline schema.
     Baseline,
-    /// A matching trigger-schema payload layered between the baseline and the
+    /// A matching schema-trigger payload layered between the baseline and the
     /// document `$schema`.
     Trigger,
 }
@@ -1589,12 +1605,12 @@ impl SchemaOrigin {
         }
     }
 
-    /// A trigger-schema-payload origin carrying the envelope file path.
+    /// A schema-trigger-payload origin carrying the envelope file path.
     pub fn trigger(path: impl Into<PathBuf>) -> Self {
         Self::for_trigger(&triggers::TriggerSource::File(path.into()))
     }
 
-    /// A trigger-schema-payload origin for the envelope at `source`.
+    /// A schema-trigger-payload origin for the envelope at `source`.
     pub fn for_trigger(source: &triggers::TriggerSource) -> Self {
         Self {
             kind: SchemaOriginKind::Trigger,
@@ -3279,7 +3295,7 @@ mod phase4_trigger_assembly {
 
     /// A Claudine-shaped trigger: activates on `prompt: string(required)`,
     /// layers a payload declaring `model: string(required)`.
-    const CLAUDINE_TRIGGER: &str = "kind: trigger-schema\n\
+    const CLAUDINE_TRIGGER: &str = "kind: schema-trigger\n\
         match:\n  prompt: string(required)\n\
         $schema: claudine.yaml\n";
     const CLAUDINE_PAYLOAD: &str = "$schema:\n  model: 'string(required)'\n";
@@ -3460,7 +3476,7 @@ mod phase4_trigger_assembly {
         // Far root (shadowed): matches on `title` — should NEVER activate.
         write(
             &root.join("schemas/claudine.trigger.yaml"),
-            "kind: trigger-schema\nmatch:\n  title: string(required)\n$schema: other.yaml\n",
+            "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema: other.yaml\n",
         );
         write(
             &root.join("schemas/other.yaml"),
@@ -3503,7 +3519,7 @@ mod phase4_trigger_assembly {
         fs::create_dir_all(root.join("schemas")).unwrap();
         write(
             &root.join("schemas/bad.trigger.yaml"),
-            "kind: trigger-schema\n\
+            "kind: schema-trigger\n\
              match:\n  prompt: string(required)\n\
              $schema:\n  - a: string(required)\n  - b: string(required)\n",
         );
@@ -3562,7 +3578,7 @@ mod phase4_trigger_assembly {
         fs::create_dir_all(root.join("schemas")).unwrap();
         write(
             &root.join("schemas/self.trigger.yaml"),
-            "kind: trigger-schema\n\
+            "kind: schema-trigger\n\
              match:\n  prompt: string(required)\n\
              $schema: self.trigger.yaml\n",
         );
@@ -3589,7 +3605,7 @@ mod phase4_trigger_assembly {
         // a.trigger.yaml's payload references b.trigger.yaml (a trigger file).
         write(
             &root.join("schemas/a.trigger.yaml"),
-            "kind: trigger-schema\n\
+            "kind: schema-trigger\n\
              match:\n  prompt: string(required)\n\
              $schema: b.trigger.yaml\n",
         );
@@ -3976,7 +3992,7 @@ mod phase4_trigger_assembly {
         let repo = repo_fixture();
         let root = repo.path();
         let trigger = |payload: &str, key: &str| {
-            format!("kind: trigger-schema\nmatch:\n  {key}: string(required)\n$schema: {payload}\n")
+            format!("kind: schema-trigger\nmatch:\n  {key}: string(required)\n$schema: {payload}\n")
         };
         write(&root.join("schemas/a.trigger.yaml"), &trigger("a.yaml", "prompt"));
         write(&root.join("schemas/b.trigger.yaml"), &trigger("b.yaml", "prompt"));

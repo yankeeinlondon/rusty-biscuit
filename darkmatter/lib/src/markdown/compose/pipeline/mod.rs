@@ -439,7 +439,7 @@ impl Markdown {
                 // interpolation pass 2 so concrete values can select a
                 // different root-union arm as well as activate or deactivate
                 // trigger payloads, then judge the values the first pass
-                // deferred as pending. `--no-trigger-schemas` removes trigger
+                // deferred as pending. `--no-schema-triggers` removes trigger
                 // schemas from this pass, never the document and baseline
                 // verdict. Only a caller that re-validates the post-shell
                 // frontmatter itself takes that verdict over; compose then

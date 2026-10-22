@@ -63,7 +63,7 @@ fn known_workspace(workspace: &LspWorkspace) {
     let root = workspace.path();
     init_repository(root);
     write(root, "schemas/named.yaml", "$schema:\n  model: string(required)\n");
-    write(root, "schemas/notes.trigger.yaml", "kind: trigger-schema\nmatch:\n  title: string(required)\n$schema: named.yaml\n");
+    write(root, "schemas/notes.trigger.yaml", "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema: named.yaml\n");
     write(root, "schemas/plain.yaml", "just: data\n");
     write(root, "home/schemas/home.yaml", "$schema:\n  home_model: string(required)\n");
     write(root, "config.yml", "setting: true\n");
@@ -138,7 +138,7 @@ fn a_failed_trigger_switches_the_registry_line_to_its_failure_variant() {
     let workspace = LspWorkspace::new();
     known_workspace(&workspace);
     let root = workspace.path();
-    write(root, "schemas/broken.trigger.yaml", "kind: trigger-schema\nmatch: {}\n");
+    write(root, "schemas/broken.trigger.yaml", "kind: schema-trigger\nmatch: {}\n");
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(initialize_params(root));
 
@@ -161,7 +161,7 @@ fn payload_registry_line(payload: Option<&str>) -> (CapturedLogs, String) {
     let workspace = LspWorkspace::new();
     let root = workspace.path();
     init_repository(root);
-    write(root, "schemas/notes.trigger.yaml", "kind: trigger-schema\nmatch:\n  title: string(required)\n$schema: payload.yaml\n");
+    write(root, "schemas/notes.trigger.yaml", "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema: payload.yaml\n");
     if let Some(payload) = payload {
         write(root, "schemas/payload.yaml", payload);
     }
@@ -210,7 +210,7 @@ fn a_malformed_envelope_counts_a_failed_trigger() {
     let workspace = LspWorkspace::new();
     let root = workspace.path();
     init_repository(root);
-    write(root, "schemas/notes.trigger.yaml", "kind: trigger-schema\nmatch: {}\n");
+    write(root, "schemas/notes.trigger.yaml", "kind: schema-trigger\nmatch: {}\n");
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(initialize_params(root));
     assert_line(&logs, "schema registry initialized with failures", &[

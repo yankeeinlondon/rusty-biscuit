@@ -58,7 +58,7 @@ pub const DEFAULT_CACHE_SIZE: usize = 64;
 /// [`DarkmatterSchemas::new`](super::DarkmatterSchemas::new) hands out clones of
 /// one process-wide cache, so validators compiled for one document (or one
 /// compose) are reused by the next — including the second `schema_validation`
-/// pass a trigger-schema compose runs after shell expansion.
+/// pass a schema-trigger compose runs after shell expansion.
 ///
 /// ## File-reference resolution invariant
 ///

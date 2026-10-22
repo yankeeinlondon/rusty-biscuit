@@ -82,7 +82,7 @@ fn shipped_prompt_with_dashes_in_string_literals_composes_unchanged() {
             "prompts/_implement/review-findings-plan.md",
             "spec=feature/spec.md",
             "--no-baseline-schema",
-            "--no-trigger-schemas",
+            "--no-schema-triggers",
         ])
         .assert()
         .success()

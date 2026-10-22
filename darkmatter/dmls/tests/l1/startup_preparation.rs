@@ -26,8 +26,8 @@ use serde_json::{Value, json};
 /// `ServerCancelled`.
 const SERVER_CANCELLED: i32 = -32802;
 
-const ENVELOPE: &str = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
-const BROKEN_ENVELOPE: &str = "kind: trigger-schema\nmatch: {}\n";
+const ENVELOPE: &str = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+const BROKEN_ENVELOPE: &str = "kind: schema-trigger\nmatch: {}\n";
 const PAYLOAD: &str = "$schema:\n  model: string(required)\n";
 const DOC: &str = "---\nprompt: hello\n---\n\n# Heading\n\nBody.\n";
 

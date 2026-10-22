@@ -31,7 +31,7 @@ fn fixture(process: &CliProcessFixture, document_frontmatter: &str) -> PathBuf {
     write(
         root,
         "schemas/prompt.trigger.yaml",
-        "kind: trigger-schema\nmatch:\n  kind: enum(prompt; required)\n$schema: prompt.yaml\n",
+        "kind: schema-trigger\nmatch:\n  kind: enum(prompt; required)\n$schema: prompt.yaml\n",
     );
     write(
         root,
@@ -74,7 +74,7 @@ fn schema_validate_honors_triggers_and_raw_mode() {
         .stdout(predicate::str::contains("owner"));
     process
         .command()
-        .args(["schema", "validate", "--no-trigger-schemas"])
+        .args(["schema", "validate", "--no-schema-triggers"])
         .arg(&document)
         .assert()
         .success();
@@ -107,7 +107,7 @@ fn compose_honors_triggers_and_raw_mode() {
         .stderr(predicate::str::contains("owner"));
     process
         .command()
-        .args(["compose", "--no-trigger-schemas"])
+        .args(["compose", "--no-schema-triggers"])
         .arg(&document)
         .assert()
         .success();
@@ -147,7 +147,7 @@ fn triggers_command_prints_shared_trace() {
         .success()
         .stdout(predicate::str::contains("Schema roots"))
         .stdout(predicate::str::contains("prompt.trigger.yaml"))
-        .stdout(predicate::str::contains("arm 1"))
+        .stdout(predicate::str::contains("condition 1"))
         .stdout(predicate::str::contains("defeated"));
 }
 
@@ -245,7 +245,7 @@ fn monorepo(process: &CliProcessFixture) {
 }
 
 fn path_trigger(pattern: &str, payload: &str) -> String {
-    format!("kind: trigger-schema\nmatch:\n  $path: \"{pattern}\"\n$schema: {payload}\n")
+    format!("kind: schema-trigger\nmatch:\n  $path: \"{pattern}\"\n$schema: {payload}\n")
 }
 
 fn stdout_of(output: &std::process::Output) -> String {
@@ -608,7 +608,7 @@ fn duplicate_steps_key_is_a_load_error_not_a_last_wins_selection() {
 }
 
 /// The 2026-10-17 incident end to end: an ordinary schema-root file that is
-/// mid-edit (invalid YAML, no `kind: trigger-schema` claim) leaves composition
+/// mid-edit (invalid YAML, no `kind: schema-trigger` claim) leaves composition
 /// and trigger tracing working, with the neighboring trigger still applied.
 #[test]
 fn an_unparseable_unclaimed_schema_root_file_leaves_compose_and_triggers_working() {
@@ -645,7 +645,7 @@ fn an_unparseable_unclaimed_schema_root_file_leaves_compose_and_triggers_working
 fn an_unparseable_claimed_schema_root_file_reports_its_yaml_error() {
     let process = CliProcessFixture::new();
     let document = fixture(&process, "kind: prompt\nowner: me");
-    write(process.cwd(), "schemas/broken.yaml", "kind: trigger-schema\nmatch:\n  prompt: string(required)\nnotes: a: b\n");
+    write(process.cwd(), "schemas/broken.yaml", "kind: schema-trigger\nmatch:\n  prompt: string(required)\nnotes: a: b\n");
     for args in [&["compose"][..], &["schema", "triggers"][..]] {
         let output = process.command().args(args).arg(&document).output().unwrap();
         assert!(!output.status.success(), "{args:?}: {output:?}");

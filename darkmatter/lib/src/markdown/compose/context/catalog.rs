@@ -2,12 +2,12 @@
 //!
 //! Each [`ContextVariableDescriptor`] describes a single variable that may be
 //! captured into `ComposeContext` at runtime. The catalog is **projected from
-//! the authored base schema** (`darkmatter/docs/schemas/darkmatter.yaml`) rather
-//! than hand-declared: `name`, type, `description`, and the `generated` /
-//! `required` / `default` flags all come from parsing the base schema's `ctx`
-//! block once via [`crate::markdown::schemas::darkmatter_base_schema`]. This
-//! makes the YAML the single source of truth (spec D1/D5) so the schema and the
-//! catalog can never drift.
+//! the global catalog's `ctx` declaration** (`darkmatter/schemas/darkmatter.yaml`,
+//! typed by `partials/context-variables.yaml`) rather than hand-declared:
+//! `name`, type, `description`, and the `generated` / `required` / `default`
+//! flags all come from that resolved declaration, read once via
+//! [`GlobalCatalog::darkmatter`]. This makes the YAML the single source of
+//! truth so the schema and the catalog can never drift.
 //!
 //! Only two pieces of catalog metadata are not schema data and stay in Rust:
 //! the presentation grouping ([`CONTEXT_VARIABLE_GROUPING`], `category` /
@@ -19,9 +19,8 @@ use std::fmt;
 use std::sync::LazyLock;
 
 use crate::catalog::{Described, Example};
-use crate::markdown::schemas::{
-    Constraint, PropertyDef, SimplifiedSchema, SimplifiedType, TypeExpr, darkmatter_base_schema,
-};
+use crate::markdown::schemas::catalog::GlobalCatalog;
+use crate::markdown::schemas::{Constraint, PropertyDef, SimplifiedType, TypeExpr};
 
 /// SimplifiedSchema type of a context variable, projected from the base schema.
 ///
@@ -246,39 +245,22 @@ pub fn context_variable_descriptors() -> &'static [ContextVariableDescriptor] {
     &CONTEXT_VARIABLE_DESCRIPTORS
 }
 
-/// Projects the descriptor catalog from the authored base schema's `ctx` block.
+/// Projects the descriptor catalog from the global catalog's `ctx`
+/// declaration.
 ///
 /// Runs once through [`CONTEXT_VARIABLE_DESCRIPTORS`]'s `LazyLock`. The `ctx`
 /// shape's `IndexMap` preserves YAML declaration order, so descriptor order and
-/// `order` indices match the authored document.
+/// `order` indices match the authored partial.
 fn project_descriptors() -> Vec<ContextVariableDescriptor> {
-    let schema = darkmatter_base_schema();
-    let ctx_shape = ctx_shape(&schema);
-    ctx_shape
+    GlobalCatalog::darkmatter()
+        .global("ctx")
+        .and_then(|ctx| ctx.shape())
+        .expect("the global catalog declares `ctx` as an object shape")
         .properties
         .iter()
         .enumerate()
         .map(|(index, (name, def))| project_one(index, name, def))
         .collect()
-}
-
-/// Extracts the inline-object shape rooted at the base schema's `ctx` property.
-fn ctx_shape(schema: &SimplifiedSchema) -> &crate::markdown::schemas::SchemaShape {
-    let SimplifiedSchema::Single(root) = schema else {
-        panic!("darkmatter base schema must be a single object shape");
-    };
-    let ctx = root
-        .properties
-        .get("ctx")
-        .expect("base schema must declare a `ctx` property");
-    let atom = match ctx {
-        PropertyDef::Single(atom) => atom,
-        PropertyDef::Union(atoms) => atoms.first().expect("`ctx` union must be non-empty"),
-    };
-    match &atom.ty {
-        TypeExpr::InlineObject(shape) => shape,
-        _ => panic!("base schema `ctx` must be an inline object shape"),
-    }
 }
 
 /// Projects one `ctx.*` property atom into a descriptor.
@@ -432,7 +414,7 @@ mod tests {
     /// helpers, so a projection bug (reading the wrong field) fails here.
     #[test]
     fn projected_descriptors_match_base_schema() {
-        use crate::markdown::schemas::darkmatter_base_schema;
+        use crate::markdown::schemas::{SimplifiedSchema, darkmatter_base_schema};
 
         let schema = darkmatter_base_schema();
         let SimplifiedSchema::Single(root) = &schema else {

@@ -235,43 +235,55 @@ pub enum SchemaError {
     #[error("invalid example artifact `{reference}`: {message}")]
     InvalidExample { reference: String, message: String },
 
-    /// A trigger-schema match expression is malformed (bad combinator shape,
-    /// unknown key, or an otherwise unparseable `match:` payload). `message`
-    /// describes the structural failure; the trigger grammar is documented in
-    /// the "Repository Trigger Schemas" section of
+    /// A schema-trigger envelope or match expression is malformed (a field of
+    /// the wrong shape, an unknown key, or an otherwise unparseable `match:`
+    /// payload). `message` starts with the field it is about (for example
+    /// `` `match[1].group[0]`: ``) and describes the failure; the trigger
+    /// grammar is documented in the "Repository Trigger Schemas" section of
     /// `darkmatter/docs/topics/schemas/definition.md`. A `$path` pattern that
     /// is not an allowed glob reference is reported here too.
-    #[error("invalid trigger-schema match expression: {message}")]
+    #[error("invalid schema-trigger: {message}")]
     TriggerMatch { message: String },
 
-    /// A file claims `kind: trigger-schema` but is not valid YAML, so it never
+    /// A schema-trigger file uses a spelling that was renamed without an
+    /// alias: `kind: trigger-schema` (now `schema-trigger`) or the `any:`
+    /// combinator (now `group:`). `field` is where the spelling appears,
+    /// `found` the rejected spelling, and `replacement` the one to use.
+    #[error("`{field}`: `{found}` was renamed; use `{replacement}`")]
+    TriggerRenamed {
+        field: String,
+        found: String,
+        replacement: String,
+    },
+
+    /// A file claims `kind: schema-trigger` but is not valid YAML, so it never
     /// reached the match grammar. `message` is the YAML parser's reason without
     /// its location; `line` and `column` are one-based (the column counts
     /// characters, not bytes) and present when the parser reported them.
-    #[error("trigger-schema envelope is not valid YAML{}: {message}", yaml_location(*.line, *.column))]
+    #[error("schema-trigger envelope is not valid YAML{}: {message}", yaml_location(*.line, *.column))]
     TriggerEnvelopeYaml {
         message: String,
         line: Option<usize>,
         column: Option<usize>,
     },
 
-    /// A trigger-schema match condition used a constraint outside the
+    /// A schema-trigger match condition used a constraint outside the
     /// match-safe subset (constraints that resolve files, import types, load
     /// examples, provide defaults, mark generated values, or eager-existence-
     /// check `file`). `property` names the offending property; `constraint`
     /// names the forbidden constraint keyword.
     #[error(
-        "trigger-schema match condition for `{property}` uses a forbidden constraint: {constraint}"
+        "schema-trigger match condition for `{property}` uses a forbidden constraint: {constraint}"
     )]
     TriggerForbiddenConstraint { property: String, constraint: String },
 
-    /// A trigger-schema match arm mapping mixes structural keys (combinators
-    /// `all`/`any`/`none`/`min-match` or the `$path` predicate) with
+    /// A schema-trigger match mapping mixes structural keys (combinators
+    /// `all`/`group`/`none`/`min-match` or the `$path` predicate) with
     /// property-condition keys. Mixing is a load error — never a guess about
     /// the author's intent. `structural` and `properties` list the offending
     /// keys.
     #[error(
-        "trigger-schema match arm mixes structural keys ({structural:?}) with property keys \
+        "schema-trigger match mapping mixes structural keys ({structural:?}) with property keys \
          ({properties:?}); use `all:` to combine them"
     )]
     TriggerMixedMapping {
@@ -279,13 +291,13 @@ pub enum SchemaError {
         properties: Vec<String>,
     },
 
-    /// A trigger-schema match arm is vacuous: no satisfiable path through the
-    /// boolean tree contains a presence-requiring condition (a `required` gate
-    /// or `$path` predicate inside `all`/`any`, not under `none`). Because
-    /// arms OR together, one vacuous arm makes the whole trigger match every
-    /// document — almost always an authoring mistake.
-    #[error("trigger-schema match arm is vacuous (no presence-requiring condition)")]
-    TriggerVacuousArm,
+    /// A schema-trigger's whole match expression is vacuous: some way of
+    /// satisfying it includes no presence-requiring condition (a `required`
+    /// gate or `$path` predicate inside `all`/`group`/`min-match`, not under
+    /// `none`), so the trigger can match a document that has none of its
+    /// keys — almost always an authoring mistake.
+    #[error("schema-trigger match is vacuous (no presence-requiring condition)")]
+    TriggerVacuousMatch,
 
     /// Two trigger filenames in the same `schemas/` root collide after
     /// case-folding (e.g. `Foo.yaml` and `foo.yaml`), which would activate
@@ -301,10 +313,10 @@ pub enum SchemaError {
         files: Vec<String>,
     },
 
-    /// A trigger-schema envelope file claimed `kind: trigger-schema` but could
+    /// A schema-trigger envelope file claimed `kind: schema-trigger` but could
     /// not be parsed. The underlying YAML, grammar, or envelope error is on
     /// `source`; `path` is the offending file.
-    #[error("trigger-schema file `{}` {}", path.display(), load_failure(source))]
+    #[error("schema-trigger file `{}` {}", path.display(), load_failure(source))]
     TriggerLoad {
         path: PathBuf,
         #[source]
@@ -312,11 +324,11 @@ pub enum SchemaError {
     },
 
     /// A trigger in a host's [`EmbeddedSchemaBundle`](super::EmbeddedSchemaBundle)
-    /// claimed `kind: trigger-schema` but could not be loaded: a malformed
+    /// claimed `kind: schema-trigger` but could not be loaded: a malformed
     /// envelope, or a payload that failed to resolve inside its bundle.
     /// `bundle` and `name` identify the embedded document; it has no host
     /// path, so this is never a [`SchemaError::TriggerLoad`].
-    #[error("embedded trigger-schema `{bundle}/{name}` {}", load_failure(source))]
+    #[error("embedded schema-trigger `{bundle}/{name}` {}", load_failure(source))]
     EmbeddedTriggerLoad {
         bundle: String,
         name: String,
@@ -342,7 +354,7 @@ pub enum SchemaError {
     )]
     BareNameSiblingExists { reference: String, suggestion: String },
 
-    /// A trigger-schema payload did not resolve to a merge-compatible object
+    /// A schema-trigger payload did not resolve to a merge-compatible object
     /// schema. Trigger payloads must be SimplifiedSchema single objects or
     /// raw JSON Schemas satisfying the simple-object baseline contract; root
     /// unions and non-object schemas are rejected because the property-keyed
@@ -350,7 +362,7 @@ pub enum SchemaError {
     /// trigger envelope file; `payload` is the authored `$schema:` reference
     /// (or `<inline>` for an inline payload); `reason` explains the rejection.
     #[error(
-        "trigger-schema payload in `{}` is not merge-compatible: {reason}",
+        "schema-trigger payload in `{}` is not merge-compatible: {reason}",
         path.display()
     )]
     TriggerPayloadNotMergeable {
@@ -359,13 +371,13 @@ pub enum SchemaError {
         reason: String,
     },
 
-    /// A trigger-schema payload resolved to a trigger envelope file (directly
+    /// A schema-trigger payload resolved to a trigger envelope file (directly
     /// or through an import cycle), rather than to an ordinary schema file.
     /// `trigger` is the originating envelope; `payload_path` is the file the
     /// payload resolved to; `chain` describes the resolution path for the
     /// indirect case.
     #[error(
-        "trigger-schema payload in `{}` resolved to a trigger-schema envelope `{}`",
+        "schema-trigger payload in `{}` resolved to a schema-trigger envelope `{}`",
         trigger.display(),
         payload_path.display()
     )]
@@ -380,7 +392,7 @@ pub enum SchemaError {
     /// the error names the payload (`suggestion`) as the file to reference
     /// instead.
     #[error(
-        "document `$schema` referenced a trigger-schema file `{reference}`; trigger schemas \
+        "document `$schema` referenced a schema-trigger file `{reference}`; trigger schemas \
          activate by placement and match — reference the payload `{suggestion}` instead"
     )]
     TriggerSchemaReferenced {
@@ -806,23 +818,32 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             SchemaError::TriggerMatch { message } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
-                    "trigger-schema match expression invalid",
+                    "schema-trigger invalid",
                 ))
                 .body(Prose::new(format!(
                     "<dim>Reason:</dim> {}",
                     Prose::escape_text_outside_code_spans(message)
                 )))
                 .hint(
-                    "See the trigger grammar: combinators (<cyan>all</cyan>/<cyan>any</cyan>/\
+                    "See the trigger grammar: combinators (<cyan>all</cyan>/<cyan>group</cyan>/\
                      <cyan>none</cyan>/<cyan>min-match</cyan>), property conditions, and the \
                      <cyan>$path</cyan> predicate.",
                 ),
+
+            SchemaError::TriggerRenamed { field, found, replacement } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "schema-trigger spelling renamed"))
+                .body(Prose::new(format!(
+                    "<cyan>{}</cyan> uses <cyan>{}</cyan>, which was renamed with no alias.",
+                    Prose::escape_text(field),
+                    Prose::escape_text(found)
+                )))
+                .hint(format!("Write <cyan>{}</cyan> instead.", Prose::escape_text(replacement))),
 
             SchemaError::TriggerEnvelopeYaml { message, line, column } => {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
                         "SchemaError",
-                        "trigger-schema envelope is not valid YAML",
+                        "schema-trigger envelope is not valid YAML",
                     ))
                     .body(Prose::new(format!(
                         "<dim>Reason:</dim> {}{}",
@@ -836,7 +857,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
                         "SchemaError",
-                        "trigger-schema forbidden constraint",
+                        "schema-trigger forbidden constraint",
                     ))
                     .body(vec![
                         Prose::new(format!(
@@ -859,10 +880,10 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
-                    "trigger-schema mixed mapping",
+                    "schema-trigger mixed mapping",
                 ))
                 .body(Prose::new(format!(
-                    "A match arm mapping cannot mix structural keys ({:?}) with property keys \
+                    "A match mapping cannot mix structural keys ({:?}) with property keys \
                      ({:?}).",
                     structural, properties
                 )))
@@ -871,22 +892,22 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                      structural key with property conditions.",
                 ),
 
-            SchemaError::TriggerVacuousArm => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("SchemaError", "trigger-schema vacuous arm"))
+            SchemaError::TriggerVacuousMatch => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "schema-trigger vacuous match"))
                 .body(Prose::new(
-                    "A match arm has no presence-requiring condition (a <cyan>required</cyan> \
+                    "A way of satisfying the match has no presence-requiring condition (a <cyan>required</cyan> \
                      gate or <cyan>$path</cyan> predicate), so it matches every document.",
                 ))
                 .hint(
                     "Add a <cyan>required</cyan> constraint or a <cyan>$path</cyan> predicate so \
-                     the arm only fires on matching documents.",
+                     the trigger only fires on matching documents.",
                 ),
 
             SchemaError::TriggerCaseFoldCollision { root, files } => {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
                         "SchemaError",
-                        "trigger-schema case-fold collision",
+                        "schema-trigger case-fold collision",
                     ))
                     .body(vec![
                         Prose::new(format!(
@@ -914,7 +935,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
                         "SchemaError",
-                        if yaml { "trigger-schema file is not valid YAML" } else { "trigger-schema file malformed" },
+                        if yaml { "schema-trigger file is not valid YAML" } else { "schema-trigger file malformed" },
                     ))
                     .body(vec![
                         Prose::new(format!(
@@ -938,7 +959,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
 
             SchemaError::EmbeddedTriggerLoad { bundle, name, source } => {
                 StatusBlock::new(StatusState::Error)
-                    .error_header(ErrorHeader::new("SchemaError", "embedded trigger-schema malformed"))
+                    .error_header(ErrorHeader::new("SchemaError", "embedded schema-trigger malformed"))
                     .body(vec![
                         Prose::new(format!(
                             "Embedded trigger <cyan>{}</cyan> could not be loaded:",
@@ -995,7 +1016,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
-                    "trigger-schema payload not merge-compatible",
+                    "schema-trigger payload not merge-compatible",
                 ))
                 .body(vec![
                     Prose::new(format!(
@@ -1022,11 +1043,11 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
-                    "trigger-schema payload cycle",
+                    "schema-trigger payload cycle",
                 ))
                 .body(vec![
                     Prose::new(format!(
-                        "Trigger file <cyan>{}</cyan> payload resolved to a trigger-schema \
+                        "Trigger file <cyan>{}</cyan> payload resolved to a schema-trigger \
                          envelope <cyan>{}</cyan>:",
                         Prose::escape_text(&trigger.display().to_string()),
                         Prose::escape_text(&payload_path.display().to_string())
@@ -1034,7 +1055,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     Prose::new(format!("<dim>Chain:</dim> {}", Prose::escape_text(chain))),
                 ])
                 .hint(
-                    "A trigger payload must not resolve to a trigger-schema envelope, directly or \
+                    "A trigger payload must not resolve to a schema-trigger envelope, directly or \
                      through an import cycle. Reference an ordinary schema file instead.",
                 ),
 
@@ -1044,11 +1065,11 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
-                    "trigger-schema file referenced as document schema",
+                    "schema-trigger file referenced as document schema",
                 ))
                 .body(vec![
                     Prose::new(format!(
-                        "Document <cyan>$schema</cyan> referenced a trigger-schema file \
+                        "Document <cyan>$schema</cyan> referenced a schema-trigger file \
                          <cyan>{}</cyan>. Trigger schemas activate by placement and match, never \
                          by reference.",
                         Prose::escape_text(reference)

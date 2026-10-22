@@ -48,8 +48,8 @@ fn schema_about_prints_simplified_schema_reference() {
         "Type System",
         "Constraint Vocabulary",
         "Trigger Schemas",
-        "kind: trigger-schema",
-        "Vacuous-arm lint",
+        "kind: schema-trigger",
+        "Vacuous-match lint",
         "Match-safe constraints only",
         "use --verbose to see additional details",
     ] {
@@ -740,7 +740,7 @@ fn schema_about_trigger_grammar_forms_render_literally() {
         .expect("run md schema about");
     assert!(output.status.success(), "schema about should succeed");
     let stdout = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
-    for form in ["all: [condition, ...]", "match: [arm, ...]"] {
+    for form in ["all: [condition, ...]", "match: [condition, ...]", "group: [condition, ...]"] {
         assert!(stdout.contains(form), "schema about must show `{form}` literally:\n{stdout}");
     }
     assert!(!stdout.contains(r"\["), "a Markdown escape leaked into a code span:\n{stdout}");

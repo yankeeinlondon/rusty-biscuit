@@ -99,7 +99,7 @@ pub enum Command {
 
         /// Disable trigger discovery and bare-name schema-root lookup
         #[arg(long)]
-        no_trigger_schemas: bool,
+        no_schema_triggers: bool,
     },
 
     /// Compose a document through the compose pipeline.
@@ -187,7 +187,7 @@ pub enum Command {
 
         /// Disable trigger discovery and bare-name schema-root lookup
         #[arg(long)]
-        no_trigger_schemas: bool,
+        no_schema_triggers: bool,
 
         /// Global shell command timeout in seconds (default: 10)
         #[arg(long, value_name = "SECONDS")]

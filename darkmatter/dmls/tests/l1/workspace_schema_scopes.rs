@@ -23,7 +23,7 @@ use dmls::log_capture::CapturedLogs;
 use dmls::work_counters::work_counts;
 use serde_json::{Value, json};
 
-const BROKEN_TRIGGER: &str = "kind: trigger-schema\nmatch: {}\n";
+const BROKEN_TRIGGER: &str = "kind: schema-trigger\nmatch: {}\n";
 const NAMED_SCHEMA: &str = "$schema:\n  model: string(required)\n";
 
 fn write(path: &Path, text: &str) {
@@ -127,6 +127,33 @@ fn startup_classifies_a_broken_trigger_in_an_unopened_package() {
     let broken = fixture.wait_for_diagnostics(&uri(&repo.join("area/pkg/schemas/broken.yaml")));
     assert!(has_prepare_error(&broken), "{broken:#?}");
     assert_eq!(work_counts().since(before).parses, 0, "startup parses no Markdown");
+    fixture.shutdown();
+}
+
+/// The spelling before the rename is a broken trigger like any other: a
+/// trigger-load diagnostic on its file naming `schema-trigger`, and one failed
+/// scope, never a silently ignored file.
+#[test]
+fn startup_reports_a_renamed_trigger_kind_as_a_broken_trigger_in_its_scope_only() {
+    let logs = CapturedLogs::global();
+    let workspace = LspWorkspace::new();
+    let repo = workspace.path();
+    fallback_monorepo(repo);
+    let renamed = repo.join("docs/schemas/renamed.yaml");
+    write(&renamed, "kind: trigger-schema\nmatch:\n  title: string(required)\n");
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_params(&[repo]));
+
+    let diagnostics = fixture.wait_for_diagnostics(&uri(&renamed));
+    let prepare: Vec<&Value> =
+        diagnostics.iter().filter(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")).collect();
+    assert_eq!(prepare.len(), 1, "{diagnostics:#?}");
+    let message = prepare[0]["message"].as_str().unwrap_or_default();
+    assert!(message.contains("trigger-schema") && message.contains("schema-trigger"), "{message}");
+    assert_registry_line(&logs, "schema registry initialized with failures", &[
+        "failed_triggers=1",
+        "failed_scopes=1",
+    ]);
     fixture.shutdown();
 }
 
@@ -350,7 +377,7 @@ fn a_watched_fix_clears_a_trigger_failure_in_an_unopened_package() {
     fixture.initialize(watched_params(&[repo]));
     assert!(has_prepare_error(&fixture.wait_for_diagnostics(&uri(&path))));
 
-    write(&path, "kind: trigger-schema\nmatch:\n  title: string(required)\n$schema: payload.yaml\n");
+    write(&path, "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema: payload.yaml\n");
     fixture.notify(
         "workspace/didChangeWatchedFiles",
         json!({ "changes": [ { "uri": uri(&path), "type": 2 } ] }),
@@ -371,7 +398,7 @@ fn a_saved_fix_clears_a_trigger_failure_in_an_unopened_package() {
     fixture.initialize(watched_params(&[repo]));
     assert!(has_prepare_error(&fixture.wait_for_diagnostics(&uri(&path))));
 
-    write(&path, "kind: trigger-schema\nmatch:\n  title: string(required)\n$schema: payload.yaml\n");
+    write(&path, "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema: payload.yaml\n");
     fixture.notify("textDocument/didSave", json!({ "textDocument": { "uri": uri(&path) } }));
     let diagnostics = fixture.wait_for_diagnostics(&uri(&path));
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");

@@ -15,7 +15,8 @@ use darkmatter::markdown::schemas::{
 };
 use std::path::Path;
 
-/// Prints the five schema roots, shadowing, and arm-by-arm trigger results.
+/// Prints the five schema roots, shadowing, and condition-by-condition
+/// trigger results.
 pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
     // The argument resolves first, so a tree escape or malformed reference is
     // `InvalidReference` rather than a later missing-repository error.
@@ -70,16 +71,18 @@ pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
     for trigger in &trace.triggers {
         let status = if trigger.matched { "<green>matched</green>" } else { "<red>not matched</red>" };
         emit(&terminal, format!("- {} — {status}", Prose::escape_text(&trigger.source.to_string())));
-        for arm in &trigger.arms {
-            let result = if arm.matched {
+        for condition in &trigger.conditions {
+            let result = if condition.matched {
                 "<green>matched</green>".to_string()
             } else {
                 format!(
                     "<red>defeated</red>: {}",
-                    Prose::escape_text_outside_code_spans(arm.defeat.as_deref().unwrap_or("condition did not match"))
+                    Prose::escape_text_outside_code_spans(
+                        condition.defeat.as_deref().unwrap_or("condition did not match")
+                    )
                 )
             };
-            emit(&terminal, format!("  - arm {} — {result}", arm.index + 1));
+            emit(&terminal, format!("  - condition {} — {result}", condition.index + 1));
         }
     }
     Ok(())

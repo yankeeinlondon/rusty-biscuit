@@ -109,7 +109,9 @@ impl StandaloneSchemaDocument {
 /// A malformed recognized envelope (missing/malformed `types`, unsupported
 /// tagged-envelope keys, unparseable SimplifiedSchema payload, invalid or
 /// remote reference) returns
-/// `Err(SchemaError::SchemaDocument)`. Invalid `suggest(...)` candidates
+/// `Err(SchemaError::SchemaDocument)`, as does a global catalog
+/// ([`crate::markdown::schemas::catalog`]), which is never a document schema.
+/// Invalid `suggest(...)` candidates
 /// within a valid envelope are returned as
 /// [`StandaloneSchemaDocument::suggestion_lints`] — they are lint data, not
 /// errors.
@@ -137,6 +139,13 @@ pub fn parse_standalone_schema_document(
     let tagged = map.get(&kind_key).and_then(YamlValue::as_str) == Some("schema");
 
     let (envelope, payload) = if tagged {
+        if matches!(map.get(&schema_key), Some(YamlValue::Mapping(_))) && !map.contains_key(&types_key) {
+            return Err(schema_document_error(
+                path,
+                "is a global catalog (`kind: schema` with `$schema` declarations); a catalog declares \
+                 globals for a host to register and never applies as a document schema",
+            ));
+        }
         let unsupported: Vec<String> = map
             .keys()
             .filter_map(YamlValue::as_str)

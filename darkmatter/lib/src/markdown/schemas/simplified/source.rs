@@ -100,7 +100,7 @@ pub enum SchemaSourceId {
     /// A schema file, by the canonical path the resolver loaded it from.
     File(std::path::PathBuf),
     /// A schema document compiled into the binary, by its repository-relative
-    /// virtual path (`darkmatter/docs/schemas/darkmatter.yaml`). It names no
+    /// virtual path (`darkmatter/schemas/partials/fm.yaml`). It names no
     /// host file: never read, watched, or reported as one.
     Embedded(String),
 }
@@ -2566,8 +2566,8 @@ mod tests {
         assert_eq!(SchemaSourceId::InlineDocument.to_string(), "the inline `$schema`");
         let file = std::path::PathBuf::from("types.yaml");
         assert_eq!(SchemaSourceId::File(file).to_string(), "`types.yaml`");
-        let embedded = SchemaSourceId::Embedded("darkmatter/docs/schemas/darkmatter.yaml".into());
-        assert_eq!(embedded.to_string(), "embedded `darkmatter/docs/schemas/darkmatter.yaml`");
+        let embedded = SchemaSourceId::Embedded("darkmatter/schemas/partials/fm.yaml".into());
+        assert_eq!(embedded.to_string(), "embedded `darkmatter/schemas/partials/fm.yaml`");
     }
 
     #[test]

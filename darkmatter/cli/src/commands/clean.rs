@@ -56,8 +56,8 @@ pub struct CleanSchemaFlags {
     pub baseline_schema: Option<PathBuf>,
     /// `--no-baseline-schema`
     pub no_baseline_schema: bool,
-    /// `--no-trigger-schemas`
-    pub no_trigger_schemas: bool,
+    /// `--no-schema-triggers`
+    pub no_schema_triggers: bool,
 }
 
 /// The `md` request a `clean` run resolves schema references in, and the
@@ -299,7 +299,7 @@ fn schema_config(
         ));
     }
 
-    Ok(config.with_trigger_schemas(!flags.no_trigger_schemas))
+    Ok(config.with_trigger_schemas(!flags.no_schema_triggers))
 }
 
 /// Renders report-only findings to STDERR: frontmatter suggestions, then

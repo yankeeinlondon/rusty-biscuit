@@ -323,7 +323,7 @@ fn a_mid_edit_unrelated_schema_file_logs_nothing_and_a_broken_trigger_warns_once
     let schemas = session.root.join("schemas");
     std::fs::create_dir_all(&schemas).unwrap();
     let envelope = schemas.join("title.trigger.yaml");
-    std::fs::write(&envelope, "kind: trigger-schema\nmatch:\n  title: string(required)\n$schema: title.yaml\n").unwrap();
+    std::fs::write(&envelope, "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema: title.yaml\n").unwrap();
     std::fs::write(schemas.join("title.yaml"), "$schema:\n  model: string\n").unwrap();
     let changed = |path: &Path, kind: u8| {
         session.notify(
@@ -341,7 +341,7 @@ fn a_mid_edit_unrelated_schema_file_logs_nothing_and_a_broken_trigger_warns_once
         assert!(session.request(id, "textDocument/hover", session.hover_params()).error.is_none());
     }
 
-    std::fs::write(&envelope, "kind: trigger-schema\nmatch: {}\n").unwrap();
+    std::fs::write(&envelope, "kind: schema-trigger\nmatch: {}\n").unwrap();
     changed(&envelope, 2);
     for id in 7..12 {
         assert!(session.request(id, "textDocument/hover", session.hover_params()).error.is_none());

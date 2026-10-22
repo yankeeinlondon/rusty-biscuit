@@ -347,7 +347,7 @@ fn test_clean_preserves_untouched_frontmatter_ranges() {
 
 /// D-8: a document with no frontmatter is passed through untouched. There is
 /// no frontmatter block, so no YAML analysis, schema resolution, or
-/// trigger-schema git-root walk can run.
+/// schema-trigger git-root walk can run.
 #[test]
 fn test_clean_no_frontmatter_is_unchanged() {
     let fixture =

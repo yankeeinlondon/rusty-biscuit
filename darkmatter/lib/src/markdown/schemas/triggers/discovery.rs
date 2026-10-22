@@ -17,8 +17,10 @@
 //!   filesystems.
 //! - The first root wins by trigger **filename** with no merging; a shadowed
 //!   file is never evaluated.
-//! - A file that does not claim `kind: trigger-schema` is silently ignored.
-//! - A file that claims the envelope but is malformed is a hard load error.
+//! - A file whose `kind` is absent or a string other than `schema-trigger`
+//!   is silently ignored; `kind: schema-trigger` (the spelling before the
+//!   rename) and a null or non-string `kind` are load errors, as is a file
+//!   that claims the envelope but is malformed.
 //! - Loading is **transactional**: if any unshadowed opted-in trigger is
 //!   invalid, no registry is installed from that scan.
 //! - A root folder whose metadata or entries cannot be read fails the scan
@@ -26,7 +28,7 @@
 //! - A host's [`EmbeddedSchemaBundle`]s are a last-resort location after the
 //!   five roots: a bundle trigger is loaded only when no file of the same
 //!   name was enumerated in any root (whatever that file holds), and only a
-//!   bundle file claiming `kind: trigger-schema` becomes a trigger. Its
+//!   bundle file claiming `kind: schema-trigger` becomes a trigger. Its
 //!   payload and imports resolve inside its bundle.
 //!
 //! The user-facing contract is the "Repository Trigger Schemas" section of
@@ -44,7 +46,7 @@ use crate::markdown::schemas::simplified::SchemaSourceId;
 
 use super::envelope::{TriggerEnvelope, parse_trigger_envelope_from_str};
 
-/// Valid YAML extensions for trigger-schema files.
+/// Valid YAML extensions for schema-trigger files.
 const YAML_EXTENSIONS: &[&str] = &["yaml", "yml"];
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -194,7 +196,7 @@ impl TriggerRegistry {
     /// A bundle document whose file name is already claimed (see
     /// [`scan_with_embedded`]) is skipped unread. Every other bundle document
     /// is classified like a root file: one that does not claim
-    /// `kind: trigger-schema` is an import target only. Each embedded
+    /// `kind: schema-trigger` is an import target only. Each embedded
     /// trigger's payload is resolved now, inside the bundle.
     ///
     /// Transactional: on error the registry is unchanged.
@@ -280,7 +282,7 @@ impl TriggerRegistry {
 }
 
 /// An embedded trigger's envelope and resolved payload, or `None` for a bundle
-/// document that does not claim `kind: trigger-schema`.
+/// document that does not claim `kind: schema-trigger`.
 type EmbeddedTriggerLoad = Option<(TriggerEnvelope, super::assemble::ResolvedPayload)>;
 
 /// Parses bundle document `name` and resolves its payload inside `bundle`.
@@ -507,7 +509,7 @@ fn check_case_fold_collision(
 
 // ── Full scan ───────────────────────────────────────────────────────────────
 
-/// Performs a full trigger-schema discovery scan for one document.
+/// Performs a full schema-trigger discovery scan for one document.
 ///
 /// Computes the document's [`SchemaRoots`] from `context`, enumerates each
 /// searched root, applies filename shadowing, classifies each unshadowed
@@ -594,7 +596,7 @@ pub fn scan_with_source(
         let content = source.root_file_text(&file.path)?;
         match parse_trigger_envelope_from_str(&content) {
             Ok(None) => {
-                // Not a trigger-schema — silently ignored.
+                // Not a schema trigger — silently ignored.
             }
             Ok(Some(envelope)) => {
                 trigger_paths.push(file.path.clone());
@@ -670,11 +672,11 @@ mod tests {
 
     /// A minimal valid trigger envelope with a payload reference.
     const VALID_TRIGGER: &str =
-        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: payload-a.yaml\n";
+        "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: payload-a.yaml\n";
 
     /// A second minimal trigger with a different match key.
     const VALID_TRIGGER_2: &str =
-        "kind: trigger-schema\nmatch:\n  title: string(required)\n$schema: payload-b.yaml\n";
+        "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema: payload-b.yaml\n";
 
     /// A simple mergeable payload for test fixtures.
     const PAYLOAD_A: &str = "$schema:\n  model: string(required)\n";
@@ -954,7 +956,7 @@ mod tests {
         let repo = repo_fixture();
         let root = repo.path();
         fs::create_dir_all(root.join("schemas")).unwrap();
-        // A normal schema file (no kind: trigger-schema).
+        // A normal schema file (no kind: schema-trigger).
         fs::write(
             root.join("schemas/normal.yaml"),
             "$schema:\n  title: string\n",
@@ -986,7 +988,7 @@ mod tests {
         // Claims the envelope but has no `match:`.
         fs::write(
             root.join("schemas/bad.trigger.yaml"),
-            "kind: trigger-schema\n",
+            "kind: schema-trigger\n",
         )
         .unwrap();
 
@@ -1008,7 +1010,7 @@ mod tests {
         .unwrap();
         fs::write(
             root.join("schemas/bad.trigger.yaml"),
-            "kind: trigger-schema\n",
+            "kind: schema-trigger\n",
         )
         .unwrap();
         write_payloads(&root.join("schemas"));
@@ -1025,7 +1027,7 @@ mod tests {
         fs::create_dir_all(root.join("schemas")).unwrap();
         fs::write(
             root.join("schemas/vacuous.trigger.yaml"),
-            "kind: trigger-schema\nmatch:\n  maybe: string\n",
+            "kind: schema-trigger\nmatch:\n  maybe: string\n",
         )
         .unwrap();
 
@@ -1034,7 +1036,7 @@ mod tests {
         assert!(matches!(
             err,
             SchemaError::TriggerLoad { ref source, .. }
-                if matches!(**source, SchemaError::TriggerVacuousArm)
+                if matches!(**source, SchemaError::TriggerVacuousMatch)
         ));
     }
 
@@ -1184,7 +1186,7 @@ mod tests {
         // regardless of whether any document would match.
         fs::write(
             root.join("schemas/lonely.trigger.yaml"),
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n\
              $schema: does-not-exist.yaml\n",
         )
         .unwrap();
@@ -1206,7 +1208,7 @@ mod tests {
         // (`prompt`) is absent from every document in this test.
         fs::write(
             root.join("schemas/union.trigger.yaml"),
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n\
              $schema:\n  - model: string(required)\n  - title: string(required)\n",
         )
         .unwrap();
@@ -1235,7 +1237,7 @@ mod tests {
         // One trigger whose payload file does not exist.
         fs::write(
             root.join("schemas/bad.trigger.yaml"),
-            "kind: trigger-schema\nmatch:\n  title: string(required)\n\
+            "kind: schema-trigger\nmatch:\n  title: string(required)\n\
              $schema: missing.yaml\n",
         )
         .unwrap();

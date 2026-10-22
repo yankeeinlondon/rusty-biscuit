@@ -156,7 +156,7 @@ impl FrontmatterRepair {
 /// non-empty frontmatter whose YAML parses after syntax repair. A document
 /// with absent or empty frontmatter therefore never builds a resolution
 /// context or resolves a schema. `document_path: None` (stdin, untitled
-/// buffers) disables trigger-schema discovery.
+/// buffers) disables schema-trigger discovery.
 ///
 /// ## Returns
 ///
@@ -372,7 +372,7 @@ fn parses(yaml: &str) -> bool {
 /// Builds the document the schema tier validates against.
 ///
 /// The path is reattached because the schema layer resolves file-reference
-/// `$schema` values and trigger-schema roots relative to the document, and
+/// `$schema` values and schema-trigger roots relative to the document, and
 /// `try_from_content` has no path to anchor them to.
 fn build_markdown(source: String, document_path: Option<&Path>) -> Result<Markdown, MarkdownError> {
     let markdown = Markdown::try_from_content(source)?;

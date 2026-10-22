@@ -32,7 +32,6 @@ use darkmatter::markdown::schemas::{
     SchemaShape, SimplifiedType, StandaloneSchemaDocument, TypeExpr, parse_property_definition,
     parse_schema_declaration, parse_standalone_schema_document, parse_trigger_envelope_from_str,
     resolve::{ResolvedSchema, resolve_schema_with_roots, resolve_yaml_schema},
-    triggers::matches,
 };
 use serde_yaml_ng::Value as YamlValue;
 
@@ -56,9 +55,13 @@ enum Class {
     EnvelopeRejected,
     /// A definition does not parse; `error` is part of the expected message.
     Draft { error: &'static str },
-    /// A `kind: trigger-schema` envelope: never a standalone schema, and its
+    /// A `kind: schema-trigger` envelope: never a standalone schema, and its
     /// `$schema` payload parses and resolves inline from its own directory.
     Trigger,
+    /// A global catalog (`kind: schema` with `$schema` declarations): refused
+    /// as a document schema by any path, while its declarations parse and
+    /// resolve inline from its own directory.
+    GlobalCatalog,
 }
 
 struct Exception {
@@ -106,54 +109,20 @@ const EXCEPTIONS: &[Exception] = &[
         Class::EnvelopeRejected,
         "tagged envelope carries `$schema`, `name`, and `description` header keys",
     ),
-    // darkmatter/schemas: authored with a `description`/`name` header the
-    // standalone loader does not accept; no reader loads this tree today.
+    // darkmatter/schemas: the global catalog; its partials are libraries.
     exception(
         "darkmatter/schemas",
         "darkmatter.yaml",
-        Class::EnvelopeRejected,
-        "`description` and `$schema` beside `kind`",
-    ),
-    exception(
-        "darkmatter/schemas",
-        "partials/context-variables.yaml",
-        Class::EnvelopeRejected,
-        "`description` header key",
-    ),
-    exception(
-        "darkmatter/schemas",
-        "partials/fm.yaml",
-        Class::EnvelopeRejected,
-        "`description` header key",
-    ),
-    exception(
-        "darkmatter/schemas",
-        "partials/error.yaml",
-        Class::EnvelopeRejected,
-        "`name` and `description` header keys",
-    ),
-    exception(
-        "darkmatter/schemas",
-        "partials/tracking.yaml",
-        Class::EnvelopeRejected,
-        "`description` header key",
-    ),
-    exception(
-        "darkmatter/schemas",
-        "partials/style.yaml",
-        Class::Draft {
-            error: "`suggest` requires at least one candidate",
-        },
-        "`style.color` declares `suggest()` with no candidates",
-    ),
-    // repo-root schemas/
-    exception(
-        "schemas",
-        "memory.yaml",
-        Class::NotASchema,
-        "stub `kind: schema-trigger` with an empty `match:`; the trigger parser claims only `kind: trigger-schema`",
+        Class::GlobalCatalog,
+        "Darkmatter's global catalog, registered explicitly",
     ),
     // claudine/schemas
+    exception(
+        "claudine/schemas",
+        "globals.yaml",
+        Class::GlobalCatalog,
+        "Claudine's host catalog of `seq`, `loop`, and `group`, registered explicitly",
+    ),
     exception(
         "claudine/schemas",
         "claudine.yaml",
@@ -269,6 +238,8 @@ const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
     ("claudine/schemas/lifecycle.yaml", &["null", "shell", "unknown"]),
     // The hash payload.
     ("claudine/schemas/claudine.yaml", &["unknown"]),
+    // Step outputs, loop results, and leg payloads are any value.
+    ("claudine/schemas/globals.yaml", &["unknown"]),
     ("claudine/schemas/inline-compose.yaml", &["unknown"]),
     // Removed root `fail_fast`, and the parser-checked task and step fields.
     ("claudine/schemas/sequence.yaml", &["null"]),
@@ -279,7 +250,6 @@ const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
         "claudine/docs/schemas/partials/side-effect.yaml",
         &["null", "unknown"],
     ),
-    ("darkmatter/docs/schemas/darkmatter.yaml", &["unknown"]),
     ("darkmatter/schemas/partials/fm.yaml", &["unknown"]),
 ];
 
@@ -591,7 +561,6 @@ fn shipped_schema_artifacts_parse_passively() {
     for file in [
         "schemas/feature-review.yaml",
         "schemas/suggestion-review.yaml",
-        "schemas/memory.yaml",
     ] {
         assert!(root.join(file).is_file(), "{file} is part of the corpus");
     }
@@ -658,6 +627,13 @@ fn shipped_schema_artifacts_parse_passively() {
                 let message =
                     outcome.expect_err(&format!("{label} now loads; remove its exception"));
                 assert!(message.contains("unsupported keys"), "{label}: {message}");
+                let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
+                definitions += parsed.len();
+                record_core_types(&mut core_type_users, &label, &parsed);
+            }
+            Class::GlobalCatalog => {
+                let message = outcome.expect_err(&format!("{label} now loads as a document schema"));
+                assert!(message.contains("global catalog"), "{label}: {message}");
                 let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
                 definitions += parsed.len();
                 record_core_types(&mut core_type_users, &label, &parsed);
@@ -745,7 +721,6 @@ fn loadable_shipped_schemas_resolve_and_lower() {
     for file in [
         "schemas/feature-review.yaml",
         "schemas/suggestion-review.yaml",
-        "schemas/memory.yaml",
     ] {
         assert!(root.join(file).is_file(), "{file} is part of the corpus");
     }
@@ -779,8 +754,8 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                 assert_lowered(&resolved, &label);
                 resolved_files += 1;
             }
-            Class::EnvelopeRejected | Class::NotASchema | Class::Trigger => {
-                if artifact.class == Class::EnvelopeRejected {
+            Class::EnvelopeRejected | Class::NotASchema | Class::Trigger | Class::GlobalCatalog => {
+                if matches!(artifact.class, Class::EnvelopeRejected | Class::GlobalCatalog) {
                     let error = resolve_schema_with_roots(&reference, dir, &[], &context)
                         .expect_err(&format!("{label} now loads; remove its exception"));
                     assert!(
@@ -809,8 +784,10 @@ fn loadable_shipped_schemas_resolve_and_lower() {
         resolved_files >= 10,
         "only {resolved_files} shipped schemas resolved"
     );
+    // The global catalog's partials became loadable libraries, so they count
+    // among `resolved_files` rather than here.
     assert!(
-        inline_bodies >= 10,
+        inline_bodies >= 9,
         "only {inline_bodies} rejected-envelope bodies resolved inline"
     );
 }
@@ -1185,7 +1162,7 @@ fn migrated_shipped_definitions_declare_their_presence() {
 fn steps_condition(expr: &MatchExpr) -> Option<&PropertyAtom> {
     match expr {
         MatchExpr::Property { name, atom } if name == "steps" => Some(atom),
-        MatchExpr::All(children) | MatchExpr::Any(children) | MatchExpr::None(children) => {
+        MatchExpr::All(children) | MatchExpr::Group(children) | MatchExpr::None(children) => {
             children.iter().find_map(steps_condition)
         }
         MatchExpr::MinMatch { of, .. } => of.iter().find_map(steps_condition),
@@ -1255,7 +1232,7 @@ fn shipped_trigger_fixtures_gate_on_a_list_of_steps() {
             .unwrap_or_else(|| panic!("{dialect} must be claimed as a trigger"));
 
         let steps = envelope
-            .match_arms
+            .conditions
             .0
             .iter()
             .find_map(steps_condition)
@@ -1288,7 +1265,7 @@ fn shipped_trigger_fixtures_gate_on_a_list_of_steps() {
     for (frontmatter, expected) in &decisions {
         let matched: Vec<&str> = envelopes
             .iter()
-            .filter(|(_, envelope)| envelope.match_arms.0.iter().any(|arm| matches(arm, frontmatter, &subject)))
+            .filter(|(_, envelope)| envelope.conditions.matches(frontmatter, &subject))
             .map(|(dialect, _)| *dialect)
             .collect();
         assert_eq!(&matched, expected, "registry decision for {frontmatter}");

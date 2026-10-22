@@ -77,7 +77,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             schema,
             baseline_schema,
             no_baseline_schema,
-            no_trigger_schemas,
+            no_schema_triggers,
         } => {
             let options = CleanOptions {
                 save,
@@ -91,7 +91,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                     schema,
                     baseline_schema,
                     no_baseline_schema,
-                    no_trigger_schemas,
+                    no_schema_triggers,
                 },
             };
             run_clean(input.as_ref(), &options, request)?;
@@ -115,7 +115,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             allow_reassigned_frontmatter_property,
             baseline_schema,
             no_baseline_schema,
-            no_trigger_schemas,
+            no_schema_triggers,
             timeout,
             allow_shell_timeout,
             shell,
@@ -158,7 +158,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 allow_reassigned_frontmatter_property,
                 baseline_schema.as_ref(),
                 no_baseline_schema,
-                no_trigger_schemas,
+                no_schema_triggers,
                 timeout,
                 allow_shell_timeout,
                 shell,
@@ -300,7 +300,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 no_baseline_schema,
                 format,
                 quiet,
-                no_trigger_schemas,
+                no_schema_triggers,
             } => {
                 schema::run_validate(
                     &inputs,
@@ -308,7 +308,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                     no_baseline_schema,
                     format,
                     quiet,
-                    no_trigger_schemas,
+                    no_schema_triggers,
                     request,
                 )?;
             }

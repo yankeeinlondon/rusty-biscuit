@@ -125,7 +125,7 @@ impl<'a> PathSubject<'a> {
 pub fn matches(expr: &MatchExpr, frontmatter: &Value, subject: &PathSubject<'_>) -> bool {
     match expr {
         MatchExpr::All(children) => children.iter().all(|c| matches(c, frontmatter, subject)),
-        MatchExpr::Any(children) => children.iter().any(|c| matches(c, frontmatter, subject)),
+        MatchExpr::Group(children) => children.iter().any(|c| matches(c, frontmatter, subject)),
         MatchExpr::None(children) => !children.iter().any(|c| matches(c, frontmatter, subject)),
         MatchExpr::MinMatch { count, of } => {
             let met = of
@@ -141,8 +141,8 @@ pub fn matches(expr: &MatchExpr, frontmatter: &Value, subject: &PathSubject<'_>)
     }
 }
 
-/// Returns the first defeating condition for a non-matching arm, for the
-/// `md schema triggers` trace. Returns `None` when the arm matches.
+/// Returns the first defeating condition for a non-matching expression, for
+/// the `md schema triggers` trace. Returns `None` when the expression matches.
 pub fn first_defeat(
     expr: &MatchExpr,
     frontmatter: &Value,
@@ -179,7 +179,7 @@ fn describe_defeat(expr: &MatchExpr, frontmatter: &Value, subject: &PathSubject<
             .iter()
             .find_map(|c| first_defeat(c, frontmatter, subject))
             .unwrap_or_else(|| "all-children".into()),
-        MatchExpr::Any(_) => "no any-child matched".into(),
+        MatchExpr::Group(_) => "no group alternative matched".into(),
         MatchExpr::None(_) => "a none-child matched".into(),
         MatchExpr::MinMatch { count, of } => {
             let met = of.iter().filter(|c| matches(c, frontmatter, subject)).count();
@@ -566,13 +566,13 @@ mod tests {
     }
 
     #[test]
-    fn any_needs_one_child() {
-        let expr = MatchExpr::Any(vec![
+    fn group_needs_one_child() {
+        let expr = MatchExpr::Group(vec![
             prop("a", SimplifiedType::String, vec![Constraint::Required]),
             prop("b", SimplifiedType::String, vec![Constraint::Required]),
         ]);
         // `a` present but type-contradicts → defeats; `b` absent → required
-        // gate fails → any fails.
+        // gate fails → the group fails.
         let fm = frontmatter(&[("a", json!(42))]);
         assert!(!matches(&expr, &fm, &PathSubject::detached()));
         let fm = frontmatter(&[("b", json!("y"))]);
@@ -626,7 +626,7 @@ mod tests {
 
     #[test]
     fn free_nesting() {
-        let expr = MatchExpr::All(vec![MatchExpr::Any(vec![
+        let expr = MatchExpr::All(vec![MatchExpr::Group(vec![
             MatchExpr::None(vec![prop("kind", SimplifiedType::String, vec![])]),
             prop("tag", SimplifiedType::String, vec![Constraint::Required]),
         ])]);

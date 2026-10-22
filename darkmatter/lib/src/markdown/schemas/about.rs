@@ -625,12 +625,12 @@ pub fn validation_behavior_descriptors() -> &'static [ValidationBehaviorDescript
     VALIDATION_BEHAVIOR_DESCRIPTORS
 }
 
-/// Trigger-schema grammar forms, in display order.
+/// Schema-trigger grammar forms, in display order.
 pub const TRIGGER_GRAMMAR_DESCRIPTORS: &[TriggerGrammarDescriptor] = &[
     TriggerGrammarDescriptor {
         name: "Envelope",
-        form: "kind: trigger-schema",
-        description: "Claims a discovered YAML file as a trigger envelope; `$schema` is its merge-compatible object-schema payload.",
+        form: "kind: schema-trigger",
+        description: "Claims a discovered YAML file as a trigger envelope; `$schema` is its merge-compatible object-schema payload, and a trigger without one layers nothing. The former `schema-trigger` spelling is an error.",
     },
     TriggerGrammarDescriptor {
         name: "Property condition",
@@ -648,9 +648,9 @@ pub const TRIGGER_GRAMMAR_DESCRIPTORS: &[TriggerGrammarDescriptor] = &[
         description: "Matches when every child condition matches.",
     },
     TriggerGrammarDescriptor {
-        name: "any",
-        form: "any: [condition, ...]",
-        description: "Matches when at least one child condition matches.",
+        name: "group",
+        form: "group: [condition, ...]",
+        description: "Matches when at least one child condition matches. The former `any:` spelling is an error.",
     },
     TriggerGrammarDescriptor {
         name: "none",
@@ -663,18 +663,18 @@ pub const TRIGGER_GRAMMAR_DESCRIPTORS: &[TriggerGrammarDescriptor] = &[
         description: "Matches when at least N of the child conditions match.",
     },
     TriggerGrammarDescriptor {
-        name: "Outer OR arms",
-        form: "match: [arm, ...]",
-        description: "A mapping is one arm; a sequence of arm mappings is OR'd. Mixing property and structural keys in one mapping is invalid.",
+        name: "Top-level conditions",
+        form: "match: [condition, ...]",
+        description: "A mapping is one condition; every entry of a list must match (AND). OR is always a `group:`; a list entry that is itself a list is invalid, as is mixing property and structural keys in one mapping.",
     },
     TriggerGrammarDescriptor {
-        name: "Vacuous-arm lint",
-        form: "each arm requires a positive gate",
-        description: "Every satisfiable arm must require presence through `required` or `$path`, outside `none`; an arm that could match every document is rejected.",
+        name: "Vacuous-match lint",
+        form: "every way to match requires a positive gate",
+        description: "Every way of satisfying the whole expression must require presence through `required` or `$path`, outside `none`; a trigger that could match a document with none of its keys is rejected.",
     },
 ];
 
-/// Returns trigger-schema grammar descriptors in display order.
+/// Returns schema-trigger grammar descriptors in display order.
 pub fn trigger_grammar_descriptors() -> &'static [TriggerGrammarDescriptor] {
     TRIGGER_GRAMMAR_DESCRIPTORS
 }
@@ -850,7 +850,7 @@ pub struct ValidationBehaviorDescriptor {
     pub description: &'static str,
 }
 
-/// Descriptor for one trigger-schema grammar form.
+/// Descriptor for one schema-trigger grammar form.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TriggerGrammarDescriptor {
     /// Author-facing name of the grammar form.

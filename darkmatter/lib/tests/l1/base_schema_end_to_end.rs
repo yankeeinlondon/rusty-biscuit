@@ -324,24 +324,24 @@ fn schema_document_transcludes_same_file_as_library_source() {
         .canonicalize()
         .expect("schema docs path must exist");
     let schema_path = manifest_dir!()
-        .join("../docs/schemas/darkmatter.yaml")
+        .join("../schemas/partials/fm.yaml")
         .canonicalize()
         .expect("schema YAML path must exist");
     let doc = std::fs::read_to_string(&doc_path).expect("schema docs must be readable");
 
     assert!(
-        doc.contains("::code ./darkmatter.yaml"),
-        "schema docs must transclude the neighboring schema source"
+        doc.contains("::code ../../schemas/partials/fm.yaml"),
+        "schema docs must transclude the catalog's `fm` partial"
     );
     let transclusion_path = doc_path
         .parent()
         .expect("schema docs must have a parent")
-        .join("darkmatter.yaml")
+        .join("../../schemas/partials/fm.yaml")
         .canonicalize()
         .expect("transclusion target must exist");
     assert_eq!(transclusion_path, schema_path);
 
-    // The authored file imports Content Policy's editor schema; the disk
+    // The authored partial imports Content Policy's editor schema; the disk
     // resolver reads it from the checkout, the library from its embedded copy.
     let policy_path = biscuit_file::canonicalize_simplified(
         &manifest_dir!().join("../../content-policy/schemas/content-policy.yaml"),
@@ -351,16 +351,31 @@ fn schema_document_transcludes_same_file_as_library_source() {
         include_str!("../../../../content-policy/schemas/content-policy.yaml"),
         content_policy::EDITOR_SCHEMA
     );
-    // A `\\?\` spelling from `canonicalize` on Windows is not a file reference.
-    let schema_file = biscuit_file::canonicalize_simplified(&schema_path).expect("schema YAML path");
-    let schema_dir = schema_file.parent().expect("schema YAML must have a parent");
-    let reference = YamlValue::String(schema_file.to_string_lossy().into_owned());
+    // The baseline is the catalog's `fm` declaration, resolved from the
+    // catalog's directory as the catalog declares it.
+    let catalog_path = biscuit_file::canonicalize_simplified(&manifest_dir!().join("../schemas/darkmatter.yaml"))
+        .expect("catalog path");
+    let catalog_dir = catalog_path.parent().expect("the catalog has a parent");
+    let declaration: YamlValue = serde_yaml_ng::from_str("fm: fm@./partials/fm.yaml").expect("declaration");
     let from_disk =
-        resolve_yaml_schema(&reference, schema_dir, &crate::request_support::context_at(schema_dir))
+        resolve_yaml_schema(&declaration, catalog_dir, &crate::request_support::context_at(catalog_dir))
             .expect("the authored baseline resolves from disk");
-    assert_eq!(from_disk.imports, [policy_path]);
-    assert_eq!(from_disk.simplified, Some(darkmatter_base_schema()));
-    assert_eq!(from_disk.json_schema, darkmatter_base_json_schema());
+    assert!(from_disk.imports.contains(&policy_path), "{:?}", from_disk.imports);
+    let Some(darkmatter::markdown::schemas::SimplifiedSchema::Single(declared)) = &from_disk.simplified else {
+        panic!("the declaration is a single shape");
+    };
+    let Some(darkmatter::markdown::schemas::PropertyDef::Single(fm)) = declared.properties.get("fm") else {
+        panic!("`fm` is a single atom");
+    };
+    let darkmatter::markdown::schemas::TypeExpr::InlineObject(fm) = &fm.ty else {
+        panic!("`fm` is an object shape");
+    };
+    let from_disk = darkmatter::markdown::schemas::SimplifiedSchema::Single(fm.clone());
+    assert_eq!(from_disk, darkmatter_base_schema());
+    assert_eq!(
+        darkmatter::markdown::schemas::to_json_schema(&from_disk).expect("lowers"),
+        darkmatter_base_json_schema()
+    );
 }
 
 #[test]

@@ -129,8 +129,8 @@ impl CleanSchemaConfig {
         self
     }
 
-    /// Enables or disables repository trigger-schema discovery and bare-name
-    /// schema-root lookup (`--no-trigger-schemas`).
+    /// Enables or disables repository schema-trigger discovery and bare-name
+    /// schema-root lookup (`--no-schema-triggers`).
     #[must_use]
     pub fn with_trigger_schemas(mut self, enabled: bool) -> Self {
         self.trigger_schemas = enabled;

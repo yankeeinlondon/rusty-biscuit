@@ -99,14 +99,34 @@ impl Markdown {
         request: &crate::markdown::compose::ComposeRequest,
         approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
     ) -> Result<ComposePreflightApprovals, ShellExpansionError> {
+        self.compose_preflight_approvals_with(request, approval_handler, ExtraShellSources::default())
+    }
+
+    /// [`Self::compose_preflight_approvals`] with `extra` commands and sites
+    /// judged in the same run, under the same policy and the same batched
+    /// prompt: a host's lifecycle shells, which the document walk does not
+    /// see. They are approved whether or not a body shell operation is
+    /// enabled.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::compose_preflight_approvals`].
+    pub fn compose_preflight_approvals_with(
+        &self,
+        request: &crate::markdown::compose::ComposeRequest,
+        approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
+        extra: ExtraShellSources,
+    ) -> Result<ComposePreflightApprovals, ShellExpansionError> {
         let options = request.options();
-        let report = self.compose_preflight(request).map_err(|e| match e {
+        let mut report = self.compose_preflight(request).map_err(|e| match e {
             crate::markdown::types::MarkdownError::ShellExpansion(inner) => *inner,
             // Preserve the rich error (transform parse, ctx merge, schema
             // validation, remote fetch, …) so the caller renders its styled
             // block instead of an opaque policy-I/O string.
             other => ShellExpansionError::Preflight(Box::new(other)),
         })?;
+        report.entries.extend(extra.entries);
+        report.candidates.extend(extra.candidates);
 
         let shell_opts = options.shell_options();
         let policy_paths = resolve_policy_paths(&shell_opts, &options.source, request.resolution_context())?;
@@ -167,6 +187,15 @@ impl Markdown {
             preflight_graph: report.preflight_graph,
         })
     }
+}
+
+/// Commands and sites a host adds to one preflight approval run.
+#[derive(Debug, Clone, Default)]
+pub struct ExtraShellSources {
+    /// Commands with known bytes, one entry per chain segment.
+    pub entries: Vec<ShellCommandEntry>,
+    /// Sites holding a placeholder.
+    pub candidates: Vec<ShellCandidate>,
 }
 
 /// The policy one preflight approval run judges every site against, and the

@@ -821,14 +821,15 @@ mod tests {
     /// cleanly so a regression in either extension is caught immediately.
     #[test]
     fn darkmatter_baseline_schema_yaml_parses() {
-        let raw = include_str!("../../../../../docs/schemas/darkmatter.yaml");
+        let raw = include_str!("../../../../../schemas/partials/fm.yaml");
         let frontmatter: YamlValue =
             serde_yaml_ng::from_str(raw).expect("baseline yaml must parse");
-        // The file is shaped as frontmatter: the schema body is the value of
-        // the `$schema` key, not the top-level mapping itself.
+        // The `fm` partial is a types-only library: the baseline body is its
+        // `fm` type, not the top-level mapping itself.
         let schema_value = frontmatter
-            .get("$schema")
-            .expect("baseline file must have a `$schema` key");
+            .get("types")
+            .and_then(|types| types.get("fm"))
+            .expect("the fm partial must declare the `fm` type");
         let schema = parse_yaml_schema(schema_value).expect("baseline schema must parse");
         let shape = match schema {
             SimplifiedSchema::Single(s) => s,
@@ -873,7 +874,7 @@ mod tests {
     /// only after preparation expands them.
     #[test]
     fn darkmatter_baseline_schema_converts_to_json_schema() {
-        let raw = include_str!("../../../../../docs/schemas/darkmatter.yaml");
+        let raw = include_str!("../../../../../schemas/partials/fm.yaml");
         assert!(raw.contains("content_policy: "), "the baseline declares an import");
         let json = crate::markdown::schemas::darkmatter_base_json_schema();
         let obj = json.as_object().expect("root must be a JSON object");

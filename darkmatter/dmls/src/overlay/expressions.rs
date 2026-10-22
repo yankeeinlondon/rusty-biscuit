@@ -19,7 +19,9 @@ use darkmatter::markdown::compose::expression::{
     identifier_prefix_start, is_whole_value_span, lint_expression, parse_condition_spanned,
     parse_spanned, reserved_root_descriptors, static_variable_reads, validate_expression,
 };
+use darkmatter::markdown::schemas::catalog::GlobalCatalog;
 use darkmatter::markdown::schemas::simplified::serialize_property_atom;
+use darkmatter::markdown::schemas::{PropertyDef, TypeExpr};
 use darkmatter::markdown::schemas::{DecodedScalar, decode_scalar};
 use darkmatter::markdown::span::SourceSpan;
 use serde::{Deserialize, Serialize};
@@ -842,6 +844,88 @@ pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<
         }
     }
 
+    items
+}
+
+/// The hover block for a host global or one of its members (`seq`,
+/// `seq.index`), from the host catalogs in the document's schema roots
+/// ([`darkmatter::markdown::schemas::catalog::host_catalogs`]). `None` when no
+/// catalog declares the root or the member. Only the declared shape is shown;
+/// which events may read the global is the host's.
+pub fn host_global_hover(name: &str, catalogs: &[GlobalCatalog]) -> Option<String> {
+    let (root, member) = match name.split_once('.') {
+        Some((root, member)) => (root, Some(member)),
+        None => (name, None),
+    };
+    let declaration = catalogs.iter().find_map(|catalog| catalog.global(root))?;
+    let shape = declaration.shape()?;
+    match member {
+        None => {
+            let members: Vec<String> = shape.properties.keys().map(|key| format!("`{key}`")).collect();
+            Some(format!("**`{root}`** — host global\n\nMembers: {}", members.join(", ")))
+        }
+        Some(member) => {
+            let def = shape.properties.get(member.split('.').next().unwrap_or(member))?;
+            Some(format!("**`{root}.{member}`** — {}", member_summary(def)))
+        }
+    }
+}
+
+/// `type — description` for one catalog member.
+fn member_summary(def: &PropertyDef) -> String {
+    let atoms: Vec<_> = match def {
+        PropertyDef::Single(atom) => vec![atom],
+        PropertyDef::Union(atoms) => atoms.iter().collect(),
+    };
+    let types: Vec<String> = atoms
+        .iter()
+        .map(|atom| match &atom.ty {
+            TypeExpr::InlineObject(_) => if atom.is_array { "object[]".to_string() } else { "object".to_string() },
+            _ => {
+                let mut bare = (*atom).clone();
+                bare.description = None;
+                serialize_property_atom(&bare)
+            }
+        })
+        .collect();
+    let description = atoms.iter().find_map(|atom| atom.description.as_deref());
+    match description {
+        Some(description) => format!("`{}` — {description}", types.join(" | ")),
+        None => format!("`{}`", types.join(" | ")),
+    }
+}
+
+/// Completion candidates for host globals matching `partial`: each declared
+/// root, and once `partial` names a root and a `.`, its declared members.
+pub fn host_global_candidates(partial: &str, catalogs: &[GlobalCatalog]) -> Vec<ExprCompletion> {
+    let mut items = Vec::new();
+    for declaration in catalogs.iter().flat_map(GlobalCatalog::globals) {
+        let root = declaration.name();
+        let Some(shape) = declaration.shape() else { continue };
+        if root.starts_with(partial) {
+            items.push(ExprCompletion {
+                label: root.to_string(),
+                insert_text: root.to_string(),
+                kind: ExprCompletionKind::ReservedRoot,
+                detail: Some("host global".to_string()),
+                documentation: host_global_hover(root, catalogs),
+            });
+        }
+        if let Some(member) = partial.strip_prefix(root).and_then(|rest| rest.strip_prefix('.')) {
+            for (key, def) in &shape.properties {
+                if key.starts_with(member) {
+                    let label = format!("{root}.{key}");
+                    items.push(ExprCompletion {
+                        label: label.clone(),
+                        insert_text: label,
+                        kind: ExprCompletionKind::ContextVariable,
+                        detail: Some("host global member".to_string()),
+                        documentation: Some(member_summary(def)),
+                    });
+                }
+            }
+        }
+    }
     items
 }
 

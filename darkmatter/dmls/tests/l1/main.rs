@@ -18,6 +18,7 @@ mod entry_point_parity;
 mod expression_scopes;
 mod formatting_transaction;
 mod full_index_removal_guard;
+mod host_globals;
 mod index_build;
 mod index_store_concurrency;
 mod index_store_facts;

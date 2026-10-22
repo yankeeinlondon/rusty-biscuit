@@ -88,10 +88,10 @@ pub enum SchemaTarget {
 
         /// Disable trigger discovery and bare-name schema-root lookup
         #[arg(long)]
-        no_trigger_schemas: bool,
+        no_schema_triggers: bool,
     },
 
-    /// Explain trigger-schema discovery and activation for a document.
+    /// Explain schema-trigger discovery and activation for a document.
     Triggers {
         /// Markdown file to inspect
         #[arg(value_name = "FILE", add = ArgValueCompleter::new(complete_markdown_files))]

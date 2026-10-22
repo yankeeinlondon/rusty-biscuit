@@ -10,12 +10,13 @@ use darkmatter::markdown::schemas::{
 
 #[test]
 fn shipped_base_schema_exposes_structural_spans_across_anchors_and_aliases() {
-    let path = biscuit_test_harness::manifest_dir!().join("../docs/schemas/darkmatter.yaml");
+    // The baseline's `style` type, a types-only partial of the global catalog.
+    let path = biscuit_test_harness::manifest_dir!().join("../schemas/partials/style.yaml");
     let source = std::fs::read_to_string(&path).expect("read shipped base schema");
     let document = parse_standalone_schema_document(&source, &path)
         .expect("classify shipped base schema")
-        .expect("pure standalone schema");
-    assert_eq!(document.envelope, StandaloneSchemaEnvelope::Pure);
+        .expect("tagged standalone schema");
+    assert_eq!(document.envelope, StandaloneSchemaEnvelope::Tagged);
 
     let page = SchemaSourcePath::root().property("style").property("page");
     let anchored_union = page.property("left-margin");

@@ -923,8 +923,10 @@ fn expression_value_completions(
 ) -> Vec<CompletionItem> {
     let (token_start, token) = expressions::value_completion_partial(value_partial, value_start);
     let frontmatter_keys = expression_property_keys(ctx);
+    let host = expressions::host_global_candidates(token, &crate::providers::dsl::host_catalogs(ctx));
     expressions::completion_candidates(token, &frontmatter_keys)
         .into_iter()
+        .chain(host)
         .filter_map(|candidate| expr_completion_item(ctx, token_start, offset, candidate))
         .collect()
 }
@@ -1099,13 +1101,14 @@ fn expression_value_at<'a>(
 fn expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, offset: usize) -> Option<Hover> {
     let value = expression_value_at(ctx, ast, offset)?;
     let expr_offset = value.decoded_offset(offset)?;
+    let host = crate::providers::dsl::host_catalogs(ctx);
     let markdown = crate::providers::dsl::with_site_scope(ctx, None, |site| {
         expressions::hover_markdown_condition(
             value.expression(),
             expr_offset,
             site,
             |name| frontmatter_scalar(ctx, name),
-            |name| schema_property_details(ctx, name),
+            |name| expressions::host_global_hover(name, &host).or_else(|| schema_property_details(ctx, name)),
         )
     });
     markup_hover(ctx, value.expression_span(), markdown)

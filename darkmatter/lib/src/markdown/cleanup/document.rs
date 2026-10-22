@@ -48,7 +48,7 @@ pub struct CleanRequest<'a> {
     /// DMLS workspace rules, below the document's own; `None` elsewhere.
     pub workspace: Option<&'a MarkdownRuleOverrides>,
     /// The document's path, for schema resolution; `None` for stdin and
-    /// untitled buffers, which disables trigger-schema discovery.
+    /// untitled buffers, which disables schema-trigger discovery.
     pub document_path: Option<&'a Path>,
 }
 

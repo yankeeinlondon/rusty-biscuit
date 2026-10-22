@@ -588,7 +588,7 @@ fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
     let payload_path = schemas.join("prompt.yaml");
     let document_path = workspace.path().join("prompt.md");
     let envelope =
-        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+        "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
     let payload = "$schema:\n  model: string(required)\n";
     let document = "---\nprompt: hello\n---\n\nBody\n";
     std::fs::write(&envelope_path, envelope).unwrap();
@@ -673,7 +673,7 @@ fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
     let payload_path = schemas.join("prompt.yaml");
     let document_path = workspace.path().join("prompt.md");
     let envelope =
-        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+        "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
     let payload = "$schema:\n  model: string(required)\n";
     let document = "---\nprompt: hello\n---\n\nBody\n";
     std::fs::write(&envelope_path, envelope).unwrap();
@@ -771,7 +771,7 @@ fn repairing_trigger_payload_clears_open_envelope_immediately() {
     let payload_path = schemas.join("prompt.yaml");
     let document_path = workspace.path().join("prompt.md");
     let envelope =
-        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+        "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
     let document = "---\nprompt: hello\n---\n\nBody\n";
     std::fs::write(&envelope_path, envelope).unwrap();
     std::fs::write(&document_path, document).unwrap();
@@ -839,8 +839,8 @@ fn saving_an_open_trigger_buffer_updates_consumers_and_unsaved_edits_do_not() {
     std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
     let envelope_path = schemas.join("prompt.trigger.yaml");
     let document_path = workspace.path().join("prompt.md");
-    let envelope = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
-    let retargeted = "kind: trigger-schema\nmatch:\n  task: string(required)\n$schema: prompt.yaml\n";
+    let envelope = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+    let retargeted = "kind: schema-trigger\nmatch:\n  task: string(required)\n$schema: prompt.yaml\n";
     let document = "---\nprompt: hello\n---\n\nBody\n";
     std::fs::write(&envelope_path, envelope).unwrap();
     std::fs::write(schemas.join("prompt.yaml"), "$schema:\n  model: string(required)\n").unwrap();
@@ -895,8 +895,8 @@ fn open_trigger_failure_transfer_round_trip(envelope_first: bool) {
     let payload_a_path = schemas.join("a.yaml");
     let payload_b_path = schemas.join("b.yaml");
     let document_path = workspace.path().join("consumer.md");
-    let envelope_a = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: a.yaml\n";
-    let envelope_b = "kind: trigger-schema\nmatch:\n  other: string(required)\n$schema: b.yaml\n";
+    let envelope_a = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: a.yaml\n";
+    let envelope_b = "kind: schema-trigger\nmatch:\n  other: string(required)\n$schema: b.yaml\n";
     let document = "---\nprompt: hello\n---\n\nBody\n";
     std::fs::write(&envelope_a_path, envelope_a).unwrap();
     std::fs::write(&envelope_b_path, envelope_b).unwrap();
@@ -5657,14 +5657,22 @@ fn meta_schema_standalone_flow_completion_locates_the_cursor_structurally() {
     fixture.shutdown();
 }
 
-/// Writes the shipped baseline three directories below `workspace`, as in
-/// the repository, so its `../../../content-policy/schemas/content-policy.yaml`
-/// import finds `policy`. The baseline's directory is not named `schemas`, so
-/// DMLS does not also read the buffer as a trigger-schema candidate.
-fn write_shipped_baseline_layout(workspace: &LspWorkspace, baseline: &str, policy: &str) -> std::path::PathBuf {
-    let path = workspace.path().join("darkmatter/docs/baseline/darkmatter.yaml");
+/// Writes the shipped baseline's `fm` partial and the sibling partials it
+/// imports three directories below `workspace`, as in the repository, so its
+/// `../../../content-policy/schemas/content-policy.yaml` import finds
+/// `policy`. The partials' directory is not named `schemas`, so DMLS does not
+/// also read the buffer as a schema-trigger candidate.
+fn write_shipped_baseline_layout(
+    workspace: &LspWorkspace,
+    baseline: &str,
+    siblings: [(&str, &str); 2],
+    policy: &str,
+) -> std::path::PathBuf {
+    let path = workspace.path().join("darkmatter/docs/baseline/fm.yaml");
     let policy_path = workspace.path().join("content-policy/schemas/content-policy.yaml");
-    for (target, text) in [(&path, baseline), (&policy_path, policy)] {
+    let siblings = siblings.map(|(name, text)| (path.with_file_name(name), text));
+    let files = [(path.clone(), baseline), (policy_path, policy)].into_iter().chain(siblings);
+    for (target, text) in files {
         std::fs::create_dir_all(target.parent().expect("parent")).unwrap();
         std::fs::write(target, text).unwrap();
     }
@@ -5675,10 +5683,14 @@ fn write_shipped_baseline_layout(workspace: &LspWorkspace, baseline: &str, polic
 fn meta_schema_phase7_shipped_schema_provider_path() {
     let workspace = LspWorkspace::new();
     let shipped =
-        biscuit_test_harness::manifest_dir!().join("../docs/schemas/darkmatter.yaml");
+        biscuit_test_harness::manifest_dir!().join("../schemas/partials/fm.yaml");
     let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
     let policy = include_str!("../../../../content-policy/schemas/content-policy.yaml");
-    let path = write_shipped_baseline_layout(&workspace, &text, policy);
+    let siblings = [
+        ("style.yaml", include_str!("../../../schemas/partials/style.yaml")),
+        ("context-variables.yaml", include_str!("../../../schemas/partials/context-variables.yaml")),
+    ];
+    let path = write_shipped_baseline_layout(&workspace, &text, siblings, policy);
 
     let schema_line = text
         .lines()
@@ -5698,7 +5710,9 @@ fn meta_schema_phase7_shipped_schema_provider_path() {
 
     let hover = hover_markup(&mut fixture, uri.as_str(), schema_line, schema_column);
     assert!(hover.contains("Type: **type-definition**"), "{hover}");
-    assert!(hover.contains("Declares: **schema**"), "{hover}");
+    // The baseline's `$schema` member sits inside the partial's `fm` type,
+    // whose definition the hover describes.
+    assert!(hover.contains("Declares: **object**"), "{hover}");
 
     fixture.shutdown();
 }
@@ -5707,10 +5721,14 @@ fn meta_schema_phase7_shipped_schema_provider_path() {
 fn meta_schema_phase6_shipped_schema_activation_and_current_error() {
     let workspace = LspWorkspace::new();
     let shipped =
-        biscuit_test_harness::manifest_dir!().join("../docs/schemas/darkmatter.yaml");
+        biscuit_test_harness::manifest_dir!().join("../schemas/partials/fm.yaml");
     let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
     let policy = include_str!("../../../../content-policy/schemas/content-policy.yaml");
-    let path = write_shipped_baseline_layout(&workspace, &text, policy);
+    let siblings = [
+        ("style.yaml", include_str!("../../../schemas/partials/style.yaml")),
+        ("context-variables.yaml", include_str!("../../../schemas/partials/context-variables.yaml")),
+    ];
+    let path = write_shipped_baseline_layout(&workspace, &text, siblings, policy);
 
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
@@ -7518,7 +7536,7 @@ fn a_frontmatter_less_document_never_reports_undeclared_properties() {
 }
 
 /// The 2026-10-17 incident file (`schemas/feature-review.yaml` mid-edit) with
-/// its first comment line replaced by a `kind: trigger-schema` claim and one
+/// its first comment line replaced by a `kind: schema-trigger` claim and one
 /// character before the line-17 error replaced by a non-BMP character, so the
 /// error stays at character column 93 while its UTF-8 and UTF-16 offsets
 /// differ from each other and from the character count.
@@ -7526,7 +7544,7 @@ fn claimed_incident_envelope() -> String {
     let incident = include_str!("../../../lib/tests/fixtures/triggers/feature-review-incident.yaml");
     let mut lines: Vec<String> = incident.split('\n').map(str::to_string).collect();
     assert!(lines[0].starts_with('#'), "{}", lines[0]);
-    lines[0] = "kind: trigger-schema".to_string();
+    lines[0] = "kind: schema-trigger".to_string();
     assert!(lines[16].contains("every finding"), "{}", lines[16]);
     lines[16] = lines[16].replacen("every finding", "😀very finding", 1);
     lines.join("\n")
@@ -7603,7 +7621,7 @@ fn an_unclaimed_unparseable_schema_root_file_gets_no_trigger_diagnostic() {
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
         diagnostics.iter().all(|diagnostic| {
-            !diagnostic["message"].as_str().unwrap_or_default().contains("trigger-schema")
+            !diagnostic["message"].as_str().unwrap_or_default().contains("schema-trigger")
         }),
         "{diagnostics:#?}"
     );

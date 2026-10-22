@@ -34,7 +34,7 @@ pub mod lifecycle;
 
 pub use approval::approval_set;
 pub use collect::{collect_frontmatter_shell_commands, collect_shell_commands};
-pub use lifecycle::{ComposePreflightApprovals, PreflightApprovalStats};
+pub use lifecycle::{ComposePreflightApprovals, ExtraShellSources, PreflightApprovalStats};
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::transclusion;

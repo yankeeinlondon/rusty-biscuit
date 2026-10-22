@@ -51,6 +51,12 @@ const UNGUARDED: &[Unguarded] = &[
         count: 1,
         reason: "a read outside every branch has no branch facts; the warning policy needs only presence there",
     },
+    Unguarded {
+        path: "lifecycle/preflight/shell_walk.rs",
+        item: "LifecycleShellSites::stamp",
+        count: 1,
+        reason: "each lifecycle event's walk starts from the declarations alone; `walk_scoped` adds its guards",
+    },
 ];
 
 /// The functions the type-narrowing inventory named as static decisions:

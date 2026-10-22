@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 const DOCUMENT: &str = "---\nprompt: hello\npolicy: ok\n\n---\n\n[broken](missing.md)\n";
 const DIRECT_DOCUMENT: &str = "---\nprompt: hello\npolicy: ok\n$schema: ./schemas/payload.yaml\n---\n\n[broken](missing.md)\n";
-const TRIGGER: &str = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: payload.yaml\n";
+const TRIGGER: &str = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: payload.yaml\n";
 const PAYLOAD: &str = "$schema:\n  policy: policy@../../shared.yaml\n  required_probe: string(required) -> Spike completion marker\n";
 
 fn uri(path: &Path) -> String {

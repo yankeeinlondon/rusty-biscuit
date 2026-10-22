@@ -70,16 +70,16 @@ use crate::workspace::watch::WatchedFolder;
 
 /// What a schema-root file is, judged from its text alone.
 ///
-/// A [`TriggerSchema`](Self::TriggerSchema) can still fail to load once its
+/// A [`SchemaTrigger`](Self::SchemaTrigger) can still fail to load once its
 /// payload is resolved in a document's context; [`TriggerRegistries::summary`]
 /// combines this class with those outcomes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RootFileClass {
     /// A standalone SimplifiedSchema document, available by name.
     NamedSchema,
-    /// A file claiming `kind: trigger-schema` whose envelope loads.
-    TriggerSchema,
-    /// A file claiming `kind: trigger-schema` whose envelope does not load.
+    /// A file claiming `kind: schema-trigger` whose envelope loads.
+    SchemaTrigger,
+    /// A file claiming `kind: schema-trigger` whose envelope does not load.
     FailedTrigger,
     /// Neither: ordinary or unparseable YAML that claims no envelope.
     Unclassified,
@@ -88,7 +88,7 @@ pub enum RootFileClass {
 /// Classifies one root file's text. Passive: nothing is resolved or read.
 fn classify(text: &str, path: &Path) -> RootFileClass {
     match parse_trigger_envelope_from_str(text) {
-        Ok(Some(_)) => RootFileClass::TriggerSchema,
+        Ok(Some(_)) => RootFileClass::SchemaTrigger,
         Err(_) => RootFileClass::FailedTrigger,
         Ok(None) => match parse_standalone_schema_document(text, path) {
             Ok(Some(_)) => RootFileClass::NamedSchema,
@@ -795,12 +795,12 @@ impl TriggerRegistries {
                 continue;
             };
             match file.class {
-                RootFileClass::TriggerSchema if failed_loads.contains(path.as_path()) => {
+                RootFileClass::SchemaTrigger if failed_loads.contains(path.as_path()) => {
                     summary.failed_triggers += 1;
                 }
                 RootFileClass::NamedSchema if *tree => summary.tree_schemas += 1,
                 RootFileClass::NamedSchema => summary.scoped_schemas += 1,
-                RootFileClass::TriggerSchema => summary.trigger_schemas += 1,
+                RootFileClass::SchemaTrigger => summary.trigger_schemas += 1,
                 RootFileClass::FailedTrigger => summary.failed_triggers += 1,
                 RootFileClass::Unclassified => summary.unclassified += 1,
             }
@@ -911,7 +911,7 @@ mod tests {
     use crate::work_counters::{WorkCounts, work_counts};
 
     fn trigger(key: &str, payload: &str) -> String {
-        format!("kind: trigger-schema\nmatch:\n  {key}: string(required)\n$schema: {payload}\n")
+        format!("kind: schema-trigger\nmatch:\n  {key}: string(required)\n$schema: {payload}\n")
     }
 
     fn payload(property: &str) -> String {
@@ -1244,7 +1244,7 @@ mod tests {
         let home_envelope = fixture.home.join("schemas/home.trigger.yaml");
         let mut previous = fixture.ready(&mut registries, &doc).version;
         for (envelope, key) in [(&env_envelope, "env"), (&home_envelope, "home")] {
-            write(envelope, "kind: trigger-schema\nmatch: {}\n");
+            write(envelope, "kind: schema-trigger\nmatch: {}\n");
             registries.invalidate_paths(std::slice::from_ref(envelope));
             assert_eq!(fixture.ready(&mut registries, &doc).version, previous, "last-good retained");
             assert!(registries.load_error_for(envelope).is_some(), "{}", envelope.display());
@@ -1293,7 +1293,7 @@ mod tests {
         let tree = fixture.ready(&mut registries, &fixture.tree_doc());
         let pkg = fixture.ready(&mut registries, &fixture.pkg_doc());
         let envelope = fixture.repo.join("schemas/tree.trigger.yaml");
-        write(&envelope, "kind: trigger-schema\nmatch: {}\n");
+        write(&envelope, "kind: schema-trigger\nmatch: {}\n");
         registries.invalidate_paths(std::slice::from_ref(&envelope));
 
         // The tree document serves its last-good registry and reports the
@@ -1387,7 +1387,7 @@ mod tests {
         let mut registries = TriggerRegistries::default();
         let ((), logs) = CapturedLogs::scoped(|| {
             fixture.ready(&mut registries, &doc);
-            write(&envelope, "kind: trigger-schema\nmatch: {}\n");
+            write(&envelope, "kind: schema-trigger\nmatch: {}\n");
             registries.invalidate_paths(std::slice::from_ref(&envelope));
             fixture.ready(&mut registries, &doc);
             assert_eq!(registries.take_transitions().len(), 1);
@@ -1398,7 +1398,7 @@ mod tests {
             }
             assert!(registries.take_transitions().is_empty());
             // A different error.
-            write(&envelope, "kind: trigger-schema\nmatch:\n  title: string(required)\n");
+            write(&envelope, "kind: schema-trigger\nmatch: []\n");
             registries.invalidate_paths(std::slice::from_ref(&envelope));
             fixture.ready(&mut registries, &doc);
             // Recovery.
@@ -1432,7 +1432,7 @@ mod tests {
     fn a_cold_failure_logs_unavailable_once() {
         let fixture = Fixture::new();
         let doc = fixture.tree_doc();
-        write(&fixture.repo.join("schemas/tree.trigger.yaml"), "kind: trigger-schema\nmatch: {}\n");
+        write(&fixture.repo.join("schemas/tree.trigger.yaml"), "kind: schema-trigger\nmatch: {}\n");
         let mut registries = TriggerRegistries::default();
         let ((), logs) = CapturedLogs::scoped(|| {
             for _ in 0..3 {
@@ -1450,7 +1450,7 @@ mod tests {
     #[test]
     fn root_files_are_classified_and_counted_once_per_folder() {
         let fixture = Fixture::new();
-        write(&fixture.repo.join("schemas/broken.trigger.yaml"), "kind: trigger-schema\nmatch: {}\n");
+        write(&fixture.repo.join("schemas/broken.trigger.yaml"), "kind: schema-trigger\nmatch: {}\n");
         let mut registries = TriggerRegistries::default();
         for doc in [fixture.tree_doc(), fixture.area_doc(), fixture.pkg_doc()] {
             let _ = fixture.lookup(&mut registries, &doc);

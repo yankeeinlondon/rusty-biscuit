@@ -94,7 +94,7 @@ pub enum SuggestionState {
         /// unsupported tagged-envelope keys, invalid payload).
         error: Option<Arc<SchemaError>>,
     },
-    /// A YAML file in a `schemas/` root claims `kind: trigger-schema` but its
+    /// A YAML file in a `schemas/` root claims `kind: schema-trigger` but its
     /// envelope is malformed. The registry remains last-good while this error
     /// is published on the authoring file.
     TriggerError(Arc<SchemaError>),
@@ -1868,7 +1868,6 @@ mod tests {
     fn shipped_schema_corpus_uses_content_classification() {
         let root = biscuit_test_harness::manifest_dir!().join("../docs/schemas");
         let expected = std::collections::BTreeMap::from([
-            ("darkmatter.yaml".to_string(), "ready"),
             ("env.yaml".to_string(), "ready"),
             ("err.yaml".to_string(), "error"),
             ("expression-functions.yaml".to_string(), "inactive"),
@@ -1901,14 +1900,9 @@ mod tests {
                 }) => "ready",
                 Some(DocumentOverlay {
                     schema_authoring:
-                        SchemaAuthoringState::Standalone { error: Some(error), .. },
+                        SchemaAuthoringState::Standalone { error: Some(_), .. },
                     ..
-                }) => {
-                    if name == "darkmatter.yaml" {
-                        panic!("shipped Darkmatter schema failed passive parsing: {error}");
-                    }
-                    "error"
-                }
+                }) => "error",
                 None => "inactive",
                 Some(_) => "other",
             };
@@ -1926,7 +1920,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             root.join("schemas/prompt.trigger.yaml"),
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n",
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n",
         )
         .unwrap();
     }
@@ -2011,7 +2005,7 @@ mod tests {
 
         std::fs::write(
             root.join("schemas/prompt.trigger.yaml"),
-            "kind: trigger-schema\nmatch: {}\n",
+            "kind: schema-trigger\nmatch: {}\n",
         )
         .unwrap();
         state.invalidate_trigger_inputs(&[root.join("schemas/prompt.trigger.yaml")]);
@@ -2172,13 +2166,13 @@ mod tests {
         let b_payload = schemas.join("b.yaml");
         std::fs::write(
             &a_envelope,
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: a.yaml\n",
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: a.yaml\n",
         )
         .unwrap();
         std::fs::write(&a_payload, "$schema:\n  model: string(required)\n").unwrap();
         std::fs::write(
             &b_envelope,
-            "kind: trigger-schema\nmatch:\n  task: string(required)\n$schema: b.yaml\n",
+            "kind: schema-trigger\nmatch:\n  task: string(required)\n$schema: b.yaml\n",
         )
         .unwrap();
         std::fs::write(&b_payload, "$schema:\n  provider: string(required)\n").unwrap();

@@ -25,7 +25,7 @@ const BUNDLE: &str = "host-bundle";
 
 /// The bundle's trigger: an inline payload importing a library that imports
 /// another library, plus an `@this` reference to the payload's own `tag`.
-const HOST_TRIGGER: &str = "kind: trigger-schema\n\
+const HOST_TRIGGER: &str = "kind: schema-trigger\n\
     match:\n  prompt: string(required)\n\
     $schema:\n  model: string\n  tag: string(not-empty)\n  title: tag@this\n  stack: stack@./lifecycle.yaml\n";
 
@@ -156,7 +156,7 @@ fn a_string_payload_names_a_bundle_document() {
             vec![
                 (
                     "host.yaml",
-                    format!("kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: {reference}\n"),
+                    format!("kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: {reference}\n"),
                 ),
                 ("payload.yaml", "$schema:\n  stack: stack@./lifecycle.yaml\n".into()),
                 ("lifecycle.yaml", LIFECYCLE.into()),
@@ -173,7 +173,7 @@ fn a_string_payload_names_a_bundle_document() {
 fn a_payload_naming_a_trigger_is_rejected_inside_the_bundle() {
     let fixture = Fixture::new();
     let trigger = |payload: &str| {
-        format!("kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: {payload}\n")
+        format!("kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: {payload}\n")
     };
     for (payload, target) in [("./host.yaml", "cycle/host.yaml"), ("other.yaml", "cycle/other.yaml")] {
         let host = bundle(
@@ -199,7 +199,7 @@ fn a_same_name_matching_disk_trigger_replaces_the_embedded_one() {
     let fixture = Fixture::new();
     let disk = fixture.write_disk_schema(
         "host.yaml",
-        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema:\n  owner: string\n",
+        "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema:\n  owner: string\n",
     );
     let api = fixture.schemas(&[HOST_BUNDLE]).expect("load");
 
@@ -217,7 +217,7 @@ fn a_same_name_disk_trigger_that_does_not_match_still_suppresses_the_embedded_on
     let fixture = Fixture::new();
     fixture.write_disk_schema(
         "host.yaml",
-        "kind: trigger-schema\nmatch:\n  title: string(required)\n$schema:\n  owner: string\n",
+        "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema:\n  owner: string\n",
     );
     let api = fixture.schemas(&[HOST_BUNDLE]).expect("load");
     assert_eq!(verdict(&api, "prompt: x\nstack: [jump]\n"), None);
@@ -235,7 +235,7 @@ fn a_same_name_disk_file_that_is_not_a_trigger_suppresses_the_embedded_one() {
 #[test]
 fn a_same_name_malformed_disk_trigger_is_an_error_with_no_embedded_fallback() {
     let fixture = Fixture::new();
-    let disk = fixture.write_disk_schema("host.yaml", "kind: trigger-schema\nmatch: 42\n$schema: {}\n");
+    let disk = fixture.write_disk_schema("host.yaml", "kind: schema-trigger\nmatch: 42\n$schema: {}\n");
     for early in [false, true] {
         let result = if early {
             DarkmatterSchemas::new(fixture.context.clone())
@@ -257,7 +257,7 @@ fn a_disk_trigger_never_imports_from_the_bundle() {
     let fixture = Fixture::new();
     let disk = fixture.write_disk_schema(
         "other.yaml",
-        "kind: trigger-schema\nmatch:\n  title: string(required)\n$schema:\n  stack: stack@./lifecycle.yaml\n",
+        "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema:\n  stack: stack@./lifecycle.yaml\n",
     );
     match fixture.schemas(&[HOST_BUNDLE]) {
         Err(SchemaError::TriggerLoad { path, .. }) => assert_eq!(path, disk),
@@ -272,7 +272,7 @@ fn a_disk_trigger_never_imports_from_the_bundle() {
 fn embedded_imports_that_miss_or_leave_the_bundle_are_errors() {
     let fixture = Fixture::new();
     let trigger = |payload: &str| {
-        format!("kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: {payload}\n")
+        format!("kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: {payload}\n")
     };
     for (cell, host, expected) in [
         ("missing import", trigger("\n  stack: stack@./absent.yaml"), "is not an embedded schema document"),
@@ -335,7 +335,7 @@ fn origins_name_the_embedded_or_disk_trigger_that_declared_each_property() {
     let fixture = Fixture::new();
     let disk = fixture.write_disk_schema(
         "disk.yaml",
-        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema:\n  owner: string\n",
+        "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema:\n  owner: string\n",
     );
     let api = fixture.schemas(&[HOST_BUNDLE]).expect("load");
 
@@ -425,7 +425,7 @@ fn a_merge_is_shared_only_by_equal_authored_schemas() {
 fn an_edited_library_under_the_same_trigger_text_is_resolved_again() {
     let fixture = Fixture::new();
     let shared_trigger: &'static str = Box::leak(
-        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema:\n  verb: verb@./action.yaml\n"
+        "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema:\n  verb: verb@./action.yaml\n"
             .to_string()
             .into_boxed_str(),
     );
@@ -450,7 +450,7 @@ fn a_failing_bundle_fails_on_every_registration() {
         "broken-twice",
         vec![(
             "host.yaml",
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema:\n  stack: stack@./absent.yaml\n".into(),
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema:\n  stack: stack@./absent.yaml\n".into(),
         )],
     );
     for attempt in ["first", "second"] {
@@ -513,6 +513,8 @@ enum Outcome {
     Unclassified,
     /// `$schema: {}`: the trigger loads and contributes no constraints.
     EmptyPayload,
+    /// No `$schema`: the trigger loads and layers no schema at all.
+    MatcherOnly,
     /// A visible error naming the embedded trigger; nothing loads.
     Error,
 }
@@ -535,6 +537,7 @@ fn observe(fixture: &Fixture, text: &str) -> Result<Outcome, String> {
     let unmatched = verdict(&api, "model: [1]\n");
     match (triggers, violating, conforming, unmatched) {
         (0, None, None, None) => Ok(Outcome::Unclassified),
+        (1, None, None, None) => Ok(Outcome::MatcherOnly),
         (1, Some(false), Some(true), None) => Ok(Outcome::Applies),
         (1, Some(true), Some(true), None) => Ok(Outcome::EmptyPayload),
         other => Err(format!("inconsistent observation (triggers, violating, conforming, unmatched) = {other:?}")),
@@ -558,21 +561,22 @@ fn walk(cells: &[(&str, String, Outcome)]) {
 
 #[test]
 fn the_trigger_envelope_matrix_holds_for_block_yaml() {
-    use Outcome::{Applies, EmptyPayload, Error, Unclassified};
-    let kind = "kind: trigger-schema\n";
+    use Outcome::{Applies, EmptyPayload, Error, MatcherOnly, Unclassified};
+    let kind = "kind: schema-trigger\n";
     let match_ = "match:\n  prompt: string(required)\n";
     let schema = "$schema:\n  model: string\n";
     let doc = |kind: &str, match_: &str, schema: &str| format!("{kind}{match_}{schema}");
     let cells = vec![
         ("control", doc(kind, match_, schema), Applies),
         ("kind absent", doc("", match_, schema), Unclassified),
-        ("kind null", doc("kind: null\n", match_, schema), Unclassified),
-        ("kind wrong type", doc("kind: 42\n", match_, schema), Unclassified),
-        ("kind one element wrong", doc("kind: [trigger-schema, 42]\n", match_, schema), Unclassified),
-        ("kind every element wrong", doc("kind: [1, 2]\n", match_, schema), Unclassified),
+        ("kind null", doc("kind: null\n", match_, schema), Error),
+        ("kind wrong type", doc("kind: 42\n", match_, schema), Error),
+        ("kind one element wrong", doc("kind: [schema-trigger, 42]\n", match_, schema), Error),
+        ("kind every element wrong", doc("kind: [1, 2]\n", match_, schema), Error),
+        ("kind renamed", doc("kind: trigger-schema\n", match_, schema), Error),
         ("kind empty", doc("kind: \"\"\n", match_, schema), Unclassified),
-        ("kind duplicate", doc("kind: trigger-schema\nkind: trigger-schema\n", match_, schema), Error),
-        ("kind trailing", doc("kind: trigger-schema\n}\n", match_, schema), Error),
+        ("kind duplicate", doc("kind: schema-trigger\nkind: schema-trigger\n", match_, schema), Error),
+        ("kind trailing", doc("kind: schema-trigger\n}\n", match_, schema), Error),
         ("match absent", doc(kind, "", schema), Error),
         ("match null", doc(kind, "match: null\n", schema), Error),
         ("match wrong type", doc(kind, "match: 42\n", schema), Error),
@@ -586,7 +590,7 @@ fn the_trigger_envelope_matrix_holds_for_block_yaml() {
             Error,
         ),
         ("match trailing", doc(kind, "match:\n  prompt: string(required)\n}\n", schema), Error),
-        ("$schema absent", doc(kind, match_, ""), Error),
+        ("$schema absent", doc(kind, match_, ""), MatcherOnly),
         ("$schema null", doc(kind, match_, "$schema: null\n"), Error),
         ("$schema wrong type", doc(kind, match_, "$schema: 42\n"), Error),
         ("$schema one element wrong", doc(kind, match_, "$schema:\n  model: string\n  bad: 42\n"), Error),
@@ -603,8 +607,8 @@ fn the_trigger_envelope_matrix_holds_for_block_yaml() {
 
 #[test]
 fn the_trigger_envelope_matrix_holds_for_json_syntax() {
-    use Outcome::{Applies, EmptyPayload, Error, Unclassified};
-    let kind = r#""kind": "trigger-schema""#;
+    use Outcome::{Applies, EmptyPayload, Error, MatcherOnly, Unclassified};
+    let kind = r#""kind": "schema-trigger""#;
     let match_ = r#""match": {"prompt": "string(required)"}"#;
     let schema = r#""$schema": {"model": "string"}"#;
     let doc = |fields: &[&str]| {
@@ -612,19 +616,20 @@ fn the_trigger_envelope_matrix_holds_for_json_syntax() {
         format!("{{{}}}\n", fields.join(", "))
     };
     // A duplicate key or trailing bracket makes the document unparseable, and
-    // a malformed flow mapping has no column-0 `kind: trigger-schema` line, so
+    // a malformed flow mapping has no column-0 `kind: schema-trigger` line, so
     // those rows are unclaimed rather than load errors (the claim rule in the
     // "Repository Trigger Schemas" section of `topics/schemas/definition.md`).
     let cells = vec![
         ("control", doc(&[kind, match_, schema]), Applies),
         ("kind absent", doc(&["", match_, schema]), Unclassified),
-        ("kind null", doc(&[r#""kind": null"#, match_, schema]), Unclassified),
-        ("kind wrong type", doc(&[r#""kind": 42"#, match_, schema]), Unclassified),
-        ("kind one element wrong", doc(&[r#""kind": ["trigger-schema", 42]"#, match_, schema]), Unclassified),
-        ("kind every element wrong", doc(&[r#""kind": [1, 2]"#, match_, schema]), Unclassified),
+        ("kind null", doc(&[r#""kind": null"#, match_, schema]), Error),
+        ("kind wrong type", doc(&[r#""kind": 42"#, match_, schema]), Error),
+        ("kind one element wrong", doc(&[r#""kind": ["schema-trigger", 42]"#, match_, schema]), Error),
+        ("kind every element wrong", doc(&[r#""kind": [1, 2]"#, match_, schema]), Error),
+        ("kind renamed", doc(&[r#""kind": "trigger-schema""#, match_, schema]), Error),
         ("kind empty", doc(&[r#""kind": """#, match_, schema]), Unclassified),
         ("kind duplicate", doc(&[kind, kind, match_, schema]), Unclassified),
-        ("kind trailing", doc(&[r#""kind": "trigger-schema"]"#, match_, schema]), Unclassified),
+        ("kind trailing", doc(&[r#""kind": "schema-trigger"]"#, match_, schema]), Unclassified),
         ("match absent", doc(&[kind, "", schema]), Error),
         ("match null", doc(&[kind, r#""match": null"#, schema]), Error),
         ("match wrong type", doc(&[kind, r#""match": 42"#, schema]), Error),
@@ -638,7 +643,7 @@ fn the_trigger_envelope_matrix_holds_for_json_syntax() {
             Unclassified,
         ),
         ("match trailing", doc(&[kind, r#""match": {"prompt": "string(required)"}}"#, schema]), Unclassified),
-        ("$schema absent", doc(&[kind, match_, ""]), Error),
+        ("$schema absent", doc(&[kind, match_, ""]), MatcherOnly),
         ("$schema null", doc(&[kind, match_, r#""$schema": null"#]), Error),
         ("$schema wrong type", doc(&[kind, match_, r#""$schema": 42"#]), Error),
         ("$schema one element wrong", doc(&[kind, match_, r#""$schema": {"model": "string", "bad": 42}"#]), Error),
@@ -670,7 +675,7 @@ fn an_unparseable_embedded_document_fails_only_when_it_claims_the_envelope() {
     let api = fixture.schemas(&[quiet]).expect("an unclaimed document is not a trigger");
     assert_eq!(api.trigger_registry().map(|registry| registry.triggers.len()), Some(1));
 
-    let loud = bundle("loud", vec![("host.yaml", "kind: trigger-schema\nnotes: a: b\n".into())]);
+    let loud = bundle("loud", vec![("host.yaml", "kind: schema-trigger\nnotes: a: b\n".into())]);
     let error = fixture.schemas(&[loud]).err().expect("a claimed document is fatal");
     let (bundle_name, name, source) = embedded_load_error(&error).unwrap_or_else(|| panic!("{error:?}"));
     assert_eq!((bundle_name, name), ("loud", "host.yaml"));

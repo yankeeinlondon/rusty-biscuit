@@ -1762,7 +1762,7 @@ impl ComposeOptions {
         opts
     }
 
-    /// Enables repository-scoped trigger-schema discovery for file sources.
+    /// Enables repository-scoped schema-trigger discovery for file sources.
     ///
     /// This is opt-in for library hosts. The `md compose` CLI enables it by
     /// default; stdin, URL, and in-memory sources remain discovery-free.

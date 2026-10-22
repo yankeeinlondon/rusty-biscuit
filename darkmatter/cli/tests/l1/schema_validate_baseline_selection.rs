@@ -347,7 +347,7 @@ fn trigger_layout(process: &CliProcessFixture) {
     std::fs::create_dir_all(cwd.join("docs")).unwrap();
     std::fs::write(
         cwd.join("schemas/prompt.trigger.yaml"),
-        "kind: trigger-schema\nmatch:\n  kind: enum(prompt; required)\n$schema: prompt.yaml\n",
+        "kind: schema-trigger\nmatch:\n  kind: enum(prompt; required)\n$schema: prompt.yaml\n",
     )
     .unwrap();
     std::fs::write(cwd.join("schemas/prompt.yaml"), OWNER_SCHEMA).unwrap();
@@ -380,16 +380,16 @@ fn trigger_schema_still_validates_after_env_opt_out() {
     assert_trigger_schema_survives(Selection { no_baseline_env: Some("true"), ..Selection::default() });
 }
 
-/// `--no-trigger-schemas` turns triggers off and leaves the embedded baseline
+/// `--no-schema-triggers` turns triggers off and leaves the embedded baseline
 /// on.
 #[test]
-fn no_trigger_schemas_keeps_the_embedded_baseline() {
+fn no_schema_triggers_keeps_the_embedded_baseline() {
     let process = CliProcessFixture::new();
     trigger_layout(&process);
     let document = process.cwd().join("docs/prompt.md");
     std::fs::write(&document, "---\nkind: prompt\nlast_updated: not-a-date\n---\nBody\n").unwrap();
 
-    let run = run_json(&process, Selection::default(), &["--no-trigger-schemas"], &document);
+    let run = run_json(&process, Selection::default(), &["--no-schema-triggers"], &document);
     assert_eq!(run.code, Some(1), "{}", run.stdout);
     assert_eq!(run.problem_paths(), ["/last_updated"], "baseline only, no trigger: {}", run.stdout);
 }

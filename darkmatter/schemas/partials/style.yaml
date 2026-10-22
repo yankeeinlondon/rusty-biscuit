@@ -1,5 +1,8 @@
+# The `style` property of the `fm` global: Darkmatter's canonical kebab-case
+# style surface. Anchors keep the repeated component shapes identical; the
+# runtime parser remains authoritative for deprecated snake_case aliases and
+# cross-field constraints such as width/max-width.
 kind: schema
-description: the 'style' property in Darkmatter
 types:
     style:
         page:
@@ -15,7 +18,7 @@ types:
             bottom-padding: *style-rows
             max-width: *style-length
             alignment: &style-alignment "enum(left, center, right) -> Horizontal alignment."
-            color: &style-color "string(suggest()) -> Tailwind(red-500 or red-300/20, etc.), hexadecimal, or CSS named color."
+            color: &style-color "string -> Tailwind, hexadecimal, or CSS named foreground color, optionally with opacity."
             bg-color: *style-color
             background: "enum(transparent, subtle, pronounced) -> Page background fill strategy."
             stylesheet: "file -> CSS file reference or URL used for browser rendering."
@@ -105,3 +108,39 @@ types:
 
         disclosure: *style-common
         code-block: *style-common
+
+        # Cleanup formatting rules (`md clean`, DMLS formatting). Defaults are
+        # runtime rule defaults, never written into frontmatter; the runtime
+        # validator (`markdown::cleanup::rules`) is authoritative. Booleans and
+        # `default-language` are literal unions rather than `boolean`/`string`
+        # so schema coercion cannot accept a quoted `"true"` or a number that
+        # cleanup rejects.
+        markdown:
+            frontmatter:
+                - "literal(true; default(true)) -> Apply non-destructive frontmatter repairs (the default)."
+                - "literal(false) -> Leave the frontmatter block byte-for-byte."
+            table-layout:
+                - "literal(true; default(true)) -> Pad table cells so columns line up (the default)."
+                - "literal(false) -> Leave table cells as authored."
+            fixed-width:
+                - "number(integer; min(1); max(1000)) -> Unwrap, then re-wrap prose to this display width."
+                - "boolean(default(false)) -> false: never re-wrap; true: re-wrap to 120."
+            unwrap:
+                - "literal(true) -> Join single line breaks inside paragraphs."
+                - "literal(false; default(false)) -> Keep authored line breaks (the default)."
+            indentation:
+                - "literal(preserve) -> Leave list indentation as authored."
+                - "literal(2) -> Two spaces per nested-list level."
+                - "literal(4; default(4)) -> Four spaces per nested-list level (the default)."
+                - "literal(8) -> Eight spaces per nested-list level."
+            ordered-lists:
+                - "literal(true; default(true)) -> Renumber ordered lists that are neither uniform nor sequential (the default)."
+                - "literal(false) -> Leave list numbers as authored."
+            list-padding:
+                - "literal(true; default(true)) -> Ensure one blank line before and after every list (the default)."
+                - "literal(false) -> Leave blank lines around lists as authored."
+            list-item-padding: "enum(preserve, none, one; default(preserve)) -> Blank lines between sibling items of the same list."
+            list-interior-padding: "enum(preserve, none, except-nested-lists, all; default(preserve)) -> Blank lines between an item's first line and the blocks nested inside it."
+            default-language:
+                - "string(not-empty; default(text); suggest(text, plain)) -> Language added to unlabeled code fences."
+                - "literal('') -> Add no language."

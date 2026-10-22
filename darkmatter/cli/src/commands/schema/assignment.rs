@@ -457,7 +457,7 @@ mod tests {
         std::fs::create_dir_all(root.join("schemas")).unwrap();
         std::fs::write(
             root.join("schemas/app.trigger.yaml"),
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: app.yaml\n",
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: app.yaml\n",
         )
         .unwrap();
         std::fs::write(root.join("schemas/app.yaml"), "$schema:\n  version: string\n  count: number\n").unwrap();

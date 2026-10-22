@@ -25,10 +25,10 @@ const REQUEST_CANCELED: i32 = -32800;
 /// `ServerCancelled`.
 const SERVER_CANCELLED: i32 = -32802;
 
-const ENVELOPE: &str = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+const ENVELOPE: &str = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
 /// A trigger whose payload file does not exist: its preparation fails.
 const MISSING_PAYLOAD_ENVELOPE: &str =
-    "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: absent-payload.yaml\n";
+    "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: absent-payload.yaml\n";
 /// The payload names a property no log line may carry.
 const PAYLOAD: &str = "$schema:\n  payloadsecretfield: string(required)\n";
 const EDITED_PAYLOAD: &str = "$schema:\n  payloadsecretfield: string\n";
@@ -152,7 +152,7 @@ fn only_pass_counts(logs: &CapturedLogs) -> String {
 /// No captured line carries payload, trigger, or document text.
 fn assert_no_schema_text(logs: &CapturedLogs) {
     for line in logs.matching("trigger registries prepared") {
-        for text in ["payloadsecretfield", "prompt: string", "kind: trigger-schema", "absent-payload", "hello"] {
+        for text in ["payloadsecretfield", "prompt: string", "kind: schema-trigger", "absent-payload", "hello"] {
             assert!(!line.contains(text), "{text:?} leaked into {line}");
         }
     }

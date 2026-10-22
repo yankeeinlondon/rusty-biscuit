@@ -391,7 +391,7 @@ fn a_matched_trigger_schema_property_is_known() {
     write(
         repo.path(),
         "schemas/stable.trigger.yaml",
-        "kind: trigger-schema\nmatch:\n  gate: literal(stable; required)\n$schema: payload.yaml\n",
+        "kind: schema-trigger\nmatch:\n  gate: literal(stable; required)\n$schema: payload.yaml\n",
     );
     write(repo.path(), "schemas/payload.yaml", "$schema:\n  trigger_marker: string\n");
     let path = write(repo.path(), "prompts/doc.md", "---\ngate: stable\n---\n[{{ trigger_marker }}]\n");

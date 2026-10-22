@@ -1845,7 +1845,7 @@ mod tests {
         std::fs::create_dir_all(repo.path().join("schemas")).unwrap();
         std::fs::write(
             repo.path().join("schemas/test.trigger.yaml"),
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: payload.yaml\n",
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: payload.yaml\n",
         )
         .unwrap();
         std::fs::write(

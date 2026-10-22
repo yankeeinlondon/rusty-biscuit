@@ -215,7 +215,8 @@ fn interpolation_completions(
     partial: &str,
 ) -> Vec<CompletionItem> {
     let frontmatter_keys = frontmatter::expression_property_keys(ctx);
-    interpolation_candidates(partial, &frontmatter_keys)
+    let host = expressions::host_global_candidates(partial, &host_catalogs(ctx));
+    lower_candidates(expressions::completion_candidates(partial, &frontmatter_keys).into_iter().chain(host))
         .into_iter()
         .filter_map(|candidate| text_edit_item(ctx, token_start, offset, candidate))
         .collect()
@@ -243,11 +244,26 @@ struct CompletionCandidate {
 /// functions. Lowers the shared [`expressions::completion_candidates`] neutral
 /// model — the single authority shared with the Expression-typed frontmatter
 /// value surface — onto this provider's LSP candidate shape.
+#[cfg(test)]
 fn interpolation_candidates(
     partial: &str,
     frontmatter_keys: &[String],
 ) -> Vec<CompletionCandidate> {
-    expressions::completion_candidates(partial, frontmatter_keys)
+    lower_candidates(expressions::completion_candidates(partial, frontmatter_keys))
+}
+
+/// The host catalogs in the document's schema roots; none without a
+/// resolution context. A catalog that fails to load contributes nothing.
+pub(crate) fn host_catalogs(ctx: &DocumentContext) -> Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog> {
+    ctx.file_context()
+        .map(|context| {
+            darkmatter::markdown::schemas::catalog::host_catalogs(context).into_iter().filter_map(Result::ok).collect()
+        })
+        .unwrap_or_default()
+}
+
+fn lower_candidates(candidates: impl IntoIterator<Item = expressions::ExprCompletion>) -> Vec<CompletionCandidate> {
+    candidates
         .into_iter()
         .map(|candidate| CompletionCandidate {
             label: candidate.label,
@@ -329,13 +345,14 @@ fn interpolation_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let body_base = body_base(ctx.text);
     let interpolation = expressions::interpolation_at(ctx.text, body_base, offset)?;
     let expr_offset = offset.saturating_sub(interpolation.inner.start);
+    let host = host_catalogs(ctx);
     let value = with_site_scope(ctx, Some(interpolation.inner.start), |site| {
         expressions::hover_markdown(
             &interpolation.text,
             expr_offset,
             site,
             |name| frontmatter_scalar(ctx, name),
-            |name| schema_property_hover(ctx, name),
+            |name| expressions::host_global_hover(name, &host).or_else(|| schema_property_hover(ctx, name)),
         )
     });
     Some(markup_hover(ctx, interpolation.outer.clone(), value))

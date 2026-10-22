@@ -160,7 +160,7 @@ pub use frontmatter_shell_expansion::{
     parse_frontmatter_shell_suffixes, parse_frontmatter_shell_value_spanned,
 };
 pub use icmp::PlannedIcmpProbe;
-pub use preflight::{ComposePreflightApprovals, ComposePreflightReport, PreflightApprovalStats, collect_frontmatter_shell_commands, collect_shell_commands};
+pub use preflight::{ComposePreflightApprovals, ComposePreflightReport, ExtraShellSources, PreflightApprovalStats, collect_frontmatter_shell_commands, collect_shell_commands};
 pub use shell_blocks::ShellBlockError;
 pub use shell_expansion::ShellCommandOrigin;
 pub use shell_expansion::ShellExpansionError;
