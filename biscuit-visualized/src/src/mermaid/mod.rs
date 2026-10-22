@@ -1,6 +1,9 @@
 pub mod config;
 pub mod error;
 pub(crate) mod gitgraph;
+// Consumed by the Merman render path's pre-parse rewrites.
+#[allow(dead_code)]
+pub(crate) mod newline;
 pub mod render;
 
 pub use config::{MermaidConfig, MermaidTheme, QuadrantTheme};

@@ -97,7 +97,7 @@ The cache key is an xxHash of a composite string containing:
 1. **Key schema prefix** (`v2`) — bumped when what a key covers changes; `v2` added background, row padding, and PNG encoding, so every artifact stored under `v1|` is a miss
 2. **Visualization kind** (mermaid or graph)
 3. **Source content** (the diagram/graph source text)
-4. **Options JSON** (theme, config, orientation, etc., plus a `request` entry from `RenderRequest::cache_identity()`: scale, target width, row height, background, and for PNG the encoder settings `png@0.17:compression=default,filter=adaptive`)
+4. **Options JSON** (theme, config, orientation, etc., plus a `request` entry from `RenderRequest::cache_identity()`: scale, target width, row height, background, and for PNG the encoder settings `png@0.18:compression=balanced,filter=adaptive`)
 5. **Backend ID** (renderer version identifier)
 6. **Output format** (svg or png)
 

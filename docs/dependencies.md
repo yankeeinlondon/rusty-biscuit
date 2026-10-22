@@ -7,6 +7,28 @@
 
 ## Recent Dependency Notes
 
+- `resvg`/`usvg` move from 0.45 to 0.47 repo-wide (2026-10-22), in
+  `biscuit-terminal` and `biscuit-visualized` (both feature `image`). With
+  them `tiny-skia` moves to 0.12, which encodes with `png` 0.18, so
+  `biscuit-visualized`'s own `png` dependency moves to 0.18 as well (`ico`
+  and `tauri-codegen` keep a separate `png` 0.17). The lockfile keeps one
+  copy each of `resvg`, `usvg`, `fontdb` (0.23), `tiny-skia` (0.12),
+  `rustybuzz` (0.20.1), and `ttf-parser` (0.25.1). `serde_json` resolves to
+  1.0.154.
+- `biscuit-visualized` adds, under its `image` feature (2026-10-22),
+  `rustybuzz` 0.20.1 and `ttf-parser` 0.25.1 (the versions `usvg` uses, so no
+  second copy), `unicode-bidi` 0.3 and `unicode-script` 0.5 (already in the
+  graph through `usvg`), and `fontique` 0.12.0 (`default-features = false`,
+  feature `system`) for the OS's generic font family. `fontique` brings
+  `read-fonts` 0.41, `font-types` 0.12, `parlance`,
+  `linebender_resource_handle`, and, on Linux and FreeBSD,
+  `yeslogic-fontconfig-sys` 6, which links the system `libfontconfig` at
+  build time (its pkg-config file must be installed). On macOS and Windows it
+  uses `objc2-core-text` and `windows` 0.62, both already in the graph.
+- `biscuit-visualized` compiles in two font assets (2026-10-22): Inter 4.1
+  Regular and Bold (SIL OFL 1.1, about 0.8 MB, every OS) and Noto Emoji
+  (SIL OFL 1.1, variable `wght`, about 2.0 MB, Linux builds only). Sources and
+  checksums are in `biscuit-visualized/src/assets/fonts/*/README.md`.
 - `biscuit-terminal` adds `icy_sixel` 0.7 (2026-10-21) as a normal
   dependency, with no cargo feature, for the Sixel graphics route. It brings
   `quantette` (with `kmeans`) and `palette` into the lockfile, plus second
@@ -1100,6 +1122,30 @@ This is a Rust workspace with the following modules:
 
 ### Image Processing
 
+- [resvg](https://github.com/linebender/resvg) _v0.47_ [📄](https://docs.rs/resvg)
+
+    _SVG rendering and rasterization (with its `usvg` parser and `tiny-skia` 0.12 backend). Used by `biscuit-terminal` and `biscuit-visualized` under their `image` features._
+
+    _Tags: image, svg, rasterization_
+
+- [rustybuzz](https://github.com/harfbuzz/rustybuzz) _v0.20.1_ [📄](https://docs.rs/rustybuzz)
+
+    _Pure-Rust HarfBuzz port for text shaping. `biscuit-visualized` (feature `image`) shapes diagram labels with it, on the version `usvg` uses._
+
+    _Tags: fonts, text, shaping_
+
+- [ttf-parser](https://github.com/harfbuzz/ttf-parser) _v0.25.1_ [📄](https://docs.rs/ttf-parser)
+
+    _Zero-allocation TrueType/OpenType font parser. `biscuit-visualized` (feature `image`) reads font names and tables with it, on the version `usvg` uses._
+
+    _Tags: fonts, parsing_
+
+- [fontique](https://github.com/linebender/parley) _v0.12.0_ [📄](https://docs.rs/fontique)
+
+    _System font enumeration and generic-family fallback through fontconfig, CoreText, or DirectWrite. Used by `biscuit-visualized` (feature `image`) with `default-features = false` and feature `system`._
+
+    _Tags: fonts, system_
+
 - [mermaid-rs-renderer](https://github.com/1jehuang/mermaid-rs-renderer) _v0.3.1_ [📄](https://docs.rs/mermaid-rs-renderer)
 
     _Pure-Rust Mermaid parser, layout engine, and SVG renderer. Used by `biscuit-visualized` with `default-features = false` (SVG only; biscuit rasterizes with its own `resvg`)._
@@ -1119,6 +1165,12 @@ This is a Rust workspace with the following modules:
     _Guess gender from first names using a Detector struct and name databases._
 
     _Tags: gender, name, prediction_
+
+- [unicode-bidi](https://github.com/servo/unicode-bidi) _v0.3_ [📄](https://docs.rs/unicode-bidi) and [unicode-script](https://github.com/unicode-rs/unicode-script) _v0.5_ [📄](https://docs.rs/unicode-script)
+
+    _Unicode bidirectional runs and script property. `biscuit-visualized` (feature `image`) splits labels into shaping runs with them, as `usvg`'s text layout does._
+
+    _Tags: i18n, unicode, text_
 
 - [unic-langid](https://github.com/zbraniecki/unic-locale) _v0.9.6_ [📄](https://docs.rs/unic-langid)
 

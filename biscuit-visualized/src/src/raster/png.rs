@@ -1,11 +1,13 @@
 use std::fs;
 use std::io;
 use std::path::Path;
+use std::sync::Arc;
 
 use resvg::usvg;
 
-use super::cloned_system_font_database;
+use super::usvg_options;
 use crate::artifact::{Background, RenderRequest};
+use crate::fonts::{FontChain, default_chain};
 
 /// Errors that can occur during SVG rasterization.
 #[derive(Debug, thiserror::Error)]
@@ -19,9 +21,26 @@ pub enum RasterError {
 }
 
 fn parse_svg_tree(svg_data: &str) -> Result<usvg::Tree, RasterError> {
-    let mut opts = usvg::Options::default();
-    *opts.fontdb_mut() = cloned_system_font_database();
+    parse_svg_tree_with(svg_data, default_chain())
+}
+
+/// Parses `svg_data`, laying out its text with `chain`'s faces.
+fn parse_svg_tree_with(svg_data: &str, chain: &Arc<FontChain>) -> Result<usvg::Tree, RasterError> {
+    let opts = usvg_options(chain);
     usvg::Tree::from_str(svg_data, &opts).map_err(|e| RasterError::SvgParseFailed(e.to_string()))
+}
+
+/// [`rasterize_svg_to_png_bytes`] with an explicit font chain (tests inject
+/// their own font set).
+#[cfg(test)]
+pub(crate) fn rasterize_svg_to_png_bytes_with(
+    svg_data: &str,
+    scale: u32,
+    chain: &Arc<FontChain>,
+) -> Result<Vec<u8>, RasterError> {
+    let tree = parse_svg_tree_with(svg_data, chain)?;
+    let pixmap = render_tree_to_pixmap(&tree, scale.max(1) as f32, None, None)?;
+    encode_png(&pixmap)
 }
 
 /// Draws `tree` scaled by `scale` onto a canvas whose height is padded up to
@@ -66,9 +85,11 @@ fn scale_for_width(tree: &usvg::Tree, target_width: u32) -> Result<f32, RasterEr
 
 /// Encodes a pixmap as PNG with zlib's default level and adaptive filtering.
 ///
-/// tiny-skia's own `encode_png` uses the `png` crate's fast settings, whose
-/// output can be larger than the raw pixels; these bytes now reach terminals
-/// unchanged, so size matters.
+/// The settings are spelled out rather than inherited from tiny-skia's
+/// `encode_png`, because they are part of the cache key (`PNG_ENCODING`):
+/// a change in tiny-skia's defaults must not change the bytes behind a key.
+/// Earlier tiny-skia used fast settings whose output could exceed the raw
+/// pixels; these bytes reach terminals unchanged, so size matters.
 fn encode_png(pixmap: &resvg::tiny_skia::Pixmap) -> Result<Vec<u8>, RasterError> {
     // tiny-skia stores premultiplied alpha; PNG wants straight alpha.
     let mut rgba = Vec::with_capacity(pixmap.data().len());
@@ -83,8 +104,8 @@ fn encode_png(pixmap: &resvg::tiny_skia::Pixmap) -> Result<Vec<u8>, RasterError>
         let mut encoder = png::Encoder::new(&mut data, pixmap.width(), pixmap.height());
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
-        encoder.set_compression(png::Compression::Default);
-        encoder.set_adaptive_filter(png::AdaptiveFilterType::Adaptive);
+        encoder.set_compression(png::Compression::Balanced);
+        encoder.set_filter(png::Filter::Adaptive);
         let mut writer = encoder.write_header().map_err(encoding_error)?;
         writer.write_image_data(&rgba).map_err(encoding_error)?;
         writer.finish().map_err(encoding_error)?;

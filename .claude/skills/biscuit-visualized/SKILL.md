@@ -227,6 +227,7 @@ RasterError::IoError(std::io::Error)
 | `biscuit-visualized/src/graph/render.rs` | GraphDiagram, GraphColorTheme, orientation |
 | `biscuit-visualized/src/cache/file_cache.rs` | Content-addressed FileCache |
 | `biscuit-visualized/src/raster/png.rs` | SVG-to-PNG rasterization via resvg |
+| `biscuit-visualized/src/fonts/` | Font-resolution chain (`chain.rs`), usvg-mirroring shaper (`shaper.rs`), Merman text measurer (`measure.rs`); crate-private |
 
 ## Dependencies
 
@@ -234,7 +235,9 @@ RasterError::IoError(std::io::Error)
 |-------|---------|
 | `mermaid-rs-renderer` 0.3.1 | Mermaid diagram rendering backend (cache backend id `mermaid-rs-renderer@0.3.x+bv3`) |
 | `layout-rs` v0.1 | Graph layout engine and DOT parsing |
-| `resvg` v0.45 | SVG-to-PNG rasterization |
+| `resvg` v0.47 | SVG-to-PNG rasterization |
+| `rustybuzz` 0.20.1, `ttf-parser` 0.25.1, `unicode-bidi`, `unicode-script`, `fontique` 0.12.0 | Font resolution (ttf-parser, fontique; used by the rasterizer's font chain) and text measurement (feature `image`: `fonts::shaper` mirrors usvg's layout, `fonts::measure::LabelMeasurer` is Merman's measurer; not yet on the Mermaid render path). rustybuzz and ttf-parser stay on usvg's versions |
+| Bundled fonts (`src/assets/fonts/`) | Inter 4.1 Regular/Bold (every OS) and Noto Emoji (Linux only), compiled in by the private `fonts::bundled` module (`image` feature) and registered in the font-resolution chain's database |
 | `biscuit-hash` | xxHash for cache key generation |
 | `serde` + `serde_json` | Theme config serialization |
 | `thiserror` v2.0 | Error type derivation |
@@ -255,4 +258,4 @@ just -f biscuit-visualized/justfile lint    # Run clippy
 - Pie chart text contrast is adjusted per-slice using WCAG luminance formula
 - Graph SVG post-processing trims layout-rs canvas padding and applies custom fonts/colors
 - layout-rs supports LR and TB orientations; `GraphOrientation` maps to these
-- System font database is lazily loaded with `OnceLock` for thread-safe caching in rasterization
+- Rasterization draws text through the crate's one font-resolution chain (`fonts::default_chain()`, lazily built behind `OnceLock`); see [Rasterization](./rasterization.md#font-database-and-resolution)

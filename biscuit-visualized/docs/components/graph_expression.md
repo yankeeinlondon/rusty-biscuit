@@ -98,7 +98,7 @@ match graph.try_render(&term) {
 - terminal-aware light/dark themes by default
 - explicit inverse rendering via `GraphExpression::inverted_for_terminal(...)`
 - width control through `ImageWidth`
-- optional font-family override with `.with_font_family(...)`
+- optional font-family override with `.with_font_family(...)`; when `MERMAID_FONT` names an installed family or the bundled `Inter`, labels are drawn in that family instead (see [font resolution](../merman.md#the-resolution-chain))
 - render metadata via `GraphRenderResult` (`png_path`, `cache_hit`)
 
 Like Mermaid rendering, graph rendering is pure Rust: this crate uses `layout-rs` for layout and `resvg` for rasterization; no Graphviz binary is required.

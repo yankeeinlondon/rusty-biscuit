@@ -56,6 +56,25 @@ The default width is `ImageWidth::Scale(1.0)`: the diagram's 16-unit body text i
 
 The diagram is rasterized once, at its final display size: the PNG is as many pixels wide as the resolved columns (margins included) times the measured cell width, and its height is padded with blank rows below the drawing up to a whole number of cell rows. When the terminal reports no cell size, the 8x16 fallback is used. Those PNG bytes reach Kitty and iTerm2 unchanged (see [`EncodedPng`](../../../biscuit-terminal/docs/components/terminal_image.md#already-encoded-png-input)), so the terminal shows the raster 1:1 in exactly the rows it reserves, with no stretching or re-encoding. A Sixel route decodes the PNG and encodes it as Sixel at the same size. The size is measured on every render, so after a terminal or font resize the next render produces a new raster.
 
+### Fonts
+
+The rasterizer already draws each label in the face the library's font
+resolution chain picks, so `MERMAID_FONT` (a family name, case-insensitive;
+`Inter` selects the bundled face) already sets the face labels are drawn in.
+Layout does not use the chain yet, so a label's box is still sized by
+`mermaid-rs-renderer`'s own estimate.
+
+> **Planned.** Once Mermaid rendering moves to Merman, each label's font is
+> chosen by one resolution chain shared by text measurement and drawing, so a
+> label is measured in the face it is drawn in. Set `MERMAID_FONT` to a family
+> name (case-insensitive) to use it for every diagram; `MERMAID_FONT=Inter`
+> selects the Inter face bundled with the library and gives the same layout on
+> every host. A family that is neither installed nor bundled logs one warning
+> per process and is otherwise ignored. Linux builds also bundle a monochrome
+> Noto Emoji face, used only when no installed font has the emoji. See
+> [Merman rendering: fonts and label text](../merman.md) for the full chain,
+> the fallback order, and the `\n` line-break rewrite.
+
 ### Error Handling
 
 Returns `MermaidRenderError` for visualization errors, unsupported terminals, and image display failures.

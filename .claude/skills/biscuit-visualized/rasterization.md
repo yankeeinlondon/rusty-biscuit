@@ -11,7 +11,7 @@ Both preserve aspect ratio and run through the same `resvg` + `tiny_skia` pipeli
 
 ## PNG encoding
 
-Every PNG (public functions and `RenderRequest` renders alike) is encoded by the private `encode_png` with the `png` crate (0.17, the version tiny-skia already uses) at zlib's default compression level with adaptive filtering, after converting tiny-skia's premultiplied alpha to straight alpha. tiny-skia's own `encode_png` uses fast compression with the Sub filter, whose output can exceed the raw pixel size; these bytes now reach Kitty and iTerm2 unchanged, so size matters. The settings are part of every PNG artifact's cache key (`PNG_ENCODING` in `artifact.rs`), so changing them never serves bytes encoded the old way.
+Every PNG (public functions and `RenderRequest` renders alike) is encoded by the private `encode_png` with the `png` crate (0.18, the version tiny-skia 0.12 already uses) at zlib's default compression level (`Compression::Balanced`) with adaptive filtering, after converting tiny-skia's premultiplied alpha to straight alpha. tiny-skia 0.12's own `encode_png` now uses the same defaults (0.11 used fast compression whose output could exceed the raw pixel size), but the settings stay explicit: they are part of every PNG artifact's cache key (`PNG_ENCODING` in `artifact.rs`), so a change in tiny-skia's defaults or ours never serves bytes encoded the old way. `Compression::High` was measured larger on a gradient test image, so it is not used.
 
 ## Width-based API (preferred for display)
 
@@ -101,19 +101,38 @@ The cache key incorporates `scale`, `target_width`, `row_height`, `background`, 
 use biscuit_visualized::raster::available_font_families;
 
 let fonts = available_font_families();
-// Returns Vec<String> of system font family names available to resvg
-// e.g., ["Arial", "Helvetica", "Courier New", ...]
+// Installed family names plus the bundled "Inter", sorted, from the same
+// database the rasterizer draws with, e.g. ["Arial", "Helvetica", "Inter", ...]
 ```
 
-## Font Database
+## Font Database and Resolution
 
-The system font database is loaded lazily on first use and cached via `OnceLock` for thread safety. This means:
+Text is drawn through the crate's one font-resolution chain
+(`fonts::FontChain`, crate-private, `image` feature), the same chain the
+Mermaid text measurer (`fonts::measure::LabelMeasurer`) resolves with:
 
-- First rasterization call may be slightly slower (font enumeration).
-- Subsequent calls reuse the cached font database.
-- No need to manually initialize or manage fonts.
+- The process chain (`fonts::default_chain()`) is built lazily on first use
+  behind a `OnceLock`: `load_system_fonts()`, then the bundled Inter
+  Regular/Bold (family `Inter`) and, on Linux builds, the bundled Noto Emoji.
+  `MERMAID_FONT` is read once, there. fontique (the OS generic family) and the
+  OS/2 scan of step 4 run only when a query first needs them.
+- `raster::usvg_options(chain)` hands usvg the chain's own
+  `Arc<fontdb::Database>` and a `usvg::FontResolver` whose `select_font`
+  calls `FontChain::resolve(&FontQuery::from_usvg(font))` and whose
+  `select_fallback` calls `FontChain::fallback`.
+- Resolution order: `MERMAID_FONT` (installed or bundled Inter, any casing)
+  → the CSS stack (names case-insensitive; generics by the OS answer) → the
+  OS `sans-serif` answer (fontique) → an installed OS/2 sans-serif face by a
+  fixed rule. Fallback: installed faces by case-folded family name, then
+  Noto Emoji (Linux) last; bundled Inter is never a fallback face.
+- `MERMAID_FONT` therefore overrides every rasterized SVG's fonts, graphs
+  included.
+- Tests build a chain with `FontChain::injected(installed_bytes,
+  generic_answers, mermaid_font)` (cfg(test)) and rasterize with
+  `raster::png::rasterize_svg_to_png_bytes_with`; never `load_system_fonts`
+  in a test that is not about the default chain.
 
-`resvg` uses the system font database to render text in SVGs. If a font referenced in the SVG is not installed, `resvg` falls back to a default font.
+User-facing rules: `biscuit-visualized/docs/merman.md`.
 
 ## `RasterError`
 
@@ -138,6 +157,7 @@ Common causes:
 
 | File | Contents |
 |------|----------|
-| `biscuit-visualized/src/raster/mod.rs` | Font database initialization, `available_font_families()`, public re-exports |
+| `biscuit-visualized/src/raster/mod.rs` | `usvg_options()` (chain database + `FontResolver`), `available_font_families()`, public re-exports |
+| `biscuit-visualized/src/fonts/` | The font-resolution chain: `query.rs` (`FontQuery`, CSS family parser), `chain.rs` (steps, fallback, face identities), `metadata.rs` (OS/2 sans-serif rule), `matching.rs` (fontdb's CSS matching), `bundled.rs` |
 | `biscuit-visualized/src/raster/png.rs` | `rasterize_svg_to_png()` (width-based), `rasterize_svg_to_png_bytes()` (scale-based), `rasterize_svg()` file wrapper, `rasterize_svg_for_request()` (crate-private), `encode_png()`, `RasterError` |
 | `biscuit-visualized/src/artifact.rs` | `RenderRequest` (`scale`, `target_width`, `row_height`, `background`; `with_target_width`/`with_row_height`/`with_background` builders), `Background`, `PNG_ENCODING` |

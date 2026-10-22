@@ -11,7 +11,17 @@ path = "src/lib.rs"
 [features]
 clap = ["dep:clap"]
 # Enables SVG rasterization and Mermaid diagram rendering (both require resvg).
-image = ["dep:resvg", "dep:png", "dep:mermaid-rs-renderer"]
+image = [
+    "dep:resvg",
+    "dep:png",
+    "dep:mermaid-rs-renderer",
+    "dep:rustybuzz",
+    "dep:ttf-parser",
+    "dep:unicode-bidi",
+    "dep:unicode-script",
+    "dep:fontique",
+    "dep:merman",
+]
 # The diagram components (`components::{MermaidDiagram, GraphExpression,
 # GitGraph}`) and the render-tree diagram hook. This crate depends on
 # `biscuit-terminal`, never the reverse, so no feature here may make
@@ -27,6 +37,26 @@ resvg = { version = "0.47", optional = true }
 # The PNG encoder resvg's tiny-skia already uses, configured for smaller output
 # (see `raster::png::encode_png`); keep it on tiny-skia's major version.
 png = { version = "0.18", optional = true }
+# Shapes labels for text measurement, so the measured face is the drawn face;
+# keep on the version usvg uses, so the lock holds one copy.
+rustybuzz = { version = "0.20.1", optional = true }
+# Reads font tables (names, OS/2 class, cmap) for font resolution; keep on the
+# version usvg uses, so the lock holds one copy.
+ttf-parser = { version = "0.25.1", optional = true }
+# Bidi runs and script itemization for shaping, as usvg's text layout does.
+unicode-bidi = { version = "0.3", optional = true }
+unicode-script = { version = "0.5", optional = true }
+# The OS's own generic font family (fontconfig, CoreText, DirectWrite) for
+# font resolution; the version Merman pins. `fontconfig-dlopen` loads
+# libfontconfig at run time, so Linux builds need no fontconfig development
+# package and a host without the library skips this step instead of failing.
+fontique = { version = "0.12.0", default-features = false, features = ["system", "fontconfig-dlopen"], optional = true }
+# The Mermaid backend replacing mermaid-rs-renderer. Pinned to a commit on
+# Ken's fork carrying the gitGraph `commitSpacing` key (branch
+# `gitgraph-commit-spacing`, based on upstream 482fcde7). `png`,
+# `native-fonts`, ELK, and `math` stay off: we rasterize and measure with our
+# own usvg and font chain.
+merman = { git = "https://github.com/yankeeinlondon/merman.git", rev = "6e6b1e6554e8e75d468c1f991652c1c53a85bace", default-features = false, features = ["svg", "all-diagrams", "layout-cytoscape"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"

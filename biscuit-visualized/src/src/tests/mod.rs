@@ -1,11 +1,19 @@
 mod artifact_tests;
+#[cfg(feature = "image")]
+mod bundled_font_tests;
 mod cache_tests;
+#[cfg(feature = "image")]
+mod font_chain_tests;
 #[cfg(feature = "image")]
 mod gitgraph_tests;
 #[cfg(feature = "image")]
 mod graph_tests;
 #[cfg(feature = "image")]
+mod measure_tests;
+#[cfg(feature = "image")]
 mod mermaid_tests;
+#[cfg(feature = "image")]
+mod newline_tests;
 #[cfg(feature = "image")]
 mod raster_tests;
 

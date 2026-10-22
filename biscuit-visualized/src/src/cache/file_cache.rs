@@ -23,7 +23,7 @@ pub const CACHE_DIR_ENV: &str = "BISCUIT_VISUALIZED_CACHE_DIR";
 /// pre-change artifacts.
 pub const MERMAID_BACKEND: &str = "mermaid-rs-renderer@0.3.x+bv3";
 pub const GRAPH_BACKEND: &str = "layout-rs@0.1.x";
-pub const RASTERIZER: &str = "resvg@0.45";
+pub const RASTERIZER: &str = "resvg@0.47";
 
 /// File-based cache for rendered visualizations.
 ///
