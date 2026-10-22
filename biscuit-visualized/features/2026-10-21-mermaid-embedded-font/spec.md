@@ -31,8 +31,10 @@ implemented: false
 needs_rulings: false
 depends-on:
     - 2026-10-21-merman
+    - 2026-10-22-merman-text-fallback
 related:
     - 2026-10-21-merman
+    - 2026-10-22-merman-text-fallback
 ---
 
 # Embedded font for Mermaid static SVG
@@ -62,7 +64,7 @@ reader's browser) is not affected.
 
 **In scope**
 
-- An `HtmlOptions` field and an `md` CLI flag that turn the opt-in on (D3).
+- An `HtmlOptions` field and an `md` CLI feature, `--feature embed-mermaid-font`, that turn the opt-in on (D3).
 - Choosing the face to measure with and embed: the face the font chain
   resolves when its embedding permission allows it, the bundled Inter
   otherwise (D13).
@@ -116,7 +118,7 @@ choosing a different face changes the layout, not only the output (D6, D13).
 | Area | Responsibility |
 | --- | --- |
 | `biscuit-visualized` | Choosing the face for the opt-in render (reading the resolved face's `fsType`, D13); measuring with it; subsetting it to the code points used; building the `@font-face` rule; the explanation for the page comment (D14) |
-| `darkmatter` | The `HtmlOptions` field and the `md` flag; collecting the code points of every diagram on a page; emitting the rule, the page comment, and the OFL attribution once per page; keeping the sanitizer's rule against external URLs |
+| `darkmatter` | The `HtmlOptions` field and the `md` feature `embed-mermaid-font`; collecting the code points of every diagram on a page; emitting the rule, the page comment, and the OFL attribution once per page; keeping the sanitizer's rule against external URLs |
 
 ## Decisions
 
@@ -151,7 +153,13 @@ separately; a weight no label uses is not embedded.
 
 - A field on Darkmatter's `HtmlOptions`: `embed_mermaid_font: bool`, default
   `false`.
-- An `md` CLI flag, `--embed-mermaid-font`, that sets it.
+- An `md` CLI feature, `--feature embed-mermaid-font`, that sets it. It uses the
+  `--feature` convention introduced by `2026-10-22-merman-text-fallback` (D4
+  there), which is implemented first: repeatable, comma-separated,
+  case-insensitive, and an unknown name is a usage error. *(Amended
+  2026-10-22: originally a standalone `--embed-mermaid-font` flag; Ken moved it
+  under the `--feature` convention and ordered this spec after the text
+  fallback.)*
 - No frontmatter key.
 - The opt-in acts only on diagrams emitted as static SVG
   (`MermaidMode::Image`); with the default `<pre class="mermaid">` path it
@@ -317,7 +325,7 @@ page that embeds a host face carries no OFL comment.
 ## Requirements
 
 - **R-E1.** `HtmlOptions::embed_mermaid_font` (default `false`) and the `md`
-  flag `--embed-mermaid-font` turn the opt-in on; there is no frontmatter key
+  feature `--feature embed-mermaid-font` turn the opt-in on; there is no frontmatter key
   (D3).
 - **R-E2.** With the opt-in on, every diagram on the page is measured with the
   face D13 chooses, which is the face embedded (D6, D13).
@@ -375,7 +383,7 @@ page that embeds a host face carries no OFL comment.
 | AC-E6 | A subset over 60 KB is embedded and its size is logged | Test with a label set large enough to exceed the budget; captured log |
 | AC-E7 | When subsetting fails, the output is the static SVG without a font, and a warning is logged | Test with an injected subsetting failure; output has no `@font-face`; captured log |
 | AC-E8 | When Inter is embedded, the subset's `name` table carries name IDs 0, 13, and 14 from Inter; the bundled `OFL.txt`'s Reserved Font Name status is recorded in the implementation log, and the declared family matches D8 | Test reading the subset's `name` table; log entry; HTML assertion on the family name |
-| AC-E9 | `HtmlOptions::embed_mermaid_font` defaults to `false`; `--embed-mermaid-font` sets it; without static-SVG mode the output is unchanged | Unit test on the default; CLI test; HTML diff with and without the flag in the default mode |
+| AC-E9 | `HtmlOptions::embed_mermaid_font` defaults to `false`; `--feature embed-mermaid-font` sets it; without static-SVG mode the output is unchanged | Unit test on the default; CLI test; HTML diff with and without the flag in the default mode |
 | AC-E10 | An opt-in render and a plain static-SVG render of the same source have different cache keys | Cache test |
 | AC-E11 | The docs describe the opt-in, the flag, the face choice with a plain explanation of `fsType` and of redistribution, the embedded face's coverage, the budget, and the failure fallback, with an example, and name no spec | Review; search for spec names in the touched docs |
 | AC-E12 | The subset is produced by `allsorts` and keeps `cmap`, `OS/2`, and `name`; the headless Chrome check of D11 and D16 (glyphs, and Inter's name IDs 0, 13, and 14) is recorded in the implementation log with its outcome (subset used, or unsubset fallback taken) | Test reading the subset's table directory; log entry with the Chrome result and, on fallback, the embedded file sizes |

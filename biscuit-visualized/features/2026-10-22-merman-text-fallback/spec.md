@@ -33,6 +33,7 @@ depends-on:
     - 2026-10-21-merman
 related:
     - 2026-10-21-merman
+    - 2026-10-21-mermaid-embedded-font
 references:
     biscuit-visualized/docs/research/mermaid/merman.md: >-
         Research on Merman, including its Unicode/ASCII output and the coverage
