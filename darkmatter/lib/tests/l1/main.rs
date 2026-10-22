@@ -125,6 +125,7 @@ mod request_context_epoch;
 mod schema_phase_validation;
 mod schema_quoting_safety;
 mod schema_embedded_trigger_bundles;
+mod schema_enhancements_matrix;
 mod schema_roots;
 mod schema_yaml_spellings;
 mod schemas_conjunctive_lowering;

@@ -32,7 +32,7 @@ use serde_json::json;
 /// One edit applied to a seed. Keys are matched at the start of a line after
 /// indentation (`{key}:`), first occurrence; items and lines by exact text.
 #[derive(Clone, Copy)]
-enum Edit {
+pub(crate) enum Edit {
     /// The unedited seed.
     Control,
     /// Replaces everything after `{key}:` on its line, plus the key's block
@@ -356,7 +356,7 @@ fn line_of(seed: &str, find: &str) -> (usize, usize) {
     (start, end)
 }
 
-fn apply(seed: &str, edit: Edit) -> String {
+pub(crate) fn apply(seed: &str, edit: Edit) -> String {
     match edit {
         Control => seed.to_string(),
         Set(key, raw) => {
