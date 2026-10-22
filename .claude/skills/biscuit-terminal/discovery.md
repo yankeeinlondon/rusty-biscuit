@@ -100,6 +100,11 @@ The graphics probe (`detection::probe`, live exchange in
   Sixel read from the DA1 sentinel's reply. Whichever of color lookup / route
   resolution needs it first sends both parts. Inside a multiplexer only the
   graphics part is sent (colors stay off).
+- On Unix the color part also carries sixteen OSC 4 palette queries
+  (`ESC ] 4 ; N ; ? BEL`, N = 0–15) between OSC 11 and the Kitty query,
+  behind the same color gate; the hidden `osc_queries::ansi_palette()` reads
+  them. A PTY test that matches the exact startup request must include them.
+  Native Windows sends none (`ASKS_PALETTE = cfg!(unix)`).
 - Outcomes: correlated Kitty `OK` → Kitty `Verified` (beats Sixel); DA1
   attribute `4` (never the class, never a digit of another number) → Sixel
   `Verified`; DA1 without either or a Kitty rejection → NoSupport `Verified`;

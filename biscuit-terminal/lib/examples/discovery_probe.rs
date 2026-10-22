@@ -52,6 +52,12 @@
 //!   `Terminal` constructions, three `cell_size()` lookups, and one cursor
 //!   position query, then print `query_budget_elapsed_ms=` and
 //!   `query_budget_done`. The test counts each query on the master side.
+//! * `palette` — Read the ANSI palette (`osc_queries::ansi_palette`) twice
+//!   and print `palette_first_ms=` (the first read's duration),
+//!   `palette[i]=` for slots 0–15, `palette_stable=` (whether the second read
+//!   matched), then `palette_done`. With `PROBE_PALETTE_AFTER_TERMINAL` set,
+//!   a `Terminal` is built first, so the palette is read from the exchange
+//!   that construction sent.
 //! * `graphics` — Construct `PROBE_GRAPHICS_CONSTRUCTIONS` (default 1)
 //!   `Terminal` values and print each one's graphics route and colors as
 //!   `graphics_<field>[i]=` lines, then `graphics_done`. With
@@ -231,6 +237,7 @@ fn main() {
         "terminal_cache" => probe_terminal_cache(),
         "terminal_latency" => probe_terminal_latency(),
         "query_budget" => probe_query_budget(),
+        "palette" => probe_palette(),
         "prose" => probe_prose(),
         _ => probe_all(),
     }
@@ -646,6 +653,31 @@ fn probe_query_budget() {
     black_box(cursor_position());
     println!("query_budget_elapsed_ms={}", start.elapsed().as_millis());
     println!("query_budget_done");
+}
+
+// ---------------------------------------------------------------------------
+// ANSI palette (OSC 4)
+// ---------------------------------------------------------------------------
+
+fn probe_palette() {
+    use biscuit_terminal::discovery::osc_queries::ansi_palette;
+    use biscuit_terminal::terminal::Terminal;
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    if std::env::var_os("PROBE_PALETTE_AFTER_TERMINAL").is_some() {
+        black_box(Terminal::new());
+    }
+    let start = Instant::now();
+    let first = ansi_palette();
+    let first_ms = start.elapsed().as_millis();
+    let second = ansi_palette();
+    println!("palette_first_ms={first_ms}");
+    for (index, slot) in first.iter().enumerate() {
+        println!("palette[{index}]={slot:?}");
+    }
+    println!("palette_stable={}", first == second);
+    println!("palette_done");
 }
 
 // ---------------------------------------------------------------------------

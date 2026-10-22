@@ -1,7 +1,8 @@
 # Live Terminal Queries
 
 Some facts about a terminal can only be learned by asking it: the background
-and foreground colors (OSC 11 / OSC 10), the cursor color (OSC 12), whether it
+and foreground colors (OSC 11 / OSC 10), the cursor color (OSC 12), the 16
+ANSI palette colors (OSC 4, not on native Windows), whether it
 renders Kitty graphics or Sixel (the graphics probe), the window size in pixels
 (CSI 14 t), the size of one character cell in pixels (CSI 16 t, native
 Windows), and the cursor position (DSR, `CSI 6 n`). `biscuit-terminal` asks
@@ -45,14 +46,15 @@ terminal that answers DA1:   ESC]10;?  ESC]11;?  ESC[c   -> ESC[?62;22c   (no wa
 ## The startup exchange
 
 `Terminal::new()` makes one live exchange per process. It always held the
-OSC 10/11 color queries; when the [graphics route](./graphics-routes.md)
+OSC 10/11 color queries, and on macOS, Linux, and WSL2 it also asks for the
+ANSI palette (see [The ANSI palette](#the-ansi-palette-osc-4)); when the [graphics route](./graphics-routes.md)
 cannot be decided from the environment (an unidentified terminal, an SSH
 session without forwarded hints, Zellij, and the other cases listed in
 [When the probe runs](./graphics-routes.md#when-the-probe-runs)), the Kitty
 graphics query is written in the same request:
 
 ```text
-ESC]10;?  ESC]11;?  ESC_Gi=<id>,s=1,v=1,a=q,t=d,f=24;AAAA ESC\  ESC[c
+ESC]10;?  ESC]11;?  ESC]4;0;? … ESC]4;15;?  ESC_Gi=<id>,s=1,v=1,a=q,t=d,f=24;AAAA ESC\  ESC[c
 ```
 
 The Kitty part is a complete query for a one-pixel image that is never
@@ -84,13 +86,14 @@ has no system call that reports it (see [Cell size](#cell-size)):
 ESC]10;?  ESC]11;?  ESC[16t  ESC[c   -> ... ESC[6;20;10t ESC[?61;4;...c
 ```
 
-Whichever caller needs the exchange first, the color lookup, the graphics
-route, or (on native Windows) a cell-size lookup, sends every part the process
-needs, and the answers are cached together. Each part keeps its own gate:
+Whichever caller needs the exchange first, the color lookup, the palette
+lookup, the graphics route, or (on native Windows) a cell-size lookup, sends
+every part the process needs, and the answers are cached together. Each part keeps its own gate:
 
 | Part | Sent when |
 |------|-----------|
 | OSC 10/11 colors | Stdout is a terminal, not CI, probing is not turned off, the terminal is on the color list (below), and no multiplexer (tmux, Zellij, GNU Screen) is in the way |
+| OSC 4 palette, slots 0–15 | Exactly when the colors are, on macOS, Linux, and WSL2; never on native Windows |
 | Kitty graphics query | The graphics route asks for a probe and no input is waiting, except to a visible tmux asked about its own Sixel (DA1 only) |
 | Cell size (`CSI 16 t`) | Native Windows only, whenever the exchange is sent there; a cell-size lookup before any exchange sends one when the color gate passes |
 | DA1 sentinel | Always, as the last part of any exchange that is sent |
@@ -109,12 +112,51 @@ flowchart TD
     K --> R
     R --> W{anything to send?}
     W -- yes --> X[write request + DA1,<br/>read until the DA1 reply]
-    X --> P[cache colors and<br/>graphics answer for the process]
+    X --> P[cache colors, palette, and<br/>graphics answer for the process]
     W -- no --> N[nothing written]
 ```
 
 [Graphics Routes](./graphics-routes.md#the-graphics-probe) explains how each
 reply becomes a route.
+
+### The ANSI palette (OSC 4)
+
+The palette is the 16 colors a user's theme assigns to the ANSI color
+indices 0–15 (black, red, … bright white). The library asks for each slot
+with its own `?` query, `ESC ] 4 ; <index> ; ? BEL`, in the startup exchange,
+right after the OSC 10/11 colors. Nothing extra is waited for: terminals
+answer in order, so the palette replies arrive before the DA1 reply that
+already ends the exchange. The library only ever asks; it never writes a
+palette entry, so the user's colors are never changed.
+
+A terminal answers each query with `ESC ] 4 ; <index> ; <color>`, ended by
+BEL (`\x07`) or ST (`ESC \`). The color is `rgb:` with one to four hex
+digits per component, each scaled from its own width (`rgb:ff/…` and
+`rgb:ffff/…` both mean 255), or `#rrggbb`:
+
+```text
+reply bytes:  ESC]4;1;rgb:cdcd/3131/3131 BEL  ESC]4;4;#2472c8 ESC\  ESC]4;9;rgb:f1/4c ESC[?62;22c
+palette:      slot 1 = (205, 49, 49), slot 4 = (36, 114, 200), every other slot unknown
+```
+
+Slot 9 is unknown because its reply was cut short. Replies may arrive in any
+order and mixed with other replies; a reply with a malformed color or an
+index outside 0–15 is ignored. A slot with no usable reply is unknown, never
+an error, and a terminal that answers none of them leaves the whole palette
+unknown.
+
+The palette shares the startup exchange's per-process cache: a terminal that
+does not answer is not asked again in that process, and a silent one costs
+the usual single bounded wait. It is not public API; `biscuit-visualized`
+reads it through the hidden `osc_queries::ansi_palette()`. **Planned:** no
+diagram palette consumes it yet. Diagram accents are to come from these
+colors, and from the detected background wherever the palette is unknown.
+
+**Native Windows sends no OSC 4 query.** The palette is always unknown there,
+so diagrams use accents derived from the background color. The same holds
+wherever the colors are not queried: no terminal on stdout or stderr, CI,
+tmux, Zellij, GNU Screen, probing turned off, or a terminal not on the color
+list.
 
 ### The wrapped exchange
 
@@ -248,7 +290,7 @@ only the way the terminal is reached differs.
 | Platform | How the terminal is reached | Queries |
 |----------|-----------------------------|---------|
 | macOS, Linux, WSL2 | `/dev/tty` in raw mode, read through `select(2)`; the terminal modes are restored afterwards | All of them |
-| Native Windows | The console input and output handles (`CONIN$` / `CONOUT$`), with the console modes restored afterwards | Colors, the cell size, and the graphics probe; not cursor position or window pixels |
+| Native Windows | The console input and output handles (`CONIN$` / `CONOUT$`), with the console modes restored afterwards | Colors, the cell size, and the graphics probe; not the ANSI palette, cursor position, or window pixels |
 
 The request goes to the controlling terminal rather than stdout, so it reaches
 the terminal even when stdout is captured.
@@ -319,7 +361,7 @@ at the prompt. A longer silence budget makes that less likely on a slow link.
 
 | What | Cached for | Notes |
 |------|------------|-------|
-| The startup exchange (colors and the direct graphics probe) | The process | Shared by every `Terminal` and every color lookup |
+| The startup exchange (colors, the ANSI palette, and the direct graphics probe) | The process | Shared by every `Terminal`, every color lookup, and the palette lookup |
 | The wrapped exchange | The process, separately | Never merged with the direct answer |
 | A graphics query skipped because input was waiting | Not cached | A later construction may probe |
 | A silent terminal | The process | Every later query returns at once |

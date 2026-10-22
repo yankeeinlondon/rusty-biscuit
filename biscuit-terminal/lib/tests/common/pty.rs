@@ -130,7 +130,29 @@ pub fn spawn_unidentified_with_env(envs: &[(&str, &str)]) -> OsSession {
     spawn_removing(envs, IDENTITY_VARS)
 }
 
-fn spawn_removing(envs: &[(&str, &str)], extra_removals: &[&str]) -> OsSession {
+/// The marker the shell around a [`spawn_redirected_with_env`] probe prints
+/// to the pty once the probe has exited.
+#[cfg(unix)]
+pub const REDIRECTED_PROBE_EXITED: &str = "redirected_probe_exited";
+
+/// Like [`spawn_with_env`], but the probe's stdout and stderr both go to
+/// `output`, so neither standard stream is a terminal while `/dev/tty` is
+/// still the pty: the library must not query, and anything it wrote to
+/// `/dev/tty` would still show on the master side. The child also loses
+/// [`IDENTITY_VARS`], as with [`spawn_unidentified_with_env`]. A shell around
+/// the probe prints [`REDIRECTED_PROBE_EXITED`] to the pty when the probe
+/// exits.
+#[cfg(unix)]
+pub fn spawn_redirected_with_env(envs: &[(&str, &str)], output: &std::path::Path) -> OsSession {
+    let mut cmd = Command::new("/bin/sh");
+    cmd.arg("-c")
+        .arg(format!("\"$0\" >\"$1\" 2>&1; echo {REDIRECTED_PROBE_EXITED}"))
+        .arg(existing_probe())
+        .arg(output);
+    configure_and_spawn(cmd, envs, IDENTITY_VARS)
+}
+
+fn existing_probe() -> PathBuf {
     let bin = discovery_probe_path();
     if !bin.exists() {
         panic!(
@@ -139,8 +161,13 @@ fn spawn_removing(envs: &[(&str, &str)], extra_removals: &[&str]) -> OsSession {
             bin.display()
         );
     }
+    bin
+}
+
+fn spawn_removing(envs: &[(&str, &str)], extra_removals: &[&str]) -> OsSession {
+    let bin = existing_probe();
     #[cfg(windows)]
-    let mut cmd = {
+    let cmd = {
         let shell =
             std::env::var_os("ComSpec").unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into());
         let mut cmd = Command::new(shell);
@@ -149,8 +176,15 @@ fn spawn_removing(envs: &[(&str, &str)], extra_removals: &[&str]) -> OsSession {
         cmd
     };
     #[cfg(not(windows))]
-    let mut cmd = Command::new(&bin);
+    let cmd = Command::new(&bin);
+    configure_and_spawn(cmd, envs, extra_removals)
+}
 
+fn configure_and_spawn(
+    mut cmd: Command,
+    envs: &[(&str, &str)],
+    extra_removals: &[&str],
+) -> OsSession {
     // Remove terminal-specific env vars that would override TERM_PROGRAM
     // detection, so tests can manufacture a terminal identity cleanly. The
     // SSH/Mosh markers go too: a run over SSH (as `just cross-check` does)
