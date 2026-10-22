@@ -12,9 +12,11 @@ use super::{QueryPort, ReadOutcome, TtyQueryError};
 use crate::discovery::raw_mode::RawModeGuard;
 
 pub(super) struct UnixPort {
-    tty: File,
-    // Dropped after nothing reads `tty` any more, restoring its modes.
+    // Declared first so it drops first: fields drop in declaration order, and
+    // the guard restores the modes through `tty`'s descriptor, which must
+    // still be open.
     _guard: RawModeGuard,
+    tty: File,
 }
 
 /// Opens `/dev/tty`, not stdout: the request must reach the controlling
@@ -27,7 +29,7 @@ pub(super) fn open_port() -> Result<UnixPort, TtyQueryError> {
         .open("/dev/tty")
         .map_err(|e| TtyQueryError::Io(format!("open /dev/tty: {e}")))?;
     let guard = RawModeGuard::new(tty.as_raw_fd()).map_err(TtyQueryError::Io)?;
-    Ok(UnixPort { tty, _guard: guard })
+    Ok(UnixPort { _guard: guard, tty })
 }
 
 impl QueryPort for UnixPort {

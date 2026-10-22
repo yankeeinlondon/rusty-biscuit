@@ -68,6 +68,9 @@
 //!   escape sequences; `fallback:<text>`; or `error:<message>`).
 //!   `PROBE_GRAPHICS_CELL_SIZE` set also prints `graphics_cell_size[i]=`,
 //!   the terminal's `cell_size()`; unset, no cell-size lookup is made.
+//!   On Unix it also prints `tty_modes_restored=true|false`: whether
+//!   `/dev/tty`'s canonical and echo modes are what they were before the
+//!   constructions.
 //! * `prose` — Render a [`Prose`] string against the detected (or
 //!   override-built) terminal and print the raw bytes between
 //!   `---PROSE---` / `---END---` markers.
@@ -398,6 +401,7 @@ fn probe_graphics() {
     {
         println!("typeahead_pending={}", await_stdin_line(wait_ms));
     }
+    let modes_before = tty_line_modes();
     for i in 0..count {
         let term = if probe_off {
             Terminal::builder().probe(ProbeMode::Off).build()
@@ -421,6 +425,9 @@ fn probe_graphics() {
         if let Ok(path) = std::env::var("PROBE_GRAPHICS_IMAGE") {
             print_image(i, std::path::Path::new(&path), &term);
         }
+    }
+    if let Some(before) = modes_before {
+        println!("tty_modes_restored={}", tty_line_modes() == Some(before));
     }
     if let Some(wait_ms) = std::env::var("PROBE_READ_TYPEAHEAD_MS")
         .ok()
@@ -490,6 +497,27 @@ fn await_stdin_line(wait_ms: u64) -> bool {
 #[cfg(not(unix))]
 fn await_stdin_line(_wait_ms: u64) -> bool {
     false
+}
+
+/// The `ICANON` and `ECHO` bits of `/dev/tty`, which a query exchange clears
+/// while it runs and must restore. `None` without a controlling terminal.
+#[cfg(unix)]
+fn tty_line_modes() -> Option<libc::tcflag_t> {
+    use std::os::unix::io::AsRawFd;
+
+    let tty = std::fs::File::open("/dev/tty").ok()?;
+    // SAFETY: `termios` is plain data that tcgetattr fully initializes on
+    // success, and the descriptor is open for the duration of the call.
+    unsafe {
+        let mut termios: libc::termios = std::mem::zeroed();
+        (libc::tcgetattr(tty.as_raw_fd(), &mut termios) == 0)
+            .then_some(termios.c_lflag & (libc::ICANON | libc::ECHO))
+    }
+}
+
+#[cfg(not(unix))]
+fn tty_line_modes() -> Option<u32> {
+    None
 }
 
 // ---------------------------------------------------------------------------

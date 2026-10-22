@@ -144,6 +144,18 @@ mod unix {
         assert_eq!(field(&collected, "graphics_bg_source[0]"), "Measured");
     }
 
+    /// The exchange leaves the terminal in canonical mode with echo on, as it
+    /// found it; otherwise the shell the process returns to stops echoing.
+    #[test]
+    fn exchange_restores_canonical_and_echo_modes() {
+        expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+        let mut answers = full_answers();
+        let collected = run(&[ALACRITTY], &mut answers);
+
+        assert_eq!(direct_kitty_queries(&collected).len(), 1, "{}", raw(&collected));
+        assert_eq!(field(&collected, "tty_modes_restored"), "true", "{}", raw(&collected));
+    }
+
     /// An unidentified terminal outside the color-query list gets the Kitty
     /// query and DA1 only; a DA1 with attribute 4 and no Kitty reply resolves
     /// to verified Sixel.

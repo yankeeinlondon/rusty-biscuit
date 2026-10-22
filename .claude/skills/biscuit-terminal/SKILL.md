@@ -134,6 +134,8 @@ Use the `renderable` skill for shared IR/layout/style definitions. Use the
   `PROBE_READ_TYPEAHEAD_MS` reads one stdin line afterwards
   (`typeahead_line=`) to check what the exchange consumed;
   `PROBE_GRAPHICS_CELL_SIZE` adds `graphics_cell_size[i]=` (`cell_size()`).
+  On Unix it also prints `tty_modes_restored=`, whether `/dev/tty` is back in
+  canonical mode with echo after the constructions.
 - The PTY tests spawn the `discovery_probe` example. `just test` builds it,
   but a narrowed `cargo nextest run --test l1 ...` does not, and silently runs
   a stale probe: run `cargo build -p biscuit-terminal --example
