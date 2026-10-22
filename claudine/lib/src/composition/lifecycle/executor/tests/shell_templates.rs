@@ -32,7 +32,7 @@ fn prepared(frontmatter: &Value, approvals: Option<&ShellPreApprovals>) -> Lifec
 
 /// `command` typed with no enclosing guard and no schema.
 fn unguarded(command: &str) -> darkmatter::markdown::compose::shell_expansion::template::CommandTemplate {
-    let declared = lifecycle_declared_types(None);
+    let declared = lifecycle_declared_types(None, crate::composition::claudine_registry());
     typed_template(command, &TypeScope::unguarded(&declared)).expect("a template")
 }
 

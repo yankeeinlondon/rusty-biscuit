@@ -1,17 +1,20 @@
 //! Lifecycle stacks: the typed action model authored in document frontmatter
 //! and the parser that builds it.
 //!
-//! A document's lifecycle is eight events (`initialize`, `start`, `success`,
-//! `blocked`, `failure`, `finalize`, `loop`, `cancelled`). Each event is a
-//! stack: an ordered action list, or one dictionary of verbs that expands
+//! A document's lifecycle fires through eight engine slots
+//! ([`LifecycleSignal`]); the host's [`registry::EventRegistry`] names the
+//! events that use them (Darkmatter's `composed` is the `Start` slot, and a
+//! host may call it `start`). Each event is a stack: an ordered action list, or one dictionary of verbs that expands
 //! into that list in canonical order (see [`actions::LifecycleNode`]). The
 //! `loop:` block's lifecycle concerns are loose verb keys or a `gate:` list;
 //! its iteration controls ([`LOOP_ITERATION_KEYS`]) belong to the host.
 //!
 //! This module parses, statically validates, and executes. A host supplies what
-//! the grammar leaves open through [`LifecycleParseOptions`] — the sound-effect
-//! catalog and the profile's policy for verbs it does not know — and runs one
-//! event's parsed stack through [`executor::StackExecutor`].
+//! the grammar leaves open through [`LifecycleParseOptions`] — its
+//! [`registry::EventRegistry`] (which keys are lifecycle stacks, under which
+//! names), the sound-effect catalog, and the profile's policy for verbs it
+//! does not know — and runs one event's parsed stack through
+//! [`executor::StackExecutor`].
 //!
 //! The runtime's host-neutral pieces live here too: the error envelope behind
 //! the `err` and `timing` globals ([`envelope`], [`context`]), cancellation
@@ -32,16 +35,18 @@
 //! ## Examples
 //!
 //! ```
+//! use darkmatter::lifecycle::registry::EventRegistry;
 //! use darkmatter::lifecycle::{
 //!     LifecycleParseOptions, LifecycleSignal, UnknownVerbPolicy, parse_lifecycle_config_with,
 //! };
 //! use serde_json::json;
 //!
-//! let frontmatter = json!({ "start": [{ "info": "Starting..." }] });
+//! let frontmatter = json!({ "composed": [{ "info": "Starting..." }] });
 //! let options = LifecycleParseOptions {
 //!     is_known_effect: &|_| false,
 //!     authored: None,
 //!     unknown_verbs: UnknownVerbPolicy::Reject,
+//!     registry: &EventRegistry::md(),
 //! };
 //! let config =
 //!     parse_lifecycle_config_with(&frontmatter, std::path::Path::new("doc.md"), &options).unwrap();
@@ -76,7 +81,11 @@ pub mod effects;
 pub mod envelope;
 pub mod error;
 pub mod executor;
+pub mod md_host;
 mod parse;
+pub mod policy;
+pub mod preflight;
+pub mod registry;
 pub mod run;
 pub mod run_guard;
 pub mod runtime;
@@ -103,42 +112,20 @@ pub use parse::{
     scan_removed_validation_keys,
 };
 #[doc(hidden)]
-pub use parse::{runs_a_shell, with_mapping_shape};
+pub use parse::{action_type, runs_a_shell, with_mapping_shape};
 #[doc(hidden)]
 pub use source_map::{AuthoredValue, LifecycleSourceMap};
 #[doc(hidden)]
 pub use validate::{Surface, event_surfaces, walk_stack};
 pub use validate::{
     collect_lifecycle_shell_commands, collect_lifecycle_shell_commands_for,
-    validate_no_nested_spans_in_literals,
+    validate_no_nested_spans_in_literals, validate_no_nested_spans_in_literals_in,
 };
-
-/// The eight top-level frontmatter keys that hold lifecycle event subtrees.
-///
-/// A host defers these from compose-time value resolution (via
-/// `ComposeOptions::with_exclude_keys`) so their authored `{{ }}` spans
-/// survive raw for event-time interpolation. Non-lifecycle keys compose as
-/// usual; the iteration controls inside `loop:` ([`LOOP_ITERATION_KEYS`]) are
-/// read from raw frontmatter by the host's loop engine, not by compose-time
-/// interpolation.
-///
-/// Order matches [`LifecycleSignal::ALL`] for readable diffs; the set is
-/// what callers consume.
-pub const LIFECYCLE_EVENT_KEYS: &[&str] = &[
-    "initialize",
-    "start",
-    "success",
-    "blocked",
-    "failure",
-    "finalize",
-    "loop",
-    "cancelled",
-];
 
 /// Complete lifecycle configuration for a document.
 ///
-/// Parsed from frontmatter properties `initialize`, `start`, `success`,
-/// `blocked`, `failure`, `cancelled`, `finalize`, and the lifecycle concerns of `loop:`.
+/// Parsed from the frontmatter keys the host's registry names for each
+/// [`LifecycleSignal`], and the lifecycle concerns of its iteration gate.
 ///
 /// ## Examples
 ///

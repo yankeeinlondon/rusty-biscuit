@@ -153,6 +153,9 @@
 //! refuse instead — assembling a plan from empty slices would silently drop the
 //! MCP injection or system prompt the invocation performed.
 
+use claudine::composition::preflight::checks::{AGENT_RESOLUTION, claudine_preflight, run_check};
+use darkmatter::lifecycle::preflight::CheckStage;
+use darkmatter::lifecycle::run::EntryReason;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -334,7 +337,10 @@ pub(crate) fn rebuild_launch_identity(
     document: &MaterializedHarnessPrompt,
     source_path: Option<&Path>,
 ) -> Result<RebuiltLaunchIdentity, crate::commands::wrap::launch_plan::LaunchPlanError> {
-    let provider = select_rebuilt_provider(intent, document, source_path)?;
+    // Each attempt's launch rebuild re-resolves the agent inside the run.
+    let provider = run_check(claudine_preflight(), AGENT_RESOLUTION, CheckStage::InRun, EntryReason::Initial, || {
+        select_rebuilt_provider(intent, document, source_path)
+    })?;
     let profile = profile_for_provider(provider)
         .or_else(|| profile_for_provider(intent.fallback_provider))
         .expect("the invocation's own provider always has a wrapper profile");

@@ -11,9 +11,9 @@
 # trigger types them; declaring them here as well would compile every event
 # stack twice. The payload declares no required property and leaves the
 # document open, so a body step's frontmatter data is kept.
-kind: trigger-schema
+kind: schema-trigger
 match:
-    any:
+    group:
         - sequence: string(required)
         - sequence: number(required)
         - sequence: boolean(required)

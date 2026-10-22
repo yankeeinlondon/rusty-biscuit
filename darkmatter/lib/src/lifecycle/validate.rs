@@ -24,9 +24,36 @@ pub fn validate_no_nested_spans_in_literals(
     source_path: &Path,
 ) -> Result<(), LifecycleError> {
     let sources = LifecycleSourceMap::from_frontmatter(frontmatter);
+    reject_nested_spans(&sources, lifecycle, source_path, |signal| Some(signal.property_name()))
+}
+
+/// [`validate_no_nested_spans_in_literals`] for a lifecycle parsed under
+/// `registry`, whose events carry the host's names.
+///
+/// ## Errors
+///
+/// As [`validate_no_nested_spans_in_literals`].
+pub fn validate_no_nested_spans_in_literals_in(
+    frontmatter: &serde_json::Value,
+    lifecycle: &LifecycleConfig,
+    source_path: &Path,
+    registry: &super::registry::EventRegistry,
+) -> Result<(), LifecycleError> {
+    let sources = LifecycleSourceMap::from_frontmatter_in(frontmatter, registry);
+    reject_nested_spans(&sources, lifecycle, source_path, |signal| registry.name_of(signal))
+}
+
+fn reject_nested_spans<'n>(
+    sources: &LifecycleSourceMap,
+    lifecycle: &LifecycleConfig,
+    source_path: &Path,
+    name: impl Fn(LifecycleSignal) -> Option<&'n str>,
+) -> Result<(), LifecycleError> {
     let surfaces = event_surfaces(lifecycle);
     for signal in LifecycleSignal::ALL {
-        let event = signal.property_name();
+        let Some(event) = name(signal) else {
+            continue;
+        };
         if signal == LifecycleSignal::Loop {
             for predicate in ["while", "until"] {
                 let path = LifecyclePath::root(event).field(predicate);

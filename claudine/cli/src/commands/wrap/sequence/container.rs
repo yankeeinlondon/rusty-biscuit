@@ -6,7 +6,8 @@ use claudine::composition::{CompositionError, RuntimeState};
 use claudine::composition::lifecycle::{LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext, LifecycleSignal};
 use claudine::composition::lifecycle::context::LifecycleErrorInfo;
 use claudine::composition::lifecycle::executor::StackExecutionContext;
-use claudine::composition::lifecycle::runtime::{ContainerEventDecision, ContainerRunner, LifecycleTransitionAbort};
+use claudine::composition::lifecycle::policy::{RefusalRoute, SubjectKind};
+use claudine::composition::lifecycle::runtime::{ContainerEventDecision, ContainerRunner};
 use claudine::composition::looping::{ContainerPassEnd, LoopFrame, PassCheckpoint, container_state, finish_container_pass};
 use color_eyre::eyre::Result;
 
@@ -36,7 +37,7 @@ impl<'a> RootRun<'a> {
         runtime: Arc<RuntimeState>,
         frame: Option<LoopFrame>,
     ) -> Self {
-        Self { runner: ContainerRunner::new(LifecycleRunGuard::new(config, context, stack.emitter)),
+        Self { runner: ContainerRunner::new(LifecycleRunGuard::new(config, context, stack.emitter)).with_subject(SubjectKind::RootSequence),
             stack, runtime, started: false, approved: None, graph: None, pending: None, child_error: None, proxy_location: None,
             frame, checkpoint: None }
     }
@@ -137,24 +138,15 @@ impl<'a> RootRun<'a> {
                     error = error.or(raised);
                     signal = LifecycleSignal::Finalize;
                 }
-                ContainerEventDecision::Abort(LifecycleTransitionAbort::ResumeWithoutSession) => {
-                    // Invalid recovery is a failure and still owes cleanup.
-                    let typed = CompositionError::LifecycleResumeWithoutSession { source_path: self.stack.source_path.to_path_buf() };
-                    self.runner.set_error(LifecycleErrorInfo::from_composition_error(&typed));
-                    let stack = stack.with_signal(LifecycleSignal::Finalize);
-                    self.runner.execute_event(LifecycleSignal::Finalize, &stack);
-                    return Err(typed.into());
-                }
-                ContainerEventDecision::Abort(_) => {
-                    let typed = CompositionError::LifecycleDeferNotImplemented { source_path: self.stack.source_path.to_path_buf() };
-                    self.runner.set_error(LifecycleErrorInfo::from_composition_error(&typed));
-                    self.runner.execute_event(LifecycleSignal::Finalize, &stack.with_signal(LifecycleSignal::Finalize));
-                    return Err(typed.into());
-                }
-                ContainerEventDecision::SetupRecoveryUnsupported { event, action } => {
-                    let typed = CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
-                        source_path: self.stack.source_path.to_path_buf(), event: format!("{event:?}").to_lowercase(), action: action.to_string(),
+                decision @ (ContainerEventDecision::Abort(_) | ContainerEventDecision::SetupRecoveryUnsupported { .. }) => {
+                    let (Some(refusal), Some(RefusalRoute::FinalizeIfOwed)) = (decision.refusal(), self.runner.refusal_route(&decision)) else {
+                        unreachable!("a root sequence finalizes only what a refusal leaves owed: {decision:?}");
                     };
+                    let Some(typed) = CompositionError::from_lifecycle_refusal(&refusal, self.stack.source_path) else {
+                        unreachable!("a container refuses only a setup recovery, a resume, or a defer: {refusal:?}");
+                    };
+                    // A refused recovery is a failure: the error is recorded,
+                    // and a `finalize` the run already owes still runs.
                     self.runner.set_error(LifecycleErrorInfo::from_composition_error(&typed));
                     self.runner.execute_event(LifecycleSignal::Finalize, &stack.with_signal(LifecycleSignal::Finalize));
                     return Err(typed.into());
@@ -198,9 +190,9 @@ impl<'a> RootRun<'a> {
 
 /// Body steps compose the container's source but do not enter its lifecycle again.
 pub(super) fn mask_body_events(overrides: &mut claudine::composition::LayeredOverrides) {
-    for key in claudine::composition::LIFECYCLE_EVENT_KEYS {
-        if *key == "loop" { continue; }
-        overrides.insert(darkmatter::markdown::compose::OverrideOrigin::Data, (*key).to_string(), serde_json::json!([]));
+    for key in claudine::composition::claudine_registry().authored_event_keys() {
+        if key == "loop" { continue; }
+        overrides.insert(darkmatter::markdown::compose::OverrideOrigin::Data, key.to_string(), serde_json::json!([]));
     }
 }
 

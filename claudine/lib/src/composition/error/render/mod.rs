@@ -58,6 +58,7 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleWrongArity { .. }
             | CompositionError::LifecycleShortFormRemoved { .. }
             | CompositionError::LifecycleActionPlacement { .. }
+            | CompositionError::LifecycleRenamedEvent { .. }
             | CompositionError::LifecycleMultipleLifecycleActions { .. }
             | CompositionError::LifecycleActionOrder { .. }
             | CompositionError::LifecycleInvalidArgs { .. }
@@ -451,6 +452,7 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleUnknownVerb { .. }
             | CompositionError::LifecycleWrongArity { .. }
             | CompositionError::LifecycleActionPlacement { .. }
+            | CompositionError::LifecycleRenamedEvent { .. }
             | CompositionError::LifecycleActionOrder { .. }
             | CompositionError::LifecycleMultipleLifecycleActions { .. }
             | CompositionError::LifecycleInvalidArgs { .. }
@@ -760,6 +762,12 @@ impl Diagnostic for CompositionError {
             } => {
                 base["property"] = json!(property);
                 base["message"] = json!(format!("action `{action}` is not valid here"));
+            }
+            CompositionError::LifecycleRenamedEvent {
+                authored, replacement, ..
+            } => {
+                base["property"] = json!(authored);
+                base["message"] = json!(format!("this host names the event `{replacement}`"));
             }
             CompositionError::LifecycleErrNotAvailable {
                 property, event, ..

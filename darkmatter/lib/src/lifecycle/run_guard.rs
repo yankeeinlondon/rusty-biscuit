@@ -584,7 +584,7 @@ impl<'a, H: LifecycleRunHost> LifecycleRunGuard<'a, H> {
         let mut warnings: Vec<_> =
             outcome.evaluation_error.iter().chain(outcome.action_error.iter()).cloned().collect();
         if let Some(control) = outcome.control.as_ref() {
-            if let Some(action) = refused_recovery(mode, control) {
+            if let Some(action) = super::policy::refused_recovery(mode, control) {
                 warnings.push(self.host.failure(LifecycleRunFailure::CancellationRecovery {
                     source_path: self.host.source_path().to_path_buf(),
                     action: action.to_string(),
@@ -652,20 +652,6 @@ impl<'a, H: LifecycleRunHost> LifecycleRunGuard<'a, H> {
                 _ => {}
             }
         }
-    }
-}
-
-/// The recovery verb `control` requests when `mode` refuses recovery.
-pub(crate) fn refused_recovery(mode: EvaluationMode, control: &StackControl) -> Option<&'static str> {
-    if mode == EvaluationMode::NormalRecovery {
-        return None;
-    }
-    match control {
-        StackControl::Retry { .. } => Some("retry"),
-        StackControl::Resume { .. } => Some("resume"),
-        StackControl::Proxy { .. } => Some("proxy"),
-        StackControl::Defer { .. } => Some("defer"),
-        _ => None,
     }
 }
 

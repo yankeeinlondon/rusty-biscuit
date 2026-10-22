@@ -141,6 +141,12 @@ pub trait DiagnosticCatalog: Sync {
     /// `None` when the label names no catalog code; a generic action verb
     /// (`shell`) is not a failure label.
     fn snapshot_for_error_kind(&self, label: &str, message: String) -> Option<DiagnosticSnapshot>;
+
+    /// The authored name of `event` in this host's diagnostics, such as the
+    /// default text of a bare `error`. Defaults to Claudine's spelling.
+    fn event_name(&self, event: super::LifecycleSignal) -> &str {
+        event.property_name()
+    }
 }
 
 /// A source appendix rendered after a diagnostic, such as the frontmatter

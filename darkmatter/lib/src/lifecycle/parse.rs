@@ -64,6 +64,9 @@ pub struct LifecycleParseOptions<'a> {
     pub authored: Option<&'a crate::markdown::Frontmatter>,
     /// What a verb outside the lifecycle verb inventory becomes.
     pub unknown_verbs: UnknownVerbPolicy,
+    /// The host's events: which frontmatter keys are lifecycle stacks, and
+    /// which Darkmatter spellings the host renamed.
+    pub registry: &'a EventRegistry,
 }
 
 /// How the parser treats a verb key it does not know.
@@ -81,6 +84,26 @@ pub enum UnknownVerbPolicy {
     /// a profile that does not run lifecycle stacks can still read a document
     /// written for one that does.
     Ignore,
+    /// [`Self::Ignore`], and the listed verbs of the inventory too: the
+    /// profile of a host that runs stacks but provides no service for these
+    /// verbs (another host's `say`, `retry`, …). Every other verb parses and
+    /// validates as under [`Self::Reject`].
+    IgnoreUnprovided(&'static [&'static str]),
+}
+
+impl UnknownVerbPolicy {
+    /// Whether `verb` becomes an opaque [`IgnoredAction`] under this policy.
+    /// `set` is never ignored.
+    pub fn ignores(self, verb: &str) -> bool {
+        if verb == "set" {
+            return false;
+        }
+        match self {
+            Self::Reject => false,
+            Self::Ignore => !is_known_lifecycle_verb(verb),
+            Self::IgnoreUnprovided(unprovided) => !is_known_lifecycle_verb(verb) || unprovided.contains(&verb),
+        }
+    }
 }
 
 /// Conditionals nest at most this deep. The limit lives only in the parser.
@@ -125,6 +148,7 @@ pub fn parse_lifecycle_config_with(
         AuthoredOrder::at_root(std::sync::Arc::new(frontmatter.mapping_orders().clone()))
     });
 
+    refuse_renamed_events(fm_obj, source_file, options.registry)?;
     let mut config = LifecycleConfig::default();
     for signal in [
         LifecycleSignal::Initialize,
@@ -135,7 +159,9 @@ pub fn parse_lifecycle_config_with(
         LifecycleSignal::Finalize,
         LifecycleSignal::Cancelled,
     ] {
-        let event = signal.property_name();
+        let Some(event) = options.registry.name_of(signal) else {
+            continue;
+        };
         let Some(value) = fm_obj.get(event) else {
             continue;
         };
@@ -152,19 +178,21 @@ pub fn parse_lifecycle_config_with(
         if signal == LifecycleSignal::Initialize {
             refuse_initialize_shells(&nodes, source_file)?;
         }
+        refuse_undeclared_action_types(&nodes, signal, source_file, options.registry)?;
         *config.stack_mut(signal) = nodes;
         if signal == LifecycleSignal::Cancelled {
             config.cancelled_declared = true;
         }
     }
 
-    if let Some(loop_value) = fm_obj.get("loop")
+    if let Some(loop_key) = options.registry.name_of(LifecycleSignal::Loop)
+        && let Some(loop_value) = fm_obj.get(loop_key)
         && !loop_value.is_null()
     {
         let Some(loop_obj) = loop_value.as_object() else {
             return Err(LifecycleError::LifecycleInvalid {
-                property: "loop".to_string(),
-                message: format!("`loop` must be an object, got {}", json_type_name(loop_value)),
+                property: loop_key.to_string(),
+                message: format!("`{loop_key}` must be an object, got {}", json_type_name(loop_value)),
                 source_file: source_file.to_path_buf(),
                 unknown_field: None,
                 expected_fields: Vec::new(),
@@ -177,8 +205,8 @@ pub fn parse_lifecycle_config_with(
         };
         config.stacks.loop_gate = parser.parse_loop_concerns(
             loop_obj,
-            &LifecyclePath::root("loop"),
-            &document_order.child("loop"),
+            &LifecyclePath::root(loop_key),
+            &document_order.child(loop_key),
         )?;
     }
 
@@ -202,6 +230,29 @@ pub fn parse_loop_concerns_with(
     parser.parse_loop_concerns(loop_obj, &LifecyclePath::root(property), authored)
 }
 
+/// Under a host that renamed `composed` or `failed`, the Darkmatter spelling
+/// is an error naming the host's, checked before any stack parses.
+fn refuse_renamed_events(
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    source_file: &Path,
+    registry: &EventRegistry,
+) -> Result<(), LifecycleError> {
+    for event in CoreEvent::ALL {
+        let authored = event.darkmatter_name();
+        if !frontmatter.contains_key(authored) {
+            continue;
+        }
+        if let KeyResolution::Renamed { authored, replacement } = registry.resolve_key(authored) {
+            return Err(LifecycleError::LifecycleRenamedEvent {
+                source_path: source_file.to_path_buf(),
+                authored,
+                replacement,
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Initialization is shell-free: a `shell` action, or a `set` value that runs
 /// a command, is refused in either branch of every conditional, before
 /// anything runs.
@@ -221,6 +272,70 @@ fn refuse_initialize_shells(nodes: &[LifecycleNode], source_file: &Path) -> Resu
             event: "initialize".to_string(),
         }),
     }
+}
+
+/// Every action, in both branches of every conditional, must be of a type
+/// the host's registry declares for its event. Ignored actions have no type.
+fn refuse_undeclared_action_types(
+    nodes: &[LifecycleNode],
+    signal: LifecycleSignal,
+    source_file: &Path,
+    registry: &EventRegistry,
+) -> Result<(), LifecycleError> {
+    let Some(id) = registry.id_of(signal) else {
+        return Ok(());
+    };
+    let declared = registry.actions(id);
+    let mut offending: Option<&LifecycleAction> = None;
+    for_each_action(nodes, &mut |action| {
+        if offending.is_none() && action_type(action).is_some_and(|kind| !declared.contains(kind)) {
+            offending = Some(action);
+        }
+    });
+    match offending {
+        None => Ok(()),
+        Some(action) => Err(LifecycleError::LifecycleActionPlacement {
+            source_path: source_file.to_path_buf(),
+            property: action.path.to_string(),
+            action: action_verb(action).to_string(),
+            event: registry.name(id).to_string(),
+        }),
+    }
+}
+
+/// The [`ActionType`] an action belongs to; an ignored action has none.
+pub fn action_type(action: &LifecycleAction) -> Option<ActionType> {
+    if runs_a_shell(action) {
+        return Some(ActionType::Shell);
+    }
+    match &action.kind {
+        LifecycleActionKind::LifecycleControl(_) => Some(ActionType::Flow),
+        LifecycleActionKind::Communication(_) => Some(ActionType::Communicate),
+        LifecycleActionKind::Shell(_) => Some(ActionType::Shell),
+        LifecycleActionKind::SideEffect(_)
+        | LifecycleActionKind::RuntimeSet(_)
+        | LifecycleActionKind::ExpressionFunction(_) => Some(ActionType::Expression),
+        LifecycleActionKind::Ignored(_) => None,
+    }
+}
+
+/// The verb an action was authored with.
+fn action_verb(action: &LifecycleAction) -> &str {
+    match &action.kind {
+        LifecycleActionKind::LifecycleControl(control) => control.verb(),
+        LifecycleActionKind::Communication(comm) => comm.channel.verb(),
+        LifecycleActionKind::Shell(_) => "shell",
+        LifecycleActionKind::SideEffect(effect) => &effect.verb,
+        LifecycleActionKind::RuntimeSet(_) => "set",
+        LifecycleActionKind::ExpressionFunction(func) => &func.function,
+        LifecycleActionKind::Ignored(ignored) => &ignored.verb,
+    }
+}
+
+/// `signal`'s authored name under `registry`, falling back to the engine
+/// slot's name for a slot the host does not expose.
+pub(crate) fn event_name(registry: &EventRegistry, signal: LifecycleSignal) -> &str {
+    registry.name_of(signal).unwrap_or(signal.property_name())
 }
 
 /// Parse a task's `setup:`/`teardown:` value into a typed stack rooted at
@@ -753,10 +868,10 @@ impl StackParser<'_> {
         }
         let path = item.field(verb);
         let property = path.to_string();
+        if self.options.unknown_verbs.ignores(verb) {
+            return Ok(ignored_action(verb, path));
+        }
         if !is_known_lifecycle_verb(verb) {
-            if self.options.unknown_verbs == UnknownVerbPolicy::Ignore {
-                return Ok(ignored_action(verb, path));
-            }
             return Err(unknown_verb(self.source_file, &property, verb));
         }
         let kind = validate_positional_arity_and_build(self.signal, verb, Vec::new(), self.source_file, &property)?;
@@ -804,13 +919,13 @@ impl StackParser<'_> {
                 "`no_error` needs an action beside it".to_string(),
             ));
         }
-        let ignore_unknown = self.options.unknown_verbs == UnknownVerbPolicy::Ignore;
+        let ignores = |verb: &str| self.options.unknown_verbs.ignores(verb);
         for (verb, _) in &verbs {
-            if verb.as_str() != "set" && !is_known_lifecycle_verb(verb) && !ignore_unknown {
+            if verb.as_str() != "set" && !is_known_lifecycle_verb(verb) && !ignores(verb) {
                 return Err(unknown_verb(self.source_file, &path.field(verb.as_str()).to_string(), verb));
             }
         }
-        if map.contains_key("say") && map.contains_key("speak") {
+        if map.contains_key("say") && map.contains_key("speak") && !ignores("say") {
             return Err(LifecycleError::LifecycleSayConflict(path.to_string()));
         }
         if sibling_no_error.is_some() && verbs.len() == 1 && verbs[0].0 == "set" {
@@ -821,7 +936,7 @@ impl StackParser<'_> {
                     .to_string(),
             ));
         }
-        if verbs.iter().filter(|(verb, _)| is_lifecycle_control_verb(verb)).count() > 1 {
+        if verbs.iter().filter(|(verb, _)| is_lifecycle_control_verb(verb) && !ignores(verb)).count() > 1 {
             return Err(LifecycleError::LifecycleMultipleLifecycleActions {
                 source_path: self.source_file.to_path_buf(),
                 property: path.to_string(),
@@ -832,9 +947,9 @@ impl StackParser<'_> {
         let mut ranked = Vec::with_capacity(verbs.len());
         for (verb, value) in verbs {
             let verb_path = path.field(verb.as_str());
-            let mut action = if verb != "set" && !is_known_lifecycle_verb(verb) {
-                // Only reachable under `UnknownVerbPolicy::Ignore`: the operand
-                // is never read, so its shape cannot fail the bundle.
+            let mut action = if ignores(verb) {
+                // The operand is never read, so its shape cannot fail the
+                // bundle.
                 ignored_action(verb, verb_path)
             } else if verb == "set" {
                 self.parse_runtime_set(value, &verb_path, authored.child("set").key_order())?
@@ -1007,7 +1122,7 @@ impl StackParser<'_> {
                 source_path: self.source_file.to_path_buf(),
                 property: action.path.to_string(),
                 action: control.verb().to_string(),
-                event: self.signal.property_name().to_string(),
+                event: event_name(self.options.registry, self.signal).to_string(),
             });
         }
         Ok(())
@@ -1291,6 +1406,7 @@ use indexmap::IndexMap;
 use super::*;
 use super::actions::{LifecycleConditional, for_each_action, is_lifecycle_control_verb};
 use super::authored_order::AuthoredOrder;
+use super::registry::{ActionType, CoreEvent, EventRegistry, KeyResolution};
 use crate::markdown::compose::context::merge::json_type_name;
 
 /// Whether an action runs a shell command: a `shell` action, or a `set` whose

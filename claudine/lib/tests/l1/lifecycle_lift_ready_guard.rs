@@ -3,7 +3,9 @@
 //!
 //! `parse.rs`, `action_shape.rs`, `actions.rs`, `validate.rs`,
 //! `signatures.rs`, and `source_map.rs` under
-//! `darkmatter/lib/src/lifecycle/` moved into Darkmatter as a unit, so none
+//! `darkmatter/lib/src/lifecycle/` moved into Darkmatter as a unit, and the
+//! lifecycle shell walk (`preflight.rs`, `preflight/shell_walk.rs`,
+//! `preflight/candidates.rs`) followed it, so none
 //! of them may name a Claudine runtime type: global settings, the
 //! configuration layer, the provider layer, messaging, or TTS/Playa. The
 //! effect catalog the parser checks `effect` names against is supplied by its
@@ -89,6 +91,30 @@ fn source_map_names_no_runtime_type() {
     assert_lift_ready(
         "source_map.rs",
         include_str!("../../../../darkmatter/lib/src/lifecycle/source_map.rs"),
+    );
+}
+
+#[test]
+fn preflight_names_no_runtime_type() {
+    assert_lift_ready(
+        "preflight.rs",
+        include_str!("../../../../darkmatter/lib/src/lifecycle/preflight.rs"),
+    );
+}
+
+#[test]
+fn preflight_shell_walk_names_no_runtime_type() {
+    assert_lift_ready(
+        "preflight/shell_walk.rs",
+        include_str!("../../../../darkmatter/lib/src/lifecycle/preflight/shell_walk.rs"),
+    );
+}
+
+#[test]
+fn preflight_candidates_names_no_runtime_type() {
+    assert_lift_ready(
+        "preflight/candidates.rs",
+        include_str!("../../../../darkmatter/lib/src/lifecycle/preflight/candidates.rs"),
     );
 }
 

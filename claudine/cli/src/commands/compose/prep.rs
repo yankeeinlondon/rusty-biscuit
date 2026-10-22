@@ -28,7 +28,12 @@ use claudine::composition::{
     build_loop_seed_with_lifecycle, commit_proxy,
     resolve_loop_config,
 };
+use claudine::composition::preflight::checks::{
+    AGENT_RESOLUTION, LAUNCH_SCHEMA, LIFECYCLE_SHELL_AUDIT, claudine_preflight, run_check,
+};
 use claudine::diagnostics::DiagnosticSnapshot;
+use darkmatter::lifecycle::preflight::CheckStage;
+use darkmatter::lifecycle::run::EntryReason;
 use claudine::invocation_context::{InvocationContext, SourceContext};
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::{Result, WrapErr, eyre};
@@ -623,15 +628,18 @@ pub(crate) fn prepare_and_run_active_document(
     )?;
     let resolved_target = {
         let _span = info_span!("compose_prep.eager_target").entered();
-        eagerly_resolve_target(
-            &prep_context,
-            &raw_hints,
-            shared.explicit_provider(),
-            shared.model.as_deref(),
-            shared.dry_run,
-            shared.silent,
-            &source.resolved_path,
-        )
+        // Before the document's run: a failure fires no lifecycle event.
+        run_check(claudine_preflight(), AGENT_RESOLUTION, CheckStage::BeforeRun, EntryReason::Initial, || {
+            eagerly_resolve_target(
+                &prep_context,
+                &raw_hints,
+                shared.explicit_provider(),
+                shared.model.as_deref(),
+                shared.dry_run,
+                shared.silent,
+                &source.resolved_path,
+            )
+        })
         .map_err(|e| enrich_report(e, &source, stderr_is_tty))?
     };
 
@@ -1214,23 +1222,25 @@ fn build_and_run_loop(
                 run_context = iteration_options.prepared_context.clone();
                 match (staged, ctx.iteration) {
                     (Some(staged), 1) => {
-                        let read = staged_boot::reread_and_audit(
-                            &source.resolved_path,
-                            &source.original_ref,
-                            proxy_overlay,
-                            iteration_options,
-                            staged.approved.clone(),
-                            &staged.approval_options,
-                        )
-                        .and_then(|(fresh, options)| {
-                            let approved = options.pre_approved_commands.clone().unwrap_or_default();
-                            kind.prepare_staged(
-                                &fresh,
-                                options,
-                                entry,
-                                claudine::composition::SchemaStage::Validate,
+                        let read = run_check(claudine_preflight(), LAUNCH_SCHEMA, CheckStage::InRun, EntryReason::Initial, || {
+                            staged_boot::reread_and_audit(
+                                &source.resolved_path,
+                                &source.original_ref,
+                                proxy_overlay,
+                                iteration_options,
+                                staged.approved.clone(),
+                                &staged.approval_options,
                             )
-                            .map(|prepared| (fresh, approved, prepared))
+                            .and_then(|(fresh, options)| {
+                                let approved = options.pre_approved_commands.clone().unwrap_or_default();
+                                kind.prepare_staged(
+                                    &fresh,
+                                    options,
+                                    entry,
+                                    claudine::composition::SchemaStage::Validate,
+                                )
+                                .map(|prepared| (fresh, approved, prepared))
+                            })
                         });
                         match read {
                             Ok((fresh, approved, prepared)) => {
@@ -1300,13 +1310,15 @@ fn build_and_run_loop(
             // audited here; an approval earned for iteration 1's bytes never
             // covers them.
             if ctx.iteration > 1 {
-                claudine::composition::resolve_shell_approvals(
-                    None,
-                    None,
-                    &frozen_loop_approvals(approval_options),
-                    Some(&prepared.lifecycle),
-                    Some(&prepared.resolved_path),
-                )?;
+                run_check(claudine_preflight(), LIFECYCLE_SHELL_AUDIT, CheckStage::InRun, EntryReason::Initial, || {
+                    claudine::composition::resolve_shell_approvals(
+                        None,
+                        None,
+                        &frozen_loop_approvals(approval_options),
+                        Some(&prepared.lifecycle),
+                        Some(&prepared.resolved_path),
+                    )
+                })?;
             }
 
             emit_compose_warnings(&prepared.warnings, shared.silent);
@@ -1749,15 +1761,11 @@ fn execute_loop_or_single(
             defer_schema_verdict: false,
             ..loop_prepare_options
         };
-        prepare_collecting_missing(
-            kind,
-            &source,
-            options,
-            entry,
-            schema_stage,
-            shared,
-            &prep_context,
-        )
+        // The eager verdict precedes the document's run: a failure fires no
+        // lifecycle event.
+        run_check(claudine_preflight(), LAUNCH_SCHEMA, CheckStage::BeforeRun, EntryReason::Initial, || {
+            prepare_collecting_missing(kind, &source, options, entry, schema_stage, shared, &prep_context)
+        })
             .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
     };
     emit_dropped_optional_warnings(&prepared.dropped_optionals);
@@ -2015,24 +2023,26 @@ fn run_staged_single(
             CompositionKind::Direct => info_span!("compose_prep.prepare_direct").entered(),
             CompositionKind::Inline => info_span!("compose_prep.prepare_inline").entered(),
         };
-        staged_boot::reread_and_audit(
-            &bootstrap.resolved_path,
-            &file,
-            proxy_overlay,
-            options,
-            approved,
-            &approval_options,
-        )
-        .and_then(|(fresh, options)| {
-            prepare_collecting_missing(
-                kind,
-                &fresh,
+        run_check(claudine_preflight(), LAUNCH_SCHEMA, CheckStage::InRun, EntryReason::Initial, || {
+            staged_boot::reread_and_audit(
+                &bootstrap.resolved_path,
+                &file,
+                proxy_overlay,
                 options,
-                entry,
-                claudine::composition::SchemaStage::Validate,
-                shared,
-                prep_context,
+                approved,
+                &approval_options,
             )
+            .and_then(|(fresh, options)| {
+                prepare_collecting_missing(
+                    kind,
+                    &fresh,
+                    options,
+                    entry,
+                    claudine::composition::SchemaStage::Validate,
+                    shared,
+                    prep_context,
+                )
+            })
         })
     };
     if staged_boot::cancel_staged_before_start(&mut guard, &document) {

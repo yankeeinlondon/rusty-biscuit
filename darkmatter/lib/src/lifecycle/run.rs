@@ -38,8 +38,9 @@
 //!
 //! The run keeps its accounting in the same [`RunAccounting`] the direct-call
 //! [`LifecycleRunGuard`](super::run_guard::LifecycleRunGuard) keeps, routes
-//! through [`decide_lifecycle_transition`] and [`LifecycleCatchProtocol`], and
-//! admits recovery through that decision's control admission over the
+//! through [`decide_lifecycle_transition`] and [`LifecycleCatchProtocol`],
+//! asks the [policy kernel](super::policy) which recoveries an event admits
+//! and how a refused one is routed, and decides an admitted one over the
 //! host's budget. Each run owns all of its state, so concurrent subjects each
 //! drive their own run.
 
@@ -52,6 +53,7 @@ use super::context::LifecycleErrorInfo;
 use super::control::ControlDispatch;
 use super::envelope::DiagnosticCatalog;
 use super::executor::{LifecycleEventOutcome, StackControl};
+use super::policy::{RecoveryVerdict, Refusal, RefusalRoute, SubjectKind, failure_event, recovery_verdict, refusal_route};
 use super::run_guard::RunAccounting;
 use super::runtime::{
     EvaluationMode, LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchState,
@@ -74,12 +76,21 @@ static NEXT_RUN: AtomicU64 = AtomicU64::new(1);
 pub struct RunSettings {
     catalog: Arc<dyn DiagnosticCatalog + Send>,
     cancellation: Option<LifecycleErrorInfo>,
+    subject: SubjectKind,
 }
 
 impl RunSettings {
     /// `catalog` classifies the error an explicit `error(...)` selects.
     pub fn new(catalog: Arc<dyn DiagnosticCatalog + Send>) -> Self {
-        Self { catalog, cancellation: None }
+        Self { catalog, cancellation: None, subject: SubjectKind::Document }
+    }
+
+    /// The kind of subject the run drives, a document unless set; it decides
+    /// which recoveries an event admits and how a refused one is routed.
+    #[must_use]
+    pub fn with_subject(mut self, subject: SubjectKind) -> Self {
+        self.subject = subject;
+        self
     }
 
     /// The error a cancelled run selects, so `cancelled` and `finalize` read it
@@ -93,7 +104,10 @@ impl RunSettings {
 
 impl fmt::Debug for RunSettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RunSettings").field("cancellation", &self.cancellation).finish_non_exhaustive()
+        f.debug_struct("RunSettings")
+            .field("cancellation", &self.cancellation)
+            .field("subject", &self.subject)
+            .finish_non_exhaustive()
     }
 }
 
@@ -110,7 +124,7 @@ pub struct RunSnapshot {
     pub transcript: Vec<TranscriptEntry>,
     /// Everything else a later reply depends on, in a fixed order: the
     /// answered generation, the cancellation floor, entry, epoch, session,
-    /// proxy hops, and the broken and cancelled flags.
+    /// and the broken and cancelled flags.
     pub progress: String,
 }
 
@@ -131,7 +145,6 @@ pub struct Run {
     entry: EntryReason,
     epoch: Option<ApprovalEpoch>,
     session: SessionAvailability,
-    proxy_hops: usize,
     error: Option<RunError>,
     catch: Option<LifecycleCatchProtocol>,
     broken: bool,
@@ -163,7 +176,6 @@ impl Run {
             entry: EntryReason::Initial,
             epoch: None,
             session: SessionAvailability::Unavailable,
-            proxy_hops: 0,
             error: None,
             catch: None,
             broken: false,
@@ -232,13 +244,12 @@ impl Run {
             error: self.error.clone(),
             transcript: self.transcript.clone(),
             progress: format!(
-                "{:?} {:?} {:?} {:?} {:?} {} {} {}",
+                "{:?} {:?} {:?} {:?} {:?} {} {}",
                 self.answered,
                 self.cancel_floor,
                 self.entry,
                 self.epoch,
                 self.session,
-                self.proxy_hops,
                 self.broken,
                 self.cancelled
             ),
@@ -499,7 +510,7 @@ impl Run {
     }
 
     /// Requests `signal` with `error` as its `err`, which differs from the
-    /// selected error only for a preflight `blocked`'s refused recovery.
+    /// selected error only for the `finalize` after a refused recovery.
     fn evaluate_reading(&mut self, signal: LifecycleSignal, mode: EvaluationMode, error: Option<RunError>) {
         let lock = if self.accounting.start_emitted() { ShellLock::Unlocked } else { ShellLock::Locked };
         self.sync_shell(lock);
@@ -535,7 +546,9 @@ impl Run {
             has_session: self.session == SessionAvailability::Available,
             attempt: self.attempt,
             control_budget,
-            proxy_hops_used: self.proxy_hops,
+            // Every document the run has adopted is in the chain, the origin
+            // (document 1) included.
+            proxy_hops_used: self.document as usize,
             // Path identity is the host's; it refuses a repeated target.
             proxy_target_seen: false,
             finalize_emitted: self.accounting.finalize_emitted(),
@@ -592,6 +605,13 @@ impl Run {
         if request.mode != EvaluationMode::NormalRecovery {
             return self.finish_or_finalize(request.mode);
         }
+        if let Some(control) = &outcome.control {
+            match recovery_verdict(self.settings.subject, signal, control) {
+                Some(RecoveryVerdict::Admit) => return self.request_recovery(signal, control.clone(), decision),
+                Some(RecoveryVerdict::Refuse(refusal)) => return self.refuse_recovery(refusal),
+                Some(RecoveryVerdict::Ignore) | None => {}
+            }
+        }
         match &outcome.control {
             Some(StackControl::Skip) => return self.issue(RequestKind::Done(Finish::Skipped)),
             Some(StackControl::Break { .. }) => {
@@ -603,14 +623,6 @@ impl Run {
             Some(StackControl::Error { reason }) if signal == LifecycleSignal::Success => {
                 return self.downgrade(reason.as_deref());
             }
-            Some(control @ (StackControl::Retry { .. } | StackControl::Resume { .. } | StackControl::Proxy { .. })) => {
-                return self.request_recovery(signal, control.clone(), decision);
-            }
-            Some(StackControl::Defer { .. }) => {
-                if let LifecycleTransitionDecision::Abort(abort) = decision {
-                    return self.abort(abort);
-                }
-            }
             Some(StackControl::Error { reason }) => {
                 if let LifecycleTransitionDecision::TerminalFailure { error: LifecycleTransitionError::ExplicitControl } =
                     decision
@@ -620,7 +632,7 @@ impl Run {
                     return self.finish_or_finalize(EvaluationMode::RefusalCleanup);
                 }
             }
-            Some(StackControl::Stop) | None => {}
+            _ => {}
         }
         self.advance(signal, decision, iterate);
     }
@@ -690,41 +702,15 @@ impl Run {
         self.conclude();
     }
 
-    /// Which events may recover, and how: `start`, the terminal events, and
-    /// `finalize` in every way (a retry before launch re-enters preparation),
-    /// `initialize` by resume (refused for want of a session) or hand-off, and
-    /// no other event.
-    fn admits_recovery(signal: LifecycleSignal, kind: RecoveryKind) -> bool {
-        match signal {
-            LifecycleSignal::Start | LifecycleSignal::Success | LifecycleSignal::Failure | LifecycleSignal::Finalize => true,
-            LifecycleSignal::Initialize => matches!(kind, RecoveryKind::Resume | RecoveryKind::Proxy),
-            _ => false,
-        }
-    }
-
+    /// Asks the host to decide an admitted recovery; a retry or resume is
+    /// decided against the budget it answers with, and only a hand-off past
+    /// the proxy budget is refused before asking.
     fn request_recovery(&mut self, from: LifecycleSignal, control: StackControl, decision: LifecycleTransitionDecision) {
-        let kind = RecoveryKind::of(&control).expect("only recovery controls reach here");
-        if !Self::admits_recovery(from, kind) {
-            let blocking = self.error.clone();
-            self.set_error(RunError::SetupRecoveryUnsupported { event: from, action: kind });
-            return match from {
-                // A retry in `initialize` has no attempt to re-enter: the run
-                // ends with no catch event and no `finalize`.
-                LifecycleSignal::Initialize => self.conclude(),
-                // A preflight `blocked` finalizes reading the error that
-                // blocked it; the refusal is what the run then reports.
-                LifecycleSignal::Blocked if !self.accounting.finalize_emitted() => {
-                    self.fire_reading(LifecycleSignal::Finalize, EvaluationMode::RefusalCleanup, blocking)
-                }
-                _ => self.finish_or_finalize(EvaluationMode::RefusalCleanup),
-            };
-        }
-        // A retry or resume is decided against the host's budget once it
-        // answers; only a hand-off is refused before asking.
+        let kind = RecoveryKind::of(&control).expect("only recovery controls are admitted");
         if kind == RecoveryKind::Proxy
             && let LifecycleTransitionDecision::Abort(abort) = decision
         {
-            return self.abort(abort);
+            return self.refuse_recovery(Refusal::Abort(abort));
         }
         let recovery = RecoveryRequest {
             kind,
@@ -742,26 +728,45 @@ impl Run {
         match decision {
             LifecycleTransitionDecision::Reenter(ControlDispatch::Retry { .. }) => self.reenter(EntryReason::Retry),
             LifecycleTransitionDecision::Reenter(ControlDispatch::Resume { .. }) => self.reenter(EntryReason::Resume),
-            LifecycleTransitionDecision::Abort(abort) => self.abort(abort),
+            LifecycleTransitionDecision::Abort(abort) => self.refuse_recovery(Refusal::Abort(abort)),
             exhausted => self.advance(recovery.from, exhausted, false),
         }
     }
 
-    /// Ends the run with no further event.
-    fn abort(&mut self, abort: LifecycleTransitionAbort) {
-        self.set_error(RunError::Aborted(abort));
-        self.conclude();
+    /// Selects `refusal` as the run's error and runs the cleanup its route
+    /// asks for, in [`EvaluationMode::RefusalCleanup`].
+    fn refuse_recovery(&mut self, refusal: Refusal) {
+        let prior = self.error.clone();
+        self.set_error(match refusal {
+            Refusal::SetupRecoveryUnsupported { event, action } => RunError::SetupRecoveryUnsupported { event, action },
+            Refusal::Abort(abort) => RunError::Aborted(abort),
+        });
+        let owed = self.accounting.terminal_emitted() && !self.accounting.finalize_emitted();
+        match refusal_route(self.settings.subject, &refusal) {
+            RefusalRoute::FinalizeIfOwed if owed => {
+                self.fire_reading(LifecycleSignal::Finalize, EvaluationMode::RefusalCleanup, prior);
+            }
+            RefusalRoute::FinalizeIfOwedReadingRefusal if owed => {
+                self.fire(LifecycleSignal::Finalize, EvaluationMode::RefusalCleanup);
+            }
+            RefusalRoute::FinalizeIfOwed | RefusalRoute::FinalizeIfOwedReadingRefusal => self.conclude(),
+            RefusalRoute::FailureThenFinalize => {
+                if !self.accounting.terminal_emitted() {
+                    self.fire(LifecycleSignal::Failure, EvaluationMode::RefusalCleanup);
+                } else if self.accounting.redesignate_terminal_to_failure() {
+                    self.evaluate(LifecycleSignal::Failure, EvaluationMode::RefusalCleanup);
+                } else {
+                    self.finish_or_finalize(EvaluationMode::RefusalCleanup);
+                }
+            }
+        }
     }
 
     /// Selects the event for a host failure from its stage and launch state,
     /// never firing a second terminal event.
     fn refuse(&mut self, failure: HostFailure) {
-        let before_launch = matches!(
-            failure.stage,
-            FailureStage::Preflight | FailureStage::Setup | FailureStage::HandoffRefused | FailureStage::RecoveryRefused
-        ) && !self.accounting.provider_launched();
+        let signal = failure_event(failure.stage, self.accounting.provider_launched());
         self.set_error(RunError::Reported(failure.error));
-        let signal = if before_launch { LifecycleSignal::Blocked } else { LifecycleSignal::Failure };
         if self.accounting.terminal_emitted() {
             self.finish_or_finalize(EvaluationMode::RefusalCleanup);
         } else {
@@ -794,7 +799,6 @@ impl Run {
         self.entry = EntryReason::Initial;
         self.epoch = None;
         self.session = SessionAvailability::Unavailable;
-        self.proxy_hops += 1;
         self.accounting.reset_for_proxy();
         self.reset_attempt();
         self.sync_shell(ShellLock::Locked);

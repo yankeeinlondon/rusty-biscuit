@@ -20,7 +20,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::sequence::build_step_overlay;
 use claudine::composition::{
-    self, CompositionError, LIFECYCLE_EVENT_KEYS, MissingProperty, PrepareOptions,
+    self, CompositionError, MissingProperty, PrepareOptions,
     PreparedComposition, ResolvedCompositionSource, SequenceMissingPropertiesStep, SequencePlan,
 };
 use claudine::harness::ShellApprovalOptions;

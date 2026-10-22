@@ -605,14 +605,18 @@ fn a_recovery_chosen_in_finalize_is_never_followed_by_a_second_finalize_for_that
     assert_eq!((run.selected_error(), run.finish()), (Some(&raised("finalize.eval")), Some(Finish::Failed)));
 }
 
+/// Traces `retry-in-preflight-blocked` and `resume-in-preflight-blocked`: a
+/// resume is refused for want of a session, the others as setup recovery.
 #[test]
 fn blocked_reached_from_preflight_cannot_recover() {
-    for (control, action) in
-        [(retry(), RecoveryKind::Retry), (resume(), RecoveryKind::Resume), (proxy(Blocked, "other.md"), RecoveryKind::Proxy)]
-    {
+    for (control, refused) in [
+        (retry(), RunError::SetupRecoveryUnsupported { event: Blocked, action: RecoveryKind::Retry }),
+        (resume(), RunError::Aborted(LifecycleTransitionAbort::ResumeWithoutSession)),
+        (proxy(Blocked, "other.md"), RunError::SetupRecoveryUnsupported { event: Blocked, action: RecoveryKind::Proxy }),
+    ] {
         let mut run = preflight_blocked("audit.denied");
         event(&mut run, Blocked, directed(control));
-        assert_eq!(run.selected_error(), Some(&RunError::SetupRecoveryUnsupported { event: Blocked, action }));
+        assert_eq!(run.selected_error(), Some(&refused));
         event(&mut run, Finalize, ok());
         assert!(!run.transcript_lines().iter().any(|line| line.starts_with("recover")));
         assert_eq!(run.finish(), Some(Finish::Failed));
@@ -620,8 +624,8 @@ fn blocked_reached_from_preflight_cannot_recover() {
 }
 
 /// Production's setup-phase recovery rules (traces `retry-in-initialize`,
-/// `retry-in-preflight-blocked`, `retry-in-start`; the `initialize` resume and
-/// hand-off rows follow Claudine's `initialize` dispatch and are untraced).
+/// `resume-in-initialize`, `proxy-in-initialize`,
+/// `retry-in-preflight-blocked`, `retry-in-start`).
 #[test]
 fn setup_phase_recovery_follows_production() {
     // A retry in `initialize` ends the run: no catch event, no `finalize`.
@@ -631,10 +635,10 @@ fn setup_phase_recovery_follows_production() {
     assert_eq!((run.selected_error(), run.finish()), (Some(&unsupported), Some(Finish::Failed)));
     assert_eq!(events(&run), [Initialize]);
 
-    // A resume in `initialize` is admitted, then refused for want of a session.
+    // A resume in `initialize` is refused for want of a session (trace
+    // `resume-in-initialize`).
     let mut run = fresh();
     event(&mut run, Initialize, directed(resume()));
-    budget(&mut run, 2);
     assert_eq!(run.selected_error(), Some(&RunError::Aborted(LifecycleTransitionAbort::ResumeWithoutSession)));
     assert_eq!((events(&run), run.finish()), (vec![Initialize], Some(Finish::Failed)));
 

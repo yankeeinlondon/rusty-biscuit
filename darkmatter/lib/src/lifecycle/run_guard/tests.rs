@@ -124,6 +124,7 @@ fn config(frontmatter: serde_json::Value) -> LifecycleConfig {
         is_known_effect: &|_| true,
         authored: None,
         unknown_verbs: UnknownVerbPolicy::Reject,
+        registry: crate::lifecycle::registry::tests::agent_host(),
     };
     parse_lifecycle_config_with(&frontmatter, &PathBuf::from("doc.md"), &options).unwrap()
 }

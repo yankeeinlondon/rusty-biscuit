@@ -7,6 +7,9 @@
 //! captured state, bundled here in [`CompositionRunCtx`] so the setup pipeline
 //! hands provider execution one cohesive context.
 
+use claudine::composition::preflight::checks::{LIFECYCLE_SHELL_AUDIT, claudine_preflight, run_check};
+use darkmatter::lifecycle::preflight::CheckStage;
+use darkmatter::lifecycle::run::EntryReason;
 use claudine::composition::LifecycleErrorInfoExt;
 use std::path::Path;
 use std::path::PathBuf;
@@ -243,12 +246,22 @@ pub(super) fn run_composition_body(
     // so auditing the bootstrap read here (before the target's `initialize` and
     // stabilized reread) would audit a document the run will not execute.
     if !skip_preflight && !adopting {
-        let _harness_preflight = claudine::composition::resolve_shell_approvals(
-            None, // template commands already approved during compose
-            None,
-            shell_options,
-            Some(&request.prepared.lifecycle),
-            Some(&request.prepared.resolved_path),
+        #[allow(clippy::result_large_err)]
+        let audit = || {
+            claudine::composition::resolve_shell_approvals(
+                None, // template commands already approved during compose
+                None,
+                shell_options,
+                Some(&request.prepared.lifecycle),
+                Some(&request.prepared.resolved_path),
+            )
+        };
+        let _harness_preflight = run_check(
+            claudine_preflight(),
+            LIFECYCLE_SHELL_AUDIT,
+            CheckStage::InRun,
+            EntryReason::Initial,
+            audit,
         )
         .map_err(|e| {
             // Shell-audit denial (or any other shell-approval failure)

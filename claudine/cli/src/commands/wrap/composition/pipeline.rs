@@ -1,5 +1,8 @@
 //! Ordered setup pipeline for one composition attempt.
 
+use claudine::composition::preflight::checks::{AGENT_RESOLUTION, claudine_preflight, run_check};
+use darkmatter::lifecycle::preflight::CheckStage;
+use darkmatter::lifecycle::run::EntryReason;
 use claudine::composition::LifecycleRunGuardExt;
 use claudine::composition::LifecycleErrorInfoExt;
 use color_eyre::eyre::WrapErr;
@@ -8,11 +11,10 @@ use std::time::Instant;
 
 use super::preflight::{PreflightBlockedOutcome, emit_preflight_blocked_and_finalize};
 use super::*;
+use claudine::composition::lifecycle::policy::{RecoveryVerdict, SubjectKind, recovery_verdict};
 use claudine::composition::{
     DocumentTransition, EvaluatedProxyRequest, LifecycleCatchProtocol, LifecycleCatchProtocolExt, LifecycleCatchResult,
-    LifecycleCatchState, LifecycleErrorInfo, LifecycleTransitionAbort, LifecycleTransitionDecision,
-    LifecycleTransitionError, LifecycleTransitionInput, ProxyProvenance, SurfacedHandoff,
-    commit_proxy, decide_lifecycle_transition,
+    LifecycleCatchState, LifecycleErrorInfo, ProxyProvenance, SurfacedHandoff, commit_proxy,
 };
 
 pub(super) enum CompositionPhaseResult<T> {
@@ -355,7 +357,9 @@ fn resolve_selection_and_launch(
         // removes a duplicate `InstalledAiClients::new()` PATH scan and a
         // redundant `load_selection_config()` (which itself runs `detect_git`
         // off the launch CWD) on the hot path.
-        let target = resolve_execution_target(request, &launch_cwd, source_repo_root)?;
+        let target = run_check(claudine_preflight(), AGENT_RESOLUTION, CheckStage::BeforeRun, EntryReason::Initial, || {
+            resolve_execution_target(request, &launch_cwd, source_repo_root)
+        })?;
 
         let provider = target.provider;
         let _selection_reason = match target.provider_reason {
@@ -1540,23 +1544,43 @@ pub(super) fn route_initialize(
             };
             return Err(eyre!(message));
         }
-        let init_decision = decide_lifecycle_transition(&LifecycleTransitionInput {
-            event: LifecycleSignal::Initialize,
-            terminal_slot: None,
-            provider_launched: false,
-            has_prior_error: false,
-            outcome: &init_outcome,
-            has_session: false,
-            attempt: 1,
-            control_budget: 0,
-            proxy_hops_used: 0,
-            proxy_target_seen: false,
-            finalize_emitted: false,
-        });
         let mut transition = DocumentTransition::Continue;
-        if let Some(ref control) = init_result.control {
-            match (&init_decision, control) {
-                (_, StackControl::Skip) => {
+        let Some(ref control) = init_result.control else {
+            return Ok(CompositionPhaseResult::Proceed(transition));
+        };
+        match recovery_verdict(SubjectKind::Document, LifecycleSignal::Initialize, control) {
+            // `retry`, `resume`, and `defer` have nothing to re-enter before
+            // pre-flight: the run ends with no catch event and no finalize.
+            Some(RecoveryVerdict::Refuse(refusal)) => {
+                let Some(error) = CompositionError::from_lifecycle_refusal(&refusal, source_path) else {
+                    unreachable!("initialize refuses only a retry, a resume, or a defer: {refusal:?}");
+                };
+                return Err(error.into());
+            }
+            Some(RecoveryVerdict::Admit) => {
+                let StackControl::Proxy { target, overlay, location } = control else {
+                    unreachable!("initialize admits only a hand-off");
+                };
+                // Hand off to the target document. The harness loop's
+                // coordinator commits this request — resolving the
+                // reference (`@repo/…`, relative, or absolute) against the
+                // source, deciding the hop, then re-materializing and
+                // running the target: its body, frontmatter, harness
+                // pre-checks, and its own `initialize` before
+                // start/terminal/finalize.
+                transition = DocumentTransition::Proxy(EvaluatedProxyRequest::new(
+                    target.clone(),
+                    overlay.clone(),
+                    ProxyProvenance::new(
+                        source_path.to_path_buf(),
+                        location.clone(),
+                        vec![source_path.to_path_buf()],
+                    ),
+                ));
+            }
+            Some(RecoveryVerdict::Ignore) => unreachable!("initialize ignores no recovery"),
+            None => match control {
+                StackControl::Skip => {
                     // Clean whole-document opt-out: no pre-flight, no provider,
                     // no finalize, no loop gate. Sequence orchestrator treats this
                     // as a successful step and advances.
@@ -1572,33 +1596,10 @@ pub(super) fn route_initialize(
                         },
                     )));
                 }
-                (
-                    LifecycleTransitionDecision::ProxyHandoff { target },
-                    StackControl::Proxy {
-                        overlay, location, ..
-                    },
-                ) => {
-                    // Hand off to the target document. The harness loop's
-                    // coordinator commits this request — resolving the
-                    // reference (`@repo/…`, relative, or absolute) against the
-                    // source, deciding the hop, then re-materializing and
-                    // running the target: its body, frontmatter, harness
-                    // pre-checks, and its own `initialize` before
-                    // start/terminal/finalize.
-                    transition = DocumentTransition::Proxy(EvaluatedProxyRequest::new(
-                        target.clone(),
-                        overlay.clone(),
-                        ProxyProvenance::new(
-                            source_path.to_path_buf(),
-                            location.clone(),
-                            vec![source_path.to_path_buf()],
-                        ),
-                    ));
-                }
-                (LifecycleTransitionDecision::Continue, StackControl::Stop) => {}
+                StackControl::Stop => {}
                 // The nearest loop's frame holds the break: nothing composes
                 // or launches, `finalize` runs once, and nothing is published.
-                (_, StackControl::Break { .. }) => {
+                StackControl::Break { .. } => {
                     guard.defuse();
                     let finalize = guard.execute_event(
                         LifecycleSignal::Finalize,
@@ -1626,42 +1627,8 @@ pub(super) fn route_initialize(
                         handoff: None,
                     })));
                 }
-                (
-                    LifecycleTransitionDecision::Abort(
-                        LifecycleTransitionAbort::ResumeWithoutSession,
-                    ),
-                    StackControl::Resume { .. },
-                ) => {
-                    // Pre-launch: there is no provider session to resume.
-                    return Err(CompositionError::LifecycleResumeWithoutSession {
-                        source_path: source_path.to_path_buf(),
-                    }
-                    .into());
-                }
-                (LifecycleTransitionDecision::Reenter(_), StackControl::Retry { .. }) => {
-                    // `retry` (re-run pre-flight) needs run-loop re-entry that does
-                    // not exist in the setup phase.
-                    return Err(CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
-                        source_path: source_path.to_path_buf(),
-                        event: "initialize".to_string(),
-                        action: "retry".to_string(),
-                    }
-                    .into());
-                }
-                (
-                    LifecycleTransitionDecision::Abort(
-                        LifecycleTransitionAbort::DeferredExecutionUnsupported,
-                    ),
-                    StackControl::Defer { .. },
-                ) => {
-                    // `defer` has no runtime home yet (rendezvous scheduler pending).
-                    return Err(CompositionError::LifecycleDeferNotImplemented {
-                        source_path: source_path.to_path_buf(),
-                    }
-                    .into());
-                }
-                _ => unreachable!("initialize control and transition decision diverged"),
-            }
+                _ => unreachable!("the catch protocol consumes initialize error control"),
+            },
         }
         Ok(CompositionPhaseResult::Proceed(transition))
     })();

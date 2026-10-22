@@ -101,6 +101,8 @@ mod launch_trigger_schemas;
 #[cfg(unix)]
 mod level1_compose_autocomplete_failure_pty;
 #[cfg(unix)]
+mod level1_approval_order_pty;
+#[cfg(unix)]
 mod level1_dry_run_pty;
 #[cfg(unix)]
 mod level1_inline_compose_mismatch_pty;
@@ -128,6 +130,13 @@ mod lifecycle_directive_matrix;
 // Records prompts with the Unix-only `launch_recorder`.
 #[cfg(unix)]
 mod lifecycle_prep;
+// Records launches with the Unix-only `launch_recorder`.
+#[cfg(unix)]
+mod lifecycle_initialize_zero_attempts;
+mod lifecycle_renamed_events;
+// Records launches with the Unix-only `launch_recorder`.
+#[cfg(unix)]
+mod lifecycle_root_preparation;
 mod lifecycle_downgrade_outcome;
 mod lifecycle_literal_escapes;
 // Records launches with the Unix-only `launch_recorder`; its fixture shells are
@@ -138,6 +147,7 @@ mod lifecycle_message_drain;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;
+mod lifecycle_one_implementation_guard;
 // Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
 // binaries, which only `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]

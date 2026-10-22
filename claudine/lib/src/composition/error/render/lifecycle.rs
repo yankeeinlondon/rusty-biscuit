@@ -704,6 +704,21 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      control actions are allowed in each event."
                 })
         }
+        CompositionError::LifecycleRenamedEvent {
+            source_path,
+            authored,
+            replacement,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle event <cyan>`{authored}`</cyan> in {file_link} is Darkmatter's name \
+                 for the event Claudine calls <cyan>`{replacement}`</cyan>."
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "renamed lifecycle event"))
+                .body(body)
+                .hint(format!("Rename the `{authored}:` key to `{replacement}:`."))
+        }
         CompositionError::LifecycleMultipleLifecycleActions {
             source_path, property, ..
         } => {

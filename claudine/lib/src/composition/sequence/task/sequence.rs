@@ -12,6 +12,7 @@ use crate::composition::error::CompositionError;
 use crate::composition::lifecycle::{LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext, LifecycleSignal};
 use crate::composition::lifecycle::bindings::SequenceBinding;
 use crate::composition::lifecycle::executor::StackExecutionContext;
+use crate::composition::lifecycle::policy::{RefusalRoute, SubjectKind};
 use crate::composition::lifecycle::runtime::{ContainerEventDecision, ContainerRunner, LifecycleTransitionAbort};
 use crate::composition::looping::{ContainerPassEnd, LoopFrame, LoopResultKind, PassCheckpoint, finish_container_pass};
 use crate::composition::runtime_state::RuntimeState;
@@ -32,7 +33,7 @@ impl TaskExecution<'_> {
             launch_area: self.stack.ctx_base_dir, context: self.stack.prepared_context,
         };
         let guard = LifecycleRunGuard::new(&sequence.lifecycle, &runtime_context, self.stack.emitter);
-        let mut runner = ContainerRunner::new(guard);
+        let mut runner = ContainerRunner::new(guard).with_subject(SubjectKind::Sequence);
         let state = self.sequence_frontmatter(sequence).unwrap_or_else(|| self.stack.frontmatter.clone());
         let result = match self.open_loop(sequence.loop_config.as_ref(), LoopResultKind::Sequence, &state, runtime) {
             Ok(mut frame) => self.run_sequence_attempts(sequence, runtime, &run_id, &mut runner, frame.as_mut()),
@@ -362,18 +363,17 @@ impl TaskExecution<'_> {
                     }
                     error = None; secondary_errors.clear(); signal = LifecycleSignal::Start;
                 }
-                ContainerEventDecision::Abort(LifecycleTransitionAbort::ResumeWithoutSession) => {
-                    let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary,
-                        &CompositionError::LifecycleResumeWithoutSession { source_path: sequence.origin_path.clone() });
-                    error = Some(diagnostic.info);
-                    runner.set_error(error.as_ref().unwrap().clone());
-                    signal = if signal == LifecycleSignal::Failure { LifecycleSignal::Finalize } else { LifecycleSignal::Failure };
-                }
-                ContainerEventDecision::SetupRecoveryUnsupported { event, action } => {
-                    let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary,
-                        &CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
-                            source_path: sequence.origin_path.clone(), event: event.property_name().into(), action: action.into(),
-                        });
+                // A `defer` is not reported as a refusal here: it falls to the
+                // unsupported-recovery arm below.
+                decision @ (ContainerEventDecision::Abort(LifecycleTransitionAbort::ResumeWithoutSession)
+                | ContainerEventDecision::SetupRecoveryUnsupported { .. }) => {
+                    let (Some(refusal), Some(RefusalRoute::FailureThenFinalize)) = (decision.refusal(), runner.refusal_route(&decision)) else {
+                        unreachable!("a nested sequence fails a refused recovery through its catch events: {decision:?}");
+                    };
+                    let Some(failure) = CompositionError::from_lifecycle_refusal(&refusal, &sequence.origin_path) else {
+                        unreachable!("a resume without a session and a setup recovery map to errors");
+                    };
+                    let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary, &failure);
                     error = Some(diagnostic.info);
                     runner.set_error(error.as_ref().unwrap().clone());
                     signal = if signal == LifecycleSignal::Failure { LifecycleSignal::Finalize } else { LifecycleSignal::Failure };

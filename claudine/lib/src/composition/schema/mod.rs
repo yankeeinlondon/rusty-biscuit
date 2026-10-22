@@ -59,6 +59,7 @@ use darkmatter::markdown::schemas::{SchemaPhase, ValidationReport};
 
 pub mod bundle;
 pub mod classify;
+pub mod globals;
 mod status_render;
 pub mod supplied;
 pub mod translate;

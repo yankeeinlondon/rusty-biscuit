@@ -4,7 +4,7 @@
 
 use crate::args::{Cli, OutputFormat};
 use crate::artifact::{
-    OutputArtifact, emit_or_show_artifact, html_artifact, json_artifact, markdown_plus_artifact,
+    OutputArtifact, html_artifact, json_artifact, markdown_plus_artifact,
     open_output_artifact,
 };
 use crate::io::{load_markdown, open_argument, resolve_file_path};
@@ -15,6 +15,8 @@ use darkmatter::markdown::cleanup::rules::{Indentation, ListItemPadding};
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
 use std::path::{Path, PathBuf};
 use tracing::{info, instrument};
+
+mod lifecycle;
 
 /// Resolved allow flags for compose validation.
 pub struct ComposeAllowFlags {
@@ -166,7 +168,7 @@ pub fn run_compose(
     allow_reassigned_frontmatter_property: bool,
     baseline_schema: Option<&PathBuf>,
     no_baseline_schema: bool,
-    no_trigger_schemas: bool,
+    no_schema_triggers: bool,
     timeout_secs: Option<u64>,
     allow_shell_timeout: bool,
     shell_report: bool,
@@ -230,9 +232,18 @@ pub fn run_compose(
     // document plus the request's repository observation, both anchored on the
     // launch directory and fixed before validation, pre-flight, and compose
     // run against the same options.
+    // A root that authors one of `md`'s events composes as a lifecycle run.
+    // Its stacks are parsed now, before anything can run, and stay deferred
+    // through every interpolation pass.
+    let lifecycle_source = resolved_input.clone().unwrap_or_else(|| launch_dir.join("<stdin>"));
+    let lifecycle = lifecycle::root_lifecycle(&md, &lifecycle_source)?;
+
     let ctx_start = perf.then(Instant::now);
     let mut options = ComposeOptions::for_document(&launch_dir, &md);
     let capture_context_dur = ctx_start.map(|s| s.elapsed()).unwrap_or_default();
+    if lifecycle.is_some() {
+        options = options.with_exclude_keys(lifecycle::event_keys());
+    }
     // Keep a cheap Arc clone for perf report context timings
     let options_ctx_ref = options.context().clone();
 
@@ -242,7 +253,7 @@ pub fn run_compose(
     // can resolve user-provided variables during the validation pass.
     let opts_start = perf.then(Instant::now);
     options = apply_compose_baseline_schema(options, baseline_schema, no_baseline_schema, request)?;
-    options = options.with_trigger_schemas(!no_trigger_schemas);
+    options = options.with_trigger_schemas(!no_schema_triggers);
 
     // Parse --state as JSON or JSON5
     if let Some(json_str) = state_json {
@@ -293,52 +304,17 @@ pub fn run_compose(
     // Uses the same options (including --state/--set) so interpolation
     // inside transclusion targets resolves correctly.
     let val_start = perf.then(Instant::now);
-    let deferred_report = if resolved_input.is_some() {
-        use darkmatter::markdown::reference::ReferenceGraphOptions;
-        use darkmatter::markdown::reference::validate::{
-            ReferenceSeverity, ReferenceValidationOptions,
-        };
-
-        let val_options = ReferenceValidationOptions::with_graph(
-            ReferenceGraphOptions::with_compose(&prepare_request(options.clone())?),
-        );
-
-        match md.validate_references(val_options) {
-            Ok(report) => {
-                let has_errors = report
-                    .issues
-                    .iter()
-                    .any(|i| i.severity == ReferenceSeverity::Error);
-
-                if has_errors {
-                    let has_unallowed = report.issues.iter().any(|i| {
-                        i.severity == ReferenceSeverity::Error && !allow.is_allowed(i.kind)
-                    });
-
-                    if allow.is_strict() || has_unallowed {
-                        // Strict mode or unallowed errors: show issues and exit
-                        use biscuit_terminal::components::renderable::TerminalRenderable as _;
-                        use darkmatter::markdown::reference::validate::ValidationReportView;
-                        let term = term_cell.get_or_init(Terminal::default);
-                        let formatted = ValidationReportView::new(report.clone()).render(term);
-                        eprint!("{formatted}");
-                        std::process::exit(2);
-                    }
-
-                    // All errors are allowed — defer report for stderr after content
-                    Some(report)
-                } else if report.issues.iter().any(|i| {
-                    i.severity == ReferenceSeverity::Warning
-                        && i.code == darkmatter::markdown::reference::validate::ReferenceIssueCode::MissingLocalTarget
-                }) {
-                    // Warnings (such as a missing link inside inserted data)
-                    // never fail the run; report them after the content.
-                    Some(report)
-                } else {
-                    None
-                }
+    // A lifecycle run checks references after `initialize`, which may create
+    // the files the body includes.
+    let deferred_report = if resolved_input.is_some() && lifecycle.is_none() {
+        match check_references(&md, &prepare_request(options.clone())?, allow) {
+            ReferenceCheck::Clean => None,
+            ReferenceCheck::Report(report) => Some(report),
+            ReferenceCheck::Refused(report) => {
+                let term = term_cell.get_or_init(Terminal::default);
+                eprint!("{}", render_reference_report(&report, term));
+                std::process::exit(2);
             }
-            Err(_) => None,
         }
     } else {
         None
@@ -421,11 +397,37 @@ pub fn run_compose(
         // `--shell` reports condition-blind approval candidates: every command
         // that *could* run under any document state, routed through the same
         // pre-flight collector that authorization uses.
-        let preflight = md.compose_preflight(&compose_request)?;
+        let mut preflight = md.compose_preflight(&compose_request)?;
+        if let Some(config) = &lifecycle {
+            // Report-only: the stacks are read, never run.
+            preflight.entries.extend(lifecycle::report_candidates(config, &lifecycle_source));
+        }
         print_shell_command_report(&preflight.entries);
         print_icmp_effect_report(&preflight.icmp_probes);
         drop(options_ctx_ref);
         return Ok(());
+    }
+
+    let document = DocumentOutput {
+        output,
+        show,
+        include_frontmatter,
+        cli,
+        input,
+    };
+
+    if let Some(config) = lifecycle {
+        drop(options_ctx_ref);
+        return lifecycle::run(lifecycle::LifecycleCompose {
+            md: &md,
+            request: compose_request,
+            config,
+            source_path: lifecycle_source,
+            approval_handler: preflight_handler,
+            check_references: is_file_input.then_some(allow),
+            document,
+            verbose: cli.verbose,
+        });
     }
 
     let compose_start = perf.then(Instant::now);
@@ -469,64 +471,7 @@ pub fn run_compose(
         }
     }
 
-    let (composed, report) = md.compose_with(&compose_request).map_err(|e| {
-        use darkmatter::markdown::MarkdownError::ShellExpansion;
-        use darkmatter::markdown::compose::ShellExpansionError;
-
-        match e {
-            ShellExpansion(inner) => match *inner {
-                ShellExpansionError::ExecutionFailed {
-                    command,
-                    code,
-                    stderr,
-                    origin,
-                    ..
-                } => {
-                    let detail = stderr.trim();
-                    if detail.is_empty() {
-                        eyre!("Shell command failed (exit {code}) at {origin}: '{command}'")
-                    } else {
-                        eyre!(
-                            "Shell command failed (exit {code}) at {origin}: '{command}'\n{detail}"
-                        )
-                    }
-                }
-                ShellExpansionError::CommandNotFound { command, origin, .. } => {
-                    eyre!(
-                        "Command not found: '{command}' ({origin})\n\
-                         Ensure '{command}' is installed and available on your PATH."
-                    )
-                }
-                ShellExpansionError::Timeout {
-                    command,
-                    timeout,
-                    origin,
-                    ..
-                } => {
-                    eyre!("Shell command timed out after {timeout:?} at {origin}: '{command}'")
-                }
-                ShellExpansionError::Blacklisted {
-                    command,
-                    reason,
-                    origin,
-                    ..
-                } => {
-                    eyre!("Blocked command at {origin}: '{command}'\nReason: {reason}")
-                }
-                ShellExpansionError::Denied { command, origin, .. } => {
-                    eyre!("Command denied at {origin}: '{command}'")
-                }
-                ShellExpansionError::ApprovalRequired {
-                    command,
-                    whitelist_path,
-                    suggested_rules,
-                    ..
-                } => approval_required_report(&command, &whitelist_path, &suggested_rules),
-                other => eyre!("{other}"),
-            },
-            other => other.into(),
-        }
-    })?;
+    let (composed, report) = md.compose_with(&compose_request).map_err(compose_error)?;
     let compose_pipeline_dur = compose_start.map(|s| s.elapsed()).unwrap_or_default();
 
     // Verbose compose summary
@@ -560,91 +505,8 @@ pub fn run_compose(
         }
     }
 
-    match output {
-        OutputFormat::Auto | OutputFormat::Markdown => {
-            let content = if include_frontmatter {
-                composed.as_string()
-            } else {
-                // Frontmatter drives the pipeline; once composition is complete, discard it.
-                composed.content().to_string()
-            };
-            let content =
-                darkmatter::markdown::render_tree::embedded::without_embedded_metadata(&content);
-            if show {
-                let artifact = OutputArtifact {
-                    content: content.clone(),
-                    extension: "md",
-                    label: "markdown",
-                };
-                println!("{content}");
-                open_output_artifact(&artifact)?;
-            } else {
-                println!("{content}");
-            }
-        }
-        OutputFormat::MarkdownPlus => {
-            // `markdown-plus` routes the composed document through the
-            // MarkdownPlus fold so disclosure blocks emit `<details>` /
-            // `<summary>` inline HTML rather than the DSL verbatim.
-            let artifact = markdown_plus_artifact(
-                &composed,
-                cli,
-                input,
-            )?;
-            emit_or_show_artifact(artifact, show)?;
-        }
-        OutputFormat::Html => {
-            let artifact =
-                html_artifact(&composed, cli, input)?;
-            emit_or_show_artifact(artifact, show)?;
-        }
-        OutputFormat::Json => {
-            let artifact = json_artifact(&composed)?;
-            emit_or_show_artifact(artifact, show)?;
-        }
-    }
-
-    // Emit compose warnings to stderr
-    if !report.warnings.is_empty() {
-        let term = term_cell.get_or_init(Terminal::default);
-        for warning in &report.warnings {
-            // A tolerated file-reference failure keeps its stable class row.
-            let prose = match warning.resolution_failure {
-                Some(failure) => format!(
-                    "{}\n<dim>failure:</dim> {}",
-                    warning.message,
-                    darkmatter::markdown::errors::resolution_failure_name(failure)
-                ),
-                None => warning.message.clone(),
-            };
-            eprintln!("{}", warning_rows(&prose, term));
-        }
-    }
-
-    // Emit deferred validation issues to stderr (allowed but still reported)
-    if let Some(report) = deferred_report {
-        use biscuit_terminal::components::renderable::TerminalRenderable as _;
-        use darkmatter::markdown::reference::validate::ValidationReportView;
-        let term = term_cell.get_or_init(Terminal::default);
-        let formatted = ValidationReportView::new(report.clone()).render(term);
-        if !formatted.is_empty() {
-            eprint!("\n{formatted}");
-        }
-        // The view lists errors only; a warning (a missing link inside text an
-        // expression inserted) is reported line by line.
-        use biscuit_terminal::components::prose::Prose;
-        use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceSeverity};
-        for issue in report.issues.iter().filter(|i| {
-            i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget
-        }) {
-            let markup = format!(
-                "{} <dim>(line {}, inside inserted text)</dim>",
-                Prose::escape_text_outside_code_spans(&issue.message),
-                issue.origin.line,
-            );
-            eprintln!("{}", warning_rows(&markup, term));
-        }
-    }
+    document.emit(&composed)?;
+    report_compose_diagnostics(&report, deferred_report.as_ref(), &term_cell);
 
     // Emit perf report to stderr (after all other diagnostics)
     if perf {
@@ -667,6 +529,222 @@ pub fn run_compose(
     drop(options_ctx_ref);
 
     Ok(())
+}
+
+/// How `md compose` writes the composed document.
+pub(crate) struct DocumentOutput<'a> {
+    pub(crate) output: OutputFormat,
+    pub(crate) show: bool,
+    pub(crate) include_frontmatter: bool,
+    pub(crate) cli: &'a Cli,
+    pub(crate) input: Option<&'a PathBuf>,
+}
+
+impl DocumentOutput<'_> {
+    /// The composed document in the requested format.
+    pub(crate) fn artifact(&self, composed: &Markdown) -> Result<OutputArtifact> {
+        match self.output {
+            OutputFormat::Auto | OutputFormat::Markdown => {
+                let content = if self.include_frontmatter {
+                    composed.as_string()
+                } else {
+                    // Frontmatter drives the pipeline; once composition is complete, discard it.
+                    composed.content().to_string()
+                };
+                Ok(OutputArtifact {
+                    content: darkmatter::markdown::render_tree::embedded::without_embedded_metadata(&content),
+                    extension: "md",
+                    label: "markdown",
+                })
+            }
+            // `markdown-plus` routes the composed document through the
+            // MarkdownPlus fold so disclosure blocks emit `<details>` /
+            // `<summary>` inline HTML rather than the DSL verbatim.
+            OutputFormat::MarkdownPlus => markdown_plus_artifact(composed, self.cli, self.input),
+            OutputFormat::Html => html_artifact(composed, self.cli, self.input),
+            OutputFormat::Json => json_artifact(composed),
+        }
+    }
+
+    /// Whether the document is printed: always for Markdown, and for the
+    /// other formats only when it is not shown instead.
+    pub(crate) fn prints(&self) -> bool {
+        matches!(self.output, OutputFormat::Auto | OutputFormat::Markdown) || !self.show
+    }
+
+    fn emit(&self, composed: &Markdown) -> Result<()> {
+        let artifact = self.artifact(composed)?;
+        if self.prints() {
+            println!("{}", artifact.content);
+        }
+        if self.show {
+            open_output_artifact(&artifact)?;
+        }
+        Ok(())
+    }
+}
+
+/// The outcome of reference validation before composition.
+pub(crate) enum ReferenceCheck {
+    Clean,
+    /// Issues that never fail the run, reported after the content.
+    Report(darkmatter::markdown::reference::validate::ReferenceValidationReport),
+    /// An error the allow flags do not cover.
+    Refused(darkmatter::markdown::reference::validate::ReferenceValidationReport),
+}
+
+/// Validates references with the same request composition will use, so
+/// interpolation inside transclusion targets resolves as it will compose.
+pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, allow: &ComposeAllowFlags) -> ReferenceCheck {
+    use darkmatter::markdown::reference::ReferenceGraphOptions;
+    use darkmatter::markdown::reference::validate::{
+        ReferenceIssueCode, ReferenceSeverity, ReferenceValidationOptions,
+    };
+
+    let val_options = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(request));
+    let Ok(report) = md.validate_references(val_options) else {
+        return ReferenceCheck::Clean;
+    };
+    let has_errors = report.issues.iter().any(|i| i.severity == ReferenceSeverity::Error);
+    if has_errors {
+        let has_unallowed = report
+            .issues
+            .iter()
+            .any(|i| i.severity == ReferenceSeverity::Error && !allow.is_allowed(i.kind));
+        if allow.is_strict() || has_unallowed {
+            return ReferenceCheck::Refused(report);
+        }
+        // All errors are allowed — defer report for stderr after content
+        return ReferenceCheck::Report(report);
+    }
+    // Warnings (such as a missing link inside inserted data) never fail the
+    // run; report them after the content.
+    if report
+        .issues
+        .iter()
+        .any(|i| i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget)
+    {
+        return ReferenceCheck::Report(report);
+    }
+    ReferenceCheck::Clean
+}
+
+pub(crate) fn render_reference_report(
+    report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
+    term: &biscuit_terminal::terminal::Terminal,
+) -> String {
+    use biscuit_terminal::components::renderable::TerminalRenderable as _;
+    use darkmatter::markdown::reference::validate::ValidationReportView;
+    ValidationReportView::new(report.clone()).render(term)
+}
+
+/// Maps a composition failure to the report `md` prints.
+pub(crate) fn compose_error(e: darkmatter::markdown::MarkdownError) -> color_eyre::eyre::Report {
+    use darkmatter::markdown::MarkdownError::ShellExpansion;
+    use darkmatter::markdown::compose::ShellExpansionError;
+
+    match e {
+        ShellExpansion(inner) => match *inner {
+            ShellExpansionError::ExecutionFailed {
+                command,
+                code,
+                stderr,
+                origin,
+                ..
+            } => {
+                let detail = stderr.trim();
+                if detail.is_empty() {
+                    eyre!("Shell command failed (exit {code}) at {origin}: '{command}'")
+                } else {
+                    eyre!(
+                        "Shell command failed (exit {code}) at {origin}: '{command}'\n{detail}"
+                    )
+                }
+            }
+            ShellExpansionError::CommandNotFound { command, origin, .. } => {
+                eyre!(
+                    "Command not found: '{command}' ({origin})\n\
+                     Ensure '{command}' is installed and available on your PATH."
+                )
+            }
+            ShellExpansionError::Timeout {
+                command,
+                timeout,
+                origin,
+                ..
+            } => {
+                eyre!("Shell command timed out after {timeout:?} at {origin}: '{command}'")
+            }
+            ShellExpansionError::Blacklisted {
+                command,
+                reason,
+                origin,
+                ..
+            } => {
+                eyre!("Blocked command at {origin}: '{command}'\nReason: {reason}")
+            }
+            ShellExpansionError::Denied { command, origin, .. } => {
+                eyre!("Command denied at {origin}: '{command}'")
+            }
+            ShellExpansionError::ApprovalRequired {
+                command,
+                whitelist_path,
+                suggested_rules,
+                ..
+            } => approval_required_report(&command, &whitelist_path, &suggested_rules),
+            other => eyre!("{other}"),
+        },
+        other => other.into(),
+    }
+}
+
+/// The compose warnings and deferred validation issues, on stderr after the
+/// content.
+pub(crate) fn report_compose_diagnostics(
+    report: &darkmatter::markdown::compose::ComposeReport,
+    deferred_report: Option<&darkmatter::markdown::reference::validate::ReferenceValidationReport>,
+    term_cell: &std::cell::OnceCell<biscuit_terminal::terminal::Terminal>,
+) {
+    use biscuit_terminal::terminal::Terminal;
+
+    if !report.warnings.is_empty() {
+        let term = term_cell.get_or_init(Terminal::default);
+        for warning in &report.warnings {
+            // A tolerated file-reference failure keeps its stable class row.
+            let prose = match warning.resolution_failure {
+                Some(failure) => format!(
+                    "{}\n<dim>failure:</dim> {}",
+                    warning.message,
+                    darkmatter::markdown::errors::resolution_failure_name(failure)
+                ),
+                None => warning.message.clone(),
+            };
+            eprintln!("{}", warning_rows(&prose, term));
+        }
+    }
+
+    // Emit deferred validation issues to stderr (allowed but still reported)
+    if let Some(report) = deferred_report {
+        let term = term_cell.get_or_init(Terminal::default);
+        let formatted = render_reference_report(report, term);
+        if !formatted.is_empty() {
+            eprint!("\n{formatted}");
+        }
+        // The view lists errors only; a warning (a missing link inside text an
+        // expression inserted) is reported line by line.
+        use biscuit_terminal::components::prose::Prose;
+        use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceSeverity};
+        for issue in report.issues.iter().filter(|i| {
+            i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget
+        }) {
+            let markup = format!(
+                "{} <dim>(line {}, inside inserted text)</dim>",
+                Prose::escape_text_outside_code_spans(&issue.message),
+                issue.origin.line,
+            );
+            eprintln!("{}", warning_rows(&markup, term));
+        }
+    }
 }
 
 /// A warning status for `markup`, whose further lines (a `hint:` or
@@ -829,7 +907,7 @@ fn approval_required_report(
 /// in-stage `ShellExpansionError` so the user sees the same shape
 /// whether the failure was caught at pre-flight (this path) or
 /// surfaced by `compose_with(...)` (the existing path).
-fn preflight_approval_error(
+pub(crate) fn preflight_approval_error(
     err: darkmatter::markdown::compose::ShellExpansionError,
 ) -> color_eyre::eyre::Report {
     use darkmatter::markdown::compose::ShellExpansionError;

@@ -94,9 +94,9 @@ pub use lifecycle::runtime::{
 };
 #[allow(deprecated)]
 pub use lifecycle::{
-    ClaudineRunHost, DefaultLifecycleEmitter, LIFECYCLE_EVENT_KEYS, LifecycleConfig, LifecycleEmitter,
+    ClaudineRunHost, DefaultLifecycleEmitter, LifecycleConfig, LifecycleEmitter,
     LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal,
-    parse_lifecycle_config,
+    claudine_registry, parse_lifecycle_config,
 };
 pub use lifecycle_actions::{
     CommunicationAction, CommunicationChannel, ExpressionFunctionAction, LifecycleAction,

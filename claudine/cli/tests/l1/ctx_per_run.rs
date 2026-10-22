@@ -841,6 +841,25 @@ fn an_included_files_lifecycle_is_scanned_but_not_run() {
     assert!(runs(&fixture).is_empty(), "the parent never runs the partial's lifecycle");
 }
 
+/// A parent and the file it includes both author `start:`: the run fires the
+/// parent's stack alone, every action of it in authored order, and none of the
+/// child's.
+#[test]
+fn an_included_files_start_stack_neither_replaces_nor_joins_the_parents() {
+    let fixture = repo("ctx-per-run-included-start");
+    doc(&fixture, "part.md", "---\nstart:\n  - append_line: [\"runs.log\", \"part start\"]\n---\nPART body\n");
+    doc(
+        &fixture,
+        "parent.md",
+        "---\nstart:\n  - append_line: [\"runs.log\", \"parent start[0]\"]\n  - append_line: [\"runs.log\", \"parent start[1]\"]\n---\nParent line.\n\n::file ./part.md\n",
+    );
+
+    let run = run(&fixture, &["compose", "--claude", "parent.md"]);
+
+    assert_eq!(run.code, Some(0), "{}", run.output);
+    assert_eq!(runs(&fixture), ["parent start[0]", "parent start[1]"]);
+}
+
 /// A sequence's static pre-flight is one discovery run, however many prompt
 /// documents it reads: three steps that each name a Git fact observe it once
 /// per step run plus once for the whole pre-flight, not once per document.

@@ -30,7 +30,9 @@ const PRESENCE_DECISION: &str = "placeholder_guard";
 
 /// Files whose functions make static (approval-time) presence decisions.
 fn is_static_preflight_module(path: &str) -> bool {
-    path == "composition/preflight.rs" || path.starts_with("composition/sequence/preflight/")
+    path == "composition/preflight.rs"
+        || path == "darkmatter/lib/src/lifecycle/preflight/shell_walk.rs"
+        || path.starts_with("composition/sequence/preflight/")
 }
 
 /// A scope primitive whose call sites are reviewed.
@@ -93,8 +95,8 @@ const fn allowed(primitive: Primitive, path: &'static str, function: &'static st
 const ALLOWED: &[Allowed] = &[
     allowed(
         Primitive::Unguarded,
-        "composition/preflight.rs",
-        "resolve_lifecycle_shell_commands_in_sequence",
+        "darkmatter/lib/src/lifecycle/preflight/shell_walk.rs",
+        "stamp",
         1,
         "each lifecycle event's walk starts from the declarations alone; `walk_scoped` adds its guards",
     ),
@@ -159,19 +161,19 @@ struct DecisionSite {
 
 const DECISION_SITES: &[DecisionSite] = &[
     DecisionSite {
-        path: "composition/preflight.rs",
+        path: "darkmatter/lib/src/lifecycle/preflight/shell_walk.rs",
         function: "resolve_shell_text",
         requires: &[PRESENCE_DECISION],
         forbids: &[],
     },
     DecisionSite {
-        path: "composition/preflight.rs",
+        path: "darkmatter/lib/src/lifecycle/preflight/shell_walk.rs",
         function: "guarded_template",
         requires: &["project_types", "retime_guarded"],
         forbids: &[],
     },
     DecisionSite {
-        path: "composition/preflight.rs",
+        path: "darkmatter/lib/src/lifecycle/preflight/shell_walk.rs",
         function: "sequence_lifecycle_template",
         requires: &[PRESENCE_DECISION, "typed_template"],
         forbids: &[],
@@ -196,7 +198,7 @@ const DECISION_SITES: &[DecisionSite] = &[
 const RETIRED: &[&str] = &["resolve_shell_command_expr"];
 
 /// Builds the missing-value error; every caller is itself held to the rule.
-const MISSING_VALUE_CONSTRUCTORS: &[(&str, &str)] = &[("composition/preflight.rs", "missing_value")];
+const MISSING_VALUE_CONSTRUCTORS: &[(&str, &str)] = &[("darkmatter/lib/src/lifecycle/preflight/shell_walk.rs", "missing_value")];
 
 /// One `fn` and its body's byte range in sanitized text.
 struct Function<'a> {
@@ -507,9 +509,9 @@ fn resolve_shell_text(read: &Value) -> Result<(), CompositionError> {
     Ok(())
 }
 "#;
-    let files = sources(&[("composition/preflight.rs", snippet)]);
+    let files = sources(&[("darkmatter/lib/src/lifecycle/preflight/shell_walk.rs", snippet)]);
     let violations = decision_site_violations(&files, &DECISION_SITES[..1]);
-    assert_eq!(violations, vec!["composition/preflight.rs::resolve_shell_text no longer calls `placeholder_guard`"]);
-    let missing = decision_site_violations(&sources(&[("composition/preflight.rs", "fn other() {}")]), &DECISION_SITES[..1]);
+    assert_eq!(violations, vec!["darkmatter/lib/src/lifecycle/preflight/shell_walk.rs::resolve_shell_text no longer calls `placeholder_guard`"]);
+    let missing = decision_site_violations(&sources(&[("darkmatter/lib/src/lifecycle/preflight/shell_walk.rs", "fn other() {}")]), &DECISION_SITES[..1]);
     assert_eq!(missing.len(), 1, "{missing:#?}");
 }

@@ -80,7 +80,8 @@ use super::envelope::DiagnosticCatalog;
 use super::error::LifecycleExprError;
 use super::services::{LifecycleServices, MissingServiceError};
 use super::shell_template::{LifecycleShellMode, LifecycleShellTemplate};
-use super::{LIFECYCLE_EVENT_KEYS, LifecycleConfig, LifecycleSignal};
+use super::registry::EventRegistry;
+use super::{LifecycleConfig, LifecycleSignal};
 
 mod host;
 mod outcome;
@@ -206,6 +207,11 @@ impl<'a> StackExecutor<'a> {
     /// The inputs this executor runs against.
     pub fn inputs(&self) -> &StackInputs<'a> {
         &self.inputs
+    }
+
+    /// The event's authored name under the host's registry.
+    fn event_name(&self) -> &str {
+        super::parse::event_name(self.inputs.host.registry(), self.inputs.signal)
     }
 
     /// Run the event's stack.
@@ -466,7 +472,7 @@ impl<'a> StackExecutor<'a> {
             return Ok(());
         }
         Err(self.inputs.host.failure(LifecycleRunFailure::UnknownEffect {
-            event: self.inputs.signal.property_name().to_string(),
+            event: self.event_name().to_string(),
             name: name.to_string(),
         }))
     }
@@ -513,6 +519,9 @@ impl<'a> StackExecutor<'a> {
     /// evaluation error and never selects `else`.
     fn execute_nodes(&self, nodes: &[LifecycleNode], working: &mut Map<String, Value>) -> Option<LifecycleEventOutcome> {
         for node in nodes {
+            if self.inputs.host.stops_on_interrupt() && self.inputs.host.interrupted() {
+                return Some(LifecycleEventOutcome::default());
+            }
             let ended = match node {
                 LifecycleNode::Conditional(conditional) => match self.when_matches(Some(&conditional.when), working) {
                     Ok(true) => self.execute_nodes(&conditional.then, working),
@@ -675,9 +684,17 @@ impl<'a> StackExecutor<'a> {
                     .map(|_| None)
                     .map_err(|error| ActionFailure::Evaluation(self.expr_error(func.function.clone(), error)))
             }
-            // Only a profile that ignores unknown verbs produces one; it names
-            // nothing this executor knows how to run, so it does nothing.
-            LifecycleActionKind::Ignored(_) => Ok(None),
+            // Only a profile that ignores verbs produces one. It runs nothing,
+            // and each occurrence reached says so once.
+            LifecycleActionKind::Ignored(ignored) => {
+                self.effects.warn(&format!(
+                    "`{}` does not run `{}`; skipped it in `{}`",
+                    self.inputs.host.registry().host(),
+                    ignored.verb,
+                    self.event_name()
+                ));
+                Ok(None)
+            }
         }
     }
 
@@ -992,7 +1009,7 @@ impl<'a> StackExecutor<'a> {
                     .host
                     .failure(LifecycleRunFailure::EvaluationFailed {
                         source_path: self.inputs.source_path.to_path_buf(),
-                        event: self.inputs.signal.property_name().to_string(),
+                        event: self.event_name().to_string(),
                         surface: "set".to_string(),
                         message: cause.to_string(),
                         property: Some(value_property.clone()),
@@ -1451,7 +1468,7 @@ impl<'a> StackExecutor<'a> {
         for (key, value) in with.iter() {
             let resolved = walker
                 .resolve_with_value(value, fm)
-                .and_then(|resolved| reject_control_plane_template(key, resolved))
+                .and_then(|resolved| reject_control_plane_template(self.inputs.host.registry(), key, resolved))
                 .map_err(|(suffix, error)| {
                     let cause = LifecycleCause::new(error);
                     self.inputs.host.failure(LifecycleRunFailure::WithEvaluationFailed {
@@ -1681,14 +1698,19 @@ fn interpolate_text_in(
 /// configuration in the target.
 ///
 /// Every other overlay key reaches the target as a data layer, so a `{{ … }}`
-/// in it is text. A lifecycle key (`success:`, `loop:`, …) is different: the
+/// in it is text. A key the host's registry names as a lifecycle stack
+/// (`success:`, `loop:`, … under Claudine) is different: the
 /// target reparses it as its own stack or loop, and those strings are
 /// evaluated at event time, outside compose. Run-time data carrying template
 /// syntax there would become an instruction, so it fails closed. On failure
 /// returns the path suffix below the key, as
 /// [`StackExecutor::resolve_with_value`] does.
-fn reject_control_plane_template(key: &str, resolved: Value) -> Result<Value, (String, LifecycleExprError)> {
-    if !LIFECYCLE_EVENT_KEYS.contains(&key) {
+fn reject_control_plane_template(
+    registry: &EventRegistry,
+    key: &str,
+    resolved: Value,
+) -> Result<Value, (String, LifecycleExprError)> {
+    if !registry.authored_event_keys().contains(&key) {
         return Ok(resolved);
     }
     match first_template_span(&resolved, &mut String::new()) {

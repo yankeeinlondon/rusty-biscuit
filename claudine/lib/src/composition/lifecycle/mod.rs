@@ -47,7 +47,7 @@ use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder};
 use crate::events::{GlobalSettings, TtsSettings};
 use crate::messaging::RuntimeMessagingSettings;
 
-pub use darkmatter::lifecycle::{actions, shell_template};
+pub use darkmatter::lifecycle::{actions, policy, shell_template};
 mod audio;
 pub mod bindings;
 mod binding_checks;
@@ -57,6 +57,7 @@ pub mod control;
 pub mod effects;
 pub mod executor;
 pub mod prep;
+pub mod registry;
 pub mod runtime;
 mod structured_shell;
 pub mod prewarm;
@@ -64,8 +65,9 @@ pub mod prewarm;
 pub(crate) use audio::*;
 pub use binding_checks::validate_no_err_in_no_error_events;
 pub(crate) use darkmatter::lifecycle::{LOOP_ITERATION_KEYS, action_value_to_expr, closest_spelling};
+pub use registry::claudine_registry;
 pub use darkmatter::lifecycle::{
-    LIFECYCLE_EVENT_KEYS, LifecycleConfig, LifecycleParseOptions, LifecycleSignal, LifecycleStacks,
+    LifecycleConfig, LifecycleParseOptions, LifecycleSignal, LifecycleStacks,
     UnknownVerbPolicy, collect_lifecycle_shell_commands, collect_lifecycle_shell_commands_for,
     scan_removed_validation_keys,
 };
@@ -102,8 +104,9 @@ pub(crate) fn with_mapping_shape<'a>(
     darkmatter::lifecycle::with_mapping_shape(value, source_file, property).map_err(CompositionError::from)
 }
 
-/// The parse options of Claudine's lifecycle profile: the embedded Playa
-/// effect catalog, and unknown verbs rejected because every verb must run.
+/// The parse options of Claudine's lifecycle profile: Claudine's event
+/// registry, the embedded Playa effect catalog, and unknown verbs rejected
+/// because every verb must run.
 fn claudine_parse_options<'a>(
     authored: Option<&'a darkmatter::markdown::Frontmatter>,
 ) -> LifecycleParseOptions<'a> {
@@ -111,6 +114,7 @@ fn claudine_parse_options<'a>(
         is_known_effect: &is_known_effect,
         authored,
         unknown_verbs: UnknownVerbPolicy::Reject,
+        registry: claudine_registry(),
     }
 }
 
@@ -125,7 +129,9 @@ fn claudine_parse_options<'a>(
 ///
 /// ## Errors
 ///
-/// The lifecycle authoring family of [`CompositionError`]: shape violations
+/// The lifecycle authoring family of [`CompositionError`]: Darkmatter's
+/// spelling of an event Claudine renamed (`composed`, `failed`;
+/// [`CompositionError::LifecycleRenamedEvent`]), shape violations
 /// ([`CompositionError::LifecycleStackInvalidShape`]), removed spellings
 /// ([`CompositionError::RemovedGrammar`]), unknown verbs or parameters,
 /// directive placement and order, and

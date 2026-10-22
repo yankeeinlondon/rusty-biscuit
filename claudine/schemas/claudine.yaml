@@ -8,9 +8,9 @@
 # application data beside Claudine's controls is kept. `sequence` is declared
 # only by sequence.yaml, which every document with a non-null `sequence`
 # selects.
-kind: trigger-schema
+kind: schema-trigger
 match:
-    any:
+    group:
         - initialize: string(required)
         - initialize: number(required)
         - initialize: boolean(required)

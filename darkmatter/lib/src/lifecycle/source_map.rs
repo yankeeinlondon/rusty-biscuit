@@ -23,6 +23,7 @@ use super::actions::{
     CommunicationChannel, expression_function_signature, is_lifecycle_control_verb, side_effect_signature,
 };
 use super::parse::LOOP_ITERATION_KEYS;
+use super::registry::EventRegistry;
 
 /// An authored lifecycle value at one canonical property path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,14 +137,27 @@ pub struct LifecycleSourceMap {
 }
 
 impl LifecycleSourceMap {
-    /// Build the map from the frontmatter object `parse_lifecycle_config` read.
+    /// Build the map from the frontmatter object `parse_lifecycle_config` read,
+    /// with every event under its engine slot's name (Claudine's spelling).
     pub fn from_frontmatter(frontmatter: &Value) -> Self {
+        Self::from_frontmatter_named(frontmatter, |signal| Some(signal.property_name()))
+    }
+
+    /// [`Self::from_frontmatter`] with each event under its name in
+    /// `registry`; a slot the host does not expose is ordinary data.
+    pub fn from_frontmatter_in(frontmatter: &Value, registry: &EventRegistry) -> Self {
+        Self::from_frontmatter_named(frontmatter, |signal| registry.name_of(signal))
+    }
+
+    fn from_frontmatter_named<'n>(frontmatter: &Value, name: impl Fn(LifecycleSignal) -> Option<&'n str>) -> Self {
         let mut map = Self::default();
         let Some(root) = frontmatter.as_object() else {
             return map;
         };
         for signal in LifecycleSignal::ALL {
-            let event = signal.property_name();
+            let Some(event) = name(signal) else {
+                continue;
+            };
             let path = LifecyclePath::root(event);
             if signal != LifecycleSignal::Loop {
                 if let Some(stack) = root.get(event) {

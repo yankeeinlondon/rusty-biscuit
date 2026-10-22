@@ -32,6 +32,7 @@ use crate::provider::Provider;
 use thiserror::Error;
 
 mod lifecycle_authoring;
+mod lifecycle_preflight;
 #[allow(missing_docs)]
 mod render;
 use render::pointer_to_dotted;
@@ -1140,6 +1141,23 @@ pub enum CompositionError {
         action: String,
         /// The event name the action was placed in (e.g. `"start"`).
         event: String,
+    },
+
+    /// A Claudine document authors Darkmatter's spelling of an event Claudine
+    /// renamed: `composed:` (Claudine's `start:`) or `failed:` (`blocked:`).
+    ///
+    /// Raised at parse time, before any lifecycle effect.
+    #[error(
+        "lifecycle event `{authored}` is named `{replacement}` by this host; write `{replacement}:` instead ({source_path})",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleRenamedEvent {
+        /// The prompt file whose frontmatter holds the key.
+        source_path: PathBuf,
+        /// The authored Darkmatter spelling (e.g. `"composed"`).
+        authored: String,
+        /// Claudine's spelling of the same event (e.g. `"start"`).
+        replacement: String,
     },
 
     /// One lifecycle dictionary holds more than one flow-control directive.
@@ -3523,6 +3541,34 @@ impl CompositionError {
         }
     }
 
+    /// The error Claudine reports for a lifecycle recovery `refusal` in
+    /// `source_path`'s stack; `None` for an abort that needs facts a refusal
+    /// does not carry (a proxy budget's chain, an evaluation error).
+    pub fn from_lifecycle_refusal(
+        refusal: &darkmatter::lifecycle::policy::Refusal,
+        source_path: &std::path::Path,
+    ) -> Option<Self> {
+        use darkmatter::lifecycle::policy::Refusal;
+        use darkmatter::lifecycle::runtime::LifecycleTransitionAbort;
+        let source_path = source_path.to_path_buf();
+        match refusal {
+            Refusal::SetupRecoveryUnsupported { event, action } => Some(Self::LifecycleSetupPhaseRecoveryUnsupported {
+                source_path,
+                event: event.property_name().to_string(),
+                action: action.name().to_string(),
+            }),
+            Refusal::Abort(LifecycleTransitionAbort::ResumeWithoutSession) => {
+                Some(Self::LifecycleResumeWithoutSession { source_path })
+            }
+            Refusal::Abort(LifecycleTransitionAbort::DeferredExecutionUnsupported) => {
+                Some(Self::LifecycleDeferNotImplemented { source_path })
+            }
+            Refusal::Abort(
+                LifecycleTransitionAbort::ProxyBudgetExhausted | LifecycleTransitionAbort::EvaluationAfterFinalize,
+            ) => None,
+        }
+    }
+
     /// Build a [`Self::LifecycleEvaluationError`] from the raised lifecycle
     /// error snapshot.
     ///
@@ -3704,6 +3750,9 @@ impl CompositionError {
             | CompositionError::LifecycleProxyWithoutOwningCoordinator { property, .. }
             | CompositionError::LifecycleTransitionUnownedAtStage { property, .. } => {
                 Some(FrontmatterHighlight::Property(property.clone()))
+            }
+            CompositionError::LifecycleRenamedEvent { authored, .. } => {
+                Some(FrontmatterHighlight::Property(authored.clone()))
             }
             CompositionError::LifecycleEvaluationError {
                 property: Some(property),

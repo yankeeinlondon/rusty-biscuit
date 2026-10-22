@@ -27,6 +27,12 @@
 //!   exits with its scripted status; `resume` means it was launched with `-r`.
 //! - `exit <code>` is appended by the test after the process exits.
 //!
+//! A run is interrupted deterministically by its own child: a provider launch
+//! scripted with [`INTERRUPT`], or a sequence `shell:` task, sends `SIGINT` to
+//! its parent `claudine` (and only after checking that the parent is
+//! `claudine`), exactly what a Ctrl+C delivers to the process. No terminal is
+//! involved and no window takes focus.
+//!
 //! The module is Unix-only: the provider is `launch_recorder`'s `/bin/sh`
 //! stub, and the fixture shells are POSIX.
 
@@ -54,6 +60,34 @@ const GUARDED_SHELL_RULES: &str = "template trace-shell start {{ string }}\n";
 /// guarded-shell scenarios write through this helper instead of `printf`.
 const TRACE_SHELL: &str = "#!/bin/sh\nprintf 'shell %s %s\\n' \"$1\" \"$2\" >> trace.log\n";
 
+/// A provider status that interrupts the run: the launch writes its `work`
+/// line and session stream, sends `SIGINT` to its parent `claudine`, and waits
+/// (bounded) to be ended by the forwarded interrupt.
+const INTERRUPT: i32 = 130;
+
+/// Darkmatter's `MAX_PROXY_HOPS`. The hop scenarios write this many hop
+/// documents, so the target the limit refuses exists and the stop is the
+/// limit, not a missing file.
+const MAX_PROXY_HOPS: usize = 16;
+
+/// Write `<id>.hop-NN.md` for `NN` in `01..=MAX_PROXY_HOPS` from the role
+/// template, each proxying to the next from `start`, before its launch.
+/// `last_after_launch` moves the hand-off of the last document the chain
+/// adopts (hop `MAX_PROXY_HOPS - 1`: the chain counts the origin) to
+/// `success`, after its launch, so only one hop launches the provider.
+fn write_proxy_hops(directory: &Path, id: &str, last_after_launch: bool) {
+    let template = include_str!("../fixtures/lifecycle_traces/proxy-hop-limit.hop.template");
+    for hop in 1..=MAX_PROXY_HOPS {
+        let before_launch = !(last_after_launch && hop == MAX_PROXY_HOPS - 1);
+        let document = template
+            .replace("@ID@", id)
+            .replace("@BEFORE@", &before_launch.to_string())
+            .replace("@HOP@", &format!("{hop:02}"))
+            .replace("@NEXT@", &format!("{:02}", hop + 1));
+        fs::write(directory.join(format!("{id}.hop-{hop:02}.md")), document).unwrap();
+    }
+}
+
 struct Scenario {
     id: &'static str,
     /// Exit status of launch `n` (0-based, across every provider launch of the
@@ -62,6 +96,8 @@ struct Scenario {
     args: &'static [&'static str],
     /// `(file name, content)`; the first is the entry document.
     documents: &'static [(&'static str, &'static str)],
+    /// Writes generated documents into the fixture directory.
+    generate: Option<fn(&Path)>,
     trace: &'static str,
 }
 
@@ -80,6 +116,12 @@ fn provider_behavior(trace: &Path, exits: &[i32]) -> String {
          for e in \"$@\"; do code=$e; [ \"$i\" -eq \"$n\" ] && break; i=$((i + 1)); done\n\
          printf 'work %s %s\\n' \"$mode\" \"$code\" >> {trace}\n\
          printf '%s\\n' {init}\n\
+         if [ \"$code\" -eq {INTERRUPT} ]; then\n\
+           parent=$(ps -o comm= -p \"$PPID\")\n\
+           case \"$parent\" in *claudine*) kill -INT \"$PPID\" ;; *) printf 'work wrong-parent %s\\n' \"$parent\" >> {trace}; exit 99 ;; esac\n\
+           i=0; while [ \"$i\" -lt 400 ]; do i=$((i + 1)); sleep 0.01; done\n\
+           printf 'work not-interrupted\\n' >> {trace}\n\
+         fi\n\
          if [ \"$code\" -eq 0 ]; then printf '%s\\n' {result}; fi\n\
          exit \"$code\"",
         init = sh_quote(INIT_EVENT),
@@ -112,6 +154,9 @@ fn check(scenario: &Scenario) {
     fixture.seed_user_config();
     for (name, content) in scenario.documents {
         fs::write(fixture.cwd().join(name), content).unwrap();
+    }
+    if let Some(generate) = scenario.generate {
+        generate(fixture.cwd());
     }
     let trace_path = fixture.cwd().join(TRACE_FILE);
     launch_recorder::install(&fixture, "claude", &provider_behavior(&trace_path, scenario.provider_exits));
@@ -146,6 +191,7 @@ macro_rules! scenarios {
             exits: [$($exit:expr),* $(,)?],
             args: [$($arg:literal),* $(,)?],
             documents: [$(($file:literal, $content:expr)),+ $(,)?],
+            $(generate: $generate:expr,)?
             trace: $trace:expr $(,)?
         }
     )*) => {
@@ -157,6 +203,7 @@ macro_rules! scenarios {
                     provider_exits: &[$($exit),*],
                     args: &[$($arg),*],
                     documents: &[$(($file, $content)),+],
+                    generate: None $(.or(Some($generate as fn(&Path))))?,
                     trace: $trace,
                 });
             }
@@ -499,6 +546,130 @@ scenarios! {
         ],
         trace: include_str!("../fixtures/lifecycle_traces/guarded-shell-null.trace"),
     }
+
+    #[test]
+    fn resume_in_preflight_blocked() {
+        id: "resume-in-preflight-blocked",
+        exits: [0],
+        args: ["compose", "--claude"],
+        documents: [
+            ("resume-in-preflight-blocked.md", include_str!("../fixtures/lifecycle_traces/resume-in-preflight-blocked.md")),
+        ],
+        trace: include_str!("../fixtures/lifecycle_traces/resume-in-preflight-blocked.trace"),
+    }
+
+    #[test]
+    fn defer_in_preflight_blocked() {
+        id: "defer-in-preflight-blocked",
+        exits: [0],
+        args: ["compose", "--claude"],
+        documents: [
+            ("defer-in-preflight-blocked.md", include_str!("../fixtures/lifecycle_traces/defer-in-preflight-blocked.md")),
+        ],
+        trace: include_str!("../fixtures/lifecycle_traces/defer-in-preflight-blocked.trace"),
+    }
+
+    #[test]
+    fn resume_in_initialize() {
+        id: "resume-in-initialize",
+        exits: [0],
+        args: ["compose", "--claude"],
+        documents: [
+            ("resume-in-initialize.md", include_str!("../fixtures/lifecycle_traces/resume-in-initialize.md")),
+        ],
+        trace: include_str!("../fixtures/lifecycle_traces/resume-in-initialize.trace"),
+    }
+
+    #[test]
+    fn proxy_in_initialize() {
+        id: "proxy-in-initialize",
+        exits: [0],
+        args: ["compose", "--claude"],
+        documents: [
+            ("proxy-in-initialize.md", include_str!("../fixtures/lifecycle_traces/proxy-in-initialize.md")),
+            ("proxy-in-initialize.target.md", include_str!("../fixtures/lifecycle_traces/proxy-in-initialize.target.md")),
+        ],
+        trace: include_str!("../fixtures/lifecycle_traces/proxy-in-initialize.trace"),
+    }
+
+    #[test]
+    fn cancelled_root_document() {
+        id: "cancelled-root-document",
+        exits: [INTERRUPT],
+        args: ["compose", "--claude"],
+        documents: [
+            ("cancelled-root-document.md", include_str!("../fixtures/lifecycle_traces/cancelled-root-document.md")),
+        ],
+        trace: include_str!("../fixtures/lifecycle_traces/cancelled-root-document.trace"),
+    }
+
+    #[test]
+    fn cancelled_root_document_unauthored() {
+        id: "cancelled-root-document-unauthored",
+        exits: [INTERRUPT],
+        args: ["compose", "--claude"],
+        documents: [
+            ("cancelled-root-document-unauthored.md", include_str!("../fixtures/lifecycle_traces/cancelled-root-document-unauthored.md")),
+        ],
+        trace: include_str!("../fixtures/lifecycle_traces/cancelled-root-document-unauthored.trace"),
+    }
+
+    #[test]
+    fn cancelled_root_sequence() {
+        id: "cancelled-root-sequence",
+        exits: [],
+        args: ["sequence", "--claude", "--yolo"],
+        documents: [
+            ("cancelled-root-sequence.md", include_str!("../fixtures/lifecycle_traces/cancelled-root-sequence.md")),
+        ],
+        trace: include_str!("../fixtures/lifecycle_traces/cancelled-root-sequence.trace"),
+    }
+
+    #[test]
+    fn proxy_hop_limit() {
+        id: "proxy-hop-limit",
+        exits: [0],
+        args: ["compose", "--claude"],
+        documents: [
+            ("proxy-hop-limit.md", include_str!("../fixtures/lifecycle_traces/proxy-hop-limit.md")),
+        ],
+        generate: |directory: &Path| write_proxy_hops(directory, "proxy-hop-limit", false),
+        trace: include_str!("../fixtures/lifecycle_traces/proxy-hop-limit.trace"),
+    }
+
+    #[test]
+    fn proxy_hop_limit_after_launch() {
+        id: "proxy-hop-limit-after-launch",
+        exits: [0],
+        args: ["compose", "--claude"],
+        documents: [
+            ("proxy-hop-limit-after-launch.md", include_str!("../fixtures/lifecycle_traces/proxy-hop-limit-after-launch.md")),
+        ],
+        generate: |directory: &Path| write_proxy_hops(directory, "proxy-hop-limit-after-launch", true),
+        trace: include_str!("../fixtures/lifecycle_traces/proxy-hop-limit-after-launch.trace"),
+    }
+
+    #[test]
+    fn retry_in_initialize_group_leg() {
+        id: "retry-in-initialize-group-leg",
+        exits: [],
+        args: ["sequence", "--claude", "--yolo"],
+        documents: [
+            ("retry-in-initialize-group-leg.md", include_str!("../fixtures/lifecycle_traces/retry-in-initialize-group-leg.md")),
+        ],
+        trace: include_str!("../fixtures/lifecycle_traces/retry-in-initialize-group-leg.trace"),
+    }
+
+    #[test]
+    fn retry_in_initialize_root_sequence() {
+        id: "retry-in-initialize-root-sequence",
+        exits: [],
+        args: ["sequence", "--claude", "--yolo"],
+        documents: [
+            ("retry-in-initialize-root-sequence.md", include_str!("../fixtures/lifecycle_traces/retry-in-initialize-root-sequence.md")),
+        ],
+        trace: include_str!("../fixtures/lifecycle_traces/retry-in-initialize-root-sequence.trace"),
+    }
 }
 
 /// Every `<id>.trace` in the fixture directory has a test and every test has
@@ -521,7 +692,10 @@ fn every_trace_fixture_has_exactly_one_test() {
             !name.ends_with(".trace")
                 && !tested.iter().any(|id| {
                     name.strip_prefix(id)
-                        .is_some_and(|rest| rest == ".md" || (rest.starts_with('.') && rest.ends_with(".md")))
+                        .is_some_and(|rest| {
+                            rest == ".md"
+                                || (rest.starts_with('.') && (rest.ends_with(".md") || rest.ends_with(".template")))
+                        })
                 })
         })
         .collect();

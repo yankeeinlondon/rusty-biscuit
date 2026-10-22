@@ -24,7 +24,7 @@ use darkmatter::effects::effect_descriptors;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::expression_function_descriptors;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::triggers::{PathSubject, matches, parse_trigger_envelope_from_str};
+use darkmatter::markdown::schemas::triggers::{PathSubject, parse_trigger_envelope_from_str};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, SchemaError, ValidationReport};
 use serde_json::{Value, json};
 
@@ -165,7 +165,7 @@ impl Discovered {
             .triggers
             .iter()
             .filter(|discovered| discovered.envelope == envelope)
-            .any(|discovered| discovered.envelope.match_arms.0.iter().any(|arm| matches(arm, &frontmatter, &subject)))
+            .any(|discovered| discovered.envelope.conditions.matches(&frontmatter, &subject))
     }
 
     /// Judges the document at `path`: which shipped triggers its frontmatter
@@ -184,12 +184,7 @@ impl Discovered {
         let mut claudine = false;
         let mut inline = false;
         for trigger in &self.schemas.trigger_registry().expect("discovery installed a registry").triggers {
-            let selected = trigger
-                .envelope
-                .match_arms
-                .0
-                .iter()
-                .any(|arm| matches(arm, &frontmatter, &subject));
+            let selected = trigger.envelope.conditions.matches(&frontmatter, &subject);
             if claudine_envelope.as_ref() == Some(&trigger.envelope) {
                 claudine |= selected;
             } else if inline_envelope.as_ref() == Some(&trigger.envelope) {

@@ -92,6 +92,9 @@ struct FakeHost {
 }
 
 impl LifecycleHost for FakeHost {
+    fn registry(&self) -> &crate::lifecycle::registry::EventRegistry {
+        crate::lifecycle::registry::tests::agent_host()
+    }
     fn bindings(&self) -> (Arc<BindingView>, HashMap<String, RuntimeBinding<'static>>) {
         (Arc::new(BindingView::baseline()), HashMap::new())
     }
@@ -161,6 +164,7 @@ fn parse(document: Value) -> LifecycleConfig {
         is_known_effect: &|_| true,
         authored: None,
         unknown_verbs: UnknownVerbPolicy::Reject,
+        registry: crate::lifecycle::registry::tests::agent_host(),
     };
     parse_lifecycle_config_with(&document, Path::new("doc.md"), &options).unwrap()
 }

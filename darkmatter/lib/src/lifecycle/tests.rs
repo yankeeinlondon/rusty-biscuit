@@ -12,6 +12,7 @@ fn options(unknown_verbs: UnknownVerbPolicy) -> LifecycleParseOptions<'static> {
         is_known_effect: &|_| true,
         authored: None,
         unknown_verbs,
+        registry: super::registry::tests::agent_host(),
     }
 }
 
@@ -159,4 +160,39 @@ fn ignore_still_validates_when_then_else_structure() {
         paths,
         [("md".to_string(), "start[0].then[0].md".to_string()), ("md".to_string(), "start[0].else.md".to_string())]
     );
+}
+
+fn parse_under(frontmatter: &Value, registry: &super::registry::EventRegistry) -> Result<LifecycleConfig, LifecycleError> {
+    let options = LifecycleParseOptions { registry, ..options(UnknownVerbPolicy::Reject) };
+    parse_lifecycle_config_with(frontmatter, Path::new("doc.md"), &options)
+}
+
+#[test]
+fn a_renaming_host_refuses_the_darkmatter_spelling_before_any_stack_parses() {
+    for (authored, replacement) in [("composed", "start"), ("failed", "blocked")] {
+        let frontmatter = json!({ authored: [], "start": [{ "unknown_verb": 1 }] });
+        let error = parse_with(&frontmatter, UnknownVerbPolicy::Reject).unwrap_err();
+        let LifecycleError::LifecycleRenamedEvent { authored: found, replacement: named, .. } = &error else {
+            panic!("expected LifecycleRenamedEvent, got {error:?}");
+        };
+        assert_eq!((found.as_str(), named.as_str()), (authored, replacement));
+        assert!(error.to_string().contains(&format!("write `{replacement}:`")), "{error}");
+    }
+}
+
+#[test]
+fn md_parses_its_own_spellings_and_leaves_host_only_keys_as_data() {
+    let md = super::registry::EventRegistry::md();
+    let frontmatter = json!({
+        "composed": [{ "info": "composed" }],
+        "failed": [{ "warn": "failed" }],
+        "start": [{ "say": "hi" }],
+        "success": "not a stack",
+        "loop": 3,
+    });
+    let config = parse_under(&frontmatter, &md).unwrap();
+    assert_eq!(config.stack(LifecycleSignal::Start).len(), 1);
+    assert_eq!(config.stack(LifecycleSignal::Blocked).len(), 1);
+    assert!(config.stack(LifecycleSignal::Success).is_empty());
+    assert!(config.stack(LifecycleSignal::Loop).is_empty());
 }

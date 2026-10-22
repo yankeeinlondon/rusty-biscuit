@@ -500,6 +500,10 @@ impl StackExecutionContext<'_> {
 }
 
 impl LifecycleHost for StackExecutionContext<'_> {
+    fn registry(&self) -> &darkmatter::lifecycle::registry::EventRegistry {
+        super::claudine_registry()
+    }
+
     /// The binding catalog's view for [`Self::binding_scope`], with the
     /// runtime state's sequence outputs under `seq`.
     fn bindings(&self) -> (Arc<BindingView>, HashMap<String, RuntimeBinding<'static>>) {

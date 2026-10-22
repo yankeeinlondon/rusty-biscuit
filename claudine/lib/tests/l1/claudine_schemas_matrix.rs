@@ -222,16 +222,17 @@ const COLUMNS: &[Column] = &[
         selection: false,
         outcomes: [Error, NULL_REJECTS_BOTH, Error, Error, Error, Error, Error, Error],
     },
-    // Trigger envelope, through `claudine.yaml`. A file whose `kind` is not
-    // `trigger-schema` is unclassified and contributes nothing, so the
-    // violating probe is no longer judged.
+    // Trigger envelope, through `claudine.yaml`. A file whose `kind` is
+    // absent or another string (the empty string included) is unclassified
+    // and contributes nothing, so the violating probe is no longer judged; a
+    // null or non-string `kind` is a load error, not ordinary data.
     Column {
         name: "trigger_kind",
         file: "claudine.yaml",
         pointer: "/kind",
         probes: ACTION_PROBES,
         selection: false,
-        outcomes: [UNCONSTRAINED, UNCONSTRAINED, UNCONSTRAINED, UNCONSTRAINED, UNCONSTRAINED, UNCONSTRAINED, Error, Error],
+        outcomes: [UNCONSTRAINED, Error, Error, Error, Error, UNCONSTRAINED, Error, Error],
     },
     Column {
         name: "trigger_match",
@@ -241,19 +242,20 @@ const COLUMNS: &[Column] = &[
         selection: false,
         outcomes: [Error; 8],
     },
+    // An absent payload leaves a matcher-only trigger that layers nothing.
     Column {
         name: "trigger_payload",
         file: "claudine.yaml",
         pointer: "/$schema",
         probes: ACTION_PROBES,
         selection: false,
-        outcomes: [Error, Error, Error, Error, Error, UNCONSTRAINED, Error, Error],
+        outcomes: [UNCONSTRAINED, Error, Error, Error, Error, UNCONSTRAINED, Error, Error],
     },
-    // A trigger condition operand: the `start: string(required)` arm.
+    // A trigger condition operand: the `start: string(required)` alternative.
     Column {
         name: "trigger_condition_operand",
         file: "claudine.yaml",
-        pointer: "/match/any/5/start",
+        pointer: "/match/group/5/start",
         probes: ("start: hi", "start: null"),
         selection: true,
         outcomes: [Error; 8],
@@ -574,7 +576,7 @@ pub(crate) fn walk_from(column_name: &str, syntax: Syntax, shipped: &[BundleFile
 
 /// The outcome of a trigger file that a duplicate key or trailing garbage
 /// makes invalid YAML. Darkmatter claims an unparseable file as a trigger
-/// envelope only through a column-0 `kind: trigger-schema` line with a plain
+/// envelope only through a column-0 `kind: schema-trigger` line with a plain
 /// `kind` key, and this matrix writes every key quoted (`"kind":`, in both
 /// syntaxes), so the file is unclassified: its trigger is gone, the probes are
 /// unconstrained, and nothing is selected.

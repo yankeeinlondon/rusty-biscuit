@@ -13,9 +13,11 @@ use serde_json::Value;
 
 use super::cancellation::CancellationCause;
 use super::context::LifecycleErrorInfo;
-use super::control::{ControlDispatch, MAX_PROXY_HOPS, decide_control};
+use super::control::{ControlDispatch, control_budget_for, decide_control};
 use super::envelope::DiagnosticCatalog;
 use super::executor::{LifecycleEventOutcome, StackControl};
+use super::policy::{RecoveryVerdict, Refusal, RefusalRoute, SubjectKind, recovery_verdict, refusal_route};
+use super::run::RecoveryKind;
 use super::run_guard::{GuardedEventStack, LifecycleRunGuard, LifecycleRunHost};
 use super::LifecycleSignal;
 
@@ -61,7 +63,8 @@ pub struct LifecycleTransitionInput<'a> {
     pub attempt: u32,
     /// Absolute retry/resume ceiling, or zero before the first control firing.
     pub control_budget: u32,
-    /// Number of proxy handoffs already committed to the current chain.
+    /// Documents in the current proxy chain, the origin included; see
+    /// [`super::policy::proxy_budget_exhausted`].
     pub proxy_hops_used: usize,
     /// Whether the requested proxy target already occurs in the chain.
     pub proxy_target_seen: bool,
@@ -385,7 +388,7 @@ pub(crate) fn explicit_error(
     LifecycleErrorInfo::from_action_failure_with(
         catalog,
         "error",
-        reason.map_or_else(|| format!("lifecycle {} error", event.property_name()), str::to_string),
+        reason.map_or_else(|| format!("lifecycle {} error", catalog.event_name(event)), str::to_string),
     )
 }
 
@@ -449,7 +452,7 @@ pub fn decide_lifecycle_transition(
                 LifecycleTransitionAbort::ResumeWithoutSession,
             ),
             ControlDispatch::Proxy { target } => {
-                if input.proxy_target_seen || input.proxy_hops_used >= MAX_PROXY_HOPS {
+                if input.proxy_target_seen || super::policy::proxy_budget_exhausted(input.proxy_hops_used) {
                     LifecycleTransitionDecision::Abort(
                         LifecycleTransitionAbort::ProxyBudgetExhausted,
                     )
@@ -543,6 +546,32 @@ pub enum ContainerEventDecision {
     SetupRecoveryUnsupported { event: LifecycleSignal, action: &'static str },
 }
 
+impl ContainerEventDecision {
+    /// The decision that reports `refusal`.
+    pub fn from_refusal(refusal: Refusal) -> Self {
+        match refusal {
+            Refusal::Abort(abort) => Self::Abort(abort),
+            Refusal::SetupRecoveryUnsupported { event, action } => {
+                Self::SetupRecoveryUnsupported { event, action: action.name() }
+            }
+        }
+    }
+
+    /// The refusal this decision reports, if it reports one.
+    pub fn refusal(&self) -> Option<Refusal> {
+        match self {
+            Self::Abort(abort) => Some(Refusal::Abort(*abort)),
+            Self::SetupRecoveryUnsupported { event, action } => {
+                let action = [RecoveryKind::Retry, RecoveryKind::Resume, RecoveryKind::Proxy]
+                    .into_iter()
+                    .find(|kind| kind.name() == *action)?;
+                Some(Refusal::SetupRecoveryUnsupported { event: *event, action })
+            }
+            _ => None,
+        }
+    }
+}
+
 /// One guarded event and the next effect its outcome requests.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContainerEventResult {
@@ -562,6 +591,7 @@ pub struct ContainerEventResult {
 /// lexical `seq`, `group`, and `err` values at every requested event.
 pub struct ContainerRunner<'a, H: LifecycleRunHost> {
     guard: LifecycleRunGuard<'a, H>,
+    subject: SubjectKind,
     attempt: u32,
     budget: u32,
     failed: bool,
@@ -571,9 +601,34 @@ pub struct ContainerRunner<'a, H: LifecycleRunHost> {
 }
 
 impl<'a, H: LifecycleRunHost> ContainerRunner<'a, H> {
-    /// Adopt a fresh guard for one container invocation.
+    /// Adopt a fresh guard for one container invocation, a nested sequence
+    /// until [`Self::with_subject`] says otherwise.
     pub fn new(guard: LifecycleRunGuard<'a, H>) -> Self {
-        Self { guard, attempt: 1, budget: 0, failed: false, error: None, secondary_errors: Vec::new(), cancellation: None }
+        Self {
+            guard,
+            subject: SubjectKind::Sequence,
+            attempt: 1,
+            budget: 0,
+            failed: false,
+            error: None,
+            secondary_errors: Vec::new(),
+            cancellation: None,
+        }
+    }
+
+    /// The kind of container this runner drives, which decides how a refused
+    /// recovery is routed ([`Self::refusal_route`]).
+    #[must_use]
+    pub fn with_subject(mut self, subject: SubjectKind) -> Self {
+        debug_assert!(subject.is_container(), "a container runner drives a container");
+        self.subject = subject;
+        self
+    }
+
+    /// How this container routes the refusal `decision` carries; `None` when
+    /// it carries none.
+    pub fn refusal_route(&self, decision: &ContainerEventDecision) -> Option<RefusalRoute> {
+        decision.refusal().map(|refusal| refusal_route(self.subject, &refusal))
     }
 
     /// Access the guard when adapting an existing event executor.
@@ -689,33 +744,13 @@ impl<'a, H: LifecycleRunHost> ContainerRunner<'a, H> {
             if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start | LifecycleSignal::Success | LifecycleSignal::Blocked) {
                 return Decision::Failure { error: self.error.clone() };
             }
-        } else if signal != LifecycleSignal::Finalize {
-            if let Some(control) = &outcome.control {
-                match control {
-                    StackControl::Skip => {
-                        self.guard.defuse();
-                        return Decision::Skip;
-                    }
-                    // A `break` before the children ran: no terminal event
-                    // fires, and `finalize` still runs once.
-                    StackControl::Break { .. }
-                        if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) =>
-                    {
-                        self.guard.defuse();
-                        return Decision::Finalize { failed: self.failed, error: self.error.clone() };
-                    }
-                    StackControl::Resume { .. } => {
-                        return Decision::Abort(LifecycleTransitionAbort::ResumeWithoutSession);
-                    }
-                    StackControl::Retry { .. } if signal == LifecycleSignal::Initialize || signal == LifecycleSignal::Blocked => {
-                        return Decision::SetupRecoveryUnsupported { event: signal, action: "retry" };
-                    }
-                    StackControl::Proxy { .. } if signal == LifecycleSignal::Blocked => {
-                        return Decision::SetupRecoveryUnsupported { event: signal, action: "proxy" };
-                    }
+        } else if let Some(control) = &outcome.control {
+            match recovery_verdict(self.subject, signal, control) {
+                Some(RecoveryVerdict::Refuse(refusal)) => return Decision::from_refusal(refusal),
+                Some(RecoveryVerdict::Admit) => match control {
                     StackControl::Retry { max_attempts, overlay, .. } => {
                         if self.budget == 0 {
-                            self.budget = self.attempt.saturating_add(*max_attempts);
+                            self.budget = control_budget_for(self.attempt, *max_attempts);
                         }
                         if let ControlDispatch::Retry { delay, .. } = decide_control(control, self.attempt, self.budget, false, false) {
                             self.attempt = self.attempt.saturating_add(1);
@@ -730,11 +765,25 @@ impl<'a, H: LifecycleRunHost> ContainerRunner<'a, H> {
                         self.guard.defuse();
                         return Decision::Proxy { target: target.clone(), overlay: overlay.clone() };
                     }
-                    StackControl::Defer { .. } => {
-                        return Decision::Abort(LifecycleTransitionAbort::DeferredExecutionUnsupported);
+                    _ => unreachable!("a container admits only retry and proxy"),
+                },
+                Some(RecoveryVerdict::Ignore) => {}
+                None if signal == LifecycleSignal::Finalize => {}
+                None => match control {
+                    StackControl::Skip => {
+                        self.guard.defuse();
+                        return Decision::Skip;
+                    }
+                    // A `break` before the children ran: no terminal event
+                    // fires, and `finalize` still runs once.
+                    StackControl::Break { .. }
+                        if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) =>
+                    {
+                        self.guard.defuse();
+                        return Decision::Finalize { failed: self.failed, error: self.error.clone() };
                     }
                     _ => {}
-                }
+                },
             }
         }
         match signal {

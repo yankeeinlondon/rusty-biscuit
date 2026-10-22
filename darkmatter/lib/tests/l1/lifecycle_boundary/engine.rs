@@ -1,5 +1,7 @@
 //! Test-only prototype of a neutral, synchronous, request/reply lifecycle
-//! engine (`2026-10-27-darkmatter-lifecycle-ownership`, Stage 1).
+//! engine (`2026-10-27-darkmatter-lifecycle-ownership`, Stage 1), now driven
+//! by the production event registry (`darkmatter::lifecycle::registry`): this
+//! file keeps only the minimal run that exercises it.
 //!
 //! The run owns every decision: which event fires next, the one terminal
 //! slot, finalize accounting, catch routing, and shell permission. A host
@@ -28,107 +30,20 @@
 //! [`Run::transcript_lines`] then reads the ordered record of events (host
 //! spelling), shell-lock transitions, selected-error changes, and the finish.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use darkmatter::markdown::compose::expression::{
     Availability, BindingView, RuntimeBinding, ScopeId, UnavailabilityReason, UnavailableBinding,
-    is_reserved_namespace,
 };
 use serde_json::{Map, Value, json};
 
-/// The five events Darkmatter owns. A host may rename only `Composed` and
-/// `Failed`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum CoreEvent {
-    Initialize,
-    Composed,
-    Failed,
-    Cancelled,
-    Finalize,
-}
-
-impl CoreEvent {
-    pub const ALL: [Self; 5] = [Self::Initialize, Self::Composed, Self::Failed, Self::Cancelled, Self::Finalize];
-
-    pub fn darkmatter_name(self) -> &'static str {
-        match self {
-            Self::Initialize => "initialize",
-            Self::Composed => "composed",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-            Self::Finalize => "finalize",
-        }
-    }
-
-    /// Section 1 of the spec: `err` is unavailable until something can fail.
-    fn err_availability(self) -> Availability {
-        match self {
-            Self::Initialize => Availability::Unavailable(UnavailabilityReason::new("lifecycle.no-error-before-composition")),
-            Self::Composed => Availability::Unavailable(UnavailabilityReason::new("lifecycle.composition-succeeded")),
-            Self::Failed | Self::Finalize => Availability::Available,
-            Self::Cancelled => Availability::ExecutionDependent,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Position {
-    BeforeComposition,
-    AfterComposition,
-    AfterFinalize,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Role {
-    Notification,
-    TerminalOutcome,
-    IterationGate,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ActionType {
-    Expression,
-    Flow,
-    Communicate,
-    Shell,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ActionTypes(BTreeSet<ActionType>);
-
-impl ActionTypes {
-    pub fn all() -> Self {
-        Self::of([ActionType::Expression, ActionType::Flow, ActionType::Communicate, ActionType::Shell])
-    }
-
-    pub fn of(types: impl IntoIterator<Item = ActionType>) -> Self {
-        Self(types.into_iter().collect())
-    }
-
-    pub fn contains(&self, action: ActionType) -> bool {
-        self.0.contains(&action)
-    }
-}
-
-/// An event's identity within one registry. Opaque so a host cannot invent
-/// one; [`Registry::id`] resolves a host spelling.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EventId(Slot);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum Slot {
-    Core(CoreEvent),
-    Host(usize),
-}
-
-impl EventId {
-    pub const fn core(event: CoreEvent) -> Self {
-        Self(Slot::Core(event))
-    }
-}
+pub use darkmatter::lifecycle::registry::{
+    ActionType, ActionTypes, CoreEvent, EventDescriptor, EventId, EventRegistry as Registry, KeyResolution,
+    OutcomePair, Position, RegistrationError, Role, generic_view as err_view,
+};
 
 const INITIALIZE: EventId = EventId::core(CoreEvent::Initialize);
 const COMPOSED: EventId = EventId::core(CoreEvent::Composed);
@@ -136,106 +51,7 @@ const FAILED: EventId = EventId::core(CoreEvent::Failed);
 const CANCELLED: EventId = EventId::core(CoreEvent::Cancelled);
 const FINALIZE: EventId = EventId::core(CoreEvent::Finalize);
 
-/// One host event registration.
-#[derive(Clone, Debug, PartialEq)]
-pub struct EventDescriptor {
-    pub name: String,
-    pub position: Position,
-    pub role: Role,
-    pub globals: Arc<BindingView>,
-    pub actions: ActionTypes,
-}
-
-impl EventDescriptor {
-    pub fn new(name: &str, position: Position, role: Role, globals: Arc<BindingView>) -> Self {
-        Self { name: name.to_string(), position, role, globals, actions: ActionTypes::all() }
-    }
-
-    #[must_use]
-    pub fn with_actions(mut self, actions: ActionTypes) -> Self {
-        self.actions = actions;
-        self
-    }
-}
-
-/// A view declaring only `err`, with `availability`.
-pub fn err_view(scope: &str, availability: Availability) -> Arc<BindingView> {
-    Arc::new(
-        BindingView::builder(ScopeId::new(scope))
-            .declare("err", "The failure the run is handling.", availability)
-            .build()
-            .expect("an `err`-only view is well-formed"),
-    )
-}
-
-/// The terminal-outcome disposition: the alternative a successful and a
-/// failed completion select, and the explicit-error downgrades allowed.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OutcomePair {
-    pub succeeded: String,
-    pub failed: String,
-    pub downgrades: Vec<(String, String)>,
-}
-
-impl OutcomePair {
-    pub fn new(succeeded: &str, failed: &str) -> Self {
-        Self { succeeded: succeeded.to_string(), failed: failed.to_string(), downgrades: Vec::new() }
-    }
-
-    /// `from` (the success alternative or the host's spelling of `failed`)
-    /// may downgrade to `to` on an explicit error.
-    #[must_use]
-    pub fn downgrade(mut self, from: &str, to: &str) -> Self {
-        self.downgrades.push((from.to_string(), to.to_string()));
-        self
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RegistrationError {
-    /// A run holds this registry; registration is fixed for a run.
-    RunStarted,
-    DuplicateName { name: String },
-    DarkmatterEventName { name: String, event: CoreEvent },
-    ReservedRoot { name: String },
-    /// `initialize`, `cancelled`, and `finalize` are guarantees.
-    FixedEvent { event: CoreEvent },
-    SecondName { event: CoreEvent, existing: String, attempted: String },
-    RoleOutOfPosition { name: String, role: Role, position: Position },
-    SecondIterationGate { name: String, existing: String },
-    SecondOutcomePair,
-    DuplicateAlternative { name: String },
-    MissingAlternative { name: String },
-    DowngradeSourceNotOutcome { from: String },
-    DowngradeTargetNotAlternative { from: String, to: String },
-    UnpairedOutcome { name: String },
-}
-
-/// What an authored frontmatter key means to this host.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum KeyResolution {
-    Event(EventId),
-    /// The Darkmatter spelling of an event this host renamed: a typed parse
-    /// error naming the host's spelling.
-    Renamed { authored: String, replacement: String },
-    /// Not a lifecycle key for this host; ordinary frontmatter data.
-    Data,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct CoreSlot {
-    name: String,
-    globals: Arc<BindingView>,
-    actions: ActionTypes,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct Pair {
-    succeeded: EventId,
-    failed: EventId,
-    downgrades: Vec<(EventId, EventId)>,
-}
-
+/// What an event is to this run, from its registration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     Core(CoreEvent),
@@ -244,276 +60,42 @@ enum Kind {
     Gate,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-struct RegistryInner {
-    host: String,
-    core: BTreeMap<CoreEvent, CoreSlot>,
-    events: Vec<EventDescriptor>,
-    pair: Option<Pair>,
-}
-
-/// A host's event registry. Mutation fails with
-/// [`RegistrationError::RunStarted`] while any [`Run`] holds it.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Registry {
-    inner: Arc<RegistryInner>,
-}
-
-impl Registry {
-    /// Darkmatter's five events and nothing else: the core-only `md` shape.
-    pub fn new(host: &str) -> Self {
-        let core = CoreEvent::ALL
-            .into_iter()
-            .map(|event| {
-                let name = event.darkmatter_name();
-                let actions = ActionTypes::all();
-                let globals = err_view(&format!("{host}.{name}"), event.err_availability());
-                (event, CoreSlot { name: name.to_string(), globals, actions })
-            })
-            .collect();
-        Self {
-            inner: Arc::new(RegistryInner { host: host.to_string(), core, events: Vec::new(), pair: None }),
-        }
+fn kind(registry: &Registry, id: EventId) -> Kind {
+    if let Some(event) = registry.core_event(id) {
+        return Kind::Core(event);
     }
-
-    fn edit<T>(&mut self, edit: impl FnOnce(&mut RegistryInner) -> Result<T, RegistrationError>) -> Result<T, RegistrationError> {
-        edit(Arc::get_mut(&mut self.inner).ok_or(RegistrationError::RunStarted)?)
-    }
-
-    pub fn rename(&mut self, event: CoreEvent, name: &str) -> Result<(), RegistrationError> {
-        self.edit(|inner| {
-            if !matches!(event, CoreEvent::Composed | CoreEvent::Failed) {
-                return Err(RegistrationError::FixedEvent { event });
-            }
-            let existing = &inner.core[&event].name;
-            if existing != event.darkmatter_name() {
-                return Err(RegistrationError::SecondName { event, existing: existing.clone(), attempted: name.to_string() });
-            }
-            inner.check_name(name)?;
-            inner.core.get_mut(&event).expect("every core event has a slot").name = name.to_string();
-            Ok(())
-        })
-    }
-
-    pub fn register(&mut self, descriptor: EventDescriptor) -> Result<EventId, RegistrationError> {
-        self.edit(|inner| {
-            inner.check_name(&descriptor.name)?;
-            let fits = match descriptor.role {
-                Role::Notification => true,
-                Role::TerminalOutcome => descriptor.position == Position::AfterComposition,
-                Role::IterationGate => descriptor.position == Position::AfterFinalize,
-            };
-            if !fits {
-                return Err(RegistrationError::RoleOutOfPosition {
-                    name: descriptor.name,
-                    role: descriptor.role,
-                    position: descriptor.position,
-                });
-            }
-            if descriptor.role == Role::IterationGate
-                && let Some(existing) = inner.events.iter().find(|event| event.role == Role::IterationGate)
-            {
-                return Err(RegistrationError::SecondIterationGate { name: descriptor.name, existing: existing.name.clone() });
-            }
-            inner.events.push(descriptor);
-            Ok(EventId(Slot::Host(inner.events.len() - 1)))
-        })
-    }
-
-    pub fn register_outcome_pair(&mut self, pair: OutcomePair) -> Result<(), RegistrationError> {
-        self.edit(|inner| {
-            if inner.pair.is_some() {
-                return Err(RegistrationError::SecondOutcomePair);
-            }
-            if pair.succeeded == pair.failed {
-                return Err(RegistrationError::DuplicateAlternative { name: pair.succeeded });
-            }
-            let alternative = |name: &str| {
-                inner
-                    .id(name)
-                    .filter(|id| inner.kind(*id) == Kind::Outcome)
-                    .ok_or_else(|| RegistrationError::MissingAlternative { name: name.to_string() })
-            };
-            let (succeeded, failed) = (alternative(&pair.succeeded)?, alternative(&pair.failed)?);
-            let mut downgrades = Vec::new();
-            for (from, to) in &pair.downgrades {
-                let source = inner
-                    .id(from)
-                    .filter(|id| *id == succeeded || *id == FAILED)
-                    .ok_or_else(|| RegistrationError::DowngradeSourceNotOutcome { from: from.clone() })?;
-                let target = inner
-                    .id(to)
-                    .filter(|id| *id == succeeded || *id == failed)
-                    .ok_or_else(|| RegistrationError::DowngradeTargetNotAlternative { from: from.clone(), to: to.clone() })?;
-                downgrades.push((source, target));
-            }
-            inner.pair = Some(Pair { succeeded, failed, downgrades });
-            Ok(())
-        })
-    }
-
-    /// Declares the action types a Darkmatter event admits for this host.
-    /// The engine's invariants still apply: `initialize` never runs a shell.
-    pub fn declare_core_actions(&mut self, event: CoreEvent, actions: ActionTypes) -> Result<(), RegistrationError> {
-        self.edit(|inner| {
-            inner.core.get_mut(&event).expect("every core event has a slot").actions = actions;
-            Ok(())
-        })
-    }
-
-    /// The host's spelling of `id`.
-    pub fn name(&self, id: EventId) -> &str {
-        self.inner.name(id)
-    }
-
-    pub fn id(&self, name: &str) -> Option<EventId> {
-        self.inner.id(name)
-    }
-
-    pub fn resolve_key(&self, key: &str) -> KeyResolution {
-        if let Some(id) = self.inner.id(key) {
-            return KeyResolution::Event(id);
-        }
-        CoreEvent::ALL
-            .into_iter()
-            .find(|event| event.darkmatter_name() == key)
-            .map_or(KeyResolution::Data, |event| KeyResolution::Renamed {
-                authored: key.to_string(),
-                replacement: self.inner.core[&event].name.clone(),
-            })
-    }
-
-    pub fn has_outcome_pair(&self) -> bool {
-        self.inner.pair.is_some()
-    }
-
-    pub fn globals(&self, id: EventId) -> &Arc<BindingView> {
-        match id.0 {
-            Slot::Core(event) => &self.inner.core[&event].globals,
-            Slot::Host(index) => &self.inner.events[index].globals,
-        }
-    }
-
-    pub fn actions(&self, id: EventId) -> &ActionTypes {
-        match id.0 {
-            Slot::Core(event) => &self.inner.core[&event].actions,
-            Slot::Host(index) => &self.inner.events[index].actions,
-        }
-    }
-
-    fn kind(&self, id: EventId) -> Kind {
-        self.inner.kind(id)
-    }
-
-    fn notifications(&self, position: Position) -> impl Iterator<Item = EventId> + '_ {
-        (0..self.inner.events.len())
-            .map(|index| EventId(Slot::Host(index)))
-            .filter(move |id| self.kind(*id) == Kind::Notification(position))
-    }
-
-    fn gate(&self) -> Option<EventId> {
-        (0..self.inner.events.len()).map(|index| EventId(Slot::Host(index))).find(|id| self.kind(*id) == Kind::Gate)
-    }
-
-    fn failed_alternative(&self) -> Option<EventId> {
-        self.inner.pair.as_ref().map(|pair| pair.failed)
-    }
-
-    fn succeeded_alternative(&self) -> Option<EventId> {
-        self.inner.pair.as_ref().map(|pair| pair.succeeded)
-    }
-
-    fn downgrade_target(&self, from: EventId) -> Option<EventId> {
-        let pair = self.inner.pair.as_ref()?;
-        pair.downgrades.iter().find(|(source, _)| *source == from).map(|(_, target)| *target)
-    }
-
-    fn is_terminal(&self, id: EventId) -> bool {
-        id == FAILED || self.kind(id) == Kind::Outcome
-    }
-
-    /// Setup events route their failures through the catch protocol.
-    fn is_setup(&self, id: EventId) -> bool {
-        matches!(
-            self.kind(id),
-            Kind::Core(CoreEvent::Initialize | CoreEvent::Composed | CoreEvent::Failed)
-                | Kind::Notification(Position::BeforeComposition | Position::AfterComposition)
-        )
-    }
-
-    /// The registered failed alternative catches every setup failure (Claudine
-    /// routes `initialize` errors to `failure`). Without a pair, only a
-    /// failure before composition reaches `failed`; later ones go straight to
-    /// `finalize` (the `md` contract in spec section 6).
-    fn catch_target(&self, origin: EventId) -> Option<EventId> {
-        self.failed_alternative().or_else(|| {
-            matches!(self.kind(origin), Kind::Core(CoreEvent::Initialize) | Kind::Notification(Position::BeforeComposition))
-                .then_some(FAILED)
-        })
-    }
-
-    fn admits_recovery(&self, id: EventId, kind: RecoveryKind) -> bool {
-        match self.kind(id) {
-            Kind::Outcome | Kind::Core(CoreEvent::Finalize) => true,
-            Kind::Core(CoreEvent::Composed) => matches!(kind, RecoveryKind::Proxy),
-            _ => false,
-        }
+    match (registry.role(id), registry.position(id)) {
+        (Some(Role::Notification), Some(position)) => Kind::Notification(position),
+        (Some(Role::TerminalOutcome), _) => Kind::Outcome,
+        _ => Kind::Gate,
     }
 }
 
-impl RegistryInner {
-    fn name(&self, id: EventId) -> &str {
-        match id.0 {
-            Slot::Core(event) => &self.core[&event].name,
-            Slot::Host(index) => &self.events[index].name,
-        }
-    }
+/// Setup events route their failures through the catch protocol.
+fn is_setup(registry: &Registry, id: EventId) -> bool {
+    matches!(
+        kind(registry, id),
+        Kind::Core(CoreEvent::Initialize | CoreEvent::Composed | CoreEvent::Failed)
+            | Kind::Notification(Position::BeforeComposition | Position::AfterComposition)
+    )
+}
 
-    fn id(&self, name: &str) -> Option<EventId> {
-        self.core
-            .iter()
-            .find(|(_, slot)| slot.name == name)
-            .map(|(event, _)| EventId::core(*event))
-            .or_else(|| self.events.iter().position(|event| event.name == name).map(|index| EventId(Slot::Host(index))))
-    }
+/// The registered failed alternative catches every setup failure (Claudine
+/// routes `initialize` errors to `failure`). Without a pair, only a failure
+/// before composition reaches `failed`; later ones go straight to `finalize`
+/// (the `md` contract in spec section 6).
+fn catch_target(registry: &Registry, origin: EventId) -> Option<EventId> {
+    registry.failed_alternative().or_else(|| {
+        matches!(kind(registry, origin), Kind::Core(CoreEvent::Initialize) | Kind::Notification(Position::BeforeComposition))
+            .then_some(FAILED)
+    })
+}
 
-    fn kind(&self, id: EventId) -> Kind {
-        match id.0 {
-            Slot::Core(event) => Kind::Core(event),
-            Slot::Host(index) => {
-                let event = &self.events[index];
-                match event.role {
-                    Role::Notification => Kind::Notification(event.position),
-                    Role::TerminalOutcome => Kind::Outcome,
-                    Role::IterationGate => Kind::Gate,
-                }
-            }
-        }
-    }
-
-    fn check_name(&self, name: &str) -> Result<(), RegistrationError> {
-        if let Some(event) = CoreEvent::ALL.into_iter().find(|event| event.darkmatter_name() == name) {
-            return Err(RegistrationError::DarkmatterEventName { name: name.to_string(), event });
-        }
-        if is_reserved_namespace(name) {
-            return Err(RegistrationError::ReservedRoot { name: name.to_string() });
-        }
-        if self.id(name).is_some() {
-            return Err(RegistrationError::DuplicateName { name: name.to_string() });
-        }
-        Ok(())
-    }
-
-    fn validate_for_run(&self) -> Result<(), RegistrationError> {
-        let paired = |index: usize| {
-            self.pair
-                .as_ref()
-                .is_some_and(|pair| [pair.succeeded, pair.failed].contains(&EventId(Slot::Host(index))))
-        };
-        match self.events.iter().enumerate().find(|(index, event)| event.role == Role::TerminalOutcome && !paired(*index)) {
-            Some((_, event)) => Err(RegistrationError::UnpairedOutcome { name: event.name.clone() }),
-            None => Ok(()),
-        }
+fn admits_recovery(registry: &Registry, id: EventId, recovery: RecoveryKind) -> bool {
+    match kind(registry, id) {
+        Kind::Outcome | Kind::Core(CoreEvent::Finalize) => true,
+        Kind::Core(CoreEvent::Composed) => matches!(recovery, RecoveryKind::Proxy),
+        _ => false,
     }
 }
 
@@ -674,15 +256,22 @@ impl EventRequest {
         }
     }
 
-    /// The `err` entry for a Darkmatter `EvaluationSession` over
-    /// [`Self::globals`].
+    /// One entry per global of [`Self::globals`] for a Darkmatter
+    /// `EvaluationSession`: `err` from the run, every other global `null`.
     pub fn runtime_bindings(&self) -> Vec<(String, RuntimeBinding<'static>)> {
-        let binding = match &self.err {
-            ErrBinding::Value(error) => RuntimeBinding::eager(error.as_ref().map_or(Value::Null, LifecycleError::to_value)),
-            ErrBinding::Unavailable { reason, .. } => RuntimeBinding::unavailable(reason.clone()),
-            ErrBinding::Undeclared => return Vec::new(),
-        };
-        vec![("err".to_string(), binding)]
+        self.globals
+            .globals()
+            .map(|declaration| {
+                let binding = match (declaration.root(), &self.err) {
+                    ("err", ErrBinding::Value(error)) => {
+                        RuntimeBinding::eager(error.as_ref().map_or(Value::Null, LifecycleError::to_value))
+                    }
+                    ("err", ErrBinding::Unavailable { reason, .. }) => RuntimeBinding::unavailable(reason.clone()),
+                    _ => RuntimeBinding::eager(Value::Null),
+                };
+                (declaration.root().to_string(), binding)
+            })
+            .collect()
     }
 }
 
@@ -973,7 +562,7 @@ fn request_name(kind: &RequestKind) -> &'static str {
 
 impl Run {
     pub fn start(registry: &Registry, document: DocumentInput) -> Result<Self, StartError> {
-        registry.inner.validate_for_run().map_err(StartError::Registration)?;
+        registry.validate().map_err(StartError::Registration)?;
         let (stacks, state) = split_document(registry, document)?;
         let id = RunId(NEXT_RUN.fetch_add(1, Ordering::Relaxed));
         let mut run = Self {
@@ -1269,9 +858,7 @@ impl Run {
             Some(Directive::Error(error)) => Some(error.clone()),
             _ => None,
         };
-        let setup_error = self
-            .registry
-            .is_setup(event)
+        let setup_error = is_setup(&self.registry, event)
             .then(|| evaluation_error.clone().or_else(|| failure.clone()).or(explicit))
             .flatten();
         if evaluation_error.is_some() || setup_error.is_some() {
@@ -1299,7 +886,7 @@ impl Run {
         let prior = self.error.clone();
         let finalize = |error| CatchStep { event: FINALIZE, error, redesignate: false };
         let pending = if let Some(error) = setup_error {
-            match self.registry.catch_target(origin) {
+            match catch_target(&self.registry, origin) {
                 Some(target) if target != origin => Some(CatchStep {
                     event: target,
                     error: Some(error),
@@ -1310,7 +897,7 @@ impl Run {
         } else {
             let needs_finalize = self.registry.is_terminal(origin)
                 || origin == CANCELLED
-                || self.registry.kind(origin) == Kind::Gate;
+                || kind(&self.registry, origin) == Kind::Gate;
             (needs_finalize && !self.finalized).then(|| finalize(evaluation.clone().or_else(|| prior.clone())))
         };
         self.catch = Some(Catch { mode, prior, evaluation, pending });
@@ -1343,7 +930,7 @@ impl Run {
 
     fn request_recovery(&mut self, event: EventId, directive: Directive) {
         let kind = RecoveryKind::Proxy;
-        if self.registry.admits_recovery(event, kind) {
+        if admits_recovery(&self.registry, event, kind) {
             let recovery = RecoveryRequest {
                 kind,
                 directive,
@@ -1393,7 +980,7 @@ impl Run {
                 Some(after) => events.skip_while(|id| *id != after).nth(1),
             }
         };
-        let (position, after) = match self.registry.kind(event) {
+        let (position, after) = match kind(&self.registry, event) {
             Kind::Core(CoreEvent::Initialize) => (Position::BeforeComposition, None),
             Kind::Core(CoreEvent::Composed) => (Position::AfterComposition, None),
             Kind::Core(CoreEvent::Finalize) => (Position::AfterFinalize, None),
@@ -1409,7 +996,7 @@ impl Run {
         match position {
             Position::BeforeComposition => self.issue(RequestKind::Prepare { entry: self.entry }),
             Position::AfterComposition => self.issue(RequestKind::PerformOperation { entry: self.entry }),
-            Position::AfterFinalize => match self.registry.gate() {
+            Position::AfterFinalize => match self.registry.iteration_gate() {
                 // A failed pass ends the loop before its gate.
                 Some(gate) if self.error.is_none() && !self.terminal_failed() => {
                     self.fire(gate, EvaluationMode::NormalRecovery);

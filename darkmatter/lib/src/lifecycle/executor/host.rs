@@ -22,12 +22,17 @@ use crate::markdown::compose::{ComposeContext, ContextBuildError};
 
 use super::super::context::{LifecycleCause, LifecycleErrorInfo, LifecycleEvaluationReason};
 use super::super::envelope::DiagnosticSnapshot;
+use super::super::registry::EventRegistry;
 
 /// The host's side of lifecycle execution.
 ///
 /// One value serves one event (or one task stack): its answers may depend on
 /// the scope the host evaluates that event in.
 pub trait LifecycleHost {
+    /// The host's events, which name the lifecycle keys a `with:` overlay
+    /// must not fill with template syntax.
+    fn registry(&self) -> &EventRegistry;
+
     /// The binding view and one runtime entry per lifecycle global the
     /// current scope declares.
     ///
@@ -106,6 +111,14 @@ pub trait LifecycleHost {
 
     /// Whether the user interrupted the run; the cancellation probe.
     fn interrupted(&self) -> bool;
+
+    /// Whether an interrupt ends this event's stack before its next item, as
+    /// `stop` would. A host whose cancellation cleanup runs in a separate
+    /// event answers `true` for its normal events; by default an interrupt
+    /// never cuts a stack short.
+    fn stops_on_interrupt(&self) -> bool {
+        false
+    }
 
     /// Whether `name` is a sound effect the host can play.
     fn is_known_effect(&self, name: &str) -> bool;

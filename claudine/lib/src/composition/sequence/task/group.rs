@@ -65,6 +65,7 @@ impl TaskExecution<'_> {
         if self.interrupted() { return PrimaryOutcome::interrupted(String::new()); }
         use crate::composition::lifecycle::{LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext, LifecycleSignal};
         use crate::composition::lifecycle::executor::DisabledShellRunner;
+        use crate::composition::lifecycle::policy::{RefusalRoute, SubjectKind};
         use crate::composition::lifecycle::runtime::{ContainerEventDecision as Decision, ContainerRunner};
 
         let before = self.runtime.map_or_else(RuntimeSnapshot::default, |runtime| runtime.snapshot());
@@ -79,7 +80,7 @@ impl TaskExecution<'_> {
             launch_area: self.stack.ctx_base_dir, context: self.stack.prepared_context,
         };
         let mut runner = ContainerRunner::new(LifecycleRunGuard::new(
-            &group.lifecycle, &context, self.stack.emitter));
+            &group.lifecycle, &context, self.stack.emitter)).with_subject(SubjectKind::Group);
         let mut frame = match self.open_loop(group.loop_config.as_deref(), LoopResultKind::Group, self.stack.frontmatter, &runtime) {
             Ok(frame) => frame,
             Err(error) => return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
@@ -324,23 +325,20 @@ impl TaskExecution<'_> {
                     signal = LifecycleSignal::Start;
                 }
                 Decision::Skip => return PrimaryOutcome::succeeded(String::new()),
-                Decision::Abort(abort) => {
-                    let failure = match abort {
-                        crate::composition::lifecycle::runtime::LifecycleTransitionAbort::ResumeWithoutSession =>
-                            CompositionError::LifecycleResumeWithoutSession { source_path: group.origin_path.clone() },
-                        _ => CompositionError::LifecycleDeferNotImplemented { source_path: group.origin_path.clone() },
+                decision @ (Decision::Abort(_) | Decision::SetupRecoveryUnsupported { .. }) => {
+                    let (Some(refusal), Some(route)) = (decision.refusal(), runner.refusal_route(&decision)) else {
+                        unreachable!("a refusal decision carries its refusal: {decision:?}");
+                    };
+                    let Some(failure) = CompositionError::from_lifecycle_refusal(&refusal, &group.origin_path) else {
+                        unreachable!("a container refuses only a setup recovery, a resume, or a defer: {refusal:?}");
                     };
                     let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary, &failure);
                     runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
-                    result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Finalize;
-                }
-                Decision::SetupRecoveryUnsupported { event, action } => {
-                    let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary,
-                        &CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
-                            source_path: group.origin_path.clone(), event: event.property_name().into(), action: action.into(),
-                        });
-                    runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
-                    result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Failure;
+                    result = PrimaryOutcome::failed(diagnostic);
+                    signal = match route {
+                        RefusalRoute::FailureThenFinalize => LifecycleSignal::Failure,
+                        RefusalRoute::FinalizeIfOwedReadingRefusal | RefusalRoute::FinalizeIfOwed => LifecycleSignal::Finalize,
+                    };
                 }
                 Decision::Proxy { target, overlay } => {
                     let result = execution.run_container_proxy(&target, overlay);

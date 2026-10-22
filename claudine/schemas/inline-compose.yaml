@@ -2,10 +2,10 @@
 # non-null `prompt` and no non-null `sequence`. Hand-maintained; see README.md.
 #
 # Every property here is declared with the same type as in claudine.yaml.
-kind: trigger-schema
+kind: schema-trigger
 match:
     all:
-        - any:
+        - group:
               - prompt: string(required)
               - prompt: number(required)
               - prompt: boolean(required)

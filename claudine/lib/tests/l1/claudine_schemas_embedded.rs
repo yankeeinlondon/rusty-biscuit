@@ -251,7 +251,7 @@ const LINKING_PROBES: &[ExportProbe] = &[
 /// inside the bundle exactly as the shipped payloads' do.
 fn exports_trigger(library: &str, probes: &[ExportProbe]) -> String {
     let marker = library.trim_end_matches(".yaml");
-    let mut text = format!("kind: trigger-schema\nmatch:\n    probe_{marker}: string(required)\n$schema:\n");
+    let mut text = format!("kind: schema-trigger\nmatch:\n    probe_{marker}: string(required)\n$schema:\n");
     for (export, _, _) in probes {
         text.push_str(&format!("    t_{export}: \"{export}@./{library}\"\n"));
     }
@@ -596,12 +596,12 @@ impl Locations {
 /// A Claudine trigger that types `tier` as the one value `tier`, selected by
 /// any `start` list.
 fn tier_trigger(tier: &str) -> String {
-    format!("kind: trigger-schema\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    tier: enum({tier})\n")
+    format!("kind: schema-trigger\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    tier: enum({tier})\n")
 }
 
 /// A same-name `claudine.yaml` that types `model` as a number.
 const NUMBER_MODEL_TRIGGER: &str =
-    "kind: trigger-schema\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    model: number\n";
+    "kind: schema-trigger\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    model: number\n";
 
 fn is_load_failure(error: &CompositionError) -> bool {
     matches!(error, CompositionError::SchemaLoad { .. } | CompositionError::SchemaParse { .. })
@@ -766,7 +766,7 @@ fn authored_schema_override_applies_last_and_takes_ownership() {
 #[test]
 fn malformed_disk_trigger_fails_without_embedded_fallback() {
     let locations = Locations::new();
-    locations.write_schema(Root::Tree, "claudine.yaml", "kind: trigger-schema\nmatch: 42\n$schema: {}\n");
+    locations.write_schema(Root::Tree, "claudine.yaml", "kind: schema-trigger\nmatch: 42\n$schema: {}\n");
     for frontmatter in ["start: [stop]", "title: x"] {
         match locations.verdict("malformed", frontmatter) {
             Err(CompositionError::SchemaLoad { .. }) => {}
@@ -783,7 +783,7 @@ fn disk_import_never_falls_back_to_an_embedded_file() {
     locations.write_schema(
         Root::Tree,
         "claudine.yaml",
-        "kind: trigger-schema\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    start: stack@./lifecycle.yaml\n",
+        "kind: schema-trigger\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    start: stack@./lifecycle.yaml\n",
     );
     let error = locations.verdict("import", "start: [stop]").expect_err("the disk import is missing");
     assert!(is_load_failure(&error), "{error:?}");
@@ -797,7 +797,7 @@ fn non_matching_disk_trigger_still_shadows_the_embedded_one() {
     locations.write_schema(
         Root::Tree,
         "claudine.yaml",
-        "kind: trigger-schema\nmatch:\n    never_set: string(required)\n$schema:\n    never_set: string\n",
+        "kind: schema-trigger\nmatch:\n    never_set: string(required)\n$schema:\n    never_set: string\n",
     );
     assert_accepts(locations.verdict("shadow", "start: [{ inf0: hi }]"), "no Claudine payload applies");
     assert_accepts(locations.verdict("shadow", "prompt: hi\nstart: [{ inf0: hi }]"), "inline-compose does not type `start`");

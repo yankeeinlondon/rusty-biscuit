@@ -553,7 +553,7 @@ fn write_git_skeleton(dir: &Path) {
 
 /// A disk `claudine.yaml` that replaces the embedded one and loosens
 /// `description` to any value.
-const LOOSENED_CLAUDINE_SCHEMA: &str = "kind: trigger-schema\nmatch:\n    any:\n        - prompt: string(required)\n$schema:\n    description: \"unknown -> loosened\"\n";
+const LOOSENED_CLAUDINE_SCHEMA: &str = "kind: schema-trigger\nmatch:\n    group:\n        - prompt: string(required)\n$schema:\n    description: \"unknown -> loosened\"\n";
 
 /// An agent that loosens `description` on disk mid-run and writes a mapping
 /// into it: this run's completion verdict still uses the launch schema, and

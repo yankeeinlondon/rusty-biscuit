@@ -19,14 +19,22 @@ them.
 | `lifecycle.yaml` | library (`kind: schema`) | the lifecycle stack types (`stack` and `initialize-stack`, typed three conditional levels deep; `cancelled-stack`, typed at all five levels the parser accepts) and the `loop:` block type |
 | `sequence-types.yaml` | library (`kind: schema`) | the sequence step and container types (`steps`, `step`, `task`, `group`), unrolled to three typed container levels |
 | `linking.yaml` | library (`kind: schema`) | the eleven optional linking keys of a linked skill, command, or agent |
-| `claudine.yaml` | trigger (`kind: trigger-schema`) | applies Claudine's frontmatter catalog to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
-| `inline-compose.yaml` | trigger (`kind: trigger-schema`) | applies inline-compose's document metadata to a document with a non-null `prompt` and no non-null `sequence` |
-| `sequence.yaml` | trigger (`kind: trigger-schema`) | applies the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`) to a document with a non-null `sequence` |
+| `claudine.yaml` | trigger (`kind: schema-trigger`) | applies Claudine's frontmatter catalog to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
+| `inline-compose.yaml` | trigger (`kind: schema-trigger`) | applies inline-compose's document metadata to a document with a non-null `prompt` and no non-null `sequence` |
+| `sequence.yaml` | trigger (`kind: schema-trigger`) | applies the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`) to a document with a non-null `sequence` |
 | `review.yaml` | standalone schema (`$schema`) | the schema of a specification review document |
+| `globals.yaml` | host catalog (`kind: schema` + `$schema`) | the shapes of Claudine's host globals `seq`, `loop`, and `group` |
+
+The **host catalog** (`globals.yaml`) declares the shape of each global
+Claudine supplies to lifecycle and sequence expressions, in Darkmatter's
+global-catalog format. The `claudine` binary embeds it separately from the
+trigger bundle and registers it with its events; it is never a document
+schema or a trigger, and which events may read each global is decided in
+code. DMLS reads it from a schema location for hover and completion.
 
 A **library** (`kind: schema`) holds named types only and reaches a document
 only when a trigger or a document's `$schema` imports it
-(`stack@./lifecycle.yaml`). A **trigger** (`kind: trigger-schema`) applies its
+(`stack@./lifecycle.yaml`). A **trigger** (`kind: schema-trigger`) applies its
 payload to every document its `match:` selects; it is never named by a
 `$schema`. The trigger and library files above are used together: copy all of
 them (`*.yaml`), as regular files, when placing the bundle elsewhere.

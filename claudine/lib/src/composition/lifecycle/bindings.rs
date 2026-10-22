@@ -8,16 +8,19 @@
 //! lifecycle global or a document property. Claudine never walks an expression
 //! to enforce it.
 //!
-//! `seq`, `group`, and `loop` are lexical whole roots. Explicit `fm.*`
+//! `seq`, `group`, and `loop` are lexical whole roots, declared by name from
+//! Claudine's host catalog ([`crate::composition::schema::globals`]), which
+//! owns their shapes. Explicit `fm.*`
 //! always reads document properties. `seq` is available in every event,
 //! including cancellation, and standalone documents expose only its outputs.
 //! `group` and `loop` retain typed outside-scope errors. Approval scopes keep
 //! late roots unavailable; sequence discovery separately permits typed
 //! templates for `seq`, `group`, and `loop`.
 //!
-//! `err` is unavailable in initialize/start/success/loop and available in
-//! blocked/failure/cancelled/finalize. `timing` is available in every event.
-//! Both are unavailable during shell approval. Retired loop and sequence
+//! An event's `err` and `timing` availability is Claudine's event registry's
+//! ([`super::registry`]): `err` is unavailable in initialize/start/success/loop
+//! and available in blocked/failure/cancelled/finalize, and `timing` is
+//! available in every event. Both are unavailable during shell approval. Retired loop and sequence
 //! reads are checked on parsed expressions before effects.
 
 mod containers;
@@ -44,6 +47,7 @@ use super::context::{LifecycleErrorInfo, LifecycleTiming};
 use crate::composition::error::CompositionError;
 use crate::composition::looping::LoopAmbient;
 use crate::composition::reserved::{LOOP_ROOT, RETIRED_LOOP_NAMES};
+use crate::composition::schema::globals::host_global;
 
 /// `err` read where no error can exist.
 pub const EVENT_HAS_NO_ERROR: &str = "claudine.event-has-no-error";
@@ -119,12 +123,27 @@ impl LifecycleScope {
         matches!(self, Self::LifecycleShellApproval | Self::SequenceShellApproval)
     }
 
-    fn carries_error(self) -> bool {
-        match self {
-            Self::Event(signal) => signal.can_carry_error(),
-            Self::TaskTeardown => true,
-            Self::TaskSetup | Self::LifecycleShellApproval | Self::SequenceShellApproval => false,
-        }
+    /// `err` and `timing` as the scope declares them outside approval: an
+    /// event's from Claudine's registry, a task stack's by its phase.
+    fn generic_globals(self) -> (Availability, Availability) {
+        let Self::Event(signal) = self else {
+            let err = if self == Self::TaskTeardown {
+                Availability::Available
+            } else {
+                Availability::Unavailable(reason(EVENT_HAS_NO_ERROR))
+            };
+            return (err, Availability::Available);
+        };
+        let registry = super::registry::claudine_registry();
+        let id = registry.id_of(signal).expect("Claudine registers an event for every slot");
+        let declared = |root: &str| {
+            registry
+                .globals(id)
+                .global(root)
+                .map(|global| global.availability().clone())
+                .expect("Claudine's event views declare `err` and `timing`")
+        };
+        (declared("err"), declared("timing"))
     }
 }
 
@@ -167,7 +186,7 @@ pub fn binding_view_in(
     in_loop: LoopMembership,
 ) -> Arc<BindingView> {
     let builder = BindingView::builder(ScopeId::new(scope.id())).declare(
-        "seq", "The innermost sequence's values.",
+        host_global("seq").name(), "The innermost sequence's values.",
         if scope.is_approval() { Availability::Unavailable(reason(PREFLIGHT_UNAVAILABLE)) }
         else { Availability::Available },
     );
@@ -180,19 +199,15 @@ pub fn binding_view_in(
             LoopMembership::Unknown => Availability::ExecutionDependent,
         }
     };
-    let builder = builder.declare(LOOP_ROOT, "The enclosing loop's values.", loop_availability);
+    let builder = builder.declare(host_global(LOOP_ROOT).name(), "The enclosing loop's values.", loop_availability);
     let builder = if scope.is_approval() {
         let preflight = || Availability::Unavailable(reason(PREFLIGHT_UNAVAILABLE));
         builder
             .declare("err", "The active failure.", preflight())
             .declare("timing", "Observed durations.", preflight())
-            .declare("group", "The enclosing group's variables.", preflight())
+            .declare(host_global("group").name(), "The enclosing group's variables.", preflight())
     } else {
-        let err = if scope.carries_error() {
-            Availability::Available
-        } else {
-            Availability::Unavailable(reason(EVENT_HAS_NO_ERROR))
-        };
+        let (err, timing) = scope.generic_globals();
         let group = match group {
             GroupMembership::Member => Availability::Available,
             GroupMembership::Outside => Availability::Unavailable(reason(OUTSIDE_GROUP)),
@@ -200,8 +215,8 @@ pub fn binding_view_in(
         };
         builder
             .declare("err", "The active failure; `null` when there is none.", err)
-            .declare("timing", "Observed durations.", Availability::Available)
-            .declare("group", "The enclosing group's variables.", group)
+            .declare("timing", "Observed durations.", timing)
+            .declare(host_global("group").name(), "The enclosing group's variables.", group)
     };
     Arc::new(
         builder
@@ -472,17 +487,7 @@ fn unavailable(root: &str, path: &str, view: &BindingView) -> ExpressionError {
     }))))
 }
 
-/// The global root an unavailable-binding diagnostic names, if it is one.
-pub fn unavailable_root(error: &ExpressionError) -> Option<&str> {
-    use darkmatter::markdown::compose::expression::BindingError;
-    match error {
-        ExpressionError::Binding(binding) => match binding.as_ref() {
-            BindingError::Unavailable(read) => Some(&read.root),
-            _ => None,
-        },
-        _ => None,
-    }
-}
+pub use darkmatter::lifecycle::preflight::unavailable_root;
 
 /// A retired `_loop_*` name and the `loop` member that replaced it.
 pub(crate) type RetiredLoopName = (&'static str, &'static str);
@@ -649,6 +654,7 @@ fn removed_loop_read_in_frontmatter(frontmatter: &Value) -> Option<(String, Reti
     let Value::Object(map) = frontmatter else {
         return None;
     };
+    let lifecycle_keys = super::claudine_registry().authored_event_keys();
     for (key, value) in map {
         if key == LOOP_ROOT {
             let Value::Object(loop_block) = value else {
@@ -672,7 +678,7 @@ fn removed_loop_read_in_frontmatter(frontmatter: &Value) -> Option<(String, Reti
                     return Some(found);
                 }
             }
-        } else if !super::LIFECYCLE_EVENT_KEYS.contains(&key.as_str())
+        } else if !lifecycle_keys.contains(&key.as_str())
             && let Some(found) = read_in_strings(value, key.clone())
         {
             return Some(found);

@@ -129,7 +129,7 @@ const SUBTREE_COMPOSE_BASELINE: &[AllowedSite] = &[
                  production evaluation path",
     },
     AllowedSite {
-        site: "composition::preflight::resolve_shell_text",
+        site: "preflight::shell_walk::resolve_shell_text",
         calls: 1,
         reason: "pre-flight shell-command resolution — early-binding only, \
                  before any event fires",

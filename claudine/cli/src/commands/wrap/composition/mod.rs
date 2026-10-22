@@ -80,7 +80,6 @@ pub(crate) use launch::{
 };
 use preflight::{
     PreflightBlockedOutcome, emit_preflight_blocked_and_finalize, preflight_blocked_control_error,
-    setup_phase_deferred,
 };
 
 /// Result of executing a single composition step through the wrapper pipeline.

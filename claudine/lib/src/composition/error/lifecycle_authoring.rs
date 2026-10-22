@@ -4,6 +4,12 @@
 //! Claudine's diagnostic catalog, block renderer, and tests are keyed on the
 //! `CompositionError` variants, so each [`LifecycleError`] variant converts to
 //! the same-named variant field by field and renders the same `Display`.
+//!
+//! The twins are Claudine's catalog projection of [`LifecycleError`] (and,
+//! in `lifecycle_preflight.rs`, of `PreflightError`), not a second parser:
+//! they are reached only through `From`. `tests/l1/lifecycle_one_implementation_guard.rs`
+//! fails on a twin built anywhere else, except a reviewed Claudine grammar
+//! that shares a variant.
 
 use darkmatter::lifecycle::error::LifecycleError;
 
@@ -242,6 +248,15 @@ impl From<LifecycleError> for CompositionError {
                 property,
                 action,
                 event,
+            },
+            LifecycleError::LifecycleRenamedEvent {
+                source_path,
+                authored,
+                replacement,
+            } => Self::LifecycleRenamedEvent {
+                source_path,
+                authored,
+                replacement,
             },
             LifecycleError::LifecycleMultipleLifecycleActions {
                 source_path,
@@ -492,6 +507,14 @@ mod tests {
                 |e| matches!(e, CompositionError::LifecycleActionPlacement { .. }),
             ),
             (
+                LifecycleError::LifecycleRenamedEvent {
+                    source_path: path(),
+                    authored: s("composed"),
+                    replacement: s("start"),
+                },
+                |e| matches!(e, CompositionError::LifecycleRenamedEvent { .. }),
+            ),
+            (
                 LifecycleError::LifecycleMultipleLifecycleActions {
                     source_path: path(),
                     property: s("start[0]"),
@@ -520,7 +543,7 @@ mod tests {
     #[test]
     fn every_lifecycle_error_converts_to_its_same_named_twin_with_the_same_display() {
         let variants = every_variant();
-        assert_eq!(variants.len(), 26, "one case per `LifecycleError` variant");
+        assert_eq!(variants.len(), 27, "one case per `LifecycleError` variant");
         for (error, is_twin) in variants {
             let expected = error.to_string();
             let converted = CompositionError::from(error);

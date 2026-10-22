@@ -188,6 +188,12 @@ fn composition_representatives() -> Vec<CompositionError> {
             source_path: PathBuf::from("p.md"),
             property: "start".to_string(),
         },
+        // composition.lifecycle_invalid (Darkmatter's spelling of a renamed event)
+        CompositionError::LifecycleRenamedEvent {
+            source_path: PathBuf::from("p.md"),
+            authored: "composed".to_string(),
+            replacement: "start".to_string(),
+        },
         // composition.lifecycle_invalid (cardinality: control action not last)
         CompositionError::LifecycleActionOrder {
             source_path: PathBuf::from("p.md"),

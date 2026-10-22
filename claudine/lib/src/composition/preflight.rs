@@ -6,24 +6,19 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 
+use darkmatter::lifecycle::preflight::{
+    LifecycleShellSites, ShellAuditBindings, ShellWalkOptions, collect_lifecycle_shell_audit,
+};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::expression::{Expr, GuardOrigin, ResolutionContext, TypeScope};
-use darkmatter::markdown::compose::subtree::SubtreeCompose;
-use darkmatter::markdown::compose::{ComposeContext, ComposeRequest, EffectiveStateBuilder};
+use darkmatter::markdown::compose::expression::{BindingView, ExpressionError, RuntimeBinding};
+use darkmatter::markdown::compose::{ComposeContext, ComposeRequest};
 
 use crate::composition::error::{CompositionError, ShellApprovalFailure};
-use crate::composition::lifecycle::{
-    LifecycleConfig, LifecycleSignal, collect_lifecycle_shell_commands,
-    collect_lifecycle_shell_commands_for,
-};
+use crate::composition::lifecycle::{LifecycleConfig, LifecycleSignal};
 use crate::composition::lifecycle::bindings::{
     EnclosingLoop, LifecycleScope, LifecycleValues, approval_diagnostics, runtime_bindings_enclosed,
-    unavailable_root,
-};
-use crate::composition::lifecycle_actions::{LifecycleActionKind, walk_scoped};
-use crate::composition::lifecycle::shell_template::{
-    LifecycleShellTemplate, lifecycle_declared_types, placeholder_guard, reads_as_command, retime_guarded, typed_template,
 };
 use crate::harness::shell::{ResolvedSiteApproval, ShellApprovalOptions, tokenize_words_strict};
 use darkmatter::markdown::compose::shell_expansion::template::{
@@ -121,10 +116,11 @@ pub fn resolve_shell_approvals(
         let source_file = lifecycle_source_path
             .map(std::path::Path::to_path_buf)
             .unwrap_or_else(|| std::path::PathBuf::from("<lifecycle-stack>"));
-        for (command, _property_path) in collect_lifecycle_shell_commands(lifecycle_config) {
+        let audit = collect_lifecycle_shell_audit(lifecycle_config, &LifecycleSignal::ALL, &source_file);
+        for (command, _property_path) in audit.commands {
             all_commands.push((command, source_file.clone(), 0));
         }
-        candidates.extend(lifecycle_shell_candidates(lifecycle_config, &LifecycleSignal::ALL, &source_file));
+        candidates.extend(audit.candidates);
     }
 
     let result = approve_commands(all_commands, &candidates, approval_options)?;
@@ -194,7 +190,7 @@ pub fn resolve_graph_shell_approvals(
         candidates.extend(preflight.candidates);
         // Resolve only frontmatter data; discovery never executes document shells.
         let roots = lifecycle_document_roots(&document.markdown, &reference.deferred_shell_roots());
-        let excluded: Vec<String> = super::lifecycle::LIFECYCLE_EVENT_KEYS.iter().map(|key| (*key).to_string())
+        let excluded: Vec<String> = super::lifecycle::claudine_registry().authored_event_keys().into_iter().map(str::to_string)
             .chain(roots.iter().map(str::to_string)).collect();
         let passive = options.clone().map_options(|options| options.only(
             &[darkmatter::markdown::compose::ComposeOperation::FrontmatterInterpolation])
@@ -214,9 +210,9 @@ pub fn resolve_graph_shell_approvals(
             &mut lifecycle, &effective, options.context(), &document.path,
             options.resolution_context(), None, enclosing, schema.as_ref(), Some(&lifecycle_options),
         )?;
-        all_commands.extend(collect_lifecycle_shell_commands(&lifecycle).into_iter()
-            .map(|(command, _)| (command, document.path.clone(), 0)));
-        candidates.extend(lifecycle_shell_candidates(&lifecycle, &LifecycleSignal::ALL, &document.path));
+        let audit = collect_lifecycle_shell_audit(&lifecycle, &LifecycleSignal::ALL, &document.path);
+        all_commands.extend(audit.commands.into_iter().map(|(command, _)| (command, document.path.clone(), 0)));
+        candidates.extend(audit.candidates);
     }
 
     let result = approve_commands(all_commands, &candidates, approval_options)?;
@@ -328,12 +324,13 @@ pub fn resolve_lifecycle_shell_approvals(
     signals: &[LifecycleSignal],
     approval_options: &ShellApprovalOptions,
 ) -> Result<PreFlightResult, CompositionError> {
-    let commands = collect_lifecycle_shell_commands_for(lifecycle, signals)
+    let audit = collect_lifecycle_shell_audit(lifecycle, signals, lifecycle_source_path);
+    let commands = audit
+        .commands
         .into_iter()
         .map(|(command, _property)| (command, lifecycle_source_path.to_path_buf(), 0))
         .collect();
-    let candidates = lifecycle_shell_candidates(lifecycle, signals, lifecycle_source_path);
-    let result = approve_commands(commands, &candidates, approval_options)?;
+    let result = approve_commands(commands, &audit.candidates, approval_options)?;
     settle_lifecycle_shell_modes(
         lifecycle,
         signals,
@@ -341,44 +338,6 @@ pub fn resolve_lifecycle_shell_approvals(
         approval_options.policy_root.as_deref(),
     );
     Ok(result)
-}
-
-/// Every lifecycle shell site reachable from `signals` that holds a
-/// placeholder, as an approval candidate: its resolved bytes (when they still
-/// read as a command) and its typed shape.
-fn lifecycle_shell_candidates(
-    lifecycle: &LifecycleConfig,
-    signals: &[LifecycleSignal],
-    source_file: &Path,
-) -> Vec<ShellCandidate> {
-    let mut candidates = Vec::new();
-    for_each_lifecycle_shell_site(lifecycle, signals, &mut |site, property| {
-        candidates.push(site.candidate(source_file, &property));
-    });
-    for signal in signals {
-        crate::composition::lifecycle_actions::for_each_action(lifecycle.stack(*signal), &mut |action| {
-            let LifecycleActionKind::Shell(shell) = &action.kind else { return; };
-            let (None, Some(authored), Expr::StringLiteral(bytes)) =
-                (&shell.template, &shell.authored_command, &shell.command) else { return; };
-            if !authored.contains("{{") { return; }
-            let parts = tokenize_words_strict(bytes).unwrap_or_else(|_| vec![bytes.clone()]);
-            let Some((program, args)) = parts.split_first() else { return; };
-            candidates.push(ShellCandidate {
-                authored_command: authored.clone(),
-                site: darkmatter::markdown::compose::shell_expansion::template::CommandSite {
-                    source_file: source_file.to_path_buf(),
-                    origin: darkmatter::markdown::compose::ShellCommandOrigin::Frontmatter {
-                        key: action.path.field("command").to_string(), line: None,
-                    },
-                    owner: None,
-                },
-                template: darkmatter::markdown::compose::shell_expansion::template::parse_authored(authored),
-                resolved: Some(vec![darkmatter::markdown::compose::shell_expansion::normalize_command(program, args)]),
-                requirement: ModeRequirement::AnyMode,
-            });
-        });
-    }
-    candidates
 }
 
 /// Record on each lifecycle shell site the mode `approved` grants it: an
@@ -390,37 +349,7 @@ pub(crate) fn settle_lifecycle_shell_modes(
     approved: &ShellPreApprovals,
     policy_root: Option<&Path>,
 ) {
-    for_each_lifecycle_shell_site(lifecycle, signals, &mut |site, _property| {
-        site.settle(approved, policy_root);
-    });
-}
-
-/// Visit every `shell` command and `set` value with a typed template,
-/// condition-blind, with its authored property.
-fn for_each_lifecycle_shell_site(
-    lifecycle: &LifecycleConfig,
-    signals: &[LifecycleSignal],
-    visit: &mut impl FnMut(&LifecycleShellTemplate, String),
-) {
-    for signal in LifecycleSignal::ALL.into_iter().filter(|signal| signals.contains(signal)) {
-        crate::composition::lifecycle_actions::for_each_action(lifecycle.stack(signal), &mut |action| {
-            match &action.kind {
-                LifecycleActionKind::Shell(shell) => {
-                    if let Some(site) = &shell.template {
-                        visit(site, action.path.field("command").to_string());
-                    }
-                }
-                LifecycleActionKind::RuntimeSet(set) => {
-                    for (key, value) in set.shell_values() {
-                        if let Some(site) = &value.template {
-                            visit(site, action.path.map_key(key.as_str()).to_string());
-                        }
-                    }
-                }
-                _ => {}
-            }
-        });
-    }
+    darkmatter::lifecycle::preflight::settle_lifecycle_shell_modes(lifecycle, signals, approved, policy_root);
 }
 
 /// Deduplicate `all_commands` and run each survivor through shell policy.
@@ -570,51 +499,13 @@ fn audit_failure(
 }
 
 /// Resolves the `{{ }}` interpolation inside every lifecycle `shell` command
-/// at pre-flight (C3), stamping the resolved bytes back into the parsed
-/// command so the approved command equals the executed command.
+/// and `set` shell value at pre-flight (C3), stamping the resolved bytes back
+/// so the approved command equals the executed command.
 ///
-/// Shell commands live inside the deferred lifecycle subtree (see
-/// `ComposeOptions::with_exclude_keys`), so after
-/// main compose they still carry their authored `{{ }}` spans. Unlike the
-/// communication/action surfaces — which interpolate at event-time (C2) —
-/// `shell` commands are approved at pre-flight, before any event fires, and so
-/// resolve in the lifecycle shell approval scope of the binding catalog
-/// ([`LifecycleScope::LifecycleShellApproval`]): `fm.*`, `ctx.*`, `env.*`,
-/// document properties, read-side functions, and `loop` as `enclosing_loop`
-/// supplies it. A late-binding reference
-/// (`err`, `timing`, `group`, `current`) is rejected with
-/// [`CompositionError::LifecycleShellResolution`], in any branch, because its
-/// value does not yet exist.
-///
-/// Each resolved action is marked [`ShellAction::pre_resolved`], so the
-/// executor runs the stamped bytes as they stand instead of interpolating the
-/// data they now contain a second time. A command with a placeholder also
-/// keeps its authored text as a template typed against `owner_schema`
-/// ([`ShellAction::template`]); the lifecycle audit then settles which of the
-/// two runs (see [`LifecycleShellTemplate`]).
-///
-/// Each site is typed in the scope of the guards that enclose it: a `then`
-/// body under its `when` (as do actions authored beside the `when`), an
-/// `else` body under its negation, nested conditionals composing. A `set`
-/// value is checked under the scope that reaches the `set`; its destinations
-/// then invalidate what guards proved about them for every later action,
-/// across the join after a conditional too. Every event starts from the
-/// declarations alone. A placeholder that reads `null` fails pre-flight
-/// unless a guard proves that very placeholder present; then the command
-/// keeps its authored text, has no bytes, and runs only as its template,
-/// which reads and checks the value when the action is reached. No guard,
-/// predicate, or mutation is evaluated.
-///
-/// [`ShellAction::pre_resolved`]: super::lifecycle::ShellAction::pre_resolved
-/// [`ShellAction::template`]: super::lifecycle::ShellAction::template
-///
-/// Short-form `shell` actions (`shell: "..."`) and long-form `shell` actions
-/// (`shell: { command: ... }`) with any `on_error:` text are covered,
-/// and so is every whole-value `$( … )` in a `set` mapping, whose command
-/// bytes Darkmatter fixes here ([`resolve_set_shell_value`]).
-/// Non-string command expressions (e.g. a bare `command: "ctx.repo"` parsed as a
-/// variable) and literals with no interpolation span are left untouched — there
-/// is nothing to stamp.
+/// Darkmatter's [`LifecycleShellSites`] fixes each site; Claudine supplies the
+/// binding catalog: the lifecycle shell approval scope, where `loop` follows
+/// `enclosing_loop`, and a late-binding reference (`err`, `timing`, `group`,
+/// `current`) is refused.
 ///
 /// ## Errors
 ///
@@ -640,6 +531,9 @@ pub fn resolve_lifecycle_shell_commands(
         file_resolution_context, file_ref_fallback_dir, enclosing_loop, owner_schema, None)
 }
 
+/// [`resolve_lifecycle_shell_commands`] for a document a sequence references:
+/// `options` carries its late roots, lexical group and sequence bindings, and
+/// the sequence's closed approvals.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_lifecycle_shell_commands_in_sequence(
     lifecycle: &mut LifecycleConfig,
@@ -652,412 +546,55 @@ pub(crate) fn resolve_lifecycle_shell_commands_in_sequence(
     owner_schema: Option<&darkmatter::markdown::schemas::SimplifiedSchema>,
     options: Option<&super::PrepareOptions>,
 ) -> Result<(), CompositionError> {
-    let frontmatter: HashMap<String, serde_json::Value> = effective_frontmatter
-        .as_object()
-        .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-        .unwrap_or_default();
-
-    let state = EffectiveStateBuilder::new()
-        .with_frontmatter(frontmatter.clone())
-        .with_context(context.clone())
-        // A deferred lifecycle subtree never defines `ctx`; downgrade any
-        // pathological `ctx` shape to a warning rather than aborting pre-flight.
-        .with_allow_ctx_override(true)
-        .build()
-        .map_err(|e| CompositionError::PreFlightStateBuildFailed { source: e })?;
-
-    let resolution_ctx = super::document_expression_resolution_context(
-        source_path,
-        Some(context),
-        file_resolution_context,
-        file_ref_fallback_dir,
-    )?;
-
-    // Each event's stack starts from the document's declarations alone: no
-    // guard fact crosses an event, a retry, a resume, or a proxy handoff.
-    let declared = lifecycle_declared_types(owner_schema);
-    for signal in LifecycleSignal::ALL {
-        walk_scoped(lifecycle.stack_mut(signal), TypeScope::unguarded(&declared), &mut |action, scope| {
-            let prefix = action.path.to_string();
-            match &mut action.kind {
-                LifecycleActionKind::RuntimeSet(set) => set.shell_values_mut().try_for_each(|(key, shell)| {
-                    if let Some(site) = sequence_lifecycle_template(&shell.authored, Some(key), &format!("{prefix}.{key}"),
-                        source_path, scope, options, &state, &resolution_ctx, enclosing_loop)? {
-                        shell.resolved = darkmatter::markdown::compose::ResolvedShellValue::template_only(
-                            key, &shell.authored, "sequence template", context);
-                        shell.template = Some(site);
-                        return Ok(());
-                    }
-                    resolve_set_shell_value(
-                        key,
-                        shell,
-                        &frontmatter,
-                        context,
-                        &state,
-                        &resolution_ctx,
-                        &format!("{prefix}.{key}"),
-                        source_path,
-                        enclosing_loop,
-                        scope,
-                    )
-                }),
-                LifecycleActionKind::Shell(shell) => {
-                    if shell.authored_command.is_none()
-                        && let Expr::StringLiteral(raw) = &shell.command
-                    {
-                        shell.authored_command = Some(raw.clone());
-                    }
-                    if let Expr::StringLiteral(raw) = &shell.command
-                        && let Some(site) = sequence_lifecycle_template(raw, None, &format!("{prefix}.command"),
-                            source_path, scope, options, &state, &resolution_ctx, enclosing_loop)? {
-                        shell.template = Some(site);
-                        shell.pre_resolved = false;
-                        return Ok(());
-                    }
-                    let property = format!("{prefix}.command");
-                    let command = resolve_shell_text(&shell.command, &state, &resolution_ctx, &property,
-                        source_path, enclosing_loop, scope)?;
-                    let on_error = match &shell.on_error {
-                        Some(on_error) => resolve_shell_text(on_error, &state, &resolution_ctx,
-                            &format!("{prefix}.on_error"), source_path, enclosing_loop, scope)?,
-                        None => None,
-                    };
-                    // `on_error` is display text, not a command: a value a guard
-                    // proves present but that is missing now renders as it does in
-                    // any message.
-                    if let (Some(on_error), Some(resolved)) = (&mut shell.on_error, on_error) {
-                        *on_error = Expr::StringLiteral(resolved.bytes);
-                    }
-                    shell.pre_resolved = true;
-                    let Some(command) = command else {
-                        shell.template = None;
-                        return Ok(());
-                    };
-                    let Expr::StringLiteral(raw) = &shell.command else {
-                        unreachable!("only a string literal command resolves");
-                    };
-                    if command.guarded.is_empty() {
-                        // The bytes run only when approval proves them; a
-                        // shape approval runs the authored template instead.
-                        let bytes = reads_as_command(&command.bytes).then(|| vec![command.bytes.clone()]);
-                        shell.template = typed_template(raw, scope).map(|template| LifecycleShellTemplate::new(template, bytes));
-                        shell.command = Expr::StringLiteral(command.bytes);
-                        return Ok(());
-                    }
-                    // A guard proves a missing value present: the command keeps
-                    // its authored text, has no bytes, and runs only as its
-                    // template, reading that value when the action is reached.
-                    let template = guarded_template(raw, raw, &command.guarded, &property, source_path, scope)?;
-                    shell.template = Some(LifecycleShellTemplate::new(template, None));
-                    Ok(())
-                }
-                _ => Ok(()),
-            }
-        })?;
-    }
-    Ok(())
-}
-
-/// Fixes one lifecycle `set` shell value's command bytes (R9).
-///
-/// The authored text resolves against the same early-binding lookup as a
-/// `shell` action's command, with late-binding roots refused, and Darkmatter
-/// then fixes every pipeline the value can run. Those bytes are what approval
-/// sees and what the action runs; nothing re-interpolates them later.
-///
-/// A value whose command holds a placeholder also keeps its authored command
-/// as a template typed in `scope`, the type scope where the `set` sits, so
-/// approval by shape can run it as one. When the resolved text no longer
-/// reads as a command (a value inserted command syntax), or a value a guard in
-/// `scope` proves present is missing now, it has no bytes and may run only as
-/// that template.
-#[allow(clippy::too_many_arguments)]
-fn resolve_set_shell_value(
-    key: &str,
-    shell: &mut crate::composition::lifecycle::actions::SetShellValue,
-    frontmatter: &HashMap<String, serde_json::Value>,
-    context: &ComposeContext,
-    state: &darkmatter::markdown::compose::EffectiveState,
-    resolution_ctx: &ResolutionContext,
-    property: &str,
-    source_path: &Path,
-    enclosing_loop: EnclosingLoop<'_>,
-    scope: &TypeScope<'_>,
-) -> Result<(), CompositionError> {
-    let resolution = resolve_shell_text(
-        &Expr::StringLiteral(shell.authored.clone()),
-        state,
-        resolution_ctx,
-        property,
-        source_path,
-        enclosing_loop,
-        scope,
-    )?;
-    let inner = darkmatter::markdown::compose::authored_shell_template(
-        &shell.authored,
-        key,
-        &biscuit_terminal::errors::SourceContext::new(
-            source_path.to_path_buf(),
-            source_path.to_path_buf(),
-            shell.authored.clone(),
-        ),
-    )
-    .map(|(inner, _)| inner);
-    if let Some(resolution) = resolution.as_ref().filter(|resolution| !resolution.guarded.is_empty()) {
-        // A guard proves a missing value present: the value runs only as its
-        // template, reading that value when the action is reached.
-        let inner = inner.unwrap_or_else(|| shell.authored.clone());
-        let template = guarded_template(&inner, &shell.authored, &resolution.guarded, property, source_path, scope)?;
-        shell.resolved = darkmatter::markdown::compose::ResolvedShellValue::template_only(
-            key,
-            &shell.authored,
-            "a guarded value is read when its action is reached",
-            context,
-        );
-        shell.template = Some(LifecycleShellTemplate::new(template, None));
-        return Ok(());
-    }
-    let resolved = resolution.map_or_else(|| shell.authored.clone(), |resolution| resolution.bytes);
-    let template = inner.and_then(|inner| typed_template(&inner, scope));
-    let resolution_failure = |error: darkmatter::markdown::compose::ShellExpansionError| {
-        CompositionError::LifecycleShellResolution {
-            source_path: source_path.to_path_buf(),
-            property: property.to_string(),
-            raw: shell.authored.clone(),
-            message: crate::composition::lifecycle::actions::shell_value_error_message(&error),
-            source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error)))),
-        }
-    };
-    let (value, site) = match darkmatter::markdown::compose::ResolvedShellValue::resolve(
-        key,
-        &shell.authored,
-        &resolved,
-        frontmatter.clone(),
+    let sites = LifecycleShellSites {
+        effective_frontmatter,
         context,
-        resolution_ctx.clone(),
-    ) {
-        Ok(value) => {
-            let site = template.map(|template| LifecycleShellTemplate::new(template, Some(value.commands())));
-            (value, site)
-        }
-        Err(error) => {
-            let template_only = template.as_ref().and_then(|_| {
-                darkmatter::markdown::compose::ResolvedShellValue::template_only(
-                    key,
-                    &shell.authored,
-                    &crate::composition::lifecycle::actions::shell_value_error_message(&error),
-                    context,
-                )
-            });
-            match (template_only, template) {
-                (Some(value), Some(template)) => (value, Some(LifecycleShellTemplate::new(template, None))),
-                _ => return Err(resolution_failure(error)),
-            }
-        }
+        source_path,
+        registry: super::lifecycle::claudine_registry(),
+        owner_schema,
+        bindings: &ClaudineShellAuditBindings { enclosing_loop },
+        options: options.map(|options| ShellWalkOptions {
+            deferred_shell_roots: &options.deferred_shell_roots,
+            lifecycle_group: options.lifecycle_group.as_ref(),
+            sequence_binding: options.sequence_binding.as_ref(),
+            pre_approved_commands: options.pre_approved_commands.as_ref(),
+            validate_deferred_shell_values: options.validate_deferred_shell_values,
+            document_shell_values: options.document_shell_values.as_ref(),
+        }),
     };
-    shell.resolved = Some(value);
-    shell.template = site;
+    sites.stamp(lifecycle, || {
+        super::document_expression_resolution_context(source_path, Some(context), file_resolution_context, file_ref_fallback_dir)
+    })?;
     Ok(())
 }
 
-/// The text one lifecycle shell field resolved to at pre-flight.
-struct ShellText {
-    /// The resolved text. A missing placeholder in `guarded` reads as empty.
-    bytes: String,
-    /// The placeholders that are missing now but that a guard enclosing the
-    /// site proves present, each with that guard. When this is not empty the
-    /// bytes are not the command the action runs.
-    guarded: Vec<(String, GuardOrigin)>,
+/// Claudine's binding catalog as the lifecycle shell walk reads it.
+struct ClaudineShellAuditBindings<'a> {
+    enclosing_loop: EnclosingLoop<'a>,
 }
 
-/// Resolves the `{{ }}` spans inside one shell-command [`Expr`], or `None`
-/// when it is not a string literal carrying a span, so there is nothing to
-/// resolve.
-///
-/// The command is first checked passively against the lifecycle shell approval
-/// scope, in every branch, so a late global (`err`, `timing`, `group`) or a
-/// late namespace (`current`) is refused by name before
-/// anything is evaluated; the bytes are then resolved through a session in the
-/// same scope, where `loop` follows `enclosing_loop`: a shell's bytes are fixed
-/// per iteration, so an iteration's values are known.
-///
-/// A placeholder that reads `null` fails with a missing value unless a guard
-/// in `scope`, the type scope at the site, proves that placeholder present;
-/// such a placeholder is returned in [`ShellText::guarded`] instead. A
-/// non-null declaration never excuses a `null`.
-fn resolve_shell_text(
-    expr: &Expr,
-    state: &darkmatter::markdown::compose::EffectiveState,
-    resolution_ctx: &ResolutionContext,
-    property: &str,
-    source_path: &Path,
-    enclosing_loop: EnclosingLoop<'_>,
-    scope: &TypeScope<'_>,
-) -> Result<Option<ShellText>, CompositionError> {
-    let Expr::StringLiteral(raw) = expr else {
-        return Ok(None);
-    };
-    if !raw.contains("{{") {
-        return Ok(None);
+impl ShellAuditBindings for ClaudineShellAuditBindings<'_> {
+    fn approval_findings(&self, raw: &str) -> Vec<ExpressionError> {
+        approval_diagnostics(raw, LifecycleScope::LifecycleShellApproval)
+            .map(|diagnostics| diagnostics.into_iter().map(|diagnostic| diagnostic.error).collect())
+            .unwrap_or_default()
     }
 
-    let approval_scope = LifecycleScope::LifecycleShellApproval;
-    // A parse failure is left to the resolution below, which reports it typed.
-    if let Ok(diagnostics) = approval_diagnostics(raw, approval_scope)
-        && let Some(diagnostic) = diagnostics.into_iter().next()
-    {
-        let message = match unavailable_root(&diagnostic.error) {
-            Some(root) => format!(
-                "late-binding reference `{root}` is not available in shell commands; \
-                 shell commands are resolved at pre-flight (before any event fires), so only \
-                 early-binding values (`fm.*`, `ctx.*`, `env.*`, read-side functions) may be \
-                 used here"
-            ),
-            None => diagnostic.error.to_string(),
-        };
-        return Err(CompositionError::LifecycleShellResolution {
-            source_path: source_path.to_path_buf(),
-            property: property.to_string(),
-            raw: raw.clone(),
-            message,
-            source: Some(Box::new(approval_failure(raw, diagnostic.error))),
-        });
+    fn approval_bindings(&self) -> (Arc<BindingView>, HashMap<String, RuntimeBinding<'static>>) {
+        runtime_bindings_enclosed(LifecycleScope::LifecycleShellApproval, LifecycleValues::default(), self.enclosing_loop)
     }
 
-    let (view, globals) = runtime_bindings_enclosed(approval_scope, LifecycleValues::default(), enclosing_loop);
-
-    // The command and each of its placeholders, as a whole value, resolve in
-    // one subtree so the placeholders keep their types: a `null` is missing,
-    // while an empty string, zero, and `false` are present.
-    let placeholders: Vec<String> = darkmatter::markdown::compose::expression::ExpressionFinder::scan_plain(raw)
-        .expressions
-        .into_iter()
-        .map(|location| location.expression)
-        .collect();
-    let value = serde_json::Value::Array(
-        std::iter::once(serde_json::Value::String(raw.clone()))
-            .chain(
-                placeholders
-                    .iter()
-                    .map(|expression| serde_json::Value::String(format!("{{{{ {expression} }}}}"))),
-            )
-            .collect(),
-    );
-    let composed = SubtreeCompose::new(&value, state)
-        .with_resolution_context(resolution_ctx.clone())
-        .with_globals(globals)
-        .with_binding_view(view)
-        .compose()
-        .map_err(|e| CompositionError::LifecycleShellResolution {
-            source_path: source_path.to_path_buf(),
-            property: property.to_string(),
-            raw: raw.clone(),
-            message: e.to_string(),
-            source: Some(Box::new(e)),
-        })?;
-    let serde_json::Value::Array(mut composed) = composed else {
-        unreachable!("an array subtree composes to an array");
-    };
-    // Before a loop's first iteration `loop` has no value yet: it is unknown
-    // here, not missing, and each iteration's preparation checks it.
-    let pending_loop = matches!(enclosing_loop, EnclosingLoop::Pending)
-        .then(|| darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots::new(["loop"]));
-    let mut guarded: Vec<(String, GuardOrigin)> = Vec::new();
-    for (expression, read) in placeholders.iter().zip(composed.iter().skip(1)) {
-        let pending = pending_loop
-            .as_ref()
-            .is_some_and(|roots| roots.late_roots_of(expression, &Default::default()).is_some());
-        if pending || !read.is_null() || guarded.iter().any(|(seen, _)| seen == expression) {
-            continue;
-        }
-        let Some(guard) = placeholder_guard(expression, scope) else {
-            return Err(missing_value(raw, expression, property, source_path));
-        };
-        guarded.push((expression.clone(), guard));
+    fn task_setup_bindings(
+        &self,
+        group: Option<&serde_json::Map<String, serde_json::Value>>,
+        seq: Option<&serde_json::Value>,
+    ) -> (Arc<BindingView>, HashMap<String, RuntimeBinding<'static>>) {
+        runtime_bindings_enclosed(LifecycleScope::TaskSetup, LifecycleValues { group, seq, ..Default::default() }, self.enclosing_loop)
     }
-    let resolved = composed.swap_remove(0);
-    let bytes = match resolved {
-        serde_json::Value::String(s) => s,
-        other => other.to_string(),
-    };
-    Ok(Some(ShellText { bytes, guarded }))
-}
 
-/// The pre-flight failure for a lifecycle shell placeholder that reads a
-/// missing value no guard proves present.
-fn missing_value(raw: &str, expression: &str, property: &str, source_path: &Path) -> CompositionError {
-    let error = darkmatter::markdown::compose::ShellExpansionError::MissingValue {
-        ctx: Box::new(biscuit_terminal::errors::SourceContext::new(
-            source_path.to_path_buf(),
-            source_path.to_path_buf(),
-            raw.to_string(),
-        )),
-        command: raw.to_string(),
-        expression: expression.to_string(),
-        origin: darkmatter::markdown::compose::ShellCommandOrigin::Frontmatter {
-            key: property.to_string(),
-            line: None,
-        },
-    };
-    CompositionError::LifecycleShellResolution {
-        source_path: source_path.to_path_buf(),
-        property: property.to_string(),
-        raw: raw.to_string(),
-        message: format!(
-            "shell command reads `{expression}`, which is missing; a shell command never runs with a missing value"
-        ),
-        source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error)))),
+    fn loop_pending(&self) -> bool {
+        matches!(self.enclosing_loop, EnclosingLoop::Pending)
     }
-}
-
-/// The command `inner` (authored as `raw`) as a template typed in `scope`,
-/// each placeholder in `guarded` read only when its guarded action is reached.
-///
-/// ## Errors
-///
-/// [`CompositionError::LifecycleShellResolution`] carrying a
-/// `TemplateGrammar` cause when `inner` is not a valid template: a command
-/// that must run as its template can run no other way.
-fn guarded_template(
-    inner: &str,
-    raw: &str,
-    guarded: &[(String, GuardOrigin)],
-    property: &str,
-    source_path: &Path,
-    scope: &TypeScope<'_>,
-) -> Result<darkmatter::markdown::compose::shell_expansion::template::CommandTemplate, CompositionError> {
-    let mut template = match darkmatter::markdown::compose::shell_expansion::template::parse_authored(inner) {
-        Ok(template) => template,
-        Err(reason) => {
-            let error = darkmatter::markdown::compose::ShellExpansionError::TemplateGrammar {
-                ctx: Box::new(biscuit_terminal::errors::SourceContext::new(
-                    source_path.to_path_buf(),
-                    source_path.to_path_buf(),
-                    inner.to_string(),
-                )),
-                command: inner.to_string(),
-                reason,
-                origin: darkmatter::markdown::compose::ShellCommandOrigin::Frontmatter {
-                    key: property.to_string(),
-                    line: None,
-                },
-            };
-            return Err(CompositionError::LifecycleShellResolution {
-                source_path: source_path.to_path_buf(),
-                property: property.to_string(),
-                raw: raw.to_string(),
-                message: format!(
-                    "a guard proves `{}` present but it is missing now, so the command must run as its \
-                     template, and it is not a valid template",
-                    guarded.first().map_or("", |(expression, _)| expression.as_str())
-                ),
-                source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error)))),
-            });
-        }
-    };
-    template.project_types(scope);
-    retime_guarded(&mut template, guarded);
-    Ok(template)
 }
 
 /// A document-graph walk failure as the error the caller reports.
@@ -1074,140 +611,17 @@ fn discovery_failed(
         .unwrap_or(CompositionError::PreFlightDiscoveryFailed(error))
 }
 
-/// A passive approval finding as the Darkmatter error composition would have
-/// raised for `raw`, so callers read one typed cause either way.
-pub(crate) fn approval_failure(
-    raw: &str,
-    cause: darkmatter::markdown::compose::expression::ExpressionError,
-) -> darkmatter::markdown::MarkdownError {
-    darkmatter::markdown::MarkdownError::Interpolation {
-        key: None,
-        expression: raw.to_string(),
-        source: Box::new(darkmatter::markdown::SourceRef::Effective {
-            rendered: raw.to_string(),
-            origin_key: None,
-        }),
-        cause: Box::new(cause),
-    }
-}
+pub(crate) use darkmatter::lifecycle::preflight::approval_failure;
+
+pub mod checks;
 
 #[cfg(test)]
 mod tests;
-
-/// Sequence lifecycle sites retain authored expressions and the step barrier's values.
-///
-/// `scope` is the type scope at the site. A late placeholder a guard there
-/// proves present, and an approval-time one that is missing now but a guard
-/// proves present, is [`HoleTiming::Guarded`]: neither the step barrier nor
-/// this discovery reads it; the reached action does.
-#[allow(clippy::too_many_arguments)]
-fn sequence_lifecycle_template(
-    raw: &str, set_key: Option<&str>, property: &str, source: &Path,
-    scope: &TypeScope<'_>,
-    options: Option<&super::PrepareOptions>, state: &darkmatter::markdown::compose::EffectiveState,
-    resolution: &ResolutionContext, enclosing_loop: EnclosingLoop<'_>,
-) -> Result<Option<LifecycleShellTemplate>, CompositionError> {
-    use darkmatter::markdown::compose::shell_expansion::template::{HoleEvaluator, HoleTiming, LookupEvaluator, resolve_late_values, fill_template};
-    let Some(options) = options.filter(|options| !options.deferred_shell_roots.is_empty()) else { return Ok(None) };
-    let context = biscuit_terminal::errors::SourceContext::new(source.to_path_buf(), source.to_path_buf(), raw.to_string());
-    let inner = match set_key {
-        Some(key) => darkmatter::markdown::compose::authored_shell_template(raw, key, &context).map(|(inner, _)| inner),
-        None => Some(raw.to_string()),
-    };
-    let Some(inner) = inner else { return Ok(None) };
-    if !inner.contains("{{") { return Ok(None) }
-    if let Ok(diagnostics) = approval_diagnostics(&inner, LifecycleScope::LifecycleShellApproval)
-        && let Some(diagnostic) = diagnostics.into_iter().find(|diagnostic| {
-            unavailable_root(&diagnostic.error).is_none_or(|root| !options.deferred_shell_roots.contains(root))
-        }) {
-        return Err(CompositionError::LifecycleShellResolution { source_path: source.to_path_buf(), property: property.to_string(),
-            raw: raw.to_string(), message: diagnostic.error.to_string(), source: Some(Box::new(approval_failure(raw, diagnostic.error))) });
-    }
-    let derived = darkmatter::markdown::compose::shell_expansion::template::derived_deferred_keys(
-        state.data().iter(), &options.deferred_shell_roots, &Default::default());
-    // Resolved-byte eligibility must not depend on the narrower template grammar.
-    let reads_late = darkmatter::markdown::compose::expression::ExpressionFinder::scan_plain(&inner)
-        .expressions.iter().any(|location| options.deferred_shell_roots
-            .late_roots_of(&location.expression, &derived).is_some());
-    if !options.deferred_shell_roots.placeholders_template_required() && !reads_late {
-        return Ok(None);
-    }
-    let Some(mut template) = typed_template(&inner, scope) else {
-        return Err(CompositionError::LifecycleShellResolution { source_path: source.to_path_buf(), property: property.to_string(),
-            raw: raw.to_string(), message: "invalid shell template grammar".to_string(), source: None });
-    };
-    for placeholder in template.placeholders_mut() {
-        if let Some(roots) = options.deferred_shell_roots.late_roots_of(&placeholder.expression, &derived) {
-            placeholder.timing = match placeholder_guard(&placeholder.expression, scope) {
-                Some(guard) => HoleTiming::Guarded { guard, roots },
-                None => HoleTiming::Deferred { roots },
-            };
-        }
-    }
-    let (view, globals) = runtime_bindings_enclosed(LifecycleScope::TaskSetup, LifecycleValues {
-        group: options.lifecycle_group.as_ref(), seq: options.sequence_binding.as_ref(), ..Default::default()
-    }, enclosing_loop);
-    let session = darkmatter::markdown::compose::expression::EvaluationSession::associate(view, state, globals)
-        .expect("task bindings agree").with_resolution_context(resolution.clone());
-    let evaluator = LookupEvaluator::new(&session);
-    // An approval-time value that is missing now but that a guard proves
-    // present is read when its action is reached, not here.
-    let guarded: Vec<(String, GuardOrigin)> = template.placeholders()
-        .filter(|placeholder| matches!(placeholder.timing, HoleTiming::ApprovalTime))
-        .filter(|placeholder| evaluator.evaluate(&placeholder.expression).is_ok_and(|value| value.is_null()))
-        .filter_map(|placeholder| Some((placeholder.expression.clone(), placeholder_guard(&placeholder.expression, scope)?)))
-        .collect();
-    retime_guarded(&mut template, &guarded);
-    let mut site = LifecycleShellTemplate::new(template, None);
-    let candidate = site.candidate(source, property);
-    if let Some(approved) = &options.pre_approved_commands
-        && !candidate.authorized_by(approved) {
-        return Err(CompositionError::LifecycleShellResolution { source_path: source.to_path_buf(), property: property.to_string(),
-            raw: raw.to_string(), message: "the authored template was not approved at sequence preflight".to_string(), source: None });
-    }
-    let origin = candidate.site.origin.clone();
-    let fail = |error: darkmatter::markdown::compose::shell_expansion::template::HoleError| {
-        let message = error.to_string();
-        CompositionError::LifecycleShellResolution { source_path: source.to_path_buf(), property: property.to_string(),
-            raw: raw.to_string(), message,
-            source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error.into_shell_error(&context, raw, &origin))))) }
-    };
-    let mut known = site.template().clone();
-    for placeholder in known.placeholders_mut() {
-        placeholder.timing = match &placeholder.timing {
-            HoleTiming::Deferred { .. } => HoleTiming::ApprovalTime,
-            HoleTiming::ApprovalTime => HoleTiming::Deferred { roots: Vec::new() },
-            // Read only when its guarded action is reached.
-            guarded @ HoleTiming::Guarded { .. } => guarded.clone(),
-        };
-    }
-    resolve_late_values([(property, &known)], &evaluator).map_err(|error| fail(error.error))?;
-    let saved = options.document_shell_values.as_ref().and_then(|values| values.get(&candidate));
-    let values = if options.validate_deferred_shell_values {
-        let late = resolve_late_values([(property, site.template())], &evaluator).map_err(|error| fail(error.error))?;
-        let values = late.site(property).cloned().unwrap_or_default();
-        if let Some(snapshot) = &options.document_shell_values { snapshot.insert(&candidate, values.clone()); }
-        Some(values)
-    } else { saved };
-    // Validate known values without evaluating deferred holes during
-    // discovery. A guarded hole is read only by its reached action, and
-    // filling would read it now, so such a site is filled only there.
-    let has_guarded = site.template().placeholders().any(|placeholder| matches!(placeholder.timing, HoleTiming::Guarded { .. }));
-    if options.validate_deferred_shell_values && !has_guarded {
-        fill_template(site.template(), &evaluator, values.as_ref()).map_err(fail)?;
-    }
-    if let Some(values) = values { site = site.with_late_values(values); }
-    Ok(Some(site))
-}
 
 /// Keep derived inputs late after frontmatter interpolation replaces their expressions.
 pub(crate) fn lifecycle_document_roots(
     markdown: &Markdown,
     roots: &darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots,
 ) -> darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots {
-    use darkmatter::markdown::compose::shell_expansion::template::{DeferredShellRoots, derived_deferred_keys};
-    let authored = super::prepare::frontmatter_to_value(markdown.frontmatter());
-    let derived = authored.as_object().map(|map| derived_deferred_keys(map.iter(), roots, &Default::default())).unwrap_or_default();
-    let extended = DeferredShellRoots::new(roots.iter().map(str::to_string).chain(derived));
-    if roots.placeholders_template_required() { extended.with_placeholders_template_required() } else { extended }
+    darkmatter::lifecycle::preflight::lifecycle_document_roots(markdown, roots)
 }

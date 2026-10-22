@@ -8,6 +8,7 @@ use tracing::info;
 use super::super::coordinator::{EvaluatedProxyRequest, ProxyProvenance, SurfacedHandoff};
 use super::super::error::CompositionError;
 use super::super::lifecycle::{LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext, LifecycleSignal};
+use super::super::lifecycle::policy::{RecoveryVerdict, SubjectKind, recovery_verdict};
 use super::super::lifecycle_context::LifecycleErrorInfo;
 use super::super::lifecycle_executor::{ShellRunner, StackControl, StackExecutionContext};
 use super::super::lifecycle::runtime::{
@@ -175,13 +176,19 @@ where
 
     // `initialize` is the only event that can re-route the whole run via a
     // lifecycle control action. Mirror the non-loop path
-    // (`wrap/composition/mod.rs::execute_composition_request_inner_with_guard`):
-    // `Skip` ends the run cleanly with no further events, `Error` routes to
-    // `failure`/`finalize` and returns a typed error, `Proxy` resolves the
-    // target and asks the caller to hand off, and `Stop` falls through to the
-    // iteration loop. `Retry`/`Resume`/`Defer` are rejected at parse time, so
-    // they are defensive fall-throughs here.
+    // (`wrap/composition/pipeline.rs::route_initialize`): `Skip` ends the run
+    // cleanly with no further events, `Proxy` asks the caller to hand off,
+    // `Stop` falls through to the iteration loop, and the policy kernel
+    // refuses `retry`/`resume`/`defer` with no further event.
     if let Some(control) = init_result.control.clone() {
+        if let Some(RecoveryVerdict::Refuse(refusal)) =
+            recovery_verdict(SubjectKind::Document, LifecycleSignal::Initialize, &control)
+        {
+            let Some(error) = CompositionError::from_lifecycle_refusal(&refusal, prompt_path) else {
+                unreachable!("initialize refuses only a retry, a resume, or a defer: {refusal:?}");
+            };
+            return Ok(LoopExecutionResult::failure(initial_frontmatter, 0, String::new(), 0, error));
+        }
         match control {
             StackControl::Skip => {
                 info!(
@@ -230,41 +237,8 @@ where
                 )
                 .with_handoff(SurfacedHandoff::Request(request)));
             }
-            StackControl::Resume { .. } => {
-                // Pre-launch: no provider session to resume.
-                return Ok(LoopExecutionResult::failure(
-                    initial_frontmatter,
-                    0,
-                    String::new(),
-                    0,
-                    CompositionError::LifecycleResumeWithoutSession {
-                        source_path: prompt_path.to_path_buf(),
-                    },
-                ));
-            }
-            StackControl::Retry { .. } => {
-                return Ok(LoopExecutionResult::failure(
-                    initial_frontmatter,
-                    0,
-                    String::new(),
-                    0,
-                    CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
-                        source_path: prompt_path.to_path_buf(),
-                        event: "initialize".to_string(),
-                        action: "retry".to_string(),
-                    },
-                ));
-            }
-            StackControl::Defer { .. } => {
-                return Ok(LoopExecutionResult::failure(
-                    initial_frontmatter,
-                    0,
-                    String::new(),
-                    0,
-                    CompositionError::LifecycleDeferNotImplemented {
-                        source_path: prompt_path.to_path_buf(),
-                    },
-                ));
+            StackControl::Retry { .. } | StackControl::Resume { .. } | StackControl::Defer { .. } => {
+                unreachable!("the policy kernel refuses initialize's retry, resume, and defer");
             }
             StackControl::Stop => {
                 // `Stop` only ends the initialize stack; the run continues
@@ -628,33 +602,21 @@ pub(crate) fn run_loop_gate(
     .finish()
     .expect("clean loop gate requires no catch event");
 
-    match &decision.control {
-        Some(StackControl::Error { reason }) => LoopGateOutcome::Fail(
-            CompositionError::LifecycleLoopGateFailed {
-                source_path: source_path.to_path_buf(),
-                iteration,
-                reason: reason
-                    .clone()
-                    .unwrap_or_else(|| "lifecycle loop gate error".to_string()),
-            },
-        ),
-        Some(StackControl::Defer { .. }) => LoopGateOutcome::Fail(
-            CompositionError::LifecycleDeferNotImplemented {
-                source_path: source_path.to_path_buf(),
-            },
-        ),
-        Some(control @ (StackControl::Retry { .. } | StackControl::Resume { .. } | StackControl::Proxy { .. })) => {
-            let action = match control {
-                StackControl::Retry { .. } => "retry",
-                StackControl::Resume { .. } => "resume",
-                _ => "proxy",
-            };
-            LoopGateOutcome::Fail(CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
-                source_path: source_path.to_path_buf(),
-                event: "loop".to_string(),
-                action: action.to_string(),
-            })
-        }
+    let Some(control) = decision.control.as_ref() else {
+        return LoopGateOutcome::Proceed;
+    };
+    if let StackControl::Error { reason } = control {
+        return LoopGateOutcome::Fail(CompositionError::LifecycleLoopGateFailed {
+            source_path: source_path.to_path_buf(),
+            iteration,
+            reason: reason.clone().unwrap_or_else(|| "lifecycle loop gate error".to_string()),
+        });
+    }
+    match recovery_verdict(SubjectKind::Document, LifecycleSignal::Loop, control) {
+        Some(RecoveryVerdict::Refuse(refusal)) => match CompositionError::from_lifecycle_refusal(&refusal, source_path) {
+            Some(error) => LoopGateOutcome::Fail(error),
+            None => unreachable!("the loop gate refuses only as setup recovery or a defer: {refusal:?}"),
+        },
         _ => LoopGateOutcome::Proceed,
     }
 }

@@ -30,6 +30,9 @@
 //! module deliberately does not touch it. The `outputs` entry stays undecorated
 //! either way: the bar is added on the rendering path only.
 
+use claudine::composition::preflight::checks::{LIFECYCLE_SHELL_AUDIT, claudine_preflight, run_check};
+use darkmatter::lifecycle::preflight::CheckStage;
+use darkmatter::lifecycle::run::EntryReason;
 use claudine::diagnostics::DiagnosticSnapshotExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -791,7 +794,11 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         let mut approval_options = approval_options;
         approval_options.closed_approvals = Some(self.run.approved.clone());
         approval_options.approval_handler = None;
-        composition::resolve_shell_approvals(None, None, &approval_options, Some(&lifecycle), Some(&source.resolved_path))?;
+        #[allow(clippy::result_large_err)]
+        let audit = || {
+            composition::resolve_shell_approvals(None, None, &approval_options, Some(&lifecycle), Some(&source.resolved_path))
+        };
+        run_check(claudine_preflight(), LIFECYCLE_SHELL_AUDIT, CheckStage::InRun, EntryReason::Initial, audit)?;
         *request.document_epoch.lock().expect("prompt document epoch poisoned") = options.document_epoch.clone();
         *request.prepared_context.lock().expect("prompt document context poisoned") = options.prepared_context.clone();
         Ok(())

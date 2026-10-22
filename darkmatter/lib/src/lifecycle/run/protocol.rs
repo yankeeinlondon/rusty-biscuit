@@ -71,7 +71,7 @@ pub enum RecoveryKind {
 }
 
 impl RecoveryKind {
-    pub(super) fn of(control: &StackControl) -> Option<Self> {
+    pub(crate) fn of(control: &StackControl) -> Option<Self> {
         match control {
             StackControl::Retry { .. } => Some(Self::Retry),
             StackControl::Resume { .. } => Some(Self::Resume),
@@ -148,9 +148,10 @@ pub struct EventRequest {
     /// [`EvaluationMode::NormalRecovery`].
     pub mode: EvaluationMode,
     /// The error for the event's `err` global: the selected error, except
-    /// that the `finalize` after a preflight `blocked`'s refused recovery
-    /// reads the error that blocked the run. Whether the event may read it is
-    /// the host's binding policy.
+    /// that a `finalize` a refused recovery routes through
+    /// [`RefusalRoute::FinalizeIfOwed`](crate::lifecycle::policy::RefusalRoute::FinalizeIfOwed)
+    /// reads the error selected before the refusal. Whether the event may
+    /// read it is the host's binding policy.
     pub error: Option<RunError>,
 }
 

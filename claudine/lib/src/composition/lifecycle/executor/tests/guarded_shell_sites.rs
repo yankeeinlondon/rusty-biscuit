@@ -64,7 +64,7 @@ pub(super) fn guarded_holes(site: &LifecycleShellTemplate) -> Vec<(String, Strin
 }
 
 pub(super) fn shape_of(command: &str) -> ShellPreApprovals {
-    let declared = lifecycle_declared_types(None);
+    let declared = lifecycle_declared_types(None, crate::composition::claudine_registry());
     let template = typed_template(command, &TypeScope::unguarded(&declared)).expect("a template");
     let mut approvals = ShellPreApprovals::new();
     approvals.insert_template(TemplateShape::from_template(&template));

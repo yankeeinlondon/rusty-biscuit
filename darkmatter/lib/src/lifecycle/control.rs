@@ -254,7 +254,7 @@ pub fn proxy_path_identity(path: &std::path::Path) -> std::path::PathBuf {
 /// The host's effectful swap (re-materialize, re-parse the lifecycle, reset
 /// the run guard) only runs when this returns `true`.
 pub fn proxy_handoff_allowed(chain: &[std::path::PathBuf], target: &std::path::Path) -> bool {
-    if chain.len() >= MAX_PROXY_HOPS {
+    if super::policy::proxy_budget_exhausted(chain.len()) {
         return false;
     }
     let target_identity = proxy_path_identity(target);

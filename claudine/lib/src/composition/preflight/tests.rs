@@ -1,4 +1,6 @@
 use super::*;
+use crate::composition::lifecycle_actions::LifecycleActionKind;
+use darkmatter::markdown::compose::expression::Expr;
 use crate::diagnostics::Diagnostic;
 use darkmatter::markdown::compose::shell_expansion::types::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
@@ -101,7 +103,8 @@ fn empty_sources_returns_empty_approved_set() {
 /// run is about to create (`frontmatter(<missing>, …)`) must NOT be
 /// resolved at compose time — its `{{ … }}` spans are late-bound and fire
 /// only when the event does. The CLI defers the lifecycle keys by passing
-/// `with_exclude_keys(LIFECYCLE_EVENT_KEYS)` into the preflight options;
+/// the registry's `authored_event_keys()` to `with_exclude_keys` in the
+/// preflight options;
 /// without it, the now-fatal file-reference check aborts preflight before
 /// the event that would make the file exist ever runs.
 #[test]

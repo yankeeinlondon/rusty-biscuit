@@ -24,6 +24,7 @@ use std::sync::Arc;
 
 use darkmatter::lifecycle::LifecycleSignal;
 use darkmatter::lifecycle::actions::{LifecyclePath, RetryBackoff};
+use darkmatter::lifecycle::policy::SubjectKind;
 use darkmatter::lifecycle::envelope::{DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION, DiagnosticCatalog, DiagnosticSnapshot};
 use darkmatter::lifecycle::executor::{ActionLocation, LifecycleEventOutcome, StackControl};
 use darkmatter::lifecycle::run::{
@@ -45,6 +46,19 @@ const COMPOSITION_FAILED: &str = "composition.failed";
 
 /// Claudine's cancellation cause, read as `err` by a cancelled subject.
 const COMPOSITION_CANCELLED: &str = "composition.cancelled";
+
+/// Claudine's cancellation cause for a Ctrl+C, read as `err` by an
+/// interrupted root's cleanup events.
+const PROVIDER_INTERRUPTED: &str = "provider.interrupted";
+
+/// A provider status that stands for a launch interrupted by Ctrl+C.
+const INTERRUPTED: i32 = 130;
+
+/// Scenarios whose recorded trace `Run` does not reproduce yet. Each one's
+/// test asserts that the replay still differs from production, and
+/// [`known_divergences_still_diverge`] fails once any of them matches, so the
+/// list cannot go stale: remove a scenario here when `Run` is fixed.
+const KNOWN_DIVERGENT: &[&str] = &[];
 
 /// The fixtures' explicit `error(...)` failures are uncoded.
 struct NoCodes;
@@ -103,6 +117,8 @@ impl DocumentInput {
 /// One lifecycle subject: a document, step, group, leg, or nested sequence.
 struct Subject {
     prefix: &'static str,
+    /// The subject kind its run is told, a document unless set.
+    kind: SubjectKind,
     document: DocumentInput,
     /// The code every attempt's preflight fails with.
     preflight: Option<&'static str>,
@@ -111,7 +127,12 @@ struct Subject {
 
 impl Subject {
     fn new(prefix: &'static str, document: DocumentInput) -> Self {
-        Self { prefix, document, preflight: None, operation: Operation::Agent }
+        Self { prefix, kind: SubjectKind::Document, document, preflight: None, operation: Operation::Agent }
+    }
+
+    fn kind(mut self, kind: SubjectKind) -> Self {
+        self.kind = kind;
+        self
     }
 
     fn preflight(mut self, code: &'static str) -> Self {
@@ -135,7 +156,8 @@ impl Subject {
 }
 
 enum Operation {
-    /// One provider launch per attempt.
+    /// One provider launch per attempt; a launch whose scripted status is
+    /// [`INTERRUPTED`] is cancelled while it runs.
     Agent,
     /// Tasks in order; the first failed task fails the subject.
     Tasks(Vec<Task>),
@@ -150,6 +172,8 @@ enum Task {
     Subject(Subject),
     /// A shell that blocks until the enclosing race's sibling has run.
     Wait { started: &'static str, completed: &'static str },
+    /// A shell that writes its line and then interrupts the whole run.
+    Interrupt(&'static str),
 }
 
 struct Shell {
@@ -163,11 +187,28 @@ struct World {
     provider_exits: &'static [i32],
     /// Proxy targets that resolve; any other target is missing.
     targets: Vec<(&'static str, Subject)>,
+    /// The code of the error a cancellation reports.
+    cancellation: &'static str,
+    /// The root run's selected error at its finish, as [`RunError::label`]
+    /// spells it, when the scenario checks it: production's reported error
+    /// is in the trace's `# given:` lines, not in its event lines.
+    reported: Option<&'static str>,
 }
 
 impl World {
     fn new(root: Subject) -> Self {
-        Self { root, provider_exits: &[0], targets: Vec::new() }
+        Self { root, provider_exits: &[0], targets: Vec::new(), cancellation: COMPOSITION_CANCELLED, reported: None }
+    }
+
+    /// A Ctrl+C interrupts the run rather than a failed sibling.
+    fn interrupted(mut self) -> Self {
+        self.cancellation = PROVIDER_INTERRUPTED;
+        self
+    }
+
+    fn reports(mut self, label: &'static str) -> Self {
+        self.reported = Some(label);
+        self
     }
 
     fn exits(mut self, exits: &'static [i32]) -> Self {
@@ -207,6 +248,9 @@ struct Host<'w> {
     /// The entry document's `model` on disk; `set_frontmatter` rewrites it.
     disk_model: Option<Value>,
     race: Option<Race<'w>>,
+    /// The selected error of the run that finished last; after the root's
+    /// drive, the root's.
+    reported: Option<String>,
 }
 
 /// One event's evaluation: the request plus the stack's local view of state.
@@ -267,8 +311,8 @@ fn missing_value(key: &str) -> LifecycleErrorInfo {
     coded(COMPOSITION_FAILED, &format!("the command reads `{key}`, which is missing"))
 }
 
-fn settings() -> RunSettings {
-    RunSettings::new(Arc::new(NoCodes)).with_cancellation_error(coded(COMPOSITION_CANCELLED, "the run was cancelled"))
+fn settings(cancellation: &str) -> RunSettings {
+    RunSettings::new(Arc::new(NoCodes)).with_cancellation_error(coded(cancellation, "the run was cancelled"))
 }
 
 /// Expression truthiness for the values the fixtures guard on.
@@ -281,14 +325,17 @@ fn truthy(value: &Value) -> bool {
     }
 }
 
-/// The fixtures' `err.code || 'uncoded: ' + err.msg`.
+/// The fixtures' `err.code || 'uncoded: ' + err.msg`. A refusal the run
+/// raised itself reads as Claudine's projection of it
+/// (`CompositionError::from_lifecycle_refusal`), whose code is
+/// [`COMPOSITION_FAILED`].
 fn render(error: &RunError) -> String {
     match error {
         RunError::Reported(error) => match &error.snapshot {
             Some(snapshot) => snapshot.code.clone(),
             None => format!("uncoded: {}", error.msg),
         },
-        other => other.label().to_string(),
+        RunError::SetupRecoveryUnsupported { .. } | RunError::Aborted(_) => COMPOSITION_FAILED.to_string(),
     }
 }
 
@@ -329,12 +376,13 @@ impl<'w> Host<'w> {
             launches: 0,
             disk_model: world.root.document.frontmatter.get("model").cloned(),
             race: None,
+            reported: None,
         }
     }
 
     /// Drives one subject's run to its finish.
     fn drive(&mut self, subject: &'w Subject) -> Finish {
-        let mut run = Run::start(settings(), subject.document.authored());
+        let mut run = Run::start(settings(self.world.cancellation).with_subject(subject.kind), subject.document.authored());
         let mut cx = RunContext {
             documents: vec![subject],
             state: subject.document.data(),
@@ -347,7 +395,10 @@ impl<'w> Host<'w> {
             let ticket = request.ticket();
             let current: &'w Subject = cx.documents[ticket.document() as usize - 1];
             let reply = match request.kind() {
-                RequestKind::Done(finish) => return *finish,
+                RequestKind::Done(finish) => {
+                    self.reported = run.selected_error().map(|error| error.label().to_string());
+                    return *finish;
+                }
                 RequestKind::EvaluateEvent(event) => {
                     let (outcome, iterate) = self.evaluate(&run, &ticket, current, event, &mut cx.state);
                     if event.signal == LifecycleSignal::Loop {
@@ -370,7 +421,14 @@ impl<'w> Host<'w> {
                 RequestKind::PerformOperation { entry } => {
                     cx.entry = *entry;
                     if let Operation::Agent = current.operation {
-                        Reply::Operation(self.launch(*entry, &mut cx))
+                        match self.launch(*entry, &mut cx) {
+                            Some(report) => Reply::Operation(report),
+                            None => {
+                                answer(&mut run, Reply::Operation(OperationReport::Started { session: SessionAvailability::Available }));
+                                run.cancel().expect("a subject awaiting its work can be cancelled");
+                                continue;
+                            }
+                        }
                     } else {
                         answer(&mut run, Reply::Operation(OperationReport::Started { session: SessionAvailability::Unavailable }));
                         match self.perform(&current.operation) {
@@ -501,18 +559,20 @@ impl<'w> Host<'w> {
                 let control = proxy(eval.event.signal, text());
                 return eval.direct(control);
             }
+            "defer" => return eval.direct(StackControl::Defer { delay: text().to_string(), reason: None }),
             other => panic!("unknown action {other}"),
         }
         true
     }
 
-    fn launch(&mut self, entry: EntryReason, cx: &mut RunContext<'w>) -> OperationReport {
+    /// The launch's report, or `None` when it was interrupted while running.
+    fn launch(&mut self, entry: EntryReason, cx: &mut RunContext<'w>) -> Option<OperationReport> {
         if entry == EntryReason::Resume && cx.launched_model != self.disk_model {
-            return OperationReport::NotStarted(HostFailure {
+            return Some(OperationReport::NotStarted(HostFailure {
                 stage: FailureStage::ResumeIncompatible,
                 entry,
                 error: coded(COMPOSITION_FAILED, "the session's launch identity changed"),
-            });
+            }));
         }
         let exits = self.world.provider_exits;
         let status = exits[self.launches.min(exits.len() - 1)];
@@ -520,12 +580,15 @@ impl<'w> Host<'w> {
         cx.launched_model = self.disk_model.clone();
         let mode = if entry == EntryReason::Resume { "resume" } else { "fresh" };
         self.lines.push(format!("work {mode} {status}"));
+        if status == INTERRUPTED {
+            return None;
+        }
         let verdict = if status == 0 {
             CompletionVerdict::Succeeded
         } else {
             CompletionVerdict::Failed(coded("provider.exited", "the provider exited without a result"))
         };
-        OperationReport::Completed { verdict, session: SessionAvailability::Available }
+        Some(OperationReport::Completed { verdict, session: SessionAvailability::Available })
     }
 
     fn recover(&mut self, recovery: &RecoveryRequest, ticket: &Ticket, cx: &mut RunContext<'w>) -> RecoveryReply {
@@ -591,6 +654,10 @@ impl<'w> Host<'w> {
                 self.lines.push((*completed).to_string());
                 Some(true)
             }
+            Task::Interrupt(line) => {
+                self.lines.push((*line).to_string());
+                None
+            }
         }
     }
 
@@ -612,13 +679,31 @@ fn scenario_id(test_name: &str) -> String {
     test_name.replace('_', "-")
 }
 
-fn replay(id: &str, trace: &str, world: World) {
+/// The trace's lines and the replay's, each ending in `exit`; when the world
+/// checks the reported error, a `reported <label>` line precedes `exit` in
+/// both.
+fn replay_lines(id: &str, trace: &str, world: &World) -> (Vec<String>, Vec<String>) {
     assert!(trace.lines().any(|line| line == format!("# scenario: {id}")), "{id}.trace names its scenario");
-    let expected: Vec<&str> = trace.lines().map(|line| line.trim_end_matches('\r')).filter(|line| !line.starts_with('#')).collect();
-    let mut host = Host::new(&world);
+    let mut expected: Vec<String> =
+        trace.lines().map(|line| line.trim_end_matches('\r')).filter(|line| !line.starts_with('#')).map(str::to_owned).collect();
+    let mut host = Host::new(world);
     let finish = host.drive(&world.root);
+    if let Some(label) = world.reported {
+        let exit = expected.pop().expect("a trace ends with its exit line");
+        expected.extend([format!("reported {label}"), exit]);
+        host.lines.push(format!("reported {}", host.reported.as_deref().unwrap_or("none")));
+    }
     host.lines.push(format!("exit {}", exit_code(finish)));
-    assert_eq!(host.lines, expected, "replay of {id}");
+    (expected, host.lines)
+}
+
+fn replay(id: &str, trace: &str, world: World) {
+    let (expected, replayed) = replay_lines(id, trace, &world);
+    if KNOWN_DIVERGENT.contains(&id) {
+        assert_ne!(replayed, expected, "replay of {id} now matches production: remove it from KNOWN_DIVERGENT");
+    } else {
+        assert_eq!(replayed, expected, "replay of {id}");
+    }
 }
 
 /// The trace scenarios, one `#[test]` per row; each row's `include_str!`
@@ -627,6 +712,11 @@ macro_rules! replay_traces {
     ($(#[test] fn $name:ident() { $trace:expr })*) => {
         fn scenarios() -> BTreeSet<String> {
             [$(stringify!($name)),*].into_iter().map(scenario_id).collect()
+        }
+
+        /// Every scenario's id, trace, and world.
+        fn cases() -> Vec<(String, &'static str, fn() -> World)> {
+            vec![$((scenario_id(stringify!($name)), $trace, worlds::$name as fn() -> World)),*]
         }
 
         $(
@@ -674,6 +764,17 @@ replay_traces! {
     #[test] fn guarded_shell_present() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-present.trace") }
     #[test] fn skip() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/skip.trace") }
     #[test] fn success() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/success.trace") }
+    #[test] fn cancelled_root_document() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-document.trace") }
+    #[test] fn cancelled_root_document_unauthored() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-document-unauthored.trace") }
+    #[test] fn cancelled_root_sequence() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/cancelled-root-sequence.trace") }
+    #[test] fn defer_in_preflight_blocked() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/defer-in-preflight-blocked.trace") }
+    #[test] fn proxy_hop_limit() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/proxy-hop-limit.trace") }
+    #[test] fn proxy_hop_limit_after_launch() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/proxy-hop-limit-after-launch.trace") }
+    #[test] fn proxy_in_initialize() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/proxy-in-initialize.trace") }
+    #[test] fn resume_in_initialize() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/resume-in-initialize.trace") }
+    #[test] fn resume_in_preflight_blocked() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/resume-in-preflight-blocked.trace") }
+    #[test] fn retry_in_initialize_group_leg() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize-group-leg.trace") }
+    #[test] fn retry_in_initialize_root_sequence() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize-root-sequence.trace") }
 }
 
 #[test]
@@ -688,12 +789,24 @@ fn every_recorded_trace_has_a_replay() {
     assert_eq!(scenarios(), recorded);
 }
 
+/// Fails once `Run` reproduces a scenario listed in [`KNOWN_DIVERGENT`], or
+/// when the list names a scenario that does not exist.
+#[test]
+fn known_divergences_still_diverge() {
+    let cases = cases();
+    for id in KNOWN_DIVERGENT {
+        let (_, trace, world) = cases.iter().find(|(case, _, _)| case == id).unwrap_or_else(|| panic!("{id} is not a replayed scenario"));
+        let (expected, replayed) = replay_lines(id, trace, &world());
+        assert_ne!(replayed, expected, "replay of {id} now matches production: remove it from KNOWN_DIVERGENT");
+    }
+}
+
 /// Each scenario's documents (its `.md` fixtures) and scripted host facts
 /// (its `# given:` lines).
 mod worlds {
     use serde_json::{Value, json};
 
-    use super::{COMPOSITION_FAILED, DocumentInput, Operation, Shell, Subject, Task, World};
+    use super::{COMPOSITION_FAILED, DocumentInput, INTERRUPTED, Operation, Shell, Subject, SubjectKind, Task, World};
 
     /// The stacks every fixture authors: each event writes its name, and the
     /// error-reading events write `err`.
@@ -970,5 +1083,91 @@ mod worlds {
                 .with("success", json!(["event", { "set": { "counter": 2 } }, { "state": "counter" }]))
                 .with("finalize", json!(["event", "err", { "state": "counter" }, "shell"])),
         ))
+    }
+
+    pub(super) fn resume_in_preflight_blocked() -> World {
+        World::new(shell_denied(document("resume-in-preflight-blocked.md").with("blocked", json!(["event", "err", { "resume": 1 }]))))
+            .reports("resume-without-session")
+    }
+
+    pub(super) fn defer_in_preflight_blocked() -> World {
+        World::new(shell_denied(document("defer-in-preflight-blocked.md").with("blocked", json!(["event", "err", { "defer": "1h" }]))))
+            .reports("defer-unsupported")
+    }
+
+    pub(super) fn resume_in_initialize() -> World {
+        World::new(entry(document("resume-in-initialize.md").with("initialize", json!(["event", { "resume": 1 }]))))
+            .reports("resume-without-session")
+    }
+
+    pub(super) fn proxy_in_initialize() -> World {
+        let path = "./proxy-in-initialize.target.md";
+        World::new(entry(document("proxy-in-initialize.md").with("initialize", json!(["event", { "proxy": path }]))))
+            .target(path, target(document(path)))
+    }
+
+    pub(super) fn cancelled_root_document() -> World {
+        World::new(entry(container(document("cancelled-root-document.md")))).exits(&[INTERRUPTED]).interrupted()
+    }
+
+    pub(super) fn cancelled_root_document_unauthored() -> World {
+        World::new(entry(document("cancelled-root-document-unauthored.md"))).exits(&[INTERRUPTED]).interrupted()
+    }
+
+    pub(super) fn cancelled_root_sequence() -> World {
+        World::new(Subject::new("seq:", container(document("cancelled-root-sequence.md"))).operation(Operation::Tasks(vec![
+            Task::Interrupt("task interrupt"),
+            Task::Shell(shell("task later", true)),
+        ])))
+        .interrupted()
+    }
+
+    /// The entry and every hop document proxy to the next hop from `start`;
+    /// `after_launch` names the one hop that proxies from `success` instead.
+    /// As in the trace test, `MAX_PROXY_HOPS` (16) hop documents exist.
+    fn proxy_chain(id: &'static str, after_launch: Option<usize>) -> World {
+        const HOP_DOCUMENTS: usize = 16;
+        let leak = |text: String| -> &'static str { Box::leak(text.into_boxed_str()) };
+        let hop_path = |hop: usize| leak(format!("./{id}.hop-{hop:02}.md"));
+        let mut world = World::new(entry(document(id).with("start", json!(["event", { "proxy": hop_path(1) }]))));
+        for hop in 1..=HOP_DOCUMENTS {
+            let next = hop_path(hop + 1);
+            let hop_document = document(hop_path(hop))
+                .with("proxy_before_launch", json!(after_launch != Some(hop)))
+                .with("start", json!(["event", { "when": "proxy_before_launch", "then": [{ "proxy": next }] }]))
+                .with("success", json!(["event", { "proxy": next }]));
+            world = world.target(hop_path(hop), Subject::new(leak(format!("hop-{hop:02}:")), hop_document));
+        }
+        world
+    }
+
+    pub(super) fn proxy_hop_limit() -> World {
+        proxy_chain("proxy-hop-limit", None).reports("proxy-budget-exhausted")
+    }
+
+    /// Hop 15, the last document production adopts, launches before it
+    /// proxies.
+    pub(super) fn proxy_hop_limit_after_launch() -> World {
+        proxy_chain("proxy-hop-limit-after-launch", Some(15)).reports("proxy-budget-exhausted")
+    }
+
+    pub(super) fn retry_in_initialize_root_sequence() -> World {
+        World::new(
+            Subject::new("seq:", container(document("retry-in-initialize-root-sequence.md")).with("initialize", json!(["event", { "retry": 1 }])))
+                .operation(Operation::Tasks(vec![Task::Shell(shell("task only", true))])),
+        )
+        .reports("setup-recovery-unsupported")
+    }
+
+    pub(super) fn retry_in_initialize_group_leg() -> World {
+        // The leg is a nested sequence (a task with its own `sequence:`).
+        let leg = Subject::new("leg:", container(document("leg")).with("initialize", json!(["event", { "retry": 1 }])))
+            .kind(SubjectKind::Sequence)
+            .operation(Operation::Tasks(vec![Task::Shell(shell("task leg", true))]));
+        let checks = Subject::new("checks:", container(document("checks"))).operation(Operation::Tasks(vec![Task::Subject(leg)]));
+        World::new(Subject::new("seq:", container(document("retry-in-initialize-group-leg.md"))).operation(Operation::Tasks(vec![
+            Task::Subject(checks),
+            Task::Shell(shell("task later", true)),
+        ])))
     }
 }

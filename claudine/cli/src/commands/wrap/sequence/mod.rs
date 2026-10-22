@@ -13,7 +13,10 @@ use claudine::composition::{
     self, CompositionError, MissingProperty, ResolvedCompositionSource, SequenceExecutionOptions,
     SequenceMissingPropertiesStep, SequencePlan, SequenceStepDraft,
 };
+use claudine::composition::preflight::checks::{AGENT_RESOLUTION, LIFECYCLE_SHELL_AUDIT, sequence_preflight};
 use color_eyre::eyre::Result;
+use darkmatter::lifecycle::preflight::CheckStage;
+use darkmatter::lifecycle::run::EntryReason;
 use tracing::info_span;
 
 use crate::commands::compose::SharedComposeArgs;
@@ -139,7 +142,7 @@ fn approve_preflight_graph(
             // directives, and resolving a deferred `success:`/`failure:` read
             // -side file reference here would trip on a file that event has
             // not created yet.
-            .with_exclude_keys(claudine::composition::LIFECYCLE_EVENT_KEYS.iter().copied())
+            .with_exclude_keys(claudine::composition::claudine_registry().authored_event_keys())
             .with_deferred_shell_roots(reference.deferred_shell_roots());
         // The task's approval-time `with` reaches its document as data, as
         // it does at the task's turn.
@@ -328,7 +331,9 @@ pub(crate) fn execute_sequence(
             },
             Ok(0) => (LifecycleSignal::Success, None),
             Ok(_) => (LifecycleSignal::Failure, root.child_error.take().or_else(|| Some(LifecycleErrorInfo::from_action_failure("sequence", "a sequence child failed")))),
-            Err(error) => (if root.started { LifecycleSignal::Failure } else { LifecycleSignal::Blocked }, Some(LifecycleErrorInfo::from_error_or_action("sequence", error.as_ref()))),
+            // A failure before the root reached `start` blocks it.
+            Err(error) => (claudine::composition::lifecycle::policy::failure_event(darkmatter::lifecycle::run::FailureStage::Setup, root.started),
+                Some(LifecycleErrorInfo::from_error_or_action("sequence", error.as_ref()))),
         };
         runtime.set_sequence_binding(seq.clone());
         if root.pending.is_none() && matches!(signal, LifecycleSignal::Success | LifecycleSignal::Failure) {
@@ -541,17 +546,25 @@ fn execute_sequence_inner(
         &prep_context.invocation,
         &graph_context,
     );
-    let preflight_approved = approve_preflight_graph(
-        &graph,
-        source,
-        &prep_context.source_context,
-        Arc::clone(&shared_approval_cache),
-        shared,
-        Some(prep_context.launch_workspace.launch_cwd.as_path()),
-        &prep_context.invocation,
-        &graph_context,
-        root.approved.as_ref(),
-    )?;
+    // Root `initialize` has run, so a failed check blocks the root container.
+    // A retry reuses the first attempt's closed approval.
+    let entry = if root.approved.is_some() { EntryReason::Retry } else { EntryReason::Initial };
+    let mut preflight = sequence_preflight().begin(entry);
+    let preflight_approved = preflight
+        .check(LIFECYCLE_SHELL_AUDIT, CheckStage::InRun, || {
+            approve_preflight_graph(
+                &graph,
+                source,
+                &prep_context.source_context,
+                Arc::clone(&shared_approval_cache),
+                shared,
+                Some(prep_context.launch_workspace.launch_cwd.as_path()),
+                &prep_context.invocation,
+                &graph_context,
+                root.approved.as_ref(),
+            )
+        })
+        .map_err(|failure| failure.error)?;
     root.approved = Some(preflight_approved.clone());
     // A retry's walk rereads referenced sources only to refuse commands the
     // closed approval never saw; the task graph stays the first attempt's.
@@ -600,42 +613,47 @@ fn execute_sequence_inner(
         .and_then(serde_json::Value::as_object)
         .is_some_and(|setters| setters.contains_key("agent"));
     let sites = providers::collect_sites(&graph, &plan, &source.resolved_path, &raw_hints, caller_sets_agent);
-    let mut selections = providers::select(
-        sites,
-        &providers::SelectionInputs {
-            snapshot,
-            catalog: &catalog,
-            cli_model,
-            explicit_provider,
-            favorite,
-            environment: prep_context.invocation.document_environment(),
-            silent,
-            dry_run: shared.dry_run,
-        },
-    )?;
-    if !shared.dry_run && !is_tty && let Some(unresolved) = selections.first_unresolved() {
-        let providers::TaskTarget::Unresolved { state, own_hint, .. } = &unresolved.target else {
-            unreachable!("first_unresolved returns an unresolved target");
-        };
-        // A task naming an ambiguous list fails as that task; a task missing
-        // a provider fails as the sequence document that names none.
-        return Err(if *own_hint {
-            providers::launch_error(
-                unresolved,
-                claudine::composition::SequenceTaskProviderProblem::Unresolvable {
-                    state: state.clone(),
-                    installed: snapshot.runnable.clone(),
+    let mut selections = preflight
+        .check(AGENT_RESOLUTION, CheckStage::InRun, || -> Result<_> {
+            let selections = providers::select(
+                sites,
+                &providers::SelectionInputs {
+                    snapshot,
+                    catalog: &catalog,
+                    cli_model,
+                    explicit_provider,
+                    favorite,
+                    environment: prep_context.invocation.document_environment(),
+                    silent,
+                    dry_run: shared.dry_run,
                 },
-            )
-        } else {
-            CompositionError::AgentResolutionFailed {
-                source_path: source.resolved_path.clone(),
-                state: claudine::composition::classify_agent_resolution(&raw_hints, snapshot),
-                installed: snapshot.runnable.clone(),
+            )?;
+            if !shared.dry_run && !is_tty && let Some(unresolved) = selections.first_unresolved() {
+                let providers::TaskTarget::Unresolved { state, own_hint, .. } = &unresolved.target else {
+                    unreachable!("first_unresolved returns an unresolved target");
+                };
+                // A task naming an ambiguous list fails as that task; a task missing
+                // a provider fails as the sequence document that names none.
+                return Err(if *own_hint {
+                    providers::launch_error(
+                        unresolved,
+                        claudine::composition::SequenceTaskProviderProblem::Unresolvable {
+                            state: state.clone(),
+                            installed: snapshot.runnable.clone(),
+                        },
+                    )
+                } else {
+                    CompositionError::AgentResolutionFailed {
+                        source_path: source.resolved_path.clone(),
+                        state: claudine::composition::classify_agent_resolution(&raw_hints, snapshot),
+                        installed: snapshot.runnable.clone(),
+                    }
+                }
+                .into());
             }
-        }
-        .into());
-    }
+            Ok(selections)
+        })
+        .map_err(|failure| failure.error)?;
     if !shared.dry_run && review::needs_review(is_tty, &selections) {
         // The state-specific pre-prompt message (a styled `Invalid Agent:`
         // line, the zero-installed-list breakdown) shares its source of truth

@@ -1,5 +1,8 @@
-//! Host registrations for the prototype engine. The engine knows none of
-//! these names; each event's behavior comes from its position and role.
+//! Host registrations on the production event registry for the prototype
+//! run. The run knows none of these names; each event's behavior comes from
+//! its position and role. Claudine's production registration is Claudine's
+//! own; this copy keeps the prototype's views, so its tests read the same
+//! reasons.
 
 use darkmatter::markdown::compose::expression::{Availability, UnavailabilityReason};
 
@@ -12,7 +15,7 @@ fn unavailable(reason: &str) -> Availability {
 /// Darkmatter's five events and nothing else: no outcome pair, so the
 /// terminal slot can only ever hold `failed`.
 pub fn md_profile() -> Registry {
-    Registry::new("md")
+    Registry::md()
 }
 
 /// Claudine as a host: `composed` is `start`, `failed` is `blocked`, the

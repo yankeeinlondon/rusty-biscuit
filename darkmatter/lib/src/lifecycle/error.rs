@@ -473,6 +473,21 @@ pub enum LifecycleError {
         event: String,
     },
 
+    /// A document run by a host that renamed a Darkmatter event authors the
+    /// Darkmatter spelling (`composed:` where the host says `start:`).
+    #[error(
+        "lifecycle event `{authored}` is named `{replacement}` by this host; write `{replacement}:` instead ({source_path})",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleRenamedEvent {
+        /// The prompt file whose frontmatter holds the key.
+        source_path: PathBuf,
+        /// The authored Darkmatter spelling (e.g. `"composed"`).
+        authored: String,
+        /// The host's spelling of the same event (e.g. `"start"`).
+        replacement: String,
+    },
+
     /// One lifecycle dictionary holds more than one flow-control directive.
     #[error(
         "lifecycle dictionary `{property}` has more than one flow-control directive; \

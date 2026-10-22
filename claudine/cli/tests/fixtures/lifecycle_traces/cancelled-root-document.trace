@@ -1,0 +1,14 @@
+# scenario: cancelled-root-document
+# doc: cancelled-root-document.md
+# given: invoked as `claudine compose --claude cancelled-root-document.md` from the directory holding the fixture documents
+# given: the document authors a cancelled stack
+# given: launch 1 sends SIGINT to claudine while it runs (a Ctrl+C) and is ended by the forwarded interrupt
+# given: the interrupt is reported to the cleanup events as provider.interrupted
+event initialize
+event start
+work fresh 130
+event cancelled
+err provider.interrupted
+event finalize
+err provider.interrupted
+exit 130

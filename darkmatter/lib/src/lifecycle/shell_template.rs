@@ -32,17 +32,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use super::registry::EventRegistry;
 use crate::markdown::compose::ShellCommandOrigin;
 use crate::markdown::compose::expression::{DeclaredTypes, GuardOrigin, TypeScope};
 use crate::markdown::compose::shell_expansion::template::{
     CommandSite, CommandTemplate, HoleTiming, ModeRequirement, ShellCandidate, ShellPreApprovals, SiteValues,
     TemplateShape, parse_authored,
 };
-
-/// The roots a lifecycle placeholder can read that the host, not the
-/// document, supplies. A placeholder reading one is typed `string`.
-// The host registry will supply these roots once hosts declare their globals.
-pub const LIFECYCLE_HOST_GLOBALS: [&str; 4] = ["loop", "err", "timing", "group"];
 
 /// How an approved lifecycle shell site runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,12 +181,14 @@ impl LifecycleShellTemplate {
 }
 
 /// The declared layer a lifecycle shell site of a document whose schema is
-/// `schema` is typed against: the schema, with [`LIFECYCLE_HOST_GLOBALS`] as
-/// host roots.
-pub fn lifecycle_declared_types(
-    schema: Option<&crate::markdown::schemas::SimplifiedSchema>,
-) -> DeclaredTypes<'_> {
-    DeclaredTypes::new(schema).with_host_globals(&LIFECYCLE_HOST_GLOBALS)
+/// `schema` is typed against: the schema, with the registry's
+/// [host globals](EventRegistry::host_globals) as host roots. A placeholder
+/// reading one is typed `string`.
+pub fn lifecycle_declared_types<'a>(
+    schema: Option<&'a crate::markdown::schemas::SimplifiedSchema>,
+    registry: &'a EventRegistry,
+) -> DeclaredTypes<'a> {
+    DeclaredTypes::new(schema).with_host_globals(registry.host_globals())
 }
 
 /// The authored command `raw` as a template typed in `scope`, the type scope
@@ -264,7 +262,7 @@ mod tests {
     use super::*;
 
     fn unguarded(raw: &str) -> Option<CommandTemplate> {
-        let declared = lifecycle_declared_types(None);
+        let declared = lifecycle_declared_types(None, crate::lifecycle::registry::tests::agent_host());
         typed_template(raw, &TypeScope::unguarded(&declared))
     }
 

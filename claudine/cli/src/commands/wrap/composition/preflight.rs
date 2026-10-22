@@ -13,12 +13,11 @@ use biscuit_terminal::terminal::Terminal;
 use claudine::composition::lifecycle::{
     LifecycleEmitter, LifecycleRunGuard, LifecycleSignal,
 };
-use claudine::composition::lifecycle_executor::{LifecycleEventOutcome, StackControl};
+use claudine::composition::lifecycle::policy::{RecoveryVerdict, SubjectKind, recovery_verdict};
+use claudine::composition::lifecycle_executor::StackControl;
 use claudine::composition::{
     CompositionError, LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchProtocolExt, LifecycleCatchState,
     LifecycleErrorInfo, LifecycleTiming,
-    LifecycleTransitionAbort, LifecycleTransitionDecision, LifecycleTransitionInput,
-    decide_lifecycle_transition,
 };
 use claudine::composition::lifecycle_executor::StackExecutionContext;
 use claudine::composition::lifecycle_executor::DisabledShellRunner;
@@ -185,64 +184,17 @@ pub(super) fn emit_preflight_blocked_and_finalize(
 /// Translate a compose pre-flight `blocked` stack's surfaced flow-control action
 /// into the error that should replace the generic blocked error.
 ///
-/// At this layer the provider has not launched and there is no run-loop to
-/// re-enter, so `resume` reports `ResumeWithoutSession` and `retry`/`requeue`/
-/// `proxy` report the typed setup-phase-deferred error (a `blocked`-proxy is
-/// decided mid-pre-flight, so it needs the same re-entry a `retry` would).
-/// Returns `None` for `stop`/`error`/no-control, leaving the original blocked
-/// error in place.
+/// A preflight `blocked` cannot recover; the policy kernel's verdict names the
+/// refusal (`resume` reports `ResumeWithoutSession`, `retry` and `proxy` the
+/// setup-phase error, `defer` not-implemented). Returns `None` for
+/// `stop`/`error`/no control and for a `retry`/`resume` asking for no
+/// attempt, leaving the original blocked error in place.
 pub(super) fn preflight_blocked_control_error(
     control: Option<StackControl>,
     source_path: &Path,
 ) -> Option<CompositionError> {
-    let outcome = LifecycleEventOutcome {
-        control,
-        ..LifecycleEventOutcome::default()
-    };
-    let decision = decide_lifecycle_transition(&LifecycleTransitionInput {
-        event: LifecycleSignal::Blocked,
-        terminal_slot: Some(LifecycleSignal::Blocked),
-        provider_launched: false,
-        has_prior_error: true,
-        outcome: &outcome,
-        has_session: false,
-        attempt: 1,
-        control_budget: 0,
-        proxy_hops_used: 0,
-        proxy_target_seen: false,
-        finalize_emitted: true,
-    });
-    match decision {
-        LifecycleTransitionDecision::Abort(LifecycleTransitionAbort::ResumeWithoutSession) => {
-            Some(CompositionError::LifecycleResumeWithoutSession {
-                source_path: source_path.to_path_buf(),
-            })
-        }
-        LifecycleTransitionDecision::Reenter(_) => {
-            Some(setup_phase_deferred("blocked", "retry", source_path))
-        }
-        LifecycleTransitionDecision::Abort(
-            LifecycleTransitionAbort::DeferredExecutionUnsupported,
-        ) => Some(CompositionError::LifecycleDeferNotImplemented {
-            source_path: source_path.to_path_buf(),
-        }),
-        LifecycleTransitionDecision::ProxyHandoff { .. } => {
-            Some(setup_phase_deferred("blocked", "proxy", source_path))
-        }
-        LifecycleTransitionDecision::Continue
-        | LifecycleTransitionDecision::CatchFailure { .. }
-        | LifecycleTransitionDecision::Finalize { .. }
-        | LifecycleTransitionDecision::TerminalSuccess
-        | LifecycleTransitionDecision::TerminalFailure { .. }
-        | LifecycleTransitionDecision::Abort(_) => None,
-    }
-}
-
-/// Build the typed setup-phase-deferred-recovery error.
-pub(super) fn setup_phase_deferred(event: &str, action: &str, source_path: &Path) -> CompositionError {
-    CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
-        source_path: source_path.to_path_buf(),
-        event: event.to_string(),
-        action: action.to_string(),
+    match recovery_verdict(SubjectKind::Document, LifecycleSignal::Blocked, &control?)? {
+        RecoveryVerdict::Refuse(refusal) => CompositionError::from_lifecycle_refusal(&refusal, source_path),
+        RecoveryVerdict::Admit | RecoveryVerdict::Ignore => None,
     }
 }
