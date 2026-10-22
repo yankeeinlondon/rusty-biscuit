@@ -4,6 +4,41 @@ created: 2026-10-12
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: "true"
+source_files_during_phase_1:
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/mod.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/envelope.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/raw_schema.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/frontmatter.rs
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.json
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.md-get.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.schema.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.json
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/slash-commands.shipped.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/timing.shipped.yaml
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/src/main.rs
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/src/Cargo.toml
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/src/Cargo.lock
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+    - claudine/features/2026-10-28-schema-enhancements/inventory/criteria-map.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/prerequisites.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/function-registry.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/ownership.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/reader-matrix.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/rulings.md
+    - claudine/features/2026-10-28-schema-enhancements/behavior-ledger.md
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/findings.md
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/runs/default.md
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/runs/arbitrary-precision.md
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/runs/preserve-order.md
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/PROVENANCE.md
+skills_files_updated_during_phase_1: []
+packages:
+    - darkmatter
 ---
 
 # Implementation Plan: Schema Enhancements
@@ -418,7 +453,11 @@ values, whole-value unions, and numeric schema metadata to the concrete matrix
 when inventory identifies their loader paths. Optional tuple null is E, unlike
 optional document properties. This distinction must appear in public results.
 
-- [ ] **Matrix fixtures** — follows inventory, before reader implementation.
+- [x] **Matrix fixtures** — follows inventory, before reader implementation.
+  - Phase 1 delivered the fixtures and the cells current code already
+    decides (`darkmatter/lib/tests/l1/schema_enhancements_matrix/`); every
+    remaining cell is assigned to its owning task or pending ruling in
+    `inventory/reader-matrix.md` → "Cell coverage", and that task adds it.
   - Obtain a fixture from each real writer/tool: shipped SimplifiedSchema
     catalog and `md schema` output, current `md frontmatter` output, DMLS's
     real client configuration exchange, and documented `.dmls.toml` settings.

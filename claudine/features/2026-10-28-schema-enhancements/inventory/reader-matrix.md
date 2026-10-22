@@ -292,3 +292,109 @@ This feature adds:
 | Documented `.dmls.toml` settings | `darkmatter/docs/lsp/configuration.md` (code blocks at :24, :157, :193) | documentation |
 | Raw JSON Schema fixtures | `lib/tests/fixtures/validate/json_schema_ref/schema.json`, `dmls/tests/fixtures/suggest_constraint/raw-schema.json` | **hand-written, no producer provenance.** Capture one from `md schema detect --format json` for provenance, and keep the hand-written ones for keyword coverage (`$ref`/`$defs`/`oneOf`), which `detect` does not emit |
 | Existing schema robustness harness | `darkmatter/cli/tests/l1/schema_robustness_matrix.rs` (controls: `docs/schemas/env.yaml`, `tests/fixtures/schema-triggers/schemas/sequence.yaml`), `cli/tests/fixtures/schema_validate_baseline/*` | precedent to reuse |
+
+## Cell coverage
+
+Matrix fixtures task, L1, module `darkmatter/lib/tests/l1/schema_enhancements_matrix/`. Positive controls and their producers are listed in `darkmatter/lib/tests/fixtures/schema_enhancements_matrix/PROVENANCE.md`. Every test name below is prefixed `schema_enhancements_matrix::`.
+
+### (a) YAML SimplifiedSchema envelope
+
+**Covered.** These cells are walked from shipped schemas. They assert the public validation result: either a schema error, or a schema that validates a sample document as expected.
+
+- **`envelope::shipped_tagged_envelope_matrix`** (`schemas/partials/timing.yaml`):
+  - control;
+  - `types`: absent, null, number, list, one wrong element, every element wrong, `{}` (accepted and unconstrained), duplicate, second document, trailing garbage;
+  - named type `timing`: number, bool, one wrong union arm, every arm wrong, `[]`, `""`, invalid member constraint, duplicate.
+- **`envelope::shipped_pure_envelope_matrix`** (`slash-commands/_schema.yaml`):
+  - control;
+  - root `$schema`: absent (load E), null, number, bool, one wrong element, every element wrong, `{}` (accepted), `[]`, `""`, duplicate, second document, trailing garbage;
+  - invalid member constraint.
+
+The duplicate-key and trailing or second-document cells assert only that loading fails, because the class is mislabeled `AmbiguousReferenced` today (Schema adapter / Grammar). The classifier-level twins of these cells stay in `schema_yaml_spellings` (`TAGGED_CELLS`, `NESTED_CELLS`, `ROOT_UNION_CELLS`).
+
+**Blocked:**
+
+| Cell | Blocked by |
+|---|---|
+| `kind`: absent, null, wrong type | **Ruling R5** |
+| named type: null | **Ruling R5** (today it is the documented `null` type) |
+| missing registered canonical; "catalog incomplete" for `types: {}` | **Catalog replacement** |
+| every `categories` cell; function-type controls | **Grammar** |
+| catalog `kind` control for functions | **Catalog replacement** |
+
+### (b) DMLS
+
+**Not covered here.** The `expressions` field does not exist yet (**blocked: Editor diagnostics, Wave 8**). The generic mechanism is pinned by `dmls/tests/l1/workspace_formatting_settings.rs`.
+
+### (c) Raw JSON Schema
+
+**Covered** by `raw_schema::raw_json_schema_keyword_matrix` (`.json`) and `raw_schema::raw_yaml_schema_keyword_matrix` (YAML raw schema).
+
+For each of the 48 keywords in the plan tables, each test checks:
+
+- **control:** the instance's validity with the keyword present;
+- **absent:**
+  - for most keywords, the instance's validity flips;
+  - for `$defs`, `definitions`, `$anchor`, `$id`, and `$dynamicAnchor`, a reference is left unresolved, giving a `BuildValidator` error;
+  - for `$schema`, `$vocabulary`, and `default`, nothing changes;
+- **explicit null, wrong whole type, and, for collection-valued keywords, one bad element and every element bad:** each is `SchemaError::BuildValidator`;
+- **other cells:**
+  - empty anchors, `type: []`, `multipleOf: 0`, and an invalid regex each give `BuildValidator`;
+  - for `const` and `default`, null, wrong type, and nested data all load (V);
+  - for `enum`, heterogeneous elements load.
+
+The keywords and where their controls come from:
+
+- **From `md schema detect` output:** `$schema`, `properties`, `anyOf`, `type`, `items`.
+- **From the hand-written keyword fixture:** all the others.
+
+Whole-document cells:
+
+- **JSON:** trailing garbage and a second value are E.
+- **YAML:** trailing garbage, a second document, and a duplicate root key are E.
+
+Only failure is asserted for these, because the class is mislabeled `AmbiguousReferenced` (Schema adapter).
+
+**Blocked:**
+
+| Cell | Blocked by |
+|---|---|
+| `.json` duplicate key (last-wins today) | **Ruling R3**, then Schema adapter |
+| `enum: []` (loads today) and `prefixItems: []` (E today) | **Ruling R7** |
+| conversion positive controls | **Wave 3 Conversion core and Wave 4 Schema adapter** |
+| lossless numeric tokens in bounds, `multipleOf`, `enum`, `const`, and `default` | **Wave 2 Numeric** |
+
+Two controls are not observable today:
+
+- **`$schema`:** the validator pins Draft 2020-12, so removing `$schema` changes nothing, and no other dialect can be selected.
+- **`$vocabulary`:** it only takes effect in a meta-schema, which cannot be reached without a retriever.
+
+Only the invalid shapes of these two are E-tested.
+
+### (d) Frontmatter
+
+**Covered** by `frontmatter::frontmatter_value_matrix`. The control is `md get --yaml` output, composed through `Markdown::try_from(path)` and `compose_with`. Every cell asserts that the source file is unchanged.
+
+| Property or edit | Covered cells |
+|---|---|
+| control | renders `7\|2\|02134\|On\|false`; `zip` and `flag` stay strings K |
+| `n` | absent E, null E, duplicate E |
+| `maybe` | absent K, null K, duplicate E |
+| `zip` | absent K, duplicate E |
+| `flag` | null K |
+| `values` | `[]` K, absent K (null, never `[]`), scalar E, duplicate E |
+| `meta` | `{}` K, absent K (null, never `{}`), nested duplicate E |
+| whole frontmatter | trailing garbage E, document end followed by content E |
+
+Composition materializes an absent declared optional property as `null`. Absent and explicit null therefore differ only in the source document, not in the composed frontmatter.
+
+**Blocked:**
+
+| Cell | Blocked by |
+|---|---|
+| numeric exactness, overflow, and underflow | **Wave 2 Numeric** |
+| `numberlike`/`boolish` through containers; numeric-text C of list and object members | **Wave 3/4** |
+| tuple slots, required variants, pattern-key values, whole-value unions | **Grammar, then Schema adapter** |
+| every JSON value-surface duplicate, including textual `config` content | **Ruling R3** |
+
+**Not covered, though decidable now:** the `config` content-target control (a native mapping serializes to JSON text) and its malformed-text E. This task left them out of scope; they remain for the Wave 4 custom-formats tests.
