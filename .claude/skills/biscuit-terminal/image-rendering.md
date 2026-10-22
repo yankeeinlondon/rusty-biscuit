@@ -154,7 +154,7 @@ let iterm_escape = img.render_iterm2(&png_data, "40", "filename.png");
 
 ## Cell Size and Aspect Ratio
 
-`TerminalImage` uses measured cell size when available (`discovery::fonts::cell_size()`), with an `8x16` fallback. This avoids visibly distorted images on terminals with non-2:1 cell geometry.
+`TerminalImage` uses measured cell size when available (`discovery::fonts::cell_size()`), with an `8x16` fallback. This avoids visibly distorted images on terminals with non-2:1 cell geometry. Unix measures it per lookup (`TIOCGWINSZ`, then CSI 14 t); native Windows reads the `CSI 16 t` answer from the startup exchange, once per process (`docs/discovery/terminal-queries.md#cell-size`).
 
 ## Error Handling Notes
 
@@ -168,7 +168,7 @@ The policy-style variants are primarily tied to helper checks; they are not all 
 
 - The encoder follows `Terminal::graphics_route` (a `GraphicsRoute`: format,
   transport, placement, confidence, structured `RouteReason`,
-  `needs_measured_cells`), resolved once
+  `needs_measured_cells`, `needs_cursor_resync`), resolved once
   per `Terminal`; never re-resolve per image. Developer guide:
   `biscuit-terminal/docs/discovery/graphics-routes.md`.
 - `render_with_route(&term)` returns `ImageOutput::Pixels(seq)` or
@@ -187,7 +187,9 @@ The policy-style variants are primarily tied to helper checks; they are not all 
   `InvalidInput`, or `NotATerminal` (`half_blocks_permitted`); otherwise
   `Fallback`. So pipes get alt text even with `FORCE_COLOR=1`. Width uses the
   pixel paths' resolver; height keeps aspect (half-block pixel = 1 cell wide,
-  ½ cell tall, measured or 8×16); transparency composites onto
+  ½ cell tall, measured or 8×16); alpha 0 is never painted (`SGR 49`
+  default background: `▄` when the upper pixel is transparent, a space when
+  both are, `49` below an odd last row), partial alpha blends onto
   `SixelBackground::for_terminal`; triangle filter. Not image support:
   `ImageSupport`/route `format` unchanged. Render-tree image nodes and
   Darkmatter's legacy `▉ IMAGE[...]` never draw half-blocks.
@@ -196,11 +198,16 @@ The policy-style variants are primarily tied to helper checks; they are not all 
 - A Sixel route draws via `sixel.rs` (`Encoder::Sixel`, `icy_sixel` 0.7, no
   cargo feature): Wu quantization, `SIXEL_PALETTE_COLORS` (256), diffusion 0,
   so output is deterministic. Resized to columns × cell width (measured or
-  `CellSize::FALLBACK`), padded below with the background to whole rows
-  (never stretched). DCS `ESC P 9;1;0 q` + `"1;1;W;H`. Every image is
-  composited onto `SixelBackground::for_terminal` (`Measured` = OSC 11
-  `background_color`; `Estimated` = white for `ColorMode::Light`, else
-  black; logged at debug in "Sixel image render").
+  `CellSize::FALLBACK`), padded below with unset pixels to whole rows
+  (never stretched). DCS `ESC P 9;1;0 q` (`P2=1`) + `"1;1;W;H`. Alpha 0
+  sets no sixel bit (icy_sixel leaves alpha < 128 unset; the canvas only
+  ever holds 0 or 255); partial alpha blends onto
+  `SixelBackground::for_terminal` (`Measured` only when
+  `Terminal::background_source` is `ColorSource::Measured`, an OSC 11 reply;
+  else `Estimated` = the `COLORFGBG`/per-app guess in `background_color`, or
+  white for `ColorMode::Light`, else black; logged at debug in "Sixel image
+  render"). **Trap:** `background_color` is `Some(#1e1e1e)` under tmux with
+  no reply; never treat `Some` as measured, read `background_source`.
 - Sixel cursor: IND (`ESC D`) per row first (scroll happens before drawing,
   never under a saved cursor), CUU back, `ESC[s`, optional CUF, DCS,
   `ESC[u`; standalone adds CUD rows + CR, inline (`TwoColumn`) omits it. No
@@ -210,8 +217,11 @@ The policy-style variants are primarily tied to helper checks; they are not all 
 - Transport `Tmux`: `protocol::for_transport` wraps every APC/OSC/DCS in its
   own envelope (`terminal_image/tmux.rs`, `wrap_graphics_for_tmux`; CSI such
   as `ESC[s`/`ESC[u`/mode 2026 stays unwrapped, an existing envelope is never
-  re-wrapped). Kitty uploads through tmux use `render_kitty_with_id`
-  (`i=` from `probe::next_kitty_id`, `q=2`, `c=`+`r=`). Any wrapped message
+  re-wrapped). Kitty uploads through tmux use `render_kitty_cells`
+  (`c=`+`r=`). Every ordinary upload (`render_kitty_cells`,
+  `render_kitty_width_only`, so also direct routes, `render_as_kitty` and the
+  graphical `HorizontalRule`) is `q=2` with a fresh `i=` from
+  `probe::next_kitty_id` on the first chunk only. Any wrapped message
   over `TMUX_MESSAGE_BUDGET` (1 MiB) → `Fallback` (`BlockedTransport`, size in
   the message) before rows are reserved; `render_inline` returns
   `UnsupportedTerminal` instead.
@@ -229,7 +239,14 @@ The policy-style variants are primarily tied to helper checks; they are not all 
 - L2: `level2_tmux_kitty_client_gets_unicode_placeholders` attaches a
   `script`-hosted client with `TERM=xterm-kitty` (system terminfo, else
   kitty.app's bundled one; skips without either) and reads what tmux
-  forwards to it.
+  forwards to it. The client attaches with `tmux -u -T RGB`: without a
+  declared `RGB` feature tmux infers color support from the host's terminfo,
+  and where it does not infer `RGB` the route correctly places ordinarily.
+- A `needs_cursor_resync` route (Windows SSH server, iTerm2 only) writes
+  `" \r"` right after the image sequence, before the `ESC[<n>B\r` tail
+  (standalone) or at the end of the `render_inline` overlay; every other
+  route's bytes are unchanged. conhost drops the CR otherwise (see the `os`
+  skill, `windows-console.md`).
 - A `needs_measured_cells` route (Zellij) falls back when `term.cell_size()`
   is `None` (`unmeasured_cells_reason`); never size such a route from the
   8×16 estimate. The library never prints hints; `bt`

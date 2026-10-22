@@ -3,7 +3,8 @@
 Some facts about a terminal can only be learned by asking it: the background
 and foreground colors (OSC 11 / OSC 10), the cursor color (OSC 12), whether it
 renders Kitty graphics or Sixel (the graphics probe), the window size in pixels
-(CSI 14 t), and the cursor position (DSR, `CSI 6 n`). `biscuit-terminal` asks
+(CSI 14 t), the size of one character cell in pixels (CSI 16 t, native
+Windows), and the cursor position (DSR, `CSI 6 n`). `biscuit-terminal` asks
 by writing an escape sequence to the terminal and reading the reply. This page
 describes what that costs, when it is skipped, and how a program that reads
 the terminal itself keeps the library out of its way.
@@ -62,26 +63,36 @@ already ended the exchange answers the second question: attribute `4` in the
 reply means Sixel. Graphics therefore add no extra round trip and no new
 moment at which the library reads input.
 
-Inside a visible tmux (`TMUX` set) that is 3.4 or later with the `sixel`
-feature on every client, the graphics part is the DA1 request alone, with no
-Kitty query (`ProbePlan::direct_da1_only`). tmux answers DA1 itself, which
-tells the library whether tmux can draw Sixel on its own, and it treats an
-unwrapped APC (`ESC _ … ESC \`) as a pane-title change, so a Kitty query
-written as-is would retitle the pane `Gi=…` instead of reaching a terminal.
+Whenever a tmux or GNU screen is in the path or likely (`TMUX` or `STY`
+set, or a `TERM` suggesting a hidden tmux), the graphics part is the DA1
+request alone, with no Kitty query (`ProbePlan::direct_da1_only`). tmux
+treats an unwrapped APC (`ESC _ … ESC \`) as a pane-title change, so a Kitty
+query written as-is would retitle the pane `Gi=…` instead of reaching a
+terminal; GNU screen takes it as a hardstatus change. Inside a visible tmux
+that is 3.4 or later with the `sixel` feature on every client, tmux answers
+DA1 itself, which tells the library whether tmux can draw Sixel on its own.
 The probe result records `kitty: NoReply` and tmux's DA1 reply:
 
 ```text
 ESC[c   -> ESC[?1;2;4c   (tmux built with Sixel; colors are not asked through tmux)
 ```
 
-Whichever caller needs the exchange first, the color lookup or the graphics
-route, sends every part the process needs, and both answers are cached
-together. Each part keeps its own gate:
+On native Windows the exchange also asks for the cell size, because Windows
+has no system call that reports it (see [Cell size](#cell-size)):
+
+```text
+ESC]10;?  ESC]11;?  ESC[16t  ESC[c   -> ... ESC[6;20;10t ESC[?61;4;...c
+```
+
+Whichever caller needs the exchange first, the color lookup, the graphics
+route, or (on native Windows) a cell-size lookup, sends every part the process
+needs, and the answers are cached together. Each part keeps its own gate:
 
 | Part | Sent when |
 |------|-----------|
 | OSC 10/11 colors | Stdout is a terminal, not CI, probing is not turned off, the terminal is on the color list (below), and no multiplexer (tmux, Zellij, GNU Screen) is in the way |
 | Kitty graphics query | The graphics route asks for a probe and no input is waiting, except to a visible tmux asked about its own Sixel (DA1 only) |
+| Cell size (`CSI 16 t`) | Native Windows only, whenever the exchange is sent there; a cell-size lookup before any exchange sends one when the color gate passes |
 | DA1 sentinel | Always, as the last part of any exchange that is sent |
 
 So inside Zellij the colors are still not queried but the graphics query is:
@@ -112,7 +123,8 @@ side of SSH: `TERM` names tmux or screen but neither `TMUX` nor `STY` is set),
 the user declared one with `BISCUIT_GRAPHICS_TRANSPORT=tmux`, or a visible
 tmux (`TMUX` set) would not say whether `allow-passthrough` is on, a second
 exchange is sent at the same moment: the Kitty query and the DA1 sentinel,
-each wrapped once for tmux passthrough. A visible tmux whose
+each wrapped once for tmux passthrough. In each of these cases this is the
+only Kitty query sent; the direct exchange carries DA1 alone or is not sent. A visible tmux whose
 `allow-passthrough` can be read is never probed: tmux reports the answer
 itself.
 
@@ -213,6 +225,17 @@ to answer color queries (Kitty, WezTerm, iTerm2, Alacritty, Ghostty, Foot,
 Contour, and on native Windows also Windows Terminal), and otherwise fall back
 to `COLORFGBG` and per-terminal defaults.
 
+Only a reply is a measurement. `bg_color_with_source()`,
+`text_color_with_source()`, and `cursor_color_with_source()` return the color
+with its `ColorSource`: `Measured` when the terminal answered the live query,
+`Estimated` when it came from `COLORFGBG` or a per-terminal default.
+`Terminal::background_source` carries the same for `Terminal::background_color`.
+Under tmux, for example, nothing is queried, so WezTerm's background reads as
+the per-terminal default `#1e1e1e`, `Estimated`, even when the real one is
+`#282c34`. Image rendering never paints transparent pixels with an estimate
+([Terminal Image](../components/terminal_image.md#sixel)), and `bt` labels each
+color `measured` or `estimated` (the JSON `source` field).
+
 The graphics probe is sent only when the environment cannot decide the route;
 [Graphics Routes](./graphics-routes.md#when-the-probe-runs) lists when it runs
 and when it never does.
@@ -225,7 +248,7 @@ only the way the terminal is reached differs.
 | Platform | How the terminal is reached | Queries |
 |----------|-----------------------------|---------|
 | macOS, Linux, WSL2 | `/dev/tty` in raw mode, read through `select(2)`; the terminal modes are restored afterwards | All of them |
-| Native Windows | The console input and output handles (`CONIN$` / `CONOUT$`), with the console modes restored afterwards | Colors and the graphics probe; not cursor position or window pixels |
+| Native Windows | The console input and output handles (`CONIN$` / `CONOUT$`), with the console modes restored afterwards | Colors, the cell size, and the graphics probe; not cursor position or window pixels |
 
 The request goes to the controlling terminal rather than stdout, so it reaches
 the terminal even when stdout is captured.
@@ -236,7 +259,7 @@ console modes when it is done. It serves both parts of the startup exchange,
 so Windows Terminal reports its real foreground and background colors, which
 also decide the light or dark theme there, instead of the per-terminal
 default. Cursor position and CSI 14 t window pixels are still not queried on
-native Windows.
+native Windows; the cell size is (see [Cell size](#cell-size)).
 
 Two Windows environments are never queried:
 
@@ -244,10 +267,37 @@ Two Windows environments are never queried:
   sequences anyway (see
   [Windows SSH server](./graphics-routes.md#windows-ssh-server)), and it
   stands between the program and the client's terminal, so neither the
-  graphics probe nor the color queries are sent.
+  graphics probe, the color queries, nor the cell-size query is sent. Images
+  there are sized with the 8×16 estimate.
 - **A legacy Windows console**: a native Windows process with no
   `WT_SESSION`, no `TERM_PROGRAM`, no `MSYSTEM`, and not in an SSH session.
   It answers no queries and renders no pixel format.
+
+## Cell size
+
+Images and pixel-drawn rules are sized from the pixel size of one character
+cell. `Terminal::cell_size()` (and `discovery::fonts::cell_size()`) returns
+the measured size, or `None`, in which case the drawing code uses
+`CellSize::FALLBACK` (8 px wide, 16 px tall).
+
+| Platform | Where the size comes from | When it is read |
+|----------|---------------------------|-----------------|
+| macOS, Linux, WSL2 | The `TIOCGWINSZ` pixel fields divided by the grid; when the terminal leaves them at zero, CSI 14 t window pixels divided by the grid | Every lookup, so a font change is followed |
+| Native Windows | The terminal's answer to `CSI 16 t` in the startup exchange, `CSI 6 ; <height> ; <width> t` | Once per process |
+
+Windows Terminal answers `ESC[6;20;10t` for its default font: 20 px tall,
+10 px wide. The answer is used only when both dimensions are between 1 and
+1024 px; no answer, a zero (a terminal that does not know its pixels), or a
+larger value leaves the size unmeasured, so the 8×16 estimate is used. The
+reply is an escape sequence, so on Windows it is never written back to the
+console input as typeahead.
+
+The Windows answer is not asked again at render time. A cell's pixel size
+follows the font, not the window, so resizing the window does not change it
+(the column count, which does change, is read on every render). Asking again
+would read console input while the program may be reading it. A font size
+change during a long-running Windows program is therefore not seen until the
+next process.
 
 ## Timing knobs
 
@@ -274,9 +324,11 @@ at the prompt. A longer silence budget makes that less likely on a slow link.
 | A graphics query skipped because input was waiting | Not cached | A later construction may probe |
 | A silent terminal | The process | Every later query returns at once |
 | An unanswered single-purpose query | The process | Only cursor position, CSI 14 t, standalone OSC |
+| The cell size on native Windows | The process | Part of the startup exchange; see [Cell size](#cell-size) |
 
-The graphics route itself is kept on each `Terminal`; the cell size an image
-is drawn with is looked up separately and is not part of the probe cache.
+The graphics route itself is kept on each `Terminal`. On macOS, Linux, and
+WSL2 the cell size an image is drawn with is measured again for each lookup
+and is not part of the probe cache.
 
 ## Stray input
 

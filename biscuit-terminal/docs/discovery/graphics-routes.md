@@ -46,6 +46,7 @@ reply that ends it. Identified terminals are never probed.
 | `confidence` | `Forced`, `Verified`, `Known`, `Unknown` | How the route was established (below). |
 | `reason` | `kind`, `message`, `fix` | Why this route, or why no pixels. `fix` is optional. |
 | `needs_measured_cells` | `true`, `false` | The image must be sized from a measured cell size, never the 8×16 estimate. Set for Zellij, which sizes images from its own measurement of the host. |
+| `needs_cursor_resync` | `true`, `false` | After an image, a space is written before the carriage return that ends it. Set for the iTerm2 route through the [Windows SSH server](#windows-ssh-server), whose console host otherwise drops that carriage return. |
 
 **Confidence:**
 
@@ -161,8 +162,10 @@ exchanges would help, and `inputs.probed()` runs them (sharing the cached
 startup exchange) and records the results. The returned `ProbePlan` has three
 fields: `direct` (the query written as-is), `tunneled` (the query wrapped for
 tmux passthrough), and `direct_da1_only`, set when the direct exchange must
-send the DA1 request without the Kitty query, as it does to a visible tmux
-that could draw Sixel itself (see [tmux](#tmux)).
+send the DA1 request without the Kitty query. It is set whenever a tmux or
+GNU screen is in the path or likely: a visible tmux (`TMUX`) or screen
+(`STY`), whatever `BISCUIT_GRAPHICS_TRANSPORT` says, and a likely hidden tmux
+(see [tmux](#tmux)).
 
 ### From the `bt` CLI
 
@@ -182,7 +185,8 @@ that could draw Sixel itself (see [tmux](#tmux)).
       "message": "WezTerm (TERM_PROGRAM=WezTerm) is known to render the Kitty graphics protocol",
       "fix": null
     },
-    "needs_measured_cells": false
+    "needs_measured_cells": false,
+    "needs_cursor_resync": false
   }
   ```
 
@@ -211,7 +215,7 @@ flowchart TD
     T -->|TMUX set| TU[visible tmux rule:<br/>version, allow-passthrough, clients]
     T -->|declared only| TD[declared tmux rule]
     T -->|no| H{TRANSPORT auto and TERM<br/>is tmux or screen, no STY?}
-    H -->|yes| HT[hidden tmux rule:<br/>plain + wrapped probe]
+    H -->|yes| HT[hidden tmux rule:<br/>DA1 direct + wrapped Kitty probe]
     H -->|no| K{TERM_PROGRAM or LC_TERMINAL<br/>names a known terminal?}
     K -->|yes| KT[that terminal's format]
     K -->|no| S{SSH session?}
@@ -309,6 +313,38 @@ A match gives the iTerm2 format (`Known`); anything else gives none
 forced `kitty` or `sixel` is blocked too. The graphics probe is never sent
 here: the console host would remove it as well.
 
+An iTerm2 route here sets `needs_cursor_resync`, and the image is followed by
+a space and a carriage return before the usual cursor movement:
+
+```text
+ESC[s  OSC 1337;File=…  ESC[u  " "  CR  ESC[<rows>B  CR
+```
+
+Without them, the line after an image started at the image's right edge
+(30 columns in after `bt image --example` from WezTerm on macOS). The
+explanation that fits what was seen, not yet proven on its own: the console
+host passes the iTerm2 sequence on without modeling the image, so its cursor
+stays where the image started while the terminal's moves to the image's right
+edge; the console host then drops the carriage return because, by its own
+cursor, the cursor is already at column 0. The space moves the console host's
+cursor off column 0, so the carriage return reaches the terminal. The space
+itself lands just right of the image's first row. Every other route sends
+exactly the bytes it sent before.
+
+```mermaid
+sequenceDiagram
+    participant P as program
+    participant C as console host
+    participant T as terminal
+    P->>C: image (OSC 1337)
+    C->>T: image
+    Note over C: cursor still at column 0
+    Note over T: cursor at the image's right edge
+    P->>C: space, CR
+    C->>T: space, CR (its cursor moved, so CR is sent)
+    Note over C,T: both at column 0
+```
+
 This applies only to the system console host. WezTerm's own multiplexer works
 on the same kind of host because WezTerm ships its own console host.
 
@@ -396,6 +432,19 @@ so the question costs no wait on the outer terminal. When probing is not
 allowed (CI, `BISCUIT_TERMINAL_PROBE=off`, `ProbeMode::Off`), DA1 is not
 asked, the route is not established, and the passthrough rules below apply.
 
+Because this route comes first, an outer terminal that tmux can draw Sixel
+for gets Sixel even when it also renders Kitty. WezTerm under a tmux built
+with Sixel (tmux 3.8 reports `sixel` for it) is the common case: `bt` reports
+Sixel, `Direct`, `Verified`, and turning `allow-passthrough` on or off changes
+nothing. Set `BISCUIT_GRAPHICS=kitty` to send Kitty through passthrough
+instead.
+
+**Known limits of tmux's own Sixel.** tmux scrolls the image with the pane in
+copy mode and hides it while another window is shown, but it clears its own
+Sixel images when the pane is resized (a split counts), and they do not come
+back. A client that attaches later does not see them either. These limits are
+documented, not worked around.
+
 Otherwise the route goes through passthrough:
 
 | tmux reports | Route |
@@ -445,15 +494,26 @@ identified.
 leaves no `TMUX` in the program's environment, but it usually sets `TERM` to
 `tmux-*` or `screen-*` (or exactly `tmux` or `screen`). With such a `TERM` and
 neither `TMUX` nor `STY` set, a hidden tmux is likely, and graphics written
-directly would be swallowed by it. The probe sends the Kitty query twice at
-the same moment: once plain, and once
-[wrapped for passthrough](./terminal-queries.md#the-wrapped-exchange).
+directly would be swallowed by it. The probe sends the Kitty query only
+[wrapped for passthrough](./terminal-queries.md#the-wrapped-exchange). The
+direct exchange carries the DA1 request alone
+(`ProbePlan::direct_da1_only`), because a real tmux takes an unwrapped APC
+(`ESC _ … ESC \`) as a pane-title change and GNU screen takes it as a
+hardstatus change; neither ever receives a plain Kitty query.
 
 | Answer | Route |
 | --- | --- |
 | `OK` to the wrapped query | transport `Tmux`, ordinary placement, `Verified`: Kitty, or the iTerm2 format when the client forwarded `LC_TERMINAL=iTerm2` |
-| `OK` to the plain query | no tmux after all: direct (`Verified`), Kitty, or the iTerm2 format when the client forwarded `LC_TERMINAL=iTerm2` |
-| Neither | none (`Unknown`), with the fix "set `BISCUIT_GRAPHICS_TRANSPORT=tmux` if a tmux with allow-passthrough on runs between this program and the terminal" |
+| No `OK` to the wrapped query | none (`Unknown`), with the fix "set `BISCUIT_GRAPHICS_TRANSPORT=tmux` if a tmux with allow-passthrough on runs between this program and the terminal, or `BISCUIT_GRAPHICS_TRANSPORT=direct` if none does" |
+
+A misleading `TERM` with no tmux at all (for example a `screen-256color`
+`TERM` copied into a plain SSH session) therefore falls back to text until
+`BISCUIT_GRAPHICS_TRANSPORT=direct` is set; the usual rules, including the
+plain Kitty query, then apply:
+
+```sh
+BISCUIT_GRAPHICS_TRANSPORT=direct bt image photo.png
+```
 
 This hint is checked before a forwarded identity such as `LC_TERMINAL=iTerm2`,
 because that identity describes the terminal outside the tmux, which never
@@ -497,9 +557,7 @@ flowchart TD
     H -->|no| N
     H -->|yes| HW{wrapped query OK?}
     HW -->|yes| HV[Kitty or iTerm2, Tmux, Verified]
-    HW -->|no| HP{plain query OK?}
-    HP -->|yes| HK[Kitty or iTerm2, Direct, Verified]
-    HP -->|no| HU[none: Unknown<br/>fix: set TRANSPORT=tmux]
+    HW -->|no| HU[none: Unknown<br/>fix: set TRANSPORT=tmux or =direct]
 ```
 
 #### Sending an image through tmux
@@ -507,10 +565,11 @@ flowchart TD
 With a `Tmux` route, `TerminalImage` writes the same image it would write
 directly, with every graphics sequence wrapped:
 
-- **Kitty**: each 4096-byte chunk gets its own envelope. The upload carries a
-  fresh nonzero image ID (`i=`), stays in quiet mode (`q=2`, so no reply lands
-  in the shell), and gives rows explicitly (`c=` and `r=`), because the outer
-  terminal is not the one the library sees.
+- **Kitty**: each 4096-byte chunk gets its own envelope. As on a direct
+  route, the upload carries a fresh nonzero image ID (`i=`) and stays in
+  quiet mode (`q=2`, so no reply lands in the shell); it always gives rows
+  explicitly (`c=` and `r=`), because the outer terminal is not the one the
+  library sees.
 - **iTerm2** and **Sixel**: the whole `File=` message, or the whole Sixel
   DCS, is one envelope; it is never split. tmux accepts at most 1 MiB (1,048,576 bytes) per wrapped message. The size
   is counted after base64, metadata, ESC doubling, and the envelope, and an
@@ -601,11 +660,12 @@ When the environment cannot decide, the library asks the terminal. The probe
 is part of the color exchange `Terminal::new()` already makes, once per
 process (see [Live Terminal Queries](./terminal-queries.md#the-startup-exchange)):
 a Kitty graphics query for a one-pixel image, with a fresh image ID, and the
-DA1 request that already ends the exchange. It adds no round trip. To a
-visible tmux that could draw Sixel itself, the direct exchange carries the DA1
-request alone (`ProbePlan::direct_da1_only`): an unwrapped Kitty query would
-retitle the pane, and the probe result records `kitty: NoReply` with tmux's
-DA1 reply.
+DA1 request that already ends the exchange. It adds no round trip. When a
+tmux or GNU screen is visible (`TMUX`, `STY`) or likely (a hidden tmux), the
+direct exchange carries the DA1 request alone (`ProbePlan::direct_da1_only`):
+an unwrapped Kitty query would retitle the tmux pane or set screen's
+hardstatus line, and the probe result records `kitty: NoReply` with the
+multiplexer's DA1 reply.
 
 ### What the replies mean
 
@@ -635,7 +695,9 @@ The probe runs only when the environment leaves the route open:
 - Zellij, always (see [Zellij](#zellij));
 - Windows Terminal whose `WindowsTerminal.exe` version is unreadable or older
   than 1.22 (see [Known terminals](#known-terminals));
-- a likely hidden tmux, with the extra wrapped query (see [tmux](#tmux));
+- a likely hidden tmux: DA1 alone directly, the Kitty query wrapped (see
+  [tmux](#tmux));
+- GNU screen (`STY` set) with an unidentified terminal: DA1 alone;
 - a declared tmux whose outer terminal is not identified (wrapped query only);
 - a visible tmux that is 3.4 or later with the `sixel` feature on every
   client (DA1 alone, unwrapped, to ask tmux about its own Sixel);
@@ -705,7 +767,7 @@ set).
 | Value | Effect |
 | --- | --- |
 | unset, `auto` | tmux is in the path when `TMUX` is set; a `tmux-*` or `screen-*` `TERM` without `TMUX` or `STY` is probed as a likely hidden tmux. |
-| `direct` | No tmux in the path, even when `TMUX` is set, and no hidden-tmux check. |
+| `direct` | No tmux in the path, even when `TMUX` is set, and no hidden-tmux check. With `TMUX` or `STY` set, the probe still leaves the Kitty query out of the direct exchange. |
 | `tmux` | tmux is in the path. With `TMUX` set the [visible tmux](#tmux) rule applies; without it, the [declared tmux](#tmux) rule picks the format and the transport is `Tmux`. |
 
 ### `BISCUIT_TERMINAL_PROBE`
@@ -801,7 +863,7 @@ override is labeled a configuration error rather than "no graphics".
 | Windows Terminal whose version could not be read and whose DA1 reply reports no Sixel | Set `BISCUIT_GRAPHICS=sixel` if it is 1.22 or later (the route is then Sixel). |
 | tmux older than 3.3 | Upgrade tmux to 3.3.0 or later. |
 | tmux with `allow-passthrough off` for the pane | `set -g allow-passthrough on`. |
-| A likely hidden tmux that answered neither query | Set `BISCUIT_GRAPHICS_TRANSPORT=tmux` if a tmux with allow-passthrough on runs between this program and the terminal. |
+| A likely hidden tmux that did not answer the wrapped query | Set `BISCUIT_GRAPHICS_TRANSPORT=tmux` if a tmux with allow-passthrough on runs between this program and the terminal, or `BISCUIT_GRAPHICS_TRANSPORT=direct` if none does. |
 | A declared tmux whose outer terminal is unknown | Set `BISCUIT_GRAPHICS` to the outer terminal's format. |
 | Invalid `BISCUIT_GRAPHICS`, `BISCUIT_GRAPHICS_TRANSPORT`, or `BISCUIT_TERMINAL_PROBE` | Set the variable to one of its accepted values. |
 

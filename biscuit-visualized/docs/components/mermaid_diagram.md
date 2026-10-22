@@ -78,13 +78,13 @@ The background decides what paints the area behind the diagram, and also the bla
 
 | Background | Result |
 |------------|--------|
-| `Background::Transparent` (default) | Nothing is painted; Kitty and iTerm2 composite the diagram over the terminal's own background; a Sixel route paints one (below) |
+| `Background::Transparent` (default) | Nothing is painted; Kitty and iTerm2 composite the diagram over the terminal's own background; a Sixel route leaves the transparent pixels unset, or paints the measured background (below) |
 | `Background::Theme` | The theme's background color |
 | `Background::Solid { r, g, b }` | One opaque color in place of the theme's |
 
 `with_transparent_background(bool)` remains as a shorthand: `true` is `Transparent`, `false` is `Theme`. `inverted(..)` switches to the inverse theme with its opaque `Theme` background.
 
-**On a Sixel route** a transparent diagram cannot stay transparent: Sixel has no transparency, so `TerminalImage` would composite it onto an estimated color. Instead, a `Background::Transparent` diagram is rasterized on `Background::Solid` with the terminal's measured background (its OSC 11 answer), or on `Background::Theme` when the terminal reported none, so the diagram's own text and lines stay readable. A `Theme` or `Solid` background you request is kept as it is. The artifact cache keys on the background, so the Sixel raster and the Kitty raster of the same diagram are separate cache entries.
+**On a Sixel route** a transparent diagram keeps its transparent pixels unset: Sixel has no partial transparency, so `TerminalImage` leaves fully transparent pixels untouched (the terminal's own background shows) and blends only antialiased edges onto the best-known background. When the terminal measured its background (an OSC 11 reply), a `Background::Transparent` diagram is instead rasterized on `Background::Solid` with that color, which makes the edges exact. When it did not, for example under tmux, where the background is only a per-terminal guess, the diagram stays `Transparent`, so a wrong guess never paints a box around it. A `Theme` or `Solid` background you request is kept as it is. The artifact cache keys on the background, so the Sixel raster and the Kitty raster of the same diagram can be separate cache entries.
 
 ### Quadrant Chart Configuration
 

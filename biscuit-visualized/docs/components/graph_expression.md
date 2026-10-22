@@ -49,7 +49,7 @@ let graph = GraphExpression::for_terminal("a -> b\nb -> c", GraphInputSyntax::Au
 
 `for_terminal` draws with `Background::Transparent`, so Kitty and iTerm2 composite the graph over the terminal's own background. `parse`, `inverted_for_terminal`, and `inverted(..)` use `Background::Theme`, the theme's opaque surface color. `with_background` overrides either (import `Background` from `biscuit_visualized::artifact`); `with_transparent_background(bool)` remains as a shorthand where `false` means `Theme`.
 
-Sixel has no transparency, so on a Sixel route a `Transparent` graph is rasterized on `Background::Solid` with the terminal's measured background, or on `Background::Theme` when the terminal reported none. An explicitly requested `Theme` or `Solid` background is kept. The artifact cache keys on the background, so a Sixel raster and a Kitty raster of the same graph are separate cache entries.
+On a Sixel route a `Transparent` graph is rasterized on `Background::Solid` with the terminal's measured background (an OSC 11 reply). Without a measurement it stays transparent: the Sixel encoder leaves its transparent pixels unset and blends only antialiased edges onto the estimated background, so no box is painted. An explicitly requested `Theme` or `Solid` background is kept. The artifact cache keys on the background, so a Sixel raster and a Kitty raster of the same graph are separate cache entries.
 
 ### Display Size
 

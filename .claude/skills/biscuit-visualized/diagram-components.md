@@ -34,8 +34,11 @@ remains (`false` = `Background::Theme`). Terminal defaults are
 `Transparent` (Kitty/iTerm2 composite over the terminal); `inverted(..)` uses
 the opaque theme background. On a Sixel route (no transparency),
 `components/display.rs::display_background` swaps a `Transparent` request for
-`Solid` = the terminal's measured background (`SixelBackground` `Measured`),
-or `Theme` when none was reported; explicit `Theme`/`Solid` are kept. The
+`Solid` = the terminal's measured background (`SixelBackground` `Measured`,
+an OSC 11 reply). Without one (none, or a `COLORFGBG`/per-app estimate such
+as `#1e1e1e` under tmux) it stays `Transparent`: the Sixel encoder leaves
+alpha-0 pixels unset and blends only antialiased edges onto the estimate, so
+no theme or guessed box is painted. Explicit `Theme`/`Solid` are kept. The
 cache keys on background, so Sixel and Kitty rasters are separate entries;
 `TerminalImage` then decodes the PNG and Sixel-encodes it (Kitty/iTerm2 get
 the PNG bytes unchanged). `MermaidRenderer::render_to_cached_png_at_width`

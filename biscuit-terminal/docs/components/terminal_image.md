@@ -31,7 +31,7 @@ let (path, width) = parse_filepath_and_width("photo.jpg|75%");
 | `filename.jpg\|50%` | 50% of terminal width |
 | `filename.jpg\|fill` | Fill available width |
 
-`ImageWidth::Scale(f32)` has no string form. It sizes an image from its natural width relative to terminal text: pixels per unit = scale × cell height ÷ 16, and columns = natural width × pixels per unit ÷ cell width, rounded up and clamped to the available columns. At `1.0`, 16 units (Mermaid's body text) are one terminal line tall. A raster image's natural width is its pixel width; `biscuit-visualized`'s `MermaidDiagram` passes the SVG's measured width. An unknown cell size (native Windows, CI, every stream redirected) uses `CellSize::FALLBACK` (8×16).
+`ImageWidth::Scale(f32)` has no string form. It sizes an image from its natural width relative to terminal text: pixels per unit = scale × cell height ÷ 16, and columns = natural width × pixels per unit ÷ cell width, rounded up and clamped to the available columns. At `1.0`, 16 units (Mermaid's body text) are one terminal line tall. A raster image's natural width is its pixel width; `biscuit-visualized`'s `MermaidDiagram` passes the SVG's measured width. An unknown cell size (CI, every stream redirected, a terminal that does not report it, such as one reached through the Windows SSH server) uses `CellSize::FALLBACK` (8×16); see [Cell size](../discovery/terminal-queries.md#cell-size) for how it is measured on each platform.
 
 ### Key API
 
@@ -56,10 +56,19 @@ let (path, width) = parse_filepath_and_width("photo.jpg|75%");
 |--------------|--------------|
 | Kitty | Kitty graphics, except to iTerm2, which gets its own format unless `BISCUIT_GRAPHICS=kitty` forced Kitty |
 | iTerm2 | iTerm2's `OSC 1337;File=` format |
-| Sixel | A Sixel image composited onto an opaque background; see [Sixel](#sixel) |
+| Sixel | A Sixel image whose transparent pixels are left unset; see [Sixel](#sixel) |
 | none | The text fallback: half-blocks or alt text |
 
+Every Kitty upload, direct or through tmux, is quiet (`q=2`, so no reply lands in the shell) and carries a fresh nonzero image ID (`i=`) on its first chunk; continuation chunks carry only `m=`. WezTerm and tmux get explicit rows (`c=` and `r=`); other Kitty-protocol terminals get the width alone (`c=`) and keep the image's aspect ratio themselves:
+
+```text
+ESC _G q=2,i=4211,f=100,a=T,t=d,c=4,m=1;… ESC \     first chunk
+ESC _G m=0;… ESC \                                  last chunk
+```
+
 A route with transport `Tmux` sends the same image wrapped for tmux passthrough: each Kitty chunk in its own `ESC P tmux; … ESC \` envelope (with a fresh nonzero image ID, quiet mode, and explicit rows), and the iTerm2 `File=` message or the Sixel DCS as one envelope. Cursor movement stays unwrapped for tmux to handle. When every tmux client is Kitty or Ghostty, the route's placement is `Placeholders`: the upload carries a virtual placement (`U=1`) and the image is drawn by lines of Unicode placeholder text that tmux keeps in the pane, so the image follows it. See [tmux in Graphics Routes](../discovery/graphics-routes.md#tmux) for the wire format, [Unicode placeholders](../discovery/graphics-routes.md#unicode-placeholders) for when they are used, and the known limits of ordinary placement through tmux.
+
+On the [Windows SSH server](../discovery/graphics-routes.md#windows-ssh-server) the route sets `needs_cursor_resync`: the iTerm2 image is followed by a space and a carriage return, then the usual cursor movement, so the line after the image starts at column 0. An image inside a layout column (`TwoColumn`) gets the same space and carriage return, which leaves the cursor at column 0 of the image's first row rather than where the image started. Every other route's bytes are unchanged.
 
 Two properties of a pixel route can still send it to the text fallback, each with its own reason so the caller can tell why:
 
@@ -93,16 +102,24 @@ match image.render_with_route(&term)? {
 
 A route whose format is Sixel draws the image with the [`icy_sixel`](https://github.com/mkrueger/icy_sixel) encoder. The settings are fixed so the output is deterministic: Wu quantization, a palette of at most `SIXEL_PALETTE_COLORS` (256) colors, and no dithering. The same image always encodes to the same bytes, and a crisp diagram gains no dithering noise.
 
-**Size.** The image is resized to its display size: the resolved columns times the cell's pixel width, with the height following the aspect ratio. The cell size is the measured one, or `CellSize::FALLBACK` (8×16) when the terminal reported none. The rows the image covers are rounded up, and the raster is padded below with the background color to fill whole cell rows; the image is never stretched to fit them.
+**Size.** The image is resized to its display size: the resolved columns times the cell's pixel width, with the height following the aspect ratio. The cell size is the measured one, or `CellSize::FALLBACK` (8×16) when the terminal reported none. The rows the image covers are rounded up, and the raster is padded below with unset (transparent) pixels to fill whole cell rows; the image is never stretched to fit them.
 
-**Background.** Sixel has no transparency, so every image is composited onto an opaque `SixelBackground` before it is encoded. `SixelBackground::for_terminal` picks the color and records where it came from:
+**Transparency and background.** Sixel has no partial transparency, so each pixel is one of three kinds:
+
+| Pixel alpha | Sent as |
+|-------------|---------|
+| 0 (fully transparent) | No sixel bit in any color. The DCS declares `P2=1`, so the terminal leaves whatever it shows there: its own background |
+| 1–254 (an antialiased edge) | Blended onto `SixelBackground::for_terminal` and drawn opaque |
+| 255 (opaque) | Unchanged |
+
+A transparent logo on a terminal whose background is `#282c34` therefore shows `#282c34` around it, whether or not the terminal reported that color. `SixelBackground::for_terminal` gives the best-known background for the edges and records where it came from:
 
 | `BackgroundSource` | Color |
 |--------------------|-------|
-| `Measured` | The terminal's answer to the OSC 11 background query (`Terminal::background_color`) |
-| `Estimated` | White for `ColorMode::Light`, black for a dark or unknown color mode |
+| `Measured` | The terminal's reply to the OSC 11 background query (`Terminal::background_source` is `ColorSource::Measured`) |
+| `Estimated` | The terminal did not reply: `Terminal::background_color` when it holds a `COLORFGBG` or per-app guess (`#1e1e1e` for most dark-default terminals, and under tmux, which is never queried), else white for `ColorMode::Light` and black for a dark or unknown color mode |
 
-An estimated background may not match the terminal's exactly, so a transparent image can show a visible box around it. The choice is logged at debug level (the `Sixel image render` event's `background` field), and a caller can check it ahead of time:
+An estimate can differ from the real background, so the antialiased edge of a transparent image can show a faint fringe of the guessed color; the transparent area itself never does. The choice is logged at debug level (the `Sixel image render` event's `background` field), and a caller can check it ahead of time:
 
 ```rust
 use biscuit_terminal::components::terminal_image::{BackgroundSource, SixelBackground};
@@ -171,8 +188,15 @@ let output = image.render_with_route(&term)?;
 
 - **Width** comes from the same resolver as the pixel paths: `ImageWidth`, margins, and alignment. The layout's left offset becomes leading spaces.
 - **Height** keeps the aspect ratio. A half-block pixel is one cell wide and half a cell tall, measured with the terminal's cell size or `CellSize::FALLBACK` (8×16). The image is resized with a triangle (bilinear) filter.
-- **Transparency** is composited onto the same background as [Sixel](#sixel) (`SixelBackground::for_terminal`). An odd last pixel row gets that background as its lower half.
-- **Escapes stay small.** A cell writes a color pair only when it differs from the previous cell's, and each line ends with an SGR reset, so nothing leaks into the following text.
+- **Transparency** is never painted with a guess. A fully transparent pixel uses the terminal's default background (`SGR 49`): a cell whose upper pixel is transparent is drawn as a lower half block (`▄`) with the lower pixel as its foreground, and a cell with both transparent is a space. A partially transparent pixel is blended onto the same best-known background as [Sixel](#sixel) (`SixelBackground::for_terminal`). An odd last pixel row has the default background as its lower half.
+
+  ```text
+  upper opaque, lower opaque       ESC[38;2;R;G;B;48;2;R;G;Bm ▀
+  upper opaque, lower transparent  ESC[38;2;R;G;B;49m ▀
+  upper transparent, lower opaque  ESC[38;2;R;G;B;49m ▄
+  both transparent                 ESC[49m (space)
+  ```
+- **Escapes stay small.** A cell writes its colors only when they differ from the previous cell's, and each line ends with an SGR reset, so nothing leaks into the following text.
 
 **Who uses it.**
 

@@ -63,6 +63,13 @@ white background, which made every dark Terminal.app profile read as Light
 (a near-white row highlight with white text, 2026-10-04). It now has no
 default and is never queried, so it falls through to `AppleInterfaceStyle`.
 
+Provenance: `bg_color_with_source()` / `text_color_with_source()` /
+`cursor_color_with_source()` return `(RgbValue, ColorSource)`; only a live
+reply is `Measured`, `COLORFGBG` and per-app defaults are `Estimated`.
+`Terminal::background_source` carries it for `background_color`
+(`ProbeMode::Off` is always `Estimated`). Under tmux nothing is queried, so
+the background is WezTerm's per-app `#1e1e1e` guess, `Estimated`.
+
 ## Feature Support
 
 ### Image Support
@@ -82,7 +89,8 @@ Resolution is environment first (`BISCUIT_GRAPHICS`,
 tmux, known terminals); `probe_plan(&inputs)` says when the environment cannot
 decide, and then the graphics probe does. Developer guide:
 `biscuit-terminal/docs/discovery/graphics-routes.md`. `image_support()` is a
-projection kept for existing callers.
+projection kept for existing callers. The Windows SSH server's iTerm2 route
+(detected or forced) sets `needs_cursor_resync`; no other route does.
 
 The graphics probe (`detection::probe`, live exchange in
 `discovery::startup_exchange`):
@@ -100,7 +108,10 @@ The graphics probe (`detection::probe`, live exchange in
 - Runs for: unidentified terminal, SSH without forwarded hints, Zellij
   (always; pixel routes set `needs_measured_cells`), Windows Terminal with
   version unreadable or < 1.22, likely hidden tmux (`TERM=tmux-*`/`screen-*`
-  without `TMUX`/`STY`: plain plus a tmux-wrapped exchange), declared tmux with
+  without `TMUX`/`STY`: DA1-only direct plus a tmux-wrapped Kitty exchange; a
+  plain `OK` never makes a route, silence → fix naming both
+  `BISCUIT_GRAPHICS_TRANSPORT=tmux` and `=direct`), GNU screen (`STY`,
+  unidentified terminal: DA1 only), declared tmux with
   unidentified outer terminal (wrapped only), visible tmux whose
   `allow-passthrough` is unreadable (wrapped only). Never for: known terminals,
   non-tty, CI, forced/none/invalid overrides, probing off, Windows SSH server,
@@ -130,13 +141,17 @@ The graphics probe (`detection::probe`, live exchange in
   `allow-passthrough` (off blocks tunneled graphics only). Probing off/CI →
   DA1 not asked → passthrough rules. Forced `sixel` with version + clients
   qualifying → Sixel `Direct` `Forced`, no DA1; otherwise passthrough.
-  Forced kitty/iterm2 unchanged.
+  Forced kitty/iterm2 unchanged. So WezTerm under a Sixel-built tmux (3.8)
+  gets tmux's Sixel, not Kitty passthrough, and passthrough on/off is moot.
+  tmux clears its own Sixel on pane resize (documented limit).
 - `ProbePlan::direct_da1_only`: set for that candidate (`direct` +
   `direct_da1_only`, plus `tunneled` if passthrough unreadable); the direct
   exchange sends DA1 alone (colors only if wanted), result `kitty: NoReply`.
   **Trap:** never send an unwrapped APC/Kitty query to a visible tmux: tmux
   treats `ESC _ … ESC \` as a pane-title change and the pane is retitled
-  `Gi=…` (seen live on tmux 3.8).
+  `Gi=…` (seen live on tmux 3.8). `route.rs::without_apc_under_multiplexer`
+  forces `direct_da1_only` whenever `TMUX` or `STY` is set (even with
+  `BISCUIT_GRAPHICS_TRANSPORT=direct`); the hidden-tmux plan sets it too.
 - Busy input: graphics query not sent, route `Unknown`, skip not cached.
 - Tests set probe answers through `RouteInputs::probe` (`GraphicsProbe`,
   `ProbeResult`, `ProbeReply`, `KittyReply`, `Da1Reply`); see
@@ -329,9 +344,11 @@ the direct graphics probe share one cached request
 (`discovery::startup_exchange`); the wrapped exchange is cached separately.
 Remote sessions (`SSH_CLIENT`, Mosh) get the full timeout;
 `BISCUIT_TERMINAL_QUERY_SILENCE_MS` overrides the budget. On native Windows
-only colors (color-list terminals plus Windows Terminal) and the graphics probe
-are queried, never in a Windows SSH server session; cursor and CSI 14 t stay
-Unix-only. Typed keys read during a Windows exchange are written back with
+only colors (color-list terminals plus Windows Terminal), the cell size
+(`CSI 16 t`, riding in the startup exchange and cached per process, because
+Windows has no pixel ioctl), and the graphics probe are queried, never in a
+Windows SSH server session (there the 8×16 `CellSize::FALLBACK` applies);
+cursor and CSI 14 t stay Unix-only. Typed keys read during a Windows exchange are written back with
 `WriteConsoleInputW`. Full contract:
 `biscuit-terminal/docs/discovery/terminal-queries.md`.
 

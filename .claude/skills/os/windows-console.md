@@ -85,6 +85,16 @@ Reference tests: `worktree/cli/tests/level2_powershell_remove.rs` and
   without Sixel's attribute `4`. Unlike the SSH server's console, this one
   passes APC through. The reference is
   `biscuit-terminal/lib/tests/level2/level2_windows_console_query.rs`.
+  The cell-size query (`CSI 16 t`) also arrives verbatim and is not answered
+  by the console host (measured 2026-10-21): with no reply written the child
+  sees none, so a test can prove both the answered and the unanswered path.
+- **A narrowed `cross-check` of that module runs whatever
+  `discovery_probe.exe` the rig last built;** nextest's `--examples` builds
+  test-mode copies under other names. After a native-mode run the standing
+  clone stays detached at the tested revision, so build the probe there over
+  SSH (`cargo build -p biscuit-terminal --example discovery_probe` in
+  `<clone>\rusty-biscuit`) and run the module again. A probe line missing
+  from the output (rather than a wrong value) is the stale-probe symptom.
 - **Read a child's printed results from a file, not the stream:**
   `cmd /d /c <exe> > out.txt 2>&1` with `cwd` set to a temp directory. A
   program that opens `CONIN$`/`CONOUT$` by name still reaches the console.
@@ -150,3 +160,14 @@ inside an `ssh -tt` session were captured at the client.
   `biscuit-terminal/docs/discovery/graphics-routes.md`.
 - A test that asserts on OSC 8 output read back through this path must accept
   the added `id=`.
+- **conhost does not model an iTerm2 image's footprint, and drops a CR it
+  thinks is a no-op** (diagnosis fits the 2026-10-21 observations from
+  WezTerm on macOS; not proven in isolation). After `ESC[s OSC 1337 ESC[u
+  ESC[<n>B CR` the next line started at the image's right edge (30 columns
+  in after `bt image --example`, about 68 after `bt bar-chart --example`):
+  conhost's cursor never left column 0, so it did not forward the CR, while
+  the client's cursor sat at the image's right edge. Writing `" " CR` right
+  after the image moves conhost's cursor first, so the CR is sent.
+  `GraphicsRoute::needs_cursor_resync` carries this; it is set only on the
+  Windows SSH server iTerm2 route. Any other "move back to column 0" after
+  output conhost cannot see has the same trap.
