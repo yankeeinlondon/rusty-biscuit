@@ -38,15 +38,151 @@ docs_created_during_phase_1:
 skills_files_updated_during_phase_1: []
 packages:
     - darkmatter
+    - darkmatter-cli
+    - dmls
+    - claudine
+    - claudine-gen
+    - sniff-cli
 human_review: false
+source_files_during_phase_2:
+    - claudine/gen/src/schema_compat.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/opencode_config.rs
+    - claudine/lib/src/provider/tests.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/compose_state_set.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_grammar_types.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/named_references.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - darkmatter/dmls/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/lifecycle/actions.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/expression/ast.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/replacement.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/parser.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - darkmatter/lib/src/markdown/hash/mod.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/numeric.rs
+    - darkmatter/lib/src/markdown/numeric/ingress.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/phase.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/signature.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/categories.documented.yaml
+    - darkmatter/lib/tests/l1/expression_type_scope.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase6.rs
+    - darkmatter/lib/tests/l1/numeric_admission.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/envelope.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/frontmatter.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/raw_schema.rs
+    - darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+    - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/snapshots/l1__schema_grammar_descriptors__snapshot_empty_tuple_and_category_annotation.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schema_grammar_descriptors__snapshot_fixed_tuple.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schema_grammar_descriptors__snapshot_union_operator.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schema_grammar_descriptors__snapshot_variadic_tuple_with_optional_position.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_string_with_pattern_and_array_constraints.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_with_description.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_any.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolean.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolish.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_date.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_datetime.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_email.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_enum_members.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_array_min_items.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_bare.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_match.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number_integer_with_min.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_numberlike.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_object.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_min_max.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_not_empty.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_pattern.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_time.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_bare.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_scheme.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_with_description.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_default_and_required_atoms.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_enum_with_default_and_required.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_full_document_schema.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_array.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_as_union_arm.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_bare.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_constrained_array.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_empty.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_mixed_with_string_fallback.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_multi_line.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_nested.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_required_value.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_basic.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_matching_default.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_required.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_root_union_inline_only.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__suggest_constraint_phase3__conversion_snapshot_covers_valid_and_invalid_metadata.snap
+    - sniff/cli/src/commands/filesystem_query.rs
+    - sniff/cli/src/output/mod.rs
+    - sniff/cli/tests/l1/snapshots.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/dependencies.md
+    - docs/dependencies.md
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/PROVENANCE.md
+docs_created_during_phase_2:
+    - darkmatter/docs/topics/numbers.md
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/frontmatter.md
+    - .claude/skills/darkmatter/schema.md
 message_to_agent: |-
-  Phase 1 produced only inventory, a numeric spike, and matrix tests; no production code changed. Read these before starting Phase 2 (all under claudine/features/2026-10-28-schema-enhancements/):
-  - The author approved every recommendation on 2026-10-22 (see "Author Decisions" at the end of this log): inventory/rulings.md R1-R7, the categories rule (reject blank and duplicate names, exact comparison, list order kept), the four numeric edge cells in spikes/numeric-ingress/findings.md, adding `trim`, carrying all 121 examples, and the "ruling requested" proposals in behavior-ledger.md. Implement them as written; they are not open.
-  - inventory/ownership.md: Grammar descriptors owns simplified/grammar.rs and convert.rs; Numeric foundations supplies the admission function that Grammar calls at grammar.rs:279 and :1948 (both parse numbers with bare parse::<f64>()). schemas/resolve.rs is unowned in the plan (proposed: Schema adapter, Wave 4); schemas/mod.rs proposed for the integrator. `expr/binding.rs` already exists, so pick another name for the call binder.
-  - Numeric seam (selected): a JSON-Pointer -> written-number-text sidecar beside today's serde_json::Value, recorded only for numbers stored as f64 (modeled on MappingOrders). YAML: second guided serde_yaml_ng pass; JSON: RawValue pass; JSON5: json-five round-trip model; expression literals: lexer.rs:921 token text; schema metadata: grammar.rs:1941 Arg.lex. Do NOT enable serde_json/arbitrary_precision. Darkmatter must declare serde_json features raw_value and float_roundtrip itself (today they only arrive via feature unification).
-  - Defects owned by Phase 2: standalone.rs:127-130 swallows YAML parse errors into Ok(None) (DMLS drops them at named_types.rs:344 and overlay/named_types.rs:231); coerce.rs:597 rounds large integers silently and its comment is wrong; YAML .inf/.nan and JSON5 1e400 become null, 1e-400 becomes 0, enum members saturate through i64, min(inf) is accepted.
-  - Matrix tests live in darkmatter/lib/tests/l1/schema_enhancements_matrix/. When your task makes a blocked cell decidable (see inventory/reader-matrix.md "Cell coverage"), add that cell there; when you fix the AmbiguousReferenced mislabel, tighten the duplicate/trailing cells to assert the new error class.
-  - Spec criterion 43 uses `trim`, which is not registered; the draft catalog lacks find_files, code_link, try_frontmatter and wrongly lists is_file_type (Phase 4 concerns).
+  Phase 2 (Wave 2) is implemented; read implementation-log.md "## Phase 2" first. What Phase 3 builds on:
+  - Numbers: darkmatter::markdown::numeric is the only way a number enters Darkmatter. Use admit_number_text for text -> number (the one lenient parser), admit_json_number/admit_f64 for values without a spelling, json_number to store and format_number to render. Frontmatter YAML, raw JSON/YAML schemas, schema-file YAML (standalone.rs and resolve.rs both go through numeric::load_admitted_yaml), SimplifiedSchema metadata, and expression literals are admitted AT LOAD, so the conversion core never sees an inexact native number; it still must admit converted text.
+  - Grammar AST (schemas/simplified/types.rs): TypeExpr::Tuple(TupleType{elements: TupleElement.., spread}), TypeExpr::Function(Box<FunctionType>) with FunctionParameters/FunctionParameter/CallExample/ExampleOutcome, Constraint::Category. `(A | B)[]` is the existing TypeExpr::Union with is_array; `id: A | B` parses to PropertyDef::Union exactly like the YAML list. Tuples lower to prefixItems/minItems/items; functions are rejected in to_json_schema (the one choke point). Duplicate-overload contracts: simplified/signature.rs.
+  - Still on the old engine: schemas/coerce.rs has no tuple (prefixItems) handling, and today's frontmatter coercion turns `true` into "true", so criterion 47's document-level rejection of [true] and every conversion criterion wait for your core. coerce_to_number leaves inexact text unconverted and validate.rs appends the admission reason; replace both with the core.
+  - serde_json preserve_order is on for every package linking darkmatter. Alphabetical outputs sort explicitly (md schema validate JSON, md hash non-strict frontmatter hash, Claudine OpenCode/Kilo config, sniff-cli JSON). Do not mechanically refresh snapshots.
+  - Hazards in this shared worktree: zsh CDPATH sends a relative `cd claudine` to /Volumes/coding/personal/rusty-biscuit (a different checkout), so always cd with absolute paths and check `pwd -P`; an outside process may commit or briefly roll back files mid-phase (it did in Phase 2). `git apply --3way` stages files; unstage with `git reset -q -- <files>`.
+  - Known load-sensitive test: dmls::l1 searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back fails only under full-suite load; main fixes it in 43798e829, not yet on feat/pipeline.
 ---
 
 # Implementation Log for 2026-10-28-schema-enhancements (6 phases)
@@ -295,3 +431,267 @@ lenient text parser), `admit_f64`, `admit_json_number`, `admit_integer`,
 `NumericAdmissionError` / `NumberTextError`. Whole-number exactness is
 decided by comparing the written digits with the exact decimal expansion of the
 nearest `f64`, so no big-integer dependency is needed.
+
+### Wave 2 execution
+
+The two Wave 2 tasks ran in parallel as foreground subagents, each in its own
+git worktree seeded with a patch of the integrator's uncommitted base (steps 1
+and 2), so neither could break the other's build. Each returned a patch
+against that base; both applied to this worktree with no conflicts.
+
+- **Grammar descriptors** (`/tmp/phase2-grammar.patch`): tuples, functions,
+  `|` and grouping, `category`, `categories:`, inline examples, duplicate
+  overload detection (`simplified/signature.rs`), function rejection in
+  document schemas, numeric admission of schema metadata, the standalone
+  YAML-error defect, serialization round trips, and docs.
+- **Numeric foundations** (`/tmp/phase2-numeric.patch`): load-time admission
+  for frontmatter YAML, raw JSON/YAML schemas, and expression literals
+  (`numeric/ingress.rs`); `f64`-only operators with non-finite errors; one
+  number formatter; JSON5 non-finite errors; the `coerce.rs` silent-rounding
+  defect; `darkmatter/docs/topics/numbers.md`.
+
+Integration fixes after the merge:
+
+- The grammar task made a standalone schema file that is not valid YAML a
+  `SchemaDocument` "not valid YAML" error. That path ran before the numeric
+  task's oversized-integer rescan, so a raw YAML schema with
+  `99999999999999999999` lost its admission reason
+  (`raw_yaml_schema_numeric_token_matrix` failed). `standalone.rs` now loads
+  through `numeric::load_admitted_yaml`, so every schema-file loader admits
+  numbers the same way and reports the admission reason.
+- The grammar task narrowed `LARGE_INT_CASES` in `schemas_literal_expression.rs`
+  to exact values; the numeric task's coercion test iterated it expecting
+  inexact values. The test now names its inexact inputs explicitly.
+
+Concurrency hazards met (recorded so the next phase avoids them):
+
+- An outside process committed this phase's integrator work in this shared
+  worktree mid-phase (`58e2a5790 feat(darkmatter): preserve authored order and
+  validate numeric ingress`, `b3e647ae8` for the log and plan). While it did,
+  working files were briefly rolled back, and one claudine test build picked
+  up an old test name. The rerun on the settled tree passed.
+- zsh `CDPATH` resolves a relative `cd claudine` from a subdirectory to
+  `/Volumes/coding/personal/rusty-biscuit/claudine`, a different checkout. One
+  claudine `just lint` and both `check-tier-coverage` runs went there; all three
+  were rerun from absolute paths in this worktree. Use absolute paths.
+- `git apply --3way` stages what it applies; the merged files were unstaged
+  again with `git reset -q -- <files>` (index only).
+
+### Design Decisions
+
+Integrator decisions:
+
+1. **`preserve_order` everywhere, sort only where a published contract needs it.**
+   - Decision: declare `serde_json/preserve_order` in `darkmatter/lib/Cargo.toml`
+     and sort explicitly at outputs whose alphabetical order is a contract.
+   - Alternatives: sort every serialized map back to alphabetical (hides the
+     feature the spec asks for); refresh every changed snapshot (silently
+     changes byte-stable outputs and persisted hashes).
+   - Why: the spec rules `preserve_order` in (decision 75); persisted hashes and
+     byte-pinned JSON reports must not drift.
+   - Downsides: four sort sites to keep; a new alphabetical-output contract must
+     sort explicitly.
+2. **`sniff-cli` sorts its JSON keys.**
+   - Decision: `sniff-cli` sorts at its three JSON writers
+     (`output::sort_json_keys`), and its snapshot tests compare with
+     `sort_maps`; a new test pins sorted keys on real output.
+   - Alternatives: accept the new key order and refresh the five snapshots.
+   - Why: `sniff-cli` links `darkmatter`, so without sorting its output would
+     depend on which packages a build unifies.
+   - Downsides: struct-declaration order is not used for `sniff` JSON.
+3. **`to_json_schema` puts `$schema` first.**
+   - Alternatives: leave it last (where insertion order puts it).
+   - Why: readers expect the dialect first; the 41 snapshot changes were checked
+     to be order-only by comparing each old/new pair as JSON.
+   - Downsides: none found.
+4. **Numeric admission at ingress (load time).**
+   - Decision: frontmatter YAML, raw JSON/YAML schemas, schema-file YAML,
+     SimplifiedSchema metadata, and expression literals admit every number when
+     loaded, from its written spelling; a failure is a located load error
+     whatever the property's declared type. The Phase 1 spelling sidecar is
+     used only inside the loaders (the guided second pass) rather than stored
+     beside the value.
+   - Alternatives: store a JSON Pointer → spelling sidecar on `Frontmatter` and
+     check at schema validation (Wave 4).
+   - Why: the spec applies the check "wherever a value becomes a number",
+     including native YAML numbers; a value that no `f64` holds cannot be a
+     Darkmatter value under any type; checking at load closes the silent
+     `.inf` → `null` and `1e-400` → `0` defects now, needs no new public
+     state, and criteria 30/59's native rows ("fails validation", "rejected")
+     are met as a located load error.
+   - Downsides: an untyped or `string` property holding such a number must
+     quote it; whole numbers in exponent form that no `f64` holds (`1e308`,
+     `1e300`) are rejected, as the spec's whole-number rule requires.
+5. **Criterion 46's `1e308 * 10`** is exercised with `big` supplied through
+   frontmatter, written as the full digits of `f64::MAX` (an exactly held whole
+   number), because exponent literals are not expression syntax (author
+   decision, numeric cell 2) and `1e308` itself is an inexact whole number.
+
+Grammar descriptors decisions (subagent):
+
+1. A trailing `-> description` on a `|` union describes the last option, as the
+   list form does. Alternatives: reject it; copy it to every option. Downside:
+   per-option descriptions need the YAML list.
+2. An option inside a YAML-list union cannot itself be a `|` union. Alternative:
+   flatten it. Why: one spelling per union; flattening breaks per-item source
+   projection.
+3. Grouping: a group without `[]` joins the enclosing union; `(A)[]` is `A[]`;
+   lists of lists and a group with its own constraint list are rejected. Why:
+   one representation (`TypeExpr::Union` with `is_array`).
+4. `?` on a union tuple element follows TypeScript: `(A | B)?` is required;
+   `A | B?` and `A? | B` are rejected.
+5. `tuple` and `function` are reserved built-in keywords; a local type with
+   either name is reached as `tuple@this`. Downside: a bare reference to such a
+   local type now fails.
+6. A spread must be written as an array type (`...T` naming an array type is
+   rejected) and takes no list constraints. Why: the simplest rule matching
+   "must name an array type".
+7. Tuple constraints are limited to `required`, `default`, `generated`,
+   file `example`, and `category`, checked at parse time, so types files that
+   are never converted are still checked.
+8. Functions take no `required`/`default` but may take `[]`; a trailing `;`
+   and trailing commas in element/parameter lists are accepted.
+9. Tuple elements, parameter types, and return types take no `-> description`.
+10. `|` ends a `Name@file` reference everywhere; inside a group, tuple, or
+    signature, `)`, `]`, `;`, and `?` also end it. Downside: a referenced path
+    cannot contain `|`.
+11. Binding contracts for duplicate overloads compare canonical parameter types
+    and constraints (order-insensitive), optional and rest positions; they
+    ignore names, descriptions, examples, categories, return types, and
+    `fallible`. Checked structurally at parse time and again with local named
+    types resolved (depth 16) when a types file loads. Downside: references
+    into other files compare by name.
+12. `to_json_schema` is the one place that rejects a function in a document
+    schema, naming the path; it works because the resolver inlines references
+    first.
+13. `tuple([])` lowers to `minItems: 0, items: false` with no `prefixItems`
+    (the 2020-12 meta-schema rejects an empty `prefixItems`, ruling R7).
+14. `categories:` is accepted only in the tagged envelope; the global catalog
+    loader is unchanged. An entry splits on its first `->`; `Name ->` with no
+    text is an error; at most one `category(...)` per type.
+15. The strict schema-document source locator now follows `|` and `>` block
+    scalars, since `function` signatures are written as `|-` blocks. This moves
+    a boundary documented as "frozen v1"; the pinning tests and docs were
+    updated.
+16. A schema file that is not valid YAML is a `SchemaDocument` error instead of
+    a silent decline or the mislabeled `AmbiguousReferenced`. DMLS
+    `standalone_lints` still returns `None` for unparseable text, so ordinary
+    YAML with syntax errors does not show as a broken schema.
+17. DMLS surfaces the YAML error where it was dropped: the overlay's named-type
+    catalog records it and hover on a reference into that file shows it;
+    `diagnostics/named_types.rs` attaches it as related information.
+18. Schema numbers: `inf`/`nan` report "not finite"; quoted defaults stay text;
+    word enum members are admitted only when spelled like numbers;
+    `suggest(...)` candidates are unchanged.
+
+Numeric foundations decisions (subagent):
+
+1. Equality stays exact (integer-to-integer `==` does not round). Alternative:
+   compare everything as `f64` (broke two pinned `expression_strict_equality`
+   tests). Why: every admitted number is held exactly, so exact `==` agrees with
+   ordering for every value a document, schema, or literal supplies. Downside:
+   an unadmitted external integer (for example `--set` with
+   `9007199254740993`) is unequal to `…992` while neither `<` nor `>` holds;
+   arithmetic rejects it.
+2. Oversized YAML integers: a failed first parse triggers a rescan that reports
+   an inadmissible integer beyond `u64` as a located admission error. Downside:
+   an exactly held integer beyond `u64` (2^64) keeps the old parse error
+   (pinned by a unit test).
+3. `coerce_to_number` keeps its spelling rule and leaves inexact text
+   unconverted; `validate.rs` appends the admission reason to the type error.
+   Alternative: an error channel in `coerce.rs` (a public struct Wave 4
+   replaces). Behavior change: `"9223372036854775807"` and
+   `"9007199254740993.0"` no longer convert.
+4. The JSON5 check stays in Darkmatter (`Json5::deserialize_raw` plus a
+   non-finite scan); `biscuit-file` is unchanged. `--state`/`--set` reject a
+   non-finite number; transclusion `set.n=Infinity` is an error (quoted stays
+   text); a `name=Infinity` shorthand setter stays text, matching its existing
+   fallback.
+5. Numeric text in arithmetic goes through `admit_number_text`; inadmissible
+   numeric text is an error rather than a concatenation. Spellings whose result
+   changed: `" 4 "` and `"1_000"` now convert; `"inf"`, `"NaN"`, `"5."`,
+   `"1e400"`, `"1e-400"`, and inexact whole text no longer convert.
+6. Raw schema admission failures reuse `SchemaError::SchemaDocument` (a new
+   variant would ripple through exhaustive matches); JSON `1e400` keeps its
+   existing load error (author cell 3).
+7. `format_number` writes every digit of a large whole number (Rust's shortest
+   form printed `2^60` as `1152921504606847000`, which reads back as a
+   different number).
+
+### Requirement-to-test mapping
+
+| Requirement | Tests (darkmatter `l1` unless noted) |
+|---|---|
+| Criterion 1 (grammar forms and rejections) | `schema_grammar_descriptors::{tuple_forms_parse, function_type_with_every_constraint_parses, union_operator_parses_everywhere_a_type_is_written, categories_list_parses_in_order_with_optional_multi_line_descriptions, invalid_tuples_and_repeated_categories_are_rejected_at_the_offending_text, invalid_function_types_are_rejected_at_the_offending_text, a_union_inside_a_yaml_list_arm_and_a_question_mark_on_a_property_are_rejected}` |
+| Criterion 2 (precedence) | `schema_grammar_descriptors::array_suffix_binds_tighter_than_the_union_operator` |
+| Criterion 3 (JSON Schema lowering) | snapshots `schema_grammar_descriptors::{snapshot_fixed_tuple, snapshot_variadic_tuple_with_optional_position, snapshot_union_operator, snapshot_empty_tuple_and_category_annotation}`; `union_operator_and_yaml_list_are_the_same_definition` |
+| Criterion 4 / 56 (functions in document schemas, indirect forms) | `schema_grammar_descriptors::{a_document_schema_that_reaches_a_function_fails_to_load_naming_the_path, tuples_validate_positions_omission_and_length}`; CLI `schema_grammar_types::schema_validate_rejects_a_function_typed_property_as_a_schema_error` |
+| Criterion 5 (categories) | `schema_grammar_descriptors::{a_declared_categories_list_limits_category_names, a_category_on_a_data_type_is_an_annotation}`; `schema_enhancements_matrix::envelope::documented_categories_matrix` |
+| Criterion 6 (duplicate overloads) | `schema_grammar_descriptors::overloads_with_one_binding_contract_fail_to_load`; unit `simplified::signature::tests` |
+| Criterion 47 (`(A \| B)[]`) | `schema_grammar_descriptors::grouped_union_list_matches_a_named_union_list` (compiled JSON Schema rejects `[true]`; document-level rejection waits for Phase 3 coercion, which today turns `true` into `"true"`) |
+| Round trip of new forms | `schema_grammar_descriptors::every_new_form_round_trips_through_serialization` |
+| End to end through `md compose` | CLI `schema_grammar_types::{compose_accepts_a_document_matching_a_tuple_and_a_union, compose_rejects_a_document_whose_tuple_has_too_many_positions}` |
+| Standalone YAML-error defect | `schema_grammar_descriptors::a_types_file_that_is_not_yaml_reports_its_yaml_error`; DMLS `named_type_references::a_reference_into_a_file_that_is_not_yaml_reports_the_yaml_error` (fails before the fix) |
+| Schema metadata numbers | `schema_grammar_descriptors::numeric_metadata_rejects_what_an_f64_cannot_hold`; `schemas_literal_expression::literal_inexact_large_integer_is_a_schema_load_error` |
+| Criterion 21 (literal part) | `numeric_admission::{an_inexact_expression_literal_is_rejected_at_the_literal, an_exact_expression_literal_evaluates_exactly}`; `expression_type_scope::literal_numbers_narrow_to_the_value_the_evaluator_compares` |
+| Criteria 30/59 (native YAML rows, spellings) | `numeric_admission::{native_frontmatter_numbers_no_f64_holds_fail_to_load_with_location, admissible_frontmatter_numbers_load_exactly}`; lib unit `frontmatter::tests::{inadmissible_frontmatter_numbers_are_located_load_errors, inadmissible_numbers_are_not_hidden_by_expression_fallbacks, admissible_frontmatter_numbers_load_exactly}`; `numeric::tests::*`; `numeric::ingress::tests::yaml_*` |
+| Quoted inexact text vs `number` (coerce defect) | `numeric_admission::quoted_inexact_text_against_a_number_fails_validation_with_the_reason`; lib unit `coerce::tests::large_integral_strings_are_admitted_before_coercion`; `schemas_literal_expression::literal_large_integer_coercion_admits_before_converting` |
+| Criterion 46 (operators, presentation) | `numeric_admission::{non_finite_results_are_errors, equality_and_ordering_agree_on_represented_values, whole_numbers_never_pass_through_an_integer_cast, the_largest_finite_number_loads_and_renders_every_digit, numeric_text_converts_through_the_canonical_parser, an_out_of_range_index_is_none_rather_than_saturated}`; lib unit `ast::tests::display_number_literal_beyond_i64_never_saturates`, `numeric::tests::presentation_never_narrows` |
+| Raw schema numeric tokens | `numeric_admission::{raw_schema_numbers_are_admitted_at_load, ordinary_raw_schema_bounds_still_load_and_validate}`; `schema_enhancements_matrix::raw_schema::{raw_json_schema_numeric_token_matrix, raw_yaml_schema_numeric_token_matrix}` |
+| Frontmatter numeric matrix cells | `schema_enhancements_matrix::frontmatter::frontmatter_value_matrix` (18 numeric cells) |
+| JSON5 non-finite | lib unit `numeric::ingress::tests::json5_non_finite_numbers_are_rejected`, `transclusion::parser::tests::set_property_non_finite_number_is_an_error_not_null`; CLI `compose_state_set::test_compose_non_finite_json5_number_is_an_error_not_null`, CLI unit `commands::compose::tests::parse_shorthand_value_keeps_a_non_finite_number_as_text_not_null` |
+| Criterion 58 (map order) | lib unit `markdown::hash::tests::non_strict_frontmatter_hash_ignores_nested_key_order`, `frontmatter::tests::parsed_frontmatter_retains_nested_mapping_order_as_metadata`, `fn_list_formatting::as_json5_uses_the_formatter_object_idiom`; `benchmark_fixtures::benchmark_manifest_matches_recorded_identities`; CLI `schema_validate_baseline::schema_validate_legacy_json_output_is_byte_identical`; claudine `opencode_config::tests::yolo_permission_block_serializes_independent_of_insertion_order`, `action_shape_control::proxy_with_iteration_follows_authored_order_and_is_complete`; sniff-cli `snapshots::json_output_keys_are_sorted_at_every_depth` |
+
+Existing tests whose expectations changed (each pinned behavior this phase
+changes on purpose): the 41 conversion snapshots (order only);
+`as_json5_uses_the_formatter_object_idiom`,
+`parsed_frontmatter_retains_nested_mapping_order_as_metadata`,
+`serialized_field_list_matches_catalog`,
+`proxy_with_iteration_is_canonical_and_complete` (renamed), the OpenCode
+insertion-order test (order); `coerce::tests::large_integral_strings_*`,
+`schemas_literal_expression::literal_large_integer_*`,
+`expression_type_scope::literal_numbers_narrow_to_the_value_the_evaluator_compares`
+(numeric admission); `schema_yaml_spellings` (library and DMLS),
+`meta_schema_phase6`, `schemas_union_postfix`, `shipped_schema_corpus`, and
+`convert.rs` unit tests (grammar: block-scalar locator, YAML errors, new
+keywords); sniff-cli JSON snapshots (now compared with `sort_maps`).
+
+### Draft catalog under the new grammar
+
+`claudine/docs/schemas/partials/functions.yaml` is still classed Draft. Its
+only grammar failures are two uses of `min-length(...)`, plus its `behavior:`
+envelope key. With those fixed, all 111 signatures parse and the file passes
+the categories and overload checks. `mutations.yaml` signatures parse; it is
+rejected for its `name:` key. Neither draft was edited (Phase 4 migrates them).
+
+### Gates
+
+Scope calculator, run from the repository root after all edits:
+`packages: [claudine, claudine-gen, darkmatter, darkmatter-cli, dmls, sniff-cli, test-toolkit]`,
+`change_class: package`, so every gate was required. All ran serially with no
+subagent running:
+
+| Gate | Result |
+|---|---|
+| `darkmatter`: `just test` (`--no-fail-fast` rerun) | 11,342 passed, 10 skipped |
+| `darkmatter`: `just lint` | clean |
+| `claudine`: `just test` | 10,691 passed, 9 skipped |
+| `claudine`: `just lint` | clean |
+| `just check-tier-coverage claudine` / `darkmatter` | 0 stranded / 0 stranded |
+| Dependents, `cargo nextest run -p <pkg>` one at a time | messenger 226, messenger-cli 133, research 606, sniff-cli 976, playa-cli 25, biscuit-icon-cli 98, biscuit-speaks-cli 108, claudine-gen + claudine-contract 298: all passed |
+| `sniff`: `just lint` | clean |
+
+Load-sensitive: `dmls::l1 searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back`
+failed under full-suite load in three runs (including one before any Phase 2
+code, with only `preserve_order`) and passed alone every time. `main` already
+relaxes this assertion (`43798e829 test(dmls): accept an intermediate watch
+registration under load`), which `feat/pipeline` does not have yet.
+
+Cross-OS: no OS-specific path, process, or console code changed (numeric
+parsing, YAML/JSON loaders, grammar, key ordering), so no `just cross-check`
+run was made; CI covers the other environments.
+
+The `claudine` skill needed no change: Claudine's only visible effects are the
+authored-order `with:` iteration (documented in Darkmatter) and the sorted
+OpenCode/Kilo inline config (unchanged output). The `darkmatter` skill
+(`expressions.md`, `frontmatter.md`, `schema.md`) was updated.
