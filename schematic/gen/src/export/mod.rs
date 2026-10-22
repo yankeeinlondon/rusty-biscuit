@@ -9,6 +9,7 @@ pub mod naming;
 pub mod openapi;
 pub mod path_params;
 pub mod postman;
+pub(crate) mod vocabulary;
 
 pub use auth::ExportAuth;
 pub use body::{ExportBody, FormField, FormFieldExportKind};

@@ -46,9 +46,23 @@ pub use types::*;
 use crate::registry::assemble_module_group;
 use schematic_define::{
     EnvList, EnvMapping, AuthStrategy, DefinitionError, Endpoint, EndpointParams,
-    RestApi, QueryParamType,
+    RestApi, QueryParamType, RateLimit, ResetUnit,
     pagination::{Collection, MoreSignal, PageSize, Strategy, ValueSource},
 };
+
+/// The rate-limit headers GitHub documents for every REST response, with the
+/// reset in Unix seconds; `retry-after` accompanies a secondary rate limit.
+/// No retry guidance is declared: GitHub publishes no retry statuses,
+/// attempt counts, or backoff.
+fn github_rate_limit() -> Result<RateLimit, DefinitionError> {
+    RateLimit::new("x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset", ResetUnit::EpochSeconds)
+        .and_then(|rate_limit| rate_limit.with_retry_after_header("retry-after"))
+        .map_err(|error| DefinitionError::InvalidDefinition {
+            api: "GitHub".to_string(),
+            endpoint: "<api>".to_string(),
+            message: error.to_string(),
+        })
+}
 
 /// GitHub's page-number pagination: a 1-based `page`, a `per_page` size, and
 /// a `Link` header whose `next` relation marks a further page.
@@ -355,6 +369,7 @@ pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
             ..Default::default()
         })
             .request_id_header("x-github-request-id".to_string())
+            .rate_limit(github_rate_limit()?)
             .default_pagination(github_page_number())
             .header(
                 "Accept".to_string(),
@@ -434,6 +449,24 @@ mod tests {
         assert_eq!(api.base_url, "https://api.github.com");
         assert!(api.docs_url.is_some());
         assert!(api.docs_url.as_ref().unwrap().contains("docs.github.com"));
+    }
+
+    #[test]
+    fn api_declares_only_the_documented_rate_limit_headers() {
+        let api = define_github_api();
+
+        let rate_limit = api.rate_limit.as_ref().expect("GitHub declares its rate-limit headers");
+        assert_eq!(rate_limit.limit_header, "x-ratelimit-limit");
+        assert_eq!(rate_limit.remaining_header, "x-ratelimit-remaining");
+        assert_eq!(rate_limit.reset_header, "x-ratelimit-reset");
+        assert_eq!(rate_limit.reset_unit, schematic_define::ResetUnit::EpochSeconds);
+        assert_eq!(rate_limit.retry_after_header.as_deref(), Some("retry-after"));
+        // No retry statuses, attempts, or backoff are invented for GitHub.
+        assert!(api.retry_guidance.is_none());
+        for endpoint in &api.endpoints {
+            assert!(endpoint.rate_limit.is_none() && endpoint.retry_guidance.is_none(), "{}", endpoint.id);
+            assert_eq!(api.effective_rate_limit(endpoint), Some(rate_limit));
+        }
     }
 
     #[test]

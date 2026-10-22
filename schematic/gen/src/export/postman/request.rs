@@ -1,6 +1,6 @@
 //! Request-level builders: URL, headers, body, and form parameters.
 
-use schematic_define::{Endpoint, RestApi, RestMethod};
+use schematic_define::{Endpoint, ParamDef, QueryParamType, RestApi, RestMethod};
 
 use crate::export::body::{ExportBody, FormField, FormFieldExportKind};
 
@@ -35,12 +35,16 @@ pub(crate) fn build_url(
         .collect();
 
     // Build path variables
+    let declared = endpoint.params.as_ref().map_or(&[][..], |params| params.path.as_slice());
     let variables: Vec<PostmanVariable> = path_params
         .iter()
         .map(|param| PostmanVariable {
             key: param.to_string(),
             value: Some(format!("<{}>", param)),
-            description: None,
+            description: declared
+                .iter()
+                .find(|declared| declared.name == *param)
+                .map(path_variable_description),
         })
         .collect();
 
@@ -65,6 +69,23 @@ pub(crate) fn build_url(
         path: path_segments,
         query: query_params,
         variable: variables,
+    }
+}
+
+/// The description of a declared path parameter's URL variable: its own
+/// description, if any, followed by its type, since a Postman variable has no
+/// type of its own (`Item id (integer)`, `one of: cat, dog`).
+fn path_variable_description(param: &ParamDef) -> String {
+    let type_text = match &param.param_type {
+        QueryParamType::Integer => "integer".to_string(),
+        QueryParamType::Number => "number".to_string(),
+        QueryParamType::Boolean => "boolean".to_string(),
+        QueryParamType::Enum(values) => format!("one of: {}", values.join(", ")),
+        _ => "string".to_string(),
+    };
+    match &param.description {
+        Some(description) if !description.is_empty() => format!("{description} ({type_text})"),
+        _ => type_text,
     }
 }
 

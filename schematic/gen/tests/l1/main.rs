@@ -11,7 +11,9 @@ mod common;
 
 mod artifact_drift;
 mod definition_baseline;
+mod definition_bundles;
 mod e2e_generation;
+mod endpoint_auth_output;
 mod fresh_output_compile;
 mod http_client;
 mod import_overlay;
@@ -28,4 +30,6 @@ mod postman_var_consistency;
 mod query_param_detection;
 mod query_params_codegen;
 mod test_layout;
+mod typed_path_output;
+mod vocabulary_exports;
 mod ws_codegen;

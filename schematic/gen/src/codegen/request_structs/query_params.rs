@@ -28,8 +28,11 @@ pub(super) fn generate_query_param_fields(query_params: &[QueryParamInfo]) -> To
                 quote! { #[doc = #doc_str] }
             });
 
+        let deprecated = qp.deprecation_doc();
+
         quote! {
             #doc
+            #deprecated
             #rename
             pub #field_name: Option<#rust_type>,
         }
@@ -49,9 +52,11 @@ pub(super) fn generate_query_builder_methods(query_params: &[QueryParamInfo]) ->
         let field_name = format_ident!("{}", field);
         let rust_type = query_param_type_to_rust_type(&qp.param_type);
         let doc = format!(" Sets the `{}` query parameter.", field);
+        let deprecated = qp.deprecation_doc();
 
         quote! {
             #[doc = #doc]
+            #deprecated
             pub fn #method_name(mut self, value: #rust_type) -> Self {
                 self.#field_name = Some(value);
                 self

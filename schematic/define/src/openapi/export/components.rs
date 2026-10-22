@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use openapiv3::ReferenceOr;
 
 use super::super::options::ExportOptions;
-use super::conversion::convert_json_schema_to_openapi;
+use super::conversion::convert_component_schema;
 use super::security::map_security;
 use crate::types::RestApi;
 
@@ -20,7 +20,7 @@ pub(super) fn map_components(
     let schemas = api
         .schemas
         .iter()
-        .map(|component| (component.name.clone(), ReferenceOr::Item(convert_json_schema_to_openapi(&component.schema))))
+        .map(|component| (component.name.clone(), ReferenceOr::Item(convert_component_schema(&component.schema))))
         .collect();
 
     openapiv3::Components {

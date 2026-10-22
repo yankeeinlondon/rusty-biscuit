@@ -5,6 +5,15 @@ use super::responses::*;
 use super::{GitHub, GitHubApi};
 /// Request for `GetRepository` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
 /// ```text
@@ -57,6 +66,15 @@ impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
     }
 }
 /// Request for `GetGitTree` endpoint.
+///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
 ///
 /// ## Example
 ///
@@ -131,6 +149,15 @@ impl schematic_runtime::EndpointSpec for GetGitTreeRequest {
 }
 /// Request for `GetRepositoryContentRaw` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
 /// ```text
@@ -190,6 +217,15 @@ impl schematic_runtime::EndpointSpec for GetRepositoryContentRawRequest {
     }
 }
 /// Request for `ListPullRequests` endpoint.
+///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
 ///
 /// ## Example
 ///
@@ -280,6 +316,15 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
 }
 /// Request for `ListPullRequestFiles` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
 /// ```text
@@ -340,6 +385,15 @@ impl schematic_runtime::EndpointSpec for ListPullRequestFilesRequest {
     }
 }
 /// Request for `ListIssues` endpoint.
+///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
 ///
 /// ## Example
 ///
@@ -430,6 +484,15 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
 }
 /// Request for `GetIssue` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
 /// ```text
@@ -490,6 +553,15 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
     }
 }
 /// Request for `ListIssueComments` endpoint.
+///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
 ///
 /// ## Example
 ///
@@ -552,6 +624,15 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
 }
 /// Request for `ListIssueTimeline` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
 /// ```text
@@ -613,6 +694,15 @@ impl schematic_runtime::EndpointSpec for ListIssueTimelineRequest {
 }
 /// Request for `ListTags` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
 /// ```text
@@ -666,6 +756,15 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
 }
 /// Request for `ListReleases` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
 /// ```text
@@ -718,6 +817,15 @@ impl schematic_runtime::EndpointSpec for ListReleasesRequest {
     }
 }
 /// Request for `GetTagReference` endpoint.
+///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
 ///
 /// ## Example
 ///
@@ -778,6 +886,15 @@ impl schematic_runtime::EndpointSpec for GetTagReferenceRequest {
 }
 /// Request for `GetBranchReference` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
 /// ```text
@@ -836,6 +953,15 @@ impl schematic_runtime::EndpointSpec for GetBranchReferenceRequest {
     }
 }
 /// Request for `GetAnnotatedTag` endpoint.
+///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
 ///
 /// ## Example
 ///
@@ -897,6 +1023,15 @@ impl schematic_runtime::EndpointSpec for GetAnnotatedTagRequest {
     }
 }
 /// Request for `ListWorkflowRuns` endpoint.
+///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
 ///
 /// ## Example
 ///
@@ -986,6 +1121,15 @@ impl schematic_runtime::EndpointSpec for ListWorkflowRunsRequest {
     }
 }
 /// Request for `ListOrgRepos` endpoint.
+///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
 ///
 /// ## Example
 ///

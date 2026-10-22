@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::AuthStrategy;
 use crate::headers::EnvMapping;
+use crate::metadata::{RateLimit, RetryGuidance};
 use crate::request::ApiRequest;
 use crate::response::ApiResponse;
 
@@ -32,6 +33,8 @@ use crate::response::ApiResponse;
 ///     request_suffix: None,
 ///     env_mapping: None,
 ///     headers: vec![],
+///     rate_limit: None,
+///     retry_guidance: None,
 /// };
 ///
 /// let json: serde_json::Value = ext.into();
@@ -54,6 +57,14 @@ pub struct SchematicDocExtension {
     /// Default headers for all endpoints.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub headers: Vec<(String, String)>,
+
+    /// The API's rate-limit headers; descriptive only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<RateLimit>,
+
+    /// The API's retry guidance; descriptive only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_guidance: Option<RetryGuidance>,
 }
 
 impl From<SchematicDocExtension> for serde_json::Value {
@@ -77,6 +88,8 @@ impl From<SchematicDocExtension> for serde_json::Value {
 ///     request: Some(ApiRequest::json_type("CreateUserBody")),
 ///     response: ApiResponse::json_type("User"),
 ///     headers: vec![("X-Custom".to_string(), "value".to_string())],
+///     rate_limit: None,
+///     retry_guidance: None,
 /// };
 ///
 /// let json: serde_json::Value = ext.into();
@@ -95,6 +108,15 @@ pub struct SchematicOpExtension {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub headers: Vec<(String, String)>,
 
+    /// The endpoint's own rate-limit headers, which replace the API's whole;
+    /// absent when the endpoint inherits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<RateLimit>,
+
+    /// The endpoint's own retry guidance, which replaces the API's whole;
+    /// absent when the endpoint inherits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_guidance: Option<RetryGuidance>,
 }
 
 impl From<SchematicOpExtension> for serde_json::Value {
@@ -211,6 +233,7 @@ mod tests {
             request_suffix: Some("Params".to_string()),
             env_mapping: None,
             headers: vec![],
+            ..Default::default()
         };
 
         let json: serde_json::Value = ext.into();
@@ -235,6 +258,7 @@ mod tests {
                 ..Default::default()
             }),
             headers: vec![("Accept".to_string(), "application/json".to_string())],
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&ext).unwrap();
@@ -258,7 +282,7 @@ mod tests {
 
     #[test]
     fn op_extension_with_json_request() {
-        let ext = SchematicOpExtension {
+        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None,
             request: Some(ApiRequest::json_type("CreateBody")),
             response: ApiResponse::json_type("Response"),
             headers: vec![],
@@ -268,7 +292,7 @@ mod tests {
 
     #[test]
     fn op_extension_with_form_data_request() {
-        let ext = SchematicOpExtension {
+        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None,
             request: Some(ApiRequest::form_data(vec![
                 FormField::file("document"),
                 FormField::text("name").optional(),
@@ -288,7 +312,7 @@ mod tests {
 
     #[test]
     fn op_extension_with_binary_response() {
-        let ext = SchematicOpExtension {
+        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None,
             request: None,
             response: ApiResponse::Binary,
             headers: vec![],
@@ -298,7 +322,7 @@ mod tests {
 
     #[test]
     fn op_extension_with_endpoint_headers() {
-        let ext = SchematicOpExtension {
+        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None,
             request: None,
             response: ApiResponse::Empty,
             headers: vec![("X-Custom-Header".to_string(), "custom-value".to_string())],
@@ -308,7 +332,7 @@ mod tests {
 
     #[test]
     fn op_extension_into_json() {
-        let ext = SchematicOpExtension {
+        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None,
             request: Some(ApiRequest::json_type("TestBody")),
             response: ApiResponse::Text,
             headers: vec![],
@@ -322,7 +346,7 @@ mod tests {
 
     #[test]
     fn op_extension_serde_roundtrip() {
-        let ext = SchematicOpExtension {
+        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None,
             request: Some(ApiRequest::form_data(vec![FormField::file("file")])),
             response: ApiResponse::json_type("Result"),
             headers: vec![("X-Header".to_string(), "value".to_string())],
@@ -472,7 +496,7 @@ mod tests {
 
     #[test]
     fn op_extension_empty_headers_roundtrips() {
-        let ext = SchematicOpExtension {
+        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None,
             request: Some(ApiRequest::json_type("Body")),
             response: ApiResponse::json_type("Response"),
             headers: vec![],
@@ -493,5 +517,65 @@ mod tests {
         assert!(!json.contains("env_auth"));
         let parsed: AuthExtension = serde_json::from_str(&json).unwrap();
         assert_eq!(ext, parsed);
+    }
+
+    // =============================================
+    // Rate-limit and retry metadata
+    // =============================================
+
+    fn metadata() -> (RateLimit, RetryGuidance) {
+        use crate::metadata::{Backoff, ResetUnit, StatusSelector};
+        let rate_limit = RateLimit::new("x-limit", "x-remaining", "x-reset", ResetUnit::HttpDate)
+            .unwrap()
+            .with_retry_after_header("retry-after")
+            .unwrap();
+        let retry = RetryGuidance::new(
+            [StatusSelector::Code(429), StatusSelector::Range { start: 500, end: 503 }],
+            true,
+            4,
+            Backoff::Fixed { delay_ms: 750 },
+        )
+        .unwrap();
+        (rate_limit, retry)
+    }
+
+    #[test]
+    fn absent_metadata_adds_no_extension_members() {
+        let doc = serde_json::to_value(SchematicDocExtension::default()).unwrap();
+        assert!(doc.get("rate_limit").is_none() && doc.get("retry_guidance").is_none());
+        let op = serde_json::to_value(SchematicOpExtension {
+            rate_limit: None, retry_guidance: None, request: None, response: ApiResponse::Empty, headers: vec![],
+        }).unwrap();
+        assert_eq!(op, serde_json::json!({"response": "Empty"}));
+    }
+
+    #[test]
+    fn metadata_keeps_every_field_through_both_extensions() {
+        let (rate_limit, retry) = metadata();
+        let expected_rate = serde_json::json!({
+            "limit_header": "x-limit", "remaining_header": "x-remaining", "reset_header": "x-reset",
+            "retry_after_header": "retry-after", "reset_unit": "http_date",
+        });
+        let expected_retry = serde_json::json!({
+            "retry_on": [{"code": 429}, {"range": {"start": 500, "end": 503}}],
+            "honor_retry_after": true, "max_attempts": 4, "backoff": {"fixed": {"delay_ms": 750}},
+        });
+
+        let doc = SchematicDocExtension {
+            rate_limit: Some(rate_limit.clone()), retry_guidance: Some(retry.clone()), ..Default::default()
+        };
+        let doc_json: serde_json::Value = doc.clone().into();
+        assert_eq!(doc_json["rate_limit"], expected_rate);
+        assert_eq!(doc_json["retry_guidance"], expected_retry);
+        assert_eq!(serde_json::from_value::<SchematicDocExtension>(doc_json).unwrap(), doc);
+
+        let op = SchematicOpExtension {
+            rate_limit: Some(rate_limit), retry_guidance: Some(retry), request: None,
+            response: ApiResponse::Empty, headers: vec![],
+        };
+        let op_json: serde_json::Value = op.clone().into();
+        assert_eq!(op_json["rate_limit"], expected_rate);
+        assert_eq!(op_json["retry_guidance"], expected_retry);
+        assert_eq!(serde_json::from_value::<SchematicOpExtension>(op_json).unwrap(), op);
     }
 }

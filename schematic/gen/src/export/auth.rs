@@ -1,6 +1,6 @@
 //! Normalized authentication metadata for export.
 
-use schematic_define::AuthStrategy;
+use schematic_define::{AuthMethod, AuthPolicy, AuthStrategy, Endpoint, EndpointAuth, EnvAuthStrategy};
 
 /// Location where an API key is sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,7 +46,7 @@ pub enum ExportAuth {
 /// ## Examples
 ///
 /// ```
-/// use schematic_define::AuthStrategy;
+/// use schematic_define::{AuthMethod, AuthPolicy, AuthStrategy, Endpoint, EndpointAuth, EnvAuthStrategy};
 /// use schematic_gen::export::auth::{ExportAuth, map_auth};
 ///
 /// let auth = map_auth(&AuthStrategy::BearerToken { header: None });
@@ -95,6 +95,100 @@ pub fn map_auth(strategy: &AuthStrategy) -> ExportAuth {
         },
         // Handle any future variants by defaulting to no auth
         _ => ExportAuth::None,
+    }
+}
+
+/// Maps one accepted method of an [`AuthPolicy`] the way [`map_auth`] maps
+/// the matching strategy (OAuth2 is a bearer token).
+fn map_method(method: &AuthMethod) -> ExportAuth {
+    match method {
+        AuthMethod::BearerToken { header } => map_auth(&AuthStrategy::BearerToken { header: header.clone() }),
+        AuthMethod::ApiKey { header, value_prefix } => map_auth(&AuthStrategy::ApiKey {
+            header: header.clone(),
+            value_prefix: value_prefix.clone(),
+        }),
+        AuthMethod::ApiKeyParam { name, location } => map_auth(&AuthStrategy::ApiKeyParam {
+            name: name.clone(),
+            location: *location,
+        }),
+        AuthMethod::Basic => ExportAuth::Basic {
+            username_var: "username".to_string(),
+            password_var: "password".to_string(),
+        },
+        AuthMethod::OAuth2(_) => ExportAuth::Bearer { variable: "bearerToken".to_string() },
+        _ => ExportAuth::None,
+    }
+}
+
+fn map_fallback(fallback: &EnvAuthStrategy) -> ExportAuth {
+    match fallback {
+        EnvAuthStrategy::BearerToken { header } => map_method(&AuthMethod::BearerToken { header: header.clone() }),
+        EnvAuthStrategy::ApiKey { header, value_prefix } => map_method(&AuthMethod::ApiKey {
+            header: header.clone(),
+            value_prefix: value_prefix.clone(),
+        }),
+        EnvAuthStrategy::ApiKeyParam { name, location } => map_method(&AuthMethod::ApiKeyParam {
+            name: name.clone(),
+            location: *location,
+        }),
+        EnvAuthStrategy::Basic => map_method(&AuthMethod::Basic),
+        _ => ExportAuth::None,
+    }
+}
+
+/// The distinct auths `policy` accepts as alternatives, in order: its
+/// explicit methods, then its environment fallback.
+pub fn policy_alternatives(policy: &AuthPolicy) -> Vec<ExportAuth> {
+    let mut alternatives: Vec<ExportAuth> = Vec::new();
+    let mapped = policy.explicit.iter().map(map_method).chain(policy.env_fallback.iter().map(map_fallback));
+    for auth in mapped {
+        if auth != ExportAuth::None && !alternatives.contains(&auth) {
+            alternatives.push(auth);
+        }
+    }
+    alternatives
+}
+
+/// The auth a request uses in place of its API's, or `None` when the
+/// endpoint inherits.
+///
+/// A public endpoint is [`ExportAuth::None`]. A replacement policy is its
+/// first alternative ([`policy_alternatives`]): one auth per request is all a
+/// Postman request holds. When the replacement declares its own environment
+/// mapping it names a credential distinct from the API's, so its variables
+/// carry the endpoint id (`bearerToken_GetAdmin`) rather than sharing the
+/// API's.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::Endpoint;
+/// use schematic_gen::export::auth::{ExportAuth, endpoint_auth_override};
+///
+/// let public = Endpoint::get("Health", "/health").describes("Health").returns_empty().public().build().unwrap();
+/// assert_eq!(endpoint_auth_override(&public), Some(ExportAuth::None));
+/// ```
+pub fn endpoint_auth_override(endpoint: &Endpoint) -> Option<ExportAuth> {
+    match endpoint.auth.as_ref()? {
+        EndpointAuth::Public => Some(ExportAuth::None),
+        EndpointAuth::Policy { policy, env_mapping } => {
+            let auth = policy_alternatives(policy).into_iter().next()?;
+            Some(if env_mapping.is_some() { with_variable_suffix(auth, &endpoint.id) } else { auth })
+        }
+        _ => None,
+    }
+}
+
+fn with_variable_suffix(auth: ExportAuth, id: &str) -> ExportAuth {
+    let suffixed = |name: String| format!("{name}_{id}");
+    match auth {
+        ExportAuth::Bearer { variable } => ExportAuth::Bearer { variable: suffixed(variable) },
+        ExportAuth::ApiKey { header, variable, location } => ExportAuth::ApiKey { header, variable: suffixed(variable), location },
+        ExportAuth::Basic { username_var, password_var } => ExportAuth::Basic {
+            username_var: suffixed(username_var),
+            password_var: suffixed(password_var),
+        },
+        ExportAuth::None => ExportAuth::None,
     }
 }
 
@@ -188,5 +282,18 @@ mod tests {
                 password_var: "password".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn policy_alternatives_count_an_env_fallback_naming_an_explicit_method_once() {
+        let bearer = AuthPolicy::from_auth_strategy(&AuthStrategy::BearerToken { header: None });
+        assert_eq!(policy_alternatives(&bearer), vec![ExportAuth::Bearer { variable: "bearerToken".to_string() }]);
+
+        let two = AuthPolicy {
+            explicit: vec![AuthMethod::Basic],
+            env_fallback: Some(EnvAuthStrategy::BearerToken { header: None }),
+        };
+        assert_eq!(policy_alternatives(&two).len(), 2);
+        assert!(matches!(policy_alternatives(&two)[0], ExportAuth::Basic { .. }));
     }
 }

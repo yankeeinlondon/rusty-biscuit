@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use schematic_define::RestApi;
 
-use crate::export::auth::{ExportAuth, map_auth};
+use crate::export::auth::{ExportAuth, endpoint_auth_override, map_auth};
 use crate::export::path_params::extract_folder_key;
 
 use super::auth::{auth_variables, build_collection_auth};
@@ -81,6 +81,7 @@ pub fn build_postman_collection(api: &RestApi) -> PostmanCollection {
     // produce duplicate declarations.
     let mut variables = vec![base_url_var];
     merge_variables(&mut variables, auth_variables(&auth));
+    merge_endpoint_auth_variables(&mut variables, [api]);
 
     PostmanCollection {
         info: PostmanInfo {
@@ -262,6 +263,7 @@ pub fn build_postman_collection_grouped(apis: &[&RestApi], module_name: &str) ->
             seen_auths.push(auth);
         }
     }
+    merge_endpoint_auth_variables(&mut variables, apis.iter().copied());
 
     PostmanCollection {
         info: PostmanInfo {
@@ -277,5 +279,17 @@ pub fn build_postman_collection_grouped(apis: &[&RestApi], module_name: &str) ->
         variable: variables,
         auth: collection_auth,
         item: items,
+    }
+}
+
+/// Declares the variables every endpoint's own auth references, after the
+/// API-level ones, in endpoint order.
+fn merge_endpoint_auth_variables<'a>(variables: &mut Vec<PostmanVariable>, apis: impl IntoIterator<Item = &'a RestApi>) {
+    for api in apis {
+        for endpoint in &api.endpoints {
+            if let Some(own) = endpoint_auth_override(endpoint) {
+                merge_variables(variables, auth_variables(&own));
+            }
+        }
     }
 }

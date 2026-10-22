@@ -20,6 +20,7 @@
 //! - [`FormField`] - Form field definitions for multipart and URL-encoded requests
 //! - [`FormFieldKind`] - Form field type classification (Text, File, Files, Json)
 //! - [`SchemaComponent`] - A named schema carried by [`RestApi::schemas`]; JSON bodies reference it through [`TypeRef`]
+//! - [`DefinitionBundle`] - An API with its complete schema closure, as canonical JSON that loads without the Rust registry
 //! - [`Schema`] - Type information for WebSocket message bodies
 //!
 //! ### Header and Authentication Types
@@ -120,6 +121,7 @@
 #![doc = include_str!("../../docs/authoring-examples.md")]
 
 pub mod auth;
+pub mod bundle;
 pub mod components;
 pub mod cross_origin;
 pub mod headers;
@@ -146,6 +148,7 @@ pub use auth::{
     ApiKeyLocation, AuthMethod, AuthPolicy, AuthStrategy, EndpointAuth, EnvAuthStrategy,
     UpdateStrategy,
 };
+pub use bundle::{BUNDLE_FORMAT_VERSION, BundleError, DefinitionBundle};
 pub use metadata::{Backoff, MetadataError, RateLimit, ResetUnit, RetryGuidance, StatusSelector};
 pub use components::SchemaComponent;
 pub use cross_origin::CrossOrigin;

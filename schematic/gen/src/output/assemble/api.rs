@@ -168,6 +168,8 @@ pub fn assemble_combined_api_module(apis: &[&RestApi]) -> TokenStream {
 
 /// Builds combined module documentation for multiple APIs sharing a module.
 fn build_combined_module_docs(apis: &[&RestApi]) -> TokenStream {
+    use crate::codegen::request_structs::endpoint_docs::{rate_limit_lines, retry_guidance_lines};
+
     let mut doc_parts: Vec<String> = Vec::new();
 
     for (i, api) in apis.iter().enumerate() {
@@ -188,6 +190,12 @@ fn build_combined_module_docs(apis: &[&RestApi]) -> TokenStream {
         };
 
         doc_parts.push(intro);
+        if let Some(rate_limit) = &api.rate_limit {
+            doc_parts.push(rate_limit_lines(rate_limit).join("\n"));
+        }
+        if let Some(guidance) = &api.retry_guidance {
+            doc_parts.push(retry_guidance_lines(guidance).join("\n"));
+        }
     }
 
     let full_doc = doc_parts.join("\n\n");
@@ -291,4 +299,29 @@ fn split_parts(
 #[doc(hidden)]
 pub fn assemble_api_code(api: &RestApi) -> TokenStream {
     assemble_api_module(api)
+}
+
+#[cfg(test)]
+mod tests {
+    use schematic_define::{AuthStrategy, Backoff, RateLimit, ResetUnit, RetryGuidance, StatusSelector};
+
+    use super::build_combined_module_docs;
+    use crate::test_utils::make_api;
+
+    #[test]
+    fn grouped_module_docs_keep_each_apis_rate_limit_and_retry_guidance() {
+        let mut first = make_api("First", "https://first.test", AuthStrategy::None, vec![]);
+        first.rate_limit = Some(RateLimit::new("x-limit", "x-remaining", "x-reset", ResetUnit::Seconds).unwrap());
+        let mut second = make_api("Second", "https://second.test", AuthStrategy::None, vec![]);
+        second.retry_guidance = Some(
+            RetryGuidance::new([StatusSelector::Code(429)], true, 3, Backoff::Fixed { delay_ms: 500 }).unwrap(),
+        );
+        let plain = make_api("Plain", "https://plain.test", AuthStrategy::None, vec![]);
+
+        let docs = build_combined_module_docs(&[&first, &second, &plain]).to_string();
+        assert!(docs.contains("x-limit") && docs.contains("x-reset"), "{docs}");
+        assert!(docs.contains("Retry guidance") && docs.contains("429"), "{docs}");
+        assert_eq!(docs.matches("Rate limit").count(), 1, "{docs}");
+        assert_eq!(docs.matches("Retry guidance").count(), 1, "{docs}");
+    }
 }

@@ -90,11 +90,24 @@ pub struct QueryParamInfo {
     pub rust_name: Option<String>,
     pub description: Option<String>,
     pub param_type: QueryParamType,
+    /// Documentation only: the field and setter docs say "Deprecated.".
+    pub deprecated: bool,
 }
 
 impl QueryParamInfo {
     pub fn field_name(&self) -> String {
         self.rust_name.clone().unwrap_or_else(|| param_field_name(&self.name))
+    }
+
+    /// The doc attributes a deprecated parameter's field and setter append
+    /// after their summary; none otherwise.
+    pub fn deprecation_doc(&self) -> TokenStream {
+        if self.deprecated {
+            let line = format!(" {}", super::endpoint_docs::DEPRECATED_LINE);
+            quote! { #[doc = ""] #[doc = #line] }
+        } else {
+            quote! {}
+        }
     }
 
     pub fn serde_rename(&self) -> TokenStream {
@@ -126,6 +139,7 @@ fn param_infos(params: &[ParamDef]) -> Vec<QueryParamInfo> {
             rust_name: p.rust_name.clone(),
             description: p.description.clone(),
             param_type: p.param_type.clone(),
+            deprecated: p.deprecated,
         })
         .collect()
 }
@@ -187,7 +201,19 @@ pub fn generate_path_format(
         quote! { let path = format!(#format_str, #(#format_args),*); }
     };
 
-    let query = if query_params.is_empty() {
+    let query = generate_query_binding(query_params);
+
+    quote! {
+        #base_path
+        #query
+    }
+}
+
+/// Generates the statement that binds `query` inside `into_parts`: the
+/// declared query parameters as unencoded `(name, value)` pairs in
+/// declaration order, one pair per array element.
+pub fn generate_query_binding(query_params: &[QueryParamInfo]) -> TokenStream {
+    if query_params.is_empty() {
         quote! { let query: Vec<(String, String)> = Vec::new(); }
     } else {
         let query_param_collectors = query_params.iter().map(|qp| {
@@ -214,11 +240,6 @@ pub fn generate_path_format(
             let mut query: Vec<(String, String)> = Vec::new();
             #(#query_param_collectors)*
         }
-    };
-
-    quote! {
-        #base_path
-        #query
     }
 }
 

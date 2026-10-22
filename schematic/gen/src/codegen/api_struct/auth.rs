@@ -1,15 +1,18 @@
-//! Translation of a definition's effective authentication policy into the
-//! runtime's `AuthConfig`.
+//! Translation of a definition's authentication policies into the runtime's
+//! `AuthConfig`: the API's effective policy, and each endpoint policy that
+//! replaces it.
 //!
 //! The runtime does not depend on `schematic-define`, so the generated
-//! `definition()` spells the policy out in runtime terms: every accepted
+//! `definition()` spells a policy out in runtime terms: every accepted
 //! explicit method becomes a `CredentialPlacement`, and the environment
-//! fallback becomes an `EnvFallback` over the variables the definition's
+//! fallback becomes an `EnvFallback` over the variables the policy's
 //! environment mapping names.
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use schematic_define::{ApiKeyLocation, AuthMethod, EnvAuthStrategy, RestApi};
+use schematic_define::{
+    ApiKeyLocation, AuthMethod, AuthPolicy, EnvAuthStrategy, EnvMapping, ResolvedEndpointAuth, RestApi,
+};
 
 /// A runtime credential placement, as generation-time data.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,13 +42,20 @@ pub(super) struct AuthConfig {
 }
 
 /// Translates `api`'s effective policy.
+pub(super) fn auth_config(api: &RestApi) -> AuthConfig {
+    policy_config(api, &api.effective_auth_policy(), &api.default_env_mapping())
+}
+
+/// Translates `policy`, reading its fallback's variables from `mapping`
+/// (parameter keys from `api`'s `env_auth`, which the mapping has no slot
+/// for).
 ///
 /// An OAuth2 method is accepted as a bearer access token, which the caller
 /// obtains out of band. A fallback with no variable to read is dropped, as is
-/// a method or location this generator does not know: the runtime then sends
-/// that request anonymously, exactly as when no variable is set.
-pub(super) fn auth_config(api: &RestApi) -> AuthConfig {
-    let policy = api.effective_auth_policy();
+/// a method or location this generator does not know: under the API's
+/// policy the runtime then sends that request anonymously, exactly as when no
+/// variable is set, and under an endpoint replacement it refuses the send.
+pub(super) fn policy_config(api: &RestApi, policy: &AuthPolicy, mapping: &EnvMapping) -> AuthConfig {
     let mut accepted: Vec<Placement> = Vec::new();
     for method in &policy.explicit {
         if let Some(placement) = explicit_placement(method)
@@ -54,8 +64,45 @@ pub(super) fn auth_config(api: &RestApi) -> AuthConfig {
             accepted.push(placement);
         }
     }
-    let env = policy.env_fallback.as_ref().and_then(|strategy| env_fallback(api, strategy));
+    let env = policy.env_fallback.as_ref().and_then(|strategy| env_fallback(api, mapping, strategy));
     AuthConfig { accepted, env }
+}
+
+/// One endpoint's authentication where it replaces the API's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum EndpointConfig {
+    Public,
+    Replaced(AuthConfig),
+}
+
+/// The endpoints of `api` that declare their own authentication, in
+/// definition order, with what each uses instead of the API's policy.
+pub(super) fn endpoint_configs(api: &RestApi) -> Vec<(&str, EndpointConfig)> {
+    api.endpoints
+        .iter()
+        .filter(|endpoint| endpoint.auth.is_some())
+        .filter_map(|endpoint| {
+            let config = match api.endpoint_auth(endpoint) {
+                ResolvedEndpointAuth::Public => EndpointConfig::Public,
+                ResolvedEndpointAuth::Replaced { policy, env_mapping } => {
+                    EndpointConfig::Replaced(policy_config(api, &policy, &env_mapping))
+                }
+                _ => return None,
+            };
+            Some((endpoint.id.as_str(), config))
+        })
+        .collect()
+}
+
+/// Whether the API's policy or any endpoint replacement accepts a
+/// caller-supplied Basic credential.
+pub(super) fn accepts_basic(api: &RestApi) -> bool {
+    std::iter::once(auth_config(api))
+        .chain(endpoint_configs(api).into_iter().filter_map(|(_, config)| match config {
+            EndpointConfig::Replaced(config) => Some(config),
+            EndpointConfig::Public => None,
+        }))
+        .any(|config| config.accepted.contains(&Placement::Basic))
 }
 
 fn explicit_placement(method: &AuthMethod) -> Option<Placement> {
@@ -80,8 +127,7 @@ fn param_placement(name: &str, location: ApiKeyLocation) -> Option<Placement> {
     }
 }
 
-fn env_fallback(api: &RestApi, strategy: &EnvAuthStrategy) -> Option<EnvFallback> {
-    let mapping = api.default_env_mapping();
+fn env_fallback(api: &RestApi, mapping: &EnvMapping, strategy: &EnvAuthStrategy) -> Option<EnvFallback> {
     let names = |list: Option<&schematic_define::EnvList>| {
         list.map(|list| list.names().to_vec()).unwrap_or_default()
     };
@@ -124,6 +170,12 @@ pub(super) fn auth_config_tokens(config: &AuthConfig) -> Option<TokenStream> {
     if config.accepted.is_empty() && config.env.is_none() {
         return None;
     }
+    Some(policy_tokens(config))
+}
+
+/// The `schematic_runtime::AuthConfig` expression for `config`, even when it
+/// accepts no credential.
+pub(super) fn policy_tokens(config: &AuthConfig) -> TokenStream {
     let accepted = config.accepted.iter().map(|placement| {
         let placement = placement_tokens(placement);
         quote! { .accept(#placement) }
@@ -144,11 +196,11 @@ pub(super) fn auth_config_tokens(config: &AuthConfig) -> Option<TokenStream> {
             )
         }
     });
-    Some(quote! {
+    quote! {
         schematic_runtime::AuthConfig::none()
             #(#accepted)*
             #env
-    })
+    }
 }
 
 fn placement_tokens(placement: &Placement) -> TokenStream {

@@ -14,9 +14,10 @@ use oauth2::basic::{
     BasicTokenResponse,
 };
 use oauth2::{
-    AuthUrl, ClientId, ClientSecret, EndpointMaybeSet, EndpointNotSet, EndpointSet, RedirectUrl,
-    RevocationUrl, TokenResponse, TokenUrl,
+    AuthType, AuthUrl, ClientId, ClientSecret, EndpointMaybeSet, EndpointNotSet, EndpointSet,
+    RedirectUrl, RevocationUrl, TokenResponse, TokenUrl,
 };
+use schematic_define::{OAuth2ClientAuthMethod, OAuth2GrantType};
 use tokio::sync::Mutex;
 
 use crate::error::OAuthError;
@@ -43,9 +44,16 @@ type OAuthClient = oauth2::Client<
 /// Manages the OAuth2 token lifecycle for a single API provider.
 ///
 /// Supports authorization code (with PKCE), client credentials, refresh, and
-/// revocation flows. Token refreshes are serialized through `refresh_lock` so
-/// concurrent callers of [`OAuth2Manager::get_valid_token`] perform a single
-/// refresh rather than stampeding the token endpoint.
+/// revocation flows. Each acquisition flow runs only for the provider grant it
+/// belongs to; the device-code grant has no flow here. Token refreshes are
+/// serialized through `refresh_lock` so concurrent callers of
+/// [`OAuth2Manager::get_valid_token`] perform a single refresh rather than
+/// stampeding the token endpoint.
+///
+/// The provider's `client_auth` decides how the client authenticates at the
+/// token and revocation endpoints: `ClientSecretBasic` in the `Authorization`
+/// header, `ClientSecretPost` in the request body, and `None` sends only the
+/// client id, never a configured secret.
 ///
 /// ## Examples
 ///
@@ -123,8 +131,17 @@ impl OAuth2Manager {
             .set_token_uri(token_url)
             .set_revocation_url_option(revocation_url);
 
-        if let Some(ref secret) = config.client_secret {
-            client = client.set_client_secret(ClientSecret::new(secret.clone()));
+        match config.provider.client_auth() {
+            OAuth2ClientAuthMethod::ClientSecretPost => client = client.set_auth_type(AuthType::RequestBody),
+            // A public client: `oauth2` sends the client id in the body when no
+            // secret is set.
+            OAuth2ClientAuthMethod::None => {}
+            _ => client = client.set_auth_type(AuthType::BasicAuth),
+        }
+        if *config.provider.client_auth() != OAuth2ClientAuthMethod::None {
+            if let Some(ref secret) = config.client_secret {
+                client = client.set_client_secret(ClientSecret::new(secret.clone()));
+            }
         }
 
         if let Some(redirect) = redirect_url {
@@ -138,6 +155,21 @@ impl OAuth2Manager {
             http_client: build_http_client()?,
             refresh_lock: Mutex::new(()),
         })
+    }
+}
+
+impl OAuth2Manager {
+    /// Fails unless the provider's grant is `expected`, so a flow never runs
+    /// against a provider that declared another grant.
+    pub(super) fn require_grant(&self, expected: OAuth2GrantType, flow: &str) -> Result<(), OAuthError> {
+        let actual = self.config.provider.grant_type();
+        if actual == expected {
+            Ok(())
+        } else {
+            Err(OAuthError::Configuration(format!(
+                "{flow} needs the {expected:?} grant, but the provider declares {actual:?}"
+            )))
+        }
     }
 }
 
@@ -289,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn begin_authorization_fails_without_auth_url() {
+    fn begin_authorization_fails_for_another_grant() {
         let manager = OAuth2Manager::new(
             client_credentials_config(),
             Box::new(MemoryTokenStore::new()),

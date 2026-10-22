@@ -28,7 +28,7 @@ fn code(api: &RestApi) -> String {
 /// `text` without whitespace and trailing commas, so an assertion does not
 /// depend on where the formatter breaks a line.
 fn squash(text: &str) -> String {
-    text.split_whitespace().collect::<String>().replace(",]", "]").replace(",)", ")")
+    text.split_whitespace().collect::<String>().replace(",]", "]").replace(",)", ")").replace(",}", "}")
 }
 
 fn oauth() -> OAuth2Config {
@@ -420,4 +420,146 @@ fn endpoint_origin_replacement_and_parameter_secrets_use_runtime_metadata() {
     api.endpoints[0].cross_origin = Some(CrossOrigin::allow_origins(Vec::<String>::new()));
     let generated = code(&api);
     assert!(squash(&generated).contains(".endpoint_cross_origin(\"List\",schematic_runtime::OriginPolicy::allow_origins(Vec::<String>::new()))"), "empty origins keep concrete type: {generated}");
+}
+
+/// `api` with an endpoint `id` that declares `auth`, or none.
+fn with_endpoint(mut api: RestApi, id: &str, auth: Option<schematic_define::EndpointAuth>) -> RestApi {
+    let mut endpoint = schematic_define::Endpoint::get(id, format!("/{}", id.to_lowercase()))
+        .describes("An endpoint").returns_empty()
+        .build().unwrap();
+    endpoint.auth = auth;
+    api.endpoints.push(endpoint);
+    api
+}
+
+/// The generated `definition()`, squashed, through the docs of the `new()`
+/// that follows it.
+fn definition_body(code: &str) -> String {
+    let squashed = squash(code);
+    let start = squashed.find("pubfndefinition()->schematic_runtime::ApiDefinition{").expect("definition()");
+    let end = squashed.find("pubfnnew()").expect("new()");
+    squashed[start..end].to_string()
+}
+
+#[test]
+fn an_api_without_endpoint_auth_emits_exactly_its_api_level_definition() {
+    let api = with_endpoint(make_api("Plain", AuthStrategy::BearerToken { header: None }, &["PLAIN_TOKEN"]), "List", None);
+    let code = code(&api);
+
+    let expected = squash(
+        "pub fn definition() -> schematic_runtime::ApiDefinition { \
+         schematic_runtime::ApiDefinition::new(Self::BASE_URL) \
+         .auth(schematic_runtime::AuthConfig::none() \
+         .accept(schematic_runtime::CredentialPlacement::Bearer { header: None }) \
+         .env_fallback(schematic_runtime::EnvFallback::new(\
+         schematic_runtime::CredentialPlacement::Bearer { header: None }, [\"PLAIN_TOKEN\"]))) }",
+    );
+    let definition = definition_body(&code);
+    let after = definition.strip_prefix(&expected).unwrap_or_else(|| panic!("{code}"));
+    assert!(after.starts_with("///"), "nothing follows the API policy but `new()`'s docs:\n{code}");
+    assert!(!code.contains("basic_auth"), "{code}");
+    assert!(!code.contains("A public endpoint sends no credential."), "no endpoint auth note:\n{code}");
+}
+
+#[test]
+fn a_public_endpoint_emits_endpoint_public_beside_the_api_policy() {
+    let api = make_api("Mixed", AuthStrategy::BearerToken { header: None }, &["MIXED_TOKEN"]);
+    let api = with_endpoint(api, "List", None);
+    let api = with_endpoint(api, "Health", Some(schematic_define::EndpointAuth::Public));
+    let code = code(&api);
+
+    let definition = definition_body(&code);
+    assert!(definition.contains(".endpoint_public(\"Health\")"), "{code}");
+    assert!(!definition.contains("\"List\""), "an inheriting endpoint emits nothing:\n{code}");
+    assert!(definition.contains("[\"MIXED_TOKEN\"]"), "the API policy is unchanged:\n{code}");
+    assert!(code.contains("A public endpoint sends no credential."), "{code}");
+}
+
+#[test]
+fn a_replacement_emits_its_own_placements_and_mapping_and_basic_auth() {
+    let api = make_api("Mixed", AuthStrategy::BearerToken { header: None }, &["MIXED_TOKEN"]);
+    let basic = AuthPolicy {
+        explicit: vec![AuthMethod::Basic],
+        env_fallback: Some(EnvAuthStrategy::Basic),
+    };
+    let mapping = EnvMapping {
+        basic_user: Some(EnvList::from_strs(&["UPLOAD_USER"])),
+        basic_pass: Some(EnvList::from_strs(&["UPLOAD_PASS", "UPLOAD_PASSWORD"])),
+        ..EnvMapping::default()
+    };
+    let api = with_endpoint(
+        api,
+        "Upload",
+        Some(schematic_define::EndpointAuth::Policy {
+            policy: basic,
+            env_mapping: Some(mapping),
+        }),
+    );
+    let reused = AuthPolicy {
+        explicit: vec![AuthMethod::BearerToken { header: Some("X-Other".to_string()) }],
+        env_fallback: Some(EnvAuthStrategy::BearerToken { header: Some("X-Other".to_string()) }),
+    };
+    let api = with_endpoint(
+        api,
+        "Other",
+        Some(schematic_define::EndpointAuth::Policy {
+            policy: reused,
+            env_mapping: None,
+        }),
+    );
+    let code = code(&api);
+
+    let definition = definition_body(&code);
+    assert!(
+        definition.contains(&squash(
+            ".endpoint_auth(\"Upload\", schematic_runtime::AuthConfig::none() \
+             .accept(schematic_runtime::CredentialPlacement::Basic) \
+             .env_fallback(schematic_runtime::EnvFallback::new(schematic_runtime::CredentialPlacement::Basic, \
+             [\"UPLOAD_PASS\", \"UPLOAD_PASSWORD\"]).username_vars([\"UPLOAD_USER\"])))"
+        )),
+        "{code}"
+    );
+    assert!(
+        definition.contains(&squash(
+            ".endpoint_auth(\"Other\", schematic_runtime::AuthConfig::none() \
+             .accept(schematic_runtime::CredentialPlacement::Bearer { header: Some(\"X-Other\".to_string()) }) \
+             .env_fallback(schematic_runtime::EnvFallback::new(\
+             schematic_runtime::CredentialPlacement::Bearer { header: Some(\"X-Other\".to_string()) }, [\"MIXED_TOKEN\"])))"
+        )),
+        "a replacement without its own mapping reads the API's:\n{code}"
+    );
+    assert!(code.contains("pub fn basic_auth("), "only the replacement accepts Basic:\n{code}");
+}
+
+#[test]
+fn a_parameter_key_replacement_reads_the_apis_env_auth_variables() {
+    let api = make_api(
+        "Keyed",
+        AuthStrategy::ApiKeyParam { name: "key".to_string(), location: ApiKeyLocation::Query },
+        &["KEYED_KEY"],
+    );
+    let query = AuthPolicy {
+        explicit: vec![AuthMethod::ApiKeyParam { name: "key".to_string(), location: ApiKeyLocation::Query }],
+        env_fallback: Some(EnvAuthStrategy::ApiKeyParam { name: "key".to_string(), location: ApiKeyLocation::Query }),
+    };
+    let api = with_endpoint(
+        api,
+        "Search",
+        Some(schematic_define::EndpointAuth::Policy {
+            policy: query,
+            env_mapping: None,
+        }),
+    );
+
+    let definition = definition_body(&code(&api));
+
+    assert!(
+        definition.contains(&squash(
+            ".endpoint_auth(\"Search\", schematic_runtime::AuthConfig::none() \
+             .accept(schematic_runtime::CredentialPlacement::ApiKeyQuery { name: \"key\".to_string() }) \
+             .env_fallback(schematic_runtime::EnvFallback::new(\
+             schematic_runtime::CredentialPlacement::ApiKeyQuery { name: \"key\".to_string() }, [\"KEYED_KEY\"])))"
+        )),
+        "{definition}"
+    );
 }

@@ -86,7 +86,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "List repositories for an organization"
+            "description": "List repositories for an organization\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         }
       ]
@@ -133,7 +133,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "Get repository metadata including default branch"
+            "description": "Get repository metadata including default branch\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         },
         {
@@ -188,7 +188,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "Get a Git tree; set `recursive` to include every nested entry (may truncate at 100k entries or 7MB)"
+            "description": "Get a Git tree; set `recursive` to include every nested entry (may truncate at 100k entries or 7MB)\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         },
         {
@@ -236,7 +236,7 @@
                 "value": "application/vnd.github.raw+json"
               }
             ],
-            "description": "Get raw file content from repository"
+            "description": "Get raw file content from repository\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         },
         {
@@ -301,7 +301,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "List pull requests with metadata"
+            "description": "List pull requests with metadata\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         },
         {
@@ -360,7 +360,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "List files changed in a pull request"
+            "description": "List files changed in a pull request\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         },
         {
@@ -425,7 +425,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "List issues (includes PRs; filter by pull_request field)"
+            "description": "List issues (includes PRs; filter by pull_request field)\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         },
         {
@@ -473,7 +473,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "Get a single issue by number"
+            "description": "Get a single issue by number\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         },
         {
@@ -532,7 +532,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "List comments on an issue"
+            "description": "List comments on an issue\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         },
         {
@@ -591,7 +591,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "List timeline events for an issue"
+            "description": "List timeline events for an issue\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         },
         {
@@ -644,7 +644,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "List repository tags"
+            "description": "List repository tags\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         },
         {
@@ -697,7 +697,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "List releases (linked to tags via tag_name)"
+            "description": "List releases (linked to tags via tag_name)\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         },
         {
@@ -747,7 +747,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "Get tag reference (check object.type: 'commit' vs 'tag')"
+            "description": "Get tag reference (check object.type: 'commit' vs 'tag')\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         },
         {
@@ -797,7 +797,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "Get branch reference (object.sha is the branch head commit)"
+            "description": "Get branch reference (object.sha is the branch head commit)\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         },
         {
@@ -846,7 +846,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "Get annotated tag object details (message, tagger, verification)"
+            "description": "Get annotated tag object details (message, tagger, verification)\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         },
         {
@@ -912,7 +912,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "List workflow runs for a repository"
+            "description": "List workflow runs for a repository\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
           }
         }
       ]

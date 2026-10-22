@@ -1360,7 +1360,7 @@ fn explicit_rust_parameter_name_preserves_wire_query_and_ordinary_setters() {
 #[test]
 fn qualified_and_container_body_examples_are_valid_rust() {
     for body in ["::schematic_definitions::openai::BetaCreateResponse", "::serde_json::Value", "::std::vec::Vec<::schematic_definitions::openai::Model>"] {
-        let lines = generate_doc_comment_with_example("CreateResponse", "CreateResponseRequest", &[], &[], true, Some(body), Some("openai"));
+        let lines = generate_doc_example("CreateResponseRequest", &PathExample { args: vec![], imports: vec![] }, &[], true, Some(body), Some("openai"));
         let start = lines.iter().position(|line| line.trim() == "```text").unwrap();
         let source = lines[start + 1..].iter().take_while(|line| line.trim() != "```").cloned().collect::<Vec<_>>().join("\n");
         syn::parse_file(&format!("fn example() {{\n{source}\n}}"))
@@ -1436,4 +1436,359 @@ fn an_unresolved_reference_is_spelled_as_a_compile_error() {
     let code = format_generated_code(&generate_request_struct(&api, &endpoint)).expect("parses");
     assert!(code.contains("::core::compile_error!"), "{code}");
     assert!(code.contains("TestResponse"), "{code}");
+}
+
+// ---- typed path parameters, deprecation, metadata, and auth docs ----
+
+use schematic_define::metadata::{Backoff, RateLimit, ResetUnit, RetryGuidance, StatusSelector};
+use schematic_define::{
+    ApiKeyEnv, AuthMethod, AuthPolicy, EndpointAuth, EndpointParams, EnvAuthStrategy, EnvList,
+    EnvMapping, ParamDef,
+};
+
+/// `endpoint` with `path` declared as its typed path parameters.
+fn with_typed_paths(mut endpoint: Endpoint, path: Vec<ParamDef>) -> Endpoint {
+    endpoint.params = Some(EndpointParams { path, query: vec![], header: vec![], cookie: vec![] });
+    endpoint
+}
+
+fn generated(endpoint: &Endpoint) -> String {
+    format_generated_code(&generate_request_struct(&crate::test_utils::api_for(endpoint), endpoint))
+        .expect("generated request parses")
+}
+
+/// One typed path parameter of every scalar kind, an enum, and a string.
+fn every_kind_endpoint() -> Endpoint {
+    with_typed_paths(
+        make_endpoint("GetItem", RestMethod::Get, "/items/{id}/{flag}/{ratio}/{kind}/{name}", None),
+        vec![
+            ParamDef::path("id", QueryParamType::Integer).describes("The item id."),
+            ParamDef::path("flag", QueryParamType::Boolean),
+            ParamDef::path("ratio", QueryParamType::Number),
+            ParamDef::path("kind", QueryParamType::Enum(vec!["asc".into(), "desc-order".into()])),
+            ParamDef::path("name", QueryParamType::String),
+        ],
+    )
+}
+
+#[test]
+fn typed_path_parameters_become_fields_of_their_declared_types() {
+    let code = generated(&every_kind_endpoint());
+
+    assert!(code.contains("pub id: i64,"), "{code}");
+    assert!(code.contains("pub flag: bool,"), "{code}");
+    assert!(code.contains("pub ratio: f64,"), "{code}");
+    assert!(code.contains("pub kind: GetItemRequestKind,"), "{code}");
+    assert!(code.contains("pub name: String,"), "{code}");
+    assert!(code.contains("/// The item id.\n    pub id: i64,"), "the declared description is the field doc: {code}");
+    assert!(code.contains("/// Path parameter: flag\n    pub flag: bool,"), "{code}");
+}
+
+#[test]
+fn typed_path_values_are_converted_to_their_wire_spelling_before_encoding() {
+    let code = squash(&generated(&every_kind_endpoint()));
+
+    assert!(
+        code.contains(&squash(
+            r#"let path = format!("/items/{}/{}/{}/{}/{}",
+                urlencoding::encode(&self.id.to_string()),
+                urlencoding::encode(&self.flag.to_string()),
+                urlencoding::encode(&self.ratio.to_string()),
+                urlencoding::encode(self.kind.as_str()),
+                urlencoding::encode(&self.name));"#
+        )),
+        "{code}"
+    );
+}
+
+#[test]
+fn a_non_finite_number_path_value_is_an_invalid_argument_before_the_path_is_built() {
+    let code = squash(&generated(&every_kind_endpoint()));
+
+    let check = squash(
+        r#"if !self.ratio.is_finite() {
+            return Err(schematic_runtime::InvalidArgument::new("path parameter `ratio` must be a finite number"));
+        }"#,
+    );
+    let check_at = code.find(&check).unwrap_or_else(|| panic!("finite check missing: {code}"));
+    let path_at = code.find("letpath=format!").expect("path is built");
+    assert!(check_at < path_at, "the check runs before the path is built: {code}");
+    assert_eq!(code.matches("is_finite()").count(), 1, "only the number is checked: {code}");
+}
+
+#[test]
+fn typed_path_constructor_takes_strings_by_into_and_other_values_by_type() {
+    let code = generated(&every_kind_endpoint());
+
+    assert!(
+        squash(&code).contains(&squash(
+            "pub fn new(id: i64, flag: bool, ratio: f64, kind: GetItemRequestKind, name: impl Into<String>,) -> Self {
+                Self { id, flag, ratio, kind, name: name.into(), }
+            }"
+        )),
+        "{code}"
+    );
+}
+
+#[test]
+fn constructor_follows_template_order_not_declaration_order() {
+    let endpoint = with_typed_paths(
+        make_endpoint("GetCell", RestMethod::Get, "/rows/{row}/columns/{column}", None),
+        vec![
+            ParamDef::path("column", QueryParamType::String),
+            ParamDef::path("row", QueryParamType::Integer),
+        ],
+    );
+
+    let code = generated(&endpoint);
+
+    assert!(code.contains("pub fn new(row: i64, column: impl Into<String>) -> Self"), "{code}");
+    assert!(code.find("pub row: i64").unwrap() < code.find("pub column: String").unwrap(), "{code}");
+}
+
+#[test]
+fn a_repeated_placeholder_is_one_field_used_at_every_occurrence() {
+    let endpoint = with_typed_paths(
+        make_endpoint("CopyItem", RestMethod::Post, "/items/{id}/copies/{id}", None),
+        vec![ParamDef::path("id", QueryParamType::Integer)],
+    );
+
+    let code = generated(&endpoint);
+
+    assert_eq!(code.matches("pub id: i64").count(), 1, "{code}");
+    assert!(code.contains("pub fn new(id: i64) -> Self"), "{code}");
+    assert!(
+        squash(&code).contains(&squash(
+            r#"format!("/items/{}/copies/{}", urlencoding::encode(&self.id.to_string()), urlencoding::encode(&self.id.to_string()))"#
+        )),
+        "{code}"
+    );
+}
+
+#[test]
+fn a_reserved_typed_occurrence_keeps_its_raw_value() {
+    let endpoint = with_typed_paths(
+        make_endpoint("GetFile", RestMethod::Get, "/files/{+file_path}/{file_path}/{+mode}/{+depth}", None),
+        vec![
+            ParamDef::path("file_path", QueryParamType::String),
+            ParamDef::path("mode", QueryParamType::Enum(vec!["raw".into()])),
+            ParamDef::path("depth", QueryParamType::Integer),
+        ],
+    );
+
+    let code = generated(&endpoint);
+
+    assert!(
+        squash(&code).contains(&squash(
+            r#"format!("/files/{}/{}/{}/{}", self.file_path, urlencoding::encode(&self.file_path), self.mode.as_str(), self.depth)"#
+        )),
+        "each occurrence decides its own encoding: {code}"
+    );
+}
+
+#[test]
+fn an_enum_path_parameter_generates_a_non_exhaustive_wire_spelled_enum() {
+    let code = generated(&every_kind_endpoint());
+
+    assert!(code.contains("#[non_exhaustive]\n#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]\npub enum GetItemRequestKind {"), "{code}");
+    assert!(code.contains("#[serde(rename = \"asc\")]\n    Asc,"), "{code}");
+    assert!(code.contains("#[serde(rename = \"desc-order\")]\n    DescOrder,"), "{code}");
+    assert!(code.contains("Self::DescOrder => \"desc-order\","), "{code}");
+    assert!(code.contains("impl ::core::fmt::Display for GetItemRequestKind"), "{code}");
+}
+
+#[test]
+fn the_enum_name_carries_the_resolved_request_suffix_and_the_rust_name() {
+    let endpoint = with_typed_paths(
+        make_endpoint("GetItem", RestMethod::Get, "/items/{sortOrder}", None),
+        vec![ParamDef::path("sortOrder", QueryParamType::Enum(vec!["a".into()])).rust_name("order")],
+    );
+
+    let code = format_generated_code(&generate_request_struct_with_suffix(
+        &crate::test_utils::api_for(&endpoint),
+        &endpoint,
+        "Params",
+    ))
+    .unwrap();
+
+    assert!(code.contains("pub enum GetItemParamsOrder {"), "{code}");
+    assert!(code.contains("#[serde(rename = \"sortOrder\")]\n    pub order: GetItemParamsOrder,"), "{code}");
+    assert!(code.contains("urlencoding::encode(self.order.as_str())"), "{code}");
+}
+
+#[test]
+fn a_typed_path_request_has_no_default_or_string_conversion_and_legacy_keeps_both() {
+    let typed = with_typed_paths(
+        make_endpoint("GetModel", RestMethod::Get, "/models/{model}", None),
+        vec![ParamDef::path("model", QueryParamType::String)],
+    );
+    let legacy = make_endpoint("GetModel", RestMethod::Get, "/models/{model}", None);
+
+    let typed_code = generated(&typed);
+    let legacy_code = generated(&legacy);
+
+    assert!(typed_code.contains("#[derive(Debug, Clone, Serialize, Deserialize)]\npub struct GetModelRequest"), "{typed_code}");
+    assert!(!typed_code.contains("Default"), "{typed_code}");
+    assert!(!typed_code.contains("impl From<"), "{typed_code}");
+    assert!(legacy_code.contains("#[derive(Debug, Clone, Default, Serialize, Deserialize)]"), "{legacy_code}");
+    assert!(legacy_code.contains("impl From<&str> for GetModelRequest"), "{legacy_code}");
+}
+
+#[test]
+fn a_typed_path_doc_example_calls_new_with_typed_arguments() {
+    let code = format_generated_code(&generate_request_struct_with_options(
+        &crate::test_utils::api_for(&every_kind_endpoint()),
+        &every_kind_endpoint(),
+        "Request",
+        Some("fixture"),
+        "FixtureApi",
+    ))
+    .unwrap();
+
+    assert!(code.contains("/// use schematic_schema::fixture::{GetItemRequest, GetItemRequestKind};"), "{code}");
+    assert!(
+        code.contains("/// let request = GetItemRequest::new(1, true, 1.5, GetItemRequestKind::Asc, \"name_value\")"),
+        "{code}"
+    );
+    assert!(!code.contains("GetItemRequest::default()"), "{code}");
+}
+
+#[test]
+fn deprecation_is_documented_on_requests_fields_and_setters_without_attributes() {
+    let mut endpoint = with_typed_paths(
+        make_endpoint("GetOld", RestMethod::Get, "/old/{id}", None),
+        vec![ParamDef::path("id", QueryParamType::Integer).deprecated()],
+    );
+    endpoint.deprecated = true;
+    let params = endpoint.params.as_mut().unwrap();
+    params.query = vec![ParamDef::new("legacy", QueryParamType::String).deprecated()];
+    params.header = vec![ParamDef::new("X-Old", QueryParamType::String).deprecated()];
+    params.cookie = vec![ParamDef::new("old_session", QueryParamType::String).deprecated()];
+
+    let code = generated(&endpoint);
+
+    assert!(code.contains("/// Request for `GetOld` endpoint.\n///\n/// Deprecated.\n"), "{code}");
+    assert!(code.contains("/// Path parameter: id\n    ///\n    /// Deprecated.\n    pub id: i64,"), "{code}");
+    assert!(code.contains("/// Query parameter: legacy\n    ///\n    /// Deprecated.\n    pub legacy:"), "{code}");
+    assert!(code.contains("///\n    /// Deprecated.\n    #[serde(rename = \"X-Old\")]"), "{code}");
+    assert!(code.contains("///\n    /// Deprecated.\n    pub old_session:"), "{code}");
+    for setter in ["with_legacy", "with_x_old", "with_old_session"] {
+        assert!(code.contains(&format!("///\n    /// Deprecated.\n    pub fn {setter}(")), "{setter}: {code}");
+    }
+    assert!(!code.contains("#[deprecated"), "{code}");
+}
+
+fn github_rate_limit() -> RateLimit {
+    RateLimit::new("x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset", ResetUnit::EpochSeconds)
+        .unwrap()
+        .with_retry_after_header("retry-after")
+        .unwrap()
+}
+
+#[test]
+fn every_rate_limit_and_retry_guidance_field_is_documented_on_the_request() {
+    let endpoint = make_endpoint("ListRepos", RestMethod::Get, "/repos", None);
+    let mut api = crate::test_utils::api_for(&endpoint);
+    api.rate_limit = Some(github_rate_limit());
+    api.endpoints[0].retry_guidance = Some(
+        RetryGuidance::new(
+            [StatusSelector::Code(429), StatusSelector::Range { start: 500, end: 599 }],
+            true,
+            3,
+            Backoff::Exponential { base_ms: 250, cap_ms: 8000 },
+        )
+        .unwrap(),
+    );
+
+    let code = format_generated_code(&generate_request_struct(&api, &api.endpoints[0])).unwrap();
+
+    let expected = "/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
+/// ## Retry guidance
+///
+/// The provider's retry guidance (documentation only; the client does not retry):
+///
+/// - retry on: `429`, `500`-`599`
+/// - honor Retry-After: yes
+/// - max attempts: 3, including the first
+/// - backoff: exponential from 250 ms, capped at 8000 ms
+///
+/// ## Example";
+    assert!(code.contains(expected), "{code}");
+}
+
+#[test]
+fn an_endpoint_retry_guidance_replaces_the_api_value_in_its_docs() {
+    let endpoint = make_endpoint("Ping", RestMethod::Get, "/ping", None);
+    let mut api = crate::test_utils::api_for(&endpoint);
+    api.retry_guidance = Some(RetryGuidance::new([], false, 1, Backoff::None).unwrap());
+    api.endpoints[0].retry_guidance =
+        Some(RetryGuidance::new([StatusSelector::Code(503)], false, 2, Backoff::Fixed { delay_ms: 500 }).unwrap());
+
+    let replaced = format_generated_code(&generate_request_struct(&api, &api.endpoints[0])).unwrap();
+    api.endpoints[0].retry_guidance = None;
+    let inherited = format_generated_code(&generate_request_struct(&api, &api.endpoints[0])).unwrap();
+
+    assert!(replaced.contains("/// - retry on: `503`\n/// - honor Retry-After: no\n/// - max attempts: 2, including the first\n/// - backoff: fixed, 500 ms"), "{replaced}");
+    assert!(inherited.contains("/// - retry on: no status\n/// - honor Retry-After: no\n/// - max attempts: 1, including the first\n/// - backoff: none, retry immediately"), "{inherited}");
+    assert!(!inherited.contains("## Rate limit"), "{inherited}");
+}
+
+#[test]
+fn endpoint_auth_overrides_are_documented_and_inherited_auth_adds_nothing() {
+    let endpoint = make_endpoint("Health", RestMethod::Get, "/health", None);
+    let mut api = crate::test_utils::api_for(&endpoint);
+    let inherited = format_generated_code(&generate_request_struct(&api, &api.endpoints[0])).unwrap();
+
+    api.endpoints[0].auth = Some(EndpointAuth::Public);
+    let public = format_generated_code(&generate_request_struct(&api, &api.endpoints[0])).unwrap();
+
+    api.endpoints[0].auth = Some(EndpointAuth::Policy {
+        policy: AuthPolicy {
+            explicit: vec![
+                AuthMethod::ApiKey { header: "X-Admin-Key".into(), value_prefix: None },
+                AuthMethod::BearerToken { header: None },
+            ],
+            env_fallback: Some(EnvAuthStrategy::ApiKey { header: "X-Admin-Key".into(), value_prefix: None }),
+        },
+        env_mapping: Some(EnvMapping {
+            api_key: Some(ApiKeyEnv {
+                names: EnvList::new(vec!["ADMIN_KEY".into(), "FALLBACK_ADMIN_KEY".into()]),
+                header: "X-Admin-Key".into(),
+            }),
+            ..EnvMapping::default()
+        }),
+    });
+    let replaced = format_generated_code(&generate_request_struct(&api, &api.endpoints[0])).unwrap();
+
+    assert!(!inherited.contains("## Authentication"), "{inherited}");
+    assert!(
+        public.contains("/// ## Authentication\n///\n/// This endpoint is public: it sends no credential.\n"),
+        "{public}"
+    );
+    assert!(
+        replaced.contains(
+            "/// This endpoint replaces the API's authentication. It accepts an API key in the \
+             `X-Admin-Key` header, a bearer token in the `Authorization` header. Without a supplied \
+             credential, it reads an API key for the `X-Admin-Key` header from `ADMIN_KEY` or \
+             `FALLBACK_ADMIN_KEY`.\n"
+        ),
+        "{replaced}"
+    );
+}
+
+#[test]
+fn a_definition_adopting_nothing_new_generates_unchanged_docs() {
+    let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
+
+    let code = generated(&endpoint);
+
+    assert!(code.contains("/// Request for `ListModels` endpoint.\n///\n/// ## Example\n"), "{code}");
 }

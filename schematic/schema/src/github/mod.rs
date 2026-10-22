@@ -28,6 +28,15 @@
 //! - `ListWorkflowRuns` - List workflow runs for a repository
 //! - `ListOrgRepos` - List repositories for an organization
 //!
+//! ## Rate limit
+//!
+//! Response headers reporting the rate limit (documentation only; the client does not act on them):
+//!
+//! - limit: `x-ratelimit-limit`
+//! - remaining: `x-ratelimit-remaining`
+//! - reset: `x-ratelimit-reset`, as Unix time in seconds
+//! - retry after: `retry-after`
+//!
 //! ## Examples
 //!
 //! ```text

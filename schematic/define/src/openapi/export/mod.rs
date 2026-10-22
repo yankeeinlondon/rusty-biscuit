@@ -67,9 +67,10 @@ pub fn export(
 ) -> Result<OpenAPI, OpenApiError> {
     let info = map_info(api, options);
     let servers = map_servers(api);
-    let paths = map_paths(api, options)?;
+    let mut components = map_components(api, options);
+    // Endpoint auth registers override-only schemes after the API's own.
+    let paths = map_paths(api, options, &mut components.security_schemes)?;
     let security = map_security_requirements(api);
-    let components = map_components(api, options);
 
     let mut extensions = IndexMap::new();
     if !options.skip_extensions {
@@ -78,6 +79,8 @@ pub fn export(
             request_suffix: api.request_suffix.clone(),
             env_mapping: api.env_mapping.clone(),
             headers: api.headers.clone(),
+            rate_limit: api.rate_limit.clone(),
+            retry_guidance: api.retry_guidance.clone(),
         };
         extensions.insert("x-schematic".to_string(), doc_ext.into());
     }
@@ -615,4 +618,66 @@ mod tests {
         assert!(matches!(export(&without_components, &ExportOptions::new()), Err(OpenApiError::UnresolvedRefs { .. })));
     }
 
+
+    // Schema-only fixtures: nothing constructs or reads them.
+    #[allow(dead_code)]
+    mod composed {
+        use schemars::JsonSchema;
+        crate::definition_type!(#[derive(JsonSchema)] pub struct Cat { pub meows: bool });
+        crate::definition_type!(#[derive(JsonSchema)] pub struct Dog { pub barks: u8 });
+        crate::definition_type!(#[derive(JsonSchema)] #[serde(untagged)] pub enum Pet { Cat(Cat), Dog(Dog) });
+        crate::definition_type!(#[derive(JsonSchema)] #[serde(untagged)] pub enum Either { Cat(Cat), Dog(Dog) });
+        crate::definition_type!(#[derive(JsonSchema)] pub struct Both { pub meows: bool, pub barks: u8 });
+    }
+
+    #[test]
+    fn composed_components_export_as_compositions_of_references() {
+        use crate::DefinitionContext;
+        use composed::*;
+        let mut ctx = DefinitionContext::types_in("::models");
+        let cat = ctx.register::<Cat>().unwrap();
+        let dog = ctx.register::<Dog>().unwrap();
+        ctx.one_of::<Pet>([cat.clone(), dog.clone()]).unwrap();
+        ctx.any_of::<Either>([cat.clone(), dog.clone()]).unwrap();
+        ctx.all_of::<Both>([cat, dog]).unwrap();
+        let endpoint = Endpoint::post("Adopt", "/pets").describes("Adopt")
+            .request_json::<Pet>(&mut ctx).returns_json::<Both>(&mut ctx).build().unwrap();
+        let api = RestApi::builder(&ctx, "Pets", "https://example.com").describes("Pets").no_auth()
+            .endpoints([endpoint]).build().unwrap();
+
+        let doc = serde_json::to_value(export(&api, &ExportOptions::new()).unwrap()).unwrap();
+        let schemas = &doc["components"]["schemas"];
+        let refs = serde_json::json!([{"$ref": "#/components/schemas/Cat"}, {"$ref": "#/components/schemas/Dog"}]);
+        assert_eq!(schemas["Pet"], serde_json::json!({"oneOf": refs}));
+        assert_eq!(schemas["Either"], serde_json::json!({"anyOf": refs}));
+        assert_eq!(schemas["Both"], serde_json::json!({"allOf": refs}));
+        assert_eq!(schemas["Cat"]["type"], "object");
+        let body = &doc["paths"]["/pets"]["post"]["requestBody"]["content"]["application/json"]["schema"];
+        assert_eq!(body["$ref"], "#/components/schemas/Pet");
+    }
+
+    #[test]
+    fn metadata_reaches_the_document_and_only_overriding_operations() {
+        use crate::metadata::{Backoff, RateLimit, ResetUnit, RetryGuidance, StatusSelector};
+        let api_limit = RateLimit::new("x-limit", "x-remaining", "x-reset", ResetUnit::EpochSeconds).unwrap();
+        let own_retry = RetryGuidance::new([StatusSelector::Code(503)], false, 2, Backoff::None).unwrap();
+        let ctx = crate::DefinitionContext::types_in("::models");
+        let api = RestApi::builder(&ctx, "Meta", "https://example.com").describes("Meta").no_auth()
+            .rate_limit(api_limit)
+            .endpoints([
+                Endpoint::get("Inherit", "/a").describes("A").returns_empty().build().unwrap(),
+                Endpoint::get("Own", "/b").describes("B").returns_empty().retry_guidance(own_retry).build().unwrap(),
+            ])
+            .build().unwrap();
+
+        let doc = serde_json::to_value(export(&api, &ExportOptions::new()).unwrap()).unwrap();
+        assert_eq!(doc["x-schematic"]["rate_limit"]["reset_unit"], "epoch_seconds");
+        assert!(doc["x-schematic"].get("retry_guidance").is_none());
+        assert_eq!(doc["paths"]["/a"]["get"]["x-schematic"], serde_json::json!({"response": "Empty"}));
+        assert_eq!(doc["paths"]["/b"]["get"]["x-schematic"]["retry_guidance"]["retry_on"], serde_json::json!([{"code": 503}]));
+        assert!(doc["paths"]["/b"]["get"]["x-schematic"].get("rate_limit").is_none());
+
+        let bare = serde_json::to_value(export(&api, &ExportOptions::new().skip_extensions()).unwrap()).unwrap();
+        assert!(!bare.to_string().contains("x-schematic"));
+    }
 }

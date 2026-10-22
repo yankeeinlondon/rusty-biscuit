@@ -1,5 +1,48 @@
 //! Converts stored JSON Schema components to OpenAPI 3.0 schemas.
 
+use openapiv3::{ReferenceOr, Schema, SchemaData, SchemaKind};
+
+/// Converts one `components.schemas` entry.
+///
+/// A composed component (`DefinitionContext::one_of`, `any_of`, `all_of`) is
+/// stored as exactly one `oneOf`/`anyOf`/`allOf` member listing component
+/// `$ref`s, and exports as that composition of references. Every other schema
+/// goes through [`convert_json_schema_to_openapi`], which does not carry
+/// compositions schemars emits inside ordinary types.
+pub(super) fn convert_component_schema(value: &serde_json::Value) -> Schema {
+    match composition(value) {
+        Some((keyword, members)) => {
+            let members = members.into_iter().map(|reference| ReferenceOr::Reference { reference }).collect();
+            let schema_kind = match keyword {
+                "oneOf" => SchemaKind::OneOf { one_of: members },
+                "anyOf" => SchemaKind::AnyOf { any_of: members },
+                _ => SchemaKind::AllOf { all_of: members },
+            };
+            Schema { schema_data: SchemaData::default(), schema_kind }
+        }
+        None => convert_json_schema_to_openapi(value),
+    }
+}
+
+/// The keyword and member references of a schema that is exactly
+/// `{"oneOf"|"anyOf"|"allOf": [{"$ref": ..}, ..]}` with at least one member.
+fn composition(value: &serde_json::Value) -> Option<(&'static str, Vec<String>)> {
+    let object = value.as_object()?;
+    if object.len() != 1 {
+        return None;
+    }
+    let keyword = ["oneOf", "anyOf", "allOf"].into_iter().find(|keyword| object.contains_key(*keyword))?;
+    let members = object[keyword].as_array().filter(|members| !members.is_empty())?;
+    members
+        .iter()
+        .map(|member| {
+            let member = member.as_object().filter(|member| member.len() == 1)?;
+            member.get("$ref")?.as_str().map(str::to_string)
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(|references| (keyword, references))
+}
+
 /// Converts a JSON Schema value to an OpenAPI schema.
 pub(super) fn convert_json_schema_to_openapi(value: &serde_json::Value) -> openapiv3::Schema {
     use openapiv3::{ObjectType, Schema, SchemaData, SchemaKind, Type};
@@ -189,5 +232,34 @@ pub(super) fn convert_json_schema_to_openapi(value: &serde_json::Value) -> opena
     Schema {
         schema_data: data,
         schema_kind,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn each_composition_keyword_exports_its_references() {
+        for keyword in ["oneOf", "anyOf", "allOf"] {
+            let stored = json!({keyword: [{"$ref": "#/components/schemas/Cat"}, {"$ref": "#/components/schemas/Dog"}]});
+            assert_eq!(serde_json::to_value(convert_component_schema(&stored)).unwrap(), stored, "{keyword}");
+        }
+    }
+
+    #[test]
+    fn compositions_that_are_not_pure_reference_lists_keep_the_ordinary_conversion() {
+        for stored in [
+            json!({"anyOf": [{"$ref": "#/components/schemas/Cat"}, {"type": "null"}]}),
+            json!({"oneOf": [{"$ref": "#/components/schemas/Cat"}], "description": "x"}),
+            json!({"oneOf": []}),
+        ] {
+            assert_eq!(
+                serde_json::to_value(convert_component_schema(&stored)).unwrap(),
+                serde_json::to_value(convert_json_schema_to_openapi(&stored)).unwrap(),
+                "{stored}"
+            );
+        }
     }
 }

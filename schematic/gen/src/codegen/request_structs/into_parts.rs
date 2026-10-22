@@ -8,8 +8,10 @@ use schematic_define::{ApiRequest, Endpoint};
 use crate::codegen::pagination::OrdinaryDefault;
 
 use crate::codegen::request_structs::named_params::generate_headers_assembly;
+use crate::codegen::request_structs::path_params::{PathField, generate_typed_path_binding};
 use crate::codegen::request_structs::shared::{
     QueryParamInfo, extract_cookie_params, extract_header_params, generate_path_format,
+    generate_query_binding,
 };
 
 /// Generates the statements that assemble `schematic_runtime::RequestParts`.
@@ -19,15 +21,27 @@ use crate::codegen::request_structs::shared::{
 /// merged with cookie parameters, are `InvalidArgument`s reported before any
 /// network work.
 ///
+/// `typed_paths` are the endpoint's declared path fields; `None` substitutes
+/// the untyped `path_params` instead. A non-finite typed number is an
+/// `InvalidArgument` too.
+///
 /// `defaults` are adopted parameters the endpoint declares required: they
 /// are not request fields, so their pager default is appended here.
 pub(super) fn generate_into_parts_body(
     endpoint: &Endpoint,
     path_params: &[&str],
+    typed_paths: Option<&[PathField]>,
     query_params: &[QueryParamInfo],
     defaults: &[OrdinaryDefault],
 ) -> TokenStream {
-    let path_format = generate_path_format(&endpoint.path, path_params, query_params);
+    let path_format = match typed_paths {
+        Some(fields) => {
+            let path = generate_typed_path_binding(&endpoint.path, fields);
+            let query = generate_query_binding(query_params);
+            quote! { #path #query }
+        }
+        None => generate_path_format(&endpoint.path, path_params, query_params),
+    };
 
     let body_expr = match &endpoint.request {
         Some(ApiRequest::Json(_)) => quote! {

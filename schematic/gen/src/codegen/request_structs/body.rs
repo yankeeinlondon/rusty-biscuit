@@ -36,14 +36,14 @@ pub fn generate_body_field(api: &RestApi, endpoint: &Endpoint) -> TokenStream {
 
 /// Generates the Default implementation for structs with a body.
 ///
-/// Returns empty TokenStream since Default is now always derived.
+/// Returns an empty TokenStream: a request that has `Default` derives it
+/// (see `derives.rs`).
 pub fn generate_default_impl(
     _struct_name: &proc_macro2::Ident,
     _path_params: &[&str],
     _query_params: &[QueryParamInfo],
     _has_body: bool,
 ) -> TokenStream {
-    // Default is derived for all structs, no manual impl needed
     quote! {}
 }
 

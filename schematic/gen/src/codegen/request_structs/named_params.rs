@@ -56,8 +56,11 @@ pub(super) fn generate_named_param_fields(
                 .unwrap_or_default()
         );
 
+        let deprecated = param.deprecation_doc();
+
         quote! {
             #[doc = #doc]
+            #deprecated
             #rename
             pub #field_name: Option<#rust_type>,
         }
@@ -81,9 +84,11 @@ pub(super) fn generate_named_builder_methods(
             param.name,
             location.label().to_lowercase()
         );
+        let deprecated = param.deprecation_doc();
 
         quote! {
             #[doc = #doc]
+            #deprecated
             pub fn #method_name(mut self, value: #rust_type) -> Self {
                 self.#field_name = Some(value);
                 self

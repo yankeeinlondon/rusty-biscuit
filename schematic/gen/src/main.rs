@@ -90,6 +90,31 @@ enum Commands {
         api: String,
     },
 
+    /// Write an API's self-contained definition bundle as canonical JSON
+    Bundle {
+        #[arg(short, long)]
+        api: String,
+
+        /// Bundle file to write; standard output when omitted
+        #[arg(long, value_name = "FILE")]
+        out: Option<String>,
+    },
+
+    /// Export OpenAPI and Postman from a definition bundle, without the registry
+    ExportBundle {
+        #[arg(short, long, value_name = "FILE")]
+        input: String,
+
+        #[arg(long, value_name = "DIR")]
+        openapi_out: Option<String>,
+
+        #[arg(long, value_enum, default_value = "json")]
+        openapi_format: OpenApiFormat,
+
+        #[arg(long, value_name = "DIR")]
+        postman_out: Option<String>,
+    },
+
     /// Import an OpenAPI specification and generate Rust client code
     Import {
         #[arg(short, long)]
@@ -182,6 +207,26 @@ fn main() -> ExitCode {
             },
         ),
         Some(Commands::Validate { api }) => pipeline::run_validate(&api, cli.verbose),
+        Some(Commands::Bundle { api, out }) => pipeline::run_bundle(&api, out.as_deref()),
+        Some(Commands::ExportBundle {
+            input,
+            openapi_out,
+            openapi_format,
+            postman_out,
+        }) => pipeline::run_export_bundle(
+            &input,
+            &GenerateOpts {
+                output: "",
+                dry_run: false,
+                verbose: cli.verbose,
+                openapi_out: openapi_out.as_deref(),
+                openapi_format: openapi_format.into(),
+                openapi_version: None,
+                postman_out: postman_out.as_deref(),
+                no_openapi: false,
+                no_postman: false,
+            },
+        ),
         Some(Commands::Import {
             input,
             api_name,

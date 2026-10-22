@@ -1,8 +1,8 @@
 //! Maps [`EndpointParams`] onto OpenAPI operation parameters.
 //!
 //! Path parameters are handled separately in [`super::paths`] because they are
-//! recovered from the path template rather than declared; everything here comes
-//! from an endpoint's explicit `params`.
+//! shared across the operations of a path item; everything here is an
+//! endpoint's own query, header, and cookie parameters.
 
 use indexmap::IndexMap;
 use openapiv3::{
@@ -53,7 +53,7 @@ fn parameter_data(param: &ParamDef) -> ParameterData {
         name: param.name.clone(),
         description: param.description.clone(),
         required: param.required,
-        deprecated: None,
+        deprecated: param.deprecated.then_some(true),
         format: ParameterSchemaOrContent::Schema(ReferenceOr::Item(param_schema(
             &param.param_type,
         ))),
@@ -67,7 +67,7 @@ fn parameter_data(param: &ParamDef) -> ParameterData {
 }
 
 /// Maps a parameter's declared type onto a JSON Schema.
-fn param_schema(param_type: &QueryParamType) -> Schema {
+pub(super) fn param_schema(param_type: &QueryParamType) -> Schema {
     let schema_kind = match param_type {
         QueryParamType::String => SchemaKind::Type(Type::String(Default::default())),
         QueryParamType::Integer => SchemaKind::Type(Type::Integer(Default::default())),
@@ -238,5 +238,22 @@ mod tests {
             &mapped[1],
             ReferenceOr::Item(Parameter::Cookie { .. })
         ));
+    }
+
+    #[test]
+    fn only_deprecated_parameters_carry_the_flag() {
+        let mut old = query_param("old", QueryParamType::String, false);
+        old.deprecated = true;
+        let params = EndpointParams {
+            query: vec![old.clone(), query_param("new", QueryParamType::String, false)],
+            header: vec![old.clone()],
+            cookie: vec![old],
+            ..Default::default()
+        };
+        let mapped = serde_json::to_value(map_parameters(Some(&params))).unwrap();
+        assert_eq!(mapped[0]["deprecated"], true);
+        assert!(mapped[1].get("deprecated").is_none());
+        assert_eq!(mapped[2]["deprecated"], true);
+        assert_eq!(mapped[3]["deprecated"], true);
     }
 }

@@ -27,6 +27,8 @@ fn summarize(description: &str) -> String {
 /// - Introduction paragraph with API name and description
 /// - Authentication section explaining the auth strategy
 /// - Features section listing endpoints grouped by HTTP method
+/// - Rate limit and retry guidance sections, when the API declares them
+///   (documentation only; the client acts on neither)
 /// - Example section with a basic usage example
 ///
 /// ## Examples
@@ -57,14 +59,16 @@ impl<'a> ModuleDocBuilder<'a> {
         let intro = self.intro_paragraph();
         let auth_section = self.auth_section();
         let features_section = self.features_section();
+        let metadata_section = self.metadata_section();
         let example_section = self.example_section();
 
         // Combine all sections with blank lines between them
         let full_doc = format!(
-            "{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}{}",
             intro.trim(),
             auth_section.trim(),
             features_section.trim(),
+            metadata_section,
             example_section.trim()
         );
 
@@ -146,6 +150,24 @@ impl<'a> ModuleDocBuilder<'a> {
         };
 
         format!("## Authentication\n\n{}{}", auth_desc, env_info)
+    }
+
+    /// The API-level rate-limit and retry guidance sections, each followed
+    /// by a blank line, or nothing when the API declares neither. An
+    /// endpoint's own value is documented on its request type instead.
+    fn metadata_section(&self) -> String {
+        use crate::codegen::request_structs::endpoint_docs::{rate_limit_lines, retry_guidance_lines};
+
+        let mut sections = String::new();
+        if let Some(rate_limit) = &self.api.rate_limit {
+            sections.push_str(&rate_limit_lines(rate_limit).join("\n"));
+            sections.push_str("\n\n");
+        }
+        if let Some(guidance) = &self.api.retry_guidance {
+            sections.push_str(&retry_guidance_lines(guidance).join("\n"));
+            sections.push_str("\n\n");
+        }
+        sections
     }
 
     /// Groups endpoints by their HTTP method.
@@ -530,5 +552,65 @@ mod tests {
             code.contains("    let client"),
             "Expected indented 'let client' in code block"
         );
+    }
+
+    /// The module doc text, one entry per `//!` line.
+    fn doc_text(api: &RestApi) -> String {
+        let file: syn::File = syn::parse2(ModuleDocBuilder::new(api).build()).expect("module docs parse");
+        file.attrs
+            .iter()
+            .filter_map(|attr| match &attr.meta {
+                syn::Meta::NameValue(doc) => match &doc.value {
+                    syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(text), .. }) => Some(text.value()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn api_rate_limit_and_retry_guidance_are_documented_before_the_example() {
+        use schematic_define::metadata::{Backoff, RateLimit, ResetUnit, RetryGuidance, StatusSelector};
+
+        let mut api = make_test_api();
+        api.rate_limit = Some(
+            RateLimit::new("x-rate-limit", "x-rate-remaining", "x-rate-reset", ResetUnit::Seconds).unwrap(),
+        );
+        api.retry_guidance = Some(
+            RetryGuidance::new([StatusSelector::Code(429)], false, 4, Backoff::Fixed { delay_ms: 100 }).unwrap(),
+        );
+
+        let docs = doc_text(&api);
+
+        let expected = " ## Rate limit
+
+ Response headers reporting the rate limit (documentation only; the client does not act on them):
+
+ - limit: `x-rate-limit`
+ - remaining: `x-rate-remaining`
+ - reset: `x-rate-reset`, as seconds until the window resets
+
+ ## Retry guidance
+
+ The provider's retry guidance (documentation only; the client does not retry):
+
+ - retry on: `429`
+ - honor Retry-After: no
+ - max attempts: 4, including the first
+ - backoff: fixed, 100 ms
+
+ ## Examples";
+        assert!(docs.contains(expected), "{docs}");
+    }
+
+    #[test]
+    fn an_api_without_metadata_has_no_metadata_sections() {
+        let docs = doc_text(&make_test_api());
+
+        assert!(!docs.contains("## Rate limit"), "{docs}");
+        assert!(!docs.contains("## Retry guidance"), "{docs}");
+        assert!(docs.contains("- `ListItems` - List all items\n\n ## Examples"), "{docs}");
     }
 }

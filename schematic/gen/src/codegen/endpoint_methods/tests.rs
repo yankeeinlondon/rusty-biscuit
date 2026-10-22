@@ -671,3 +671,87 @@ fn no_shipped_call_type_shares_a_name_with_a_definitions_type() {
         .collect();
     assert!(shadowing.is_empty(), "call types that shadow definitions types: {shadowing:?}");
 }
+
+// ---- typed path parameters, deprecation, and endpoint auth ----
+
+fn typed_cell_api() -> RestApi {
+    let mut get_cell = endpoint("GetCell", RestMethod::Get, "/rows/{row}/kinds/{kind}", "Gets a cell.");
+    get_cell.params = Some(EndpointParams {
+        path: vec![
+            ParamDef::path("kind", QueryParamType::Enum(vec!["a-1".into(), "b".into()])),
+            ParamDef::path("row", QueryParamType::Integer),
+        ],
+        query: vec![],
+        header: vec![],
+        cookie: vec![],
+    });
+    api("Cells", vec![get_cell])
+}
+
+#[test]
+fn typed_path_arguments_follow_the_template_with_their_declared_types() {
+    let api = typed_cell_api();
+
+    let code = code(&api);
+
+    assert!(
+        squash(&code).contains(
+            "pubfnget_cell(&self,row:i64,kind:GetCellRequestKind)->GetCellCall<'_>{\
+             GetCellCall(self.0.send(GetCellRequest::new(row,kind)))}"
+        ),
+        "{code}"
+    );
+    let docs = fn_docs(&code, "Cells", "get_cell");
+    assert!(docs.contains(&" - `row: i64`: the `{row}` path parameter".to_string()), "{docs:?}");
+    assert!(docs.contains(&" - `kind: GetCellRequestKind`: the `{kind}` path parameter".to_string()), "{docs:?}");
+    assert_eq!(example_invocation(&api, &api.endpoints[0], "client"), "client.get_cell(1, GetCellRequestKind::A1)");
+}
+
+#[test]
+fn deprecation_is_documented_on_methods_call_types_and_setters_without_attributes() {
+    let mut api = widgets();
+    let get_widget = api.endpoints.iter_mut().find(|endpoint| endpoint.id == "GetWidget").unwrap();
+    get_widget.deprecated = true;
+    get_widget.params.as_mut().unwrap().query[0].deprecated = true;
+
+    let code = code(&api);
+
+    let method_docs = fn_docs(&code, "Widgets", "get_widget");
+    let route = method_docs.iter().position(|line| line == " `GET /owners/{owner}/widgets/{widget_id}`").unwrap();
+    assert_eq!(method_docs[route + 1..route + 3], ["", " Deprecated."], "{method_docs:?}");
+    assert!(
+        method_docs.contains(&" - [`limit`](GetWidgetCall::limit): the `limit` query parameter (`i64`). Results per page. Deprecated.".to_string()),
+        "{method_docs:?}"
+    );
+    assert_eq!(
+        fn_docs(&code, "GetWidgetCall", "limit"),
+        [" Sets the `limit` query parameter (`i64`). Results per page.", "", " Deprecated."]
+    );
+    assert!(
+        squash(&code).contains(&squash(
+            "the call without sending it.\n///\n/// Deprecated.\n#[derive(Clone, Debug)]\n#[must_use = \"a call sends nothing until it is awaited\"]\npub struct GetWidgetCall"
+        )),
+        "{code}"
+    );
+    assert!(!code.contains("#[deprecated"), "{code}");
+    assert_eq!(fn_docs(&code, "GetWidgetCall", "tag").len(), 1, "an undeprecated setter is unchanged");
+}
+
+#[test]
+fn a_public_endpoint_method_says_it_sends_no_credential() {
+    let mut api = widgets();
+    api.endpoints[0].auth = Some(schematic_define::EndpointAuth::Public);
+    let method = names_of(&api, 0);
+
+    let code = code(&api);
+
+    assert!(
+        fn_docs(&code, "Widgets", &method).contains(&" This endpoint is public: it sends no credential.".to_string()),
+        "{code}"
+    );
+    assert!(!fn_docs(&code, "Widgets", &names_of(&api, 1)).iter().any(|line| line.contains("credential")));
+}
+
+fn names_of(api: &RestApi, index: usize) -> String {
+    resolve_names(api).endpoints[index].method.clone()
+}

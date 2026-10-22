@@ -28,14 +28,39 @@ const BASIC_APIS: &[&str] = &["bitbucket", "emqx-basic"];
 // exactly that variable, which the current builder also requires.
 const UNUSED_USERNAME_APIS: &[&str] = &["unfolded-circle-core-rest"];
 
+/// Deliberate definition adoptions made after the snapshots were taken: one
+/// API, one top-level definition field, and the exact value adopted. A
+/// snapshot that already has the field, or a current value that differs, is
+/// still reported at its own leaf.
+fn adoptions() -> [(&'static str, &'static str, Value); 1] {
+    [(
+        "github",
+        "rate_limit",
+        serde_json::json!({
+            "limit_header": "x-ratelimit-limit",
+            "remaining_header": "x-ratelimit-remaining",
+            "reset_header": "x-ratelimit-reset",
+            "reset_unit": "epoch_seconds",
+            "retry_after_header": "retry-after"
+        }),
+    )]
+}
+
 /// Rewrites a historical snapshot from before `RestApi::env_username` was
-/// removed and Basic carried its own lists. Touches only `definition/auth`,
-/// `definition/env_auth` and `definition/env_username`, and then recomputes
+/// removed and Basic carried its own lists, and adds the named
+/// [`adoptions`]. Touches only `definition/auth`, `definition/env_auth`,
+/// `definition/env_username` and the adopted fields, and then recomputes
 /// `fingerprints/api_metadata` exactly as `snapshot` does; anything it does
 /// not recognize is left in place to be reported at its own leaf.
 fn normalize_historical(key: &str, mut historical: Value) -> Value {
     let definition = historical["definition"].as_object_mut().unwrap();
     let mut changed = false;
+    for (api, field, value) in adoptions() {
+        if api == key && !definition.contains_key(field) {
+            definition.insert(field.to_string(), value);
+            changed = true;
+        }
+    }
     if definition.get("env_username").is_some_and(Value::is_null) {
         definition.remove("env_username");
         changed = true;
@@ -244,15 +269,34 @@ fn historical(file: &str) -> Value {
 }
 
 #[test]
+fn adoptions_accept_only_the_named_api_field_and_exact_value() {
+    let mut github = resolve_api("github").unwrap();
+    github.rate_limit = Some(
+        schematic_define::RateLimit::new("x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-used",
+            schematic_define::ResetUnit::EpochSeconds).unwrap().with_retry_after_header("retry-after").unwrap(),
+    );
+    let changed = historical_differences("github", historical("github"), &github);
+    assert!(changed.contains(&"github/definition/rate_limit/reset_header".to_string()), "{changed:?}");
+
+    let mut gitea = resolve_api("gitea").unwrap();
+    gitea.rate_limit = github.rate_limit.clone();
+    let changed = historical_differences("gitea", historical("gitea"), &gitea);
+    assert!(changed.contains(&"gitea/definition/rate_limit".to_string()), "{changed:?}");
+}
+
+#[test]
 fn historical_normalization_lowers_basic_and_unused_usernames_only() {
     for key in ["bitbucket", "emqx-basic", "unfolded-circle-core-rest", "github"] {
         let raw = historical(key);
         let normalized = normalize_historical(key, raw.clone());
         let mut touched = Vec::new();
         differences(&canonical(raw), &canonical(normalized), key, &mut touched);
+        let adopted: Vec<String> = adoptions().into_iter().filter(|(api, ..)| *api == key)
+            .map(|(_, field, _)| format!("{key}/definition/{field}")).collect();
         touched.retain(|path| !path.starts_with(&format!("{key}/definition/auth/"))
             && ![format!("{key}/definition/auth"), format!("{key}/definition/env_auth/0"),
-                format!("{key}/definition/env_username"), format!("{key}/fingerprints/api_metadata")].contains(path));
+                format!("{key}/definition/env_username"), format!("{key}/fingerprints/api_metadata")].contains(path)
+            && !adopted.contains(path));
         assert!(touched.is_empty(), "{key}: normalization touched {touched:?}");
     }
 }
@@ -297,7 +341,9 @@ fn normalization_leaves_other_auth_leaves_reported() {
 
 #[test]
 fn shipped_json_field_matrix_preserves_required_and_optional_shapes() {
-    fn matrix<T>(control: Value, optional: &[&str])
+    // `optional` fields may be absent; `strict` ones among them reject an
+    // explicit null instead of reading it as absent.
+    fn matrix<T>(control: Value, optional: &[&str], strict: &[&str])
     where T: serde::de::DeserializeOwned + serde::Serialize {
         assert!(serde_json::from_value::<T>(control.clone()).is_ok());
         for (field, value) in control.as_object().unwrap() {
@@ -307,7 +353,8 @@ fn shipped_json_field_matrix_preserves_required_and_optional_shapes() {
                 if null { edited[field] = Value::Null; }
                 else { edited.as_object_mut().unwrap().remove(field); }
                 let result = serde_json::from_value::<T>(edited);
-                assert_eq!(result.is_ok(), is_optional, "{field}: null={null}");
+                let accepted = is_optional && !(null && strict.contains(&field.as_str()));
+                assert_eq!(result.is_ok(), accepted, "{field}: null={null}");
                 if let Ok(restored) = result {
                     assert!(serde_json::to_value(restored).unwrap()[field].is_null(), "{field}");
                 }
@@ -360,18 +407,18 @@ fn shipped_json_field_matrix_preserves_required_and_optional_shapes() {
     let api = resolve_api("github").unwrap();
     matrix::<RestApi>(serde_json::to_value(&api).unwrap(), &[
         "docs_url", "auth_policy", "module_path", "request_suffix",
-        "version", "env_mapping", "request_id_header", "default_pagination",
-    ]);
+        "version", "env_mapping", "request_id_header", "default_pagination", "rate_limit",
+    ], &["rate_limit"]);
     for endpoint in &api.endpoints {
         matrix::<schematic_define::Endpoint>(serde_json::to_value(endpoint).unwrap(), &[
             "request", "params", "cross_origin", "pagination",
-        ]);
+        ], &[]);
         if let Some(params) = &endpoint.params {
             matrix::<schematic_define::EndpointParams>(serde_json::to_value(params).unwrap(), &[
 
-            ]);
+            ], &[]);
             for param in params.query.iter().chain(&params.header).chain(&params.cookie) {
-                matrix::<schematic_define::ParamDef>(serde_json::to_value(param).unwrap(), &["description"]);
+                matrix::<schematic_define::ParamDef>(serde_json::to_value(param).unwrap(), &["description"], &[]);
             }
         }
     }

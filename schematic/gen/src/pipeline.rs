@@ -552,6 +552,53 @@ fn openapi_export_options(
         .with_format(format.into())
 }
 
+/// Runs the bundle command: writes the [`DefinitionBundle`] of one API to
+/// `out`, or to standard output.
+///
+/// [`DefinitionBundle`]: schematic_define::DefinitionBundle
+pub fn run_bundle(api_name: &str, out: Option<&str>) -> Result<(), GeneratorError> {
+    let api = resolve_api(api_name)?;
+    let bundle = schematic_define::DefinitionBundle::new(api)
+        .map_err(|source| GeneratorError::Bundle { path: api_name.to_owned(), source })?;
+    let json = bundle.to_json();
+    match out {
+        Some(path) => std::fs::write(path, json).map_err(|source| GeneratorError::WriteError { path: path.to_owned(), source }),
+        None => {
+            print!("{json}");
+            Ok(())
+        }
+    }
+}
+
+/// Runs the export-bundle command: loads the bundle at `input` without the
+/// registry and publishes its OpenAPI document and Postman collection to the
+/// requested roots, keeping every other file there. A bundle that does not
+/// load writes nothing.
+pub fn run_export_bundle(input: &str, opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
+    if opts.openapi_out.is_none() && opts.postman_out.is_none() {
+        return Err(GeneratorError::ConfigError("export-bundle needs --openapi-out or --postman-out".into()));
+    }
+    let text = std::fs::read_to_string(input)
+        .map_err(|error| GeneratorError::ConfigError(format!("cannot read {input}: {error}")))?;
+    let bundle = schematic_define::DefinitionBundle::from_json(&text)
+        .map_err(|source| GeneratorError::Bundle { path: input.to_owned(), source })?;
+    let apis = [bundle.api()];
+    let mut report = GenerationReport::default();
+    if let Some(dir) = opts.openapi_out {
+        report.outputs.push(publish_openapi(&apis, false, dir, opts));
+    }
+    if let Some(dir) = opts.postman_out {
+        report.outputs.push(publish_postman(&apis, false, dir, opts));
+    }
+    for output in &report.outputs {
+        match &output.result {
+            Ok(()) => println!("{} {} output", "[OK]".green().bold(), output.output),
+            Err(_) => println!("{} {} output", "[FAILED]".red().bold(), output.output),
+        }
+    }
+    report.into_result()
+}
+
 /// Runs the validate command: every output's validator over one API.
 ///
 /// Prints each diagnostic to stderr and one pass/fail line per output.

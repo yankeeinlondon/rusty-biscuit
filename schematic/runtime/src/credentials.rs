@@ -1,10 +1,16 @@
 //! Programmatic credentials and how an API accepts them.
 //!
 //! A credential is supplied per call or at client level; when neither is
-//! set, the client reads its configured environment variables, and when
-//! nothing resolves the request is sent anonymously. There is no
-//! missing-credential error and no retry with another credential. A
-//! credential's `Debug` and `Display` output never shows its value.
+//! set, the client reads its configured environment variables. When nothing
+//! resolves, an endpoint under the API's policy is sent anonymously, while an
+//! endpoint whose definition replaces that policy
+//! ([`ApiDefinition::endpoint_auth`](crate::ApiDefinition::endpoint_auth))
+//! is refused before sending, as is any send whose per-call credential the
+//! endpoint does not accept. A public endpoint
+//! ([`ApiDefinition::endpoint_public`](crate::ApiDefinition::endpoint_public))
+//! resolves no credential at all. There is never a retry with another
+//! credential. A credential's `Debug` and `Display` output never shows its
+//! value.
 //!
 //! [`AuthConfig`] is the runtime's form of a definition's effective
 //! authentication policy; it is separate from the definition types in
@@ -303,12 +309,53 @@ impl AuthConfig {
             }
             CallAuth::Inherit => {
                 if let Some(credential) = client {
-                    // Validated against the accepted placements when the client was built.
+                    // The client credential was validated against the API and
+                    // every endpoint replacement together, so a policy that
+                    // does not accept its kind skips it rather than
+                    // reinterpreting its secret.
                     if let Some(placement) = self.placement_for(credential.kind()) {
                         return Ok(Resolved::sent(placement, credential.wire_value(placement), AuthMethod::ClientLevel));
                     }
                 }
                 Ok(self.resolve_env().unwrap_or_else(Resolved::anonymous))
+            }
+        }
+    }
+
+    /// [`resolve`](Self::resolve) for an endpoint whose policy replaces the
+    /// API's: unless the call asked for no credential, nothing resolving is
+    /// refused rather than sent anonymously.
+    pub(crate) fn resolve_required(
+        &self,
+        call: &CallAuth,
+        client: Option<&Credential>,
+        endpoint: &str,
+    ) -> Result<Resolved, InvalidArgument> {
+        let resolved = self.resolve(call, client)?;
+        if resolved.sent.is_none() && !matches!(call, CallAuth::Anonymous) {
+            return Err(InvalidArgument::new(format!(
+                "endpoint `{endpoint}` requires {} credential, and none was supplied or found in its environment variables",
+                self.accepted_kinds()
+            )));
+        }
+        Ok(resolved)
+    }
+
+    /// The kinds this policy can send, for a message: `an access token or
+    /// Basic`.
+    fn accepted_kinds(&self) -> String {
+        let mut kinds: Vec<CredentialKind> = Vec::new();
+        for kind in self.placements().map(CredentialPlacement::kind) {
+            if !kinds.contains(&kind) {
+                kinds.push(kind);
+            }
+        }
+        let names: Vec<&str> = kinds.into_iter().map(CredentialKind::name).collect();
+        match names.as_slice() {
+            [] => "a".to_string(),
+            [first, ..] => {
+                let article = if first.starts_with(['a', 'A']) { "an" } else { "a" };
+                format!("{article} {}", names.join(" or "))
             }
         }
     }
@@ -341,7 +388,7 @@ pub(crate) struct Resolved {
 }
 
 impl Resolved {
-    fn anonymous() -> Self {
+    pub(crate) fn anonymous() -> Self {
         Self {
             sent: None,
             auth: AuthMethod::Anonymous,

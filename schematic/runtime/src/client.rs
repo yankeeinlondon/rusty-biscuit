@@ -65,6 +65,27 @@ pub struct ApiDefinition {
     request_id_header: Option<String>,
     cross_origin: OriginPolicy,
     endpoint_cross_origin: Vec<(String, OriginPolicy)>,
+    endpoint_auth: Vec<(String, EndpointAuth)>,
+}
+
+/// One endpoint's authentication, replacing the API's.
+#[derive(Debug, Clone)]
+enum EndpointAuth {
+    /// No credential is resolved or sent.
+    Public,
+    /// This policy instead of the API's; nothing resolving is an error.
+    Replaced(AuthConfig),
+}
+
+impl EndpointAuth {
+    fn placements(&self) -> impl Iterator<Item = &CredentialPlacement> {
+        match self {
+            Self::Public => None,
+            Self::Replaced(auth) => Some(auth.placements()),
+        }
+        .into_iter()
+        .flatten()
+    }
 }
 
 impl ApiDefinition {
@@ -77,6 +98,7 @@ impl ApiDefinition {
             request_id_header: None,
             cross_origin: OriginPolicy::SameOrigin,
             endpoint_cross_origin: Vec::new(),
+            endpoint_auth: Vec::new(),
         }
     }
 
@@ -101,6 +123,30 @@ impl ApiDefinition {
     #[must_use]
     pub fn auth(mut self, auth: AuthConfig) -> Self {
         self.auth = auth;
+        self
+    }
+
+    /// Makes one endpoint public: its sends resolve no credential from any
+    /// source, and every value in a location where this API or any of its
+    /// endpoint policies places a credential (header, query parameter, or
+    /// cookie) is removed from the request, including one the request sets
+    /// itself. Other headers and cookies are kept.
+    #[must_use]
+    pub fn endpoint_public(mut self, endpoint: impl Into<String>) -> Self {
+        self.endpoint_auth.push((endpoint.into(), EndpointAuth::Public));
+        self
+    }
+
+    /// Replaces the API's policy for one endpoint; the two are never merged.
+    ///
+    /// A per-call credential must be of a kind `auth` accepts. A client-level
+    /// credential is sent only when `auth` accepts its kind, and is otherwise
+    /// passed over for `auth`'s environment fallback. When nothing resolves,
+    /// the send is refused with [`InvalidArgument`] before any request,
+    /// unless the call asked for no credential.
+    #[must_use]
+    pub fn endpoint_auth(mut self, endpoint: impl Into<String>, auth: AuthConfig) -> Self {
+        self.endpoint_auth.push((endpoint.into(), EndpointAuth::Replaced(auth)));
         self
     }
 
@@ -155,7 +201,7 @@ impl<A: Api> Clone for Client<A> {
 impl<A: Api> fmt::Debug for Client<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let settings = &*self.settings;
-        let secrets = secret_names(&settings.definition, &settings.definition.auth);
+        let secrets = secret_names(&settings.definition);
         f.debug_struct("Client")
             .field("api", &A::NAME)
             .field("base_url", &secrets.redact_url_reference(&settings.definition.base_url))
@@ -207,6 +253,10 @@ struct Inner {
     request_id_header: Option<String>,
     origins: OriginRules,
     endpoint_origins: Vec<(String, OriginRules)>,
+    endpoint_auth: Vec<(String, EndpointAuth)>,
+    /// Every placement of the API's policy and of each endpoint replacement:
+    /// what a public endpoint's send strips.
+    public_placements: Vec<CredentialPlacement>,
     hooks: Hooks,
 }
 
@@ -312,6 +362,10 @@ impl<A: Api> Client<A> {
     /// Sends `credential` when a call supplies none, before the environment
     /// fallback is read. It replaces any credential set before, including
     /// one from [`api_key`](Self::api_key).
+    ///
+    /// It is accepted when the API or any endpoint policy that replaces the
+    /// API's accepts its kind, and each send uses it only where the
+    /// endpoint's policy does; it is never sent in another kind's placement.
     #[must_use]
     pub fn credentials(self, credential: Credential) -> Self {
         self.update(|settings| settings.credential = Some(ClientCredential::Given(credential)))
@@ -322,17 +376,21 @@ impl<A: Api> Client<A> {
     /// list that is a bearer token or an API key in a header, query
     /// parameter, or cookie. It replaces any credential set before.
     ///
-    /// An API that accepts only Basic credentials, or none, fails validation
-    /// with [`BuildError::IncompatibleCredential`].
+    /// When the API itself takes no single secret, the first endpoint policy
+    /// replacing the API's that does decides the key's kind. The key is sent
+    /// only to endpoints whose policy accepts that kind, as with
+    /// [`credentials`](Self::credentials). With no such placement anywhere,
+    /// validation fails with [`BuildError::IncompatibleCredential`].
     #[must_use]
     pub fn api_key(self, key: impl Into<String>) -> Self {
         let key = Credential::api_key(key);
         self.update(|settings| settings.credential = Some(ClientCredential::Key(key)))
     }
 
-    /// Reads the environment fallback's variables in this order instead of
-    /// the definition's. For Basic authentication these are the password
-    /// variables.
+    /// Reads the API's environment fallback variables in this order instead
+    /// of the definition's. For Basic authentication these are the password
+    /// variables. An endpoint policy that replaces the API's keeps its own
+    /// order.
     #[must_use]
     pub fn env_order<I, S>(self, vars: I) -> Self
     where
@@ -415,19 +473,27 @@ impl<A: Api> Client<A> {
     fn validated_for<R: EndpointSpec>(&self, start: Instant) -> Result<&Inner, TransportError> {
         self.validated().map_err(|error| {
             let settings = &*self.settings;
-            let secrets = secret_names(&settings.definition, &settings.definition.auth);
+            let secrets = secret_names(&settings.definition);
             let meta = RequestMeta::unassembled(&secrets, R::ENDPOINT_ID, R::METHOD, &settings.definition.base_url);
             TransportError::new(meta, TransportErrorKind::InvalidClient(error), start.elapsed())
         })
     }
 }
 
-/// The names whose values are never stored for an API with `definition` and
-/// the effective `auth`.
-fn secret_names(definition: &ApiDefinition, auth: &AuthConfig) -> SecretNames {
+/// The names whose values are never stored for an API with `definition`:
+/// every placement of the API's policy and of each endpoint replacement.
+fn secret_names(definition: &ApiDefinition) -> SecretNames {
     SecretNames::builtin()
-        .with_names(auth.placements().map(CredentialPlacement::secret_name))
+        .with_names(all_placements(definition).map(CredentialPlacement::secret_name))
         .with_names(&definition.secret_names)
+}
+
+/// Every placement of the API's policy and of each endpoint replacement.
+fn all_placements(definition: &ApiDefinition) -> impl Iterator<Item = &CredentialPlacement> {
+    definition
+        .auth
+        .placements()
+        .chain(definition.endpoint_auth.iter().flat_map(|(_, auth)| auth.placements()))
 }
 
 /// Validates `settings` into the state every send reads.
@@ -443,10 +509,16 @@ fn validate(settings: &Settings) -> Result<Inner, BuildError> {
     if let Some(vars) = &settings.env_order {
         auth.replace_env_order(vars.clone());
     }
+    let policies = || {
+        std::iter::once(&auth).chain(definition.endpoint_auth.iter().filter_map(|(_, endpoint)| match endpoint {
+            EndpointAuth::Replaced(auth) => Some(auth),
+            EndpointAuth::Public => None,
+        }))
+    };
     let credential = match settings.credential.clone() {
         None => None,
         Some(ClientCredential::Given(credential)) => {
-            if auth.placement_for(credential.kind()).is_none() {
+            if policies().all(|auth| auth.placement_for(credential.kind()).is_none()) {
                 return Err(BuildError::IncompatibleCredential {
                     supplied: credential.kind().name(),
                 });
@@ -454,13 +526,13 @@ fn validate(settings: &Settings) -> Result<Inner, BuildError> {
             Some(credential)
         }
         Some(ClientCredential::Key(key)) => {
-            let placement = auth.key_placement().ok_or(BuildError::IncompatibleCredential {
+            let placement = policies().find_map(AuthConfig::key_placement).ok_or(BuildError::IncompatibleCredential {
                 supplied: key.kind().name(),
             })?;
             Some(key.for_placement(placement))
         }
     };
-    let secrets = secret_names(definition, &auth);
+    let secrets = secret_names(definition);
 
     let mut default_headers = HeaderMap::new();
     for (name, value) in &settings.default_headers {
@@ -498,6 +570,8 @@ fn validate(settings: &Settings) -> Result<Inner, BuildError> {
         request_id_header: definition.request_id_header.clone(),
         origins,
         endpoint_origins,
+        endpoint_auth: definition.endpoint_auth.clone(),
+        public_placements: all_placements(definition).cloned().collect(),
         hooks: settings.hooks.clone(),
     })
 }
@@ -754,6 +828,35 @@ impl Inner {
             .unwrap_or(&self.origins)
     }
 
+    /// The endpoint's own authentication, or `None` when it uses the API's.
+    fn auth_for<R: EndpointSpec>(&self) -> Option<&EndpointAuth> {
+        self.endpoint_auth.iter().rev()
+            .find(|(endpoint, _)| endpoint == R::ENDPOINT_ID)
+            .map(|(_, auth)| auth)
+    }
+
+    /// Resolves the credential of one send of `R` and removes from
+    /// `assembled` whatever the call or the endpoint rules out.
+    fn resolve_for<R: EndpointSpec>(&self, call: &CallAuth, assembled: &mut Assembled) -> Result<Resolved, InvalidArgument> {
+        let resolved = match self.auth_for::<R>() {
+            None => self.auth.resolve(call, self.credential.as_ref())?,
+            Some(EndpointAuth::Replaced(auth)) => auth.resolve_required(call, self.credential.as_ref(), R::ENDPOINT_ID)?,
+            Some(EndpointAuth::Public) => {
+                for placement in &self.public_placements {
+                    remove_placement(assembled, placement);
+                }
+                return Ok(Resolved::anonymous());
+            }
+        };
+        if matches!(call, CallAuth::Anonymous) {
+            match self.auth_for::<R>() {
+                Some(EndpointAuth::Replaced(auth)) => strip_credentials(auth, assembled),
+                _ => strip_credentials(&self.auth, assembled),
+            }
+        }
+        Ok(resolved)
+    }
+
     /// The execution core shared by every send: prepares the first hop
     /// ([`prepare`](Self::prepare)), checks the deadline, and follows
     /// redirects under one expiration until a reply that ends the send.
@@ -904,17 +1007,13 @@ impl Inner {
             return Err(pre_send(TransportErrorKind::CrossOriginRejected { target }, meta));
         };
 
-        let resolved = inner.auth.resolve(&options.auth, inner.credential.as_ref());
-        let resolved = match resolved {
+        let resolved = match inner.resolve_for::<R>(&options.auth, &mut assembled) {
             Ok(resolved) => resolved,
             Err(argument) => {
                 let meta = self.meta_for::<R>(&assembled.method, &assembled.url, &assembled.headers, AuthMethod::Anonymous);
                 return Err(pre_send(TransportErrorKind::InvalidArgument(argument), meta));
             }
         };
-        if matches!(options.auth, CallAuth::Anonymous) {
-            strip_credentials(&inner.auth, &mut assembled);
-        }
         let (sent, auth) = match self.authenticate(&assembled, credentials, &resolved, false) {
             Ok(sent) => sent,
             Err(argument) => {
@@ -1092,7 +1191,7 @@ fn category_kind(category: FailureCategory, deadline: Option<&Deadline>) -> Tran
     }
 }
 
-/// Removes every value any of the API's placements could carry, for a call
+/// Removes every value any of `auth`'s placements could carry, for a call
 /// that asked for no credential.
 fn strip_credentials(auth: &AuthConfig, assembled: &mut Assembled) {
     for placement in auth.placements() {

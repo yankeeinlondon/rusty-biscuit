@@ -2332,7 +2332,14 @@
         "schematic-github-client"
       ]
     ],
-    "module_path": "github"
+    "module_path": "github",
+    "rate_limit": {
+      "limit_header": "x-ratelimit-limit",
+      "remaining_header": "x-ratelimit-remaining",
+      "reset_header": "x-ratelimit-reset",
+      "reset_unit": "epoch_seconds",
+      "retry_after_header": "retry-after"
+    }
   },
   "x-schematic-grouped-from": [
     "GitHub"

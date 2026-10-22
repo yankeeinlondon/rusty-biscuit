@@ -147,6 +147,15 @@ pub enum Feature {
     PaginationException,
     /// A pagination strategy input against the endpoint's declared parameters.
     PaginationParameter,
+    /// An endpoint's own authentication (public, or a replacement policy).
+    EndpointAuth,
+    /// A schema registered as a `oneOf`, `anyOf`, or `allOf` composition.
+    SchemaComposition,
+    /// An OAuth2 grant an output has no form for.
+    #[serde(rename = "oauth2-grant")]
+    OAuth2Grant,
+    /// A typed path parameter (`EndpointParams.path`).
+    PathParameter,
 }
 
 impl Feature {
@@ -175,6 +184,10 @@ impl Feature {
             Self::PaginationStrategy => "pagination-strategy",
             Self::PaginationException => "pagination-exception",
             Self::PaginationParameter => "pagination-parameter",
+            Self::EndpointAuth => "endpoint-auth",
+            Self::SchemaComposition => "schema-composition",
+            Self::OAuth2Grant => "oauth2-grant",
+            Self::PathParameter => "path-parameter",
         }
     }
 }

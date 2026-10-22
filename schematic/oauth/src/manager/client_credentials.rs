@@ -1,6 +1,7 @@
 //! Client credentials flow.
 
 use oauth2::Scope;
+use schematic_define::OAuth2GrantType;
 
 use crate::error::OAuthError;
 use crate::manager::{extract_tokens, OAuth2Manager};
@@ -13,8 +14,11 @@ impl OAuth2Manager {
     ///
     /// ## Errors
     ///
-    /// Returns `OAuthError::TokenExchange` if the token endpoint returns an error.
+    /// - `OAuthError::Configuration` if the provider does not declare the
+    ///   client-credentials grant; nothing is sent.
+    /// - `OAuthError::TokenExchange` if the token endpoint returns an error.
     pub async fn acquire_client_credentials_token(&self) -> Result<StoredTokens, OAuthError> {
+        self.require_grant(OAuth2GrantType::ClientCredentials, "the client-credentials flow")?;
         let mut request = self.client.exchange_client_credentials();
 
         for scope in &self.config.scopes {

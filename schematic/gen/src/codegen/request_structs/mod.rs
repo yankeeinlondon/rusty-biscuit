@@ -6,11 +6,13 @@
 
 mod body;
 mod derives;
+pub(crate) mod endpoint_docs;
 pub(crate) mod endpoint_spec;
 mod form;
 mod into_parts;
 mod named_params;
-mod path_params;
+pub(crate) mod param_enums;
+pub(crate) mod path_params;
 mod query_params;
 pub(crate) mod shared;
 mod single;
@@ -25,6 +27,7 @@ use crate::codegen::pagination::OrdinaryDefault;
 use crate::parser::extract_path_params;
 
 use named_params::ParamLocation;
+use path_params::PathField;
 use shared::{
     QueryParamInfo, extract_cookie_params, extract_header_params, extract_query_params,
 };
@@ -42,10 +45,18 @@ pub const PLACEHOLDER_API_MARKER: &str = "Api";
 /// Generates a request struct for the given endpoint.
 ///
 /// The generated struct includes:
-/// - String fields for each path parameter (e.g., `{model}` becomes `pub model: String`)
+/// - one field per path parameter: a `String` per placeholder when the
+///   endpoint declares no `params.path` (e.g., `{model}` becomes
+///   `pub model: String`), otherwise one field per distinct placeholder typed
+///   `String`, `i64`, `f64`, `bool`, or a generated enum, with `new()` taking
+///   them in first-occurrence template order
 /// - A `body` field if the endpoint sends a body: its JSON type, a generated
 ///   form struct, `String` for a text body, or `Vec<u8>` for a binary body
-/// - `Default` trait implementation
+/// - a derived `Default`, unless a typed path field makes `new()` the only
+///   way to build it
+/// - docs stating deprecation, an endpoint's own authentication, and its
+///   effective rate-limit headers and retry guidance; none of these changes
+///   the generated code
 /// - a `schematic_runtime::EndpointSpec` implementation naming its API
 ///   marker, success type, codec, and endpoint id, whose `into_parts`
 ///   assembles the request
@@ -139,6 +150,8 @@ pub(crate) fn generate_request_struct_with_defaults(
     let query_params = extract_query_params(&endpoint.params);
     let header_params = extract_header_params(&endpoint.params);
     let cookie_params = extract_cookie_params(&endpoint.params);
+    let typed_paths = path_params::typed_path_fields(endpoint, &struct_name_str);
+    let typed_paths = typed_paths.as_deref();
     // Every optional field starts as `None` in the generated constructors and
     // `From` impls, whichever location it is sent in.
     let optional_params: Vec<QueryParamInfo> = query_params
@@ -154,7 +167,13 @@ pub(crate) fn generate_request_struct_with_defaults(
     let body_type_name = body_type_name.as_deref();
     let has_body = body_type_name.is_some();
 
-    let path_param_fields = path_params::generate_path_param_fields(&path_params);
+    let path_param_fields = match typed_paths {
+        Some(fields) => path_params::generate_typed_path_fields(fields),
+        None => path_params::generate_path_param_fields(&path_params),
+    };
+    let path_enums = typed_paths
+        .map(|fields| path_params::generate_path_enums(fields, &struct_name_str))
+        .unwrap_or_default();
     let query_param_fields = query_params::generate_query_param_fields(&query_params);
     let header_param_fields =
         named_params::generate_named_param_fields(&header_params, ParamLocation::Header);
@@ -162,14 +181,18 @@ pub(crate) fn generate_request_struct_with_defaults(
         named_params::generate_named_param_fields(&cookie_params, ParamLocation::Cookie);
     let body_field = body::generate_body_field(api, endpoint);
 
-    let derives = derives::generate_derives(has_body);
+    let derives = derives::generate_derives(typed_paths.is_none());
 
     let default_impl =
         body::generate_default_impl(&struct_name, &path_params, &query_params, has_body);
 
     // Generate new() constructor method body for type-safe construction
+    let path_args = match typed_paths {
+        Some(fields) => path_params::typed_path_args(fields),
+        None => path_params::untyped_path_args(&path_params),
+    };
     let new_method =
-        path_params::generate_new_method(&path_params, &optional_params, has_body, body_type_name);
+        path_params::generate_new_method(&path_args, &optional_params, has_body, body_type_name);
 
     // Generate builder methods for query, header, and cookie params
     let query_builder_methods = query_params::generate_query_builder_methods(&query_params);
@@ -187,23 +210,45 @@ pub(crate) fn generate_request_struct_with_defaults(
         body_type_name,
     );
 
-    // Generate From<&str> and From<String> impls for single-param no-body structs
-    let from_string_impls =
-        single::generate_from_string_impls(&struct_name, &path_params, &optional_params, has_body);
+    // Generate From<&str> and From<String> impls for single-param no-body
+    // structs. A typed path value is only taken by `new()`.
+    let from_string_impls = if typed_paths.is_some() {
+        quote! {}
+    } else {
+        single::generate_from_string_impls(&struct_name, &path_params, &optional_params, has_body)
+    };
 
-    let into_parts_body = into_parts::generate_into_parts_body(endpoint, &path_params, &query_params, defaults);
+    let into_parts_body = into_parts::generate_into_parts_body(
+        endpoint,
+        &path_params,
+        typed_paths,
+        &query_params,
+        defaults,
+    );
     let endpoint_spec_impl =
         endpoint_spec::generate_endpoint_spec_impl(api, &struct_name, api_marker, endpoint, into_parts_body);
 
-    let doc_lines = generate_doc_comment_with_example(
-        &endpoint.id,
+    let example = match typed_paths {
+        Some(fields) => typed_path_example(fields),
+        None => PathExample {
+            args: path_params.iter().map(|p| format!("\"{p}_value\"")).collect(),
+            imports: Vec::new(),
+        },
+    };
+    let mut doc_lines = vec![format!(" Request for `{}` endpoint.", endpoint.id)];
+    doc_lines.extend(
+        endpoint_docs::request_doc_sections(api, endpoint)
+            .iter()
+            .map(|line| endpoint_docs::doc_line(line)),
+    );
+    doc_lines.extend(generate_doc_example(
         &struct_name_str,
-        &path_params,
+        &example,
         &optional_params,
         has_body,
         body_type_name,
         module_path,
-    );
+    ));
 
     let all_fields = if has_body {
         quote! {
@@ -243,6 +288,8 @@ pub(crate) fn generate_request_struct_with_defaults(
     quote! {
         #form_struct
 
+        #path_enums
+
         #(#[doc = #doc_lines])*
         #derives
         pub struct #struct_name {
@@ -275,32 +322,55 @@ pub(crate) fn request_body_type_name(api: &RestApi, endpoint: &Endpoint) -> Opti
     }
 }
 
-/// Generates doc comment lines with an example section.
+/// The path arguments a doc example passes to `new()`, and the types they
+/// name that the example's `use` line imports besides the request.
+struct PathExample {
+    args: Vec<String>,
+    imports: Vec<String>,
+}
+
+fn typed_path_example(fields: &[PathField]) -> PathExample {
+    let imports = fields
+        .iter()
+        .filter_map(|field| match &field.value {
+            path_params::PathValue::Enum { type_name, .. } => Some(type_name.clone()),
+            _ => None,
+        })
+        .collect();
+    PathExample { args: fields.iter().map(PathField::example_arg).collect(), imports }
+}
+
+/// Generates the doc lines of the example section, starting with the blank
+/// line that separates it from the summary.
 ///
 /// The example shows how to instantiate the request struct:
 /// - For structs with no required fields: uses `Default::default()`
 /// - For structs with path params only: uses `new()` with params
 /// - For structs with body: uses `new()` with body (and optional params)
 /// - Query params use builder-style `with_*` methods
-fn generate_doc_comment_with_example(
-    endpoint_id: &str,
+fn generate_doc_example(
     struct_name: &str,
-    path_params: &[&str],
+    path: &PathExample,
     query_params: &[QueryParamInfo],
     has_body: bool,
     body_type: Option<&str>,
     module_path: Option<&str>,
 ) -> Vec<String> {
-    let mut lines = vec![format!(" Request for `{}` endpoint.", endpoint_id)];
-
-    // Add blank line before example section
-    lines.push(String::new());
-    lines.push(" ## Example".to_string());
-    lines.push(String::new());
-    lines.push(" ```text".to_string());
+    let path_params = &path.args;
+    let mut lines = vec![
+        String::new(),
+        " ## Example".to_string(),
+        String::new(),
+        " ```text".to_string(),
+    ];
 
     // Build the module path for use statement
     let mod_path = module_path.unwrap_or("api");
+    let request_import = if path.imports.is_empty() {
+        format!(" use schematic_schema::{mod_path}::{struct_name};")
+    } else {
+        format!(" use schematic_schema::{mod_path}::{{{struct_name}, {}}};", path.imports.join(", "))
+    };
 
     // Generate appropriate example based on struct configuration
     if has_body {
@@ -309,19 +379,20 @@ fn generate_doc_comment_with_example(
         // Raw text and binary bodies are std types: nothing to import.
         match body_ty {
             "String" | "Vec<u8>" => {
-                lines.push(format!(" use schematic_schema::{mod_path}::{struct_name};"));
+                lines.push(request_import.clone());
                 lines.push(String::new());
                 lines.push(format!(" let body: {body_ty} = Default::default();"));
             }
             _ if body_ty.starts_with("::") => {
-                lines.push(format!(" use schematic_schema::{mod_path}::{struct_name};"));
+                lines.push(request_import.clone());
                 lines.push(String::new());
                 lines.push(format!(" let body: {body_ty} = Default::default();"));
             }
             _ => {
-                lines.push(format!(
-                    " use schematic_schema::{mod_path}::{{{struct_name}, {body_ty}}};"
-                ));
+                let mut imports = vec![struct_name.to_string()];
+                imports.extend(path.imports.iter().cloned());
+                imports.push(body_ty.to_string());
+                lines.push(format!(" use schematic_schema::{mod_path}::{{{}}};", imports.join(", ")));
                 lines.push(String::new());
 
                 // Show body construction with ..Default::default() pattern
@@ -337,11 +408,7 @@ fn generate_doc_comment_with_example(
             lines.push(format!(" let request = {struct_name}::new(body)"));
         } else {
             // Include path params in new() call
-            let param_args: Vec<String> = path_params
-                .iter()
-                .map(|p| format!("\"{p}_value\""))
-                .collect();
-            let args = param_args.join(", ");
+            let args = path_params.join(", ");
             lines.push(format!(" let request = {struct_name}::new({args}, body)"));
         }
 
@@ -353,14 +420,10 @@ fn generate_doc_comment_with_example(
         lines.push(";".to_string());
     } else if !path_params.is_empty() {
         // Path params only - use new()
-        lines.push(format!(" use schematic_schema::{mod_path}::{struct_name};"));
+        lines.push(request_import);
         lines.push(String::new());
 
-        let param_args: Vec<String> = path_params
-            .iter()
-            .map(|p| format!("\"{p}_value\""))
-            .collect();
-        let args = param_args.join(", ");
+        let args = path_params.join(", ");
         lines.push(format!(" let request = {struct_name}::new({args})"));
 
         // Add query param builder calls

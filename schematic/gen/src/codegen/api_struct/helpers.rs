@@ -4,16 +4,24 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use schematic_define::{CrossOrigin, RestApi};
 
-use super::auth::{auth_config, auth_config_tokens};
+use super::auth::{EndpointConfig, auth_config, auth_config_tokens, endpoint_configs, policy_tokens};
 
 /// The `schematic_runtime::ApiDefinition` expression for `api`.
 ///
 /// Settings equal to the runtime's defaults (no authentication, the
 /// same-origin policy, no extra secret names, no request-id header) are left
 /// out. Endpoint replacements are always emitted, including same-origin,
-/// because their API default may differ.
+/// because their API default may differ; an endpoint without its own
+/// authentication emits nothing for it.
 pub(super) fn generate_definition(api: &RestApi) -> TokenStream {
     let auth = auth_config_tokens(&auth_config(api)).map(|auth| quote! { .auth(#auth) });
+    let endpoint_auth = endpoint_configs(api).into_iter().map(|(id, config)| match config {
+        EndpointConfig::Public => quote! { .endpoint_public(#id) },
+        EndpointConfig::Replaced(config) => {
+            let config = policy_tokens(&config);
+            quote! { .endpoint_auth(#id, #config) }
+        }
+    });
     let cross_origin = origin_policy_tokens(&api.cross_origin).map(|policy| quote! { .cross_origin(#policy) });
     let endpoint_policies = api.endpoints.iter().filter_map(|endpoint| {
         endpoint.cross_origin.as_ref().map(|policy| {
@@ -43,6 +51,7 @@ pub(super) fn generate_definition(api: &RestApi) -> TokenStream {
             #auth
             #cross_origin
             #(#endpoint_policies)*
+            #(#endpoint_auth)*
             #secret_names
             #request_id_header
     }

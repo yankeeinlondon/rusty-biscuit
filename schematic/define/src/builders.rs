@@ -276,7 +276,6 @@ impl RestApiBuilder<'_, Present, Present> {
         let fail = |message: &str| invalid(&api.name, "<api>", message);
         if self.auth_choices != 1 { return Err(fail("authentication must be declared exactly once")); }
         if let AuthStrategy::Basic { username_env, .. } = &mut api.auth {
-            if !api.env_auth.is_empty() { return Err(fail("Basic authentication carries its own environment lists; env_auth must be empty")); }
             if let Some(name) = self.username {
                 let declared = EnvList::single(name);
                 if username_env.names().is_empty() { *username_env = declared; }
@@ -286,59 +285,69 @@ impl RestApiBuilder<'_, Present, Present> {
             && api.env_mapping.as_ref().and_then(|mapping| mapping.basic_user.as_ref()) != Some(&EnvList::single(name)) {
             return Err(fail("username environment requires Basic authentication or a matching explicit basic_user mapping"));
         }
-        let url = url::Url::parse(&api.base_url).map_err(|_| fail("invalid base URL"))?;
-        if api.name.trim().is_empty() || api.description.trim().is_empty() || !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-            return Err(fail("name and description must be nonempty and base URL must be HTTP(S)"));
-        }
-        if let Some(mapping) = &api.env_mapping {
-            let expected = RestApi::legacy_env_mapping_for(&api.auth, &api.env_auth);
-            if (expected.bearer_token.is_some() && mapping.bearer_token.is_some() && mapping.bearer_token != expected.bearer_token)
-                || (expected.basic_user.is_some() && mapping.basic_user.is_some() && mapping.basic_user != expected.basic_user)
-                || (expected.basic_pass.is_some() && mapping.basic_pass.is_some() && mapping.basic_pass != expected.basic_pass)
-                || (expected.api_key.is_some() && mapping.api_key.is_some() && mapping.api_key != expected.api_key) {
-                return Err(fail("explicit environment mapping conflicts with authentication declaration"));
-            }
-        }
-        validate_origin(&api.cross_origin).map_err(|message| fail(&message))?;
-        // Fields are public and deserializable, so values built through the
-        // validating constructors may since have been mutated.
-        if let Some(rate_limit) = &api.rate_limit { rate_limit.validate().map_err(|error| fail(&format!("rate_limit: {error}")))?; }
-        if let Some(guidance) = &api.retry_guidance { guidance.validate().map_err(|error| fail(&format!("retry_guidance: {error}")))?; }
-        // The OpenAPI importer builds grants without validation; this is the
-        // definition's gate.
-        if let AuthStrategy::OAuth2(config) = &api.auth { config.validate().map_err(|error| fail(&format!("auth: {error}")))?; }
-        if let Some(policy) = &api.auth_policy { validate_oauth2(policy).map_err(|error| fail(&format!("auth_policy: {error}")))?; }
-        if let Some(name) = &api.request_id_header
-            && !valid_header_name(name) { return Err(fail("invalid request-id header name")); }
-        for name in &api.secret_names {
-            if !valid_header_name(name) { return Err(fail("invalid secret header name")); }
-        }
-        if let Some(diagnostic) = crate::pagination::validate_pagination(&api).into_iter().next() {
-            return Err(invalid(&api.name, diagnostic.endpoint.as_deref().unwrap_or("<api>"),
-                format!("{}: {}", diagnostic.error.rule(), diagnostic.error)));
-        }
-        for ep in &api.endpoints {
-            if ep.path.contains('?') {
-                return Err(invalid(&api.name, &ep.id, format!("path `{}` contains a query; declare query parameters separately", ep.path)));
-            }
-            if ep.method == RestMethod::Get && ep.request.is_some() {
-                return Err(invalid(&api.name, &ep.id, "GET endpoint cannot declare a request body"));
-            }
-            if let Some(policy) = &ep.cross_origin {
-                validate_origin(policy).map_err(|message| invalid(&api.name, &ep.id, message))?;
-            }
-            validate_endpoint_vocabulary(&api.name, ep)?;
-            if let Some(message) = credential_source_problem(&api, ep) { return Err(invalid(&api.name, &ep.id, message)); }
-            if let Some(params) = &ep.params {
-                for param in params.query.iter().chain(&params.header).chain(&params.cookie) {
-                    if let Some(name) = &param.rust_name
-                        && !valid_rust_name(name) { return Err(invalid(&api.name, &ep.id, "invalid Rust parameter name")); }
-                }
-            }
-        }
-        api.validate_references()?;
+        validate_api(&api)?;
         Ok(api)
     }
+}
+
+/// Every rule a built API satisfies that its fields alone can show; API
+/// build and [`crate::DefinitionBundle::from_json`] run it.
+pub(crate) fn validate_api(api: &RestApi) -> Result<(), DefinitionError> {
+    let fail = |message: &str| invalid(&api.name, "<api>", message);
+    if matches!(api.auth, AuthStrategy::Basic { .. }) && !api.env_auth.is_empty() {
+        return Err(fail("Basic authentication carries its own environment lists; env_auth must be empty"));
+    }
+    let url = url::Url::parse(&api.base_url).map_err(|_| fail("invalid base URL"))?;
+    if api.name.trim().is_empty() || api.description.trim().is_empty() || !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(fail("name and description must be nonempty and base URL must be HTTP(S)"));
+    }
+    if let Some(mapping) = &api.env_mapping {
+        let expected = RestApi::legacy_env_mapping_for(&api.auth, &api.env_auth);
+        if (expected.bearer_token.is_some() && mapping.bearer_token.is_some() && mapping.bearer_token != expected.bearer_token)
+            || (expected.basic_user.is_some() && mapping.basic_user.is_some() && mapping.basic_user != expected.basic_user)
+            || (expected.basic_pass.is_some() && mapping.basic_pass.is_some() && mapping.basic_pass != expected.basic_pass)
+            || (expected.api_key.is_some() && mapping.api_key.is_some() && mapping.api_key != expected.api_key) {
+            return Err(fail("explicit environment mapping conflicts with authentication declaration"));
+        }
+    }
+    validate_origin(&api.cross_origin).map_err(|message| fail(&message))?;
+    // Fields are public and deserializable, so values built through the
+    // validating constructors may since have been mutated.
+    if let Some(rate_limit) = &api.rate_limit { rate_limit.validate().map_err(|error| fail(&format!("rate_limit: {error}")))?; }
+    if let Some(guidance) = &api.retry_guidance { guidance.validate().map_err(|error| fail(&format!("retry_guidance: {error}")))?; }
+    // The OpenAPI importer builds grants without validation; this is the
+    // definition's gate.
+    if let AuthStrategy::OAuth2(config) = &api.auth { config.validate().map_err(|error| fail(&format!("auth: {error}")))?; }
+    if let Some(policy) = &api.auth_policy { validate_oauth2(policy).map_err(|error| fail(&format!("auth_policy: {error}")))?; }
+    if let Some(name) = &api.request_id_header
+        && !valid_header_name(name) { return Err(fail("invalid request-id header name")); }
+    for name in &api.secret_names {
+        if !valid_header_name(name) { return Err(fail("invalid secret header name")); }
+    }
+    if let Some(diagnostic) = crate::pagination::validate_pagination(api).into_iter().next() {
+        return Err(invalid(&api.name, diagnostic.endpoint.as_deref().unwrap_or("<api>"),
+            format!("{}: {}", diagnostic.error.rule(), diagnostic.error)));
+    }
+    for ep in &api.endpoints {
+        if ep.path.contains('?') {
+            return Err(invalid(&api.name, &ep.id, format!("path `{}` contains a query; declare query parameters separately", ep.path)));
+        }
+        if ep.method == RestMethod::Get && ep.request.is_some() {
+            return Err(invalid(&api.name, &ep.id, "GET endpoint cannot declare a request body"));
+        }
+        if let Some(policy) = &ep.cross_origin {
+            validate_origin(policy).map_err(|message| invalid(&api.name, &ep.id, message))?;
+        }
+        validate_endpoint_vocabulary(&api.name, ep)?;
+        if let Some(message) = credential_source_problem(api, ep) { return Err(invalid(&api.name, &ep.id, message)); }
+        if let Some(params) = &ep.params {
+            for param in params.query.iter().chain(&params.header).chain(&params.cookie) {
+                if let Some(name) = &param.rust_name
+                    && !valid_rust_name(name) { return Err(invalid(&api.name, &ep.id, "invalid Rust parameter name")); }
+            }
+        }
+    }
+    api.validate_references()
 }
 
 /// Rules needing only the endpoint. Endpoint build runs them, and API build

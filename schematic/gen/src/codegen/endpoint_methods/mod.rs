@@ -47,6 +47,7 @@ use schematic_define::{Endpoint, RestApi};
 
 use crate::codegen::api_struct::api_tag_name;
 use crate::codegen::pagination::{KnobForward, PagerForwards};
+use crate::codegen::request_structs::path_params::typed_path_fields;
 use crate::codegen::request_structs::request_body_type_name;
 use crate::codegen::request_structs::shared::{
     param_field_name, query_param_type_to_rust_type, type_name_to_tokens,
@@ -73,9 +74,9 @@ pub fn generate_endpoint_methods(api: &RestApi) -> TokenStream {
     let mut call_types = TokenStream::new();
     let mut methods = TokenStream::new();
     for (endpoint, names) in api.endpoints.iter().zip(&names.endpoints) {
-        let args = required_args(api, endpoint);
-        call_types.extend(call_type(&api.name, &tag, names));
-        methods.extend(endpoint_method(endpoint, names, &args));
+        let args = required_args(api, endpoint, &names.request_type);
+        call_types.extend(call_type(&api.name, &tag, names, endpoint.deprecated));
+        methods.extend(endpoint_method(api, endpoint, names, &args));
     }
 
     quote! {
@@ -88,8 +89,8 @@ pub fn generate_endpoint_methods(api: &RestApi) -> TokenStream {
 }
 
 /// How a caller calls `endpoint` on a client bound to `client`, for docs:
-/// `client.get_item("item_id")`, with each path parameter's name as its
-/// value and `body` for a body.
+/// `client.get_item("item_id")`, with each untyped path parameter's name as
+/// its value, a plausible value of each typed one, and `body` for a body.
 pub(crate) fn example_invocation(api: &RestApi, endpoint: &Endpoint, client: &str) -> String {
     let names = resolve_names(api);
     let (_, names) = api
@@ -98,10 +99,13 @@ pub(crate) fn example_invocation(api: &RestApi, endpoint: &Endpoint, client: &st
         .zip(&names.endpoints)
         .find(|(candidate, _)| candidate.id == endpoint.id)
         .expect("the endpoint belongs to the API");
-    let mut args: Vec<String> = extract_path_params(&endpoint.path)
-        .into_iter()
-        .map(|param| format!("\"{}\"", param_field_name(param)))
-        .collect();
+    let mut args: Vec<String> = match typed_path_fields(endpoint, &names.request_type) {
+        Some(fields) => fields.iter().map(|field| field.example_arg()).collect(),
+        None => extract_path_params(&endpoint.path)
+            .into_iter()
+            .map(|param| format!("\"{}\"", param_field_name(param)))
+            .collect(),
+    };
     if request_body_type_name(api, endpoint).is_some() {
         args.push("body".to_string());
     }
@@ -113,17 +117,28 @@ pub(crate) fn setter_type(setter: &SetterName) -> TokenStream {
     query_param_type_to_rust_type(&setter.param.param_type)
 }
 
-/// The required arguments of `endpoint`, in `{Endpoint}Request::new` order:
-/// each path parameter, then the body.
-fn required_args(api: &RestApi, endpoint: &Endpoint) -> Vec<RequiredArg> {
-    let mut args: Vec<RequiredArg> = extract_path_params(&endpoint.path)
-        .into_iter()
-        .map(|param| RequiredArg {
-            name: param_field_name(param),
-            ty: quote! { impl Into<String> },
-            role: format!("the `{{{param}}}` path parameter"),
-        })
-        .collect();
+/// The required arguments of `endpoint`, whose request type is
+/// `request_type`, in `{Endpoint}Request::new` order: each path parameter
+/// (typed ones in first-occurrence template order), then the body.
+fn required_args(api: &RestApi, endpoint: &Endpoint, request_type: &str) -> Vec<RequiredArg> {
+    let mut args: Vec<RequiredArg> = match typed_path_fields(endpoint, request_type) {
+        Some(fields) => fields
+            .iter()
+            .map(|field| RequiredArg {
+                name: field.field.clone(),
+                ty: field.arg_type(),
+                role: format!("the `{{{}}}` path parameter", field.wire),
+            })
+            .collect(),
+        None => extract_path_params(&endpoint.path)
+            .into_iter()
+            .map(|param| RequiredArg {
+                name: param_field_name(param),
+                ty: quote! { impl Into<String> },
+                role: format!("the `{{{param}}}` path parameter"),
+            })
+            .collect(),
+    };
     if let Some(body) = request_body_type_name(api, endpoint) {
         args.push(RequiredArg {
             name: "body".to_string(),
@@ -134,10 +149,15 @@ fn required_args(api: &RestApi, endpoint: &Endpoint) -> Vec<RequiredArg> {
     args
 }
 
-fn call_type(api_name: &str, tag: &proc_macro2::Ident, names: &EndpointNames) -> TokenStream {
+fn call_type(
+    api_name: &str,
+    tag: &proc_macro2::Ident,
+    names: &EndpointNames,
+    deprecated: bool,
+) -> TokenStream {
     let call = format_ident!("{}", names.call_type);
     let request = format_ident!("{}", names.request_type);
-    let doc = docs::call_type_doc(api_name, names);
+    let doc = docs::call_type_doc(api_name, names, deprecated);
     let runtime_call = quote! { schematic_runtime::Call<'a, #tag, #request> };
 
     let setters = names.setters.iter().map(|setter| {
@@ -340,11 +360,16 @@ fn pager_forwards(
     }
 }
 
-fn endpoint_method(endpoint: &Endpoint, names: &EndpointNames, args: &[RequiredArg]) -> TokenStream {
+fn endpoint_method(
+    api: &RestApi,
+    endpoint: &Endpoint,
+    names: &EndpointNames,
+    args: &[RequiredArg],
+) -> TokenStream {
     let method = format_ident!("{}", names.method);
     let call = format_ident!("{}", names.call_type);
     let request = format_ident!("{}", names.request_type);
-    let doc = docs::endpoint_method_doc(endpoint, names, args);
+    let doc = docs::endpoint_method_doc(api, endpoint, names, args);
     let params = args.iter().map(|arg| {
         let name = format_ident!("{}", arg.name);
         let ty = &arg.ty;

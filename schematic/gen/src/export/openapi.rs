@@ -132,8 +132,11 @@ pub fn write_openapi_grouped(
 /// - **paths**: unioned across all members. Two members may declare the same
 ///   `path` + `method` only when the operations are equal apart from their
 ///   `security` (the EMQX Basic + Bearer pair); the merged operation then
-///   lists both security alternatives. Any other overlap is an OpenAPI-only
-///   `duplicate-method-path` error naming both APIs.
+///   accepts either side's requirements (see `merge_method`, including a
+///   public `security: []` side). Any other overlap is an OpenAPI-only
+///   `duplicate-method-path` error naming both APIs. Path-level parameters
+///   are declared once per `(name, in)`; a later member's differing
+///   declaration becomes an override on that member's operations.
 /// - **operationId**: unique across the document. The first member in
 ///   registry order keeps an id; a later member's clashing id is prefixed
 ///   with its API name in PascalCase (`OllamaOpenAIListModels`), plus a
@@ -146,8 +149,9 @@ pub fn write_openapi_grouped(
 ///   `invalid-schema-reference` error naming both APIs.
 /// - **components.security_schemes**: unioned across members. If two members
 ///   define the same scheme name with different security-scheme content, the
-///   second is renamed to `<scheme>_<api_snake>` and that API's operation and
-///   top-level `security` requirements reference the renamed scheme.
+///   second is renamed to `<scheme>_<api_snake>` (then `<scheme>_<api_snake>2`,
+///   ... while that name holds a different scheme) and that API's operation
+///   and top-level `security` requirements reference the renamed scheme.
 /// - **security**: top-level requirements unioned across members,
 ///   deduplicated while preserving insertion order.
 /// - **tags**: unioned across members (currently always empty in practice).
@@ -346,6 +350,10 @@ fn merge_documents(
         }
     }
     let mut contributors: Vec<String> = vec![seed_name];
+    // Each contributor's document-level requirements, which its operations
+    // without their own `security` inherit.
+    let mut inherited_security: Vec<Vec<openapiv3::SecurityRequirement>> =
+        vec![merged.security.clone().unwrap_or_default()];
     // Component name -> index of the API that supplied it; absent means the seed.
     let mut schema_owners: IndexMap<String, usize> = IndexMap::new();
 
@@ -395,9 +403,18 @@ fn merge_documents(
                             // Same scheme by content — drop the duplicate.
                             continue;
                         }
-                        let renamed = format!("{}_{}", name, snake_case(&api_name));
+                        let base = format!("{}_{}", name, snake_case(&api_name));
+                        let mut renamed = base.clone();
+                        let mut suffix = 2;
+                        while let Some(taken) = merged_components.security_schemes.get(&renamed) {
+                            if security_schemes_equal(taken, &scheme) {
+                                break;
+                            }
+                            renamed = format!("{base}{suffix}");
+                            suffix += 1;
+                        }
                         renames.insert(name.clone(), renamed.clone());
-                        merged_components.security_schemes.insert(renamed, scheme);
+                        merged_components.security_schemes.entry(renamed).or_insert(scheme);
                     }
                     None => {
                         merged_components.security_schemes.insert(name, scheme);
@@ -417,11 +434,14 @@ fn merge_documents(
             }
         }
 
+        inherited_security.push(doc.security.clone().unwrap_or_default());
+
         // ---- Merge paths ----
         for (path, item_ref) in std::mem::take(&mut doc.paths.paths) {
             match merged.paths.paths.get_mut(&path) {
                 Some(ReferenceOr::Item(existing)) => {
-                    if let ReferenceOr::Item(incoming) = item_ref {
+                    if let ReferenceOr::Item(mut incoming) = item_ref {
+                        merge_path_parameters(existing, &mut incoming);
                         for (method, incoming_op) in path_methods_present(&incoming) {
                             if let Some(existing_op) = method_slot(existing, method)
                                 && !operations_compatible(existing_op, incoming_op)
@@ -447,27 +467,25 @@ fn merge_documents(
                                 });
                             }
                         }
-                        for (method, _op) in path_methods_present(&incoming) {
-                            operations
-                                .entry((path.clone(), method))
-                                .or_default()
-                                .push(api_index);
-                        }
-
                         // Move method operations from incoming into existing,
                         // or union security requirements when the existing
                         // operation is structurally equivalent.
-                        merge_method(&mut existing.get, incoming.get);
-                        merge_method(&mut existing.post, incoming.post);
-                        merge_method(&mut existing.put, incoming.put);
-                        merge_method(&mut existing.patch, incoming.patch);
-                        merge_method(&mut existing.delete, incoming.delete);
-                        merge_method(&mut existing.head, incoming.head);
-                        merge_method(&mut existing.options, incoming.options);
-                        merge_method(&mut existing.trace, incoming.trace);
-
-                        // Append any new path-level parameters.
-                        existing.parameters.extend(incoming.parameters);
+                        for method in METHODS {
+                            let Some(incoming_op) = method_slot_mut(&mut incoming, method).take() else {
+                                continue;
+                            };
+                            let owners = operations.entry((path.clone(), method)).or_default();
+                            let existing_inherited = union_requirements(
+                                owners.iter().map(|&index| inherited_security[index].as_slice()),
+                            );
+                            owners.push(api_index);
+                            merge_method(
+                                method_slot_mut(existing, method),
+                                incoming_op,
+                                &existing_inherited,
+                                &inherited_security[api_index],
+                            );
+                        }
                     }
                 }
                 Some(ReferenceOr::Reference { .. }) | None => {
@@ -699,32 +717,117 @@ fn operations_compatible(a: &openapiv3::Operation, b: &openapiv3::Operation) -> 
 ///
 /// - If the slot is empty, the incoming operation is moved in wholesale.
 /// - If both are present and structurally equivalent
-///   (see [`operations_compatible`]), the incoming security requirements are
-///   unioned into the existing operation, deduplicated while preserving order.
+///   (see [`operations_compatible`]), the merged operation accepts what
+///   either side accepts. When neither declares its own `security`, both
+///   inherit and nothing changes. Otherwise each side's effective
+///   requirements (its own `security`, else `*_inherited`, its document's)
+///   are unioned, deduplicated in order. A side that needs no authentication
+///   (`security: []`, or inheriting none) contributes the empty requirement
+///   `{}`, so a public alternative is never lost; two such sides stay
+///   `security: []`.
 /// - Otherwise the incoming operation is dropped (the caller has already
 ///   verified compatibility before calling this function).
 fn merge_method(
     existing: &mut Option<openapiv3::Operation>,
-    incoming: Option<openapiv3::Operation>,
+    incoming_op: openapiv3::Operation,
+    existing_inherited: &[openapiv3::SecurityRequirement],
+    incoming_inherited: &[openapiv3::SecurityRequirement],
 ) {
-    let Some(incoming_op) = incoming else {
+    let Some(existing_op) = existing.as_mut() else {
+        *existing = Some(incoming_op);
         return;
     };
-    match existing.as_mut() {
-        None => {
-            *existing = Some(incoming_op);
+    if existing_op.security.is_none() && incoming_op.security.is_none() {
+        return;
+    }
+    let sides = [
+        existing_op.security.as_deref().unwrap_or(existing_inherited),
+        incoming_op.security.as_deref().unwrap_or(incoming_inherited),
+    ];
+    let merged = if sides.iter().all(|side| side.is_empty()) {
+        Vec::new()
+    } else {
+        let anonymous = [openapiv3::SecurityRequirement::new()];
+        union_requirements(
+            sides.into_iter().map(|side| if side.is_empty() { &anonymous[..] } else { side }),
+        )
+    };
+    existing_op.security = Some(merged);
+}
+
+/// Unions requirement lists, deduplicated in first-seen order.
+fn union_requirements<'a>(
+    lists: impl IntoIterator<Item = &'a [openapiv3::SecurityRequirement]>,
+) -> Vec<openapiv3::SecurityRequirement> {
+    let mut out: Vec<openapiv3::SecurityRequirement> = Vec::new();
+    for requirement in lists.into_iter().flatten() {
+        if !out.contains(requirement) {
+            out.push(requirement.clone());
         }
-        Some(existing_op) => {
-            if let Some(incoming_security) = incoming_op.security {
-                let bucket = existing_op.security.get_or_insert_with(Vec::new);
-                for req in incoming_security {
-                    if !bucket.iter().any(|present| present == &req) {
-                        bucket.push(req);
+    }
+    out
+}
+
+/// Every method label a path item can hold, in [`path_methods_present`] order.
+const METHODS: [&str; 8] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE"];
+
+/// The operation slot of `item` for a [`METHODS`] label.
+fn method_slot_mut<'a>(item: &'a mut openapiv3::PathItem, method: &str) -> &'a mut Option<openapiv3::Operation> {
+    match method {
+        "GET" => &mut item.get,
+        "POST" => &mut item.post,
+        "PUT" => &mut item.put,
+        "PATCH" => &mut item.patch,
+        "DELETE" => &mut item.delete,
+        "HEAD" => &mut item.head,
+        "OPTIONS" => &mut item.options,
+        _ => &mut item.trace,
+    }
+}
+
+/// Merges `incoming`'s path-level parameters into `existing`.
+///
+/// A parameter `existing` declares differently under the same `(name, in)`
+/// becomes an operation-level override on each of `incoming`'s operations
+/// that does not already override it, so the earlier API's declaration stays
+/// common. Every other parameter is appended.
+///
+/// ## Notes
+///
+/// Appending an identical declaration repeats it in the path item, which
+/// OpenAPI forbids. The committed `emqx.json` holds such repeats, so removing
+/// them is an artifact change of its own rather than part of this merge.
+fn merge_path_parameters(existing: &mut openapiv3::PathItem, incoming: &mut openapiv3::PathItem) {
+    for param in std::mem::take(&mut incoming.parameters) {
+        let key = parameter_key(&param);
+        match existing.parameters.iter().find(|present| key.is_some() && parameter_key(present) == key) {
+            None => existing.parameters.push(param),
+            Some(present) if present == &param => existing.parameters.push(param),
+            Some(_) => {
+                for method in METHODS {
+                    if let Some(op) = method_slot_mut(incoming, method).as_mut()
+                        && !op.parameters.iter().any(|own| parameter_key(own) == key)
+                    {
+                        op.parameters.insert(0, param.clone());
                     }
                 }
             }
         }
     }
+}
+
+/// `(in, name)` of an inline parameter.
+fn parameter_key(param: &ReferenceOr<openapiv3::Parameter>) -> Option<(&'static str, &str)> {
+    let ReferenceOr::Item(param) = param else {
+        return None;
+    };
+    let location = match param {
+        openapiv3::Parameter::Query { .. } => "query",
+        openapiv3::Parameter::Header { .. } => "header",
+        openapiv3::Parameter::Path { .. } => "path",
+        openapiv3::Parameter::Cookie { .. } => "cookie",
+    };
+    Some((location, param.parameter_data_ref().name.as_str()))
 }
 
 /// Returns each method label that has an attached operation.

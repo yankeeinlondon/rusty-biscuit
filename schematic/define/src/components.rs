@@ -48,7 +48,7 @@ pub(crate) fn flatten<'a>(
 ) -> Result<Vec<SchemaComponent>, DefinitionError> {
     let mut merged = Merged::default();
     for (name, rust_path, diagnostic, schema, composition) in registrations {
-        let own = SchemaComponent { name: name.into(), rust_path: Some(rust_path.into()), schema: strip(schema) };
+        let own = SchemaComponent { name: name.into(), rust_path: Some(rust_path.into()), schema: strip(schema, name) };
         let own_shape = wire_shape(&own.schema, name, false);
         let composed = composition.is_some();
         let (entry, shape, alternate) = match composition {
@@ -104,7 +104,7 @@ impl Merged {
                 let defs = object.get("$defs").and_then(Value::as_object);
                 let schemas = object.get("components").and_then(|c| c.get("schemas")).and_then(Value::as_object);
                 for (name, schema) in defs.into_iter().chain(schemas).flatten() {
-                    let stripped = strip(schema);
+                    let stripped = strip(schema, root_name);
                     let shape = wire_shape(&stripped, root_name, true);
                     match self.components.iter().position(|c| &c.name == name) {
                         Some(index) if !self.agrees(index, &shape) => self.conflict(index, format!("a schema nested in {root}")),
@@ -152,11 +152,15 @@ fn resolve_root_refs(value: &mut Value, target: &str) {
     }
 }
 
-fn strip(schema: &Value) -> Value {
+/// `schema` without its nested definitions, with each `"$ref": "#"` naming
+/// `root_name`: a nested component no longer knows which registration's
+/// document `#` was, so it is resolved while that is still known.
+fn strip(schema: &Value, root_name: &str) -> Value {
     let mut schema = schema.clone();
     if let Some(object) = schema.as_object_mut() {
         for key in ["$schema", "$defs", "components"] { object.remove(key); }
     }
+    resolve_root_refs(&mut schema, &format!("#/components/schemas/{root_name}"));
     schema
 }
 

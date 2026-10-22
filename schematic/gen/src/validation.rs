@@ -50,6 +50,8 @@ use schematic_define::pagination::{
 use serde_json::Value;
 
 use crate::codegen::endpoint_methods::{call_type_name, resolve_names};
+use crate::codegen::request_structs::param_enums::variant_collisions;
+use crate::codegen::request_structs::path_params::{PathValue, typed_path_fields};
 use crate::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use crate::errors::GeneratorError;
 use crate::export::resolve_module_name;
@@ -111,8 +113,8 @@ pub fn endpoint_uniqueness_key(endpoint: &Endpoint) -> EndpointUniquenessKey {
 ///
 /// Covers everything the OpenAPI and Postman validators check about routes,
 /// plus the Rust-only rules: identifiers, request suffixes, module paths and
-/// file names, type syntax, generated-name collisions across each module
-/// group, endpoint-method and setter renames (warnings), and the request
+/// file names, type syntax, declared path parameters, generated-name
+/// collisions across each module group, endpoint-method and setter renames (warnings), and the request
 /// inputs the client sends verbatim: header and cookie parameter names, raw
 /// body content types, and API-key parameter names.
 pub fn validate_rust_client(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
@@ -144,6 +146,7 @@ pub fn validate_openapi(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
         check_routes(api, Output::OpenApi, &mut diagnostics);
         check_export_filename(api, Output::OpenApi, &mut diagnostics);
         check_schema_references(api, Output::OpenApi, &mut diagnostics);
+        diagnostics.extend(crate::export::vocabulary::diagnostics(api, Output::OpenApi));
     }
     diagnostics
 }
@@ -157,6 +160,7 @@ pub fn validate_postman(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
     for api in apis {
         check_routes(api, Output::Postman, &mut diagnostics);
         check_export_filename(api, Output::Postman, &mut diagnostics);
+        diagnostics.extend(crate::export::vocabulary::diagnostics(api, Output::Postman));
     }
     diagnostics
 }
@@ -385,6 +389,7 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
             }
         }
 
+        check_typed_path_params(api, endpoint, diagnostics);
         check_request_struct_fields(api, endpoint, diagnostics);
         check_raw_body_content_type(api, endpoint, diagnostics);
         check_sent_params(api, endpoint, diagnostics);
@@ -799,12 +804,89 @@ fn referenced_type_names(api: &RestApi, endpoint: &Endpoint) -> Vec<(&'static st
         .collect()
 }
 
+/// Checks an endpoint's declared path parameters against what the Rust
+/// emitters can generate.
+///
+/// Definition build already rejects these; they are checked again because
+/// every field of a definition stays public. A declaration without a
+/// placeholder or a placeholder without a declaration, an array or JSON
+/// type, an empty enum, and an invalid `rust_name` are
+/// [`Feature::PathParameter`] errors. Two enum values whose variant
+/// identifiers coincide (`a-b` and `a_b`) are a
+/// [`Feature::GeneratedNameCollision`]: the emitter never renames a variant.
+fn check_typed_path_params(api: &RestApi, endpoint: &Endpoint, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    let Some(params) = endpoint.params.as_ref().filter(|params| !params.path.is_empty()) else {
+        return;
+    };
+    let mut push = |feature, message: String| {
+        diagnostics.push(ValidationDiagnostic::new(
+            Severity::Error,
+            &api.name,
+            Some(&endpoint.id),
+            feature,
+            Output::Rust,
+            message,
+        ));
+    };
+    let placeholders = endpoint.path_placeholders();
+    for placeholder in &placeholders {
+        if !params.path.iter().any(|param| param.name == *placeholder) {
+            push(
+                Feature::PathParameter,
+                format!("path placeholder `{{{placeholder}}}` has no declared path parameter"),
+            );
+        }
+    }
+    for param in &params.path {
+        let name = &param.name;
+        if !placeholders.contains(&name.as_str()) {
+            push(
+                Feature::PathParameter,
+                format!("path parameter `{name}` has no `{{{name}}}` placeholder in `{}`", endpoint.path),
+            );
+        }
+        if let Some(rust_name) = &param.rust_name
+            && !is_field_ident(rust_name)
+        {
+            push(Feature::PathParameter, format!("path parameter `{name}` has invalid Rust name `{rust_name}`"));
+        }
+        match &param.param_type {
+            QueryParamType::Array(_) | QueryParamType::Json => push(
+                Feature::PathParameter,
+                format!("path parameter `{name}` must be a scalar or enum, not an array or JSON value"),
+            ),
+            QueryParamType::Enum(values) if values.is_empty() => {
+                push(Feature::PathParameter, format!("path parameter `{name}` declares an enum with no values"));
+            }
+            QueryParamType::Enum(values) => {
+                for (variant, wire_values) in variant_collisions(values) {
+                    push(
+                        Feature::GeneratedNameCollision,
+                        format!(
+                            "path parameter `{name}` enum values `{}` all generate the variant `{variant}`",
+                            wire_values.join("`, `")
+                        ),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Whether `name` can be a generated struct field and constructor argument.
+fn is_field_ident(name: &str) -> bool {
+    syn::parse_str::<syn::Ident>(name).is_ok() && !matches!(name, "self" | "Self" | "crate" | "super" | "_")
+}
+
 /// Checks the fields of an endpoint's request struct and form body struct.
 ///
 /// Field names preserve explicit Rust names or use [`sanitize_rust_field_ident`],
 /// exactly as the emitters derive them, so distinct wire names can still collide
-/// (`{user-id}` and `user_id`). Query, header, and cookie builders are all
-/// `with_<field>`, so a builder collision is a field collision.
+/// (`{user-id}` and `user_id`). Typed path parameters count once per distinct
+/// placeholder, under their `rust_name` when they declare one. Query, header,
+/// and cookie builders are all `with_<field>`, so a builder collision is a
+/// field collision.
 fn check_request_struct_fields(
     api: &RestApi,
     endpoint: &Endpoint,
@@ -822,8 +904,20 @@ fn check_request_struct_fields(
     };
 
     let mut fields: Vec<(String, String, bool)> = Vec::new();
-    for name in extract_path_params(&endpoint.path) {
-        fields.push((format!("path parameter `{name}`"), name.to_string(), false));
+    let declared_paths = endpoint.params.as_ref().map(|params| params.path.as_slice()).unwrap_or_default();
+    if declared_paths.is_empty() {
+        for name in extract_path_params(&endpoint.path) {
+            fields.push((format!("path parameter `{name}`"), name.to_string(), false));
+        }
+    } else {
+        for name in endpoint.path_placeholders() {
+            let rust_name = declared_paths
+                .iter()
+                .find(|param| param.name == name)
+                .and_then(|param| param.rust_name.clone());
+            let explicit = rust_name.is_some();
+            fields.push((format!("path parameter `{name}`"), rust_name.unwrap_or_else(|| name.to_string()), explicit));
+        }
     }
     let no_params: &[ParamDef] = &[];
     let (query, header, cookie) = endpoint.params.as_ref().map_or(
@@ -907,8 +1001,9 @@ fn duplicate_names(entries: &[(String, String)], kind: &str) -> Vec<String> {
 ///
 /// APIs sharing a module path are generated into one namespace, so raw
 /// endpoint ids may repeat across them as long as their request suffixes keep
-/// the emitted names apart. A referenced body or response type that equals
-/// an emitted name is a collision too: the local item would shadow the
+/// the emitted names apart. The enums of enum-typed path parameters are
+/// emitted names too. A referenced body or response type that equals an
+/// emitted name is a collision as well: the local item would shadow the
 /// definitions type.
 fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDiagnostic>) {
     struct Owner<'a> {
@@ -951,6 +1046,15 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
                     endpoint: Some(&endpoint.id),
                     role: format!("the call type of {}::{}", api.name, endpoint.id),
                 });
+            for path in typed_path_fields(endpoint, &format!("{}{suffix}", endpoint.id)).unwrap_or_default() {
+                if let PathValue::Enum { type_name, .. } = path.value {
+                    emitted.entry(type_name).or_default().push(Owner {
+                        api: &api.name,
+                        endpoint: Some(&endpoint.id),
+                        role: format!("the `{}` path-parameter enum of {}::{}", path.wire, api.name, endpoint.id),
+                    });
+                }
+            }
             if matches!(
                 endpoint.request,
                 Some(ApiRequest::FormData { .. } | ApiRequest::UrlEncoded { .. })
@@ -1999,5 +2103,130 @@ mod tests {
                 .collect();
             assert!(errors.is_empty(), "{errors:#?}");
         }
+    }
+
+    // ---- typed path parameters ----
+
+    fn typed_path(id: &str, path: &str, declared: Vec<ParamDef>, query: Vec<ParamDef>) -> Endpoint {
+        let mut endpoint = endpoint(id, RestMethod::Get, path);
+        endpoint.params = Some(EndpointParams { path: declared, query, header: vec![], cookie: vec![] });
+        endpoint
+    }
+
+    /// Only Rust-output diagnostics, and none of them reaches another output.
+    fn rust_only(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
+        let rust = validate_rust_client(apis);
+        for other in [validate_openapi(apis), validate_postman(apis)] {
+            assert!(
+                other.iter().all(|d| d.feature != Feature::GeneratedNameCollision && d.output != Output::Rust),
+                "a Rust-only rule reached another output: {other:?}"
+            );
+        }
+        rust
+    }
+
+    #[test]
+    fn path_enum_values_with_one_variant_identifier_are_a_rust_collision() {
+        let kind = ParamDef::path("kind", QueryParamType::Enum(vec!["a-b".into(), "c".into(), "a_b".into()]));
+        let api = api_with(vec![typed_path("GetItem", "/items/{kind}", vec![kind], vec![])]);
+
+        let diagnostics = rust_only(&[&api]);
+
+        assert_eq!(features(&diagnostics), [(Severity::Error, Feature::GeneratedNameCollision)]);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.api, ["TestApi"]);
+        assert_eq!(diagnostic.endpoint.as_deref(), Some("GetItem"));
+        assert_eq!(diagnostic.output, Output::Rust);
+        assert_eq!(
+            diagnostic.message,
+            "path parameter `kind` enum values `a-b`, `a_b` all generate the variant `AB`"
+        );
+    }
+
+    #[test]
+    fn a_path_enum_type_colliding_with_a_grouped_request_struct_names_both_apis() {
+        let kind = ParamDef::path("kind", QueryParamType::Enum(vec!["a".into()]));
+        let first = group_member("First", None, vec![typed_path("Get", "/{kind}", vec![kind], vec![])]);
+        let second = group_member("Second", Some("Kind"), vec![get("GetRequest")]);
+
+        let diagnostics = rust_only(&[&first, &second]);
+
+        assert_eq!(features(&diagnostics), [(Severity::Error, Feature::GeneratedNameCollision)]);
+        assert_eq!(diagnostics[0].api, ["First", "Second"]);
+        assert_eq!(diagnostics[0].output, Output::Rust);
+        assert_eq!(
+            diagnostics[0].message,
+            "`GetRequestKind` is generated for the `kind` path-parameter enum of First::Get and the \
+             request struct of Second::GetRequest"
+        );
+    }
+
+    #[test]
+    fn a_path_enum_type_shadowing_a_referenced_type_is_a_collision() {
+        let kind = ParamDef::path("kind", QueryParamType::Enum(vec!["a".into()]));
+        let mut endpoint = typed_path("Get", "/{kind}", vec![kind], vec![]);
+        endpoint.response = ApiResponse::json_type("GetRequestKind");
+        let api = api_with(vec![endpoint]);
+
+        let diagnostics = rust_only(&[&api]);
+
+        assert_eq!(features(&diagnostics), [(Severity::Error, Feature::GeneratedNameCollision)]);
+        assert_eq!(diagnostics[0].endpoint.as_deref(), Some("Get"));
+        assert_eq!(
+            diagnostics[0].message,
+            "response type `GetRequestKind` of TestApi::Get is shadowed by the `kind` path-parameter enum of TestApi::Get"
+        );
+    }
+
+    #[test]
+    fn a_path_rust_name_or_sanitized_name_colliding_with_a_query_field_is_a_collision() {
+        let aliased = ParamDef::path("id", QueryParamType::Integer).rust_name("page");
+        let by_rust_name = typed_path("ById", "/{id}", vec![aliased], vec![param("page", false)]);
+        let camel = ParamDef::path("userId", QueryParamType::String);
+        let by_sanitizer = typed_path("BySanitizer", "/users/{userId}", vec![camel], vec![param("user_id", false)]);
+        let api = api_with(vec![by_rust_name, by_sanitizer]);
+
+        let diagnostics = rust_only(&[&api]);
+
+        assert_eq!(features(&diagnostics), vec![(Severity::Error, Feature::GeneratedNameCollision); 2]);
+        assert_eq!(diagnostics[0].endpoint.as_deref(), Some("ById"));
+        assert_eq!(
+            diagnostics[0].message,
+            "request struct field `page` is generated for path parameter `id` and query parameter `page`"
+        );
+        assert_eq!(diagnostics[1].endpoint.as_deref(), Some("BySanitizer"));
+        assert_eq!(
+            diagnostics[1].message,
+            "request struct field `user_id` is generated for path parameter `userId` and query parameter `user_id`"
+        );
+    }
+
+    #[test]
+    fn a_repeated_typed_placeholder_is_one_field_and_valid() {
+        let id = ParamDef::path("id", QueryParamType::Integer);
+        let kind = ParamDef::path("kind", QueryParamType::Enum(vec!["a-b".into(), "c".into()]));
+        let api = api_with(vec![typed_path("Copy", "/{id}/copies/{+id}/{kind}", vec![kind, id], vec![])]);
+
+        assert!(validate_rust_client(&[&api]).is_empty());
+    }
+
+    #[test]
+    fn path_declarations_the_rust_client_cannot_generate_are_path_parameter_errors() {
+        let mut list = ParamDef::path("ids", QueryParamType::Array(Box::new(QueryParamType::Integer)));
+        list.rust_name = Some("not a name".into());
+        let api = api_with(vec![typed_path("Get", "/{ids}/{other}", vec![list], vec![])]);
+
+        let diagnostics = validate_rust_client(&[&api]);
+
+        assert_eq!(features(&diagnostics), vec![(Severity::Error, Feature::PathParameter); 3]);
+        let messages: Vec<&str> = diagnostics.iter().map(|d| d.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            [
+                "path placeholder `{other}` has no declared path parameter",
+                "path parameter `ids` has invalid Rust name `not a name`",
+                "path parameter `ids` must be a scalar or enum, not an array or JSON value",
+            ]
+        );
     }
 }

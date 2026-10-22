@@ -1,6 +1,7 @@
 //! Authorization code flow with PKCE support.
 
 use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope};
+use schematic_define::OAuth2GrantType;
 
 use crate::error::OAuthError;
 use crate::manager::{extract_tokens, OAuth2Manager};
@@ -14,9 +15,10 @@ impl OAuth2Manager {
     ///
     /// ## Errors
     ///
-    /// Returns `OAuthError::Configuration` if the authorization URL is not set
-    /// on the provider config.
+    /// Returns `OAuthError::Configuration` if the provider does not declare the
+    /// authorization-code grant.
     pub fn begin_authorization(&self) -> Result<AuthorizationSession, OAuthError> {
+        self.require_grant(OAuth2GrantType::AuthorizationCodePkce, "the authorization-code flow")?;
         let mut auth_request = self
             .client
             .authorize_url(CsrfToken::new_random)
@@ -27,9 +29,7 @@ impl OAuth2Manager {
         }
 
         // Every `PkceRequirement`, `Supported` included, sends a challenge: a
-        // provider that merely supports PKCE still gains its protection. Only the
-        // authorization-code grant carries one, and other grants have no
-        // authorization URL, so they already failed above.
+        // provider that merely supports PKCE still gains its protection.
         let use_pkce = self.config.provider.pkce().is_some();
 
         let pkce_verifier = if use_pkce {
@@ -55,6 +55,8 @@ impl OAuth2Manager {
     ///
     /// ## Errors
     ///
+    /// - `OAuthError::Configuration` if the provider does not declare the
+    ///   authorization-code grant.
     /// - `OAuthError::StateMismatch` if the CSRF state does not match.
     /// - `OAuthError::TokenExchange` if the token endpoint returns an error.
     pub async fn exchange_code(
@@ -63,6 +65,7 @@ impl OAuth2Manager {
         state: &str,
         session: &AuthorizationSession,
     ) -> Result<StoredTokens, OAuthError> {
+        self.require_grant(OAuth2GrantType::AuthorizationCodePkce, "the authorization-code flow")?;
         if state != session.csrf_state {
             return Err(OAuthError::StateMismatch {
                 expected: session.csrf_state.clone(),
