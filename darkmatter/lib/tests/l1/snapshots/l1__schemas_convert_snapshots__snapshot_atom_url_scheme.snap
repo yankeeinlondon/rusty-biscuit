@@ -1,10 +1,10 @@
 ---
-source: darkmatter/lib/tests/schemas_convert_snapshots.rs
-assertion_line: 130
+source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: "convert_atom(\"url(scheme(https))\")"
 ---
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
   "additionalProperties": true,
   "properties": {
     "field": {
@@ -13,14 +13,13 @@ expression: "convert_atom(\"url(scheme(https))\")"
           "type": "null"
         },
         {
-          "format": "uri",
           "type": "string",
+          "format": "uri",
           "x-darkmatter-url-scheme": [
             "https"
           ]
         }
       ]
     }
-  },
-  "type": "object"
+  }
 }

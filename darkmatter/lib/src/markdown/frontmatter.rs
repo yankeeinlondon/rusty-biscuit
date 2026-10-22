@@ -1236,8 +1236,8 @@ This is content."#;
         let set = &frontmatter.as_map()["start"][0]["set"];
         assert_eq!(
             set.as_object().unwrap().keys().collect::<Vec<_>>(),
-            vec!["a_first_lexically", "z_last_lexically"],
-            "ordinary serde_json maps keep their established canonical order",
+            vec!["z_last_lexically", "a_first_lexically"],
+            "serde_json maps keep written order (`preserve_order`), agreeing with the metadata",
         );
     }
 

@@ -1,52 +1,48 @@
 ---
-source: darkmatter/lib/tests/schemas_convert_snapshots.rs
-assertion_line: 243
+source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: convert_yaml(yaml)
 ---
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
   "additionalProperties": true,
   "properties": {
+    "title": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$"
+    },
+    "tags": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 5
+        }
+      ]
+    },
     "author": {
       "anyOf": [
         {
           "type": "null"
         },
         {
-          "pattern": "\\S",
-          "type": "string"
-        },
-        {
-          "format": "email",
-          "type": "string"
-        }
-      ]
-    },
-    "hero": {
-      "anyOf": [
-        {
-          "type": "null"
-        },
-        {
-          "const": ""
-        },
-        {
-          "format": "darkmatter-file-reference",
-          "type": "string"
-        }
-      ]
-    },
-    "homepage": {
-      "anyOf": [
-        {
-          "type": "null"
-        },
-        {
-          "format": "uri",
           "type": "string",
-          "x-darkmatter-url-scheme": [
-            "https"
-          ]
+          "pattern": "\\S"
+        },
+        {
+          "type": "string",
+          "format": "email"
         }
       ]
     },
@@ -56,16 +52,12 @@ expression: convert_yaml(yaml)
           "type": "null"
         },
         {
-          "maximum": 5,
           "minimum": 0,
+          "maximum": 5,
           "type": "number"
         }
       ],
       "default": 3
-    },
-    "slug": {
-      "pattern": "^[a-z0-9-]+$",
-      "type": "string"
     },
     "status": {
       "anyOf": [
@@ -82,30 +74,37 @@ expression: convert_yaml(yaml)
       ],
       "default": "draft"
     },
-    "tags": {
+    "homepage": {
       "anyOf": [
         {
           "type": "null"
         },
         {
-          "items": {
-            "type": "string"
-          },
-          "maxItems": 5,
-          "minItems": 1,
-          "type": "array",
-          "uniqueItems": true
+          "type": "string",
+          "format": "uri",
+          "x-darkmatter-url-scheme": [
+            "https"
+          ]
         }
       ]
     },
-    "title": {
-      "pattern": "\\S",
-      "type": "string"
+    "hero": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "const": ""
+        },
+        {
+          "type": "string",
+          "format": "darkmatter-file-reference"
+        }
+      ]
     }
   },
   "required": [
     "title",
     "slug"
-  ],
-  "type": "object"
+  ]
 }

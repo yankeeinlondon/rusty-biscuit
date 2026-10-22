@@ -1,10 +1,10 @@
 ---
-source: darkmatter/lib/tests/schemas_convert_snapshots.rs
-assertion_line: 288
+source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: convert_yaml(yaml)
 ---
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
   "additionalProperties": true,
   "properties": {
     "database": {
@@ -13,6 +13,7 @@ expression: convert_yaml(yaml)
           "type": "null"
         },
         {
+          "type": "object",
           "additionalProperties": false,
           "properties": {
             "primary": {
@@ -21,6 +22,7 @@ expression: convert_yaml(yaml)
                   "type": "null"
                 },
                 {
+                  "type": "object",
                   "additionalProperties": false,
                   "properties": {
                     "host": {
@@ -40,8 +42,7 @@ expression: convert_yaml(yaml)
                   },
                   "required": [
                     "host"
-                  ],
-                  "type": "object"
+                  ]
                 }
               ]
             },
@@ -51,7 +52,9 @@ expression: convert_yaml(yaml)
                   "type": "null"
                 },
                 {
+                  "type": "array",
                   "items": {
+                    "type": "object",
                     "additionalProperties": false,
                     "properties": {
                       "host": {
@@ -74,18 +77,14 @@ expression: convert_yaml(yaml)
                           }
                         ]
                       }
-                    },
-                    "type": "object"
-                  },
-                  "type": "array"
+                    }
+                  }
                 }
               ]
             }
-          },
-          "type": "object"
+          }
         }
       ]
     }
-  },
-  "type": "object"
+  }
 }

@@ -1,10 +1,10 @@
 ---
-source: darkmatter/lib/tests/schemas_convert_snapshots.rs
-assertion_line: 147
+source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: "convert_atom(\"string(pattern(^[a-z]+$))[](min(1); max(5); unique)\")"
 ---
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
   "additionalProperties": true,
   "properties": {
     "field": {
@@ -13,17 +13,16 @@ expression: "convert_atom(\"string(pattern(^[a-z]+$))[](min(1); max(5); unique)\
           "type": "null"
         },
         {
-          "items": {
-            "pattern": "^[a-z]+$",
-            "type": "string"
-          },
-          "maxItems": 5,
-          "minItems": 1,
           "type": "array",
-          "uniqueItems": true
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]+$"
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 5
         }
       ]
     }
-  },
-  "type": "object"
+  }
 }

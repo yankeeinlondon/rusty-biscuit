@@ -477,7 +477,7 @@ fn emit_json(file: &Path, outcome: &FileOutcome) {
     use serde_json::json;
 
     let file_str = file.to_string_lossy().into_owned();
-    let value = match outcome {
+    let mut value = match outcome {
         FileOutcome::Validated {
             report_valid,
             problems,
@@ -552,6 +552,9 @@ fn emit_json(file: &Path, outcome: &FileOutcome) {
             "problems": [],
         }),
     };
+    // The JSON report's keys are alphabetical, a published contract that
+    // predates `serde_json/preserve_order`.
+    value.sort_all_objects();
     println!("{}", value);
 }
 

@@ -1,10 +1,10 @@
 ---
-source: darkmatter/lib/tests/schemas_convert_snapshots.rs
-assertion_line: 65
+source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: "convert_atom(\"datetime\")"
 ---
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
   "additionalProperties": true,
   "properties": {
     "field": {
@@ -13,11 +13,10 @@ expression: "convert_atom(\"datetime\")"
           "type": "null"
         },
         {
-          "format": "darkmatter-datetime",
-          "type": "string"
+          "type": "string",
+          "format": "darkmatter-datetime"
         }
       ]
     }
-  },
-  "type": "object"
+  }
 }

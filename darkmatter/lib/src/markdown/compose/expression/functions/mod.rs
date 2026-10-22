@@ -3320,7 +3320,7 @@ mod tests {
             let list = v(json!([{ "package": "darkmatter", "dev deps": ["renderable"] }]));
             assert_eq!(
                 s(&as_json5(&list).unwrap()),
-                "[{'dev deps': ['renderable'], package: 'darkmatter'}]"
+                "[{package: 'darkmatter', 'dev deps': ['renderable']}]"
             );
         }
 

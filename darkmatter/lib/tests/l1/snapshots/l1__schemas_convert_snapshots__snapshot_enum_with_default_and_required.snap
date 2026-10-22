@@ -1,22 +1,22 @@
 ---
-source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: convert_yaml(yaml)
 ---
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
   "additionalProperties": true,
   "properties": {
     "status": {
-      "default": "draft",
       "enum": [
         "draft",
         "published",
         "archived"
-      ]
+      ],
+      "default": "draft"
     }
   },
   "required": [
     "status"
-  ],
-  "type": "object"
+  ]
 }

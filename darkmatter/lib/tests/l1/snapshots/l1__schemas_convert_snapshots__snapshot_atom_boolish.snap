@@ -1,10 +1,10 @@
 ---
-source: darkmatter/lib/tests/schemas_convert_snapshots.rs
-assertion_line: 95
+source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: "convert_atom(\"boolish\")"
 ---
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
   "additionalProperties": true,
   "properties": {
     "field": {
@@ -31,6 +31,5 @@ expression: "convert_atom(\"boolish\")"
         }
       ]
     }
-  },
-  "type": "object"
+  }
 }

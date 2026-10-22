@@ -645,13 +645,9 @@ impl WithOverlay {
         self.0.get(key)
     }
 
-    /// Iterate the overlay's properties.
-    ///
-    /// Order is deterministic but is **not** the authored order: `serde_json`
-    /// is built without `preserve_order`, so frontmatter parsing has already
-    /// normalized a nested mapping's keys to sorted order before they reach
-    /// here. Overlay semantics are per-key, so no consumer may depend on
-    /// order for meaning.
+    /// Iterate the overlay's properties in authored order (`serde_json` is
+    /// built with `preserve_order`). Overlay semantics are per-key, so no
+    /// consumer may depend on order for meaning.
     pub fn iter(&self) -> impl Iterator<Item = (&String, &WithValue)> {
         self.0.iter()
     }

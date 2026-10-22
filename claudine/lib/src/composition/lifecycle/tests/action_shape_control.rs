@@ -1261,13 +1261,13 @@ fn proxy_with_rejects_unparseable_whole_value_span() {
 }
 
 #[test]
-fn proxy_with_iteration_is_canonical_and_complete() {
+fn proxy_with_iteration_follows_authored_order_and_is_complete() {
     let fm = json!({
         "initialize": [{ "proxy": { "target": "@next.md", "with": { "zebra": 1, "apple": 2, "mango": 3 } } }],
     });
     let (_, with) = proxy_action(&fm, LifecycleSignal::Initialize);
     let keys: Vec<&str> = with.iter().map(|(k, _)| k.as_str()).collect();
-    assert_eq!(keys, ["apple", "mango", "zebra"]);
+    assert_eq!(keys, ["zebra", "apple", "mango"]);
 }
 
 #[test]

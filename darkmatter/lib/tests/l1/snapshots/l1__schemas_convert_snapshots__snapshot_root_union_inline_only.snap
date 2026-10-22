@@ -1,14 +1,17 @@
 ---
-source: darkmatter/lib/tests/schemas_convert_snapshots.rs
-assertion_line: 224
+source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: convert_yaml(yaml)
 ---
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "anyOf": [
     {
+      "type": "object",
       "additionalProperties": true,
       "properties": {
+        "title": {
+          "type": "string"
+        },
         "body": {
           "anyOf": [
             {
@@ -18,17 +21,14 @@ expression: convert_yaml(yaml)
               "type": "string"
             }
           ]
-        },
-        "title": {
-          "type": "string"
         }
       },
       "required": [
         "title"
-      ],
-      "type": "object"
+      ]
     },
     {
+      "type": "object",
       "additionalProperties": true,
       "properties": {
         "name": {
@@ -37,8 +37,7 @@ expression: convert_yaml(yaml)
       },
       "required": [
         "name"
-      ],
-      "type": "object"
+      ]
     }
   ]
 }

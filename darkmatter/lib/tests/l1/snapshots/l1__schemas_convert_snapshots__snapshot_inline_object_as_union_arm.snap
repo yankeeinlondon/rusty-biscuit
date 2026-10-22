@@ -1,10 +1,10 @@
 ---
-source: darkmatter/lib/tests/schemas_convert_snapshots.rs
-assertion_line: 310
+source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: convert_yaml(yaml)
 ---
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
   "additionalProperties": true,
   "properties": {
     "payload": {
@@ -13,43 +13,42 @@ expression: convert_yaml(yaml)
           "type": "null"
         },
         {
+          "type": "object",
           "additionalProperties": false,
           "properties": {
-            "foo_id": {
-              "type": "string"
-            },
             "type": {
               "enum": [
                 "foo"
               ]
+            },
+            "foo_id": {
+              "type": "string"
             }
           },
           "required": [
             "type",
             "foo_id"
-          ],
-          "type": "object"
+          ]
         },
         {
+          "type": "object",
           "additionalProperties": false,
           "properties": {
-            "bar_count": {
-              "type": "number"
-            },
             "type": {
               "enum": [
                 "bar"
               ]
+            },
+            "bar_count": {
+              "type": "number"
             }
           },
           "required": [
             "type",
             "bar_count"
-          ],
-          "type": "object"
+          ]
         }
       ]
     }
-  },
-  "type": "object"
+  }
 }

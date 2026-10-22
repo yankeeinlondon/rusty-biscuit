@@ -80,7 +80,7 @@ pub(super) fn hex(value: u64) -> String {
 ///
 /// ## Notes
 ///
-/// Non-strict canonicalization sorts keys and renders each entry as
+/// Non-strict canonicalization sorts keys at every depth and renders each entry as
 /// `key:<json-value>` joined with a literal `\n` two-char sequence. This is the
 /// historical shape and must stay stable so the default `md hash` output does
 /// not drift for documents that carry no ignored keys.
@@ -97,8 +97,11 @@ pub(super) fn hash_frontmatter_map(map: &FrontmatterMap, strict: bool) -> u64 {
         let canonical: String = keys
             .iter()
             .map(|k| {
-                let v = &map[*k];
-                format!("{}:{}", k, serde_json::to_string(v).unwrap_or_default())
+                // Nested keys are sorted too, as they were before
+                // `serde_json/preserve_order`, so stored hashes stay valid.
+                let mut v = map[*k].clone();
+                v.sort_all_objects();
+                format!("{}:{}", k, serde_json::to_string(&v).unwrap_or_default())
             })
             .collect::<Vec<_>>()
             .join("\\n");
@@ -146,5 +149,20 @@ pub(super) fn hash_content_with_policy(content: &str, strict: bool) -> u64 {
                 HashVariant::BlankLine,
             ],
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::markdown::Markdown;
+
+    /// The non-strict frontmatter hash is persisted in documents, so it must
+    /// not depend on the written order of nested keys now that maps keep it.
+    #[test]
+    fn non_strict_frontmatter_hash_ignores_nested_key_order() {
+        let written: Markdown = "---\nmeta:\n  z: 1\n  a: 2\n---\nbody\n".into();
+        let sorted: Markdown = "---\nmeta:\n  a: 2\n  z: 1\n---\nbody\n".into();
+        assert_eq!(written.hash_frontmatter(false), sorted.hash_frontmatter(false));
+        assert_ne!(written.hash_frontmatter(true), sorted.hash_frontmatter(true));
     }
 }

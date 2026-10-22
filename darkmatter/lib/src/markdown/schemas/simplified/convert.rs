@@ -89,8 +89,12 @@ pub fn to_json_schema(schema: &SimplifiedSchema) -> Result<Value, SchemaError> {
         SimplifiedSchema::Single(shape) => shape_to_object_schema(shape)?,
         SimplifiedSchema::Union(arms) => union_to_root_schema(arms)?,
     };
-    root.insert("$schema".into(), Value::String(DRAFT_2020_12.into()));
-    Ok(Value::Object(root))
+    // `$schema` leads the document, as JSON Schema readers expect, now that
+    // maps keep insertion order.
+    let mut document = Map::with_capacity(root.len() + 1);
+    document.insert("$schema".into(), Value::String(DRAFT_2020_12.into()));
+    document.extend(root);
+    Ok(Value::Object(document))
 }
 
 // ── Shape & root union ────────────────────────────────────────────────────
