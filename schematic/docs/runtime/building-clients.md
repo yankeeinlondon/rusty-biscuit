@@ -68,10 +68,10 @@ validates again on its next use, and clones made earlier keep theirs.
 | `danger_accept_invalid_certificates()` | accept any server certificate, including self-signed and expired ones; only for devices that cannot present a valid one |
 | `user_agent(value)` | the `User-Agent` of every request |
 | `default_header(name, value)` | a header sent with every request unless the request sets the same header |
-| `api_key(secret)` | the client [credential](./credentials.md#setting-a-client-credential), placed wherever the API takes a single secret |
-| `basic_auth(user, password)` | an HTTP Basic client credential; exists only on APIs that accept Basic |
-| `credentials(credential)` | the client credential in its general form |
-| `env_order([..])` | replace the order of the environment variables the fallback reads |
+| `api_key(secret)` | the client [credential](./credentials.md#setting-a-client-credential), placed wherever the API (or, failing that, an endpoint's replacement policy) takes a single secret |
+| `basic_auth(user, password)` | an HTTP Basic client credential; exists only on APIs where the API or an endpoint's replacement policy accepts Basic |
+| `credentials(credential)` | the client credential in its general form; sent only to endpoints whose policy accepts its kind |
+| `env_order([..])` | replace the order of the environment variables the API's fallback reads; an endpoint with its own policy keeps its own order |
 | `cross_origin(policy)` | tighten the API default and endpoint [cross-origin policies](./origins-and-redirects.md) |
 | `transport(&shared)` | take connections from a `SharedTransport` |
 | `pre_response_json(hook)`, `mutate_response::<R, _>(hook)` | register [response hooks](./hooks.md) |

@@ -12,7 +12,7 @@ let restored: schematic_define::RestApi = serde_json::from_str(&json)?;
 assert_eq!(api, restored);
 ```
 
-Required fields keep their native JSON types. Empty collections remain empty; missing collections are errors. Optional fields intentionally define both omission and explicit `null` as `None`. For example, `"params": null` means no parameter declaration, whereas `"params": {"query": [], "header": [], "cookie": []}` means a present, empty declaration. Booleans must be native (`true`), not quoted (`"true"`). Duplicate typed fields and trailing garbage are errors. Plain derives retain Serde's usual handling of unknown fields; this format is not a strict configuration schema.
+Required fields keep their native JSON types. Empty collections remain empty; missing collections are errors. Optional fields intentionally define both omission and explicit `null` as `None`. For example, `"params": null` means no parameter declaration, whereas `"params": {"query": [], "header": [], "cookie": []}` means a present, empty declaration. Booleans must be native (`true`), not quoted (`"true"`). Duplicate typed fields and trailing garbage are errors. Plain derives retain Serde's usual handling of unknown fields; this format is not a strict configuration schema. For a strict, self-contained file that loads and exports without the Rust registry, use a [definition bundle](io/definition-bundles.md).
 
 ## Migration checks
 

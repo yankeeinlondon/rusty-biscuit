@@ -20,9 +20,12 @@ supplies one wins:
    (`env_order([..])` replaces the list)
 5. otherwise the request is sent anonymously
 
-There is no missing-credential error: a server that needs a credential
-answers (typically with a 401) inside the response envelope, and the
-metadata records `AuthMethod::Anonymous`.
+For an endpoint that inherits the API policy there is no missing-credential
+error: a server that needs a credential answers (typically with a 401) inside
+the response envelope, and the metadata records `AuthMethod::Anonymous`. An
+endpoint can override this: a public endpoint never sends a credential, and an
+endpoint with its own policy refuses a send that resolves none, before any
+request. See [endpoint authentication](../runtime/credentials.md#endpoint-authentication).
 
 ```rust
 use schematic_schema::prelude::*;

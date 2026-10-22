@@ -386,6 +386,10 @@ For the focused definition and generation reference notes, see:
 
 REST definitions and parameter types now derive plain Serde, including policy and pagination evidence types. Optional fields define omission/null as None; required collections reject missing/null input. A `RestApi` carries its schema components (`schemas`); this is data transfer, so call `validate_references` on a deserialized API before use. `just -f schematic/justfile migration-check` compares historical JSON values and regenerates all artifacts into temporary directories without mutating fixtures. Baselines use biscuit-hash BLAKE3 on canonical JSON above the 5 MB raw threshold; see `schematic/docs/definition-snapshots.md`.
 
+## Definition bundles
+
+`DefinitionBundle::new(api)` (optionally `.with_models(ctx.models().clone())`) is the strict, self-contained form: `to_json()` writes canonical JSON (sorted keys, array order kept, absent options omitted) and `from_json` loads it with no Rust registry. Loading rejects duplicate keys at any depth, trailing content, explicit `null` outside schema data (grant-inapplicable OAuth2 fields excepted), and members the shape would silently drop, then reruns the builder's validation, the closed `#/components/schemas/` reference check, and catalog consistency. Component `$ref`s are always namespaced: `DefinitionContext::components` resolves a nested type's `"$ref": "#"` to its registration root. CLI: `schematic-gen bundle --api NAME --out FILE` and `schematic-gen export-bundle --input FILE --openapi-out DIR --postman-out DIR` (byte-identical to `generate`). Tests: `define/tests/definition_bundles.rs` (committed fixture `define/tests/fixtures/bundles/fixture.json`, the JSON matrix walk) and `gen/tests/l1/definition_bundles.rs` (every shipped API, CLI wiring). A builder or vocabulary change that adds a `skip_serializing_if` default must extend `OMITTED_DEFAULTS` in `define/src/bundle.rs`. See `schematic/docs/io/definition-bundles.md`.
+
 ## Typed registration
 
 `schematic-define` now has additive `DefinitionContext`, `TypeDesc`, `Registration`,
@@ -431,8 +435,9 @@ external literals cannot compile. `Schema { type_name, module_path }` is used
 only by WebSocket messages. Endpoint oauth_scopes is removed; auth_policy is retained. Read
 `schematic/docs/definition-builders.md` for accepted forms and the Default allow-list.
 
-Optional vocabulary (definition side only; generator, exporter and runtime
-consumers are still planned): `.path_param(ParamDef::path(name, type))` fills
+Optional vocabulary (each output's behavior is in `definition-builders.md` and
+the pages it links; the runtime never reads rate-limit/retry metadata, and no
+`#[deprecated]` attribute is generated): `.path_param(ParamDef::path(name, type))` fills
 `EndpointParams::path` (once any is declared, names must equal the
 placeholders; `{+x}` counts as `x`); `.deprecated()` on endpoints and
 `ParamDef`; `.rate_limit(..)`/`.retry_guidance(..)` on API and endpoint (an
@@ -442,7 +447,12 @@ endpoint value replaces the API value whole; read through
 (at most one; resolve with `RestApi::endpoint_auth`). Build checks a
 replacement policy's env fallback against the endpoint mapping, else the API's
 effective mapping. A required pager-adopted parameter needs a type-valid sent
-default (`pager-managed-default-invalid`). Polymorphic bodies: `ctx.one_of::<T>([..])` / `any_of` / `all_of` over descriptors from the same
+default (`pager-managed-default-invalid`). Generated output: a typed-path
+request has typed fields, a template-ordered `new(..)` and no `Default`; the
+runtime applies endpoint auth per send (`ApiDefinition::endpoint_public` /
+`endpoint_auth`; a replacement that resolves no credential fails before send).
+New diagnostics: `path-parameter` (Rust error), `endpoint-auth`,
+`schema-composition`, `oauth2-grant` (export warnings). Polymorphic bodies: `ctx.one_of::<T>([..])` / `any_of` / `all_of` over descriptors from the same
 context bind a hand-written serde type to a structure that replaces its
 schemars schema in `components()`; see `schematic/docs/typed-registration.md`.
 

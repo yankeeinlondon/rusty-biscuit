@@ -8,8 +8,8 @@ Schematic currently emits two `x-schematic` extension types in exported OpenAPI 
 
 | Extension | Level | Purpose |
 |-----------|-------|---------|
-| `x-schematic` | Document | API-wide configuration (module path, headers, env mapping) |
-| `x-schematic` | Operation | Endpoint-specific metadata (request/response types, headers) |
+| `x-schematic` | Document | API-wide configuration (module path, headers, env mapping, rate-limit and retry metadata) |
+| `x-schematic` | Operation | Endpoint-specific metadata (request/response types, headers, an endpoint's own rate-limit and retry metadata) |
 
 The library also defines a schema-level extension type (`SchematicSchemaExtension`) for Rust type metadata, but the current exporter does not emit schema-level `x-schematic` fields.
 
@@ -42,6 +42,8 @@ x-schematic:
 | `request_suffix` | `string?` | Custom suffix for generated request wrapper structs (default: "Request"). |
 | `env_mapping` | `object?` | Environment variable configuration for authentication. See [Env Mapping](#env-mapping). |
 | `headers` | `array<[string, string]>` | Default headers applied to all endpoints. |
+| `rate_limit` | `object?` | The API's rate-limit headers. Absent when undeclared. See [Rate-Limit and Retry Metadata](#rate-limit-and-retry-metadata). |
+| `retry_guidance` | `object?` | The API's retry guidance. Absent when undeclared. See [Rate-Limit and Retry Metadata](#rate-limit-and-retry-metadata). |
 
 ### Env Mapping
 
@@ -90,6 +92,41 @@ paths:
 | `request` | `object?` | Request body specification. See [Request Types](#request-types). |
 | `response` | `object \| string` | Response specification. See [Response Types](#response-types). |
 | `headers` | `array<[string, string]>` | Endpoint-specific headers. |
+| `rate_limit` | `object?` | The endpoint's own rate-limit headers, which replace the API's whole. Absent when the endpoint inherits the document's value. |
+| `retry_guidance` | `object?` | The endpoint's own retry guidance, which replaces the API's whole. Absent when the endpoint inherits the document's value. |
+
+### Rate-Limit and Retry Metadata
+
+Both values are descriptive: they tell a reader which response headers
+report the rate limit and how the provider says to retry, and nothing in
+Schematic acts on them. Each appears in the document extension when the API
+declares it, and in an operation extension only when that endpoint declares
+its own value; an operation without one uses the document's. Neither is
+written when undeclared, and [`skip_extensions()`](#skipping-extensions)
+leaves both out with the rest of `x-schematic`.
+
+```yaml
+x-schematic:
+  rate_limit:
+    limit_header: x-ratelimit-limit
+    remaining_header: x-ratelimit-remaining
+    reset_header: x-ratelimit-reset
+    reset_unit: epoch_seconds       # seconds | epoch_seconds | http_date
+    retry_after_header: retry-after # optional
+  retry_guidance:
+    retry_on:                       # status codes and inclusive ranges
+      - code: 429
+      - range: { start: 500, end: 503 }
+    honor_retry_after: true
+    max_attempts: 4                 # including the first attempt
+    backoff:                        # none | fixed | exponential
+      fixed: { delay_ms: 750 }
+```
+
+`backoff` is the string `none`, `{fixed: {delay_ms}}`, or
+`{exponential: {base_ms, cap_ms}}`. Every `retry_guidance` member is
+required; only `retry_after_header` is optional in `rate_limit`. GitHub's
+document declares the `rate_limit` above (without `retry_guidance`).
 
 ### Schema references
 

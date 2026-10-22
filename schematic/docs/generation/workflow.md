@@ -59,11 +59,15 @@ schematic-gen validate --api openai
 schematic-gen generate --api openai --output generated/src
 schematic-gen generate --api openai --output generated/src --openapi-out specs/ --openapi-format yaml
 schematic-gen import --input petstore.yaml --output generated/src --strict
+schematic-gen bundle --api github --out github.bundle.json
+schematic-gen export-bundle --input github.bundle.json --openapi-out specs/ --postman-out collections/
 ```
 
 [OpenAPI import](../io/import-openapi.md), [OpenAPI export](../io/export-openapi.md),
 and [Postman export](../io/export-postman.md) describe the complete options,
-version selection, and format behavior.
+version selection, and format behavior. [Definition bundles](../io/definition-bundles.md)
+describes the `bundle` file and the checks `export-bundle` applies before it
+exports without the Rust registry.
 
 ## Share a generated module
 

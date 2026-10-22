@@ -104,6 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [Generate artifacts and verify changes](docs/generation/workflow.md), including the current provider catalog and shared-module settings.
 - [Call an API](docs/runtime/calling-an-api.md), [read responses](docs/runtime/README.md), and [page through lists](docs/pagination.md).
 - [Import OpenAPI](docs/io/import-openapi.md), [export OpenAPI](docs/io/export-openapi.md), or [export Postman](docs/io/export-postman.md).
+- [Save a definition as a self-contained bundle](docs/io/definition-bundles.md) and export from the file alone.
 - [Understand generated requests](docs/generation/request-side.md), [validation](docs/generation/validation.md), and [partial generation](docs/generation/partial-generation.md).
 - [Use WebSocket headers](docs/headers/README.md).
 

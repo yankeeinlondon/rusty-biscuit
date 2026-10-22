@@ -406,8 +406,8 @@ impl OpenAI {
     pub const DOCS_URL: Option<&'static str> = None;
 
     /// What the API tells the runtime: its base URL, how it accepts
-    /// credentials, its cross-origin policy, its secret names, and its
-    /// request-id header.
+    /// credentials, its cross-origin policy, its secret names, its
+    /// request-id header, and any endpoint that authenticates differently.
     pub fn definition() -> schematic_runtime::ApiDefinition {
         schematic_runtime::ApiDefinition::new(Self::BASE_URL)
             .auth(
@@ -422,7 +422,7 @@ impl OpenAI {
         Self(schematic_runtime::Client::new(Self::definition()))
     }
 
-    // Only on an API that accepts HTTP Basic:
+    // Only when the API, or an endpoint policy replacing the API's, accepts HTTP Basic:
     // pub fn basic_auth(self, username: impl Into<String>, password: impl Into<String>) -> Self
 }
 
@@ -433,6 +433,8 @@ impl Default for OpenAI { ... }
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /// Request for `RetrieveModel` endpoint.
+// `{model}` is an untyped placeholder; a declared (typed) path parameter
+// changes the field type and drops `Default` and the `From` impls (see "Path Parameters").
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveModelRequest {
     /// Path parameter: model
@@ -503,7 +505,13 @@ What each part of the `EndpointSpec` impl means:
 `definition()` leaves out every setting equal to the runtime's default: a
 `same_origin` cross-origin policy, no extra secret names, no request-id
 header. A definition's `CrossOrigin` value maps onto the `OriginPolicy`
-constructor of the same name. The API's static headers other than `Cookie`
+constructor of the same name. Only an endpoint that declares its own
+authentication adds a call: `.endpoint_public("Health")` for `.public()`,
+and `.endpoint_auth("Upload", AuthConfig::none()...)` for `.auth(..)` or
+`.auth_with_env_mapping(..)`, spelling out the replacement policy the way
+`.auth(..)` spells out the API's (see
+[Authentication Strategies](#authentication-strategies)). An API without
+such endpoints generates exactly the `definition()` it always did. The API's static headers other than `Cookie`
 become `.default_header(..)` calls in `new()`; an API-level `Cookie` is
 folded into every endpoint's static headers instead, because the runtime
 refuses a default header that can carry a credential.
@@ -567,6 +575,42 @@ matches an API-struct method (`new`, `send`, `base_url`, …) gets an
 `build`, `credential`, …) gets a `_param` suffix, each reported as an
 `endpoint-method-rename` warning. See
 [Endpoint method names](../generation/validation.md#endpoint-method-names).
+
+### Deprecation, rate limits, and endpoint authentication in docs
+
+Some definition vocabulary only changes the generated documentation, so your
+editor's hover text tells you about it while the code stays the same. An
+endpoint or API that declares none of it generates exactly the docs it did
+before.
+
+| Declaration | Where it appears |
+| --- | --- |
+| `.deprecated()` on an endpoint | a "Deprecated." line on the request type, the endpoint method, and the call type |
+| `.deprecated()` on a parameter | a "Deprecated." line on its request field and its setter, and after its entry in the method's `## Optional values` list |
+| `.public()` | "This endpoint is public: it sends no credential." on the request type (under `## Authentication`) and the method |
+| `.auth(..)`, `.auth_with_env_mapping(..)` | the same places: the methods the replacement accepts and the environment variables it reads, in order |
+| API `.rate_limit(..)`, `.retry_guidance(..)` | `## Rate limit` and `## Retry guidance` sections in the module docs, including a module shared by several APIs |
+| the endpoint's effective rate limit or retry guidance (its own, else the API's) | the same sections on its request type |
+
+Deprecation never generates a `#[deprecated]` attribute: that would fail
+every `-D warnings` build of the generated crate and of its dependents.
+Rate-limit and retry sections are descriptive only; the client neither reads
+the headers nor retries. For example, every GitHub request type carries:
+
+```rust
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+```
+
+When any endpoint authenticates differently, the API struct's `new()` docs
+also say that a public endpoint sends no credential and that a replacement
+refuses a send which resolves none.
 
 ## Using Generated Code
 
@@ -634,21 +678,41 @@ dropped, so the API reads nothing from the environment. LM Studio and
 Eversolo, for example, set an empty mapping, so their `env_auth` variable is
 never read.
 
-Runtime precedence, for every placement:
+Runtime precedence, for an endpoint that uses the API's policy:
 
 1. a per-call credential (`.credential(..)` on the call)
-2. the client credential (`api_key(..)`, `basic_auth(..)`, or `credentials(..)` on the client)
+2. the client credential (`api_key(..)`, `basic_auth(..)`, or `credentials(..)` on the client), when the policy accepts its kind
 3. the first non-empty configured environment variable (the client's `env_order([..])` replaces the definition's order)
 4. none: the request is sent anonymously and its metadata records `AuthMethod::Anonymous`
 
-There is no missing-credential error; a server that requires one answers
-(typically with 401) as a `CallError::Api`, or inside the `.full()` response
-envelope. `.anonymous()` on a call removes every credential source for that
-call; `.anonymous()` and `.credential(..)` replace each other, and the last
-one wins. A credential is never
+There is no missing-credential error for such an endpoint; a server that
+requires one answers (typically with 401) as a `CallError::Api`, or inside
+the `.full()` response envelope. `.anonymous()` on a call removes every
+credential source for that call; `.anonymous()` and `.credential(..)`
+replace each other, and the last one wins. A credential is never
 injected over a request value of the same name: a request that already sets
 the credential header, the API-key query parameter, or the API-key cookie
 fails with `TransportErrorKind::InvalidArgument` before anything is sent.
+
+An endpoint that declares its own authentication changes this for its sends
+only:
+
+- **`.public()`**: no credential from any source is sent (a per-call one is
+  silently dropped), and every header, query parameter, and cookie in a
+  credential location of the API or of any endpoint replacement is removed
+  from the request, even a value the request set itself.
+- **`.auth(..)` or `.auth_with_env_mapping(..)`**: the replacement policy is
+  used instead of the API's, in the same order (per call, client, then the
+  endpoint's own environment variables, which `env_order` does not change).
+  A credential counts only when the replacement accepts its kind; a per-call
+  credential of another kind fails with `InvalidArgument`. When nothing
+  resolves the send fails with `InvalidArgument`, naming the endpoint and
+  the kinds it accepts, unless the call is `.anonymous()`.
+
+A client credential is accepted at `build()` when the API's policy or any
+replacement accepts its kind, and `basic_auth(..)` is generated when either
+accepts Basic. [Endpoint authentication](../runtime/credentials.md#endpoint-authentication)
+has the full rules and a diagram of the decision for one send.
 
 ```rust
 use schematic_schema::prelude::*;
@@ -777,7 +841,9 @@ names the runtime's method constant:
 
 ## Path Parameters
 
-Path parameters use `{param}` syntax and are automatically extracted:
+Path parameters use `{param}` syntax. An endpoint that declares none of them
+with `path_param(..)` keeps every placeholder an untyped `String` field,
+extracted from the template:
 
 ```rust
 // API definition
@@ -824,6 +890,78 @@ impl schematic_runtime::EndpointSpec for GetMessageRequest {
 // Usage
 let request = GetMessageRequest::new("thread-123", "msg-456");
 ```
+
+### Typed path parameters
+
+An endpoint that declares its path parameters with
+`.path_param(ParamDef::path(name, type))` gets one typed field per distinct
+placeholder:
+
+| Declared type | Field type | `new(..)` argument |
+| --- | --- | --- |
+| `String` | `String` | `impl Into<String>` |
+| `Integer` | `i64` | `i64` |
+| `Number` | `f64` | `f64` |
+| `Boolean` | `bool` | `bool` |
+| `Enum(values)` | generated enum `{RequestType}{FieldPascal}` | the enum |
+
+```rust
+// API definition
+let endpoint = Endpoint::get("GetIssue", "/repos/{owner}/{number}/labels/{kind}")
+    .describes("Read an issue's labels").returns_empty()
+    .path_param(ParamDef::path("kind", QueryParamType::Enum(vec!["bug".into(), "help-wanted".into()])))
+    .path_param(ParamDef::path("number", QueryParamType::Integer).describes("The issue number."))
+    .path_param(ParamDef::path("owner", QueryParamType::String))
+    .build()?;
+
+// Generated (abridged): no `Default`, no `From<&str>`/`From<String>`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetIssueRequest {
+    pub owner: String,
+    /// The issue number.
+    pub number: i64,
+    pub kind: GetIssueRequestKind,
+}
+
+#[non_exhaustive]
+pub enum GetIssueRequestKind {
+    #[serde(rename = "bug")]
+    Bug,
+    #[serde(rename = "help-wanted")]
+    HelpWanted,
+}
+// plus `as_str()` and `Display`, both giving the wire value ("help-wanted")
+
+// Usage: arguments follow the template, not the declaration order
+let request = GetIssueRequest::new("octocat", 42, GetIssueRequestKind::HelpWanted);
+// sends /repos/octocat/42/labels/help-wanted
+```
+
+- **Argument order.** `new(..)` takes the path arguments in the order their
+  placeholders first appear in the template, then the body. The endpoint
+  method on the API struct takes the same arguments.
+- **Repeated placeholders.** A placeholder that appears twice
+  (`/items/{id}/copies/{id}`) is one field, sent at every occurrence.
+- **Wire spelling.** Each value is converted to its wire form before
+  encoding: the decimal number, `true` or `false`, or the enum's `as_str()`.
+  It is then percent-encoded, except at a `{+name}` occurrence, which keeps
+  the raw value (`dir/sub/file.txt` stays unescaped). A non-finite `f64`
+  (`NaN`, infinity) fails with `InvalidArgument` naming the parameter before
+  anything is sent. See [Request-Side Inputs](./request-side.md).
+- **No shortcut constructors.** A request with a typed path field derives no
+  `Default` and gets no `From<&str>` or `From<String>`, because a defaulted
+  or string-converted value would send a placeholder the caller never chose.
+  `new(..)` is the only way to build it.
+- **Docs.** A field's doc is its declared description, else
+  `Path parameter: {name}`, with a "Deprecated." line when the parameter is
+  deprecated. The enum is `#[non_exhaustive]`, so a value added later is not
+  a breaking change.
+
+Endpoints that declare no path parameters are unchanged. The rules a
+declaration must satisfy are in
+[Building REST definitions](../definition-builders.md#paths-deprecation-rate-limits-and-endpoint-authentication),
+and the generator's `path-parameter` and `generated-name-collision` checks are
+in [Generation Validation](./validation.md#what-each-output-checks).
 
 ## Query Parameters
 
@@ -1061,7 +1199,7 @@ The generator produces convenience `From` implementations for request structs:
 
 ### Single-Parameter Requests
 
-For endpoints with exactly one path parameter and no body, `From<&str>` and `From<String>` are generated:
+For endpoints with exactly one untyped path parameter and no body, `From<&str>` and `From<String>` are generated. An endpoint whose path parameters are [typed](#typed-path-parameters) gets neither:
 
 ```rust
 // Instead of:

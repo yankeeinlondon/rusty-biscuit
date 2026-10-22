@@ -47,10 +47,82 @@ See [typed registration](../typed-registration.md) and
 
 Query/header/cookie parameters export in their declared locations. Query strings
 do not belong in path templates; endpoint identity is method plus normalized
-path. API authentication and explicit `auth_policy` determine security schemes.
+path. The API's authentication strategy (`auth`) determines the document's
+security scheme and requirement; an endpoint's own authentication adds
+operation-level `security` (see [Endpoint security](#endpoint-security)).
 Runtime-only origin/redaction policies do not become OpenAPI transport rules.
-The supported extension fields are described in
-[OpenAPI extensions](openapi-extensions.md).
+The supported extension fields, including rate-limit and retry metadata, are
+described in [OpenAPI extensions](openapi-extensions.md).
+
+## Path parameters, deprecation, and composition
+
+A path parameter declared with `path_param` exports with its type, its
+description, `required: true`, and `deprecated: true` when it is deprecated.
+An endpoint that declares none keeps one untyped `string` parameter per
+placeholder. A placeholder repeated in the template, or written `{+name}`,
+is declared once:
+
+```yaml
+/items/{item_id}:
+  parameters:
+    - in: path
+      name: item_id
+      description: Item to read
+      required: true
+      schema: { type: integer }
+      style: simple
+  get: { ... }
+  delete:
+    parameters:            # this operation declares item_id differently
+      - in: path
+        name: item_id
+        description: Item to delete
+        required: true
+        deprecated: true
+        schema: { type: integer }
+        style: simple
+```
+
+Path parameters live on the path item, shared by its operations. When the
+operations of one path declare a parameter differently, the path item holds
+the declaration of the first operation in the order `get`, `put`, `post`,
+`delete`, `options`, `head`, `patch`, and each operation that differs carries
+its own declaration as an operation-level override. The result never depends
+on the order the endpoints were defined in. An `Enum` type exports as
+`{type: string, enum: [..]}`.
+
+A deprecated endpoint's operation has `deprecated: true`, as does a
+deprecated query, header, or cookie parameter; nothing is written for one
+that is not deprecated.
+
+A composed component (`DefinitionContext::one_of`, `any_of`, or `all_of`;
+see [typed registration](../typed-registration.md)) exports as that
+composition of references, for example
+`Pet: {oneOf: [{$ref: '#/components/schemas/Cat'}, {$ref: '#/components/schemas/Dog'}]}`.
+
+## Endpoint security
+
+An endpoint that declares its own authentication gets an operation-level
+`security`; one that inherits gets none and uses the document's:
+
+| Endpoint declaration | Operation `security` |
+| --- | --- |
+| none (inherits) | absent |
+| `.public()` | `[]`, no authentication |
+| `.auth(policy)`, `.auth_with_env_mapping(..)` | one requirement object per method the policy accepts (its explicit methods, then its environment fallback), any one of which satisfies the operation |
+
+A replacement's schemes are registered in `components.securitySchemes`
+after the API's own. A scheme identical to one already registered reuses its
+name; a different scheme takes its base name (`bearerAuth`, `apiKeyAuth`,
+`basicAuth`, `oauth2Auth`) when free, else `bearerAuth2`, `bearerAuth3`, and
+so on. A name is never reassigned to a different scheme, and endpoints are
+visited in definition order, so the names are deterministic.
+
+OpenAPI 3.0 has no OAuth2 device-code flow. A device-code grant gets no
+scheme and no requirement, and the generator reports an `oauth2-grant`
+warning (see [Generation Validation](../generation/validation.md#what-each-output-checks)).
+An endpoint replacement whose only method is a device-code grant has no
+`security` of its own.
 
 ## Version Resolution
 
@@ -87,13 +159,24 @@ APIs sharing a module (`ollama`, `emqx`) produce grouped OpenAPI documents that 
   name that two members define differently fails the OpenAPI output with
   `invalid-schema-reference`, naming both APIs
 - **Paths** — Union of all endpoints from all APIs. An operation that two
-  members declare identically apart from authentication appears once; two
-  different operations on one method and path fail the OpenAPI output.
+  members declare identically apart from authentication appears once and
+  accepts what either side accepts: each side's own `security`, or else its
+  document's requirements, are unioned, and a side that needs no
+  authentication (a public `security: []`, or an API without auth)
+  contributes the empty requirement `{}`, so its public alternative is kept.
+  Two different operations on one method and path fail the OpenAPI output.
+- **Path parameters** — Declared once per name and location on the path
+  item. A later member that declares one differently gets an
+  operation-level override on its own operations; the earlier member's
+  declaration stays common.
 - **operationId** — Unique across the document. The first member in module
   group order keeps an id; a later clash is prefixed with its API name
   (`OllamaOpenAIListModels`), with a numeric suffix if that is taken too.
 - **Security schemes** — Union keyed by scheme name; a same-named scheme with
-  different content is renamed `<scheme>_<api_snake>` for the later API
+  different content is renamed `<scheme>_<api_snake>` for the later API, then
+  `<scheme>_<api_snake>2`, `3`, ... while that name holds a different scheme.
+  A rename never overwrites an existing scheme, and that API's operation and
+  document requirements reference the new name.
 - **Security** — Union of every member's document-level requirements
 - **Servers, external docs, info** — From the first member, with the module
   name as `info.title`

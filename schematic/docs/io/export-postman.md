@@ -41,7 +41,8 @@ Each collection includes:
 
 - **Info** — Collection name, description, and schema version
 - **Auth** — Collection-level authentication (bearer, apikey, basic, or noauth)
-- **Variables** — `baseUrl` variable for the API's base URL
+- **Variables** — `baseUrl` variable for the API's base URL, plus every
+  auth variable the collection and its requests reference
 - **Items** — Endpoints organized into folders by URL path segment
 
 ## Folder Grouping
@@ -73,6 +74,30 @@ The algorithm strips leading `/`, ignores path variables `{...}`, and skips vers
 Postman's API-key auth can add a key only to a header or the query string,
 so a cookie key travels in a `Cookie` header that holds the cookie pair.
 
+### Endpoint authentication
+
+A request whose endpoint declares its own authentication always carries a
+request-level `auth`, which takes precedence over the collection's:
+
+| Endpoint declaration | Request `auth` |
+| --- | --- |
+| none (inherits) | none of its own; the collection's applies |
+| `.public()` | `{"type": "noauth"}` |
+| `.auth(policy)` | the policy's first accepted method, mapped as in the table above (an OAuth2 method is a `bearer` token) |
+| `.auth_with_env_mapping(policy, mapping)` | the same, with variables suffixed by the endpoint id |
+
+A replacement that declares its own environment mapping names a credential
+distinct from the API's, so its variables are suffixed with the endpoint id
+(`{{bearerToken_Admin}}` for an endpoint `Admin`, or `{{username_Upload}}`
+and `{{password_Upload}}`) instead of sharing `{{bearerToken}}`,
+`{{apiKey}}`, `{{username}}`, or `{{password}}` with the API. Every variable a
+request references is declared on the collection.
+
+A Postman request holds one auth. When a replacement policy accepts more
+than one alternative, only the first is exported and the generator reports
+an `endpoint-auth` warning; the collection is still written (see
+[Generation Validation](../generation/validation.md#what-each-output-checks)).
+
 ## Parameter Mapping
 
 Every declared parameter appears in the request it belongs to, so a user can
@@ -80,7 +105,7 @@ fill in any input the API accepts:
 
 | Location | Postman entry |
 |----------|---------------|
-| path | URL variable valued `<name>` |
+| path | URL variable valued `<name>`, described by its type when declared |
 | query | URL query entry with no value |
 | header | request header `name: <name>` |
 | cookie | request header `Cookie: name=<name>` |
@@ -95,6 +120,18 @@ switches it on. A declared description becomes the header's description:
   { "key": "openai-beta", "value": "<openai-beta>", "disabled": true,
     "description": "Optional beta features to enable for this request." },
   { "key": "Cookie", "value": "session=<session>" }
+]
+```
+
+A path parameter declared with `path_param` gives its URL variable a
+description, since a Postman variable has no type: the parameter's
+description followed by its type in parentheses, or the type alone. An enum
+is listed by value:
+
+```json
+"variable": [
+  { "key": "number", "value": "<number>", "description": "Issue number (integer)" },
+  { "key": "kind", "value": "<kind>", "description": "one of: bug, help-wanted" }
 ]
 ```
 
@@ -114,6 +151,35 @@ header.
 | `UrlEncoded` | `urlencoded` | — |
 | `Text` | `raw` | declared content type |
 | `Binary` | `file` | — |
+
+## Request Descriptions
+
+A request's description is its endpoint's description, followed, after a
+blank line, by one line for each piece of definition vocabulary that Postman
+has no field for. Each line appears only when it applies:
+
+| Line | When |
+| --- | --- |
+| `Deprecated.` | the endpoint is deprecated |
+| `Deprecated parameters: a, b.` | any path, query, header, or cookie parameter is deprecated |
+| ``Rate limit headers: limit `…`, remaining `…`, reset `…` (unit), retry after `…`.`` | the endpoint has an effective rate limit (its own, else the API's) |
+| `Retry guidance: retry on …; honor Retry-After: …; max attempts … (including the first); backoff ….` | the endpoint has effective retry guidance |
+
+Every GitHub request, for example, ends with:
+
+```text
+Rate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`.
+```
+
+An endpoint that declares none of these keeps its description alone.
+
+## Schema Composition
+
+A Postman collection cannot declare `oneOf`, `anyOf`, or `allOf`. An
+endpoint whose JSON body or response names a composed component (see
+[typed registration](../typed-registration.md)) reports a
+`schema-composition` warning; the collection is still written, the request
+keeps its existing example, and no example payload is invented.
 
 ## Grouped Collections
 
@@ -161,5 +227,5 @@ OpenAPI generation. Use [definition builders](../definition-builders.md) and
 [typed registration](../typed-registration.md); do not fill a separate registry.
 Parameters keep their declared query, header, cookie, or body location. Paths
 contain placeholders, with query inputs represented separately. Authentication
-comes from the effective API policy; runtime origin/redaction settings are not
+comes from the effective API policy and each endpoint's own declaration; runtime origin/redaction settings are not
 Postman transport enforcement.

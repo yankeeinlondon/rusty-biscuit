@@ -125,7 +125,8 @@ The same fields are available to code as
 | `invalid-request-suffix`: `request_suffix` is empty or not alphanumeric | ✓ | | | error |
 | `invalid-module-path`: the module path is not one Rust identifier | ✓ | | | error |
 | `invalid-type-syntax`: a body, response, or form JSON type, spelled through the API's schema components, is not a Rust type | ✓ | | | error |
-| `generated-name-collision`: two generated items, fields, or client methods share a name, including two endpoints whose methods get one name and a call type named like another item | ✓ | | | error |
+| `generated-name-collision`: two generated items, fields, or client methods share a name, including two endpoints whose methods get one name, a call type named like another item, a path-parameter enum (`{RequestType}{FieldPascal}`) named like another item, a path field named like another field of its request, and two values of one path enum that sanitize to the same variant (`a-b` and `a_b`) | ✓ | | | error |
+| `path-parameter`: a declared path parameter has no placeholder, a placeholder has no declaration (once any is declared), its type is `Array` or `Json`, its enum has no values, or its `rust_name` is not a valid field name | ✓ | | | error |
 | `endpoint-method-rename`: an endpoint method or call-type setter was renamed to avoid a method every API struct or call type has (see below) | ✓ | | | warning |
 | `invalid-schema-reference`: a body, response, or form JSON reference names no registered component in the API's `schemas`, a component is malformed, or two members of one OpenAPI module document define a component name differently (see below) | ✓ | ✓ | | error |
 | `duplicate-method-path` across a module group: two member APIs declare different operations on one method and path | | ✓ | | error (found while building the document) |
@@ -138,6 +139,9 @@ The same fields are available to code as
 | `pagination-strategy`: a pagination strategy is malformed, alone or on its endpoint (see below) | ✓ | | | error |
 | `pagination-exception`: an endpoint collection has an unusable item selector, item type, item location, or alternates | ✓ | | | error |
 | `pagination-parameter`: a strategy input collides with a declared parameter it cannot adopt, adopts one without the knob that replaces it, or manages a required one without a value to send | ✓ | | | error |
+| `oauth2-grant`: the API, or an endpoint's replacement policy, uses an OAuth2 device-code grant, which OpenAPI 3.0 has no flow for; the scheme is left out | | ✓ | | warning |
+| `endpoint-auth`: an endpoint's replacement policy accepts more than one authentication alternative, but a Postman request holds one auth; only the first is exported | | | ✓ | warning |
+| `schema-composition`: an endpoint's JSON body or response names a composed (`oneOf`/`anyOf`/`allOf`) component, which a Postman collection cannot declare; the existing example is kept and none is invented | | | ✓ | warning |
 
 The Rust client sends text and binary bodies, header and cookie parameters,
 and API keys in a query parameter or cookie, so its rules for those features

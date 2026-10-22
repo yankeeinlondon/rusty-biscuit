@@ -16,7 +16,8 @@ These pages describe that runtime from the caller's side. You can:
 - tell "the server answered with an error" apart from "the server never
   answered" with one `match`
 - supply credentials per call, per client, or from environment variables,
-  and see in the metadata which one was sent
+  and see in the metadata which one was sent; an endpoint the definition
+  declares public never sends one
 - page through a list endpoint, or collect all of it, and know whether the
   list is complete
 - bound a whole multi-request operation by one shared deadline
@@ -60,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | [Calling an API](./calling-an-api.md) | creating a client, endpoint methods, optional values, per-call overrides, `.full()`, `.build()?`, `CallError`, and when to use request objects |
 | [Sending and responses](./sending-and-responses.md) | awaiting a call, `.full()` and `send_raw`, the `Response` envelope, `CallError`, every `ErrorKind`, `TransportError`, codecs, and what is safe to log |
 | [Building clients](./building-clients.md) | `{Api}::new()` and its chained settings, when settings are validated, timeouts, proxies and TLS, `SharedTransport`, and every `BuildError` |
-| [Credentials](./credentials.md) | precedence (per call, client, environment, anonymous), `.anonymous()` on a call, and why the runtime never retries |
+| [Credentials](./credentials.md) | precedence (per call, client, environment, anonymous), public endpoints and endpoint replacement policies, `.anonymous()` on a call, and why the runtime never retries |
 | [Origins and redirects](./origins-and-redirects.md) | the cross-origin policies, how a redirect is followed hop by hop, and `check_link` |
 | [Deadlines and timeouts](./deadlines-and-timeouts.md) | the per-request timeout, a `Deadline` shared across sends, and stream bounds |
 | [Response hooks](./hooks.md) | `pre_response_json` and `mutate_response` |

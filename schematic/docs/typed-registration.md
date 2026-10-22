@@ -187,9 +187,14 @@ Endpoint::post("Adopt", "/pets").request_json::<Pet>(&mut ctx) // references Pet
   `ModelDef::Alias` in registration order. The model catalog types serialize
   with serde; unknown members and explicit `null` for optional fields are
   rejected.
-- Postman has no schema-composition declaration; exporting a composition there
-  reports an unsupported-feature diagnostic instead of inventing an example
-  (**planned**).
+- OpenAPI export writes a composed component as `oneOf`, `anyOf`, or `allOf`
+  over `$ref`s to its members, for example
+  `Pet: {oneOf: [{$ref: '#/components/schemas/Cat'}, {$ref: '#/components/schemas/Dog'}]}`.
+- Postman has no schema-composition declaration. An endpoint whose JSON body
+  or response names a composed component reports a `schema-composition`
+  warning for the Postman output; the collection is still written, keeping
+  the request's existing example and inventing none. See
+  [Generation Validation](generation/validation.md#what-each-output-checks).
 
 ## References in transferred definitions
 

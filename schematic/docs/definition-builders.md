@@ -120,12 +120,19 @@ uses the explicit `rust_name`, else the wire name with characters outside
 `[A-Za-z0-9_]` replaced by `_`; the generator's `generated-name-collision`
 check, which also snake-cases, stays the complete one.
 `Endpoint::path_placeholders()` lists the placeholder names once each, in
-order of first occurrence.
+order of first occurrence. The generated Rust client types each declared
+parameter (`String`, `i64`, `f64`, `bool`, or a generated enum; see
+[typed path parameters](generation/generated-clients.md#typed-path-parameters)),
+and OpenAPI export declares it with its type, description, and deprecation
+(see [OpenAPI export](io/export-openapi.md#path-parameters-deprecation-and-composition)).
 
 **Deprecation.** `.deprecated()` on an endpoint or a `ParamDef` sets a flag
-that is omitted from JSON while false. Generated Rust documentation and the
-OpenAPI `deprecated` field are **planned**; no Rust `#[deprecated]` attribute
-will be generated.
+that is omitted from JSON while false. Generated Rust documentation gains a
+"Deprecated." line on the request, method, call type, field, or setter;
+OpenAPI export writes `deprecated: true` on the operation or parameter; and
+a Postman request description says which parts are deprecated. No Rust
+`#[deprecated]` attribute is generated, because it would fail `-D warnings`
+builds of the generated crate and everything that depends on it.
 
 **Rate-limit and retry metadata.** `.rate_limit(RateLimit)` and
 `.retry_guidance(RetryGuidance)` exist on the API and endpoint builders. An
@@ -133,7 +140,12 @@ endpoint value replaces the API value whole, never field by field;
 `RestApi::effective_rate_limit(&endpoint)` and `effective_retry_guidance`
 return the value that applies. The values are descriptive: nothing retries,
 sleeps, or enforces them. Build re-validates them, since their fields are
-public. Their export to OpenAPI and generated documentation is **planned**.
+public. Generated Rust documents the API value in the module docs and the
+effective value in each request's docs (`## Rate limit`, `## Retry
+guidance`); OpenAPI export writes them as
+[`x-schematic` fields](io/openapi-extensions.md); a Postman request
+description gets one line for each. GitHub is the shipped API that declares
+rate-limit headers.
 
 **Endpoint authentication.** With no declaration an endpoint inherits the API
 policy. `.public()` makes it unauthenticated; `.auth(policy)` replaces the API
@@ -154,8 +166,13 @@ mapping; `.auth_with_env_mapping(policy, mapping)` replaces that mapping too.
 
 A policy without an environment fallback needs no mapping. JSON spells the
 field `"auth": "Public"` or
-`"auth": {"Policy": {"policy": {..}, "env_mapping": {..}}}`. Applying the
-resolved policy in generated clients is **planned**.
+`"auth": {"Policy": {"policy": {..}, "env_mapping": {..}}}`. A generated
+client applies the resolved policy on every send: a public endpoint sends no
+credential, and a replacement uses only its own placements and refuses a
+send that resolves no credential (see
+[endpoint authentication](runtime/credentials.md#endpoint-authentication)).
+OpenAPI export writes the operation's own `security`, and Postman export the
+request's own `auth`.
 
 Each new field is omitted when unset. Absent means inherit, false or empty;
 an explicit `null`, a wrong type, or `{}` for a metadata value is an error.
@@ -231,8 +248,7 @@ An explicit environment mapping may leave credential fields unset. An empty mapp
 single stored response; `ErrorSet::none()` does not disable runtime errors.
 Several successes, status/range error declarations, streaming success constructors,
 content-type setters on success declarations, and GraphQL are **planned**.
-The names `path_param`, `public`, `auth`, `deprecated`, and `rate_limit` are
-reserved for **planned** vocabulary. Request content-type setters already work;
+Request content-type setters already work;
 they do not add success content negotiation. There is no route selector API.
 
 Start with [the compiling authoring example](authoring-examples.md).

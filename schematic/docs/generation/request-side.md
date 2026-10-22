@@ -30,7 +30,7 @@ You can:
 ```mermaid
 flowchart LR
     A["Request struct<br/>(path, query, header, cookie fields, body)"] --> B["EndpointSpec::into_parts()<br/>(generated)"]
-    B --> C["path<br/>path parameters substituted<br/>and percent-encoded"]
+    B --> C["path<br/>path parameters in wire spelling,<br/>substituted and percent-encoded"]
     B --> D["query<br/>unencoded (name, value) pairs"]
     B --> E["headers<br/>static + header parameters<br/>+ one Cookie header"]
     B --> B2["body"]
@@ -60,7 +60,7 @@ static `Cookie` header that cannot be merged):
 | Field | Contents |
 | --- | --- |
 | `method` | HTTP method (`schematic_runtime::Method`), such as `Method::GET` |
-| `path` | Path with path parameters substituted and percent-encoded; keeps any query written in the path template |
+| `path` | Path with path parameters substituted in their wire spelling and percent-encoded; keeps any query written in the path template |
 | `query` | Declared query parameters as unencoded `(name, value)` pairs, in declaration order, duplicates kept |
 | `headers` | Endpoint headers as `(name, value)` pairs: static endpoint headers, set header parameters, and at most one `Cookie` header |
 | `body` | Request body (`schematic_runtime::RequestBody`) |
@@ -68,6 +68,17 @@ static `Cookie` header that cannot be merged):
 `Client::send` turns every `InvalidArgument`, whether from `into_parts()` or
 from the runtime's own checks below, into a `TransportError` whose kind is
 `TransportErrorKind::InvalidArgument`. Nothing is sent in that case.
+
+A [typed path parameter](./generated-clients.md#typed-path-parameters) is
+converted to its wire spelling before it is encoded: an `i64` or `f64` as its
+decimal form, a `bool` as `true` or `false`, and an enum as its `as_str()`
+value, so `new(-42, true, 2.5, Kind::FirstKind)` on
+`/items/{id}/flags/{flag}/ratios/{ratio}/kinds/{kind}` produces
+`/items/-42/flags/true/ratios/2.5/kinds/first-kind`. A `{+name}` occurrence
+keeps its value raw instead of percent-encoding it. A non-finite `f64` has no
+wire spelling, so `into_parts()` returns an `InvalidArgument` naming the
+parameter (``path parameter `ratio` must be a finite number``) and nothing is
+sent. Untyped placeholders are `String` fields and are encoded as given.
 
 ## Query parameters
 
@@ -329,16 +340,19 @@ client.list_things().anonymous().await?;
   `TransportErrorKind::InvalidArgument` before any network work, and the
   error does not contain the key.
 - **No key.** When no source supplies a key, the request is sent without
-  one; there is no missing-credential error. The response metadata records
+  one; there is no missing-credential error (except on an endpoint whose
+  definition replaces the API's policy, which fails the send instead; see
+  [Endpoint authentication](../runtime/credentials.md#endpoint-authentication)). The response metadata records
   `AuthMethod::Anonymous`, and the server's reply (typically a 401) arrives
   in the response envelope. A definition without an env fallback reads no
   variable, even if one is set, and a fallback with no variable to read is
   dropped from the generated definition.
-- **Wrong kind.** A per-call credential of a kind the API does not accept
-  (for example `Credential::basic` for a key-in-query API) fails with
-  `TransportErrorKind::InvalidArgument`; a client credential of such a kind
-  is refused with `BuildError::IncompatibleCredential` at `build()`, or else
-  on the first call as `TransportErrorKind::InvalidClient`.
+- **Wrong kind.** A per-call credential of a kind the endpoint's policy
+  does not accept (for example `Credential::basic` for a key-in-query API)
+  fails with `TransportErrorKind::InvalidArgument`; a client credential of a
+  kind neither the API nor any endpoint replacement accepts is refused with
+  `BuildError::IncompatibleCredential` at `build()`, or else on the first
+  call as `TransportErrorKind::InvalidClient`.
 
 ## Debug output never shows a credential
 

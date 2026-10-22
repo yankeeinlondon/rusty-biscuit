@@ -18,8 +18,9 @@ Build endpoints before the API borrows their shared `DefinitionContext`.
 Read [the generator and client reference](../docs/generation/generated-clients.md),
 [the generation workflow](../docs/generation/workflow.md),
 [OpenAPI import](../docs/io/import-openapi.md),
-[OpenAPI export](../docs/io/export-openapi.md), and
-[Postman export](../docs/io/export-postman.md) for commands and output contracts.
+[OpenAPI export](../docs/io/export-openapi.md),
+[Postman export](../docs/io/export-postman.md), and
+[definition bundles](../docs/io/definition-bundles.md) for commands and output contracts.
 Generated artifacts are rebuilt through the generator and never hand-edited.
 
 Run `just test`, `just lint`, and `just doctest` in `schematic/`.
