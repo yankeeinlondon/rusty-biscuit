@@ -132,7 +132,7 @@ commits, or feature closure commands. This plan creates no implementation change
 
 ### Wave 1 — Inventory and one-time investigation
 
-- [ ] **Contract inventory** — integrator; prerequisite for every later wave.
+- [x] **Contract inventory** — integrator; prerequisite for every later wave.
   - Map each acceptance criterion to a task, test identity, and public result
     in `implementation-log.md`. Inventory actual canonical names, aliases,
     evaluation modes, handler families, descriptors, examples, and current
@@ -149,7 +149,7 @@ commits, or feature closure commands. This plan creates no implementation change
     Capture existing loader/error/fallback behavior; identify any policy
     conflict as an explicit Phase 1 ruling, not an implementation guess.
 
-- [ ] **Numeric ingress** — bounded spike, **parallel** with inventory; own
+- [x] **Numeric ingress** — bounded spike, **parallel** with inventory; own
   throwaway spike artifacts only.
   - Trace production YAML/JSON loading and expression numeric tokenization for
     `9007199254740993`, `.0`, exponent spelling, negative boundaries, `0.1`,
