@@ -36,12 +36,15 @@
 //! [`TriggerRegistries::invalidate_paths`] or
 //! [`TriggerRegistries::invalidate_all`] marks it stale, or when its context
 //! changes. Each preparation records what it read: the searched and absent
-//! root folders, every root file and payload dependency with its xxHash, and
-//! the folders holding the dependencies. A changed path is re-read and
-//! compared with its recorded hash; an unchanged file invalidates nothing.
-//! A creation or deletion in a recorded folder invalidates without a hash. A
-//! failed scope is invalidated by any change, since its error may name a
-//! file that does not exist yet.
+//! root folders, every root file and payload dependency with its xxHash, the
+//! folders holding the dependencies, and every candidate location payload
+//! resolution searched (present or absent) through the selected file. A
+//! changed path is re-read and compared with its recorded hash; an unchanged
+//! file invalidates nothing. A creation or deletion in a recorded folder, at
+//! a searched candidate, or of a folder above a candidate invalidates without
+//! a hash. A failed scope is invalidated by any change, since its error may
+//! name a file that does not exist yet, and keeps the candidates and folders
+//! of the scope it replaced so their watches survive until it recovers.
 //!
 //! Failures follow the transition rule in [`TriggerRegistries::record_failure`]:
 //! one record per failure scope (workspace boundary and document folder)
@@ -63,6 +66,7 @@ use darkmatter::markdown::schemas::{
 
 use super::TriggerDiagnosticTransition;
 use crate::work_counters;
+use crate::workspace::watch::WatchedFolder;
 
 /// What a schema-root file is, judged from its text alone.
 ///
@@ -302,6 +306,57 @@ struct Dependencies {
     files: HashMap<PathBuf, Option<u64>>,
     /// Folders holding payload dependencies.
     folders: HashSet<PathBuf>,
+    /// Every candidate location payload resolution searched, through the
+    /// selected file ([`TriggerRegistry::searched_locations`]), present or
+    /// absent. A change at a candidate, or at a folder above one, can change
+    /// which file resolution selects.
+    searched: Vec<PathBuf>,
+    /// Absent root folders and absent searched-candidate folders, each with
+    /// its nearest existing ancestor, from which the folder's creation is
+    /// watched.
+    absent_bases: HashMap<PathBuf, PathBuf>,
+}
+
+impl Dependencies {
+    /// Records `candidates` (searched locations) and the absence of their
+    /// folders. Reads folder metadata, so only a preparation calls it.
+    fn record_searched<'a>(&mut self, candidates: impl IntoIterator<Item = &'a Path>) {
+        for candidate in candidates {
+            let key = normalized(candidate);
+            if let Some(folder) = key.parent() {
+                self.record_absence(folder);
+            }
+            self.searched.push(key);
+        }
+        self.searched.sort();
+        self.searched.dedup();
+    }
+
+    /// Records [`normalized`] `folder`'s nearest existing ancestor when the
+    /// folder does not exist.
+    fn record_absence(&mut self, folder: &Path) {
+        if self.absent_bases.contains_key(folder) || folder.is_dir() {
+            return;
+        }
+        if let Some(base) = folder.ancestors().skip(1).find(|ancestor| ancestor.is_dir()) {
+            self.absent_bases.insert(folder.to_path_buf(), base.to_path_buf());
+        }
+    }
+
+    /// The folders a watch must cover: root folders, dependency folders, and
+    /// the folders of searched candidates.
+    fn watched_folders(&self) -> impl Iterator<Item = WatchedFolder> + '_ {
+        self.roots
+            .iter()
+            .map(|(folder, _)| folder.as_path())
+            .chain(self.absent.iter().map(PathBuf::as_path))
+            .chain(self.folders.iter().map(PathBuf::as_path))
+            .chain(self.searched.iter().filter_map(|candidate| candidate.parent()))
+            .map(|folder| WatchedFolder {
+                folder: folder.to_path_buf(),
+                absent_base: self.absent_bases.get(folder).cloned(),
+            })
+    }
 }
 
 /// One document's registry.
@@ -338,6 +393,10 @@ pub struct Preparation {
     /// The change epoch when the copy was taken.
     epoch: u64,
     seq: u64,
+    /// The previous scope's searched candidates and dependency folders, kept
+    /// when this preparation fails: the failing file may be one of them, and
+    /// its repair must still be watched.
+    carried: (Vec<PathBuf>, HashSet<PathBuf>),
 }
 
 /// A finished [`Preparation`], ready for [`TriggerRegistries::install`].
@@ -352,15 +411,32 @@ pub struct Prepared {
     deps: Dependencies,
 }
 
+impl Prepared {
+    /// Whether the registry failed to load.
+    pub fn failed(&self) -> bool {
+        self.result.is_err()
+    }
+}
+
 impl Preparation {
     /// Scans the document's roots and reads its payload dependencies' hashes.
     /// Does all of a preparation's I/O, and touches no shared state.
     pub fn run(mut self) -> Prepared {
-        work_counters::record_registry_scan();
+        let _scan = work_counters::record_registry_scan();
         let mut deps = Dependencies::default();
         let result = scan_with_source(&self.context, &[], &mut self.roots);
         if let Ok(roots) = SchemaRoots::for_document(&self.context) {
             record_roots(&roots, &mut deps);
+        }
+        match &result {
+            Ok(registry) => deps.record_searched(registry.searched_locations()),
+            // A failed resolution reports no candidates; keep the previous
+            // scope's, so recovery is watched where it was.
+            Err(_) => {
+                let (searched, folders) = std::mem::take(&mut self.carried);
+                deps.record_searched(searched.iter().map(PathBuf::as_path));
+                deps.folders.extend(folders);
+            }
         }
         if let Ok(registry) = &result {
             for (file, hash) in roots_read(&self.roots, &deps) {
@@ -474,6 +550,11 @@ impl TriggerRegistries {
         }
         self.next_seq += 1;
         self.in_flight.insert(self.next_seq, self.epoch);
+        let carried = self
+            .scopes
+            .get(path)
+            .map(|scope| (scope.deps.searched.clone(), scope.deps.folders.clone()))
+            .unwrap_or_default();
         Some(Preparation {
             path: path.to_path_buf(),
             boundary: boundary.to_path_buf(),
@@ -481,6 +562,7 @@ impl TriggerRegistries {
             roots: self.roots.clone(),
             epoch: self.epoch,
             seq: self.next_seq,
+            carried,
         })
     }
 
@@ -669,15 +751,11 @@ impl TriggerRegistries {
     }
 
     /// Every folder the prepared registries depend on: searched and absent
-    /// root folders and the folders holding payload dependencies.
-    pub fn watch_folders(&self) -> BTreeSet<PathBuf> {
-        let mut folders = BTreeSet::new();
-        for scope in self.scopes.values() {
-            folders.extend(scope.deps.roots.iter().map(|(folder, _)| folder.clone()));
-            folders.extend(scope.deps.absent.iter().cloned());
-            folders.extend(scope.deps.folders.iter().cloned());
-        }
-        folders
+    /// root folders, the folders holding payload dependencies, and the
+    /// folders of every searched payload candidate, each absent one with the
+    /// nearest existing ancestor its preparation observed. A lookup only.
+    pub fn watch_folders(&self) -> BTreeSet<WatchedFolder> {
+        self.scopes.values().flat_map(|scope| scope.deps.watched_folders()).collect()
     }
 
     /// Counts the distinct root folders and files the prepared registries
@@ -738,7 +816,9 @@ fn record_roots(roots: &SchemaRoots, deps: &mut Dependencies) {
     }
     for entry in roots.entries() {
         if let SchemaRootState::Absent(folder) = &entry.state {
-            deps.absent.push(normalized(folder));
+            let folder = normalized(folder);
+            deps.record_absence(&folder);
+            deps.absent.push(folder);
         }
     }
 }
@@ -771,6 +851,11 @@ fn scope_affected(scope: &Scope, path: &Path, current: Option<&mut Option<Option
             work_counters::read(path).ok().map(|bytes| work_counters::hash_bytes(&bytes))
         });
         return current != *recorded;
+    }
+    // A candidate created, deleted, or replaced, or a folder above one
+    // (a client may report only the directory of a folder-and-file creation).
+    if scope.deps.searched.iter().any(|candidate| candidate.starts_with(path)) {
+        return true;
     }
     let Some(parent) = path.parent() else {
         return false;
@@ -1433,5 +1518,164 @@ mod tests {
             (shadowed.trigger_schemas - 1, 1, 1),
             "shadowed: {shadowed:?}, reached: {reached:?}"
         );
+    }
+
+    // ── Searched payload candidates ─────────────────────────────────────────
+
+    const SHARED_FIELDS: &str = "$schema:\n  Fields: string\n";
+    const NEARER_FIELDS: &str = "$schema:\n  Fields: number\n";
+
+    /// The tree payload imports `Fields@shared/types.yaml`, which resolves in
+    /// the authoring folder first (`schemas/shared/types.yaml`, absent with
+    /// its folder) and then the repository root, where it is found.
+    fn shared_import_fixture() -> Fixture {
+        let fixture = Fixture::new();
+        write(&fixture.repo.join("schemas/tree-payload.yaml"), "$schema:\n  tree_model: Fields@shared/types.yaml\n");
+        write(&fixture.repo.join("shared/types.yaml"), SHARED_FIELDS);
+        fixture
+    }
+
+    fn selects(installed: &InstalledRegistry, file: &Path) -> bool {
+        installed.registry.dependencies().any(|dependency| dependency == file)
+    }
+
+    #[test]
+    fn a_nearer_candidate_created_in_an_absent_folder_invalidates_a_ready_registry() {
+        let fixture = shared_import_fixture();
+        let mut registries = TriggerRegistries::default();
+        let doc = fixture.tree_doc();
+        let shared = fixture.repo.join("shared/types.yaml");
+        let nearer_folder = fixture.repo.join("schemas/shared");
+        let nearer = nearer_folder.join("types.yaml");
+        let initial = fixture.ready(&mut registries, &doc);
+        assert!(selects(&initial, &shared));
+        assert!(
+            registries.watch_folders().contains(&WatchedFolder {
+                folder: nearer_folder.clone(),
+                absent_base: Some(fixture.repo.join("schemas")),
+            }),
+            "the absent candidate folder is watched from its nearest existing ancestor: {:?}",
+            registries.watch_folders()
+        );
+
+        write(&nearer, NEARER_FIELDS);
+        registries.invalidate_paths(std::slice::from_ref(&nearer));
+        assert!(!registries.is_fresh(&doc, &fixture.context(&doc)), "the created candidate affects the scope");
+        let shadowed = fixture.ready(&mut registries, &doc);
+        assert_ne!(shadowed.version, initial.version);
+        assert!(selects(&shadowed, &nearer) && !selects(&shadowed, &shared));
+        assert_eq!(shadowed.registry, scan(&fixture.context(&doc).for_source(&doc)).unwrap());
+        assert!(
+            registries.watch_folders().contains(&WatchedFolder::present(nearer_folder.clone())),
+            "coverage advances to the created folder: {:?}",
+            registries.watch_folders()
+        );
+
+        // Removal falls back to the repository-root file.
+        std::fs::remove_file(&nearer).unwrap();
+        registries.invalidate_paths(std::slice::from_ref(&nearer));
+        let fallback = fixture.ready(&mut registries, &doc);
+        assert!(selects(&fallback, &shared) && !selects(&fallback, &nearer));
+        assert_eq!(fallback.registry, scan(&fixture.context(&doc).for_source(&doc)).unwrap());
+    }
+
+    #[test]
+    fn a_directory_event_above_a_candidate_invalidates_a_ready_registry() {
+        // `schemas/shared/` exists but holds no dependency, so no root or
+        // dependency-folder rule covers an event inside it; only the
+        // searched candidate `schemas/shared/deep/types.yaml` does.
+        let fixture = Fixture::new();
+        write(&fixture.repo.join("schemas/tree-payload.yaml"), "$schema:\n  tree_model: Fields@shared/deep/types.yaml\n");
+        write(&fixture.repo.join("shared/deep/types.yaml"), SHARED_FIELDS);
+        write(&fixture.repo.join("schemas/shared/readme.md"), "unrelated\n");
+        let mut registries = TriggerRegistries::default();
+        let doc = fixture.tree_doc();
+        let nearer_folder = fixture.repo.join("schemas/shared/deep");
+        fixture.ready(&mut registries, &doc);
+        assert!(registries.watch_folders().contains(&WatchedFolder {
+            folder: nearer_folder.clone(),
+            absent_base: Some(fixture.repo.join("schemas/shared")),
+        }));
+
+        // The client reports only the directory of a folder-and-file creation.
+        write(&nearer_folder.join("types.yaml"), NEARER_FIELDS);
+        registries.invalidate_paths(std::slice::from_ref(&nearer_folder));
+        let shadowed = fixture.ready(&mut registries, &doc);
+        assert!(selects(&shadowed, &nearer_folder.join("types.yaml")));
+        assert!(registries.watch_folders().contains(&WatchedFolder::present(nearer_folder)));
+    }
+
+    #[test]
+    fn unrelated_events_keep_a_ready_registry_fresh_and_do_no_work() {
+        let fixture = shared_import_fixture();
+        let mut registries = TriggerRegistries::default();
+        let doc = fixture.tree_doc();
+        let initial = fixture.ready(&mut registries, &doc);
+        let unrelated = [
+            fixture.repo.join("elsewhere/shared/types.yaml"),
+            fixture.repo.join("schemas-old/shared"),
+            fixture.repo.join("notes/todo.yaml"),
+        ];
+        for path in &unrelated {
+            write(&path.join("file.yaml"), "a: b\n");
+        }
+
+        let before = work_counts();
+        registries.invalidate_paths(&unrelated);
+        assert!(registries.is_fresh(&doc, &fixture.context(&doc)));
+        assert_eq!(fixture.ready(&mut registries, &doc).version, initial.version);
+        assert_eq!(work_counts().since(before), WorkCounts::default());
+    }
+
+    #[test]
+    fn a_candidate_created_during_a_preparation_leaves_its_result_stale() {
+        let fixture = shared_import_fixture();
+        let mut registries = TriggerRegistries::default();
+        let doc = fixture.tree_doc();
+        let context = fixture.context(&doc);
+        let nearer = fixture.repo.join("schemas/shared/types.yaml");
+        fixture.ready(&mut registries, &doc);
+        registries.invalidate_all();
+        let prepared = registries.begin(&doc, &fixture.repo, &context).unwrap().run();
+        // The candidate appears after the preparation searched for it.
+        write(&nearer, NEARER_FIELDS);
+        registries.invalidate_paths(std::slice::from_ref(&nearer));
+
+        assert!(!registries.install(prepared), "installed, but stale");
+        assert!(selects(&fixture.ready(&mut registries, &doc), &nearer));
+    }
+
+    #[test]
+    fn a_malformed_nearer_candidate_keeps_last_good_and_its_watch_until_repaired() {
+        let fixture = shared_import_fixture();
+        let mut registries = TriggerRegistries::default();
+        let doc = fixture.tree_doc();
+        let nearer_folder = fixture.repo.join("schemas/shared");
+        let nearer = nearer_folder.join("types.yaml");
+        let initial = fixture.ready(&mut registries, &doc);
+
+        write(&nearer, "$schema:\n  Fields: [unclosed\n");
+        registries.invalidate_paths(std::slice::from_ref(&nearer));
+        assert!(scan(&fixture.context(&doc).for_source(&doc)).is_err(), "the nearer file fails to load");
+        assert_eq!(fixture.ready(&mut registries, &doc).version, initial.version, "last-good retained");
+        assert_eq!(registries.summary().failed_scopes, 1);
+        // The failed resolution reports no candidates, yet the folder holding
+        // the failing file stays watched, now as present.
+        assert!(
+            registries.watch_folders().contains(&WatchedFolder::present(nearer_folder.clone())),
+            "{:?}",
+            registries.watch_folders()
+        );
+        // A second failure keeps the watch too.
+        registries.invalidate_paths(std::slice::from_ref(&nearer));
+        fixture.ready(&mut registries, &doc);
+        assert!(registries.watch_folders().contains(&WatchedFolder::present(nearer_folder.clone())));
+
+        write(&nearer, NEARER_FIELDS);
+        registries.invalidate_paths(std::slice::from_ref(&nearer));
+        let repaired = fixture.ready(&mut registries, &doc);
+        assert_ne!(repaired.version, initial.version);
+        assert!(selects(&repaired, &nearer));
+        assert_eq!(registries.summary().failed_scopes, 0);
     }
 }

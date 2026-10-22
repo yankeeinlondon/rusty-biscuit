@@ -188,7 +188,12 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
 ## Imports and dictionaries
 
 - `Name@file` and `Name@this` import named types eagerly with dependency and
-  cycle tracking. A bare non-keyword `Name` parses to the same
+  cycle tracking. Dependencies (`imports`, `examples`, `referenced_files`)
+  are canonical, existing, content-hashed files; `ResolvedSchema::searched`
+  is a separate lexical list of every candidate probed through the selected
+  one (may be absent; recursive `%` adds nothing). Propagate both into
+  `ResolvedPayload` and never hash `searched` as a file (see
+  [dmls.md](dmls.md) for the editor side). A bare non-keyword `Name` parses to the same
   `TypeExpr::Imported { reference: "this" }` as `Name@this` (no stored
   spelling; `SimplifiedType::is_keyword` decides built-in vs reference, so
   `string` is built-in and `string@this` is local). Local names are the

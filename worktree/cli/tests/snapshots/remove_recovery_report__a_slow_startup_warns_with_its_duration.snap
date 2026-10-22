@@ -1,0 +1,7 @@
+---
+source: worktree/cli/tests/remove_recovery_report.rs
+expression: "rendered.join(\"\\n---\\n\")"
+---
+Warning: Confirming that the checkout is being watched for changes took 1.6 s. The removal may take longer, and it stops if that confirmation stalls.
+---
+Warning: Confirming that the checkout is being watched for changes took 12.3 s. The removal may take longer, and it stops if that confirmation stalls.

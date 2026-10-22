@@ -266,6 +266,17 @@ impl TriggerRegistry {
                     .flat_map(|payload| payload.dependencies.iter().map(PathBuf::as_path)),
             )
     }
+
+    /// The locations each resolved payload probed while selecting its schema
+    /// file, imports, and examples, including absent nearer candidates whose
+    /// creation would change the selection. Paths are lexical and may not
+    /// exist; a path may repeat across payloads. Embedded triggers contribute
+    /// none.
+    pub fn searched_locations(&self) -> impl Iterator<Item = &Path> {
+        self.payloads
+            .iter()
+            .flat_map(|payload| payload.searched.iter().map(PathBuf::as_path))
+    }
 }
 
 /// An embedded trigger's envelope and resolved payload, or `None` for a bundle

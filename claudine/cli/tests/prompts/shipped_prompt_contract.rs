@@ -993,7 +993,9 @@ fn assert_feature_review_next_spec_route(present: bool) {
         assert!(rendered.contains("following/spec.md"), "{rendered}");
         assert!(rendered.contains("following/plan.md"), "{rendered}");
     }
-    assert!(!rendered.contains("removed"), "{rendered}");
+    // The prompt's own prose may say "removed"; only the removed-grammar
+    // diagnostics are defects.
+    assert!(!rendered.contains("removed grammar") && !rendered.contains("removed validation/handler key"), "{rendered}");
     assert!(!fixture.audio_spool().exists(), "no audio may be published");
 }
 

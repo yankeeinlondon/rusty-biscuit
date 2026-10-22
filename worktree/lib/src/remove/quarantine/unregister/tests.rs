@@ -10,7 +10,7 @@ use crate::git::recorder;
 use crate::remove::collect_inventory;
 use crate::remove::missing::bind_index;
 use crate::remove::observation::deletion::{DeletionOptions, delete_content};
-use crate::remove::observation::injected::Injector;
+use crate::remove::observation::injected::{Injector, Scripted};
 use crate::remove::observation::inventory::DeletionInventory;
 use crate::remove::observation::{ObserverOptions, Root, Targets};
 use crate::remove::quarantine::association::{MovePlan, move_to_quarantine, plan_move};
@@ -70,14 +70,14 @@ impl Setup {
     /// events drained; returns the inventory and binding.
     fn prepare_and_move(&self, observation: &mut Observation) -> (Arc<DeletionInventory>, IndexBinding) {
         let inventory = Arc::new(DeletionInventory::capture(&self.plan.original, &self.sensitive).unwrap());
-        inventory.confirm(&self.plan.original, &observation.drain()).unwrap();
+        inventory.confirm(&self.plan.original, &observation.drain(&|| false)).unwrap();
         let approved = bind_index(&self.repo.path(), &self.plan.admin, self.repo.sha("refs/heads/feat/gone")).unwrap();
         move_to_quarantine(&self.repo.path(), &self.plan, &|| false).unwrap();
-        observation.moved_to_quarantine();
+        observation.moved_to_quarantine(&|| false);
         // The move's own events: the original renamed away, the quarantine
         // renamed in, and the rewritten admin `gitdir`. Checking them is the
         // lifecycle's job; here they only must not be loss or tree content.
-        let own = observation.drain();
+        let own = observation.drain(&|| false);
         assert_eq!(own.lost, None);
         for event in &own.events {
             let expected = match &event.scope {
@@ -115,15 +115,40 @@ impl crate::remove::recovery::journal::JournalSink for SharedSink {
     }
 }
 
+/// An interrupt that ends unregistration's wait for delivery keeps the
+/// registration and the admin directory; uninterrupted, the same session then
+/// unregisters.
+#[test]
+fn an_interrupted_wait_keeps_the_registration() {
+    let setup = setup();
+    let (mut observation, injector) = Observation::injected_confirming(setup.targets(), ObserverOptions::default());
+    // One marker per wait, a virtual second apart, more than the removal needs.
+    for second in 1..=200 {
+        injector.at(std::time::Duration::from_secs(second), Scripted::Acknowledge);
+    }
+    let (inventory, approved) = setup.prepare_and_move(&mut observation);
+    setup.delete(&mut observation, inventory);
+
+    match unregister_quarantine(&setup.repo.path(), &mut observation, &approved, &|| true) {
+        Err(error @ UnregisterError::Interrupted) => assert_eq!(error.outcome(), RemovalOutcome::CleanupFailed),
+        other => panic!("expected an interrupt, got {other:?}"),
+    }
+    assert!(setup.registered_at_quarantine());
+    assert!(setup.plan.admin.dir.is_dir() && !injector.admin_released());
+
+    unregister_quarantine(&setup.repo.path(), &mut observation, &approved, &|| false).unwrap();
+    assert!(!setup.registered_at_quarantine() && !setup.plan.admin.dir.exists());
+}
+
 #[test]
 fn native_a_checked_removal_deletes_the_content_then_unregisters_only_this_worktree() {
     let setup = setup();
-    let mut observation = Observation::start(setup.targets(), ObserverOptions::default()).unwrap();
+    let mut observation = Observation::start(setup.targets(), ObserverOptions::default(), &|| false).unwrap();
     let (inventory, approved) = setup.prepare_and_move(&mut observation);
     let journal_bytes = setup.delete(&mut observation, Arc::clone(&inventory));
 
     recorder::start_recording();
-    let warning = unregister_quarantine(&setup.repo.path(), &mut observation, &approved).unwrap();
+    let warning = unregister_quarantine(&setup.repo.path(), &mut observation, &approved, &|| false).unwrap();
     let calls = recorder::finish_recording();
 
     assert_eq!(warning, None);
@@ -176,7 +201,7 @@ fn assert_index_changed_keeps_the_registration(change: impl FnOnce(&Setup)) {
     setup.delete(&mut observation, inventory);
     change(&setup);
 
-    match unregister_quarantine(&setup.repo.path(), &mut observation, &approved) {
+    match unregister_quarantine(&setup.repo.path(), &mut observation, &approved, &|| false) {
         Err(error @ UnregisterError::IndexChanged) => assert_eq!(error.outcome(), RemovalOutcome::ActivityDetected),
         other => panic!("{other:?}"),
     }
@@ -210,7 +235,7 @@ fn assert_activity_keeps_the_registration(act: impl FnOnce(&Setup, &Injector), l
     setup.delete(&mut observation, inventory);
     act(&setup, &injector);
 
-    match unregister_quarantine(&setup.repo.path(), &mut observation, &approved) {
+    match unregister_quarantine(&setup.repo.path(), &mut observation, &approved, &|| false) {
         Err(UnregisterError::Activity(list)) => assert!(list.iter().any(|activity| activity.location == location), "{list:?}"),
         other => panic!("{other:?}"),
     }
@@ -250,7 +275,7 @@ fn lost_coverage_keeps_the_registration() {
     setup.delete(&mut observation, inventory);
     injector.overflow();
     assert!(matches!(
-        unregister_quarantine(&setup.repo.path(), &mut observation, &approved),
+        unregister_quarantine(&setup.repo.path(), &mut observation, &approved, &|| false),
         Err(UnregisterError::CoverageLost(CoverageLost::Overflow))
     ));
     assert!(setup.registered_at_quarantine());

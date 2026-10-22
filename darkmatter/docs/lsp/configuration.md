@@ -96,10 +96,16 @@ for these, for example Neovim on Linux) does not report edits to
 
 After a reload, DMLS re-derives everything the settings shape: it lists the
 workspace again when `[workspace]` changed, recomputes the wiki roots when
-`wiki.wiki_root` changed, drops its cached file-resolution contexts and marks
+`wiki.wiki_root` changed, drops its cached file-resolution contexts, marks
 every trigger registry stale, re-publishes diagnostics for every open
 document, and asks the editor to refresh semantic tokens when
 `semantic_tokens.enable` or `wiki.enable` changed.
+
+A reload whose effective configuration is unchanged (many editors send
+`{"settings": {}}` right after starting) only drops the cached contexts and
+re-publishes diagnostics. No trigger registry is marked stale, so it costs
+no registry preparation; a document whose context comes out different is
+prepared again when it next needs its registry.
 
 ## Precedence: editor settings, the file, defaults
 
