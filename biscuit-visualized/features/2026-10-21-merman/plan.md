@@ -16,7 +16,77 @@ docs_created_during_phase_1:
     - biscuit-visualized/features/2026-10-21-merman/spikes/s1-comparison/windows-leg.md
 skills_files_updated_during_phase_1:
     - .claude/skills/os/build-hosts.md
-packages: []
+packages:
+    - biscuit-visualized
+    - biscuit-terminal
+source_files_during_phase_2:
+    - biscuit-visualized/src/Cargo.toml
+    - Cargo.lock
+    - biscuit-terminal/lib/Cargo.toml
+    - biscuit-visualized/src/src/artifact.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/lib.rs
+    - biscuit-visualized/src/src/fonts/mod.rs
+    - biscuit-visualized/src/src/fonts/bundled.rs
+    - biscuit-visualized/src/src/fonts/chain.rs
+    - biscuit-visualized/src/src/fonts/query.rs
+    - biscuit-visualized/src/src/fonts/metadata.rs
+    - biscuit-visualized/src/src/fonts/matching.rs
+    - biscuit-visualized/src/src/fonts/shaper.rs
+    - biscuit-visualized/src/src/fonts/measure.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/newline.rs
+    - biscuit-visualized/src/src/raster/mod.rs
+    - biscuit-visualized/src/src/raster/png.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/bundled_font_tests.rs
+    - biscuit-visualized/src/src/tests/font_chain_tests.rs
+    - biscuit-visualized/src/src/tests/measure_tests.rs
+    - biscuit-visualized/src/src/tests/newline_tests.rs
+    - biscuit-visualized/src/src/tests/raster_tests.rs
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_class.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_er.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_flowchart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_mindmap.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_sequence.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_state.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/mixed/mixed_class.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/mixed/mixed_flowchart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/mixed/mixed_mindmap.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/mixed/mixed_sequence.mmd
+    - biscuit-visualized/src/assets/fonts/inter/Inter-Regular.ttf
+    - biscuit-visualized/src/assets/fonts/inter/Inter-Bold.ttf
+    - biscuit-visualized/src/assets/fonts/noto-emoji/NotoEmoji-Variable.ttf
+    - biscuit-terminal/lib/examples/discovery_probe.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/mod.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/parse.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/query.rs
+    - biscuit-terminal/lib/src/discovery/startup_exchange.rs
+    - biscuit-terminal/lib/tests/common/pty.rs
+    - biscuit-terminal/lib/tests/l1/level1_graphics_probe.rs
+    - biscuit-terminal/lib/tests/l1/level1_osc4_palette.rs
+    - biscuit-terminal/lib/tests/l1/main.rs
+docs_updated_during_phase_2:
+    - docs/dependencies.md
+    - biscuit-visualized/docs/dependencies.md
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - biscuit-visualized/docs/components/graph_expression.md
+    - biscuit-terminal/docs/dependencies.md
+    - biscuit-terminal/docs/discovery/color.md
+    - biscuit-terminal/docs/discovery/terminal-queries.md
+docs_created_during_phase_2:
+    - biscuit-visualized/docs/merman.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/pr-01-gitgraph-commit-spacing.md
+    - biscuit-visualized/src/assets/fonts/inter/README.md
+    - biscuit-visualized/src/assets/fonts/inter/OFL.txt
+    - biscuit-visualized/src/assets/fonts/noto-emoji/README.md
+    - biscuit-visualized/src/assets/fonts/noto-emoji/OFL.txt
+    - biscuit-visualized/src/src/tests/fixtures/merman/README.md
+skills_files_updated_during_phase_2:
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/artifacts-caching.md
+    - .claude/skills/biscuit-visualized/rasterization.md
+    - .claude/skills/biscuit-terminal/discovery.md
 ---
 
 # Plan: Merman Rendering
@@ -334,21 +404,21 @@ start together.
 
 *Stream C — Merman fork patch (D56, D10, R-C2, AC-C2a; independent)*
 
-- [ ] **Add Ken's fork as a remote.** In `/Users/ken/coding/forks/merman`
+- [x] **Add Ken's fork as a remote.** In `/Users/ken/coding/forks/merman`
   (only remote today: `origin` = upstream `Latias94/merman`), add Ken's GitHub
   fork as a second remote (name it `ken`; confirm the fork URL with `gh repo
   view --json url` on Ken's account, and that `git ls-remote` reaches it).
   Pre-authorized: item 8.
-- [ ] **Branch and patch.** Create a branch from the D10 rev
+- [x] **Branch and patch.** Create a branch from the D10 rev
   (`482fcde7faffb05a466f198085d615e604075d97`), for example
   `gitgraph-commit-spacing`. Add the gitGraph config key `commitSpacing` (px,
   default 50, today's behavior), read wherever `COMMIT_STEP`/`LAYOUT_OFFSET`
   set the step in `merman-render/src/gitgraph.rs`, plus config parsing. Add a
   test in Merman's own suite: the default keeps a 50 px step; a set value
   changes consecutive `pos` by that value. Run the fork's relevant tests.
-- [ ] **Push.** Push the branch to the `ken` remote only. Never push to
+- [x] **Push.** Push the branch to the `ken` remote only. Never push to
   `origin`.
-- [ ] **Pull request draft.** Write
+- [x] **Pull request draft.** Write
   `upstream-issues/pr-01-gitgraph-commit-spacing.md` in this spec's folder:
   ready-to-paste title and body (motivation, the S3 evidence, the key's
   semantics and default, the test). Ken opens the pull request; agents never
@@ -357,14 +427,14 @@ start together.
 
 *Stream A — dependencies and bundled fonts*
 
-- [ ] **resvg/usvg 0.47 upgrade (R-M3, AC-M5).** Find every crate using
+- [x] **resvg/usvg 0.47 upgrade (R-M3, AC-M5).** Find every crate using
   resvg/usvg/tiny-skia (`grep` across `Cargo.toml`s and `Cargo.lock`), bump
   repo-wide to the 0.47 line, fix API changes, and reach a single usvg in
   `Cargo.lock` (`cargo tree -d`). Run `just test` in each affected area and
   review changed PNG/SVG snapshots. This is the highest blast-radius task in
   the plan; do it alone in its own change.
     - Prerequisite for: font chain, measurer.
-- [ ] **Add fontique, ttf-parser, rustybuzz, Merman (R-C2, D58, D68).** After
+- [x] **Add fontique, ttf-parser, rustybuzz, Merman (R-C2, D58, D68).** After
   the usvg upgrade and Stream C's push. `biscuit-visualized` only;
   `rustybuzz` and `ttf-parser` pinned to the versions usvg 0.47 uses, so
   `cargo tree -d` shows one copy of each (pre-authorized: item 1); Merman as a git
@@ -374,13 +444,13 @@ start together.
   stays until Phase 3 Wave 8 (both compile together). Check `cargo tree` for
   `png`/ELK/second usvg. Update root and area `docs/dependencies.md` (Phase 7
   finalizes them).
-- [ ] **Bundle Inter (D40, R-M12, AC-M9).** Add Inter regular and bold,
+- [x] **Bundle Inter (D40, R-M12, AC-M9).** Add Inter regular and bold,
   `OFL.txt`, and a note of the Inter release under
   `biscuit-visualized/src/assets/fonts/inter/`, compiled in with
   `include_bytes!`. Confirm and record in the log whether `OFL.txt` declares a
   Reserved Font Name (input to `2026-10-21-mermaid-embedded-font` D8). Record
   file sizes. Pre-authorized: item 5.
-- [ ] **Bundle Noto Emoji on Linux only (D65, R-M14).** Add Noto Emoji
+- [x] **Bundle Noto Emoji on Linux only (D65, R-M14).** Add Noto Emoji
   (monochrome, regular, TrueType), its `OFL.txt`, and a release note under
   `biscuit-visualized/src/assets/fonts/noto-emoji/`, included only under
   `#[cfg(target_os = "linux")]` (WSL2 included). Record the exact file size in
@@ -388,7 +458,7 @@ start together.
 
 *Stream B — OSC 4 (independent of A and C)*
 
-- [ ] **OSC 4 query in `biscuit-terminal` (D19, D46, R-P1, R-P2, R-P7, AC-P1,
+- [x] **OSC 4 query in `biscuit-terminal` (D19, D46, R-P1, R-P2, R-P7, AC-P1,
   AC-P2, AC-P5, AC-P6).** In `discovery/osc_queries`, behind the existing gate,
   internal (not public API).
     - Query indices 0–15, join the existing OSC 10/11 round trip, bounded
@@ -407,7 +477,7 @@ start together.
 
 **Wave 4 — after Wave 3 Stream A (parallel streams).**
 
-- [ ] **Font-resolution chain (D32, D50, D51, D59, D65, R-M4–M8, R-M13,
+- [x] **Font-resolution chain (D32, D50, D51, D59, D65, R-M4–M8, R-M13,
   AC-M3, AC-M4, AC-M8, AC-M10).** New module in `biscuit-visualized`: one
   function used by measurer and rasterizer.
     - Register the bundled Inter as family `Inter` (never a step-4
@@ -429,7 +499,7 @@ start together.
       above (AC-M8); `MERMAID_FONT=Inter` with an empty host set (AC-M9);
       DejaVu-only host still resolves (AC-M4); two faces covering a character
       (AC-M10).
-- [ ] **`\n` → `<br/>` label lexer (D34, R-M10, R-V9, AC-M6).** Pure
+- [x] **`\n` → `<br/>` label lexer (D34, R-M10, R-V9, AC-M6).** Pure
   string-to-string module, independent of fonts: class, ER, mindmap,
   requirement only, via a small per-family label lexer. Never touches
   `%%{init}%%`, `%%` comments, `click` URLs/tooltips, `classDef`/`style`
@@ -438,20 +508,20 @@ start together.
 
 **Wave 5 — after the font chain.**
 
-- [ ] **rustybuzz `TextMeasurer` (D31, R-M1, R-M2, AC-M1, AC-M2).** Shape each
+- [x] **rustybuzz `TextMeasurer` (D31, R-M1, R-M2, AC-M1, AC-M2).** Shape each
   label on the chain's face; mirror usvg 0.47 letter-spacing, word-spacing,
   kerning, small-caps and the per-character fallback rule; no SVG parsing;
   measure each candidate string exactly as given (no whitespace collapsing);
   wire through `DeterministicTextMeasurer::with_width_callback` so Merman wraps.
-- [ ] **Rasterizer `FontResolver` (R-M4).** Replace the rasterizer's font setup
+- [x] **Rasterizer `FontResolver` (R-M4).** Replace the rasterizer's font setup
   in `raster/` with a usvg `FontResolver` calling the same chain, with the same
   fontdb faces.
-- [ ] **Oracle test (R-V8).** Measured width equals usvg 0.47's laid-out width
+- [x] **Oracle test (R-V8).** Measured width equals usvg 0.47's laid-out width
   for the same chunk (within 1 px per AC-M1) across a Latin, RTL, CJK, emoji,
   combining-mark set, so a future usvg bump re-runs it.
-- [ ] **Measure-vs-draw face test (AC-M3).** For every label of a wrapping
+- [x] **Measure-vs-draw face test (AC-M3).** For every label of a wrapping
   corpus, measurer and resolver yield the same face.
-- [ ] **Linux emoji test (D65, AC-M11).** `#[cfg(target_os = "linux")]`: with
+- [x] **Linux emoji test (D65, AC-M11).** `#[cfg(target_os = "linux")]`: with
   an injected font set holding no emoji face, an emoji label shapes to no
   `.notdef` glyph and paints pixels in its glyph box; with an injected emoji
   face, that face is chosen over Noto Emoji. Confirm by `cfg` review that
@@ -459,7 +529,7 @@ start together.
 
 **Wave 5 docs (with Wave 5).**
 
-- [ ] **Docs (planned).** Write the font chain, `MERMAID_FONT` and its
+- [x] **Docs (planned).** Write the font chain, `MERMAID_FONT` and its
   warning, D50's rule, fallback order, the bundled Inter, and the Linux-only
   Noto Emoji into `biscuit-visualized/docs/merman.md` (create it) and
   `biscuit-visualized/docs/components/mermaid_diagram.md`, each marked
@@ -467,13 +537,13 @@ start together.
 
 ### Validation checkpoint 2
 
-- [ ] `just test` and `just lint` pass in `biscuit-terminal`,
+- [x] `just test` and `just lint` pass in `biscuit-terminal`,
   `biscuit-visualized`, and every area the usvg bump touched.
-- [ ] `cargo tree -d` shows one usvg at 0.47; no ELK; no `png` feature pulled;
+- [x] `cargo tree -d` shows one usvg at 0.47; no ELK; no `png` feature pulled;
   Merman resolves from the fork commit.
-- [ ] The fork branch is on Ken's GitHub fork (`git ls-remote ken`), its test
+- [x] The fork branch is on Ken's GitHub fork (`git ls-remote ken`), its test
   passes, and the PR draft file exists (AC-C2a).
-- [ ] Oracle, font-chain, Linux emoji, and `\n` lexer tests are green; the
+- [x] Oracle, font-chain, Linux emoji, and `\n` lexer tests are green; the
   OSC 4 silent-TTY test proves no re-send.
 
 ---
