@@ -64,6 +64,14 @@ strands:
 `rust-testing`, `os` (before touching path or cfg code), `biscuit-file` (only if
 touching file references), `clap`, `syntect`/`two-face`, `just`.
 
+### Working rules
+
+- Evidence that invalidates a decision's premise is handled under the spec's
+  D10 (bounded implementer autonomy): proceed only with an option that meets
+  its three conditions, then amend the spec, log it under "Decided during
+  implementation", and flag it for review; otherwise stop and set
+  `human_review`.
+
 ## Phase 1: Rulings, Prerequisite Gate, API Recon
 
 Nothing in this phase changes shipped code. It removes the guesses that would

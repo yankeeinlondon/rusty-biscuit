@@ -278,7 +278,10 @@ faces, drop shadows in Darkmatter's static SVG, a Linux-only emoji fallback
 font, and a sixth upstream issue); they amend D32, D37, D40, D41, D52, D59,
 and D60 in place. D67–D69 record Ken's rulings of 2026-10-22 on the
 benchmark's placement, the measurer's direct crates, and a clean-room check;
-D67 amends D44 in place.
+D67 amends D44 in place. D70–D72 record Ken's rulings of 2026-10-22 after
+Phase 2 (font identity in the cache key, the OSC 4 query on native Windows,
+and bounded implementer autonomy); D70 amends D41 and D63, and D71 amends
+D46, in place.
 
 ### D1. Decision rule: Ken decided from a scorecard, Merman favored *(amended 2026-10-21 by D30)*
 
@@ -973,12 +976,17 @@ runners included, so goldens need neither a test-only font directory nor
 per-host baselines; one free face serves goldens, the HTML embedding, and
 users who want identical output everywhere.
 
-### D41. Cache key *(resolves Q5; amended 2026-10-22 by D63)*
+### D41. Cache key *(resolves Q5; amended 2026-10-22 by D63 and D70)*
 
 > **Amended by D63:** the key also carries the identity of the face the chain
-> actually resolved for each requested family and fallback (content hash plus
-> face index), so `MERMAID_FONT`, installed or removed fonts, and fallback
-> order all reach the key.
+> actually resolved for each requested family and fallback, so
+> `MERMAID_FONT`, installed or removed fonts, and fallback order all reach the
+> key.
+>
+> **Amended by D70:** only the faces the chain resolves for the design's
+> stacks and the generic families, plus the bundled faces, are hashed by
+> contents; every other font file fallback could reach is identified by path,
+> size, modification time, and face index.
 
 - The backend id is **`merman@<12-char rev>+bv1`**: the first 12 characters
   of the pinned Merman rev (D10), and `bv1`, our post-process version. It
@@ -989,21 +997,26 @@ users who want identical output everywhere.
     - the output format;
     - a biscuit-hash of the **compiled** per-family theme design JSON (this
       covers the palette, R-P6, and any change in how a design compiles);
-    - a biscuit-hash of the **contents** of every font file the chain (D32)
-      can return for the design's font stacks plus the generic families,
-      the bundled Inter included (and, on Linux builds, the bundled Noto
-      Emoji, D65). This covers fonts that a family's own CSS requests
-      (railroad, treeView, and cynefin ask for `courier`) without parsing;
+    - a biscuit-hash of the **font set** the chain (D32) can return for the
+      design's font stacks plus the generic families (D70): the **contents**
+      of the faces the chain resolves for those stacks and generic families,
+      of the bundled Inter, and, on Linux builds, of the bundled Noto Emoji
+      (D65); and the **path, size, modification time, and face index** of
+      every other font file fallback could reach. This covers fonts that a
+      family's own CSS requests (railroad, treeView, and cynefin ask for
+      `courier`) without parsing;
     - the **resolved-face identity** of D63: for each requested family and
-      each fallback position, the content hash and face index of the face
-      the chain actually resolved.
+      each fallback position, the D70 identity of the face the chain actually
+      resolved.
 - The font hash is computed **once per process**.
 - The key is checked **before parsing** (pipeline step 4).
 - Hashes use biscuit-hash's `xx_hash`, as the key itself does today.
 
 *Rationale:* hashing compiled output rather than raw colors catches every
-change that alters the theme, and hashing font contents rather than paths
-catches a font upgraded in place.
+change that alters the theme, and hashing the contents of the faces the
+stacks resolve to catches one of them upgraded in place; size and
+modification time catch an install, removal, or upgrade of any other face
+at a cost that fits D35 (D70).
 
 ### D42. CI tiers and promotion to gating *(resolves Q8)*
 
@@ -1084,20 +1097,23 @@ catches a font upgraded in place.
 Every text element meets 4.5:1 (WCAG AA normal text) against the fill behind
 it. There is no large-text exception, so text size is never measured.
 
-### D46. OSC 4 on native Windows *(resolves Q19)*
+### D46. OSC 4 on native Windows *(resolves Q19; amended 2026-10-22 by D71)*
+
+> **Amended by D71:** Phase 2 found that the Windows query path exists and
+> carries OSC 4 with no new Windows-specific code, so under the rule below
+> the query runs on native Windows. The recorded outcome below is replaced.
 
 - The OSC 4 query runs on native Windows **only if** the Windows query path
-  delivered by `2026-10-13-graphics-where-possible` carries it with no new
-  Windows-specific code.
+  carries it with no new Windows-specific code.
 - Otherwise native Windows uses background-derived accents (R-P4), and the
   `docs/` palette page says so.
-- **Recorded outcome:** Phase 1 found, on 2026-10-21, that the non-Unix arm
-  of `biscuit-terminal`'s OSC query is still a stub that answers every query
-  with `OscQueryError::Unsupported`. Carrying OSC 4 there would need new
-  Windows-specific code, so **native Windows uses background-derived
-  accents**, and the `docs/` palette page says so. This is the outcome, not
-  an open item; the implementation log restates it when the OSC 4 task
-  runs.
+- **Recorded outcome (D71):** the condition holds. `biscuit-terminal`'s
+  Windows console query backend
+  (`biscuit-terminal/lib/src/discovery/tty_query/windows.rs`) already
+  answers OSC 10/11 in the startup exchange, so **the OSC 4 query runs on
+  native Windows** through that backend. Phase 5 enables it and verifies it
+  on the Windows test host. A terminal that does not answer gets
+  background-derived accents (R-P4), as on any other OS.
 
 ### D47. Derived-palette goldens *(resolves Q20)*
 
@@ -1272,19 +1288,25 @@ The R-V4 test allow-lists that specific known-false diagnostic per family,
 with a comment naming it. The general "no `unsupported-*`" assertion is not
 weakened.
 
-### D63. Cache key: the faces actually resolved *(amends D41)*
+### D63. Cache key: the faces actually resolved *(amends D41; amended 2026-10-22 by D70)*
 
-- Besides the content hash of every font file the chain can return (D41),
-  the key includes the **identity of the face the chain actually resolved**
-  for each requested family and for each fallback position: that face file's
-  content hash plus its face index within the file.
+> **Amended by D70:** a resolved face's identity is its content hash plus
+> face index only for the faces D70 hashes by contents; any other face is
+> identified by path, size, modification time, and face index.
+
+- Besides the font-set hash of D41, the key includes the **identity of the
+  face the chain actually resolved** for each requested family and for each
+  fallback position: its D70 identity, which is the face file's content hash
+  plus its face index for a face resolved for a stack or generic family or a
+  bundled face, and the file's path, size, modification time, and face index
+  for any other.
 - This covers `MERMAID_FONT` (a different step-1 answer changes the key),
   fonts installed or removed between runs (a different step 2–4 answer), and
   the fallback order of D59 and D65.
 - Like the rest of the font hash, it is computed once per process (D41).
 
-*Rationale:* hashing every candidate file says which faces could be used, not
-which were; two hosts, or two runs with different `MERMAID_FONT` values, can
+*Rationale:* identifying every candidate file says which faces could be used,
+not which were; two hosts, or two runs with different `MERMAID_FONT` values, can
 hold the same files and still resolve different faces, and a cached artifact
 must never be served across that difference.
 
@@ -1373,6 +1395,73 @@ repository search over the changed code for Zed-specific identifiers (at
 least `zed-accent`, `mermaid_render`, `inject_css`, and `accent_colors`)
 finds none. The implementation log records the check.
 
+### D70. Font identity in the cache key *(amends D41 and D63)*
+
+Ken ruled on 2026-10-22, after Phase 2, choosing option A of the Phase 2
+review item.
+
+- The once-per-process font hash (D41) reads and hashes the **contents**
+  only of:
+    - the faces the chain (D32) actually resolves for the design's font
+      stacks and the generic families;
+    - the bundled Inter (D40);
+    - on Linux builds, the bundled Noto Emoji (D65).
+- **Every other font file** that fallback (D59) could reach is identified by
+  its **path, size, modification time, and face index**, not its contents.
+- The resolved-face identity of D63 uses the same split.
+- **Accepted residual risk:** a font file replaced in place with identical
+  size and modification time is not detected.
+
+*Evidence:* on macOS the chain can reach 2,986 font files (3,419 faces,
+about 1.7 GB). Hashing all of their contents took 0.57 s and 0.95 s per
+process with the files already in the OS cache, which alone breaks D35's
+500 ms cold-render limit. Linux hosts hold far fewer fonts.
+
+*Rationale:* the key still changes whenever a font is installed, removed, or
+upgraded, since an upgrade changes the size or modification time, and the
+faces that draw almost every label are still hashed by contents. A
+persistent per-file hash index (option B) would keep exact semantics only
+for the residual case, at the cost of a slow first run and an index with its
+own invalidation.
+
+### D71. OSC 4 on native Windows: carried *(amends D46)*
+
+Ken ruled on 2026-10-22, after Phase 2, applying D46's own rule to the
+evidence.
+
+- D46 runs OSC 4 on native Windows if the existing Windows query path
+  carries it with no new Windows-specific code. Phase 2 found that path
+  exists (`biscuit-terminal/lib/src/discovery/tty_query/windows.rs`), so the
+  query **runs on native Windows**.
+- Phase 2 shipped it gated off there (`ASKS_PALETTE = cfg!(unix)`).
+  **Phase 5 enables it on Windows through that backend**, adding no
+  Windows-specific query code, and verifies it on the Windows test host
+  (see the `os` skill).
+- A terminal that does not answer gets background-derived accents (R-P4),
+  as on any terminal.
+
+### D72. Bounded implementer autonomy *(pre-authorization; item 12 of [Pre-authorized preparatory work](#pre-authorized-preparatory-work))*
+
+Ken ruled on 2026-10-22. When implementation evidence invalidates a
+decision's premise, the implementer may proceed with an option that meets
+**all three** of these conditions:
+
+1. it preserves the decision's stated purpose;
+2. it stays within every other decision and limit of this spec;
+3. it adds no new dependency, no outward-facing action (pushing, posting,
+   filing), and no scope.
+
+The implementer then:
+
+- amends this spec (the decision is marked amended, as D41 is by D63);
+- records the evidence and the choice under a **"Decided during
+  implementation"** heading in the implementation log;
+- flags the choice for the review cycle.
+
+If no option meets all three conditions, or the options trade off things
+Ken would weigh, the implementer stops and sets `human_review` in the
+implementation log, as before.
+
 ## Rendering pipeline
 
 The end-to-end path of one diagram after the cutover, as Ken laid it out on
@@ -1402,7 +1491,7 @@ flowchart TD
 | 2 | Terminal colors (`biscuit-terminal`) → palette → compiled theme. `biscuit-visualized` builds the `ThemeDesignV1`; Merman compiles it (D6, D7) | `biscuit-terminal`, `biscuit-visualized`, Merman |
 | 3 | Font-resolution chain (D32), with the bundled Inter registered (D40) and, on Linux builds, the bundled Noto Emoji as the last fallback face (D65) | `biscuit-visualized` with fontique and ttf-parser |
 | 3b | Source rewrites before parsing (D55): the `\n` rewrite (D34) and gitGraph `commitSpacing`, set only when tags would collide, from tag widths measured with our measurer (D36, D56) | `biscuit-visualized` |
-| 4 | Cache check, **before parsing**. Key (D41): backend id `merman@<12-char rev>+bv1`, the rewritten source, output format, a hash of the compiled per-family design JSON, and a once-per-process hash of every font file the chain can return plus the identity of each face it actually resolved (D63) | `biscuit-visualized` |
+| 4 | Cache check, **before parsing**. Key (D41): backend id `merman@<12-char rev>+bv1`, the rewritten source, output format, a hash of the compiled per-family design JSON, and a once-per-process font-set hash (contents of the faces resolved for the stacks and generic families and of the bundled faces; path, size, modification time, and face index for every other reachable file, D70) plus the identity of each face it actually resolved (D63) | `biscuit-visualized` |
 | 5 | Parse | Merman |
 | 6 | Layout, with measurement through our `TextMeasurer`; Merman wraps (D31). 6b: gitGraph geometry from the layout data (D5, D36) | Merman; `biscuit-visualized` (measurer, 6b) |
 | 7 | resvg-safe SVG with `<text>` elements, not paths | Merman |
@@ -1416,9 +1505,10 @@ Two points the table settles:
 - **Pre-parse work** sits in step 3b, after the font chain and before the
   cache check, so the key covers the source as rewritten (D41, D55).
 - **Fonts known only after parsing.** Some families request fonts in their
-  own CSS (railroad, treeView, and cynefin ask for `courier`). The key hashes
+  own CSS (railroad, treeView, and cynefin ask for `courier`). The key covers
   every file the chain can return for the design's stacks plus the generic
-  families, so those requests are covered without parsing (D41).
+  families, by contents or by path, size, and modification time (D70), so
+  those requests are covered without parsing (D41).
 
 ## Pre-authorized preparatory work
 
@@ -1489,12 +1579,22 @@ Ken approved the following on 2026-10-22, after the rulings above:
     record the output in the implementation log; then make the item 6 edits
     (`gates = true`, exclusion fields removed). D42 holds the order.
 
+Ken approved the following on 2026-10-22, after Phase 2:
+
+12. **Bounded implementer autonomy (D72).** When implementation evidence
+    invalidates a decision's premise, proceed with an option that preserves
+    the decision's stated purpose, stays within every other decision and
+    limit, and adds no new dependency, outward-facing action, or scope; then
+    amend this spec, record the evidence and the choice under "Decided
+    during implementation" in the implementation log, and flag it for the
+    review cycle. Otherwise stop and set `human_review`.
+
 ## Phases
 
 The order follows the original draft. Which Merman-path steps can run in
 parallel is a planning question. As of 2026-10-22, S0–S3 and the Windows leg
 are done, Ken has chosen Merman (D30), and the rulings of 2026-10-22
-(D40–D69) are recorded. The gitGraph cutover starts with the `commitSpacing`
+(D40–D72) are recorded. The gitGraph cutover starts with the `commitSpacing`
 patch on Ken's fork (D56).
 
 ```mermaid
@@ -1624,8 +1724,8 @@ As of 2026-10-22 (S1, S2, and the Phase 1 records of S3 and the Windows leg):
   `MermaidDiagram` with no family-specific code.
 - **R-C7.** The cache key changes so no `mmdr` artifact is served after the
   cutover: backend id `merman@<12-char rev>+bv1`, plus the inputs of D41
-  and the resolved-face identity of D63, checked before parsing, with the
-  font hash computed once per process.
+  and the resolved-face identity of D63, with font identity per D70,
+  checked before parsing, with the font hash computed once per process.
 - **R-C8.** Every target that receives our SVG receives Merman's resvg-safe
   SVG; rasterized output contains no `foreignObject` HTML labels. Darkmatter's
   default HTML path (`MermaidMode::Off`) is unchanged and receives no SVG
@@ -1754,9 +1854,10 @@ As of 2026-10-22 (S1, S2, and the Phase 1 records of S3 and the Windows leg):
 
 - **R-P1.** `biscuit-terminal` gains an internal OSC 4 query for ANSI colors
   0–15 (D19), with a bounded timeout and a per-process cache, and never
-  changes the user's palette. On native Windows it runs only under the
-  condition of D46; otherwise native Windows uses background-derived accents
-  (R-P4).
+  changes the user's palette. It also runs on native Windows, through the
+  existing Windows console query backend and with no Windows-specific query
+  code (D46, D71); a terminal that does not answer gets background-derived
+  accents (R-P4).
 - **R-P2.** No reply, a partial reply, or a malformed reply yields "unknown"
   for the missing entries, never an error to the caller.
 - **R-P3.** In a terminal context, the default palette is built from the
@@ -1889,7 +1990,7 @@ of them.
 | AC-C4 | `worktree/cli/src/commands/git_graph/tests.rs` passes; no topology assertion (commits, parents, lanes, order, tags) is changed, and every changed assertion is a renderer-mechanics assertion listed in the implementation log with its category (D43) | `git diff main -- worktree/cli/src/commands/git_graph/tests.rs` reviewed against the log's list: every hunk is on the list and each listed assertion is mechanics; tests pass |
 | AC-C5 | Each Merman-only family has a smoke test, a golden SVG under each of the 4 fixed palettes (D27), and an entry in the docs list; the list matches Merman's family registry at the pinned rev | One test per family; four golden files per family; review of the docs list against the registry |
 | AC-C6 | An artifact cached before the cutover is not served after it; the backend id is `merman@<12-char rev>+bv1` | Cache test pinning the new backend id |
-| AC-C6a | The key changes when the rewritten source, the output format, the compiled design JSON, the contents of any font file the chain can return (the bundled Inter included), or the face the chain resolves for a requested family or fallback (D63) change; it is computed before parsing; the font hash is computed once per process | Cache tests changing one input at a time; a test that a family's CSS-requested font changes the key without parsing; tests that changing only `MERMAID_FONT`, only the injected installed-font set, or only the fallback order changes the key; a counter on font hashing across two renders |
+| AC-C6a | The key changes when the rewritten source, the output format, the compiled design JSON, the contents of a face the chain resolves for a stack or generic family or of a bundled face (Inter, and Noto Emoji on Linux), the path, size, modification time, or face index of any other font file fallback can reach (D70), or the face the chain resolves for a requested family or fallback (D63) change; only the resolved and bundled faces are read for hashing; it is computed before parsing; the font hash is computed once per process | Cache tests changing one input at a time; a test that changing only another reachable file's size or modification time changes the key and that its contents are not read; a test that a family's CSS-requested font changes the key without parsing; tests that changing only `MERMAID_FONT`, only the injected installed-font set, or only the fallback order changes the key; a counter on font hashing across two renders |
 | AC-C7 | No rasterized SVG contains `foreignObject` | Test over the golden corpus |
 | AC-C8 | Labels of a Merman-rendered diagram survive Darkmatter's sanitizer in the static-SVG opt-in, and the sanitizer still rejects an external `url(...)` | Darkmatter test (R-V7) plus a negative case with an external URL |
 | AC-C8a | Darkmatter's default HTML (`MermaidMode::Off`) still emits `<pre class="mermaid">` with no SVG; in the static-SVG opt-in, every label's `font-family` starts with its measured face followed by the original stack, and label overflow is allowed only there | Darkmatter HTML test per mode; assertion that rasterized SVG carries neither change (R-C9a) |
@@ -1925,7 +2026,7 @@ of them.
 | AC-P3 | With no ANSI reply but a known background, accents come from the background; with neither, the fixed palette for the color mode is used | Unit tests on palette resolution with injected detection results |
 | AC-P4 | Changing only a palette color changes the cache key | Cache test |
 | AC-P5 | Non-terminal output and CI send no queries | Test with redirected stdout and `CI` set |
-| AC-P6 | The implementation log records which D46 case applies on native Windows, and the `docs/` palette page states it; if OSC 4 is not carried, native Windows adds no Windows-specific query code and its palette uses background-derived accents | Log entry; docs review; on Windows, a palette-resolution test with a known background and no ANSI reply |
+| AC-P6 | On native Windows the OSC 4 query is sent through the existing Windows console query backend with no Windows-specific query code (D46, D71); a terminal that answers yields its ANSI palette, and one that does not yields background-derived accents; the implementation log records the Windows test host run and the `docs/` palette page states the Windows behavior | Log entry with the Windows test host run; code review that no Windows-specific query code was added; docs review; on Windows, a palette-resolution test with a known background and no ANSI reply |
 | AC-V1 | Golden SVG snapshots exist for every family × fixed palette, PNG snapshots for `Dark` and `Default`; SVG snapshots fail on any change and PNG snapshots on change beyond the D42 tolerance; they pass on every CI environment with `MERMAID_FONT=Inter`; every code point in a golden input is mapped by Inter | Snapshot suite (`insta`) on Linux, macOS, native Windows, and WSL2; a test comparing golden inputs' code points with Inter's `cmap` |
 | AC-V2 | `just bench` in `biscuit-visualized` runs the non-member benchmark crate at `biscuit-visualized/bench/` (D67) locally in the release profile, reports median and p95 per family (warm full render and cold one-shot), and on the Linux build host flags a family over 50 ms warm median, a cold render of 500 ms or more, and a regression over 25% against the baseline JSON stored in `biscuit-visualized/bench/`; no iteration is a cache hit; CI plans no cell for the benchmark crate | Running `just bench` on the Linux build host; `just ci-local --plan` shows no benchmark cell; a doctored baseline and a doctored limit each make it flag; the per-iteration cache directory is empty when each timed region starts |
 | AC-V3 | Six derived-palette SVG goldens exist: flowchart, sequence, and gitGraph under the full-ANSI palette and the background-only palette (D47) | Snapshot files; the suite fails on change |

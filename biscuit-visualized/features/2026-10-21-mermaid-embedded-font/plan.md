@@ -74,6 +74,11 @@ Ruling G picks it).
 - Any task that changes a symbol's behavior also updates its `///`/`//!` docs in
   the same change (repo comment-drift rule).
 - Do not run `cargo fmt`. Do not commit.
+- Evidence that invalidates a decision's premise is handled under the spec's
+  D17 (bounded implementer autonomy): proceed only with an option that meets
+  its three conditions, then amend the spec, log it under "Decided during
+  implementation", and flag it for review; otherwise stop and set
+  `human_review`.
 
 ## Phase 1: Prerequisite Gate, Rulings, Spike
 

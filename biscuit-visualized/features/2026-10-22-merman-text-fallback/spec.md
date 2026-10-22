@@ -301,7 +301,7 @@ automatic mode (D5). `TerminalMermaidMode::Code` and `::Image`, and every
 Ken made D1–D9 on 2026-10-22. They replace the draft's two open questions
 (which inputs may replace source; how Markdown consumers opt in) and add the
 fallback policy, the CLI convention, Mermaid highlighting, and highlighting in
-`bt`.
+`bt`. D10, also of 2026-10-22, pre-authorizes bounded implementer autonomy.
 
 ### D1. Eligibility comes from Merman's metadata
 
@@ -512,6 +512,25 @@ darkmatter's highlighter. This amends D8, which had left `bt` unhighlighted.
   biscuit-terminal's library has no cycle.
 - Cost, accepted by Ken: `bt` now compiles darkmatter, which lengthens its
   build and enlarges its binary.
+
+### D10. Bounded implementer autonomy *(pre-authorization)*
+
+Ken ruled on 2026-10-22 that the rule `2026-10-21-merman` records as its
+D72 applies to this work too. When implementation evidence invalidates a
+decision's premise, the implementer may proceed with an option that meets
+**all three** of these conditions:
+
+1. it preserves the decision's stated purpose;
+2. it stays within every other decision and limit of this spec and of the specs it depends on;
+3. it adds no new dependency, no outward-facing action (pushing, posting,
+   filing), and no scope.
+
+The implementer then amends this spec (marking the decision amended),
+records the evidence and the choice under a **"Decided during
+implementation"** heading in the implementation log, and flags the choice
+for the review cycle. If no option meets all three conditions, or the
+options trade off things Ken would weigh, the implementer stops and sets
+`human_review` in the implementation log.
 
 ## Requirements
 

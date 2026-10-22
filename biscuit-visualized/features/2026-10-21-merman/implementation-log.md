@@ -40,13 +40,27 @@ message_to_agent: |-
   - `mermaid::newline::rewrite_label_newlines(&str) -> Cow<str>` is the D34
     lexer, with module-level `#[allow(dead_code)]`. Phase 3 calls it in
     pipeline step 3b and adds the end-to-end "fitting box" check of AC-M6.
-  - Cache key: `font_set_hash()` hashes about 1.7 GB on macOS (0.6–1 s).
-    Ken is asked to rule on this (human_review_items) before you wire D41/D63.
-    Follow his ruling.
-  - D46's premise is stale. biscuit-terminal has a Windows console query
-    backend (`discovery/tty_query/windows.rs`), so OSC 4 could run on Windows
-    with no new code. It is kept Unix-only (`ASKS_PALETTE = cfg!(unix)`)
-    until Ken re-decides. This matters for Phase 5, not Phase 3.
+  - Cache key: Ken ruled D70 (amends D41 and D63). `font_set_hash()` today
+    hashes the contents of every reachable font file, about 1.7 GB on macOS
+    (0.6–1 s). Change it so only the faces the chain resolves for the
+    design's stacks and the generic families, the bundled Inter, and (Linux)
+    Noto Emoji are hashed by contents; identify every other reachable font
+    file by path, size, modification time, and face index. Accepted
+    residual: an in-place replacement with identical size and timestamp is
+    not detected. Phase 3's cache-key task names the change.
+  - Ken ruled D71 (amends D46): OSC 4 runs on native Windows, because the
+    existing Windows console query backend (`discovery/tty_query/windows.rs`)
+    carries it with no new Windows-specific code. It is still gated
+    `ASKS_PALETTE = cfg!(unix)`; Phase 5 enables it on Windows through that
+    backend and verifies it on the Windows test host (`os` skill). A
+    terminal that does not answer gets background-derived accents. This
+    matters for Phase 5, not Phase 3.
+  - D72 (pre-authorized item 12) lets you proceed, without stopping, when
+    evidence invalidates a decision's premise and an option preserves its
+    purpose, stays within every other decision and limit, and adds no
+    dependency, outward-facing action, or scope. Amend the spec, log it
+    under "Decided during implementation", and flag it for review;
+    otherwise set `human_review` as before.
   - The palette hook for Phase 5 is
     `biscuit_terminal::discovery::osc_queries::ansi_palette() -> [Option<RgbValue>; 16]`
     (`#[doc(hidden)]`).
@@ -123,26 +137,7 @@ skills_files_updated_during_phase_2:
     - .claude/skills/biscuit-visualized/artifacts-caching.md
     - .claude/skills/biscuit-visualized/rasterization.md
     - .claude/skills/biscuit-terminal/discovery.md
-human_review: true
-human_review_items:
-    - |-
-      **The font hash in the render cache key costs about a second per process on macOS. Decide how to identify fonts before Phase 3 builds the cache key.**
-
-      *Why now:* Phase 3 builds the render cache key. The spec says that key includes a hash of the **contents** of every font file the font chain can return (D41), plus the content hash of each face it actually resolved, fallback faces included (D63). Fallback can reach every installed face, so on this Mac that means reading and hashing 2,986 font files, about 1.7 GB. That took 0.57 s and 0.95 s per process with the files already in the OS file cache, and longer from a cold disk. The same spec caps a one-shot render in a fresh process at 500 ms (D35). Built as written, every `bt`/Darkmatter process that renders a diagram on macOS pays about a second before its first cache lookup, and the 500 ms rule cannot be met. Linux hosts have far fewer fonts, so it barely shows there.
-
-      **Options**
-
-      - **A. Hash contents only for the faces the stacks resolve to; identify every other font file by path, size, and modification time.** Read the bytes only of the few faces the chain resolves for the design's stacks and the generic families, plus the bundled Inter and Noto Emoji. Identify the remaining fallback candidates by file path, size, modification time, and face index.
-          - Pros: well under the 500 ms budget. Still invalidates on any font installed, removed, or upgraded, because an upgrade changes the size or modification time. Simple.
-          - Cons: departs from "contents" for fallback faces; a font file replaced in place with the same size and a preserved timestamp would be missed (rare).
-      - **B. Keep full content hashing, but remember it on disk.** Store each file's content hash under the cache directory, keyed by path, size, and modification time, and re-hash only changed files.
-          - Pros: keeps the spec's content semantics exactly.
-          - Cons: the first render on each host still pays 1–2 s; adds a persistent index with its own invalidation and concurrency handling.
-      - **C. Build it as specified and relax D35's cold rule (for example to 1.5 s on macOS).**
-          - Pros: no design change.
-          - Cons: every diagram-rendering process on macOS is about a second slower, permanently; the cold-render rule stops protecting users.
-
-      **Recommendation: A.** It keeps the property the key exists for, that a cached image is never reused after fonts change, at a cost that fits D35. The only case it gives up, a byte-different font with identical size and timestamp, is not one a user produces by installing or upgrading fonts. B buys exactness for that corner case with a persistent index and a slow first run; C makes every render slower to protect against the same corner case.
+human_review: false
 ---
 
 # Implementation Log for 2026-10-21-merman (7 phases)
@@ -457,8 +452,7 @@ done by the orchestrator.
   OSC 4 there would need no Windows-specific code, which is D46's own
   condition for running it. The conservative outcome (not carried) was kept
   because it is unproven on Windows; turning it on is a one-line change plus a
-  Windows proof. For Ken to re-decide before Phase 5 consumes the palette (not
-  needed for Phase 3).
+  Windows proof. Ken ruled D71 (below): Phase 5 turns it on.
 - Gate note: the color gate's `is_tty()` is stdout **or** stderr, not stdout
   alone as R-P7's wording says; unchanged.
 - Unrelated pre-existing defect seen: `biscuit-terminal`'s lib test target
@@ -537,8 +531,8 @@ done by the orchestrator.
   faces, 1,713,371,560 bytes: **571 ms and 950 ms** on two runs with the
   files already in the OS cache (cold disk will be slower). System font load
   ≈170–180 ms; first fontique answer ≈235–285 ms. Wired as specified, this
-  alone exceeds D35's 500 ms cold-render rule on macOS. Raised for Ken
-  (`human_review_items`).
+  alone exceeds D35's 500 ms cold-render rule on macOS. Raised for Ken;
+  ruled by D70 (below).
 
 ### Departures from the plan/spec
 
@@ -547,7 +541,8 @@ done by the orchestrator.
 - Noto Emoji is the variable font, 1,982,596 bytes (no static regular face
   is published).
 - fontique uses `fontconfig-dlopen`.
-- D46's premise is stale (above); outcome kept as recorded.
+- D46's premise is stale (above); outcome kept as recorded, then reversed by
+  D71 (below).
 
 ### Requirement-to-test mapping
 
@@ -633,3 +628,30 @@ Narrowed runs for the test-input readers:
   that commit, and they read temp-dir fixtures, not repository files. Phase 2
   changes no sniff file, and no dependency bump can add a JSON field. Left
   for the sniff owners. Not caused by this phase.
+
+### Re-invocation (2026-10-22)
+
+The Phase 2 prompt ran a second time after Phase 2 had been committed
+(`8adcc3670`, `7eead9fca`). Every Phase 2 task and checkpoint in the plan was
+already ticked, the working tree was clean, and both files already carried
+every `*_during_phase_2` key and `packages`. Nothing was re-implemented and no
+source file changed; this note is the only edit. The frontmatter, including
+`human_review: true` (the font-hash ruling Phase 3 needs) and
+`message_to_agent`, was left as the Phase 2 run wrote it.
+
+Gate check for this re-invocation: `git status --porcelain
+--untracked-files=all | awk '{print $NF}' | xargs python3
+scripts/ci/affected_scope.py` gave `packages: []`, `change_class:
+documentation`, so `just test` and `just lint` were skipped for it. The
+Phase 2 gate results above still stand for the committed code.
+
+### Rulings after Phase 2 (Ken, 2026-10-22)
+
+The Phase 2 review item and the D46 finding are ruled; `human_review` is
+cleared and Phase 3 is unblocked.
+
+| Ruling | Decision | Evidence |
+| ------ | -------- | -------- |
+| Font identity in the cache key: hash contents only of the faces the chain resolves for the design's stacks and the generic families, the bundled Inter, and (Linux) Noto Emoji; identify every other reachable font file by path, size, modification time, and face index (option A). Accepted residual: an in-place replacement with identical size and timestamp is missed | D70 (amends D41, D63) | 2,986 files, 3,419 faces, about 1.7 GB on macOS; full content hashing took 571 ms and 950 ms per process with a warm OS cache, over D35's 500 ms cold limit (above) |
+| OSC 4 on native Windows runs, by D46's own rule; Phase 5 enables it through the existing Windows backend and verifies it on the Windows test host; no answer ⇒ background-derived accents | D71 (amends D46) | `biscuit-terminal/lib/src/discovery/tty_query/windows.rs` already answers OSC 10/11 in the startup exchange; today `ASKS_PALETTE = cfg!(unix)` (Stream B) |
+| Bounded implementer autonomy: when evidence invalidates a decision's premise, proceed with an option that preserves its purpose, stays within every other decision and limit, and adds no dependency, outward-facing action, or scope; amend the spec, log under "Decided during implementation", flag for review; otherwise stop and set `human_review` | D72 (pre-authorized item 12); also `2026-10-22-merman-text-fallback` D10 and `2026-10-21-mermaid-embedded-font` D17 | Both Phase 2 findings stopped work for a ruling |

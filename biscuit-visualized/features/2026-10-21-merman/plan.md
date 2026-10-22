@@ -116,15 +116,16 @@ correctly. Eight strands, in dependency order:
    by our rustybuzz `TextMeasurer` and the rasterizer's usvg `FontResolver`;
    Merman wraps.
 4. **Cutover core.** Merman render path, time budget (D28), cache identity with
-   resolved faces (D41, D63), pre-parse step 3b (D55: `\n` rewrite, D34;
+   resolved faces and font identity (D41, D63, D70), pre-parse step 3b (D55: `\n` rewrite, D34;
    `commitSpacing`, D56), SVG post-process (D33), gitGraph geometry on layout
    data (D5, D36), interim themes (D61), `mmdr` removed, and the six upstream
    issue drafts for Ken to file during the cutover (D52, D66).
 5. **Consumers.** `biscuit-terminal`, `sniff`, `worktree` under D43's rewrite
    rule, the "HTML static" target (D60), and `darkmatter`'s static-SVG path and
    sanitizer, drop shadows included (D37, D64).
-6. **Terminal palette and styling.** Internal OSC 4 query (D19, D46) in
-   `biscuit-terminal` (runs early, in parallel); palette type, per-family
+6. **Terminal palette and styling.** Internal OSC 4 query (D19, D46, D71) in
+   `biscuit-terminal` (runs early, in parallel; enabled on native Windows in
+   Phase 5); palette type, per-family
    compiled `ThemeDesignV1`, accent post-process, 4.5:1 text everywhere (D6,
    D17, D45), then Ken's gallery sign-off.
 7. **Verification.** Golden SVG/PNG corpus with Inter on every CI environment
@@ -184,6 +185,11 @@ correctly. Eight strands, in dependency order:
 - An implementation log lives at `implementation-log.md` beside the spec;
   rulings, departures from the spec, each D43 rewrite, measured sizes, and
   sign-offs are recorded there.
+- **Evidence that invalidates a decision's premise** is handled under the
+  spec's D72 (pre-authorized item 12): proceed only with an option that meets
+  its three conditions, then amend the spec, log it under "Decided during
+  implementation", and flag it for review; otherwise stop and set
+  `human_review`.
 
 ### Input robustness (scope note)
 
@@ -221,6 +227,10 @@ carries the same table.
    of the face the chain actually resolved for each requested family and
    fallback. Checked before parsing.
    *Differs from Phase 1:* adds the resolved-face identity (D63).
+   *Amended after Phase 2 (D70):* only the faces resolved for the stacks and
+   generic families and the bundled faces are hashed by contents; every other
+   reachable font file is identified by path, size, modification time, and
+   face index.
 2. **CI tiers (Q8) — D42.** SVG goldens, PNG goldens (AE share ≤ 0.1%, RMSE ≤
    0.005), and OSC 4 parser tests are L1 on every CI environment; this work
    promotes `biscuit-visualized` to gating (`gates = true`, exclusion fields
@@ -241,6 +251,8 @@ carries the same table.
 6. **OSC 4 on native Windows (Q19) — D46.** Not carried: the non-Unix OSC
    query arm is a stub, so native Windows uses background-derived accents and
    the palette docs say so.
+   *Amended after Phase 2 (D71):* the Windows query path exists, so by D46's
+   own rule OSC 4 runs on native Windows; Phase 5 enables and verifies it.
 7. **Derived-palette goldens (Q20) — D47.** Six SVG goldens: flowchart,
    sequence, gitGraph × {full ANSI set, background only}.
 8. **Fixtures (Q21) — D49.** `biscuit-visualized/src/tests/fixtures/merman/`;
@@ -467,7 +479,8 @@ start together.
       ST terminators. No/partial/malformed reply ⇒ `unknown` per missing
       entry, never an error (default outcome; no other exceptions).
     - Native Windows: no OSC 4 and no new Windows-specific query code (D46);
-      restate the outcome in the log (AC-P6).
+      restate the outcome in the log (AC-P6). (Superseded by D71: Phase 5
+      enables the query on native Windows.)
     - Tests: parser unit tests (L1); silent fake TTY proving timeout and no
       re-send (call count); redirected stdout and `CI` set send no query. Use
       the Test Toolkit; L2 tests must not take focus.
@@ -578,16 +591,29 @@ of Phase 2 Streams A and C.
       asserting fallback, warning, and elapsed time around the Merman call
       only; parse-error, unsupported, and ZenUML cases; no `foreignObject` in
       rasterized output.
-- [ ] **Cache identity (D41, D63, R-C7, R-P6 prep, AC-C6, AC-C6a, AC-P4).**
-  New `MERMAID_BACKEND` value `merman@<12-char rev>+bv1`; key inputs: rewritten
-  source, output format, compiled design JSON hash, once-per-process hash of
-  every font file the chain can return, and the **resolved-face identity** of
-  D63. Use `biscuit-hash` (`xx_hash`). Cache check happens before parsing
-  (pipeline step 4). Tests: an artifact keyed under the old backend id is not
-  served; changing only the rewritten source / the output format / one
-  palette color / one font file / the post-process version / `MERMAID_FONT`
-  / the injected installed-font set / the fallback order changes the key; a family's CSS-requested font changes the key
-  without parsing; a counter shows font hashing once across two renders.
+- [ ] **Cache identity (D41, D63, D70, R-C7, R-P6 prep, AC-C6, AC-C6a,
+  AC-P4).** New `MERMAID_BACKEND` value `merman@<12-char rev>+bv1`; key
+  inputs: rewritten source, output format, compiled design JSON hash, the
+  once-per-process font-set hash, and the **resolved-face identity** of D63.
+  Use `biscuit-hash` (`xx_hash`). Cache check happens before parsing
+  (pipeline step 4).
+    - **Change `font_set_hash`** (and `face_identity` / `query_identities`)
+      in Phase 2's `biscuit-visualized/src/src/fonts/` module to D70: read
+      and hash the contents only of the faces the chain resolves for the
+      design's stacks and the generic families, the bundled Inter, and (Linux)
+      the bundled Noto Emoji; identify every other reachable font file by
+      path, size, modification time, and face index. Phase 2's version
+      hashes the contents of every file (about 1.7 GB on macOS).
+    - Tests: an artifact keyed under the old backend id is not served;
+      changing only the rewritten source / the output format / one palette
+      color / one resolved face's contents / another reachable file's size or
+      modification time / the post-process version / `MERMAID_FONT` / the
+      injected installed-font set / the fallback order changes the key; the
+      contents of a non-resolved, non-bundled file are never read; a family's
+      CSS-requested font changes the key without parsing; a counter shows
+      font hashing once across two renders.
+    - Record the font-set hash time on macOS in the log against D35's
+      500 ms cold limit.
 - [ ] **SVG post-process module (D33, R-M9, AC-M7).** Keep the gradient-stroke
   fix and the `sans-serif` default; delete `apply_svg_overrides`,
   `fix_legend_text_baseline`, `fix_pie_text_contrast` when Merman does not
@@ -753,8 +779,18 @@ Depends on Phase 3 (render path) and Phase 2 (OSC 4).
   detection results for tests): background + foreground + ANSI → palette; no
   ANSI ⇒ accents from background; nothing ⇒ fixed palette for the color mode;
   non-terminal output (files, Darkmatter, CI) ⇒ fixed palette; native Windows
-  ⇒ background-derived accents (D46). ANSI 1–6 as rotating accents (S0,
-  Design notes). Palette colors enter the cache key (R-P6).
+  follows the same rules, with its ANSI palette from OSC 4 when the terminal
+  answers (D71). ANSI 1–6 as rotating accents (S0, Design notes). Palette
+  colors enter the cache key (R-P6).
+- [ ] **OSC 4 on native Windows (D46, D71, R-P1, AC-P6).** In
+  `biscuit-terminal`'s `discovery/osc_queries`, enable the palette query on
+  native Windows (today `ASKS_PALETTE = cfg!(unix)`) so it rides the existing
+  Windows console query backend
+  (`biscuit-terminal/lib/src/discovery/tty_query/windows.rs`), with no new
+  Windows-specific query code. Verify on the Windows test host (`os` skill):
+  a terminal that answers yields its palette; one that does not times out
+  and yields background-derived accents. Record the run in the log; update
+  `biscuit-terminal/docs/discovery/terminal-queries.md` and `color.md`.
 
 **Wave 11 — after Wave 10.**
 
@@ -787,8 +823,8 @@ Depends on Phase 3 (render path) and Phase 2 (OSC 4).
   new themes (macOS and Linux). Ken captures Zed screenshots and signs off;
   record sign-off in the log. **Human gate: Phase 6 goldens are generated only
   after this sign-off.**
-- [ ] **Docs (shipped).** Write palettes, OSC 4 use (with the native Windows
-  case, D46), accents, contrast, and scoped CSS into
+- [ ] **Docs (shipped).** Write palettes, OSC 4 use (native Windows included,
+  D46, D71), accents, contrast, and scoped CSS into
   `biscuit-visualized/docs/merman.md` and
   `docs/components/mermaid_diagram.md`; remove the **planned** markers they
   replace; remove the **planned** marker in `biscuit-terminal/docs/discovery/`.
@@ -798,7 +834,7 @@ Depends on Phase 3 (render path) and Phase 2 (OSC 4).
 - [ ] `just test` / `just lint` pass in `biscuit-visualized` and
   `biscuit-terminal`.
 - [ ] AC-T1, AC-T2, AC-T3, AC-T6, AC-T7, AC-T8, AC-P3, AC-P4, AC-P6, AC-C15
-  verified.
+  verified; AC-P6 on the Windows test host.
 - [ ] Ken's gallery sign-off (AC-T5) recorded.
 
 ---
@@ -932,7 +968,7 @@ phases have already written their behavior into these pages (marked
   `biscuit-visualized/docs/components/git_graph.md`, and
   `biscuit-visualized/docs/components/graph_expression.md` to post-cutover
   behavior: font chain, `MERMAID_FONT`, bundled fonts, palettes, OSC 4 with the
-  native Windows case (D46), the time budget, and the Merman-only family list
+  native Windows case (D46, D71), the time budget, and the Merman-only family list
   (D16) where relevant.
 - [ ] **R-D3: `biscuit-visualized/docs/mermaid-gitgraph.md` (AC-D3).** Compare
   it with `merman.md` and `components/git_graph.md`. If redundant: delete it
@@ -1073,7 +1109,8 @@ flowchart TD
   both directions, drop shadows capped per D64 (Wave 9).
 - **Cache serving the wrong face**: resolved-face identity in the key (D63),
   tested by changing only `MERMAID_FONT`, installed fonts, or fallback order
-  (Wave 6).
+  (Wave 6). Accepted residual (D70): a non-resolved font file replaced in place
+  with identical size and modification time is not detected.
 - **Linux-only emoji font**: compiled in only under `target_os = "linux"`, last
   in the fallback order so installed color emoji win; goldens exclude emoji
   (D65, Wave 5).

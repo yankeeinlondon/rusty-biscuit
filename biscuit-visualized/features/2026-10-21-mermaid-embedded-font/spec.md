@@ -322,6 +322,25 @@ page that embeds a host face carries no OFL comment.
   the fallback of D11) apply to whichever face is embedded, Inter or a host
   face.
 
+### D17. Bounded implementer autonomy *(pre-authorization)*
+
+Ken ruled on 2026-10-22 that the rule `2026-10-21-merman` records as its
+D72 applies to this work too. When implementation evidence invalidates a
+decision's premise, the implementer may proceed with an option that meets
+**all three** of these conditions:
+
+1. it preserves the decision's stated purpose;
+2. it stays within every other decision and limit of this spec and of the specs it depends on;
+3. it adds no new dependency, no outward-facing action (pushing, posting,
+   filing), and no scope.
+
+The implementer then amends this spec (marking the decision amended),
+records the evidence and the choice under a **"Decided during
+implementation"** heading in the implementation log, and flags the choice
+for the review cycle. If no option meets all three conditions, or the
+options trade off things Ken would weigh, the implementer stops and sets
+`human_review` in the implementation log.
+
 ## Requirements
 
 - **R-E1.** `HtmlOptions::embed_mermaid_font` (default `false`) and the `md`
