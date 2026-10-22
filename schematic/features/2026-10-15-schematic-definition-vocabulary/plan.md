@@ -18,6 +18,7 @@ packages:
   - schematic-definitions
   - schematic-gen
   - schematic-oauth
+  - schematic-runtime
 source_files_during_phase_2:
   - schematic/define/src/auth.rs
   - schematic/define/src/builders.rs
@@ -104,6 +105,108 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
   - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_3:
+  - schematic/define/src/openapi/export/components.rs
+  - schematic/define/src/openapi/export/conversion.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/parameters.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/security.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/gen/src/codegen/api_struct/auth.rs
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/api_struct/mod.rs
+  - schematic/gen/src/codegen/api_struct/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/docs.rs
+  - schematic/gen/src/codegen/endpoint_methods/mod.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/module_docs.rs
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/derives.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_docs.rs
+  - schematic/gen/src/codegen/request_structs/into_parts.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/named_params.rs
+  - schematic/gen/src/codegen/request_structs/param_enums.rs
+  - schematic/gen/src/codegen/request_structs/path_params.rs
+  - schematic/gen/src/codegen/request_structs/query_params.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/auth.rs
+  - schematic/gen/src/export/mod.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/collection.rs
+  - schematic/gen/src/export/postman/item.rs
+  - schematic/gen/src/export/postman/request.rs
+  - schematic/gen/src/export/vocabulary.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/endpoint_auth_output.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/gen/tests/l1/typed_path_output.rs
+  - schematic/gen/tests/l1/vocabulary_exports.rs
+  - schematic/oauth/src/lib.rs
+  - schematic/oauth/src/manager/authorization_code.rs
+  - schematic/oauth/src/manager/client_credentials.rs
+  - schematic/oauth/src/manager/mod.rs
+  - schematic/oauth/tests/wiremock_flows.rs
+  - schematic/openapi/github.json
+  - schematic/postman/github.postman_collection.json
+  - schematic/runtime/src/call.rs
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/credentials.rs
+  - schematic/runtime/src/options.rs
+  - schematic/runtime/tests/l1/endpoint_auth.rs
+  - schematic/runtime/tests/l1/main.rs
+  - schematic/runtime/tests/l1/metadata_boundary.rs
+  - schematic/schema/src/github/mod.rs
+  - schematic/schema/src/github/requests.rs
+docs_updated_during_phase_3:
+  - schematic/docs/definition-builders.md
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/request-side.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/headers/README.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/runtime/building-clients.md
+  - schematic/docs/runtime/calling-an-api.md
+  - schematic/docs/runtime/credentials.md
+  - schematic/docs/runtime/README.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/implementation-log.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_4:
+  - schematic/define/src/builders.rs
+  - schematic/define/src/bundle.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/tests/bundle_support/mod.rs
+  - schematic/define/tests/definition_bundles.rs
+  - schematic/define/tests/fixtures/bundles/fixture.json
+  - schematic/gen/src/errors.rs
+  - schematic/gen/src/main.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/tests/l1/definition_bundles.rs
+  - schematic/gen/tests/l1/main.rs
+docs_updated_during_phase_4:
+  - schematic/README.md
+  - schematic/docs/definition-snapshots.md
+  - schematic/docs/generation/workflow.md
+  - schematic/gen/README.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/implementation-log.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/plan.md
+docs_created_during_phase_4:
+  - schematic/docs/io/definition-bundles.md
+skills_files_updated_during_phase_4:
+  - .claude/skills/schematic-define/SKILL.md
 ---
 
 # Schematic definition vocabulary implementation plan
@@ -179,30 +282,30 @@ Waves are numbered uniquely across the plan. Tasks within one wave may run concu
 
 ### Wave 4: Consumers with separate ownership
 
-- [ ] **Resolve authentication**
+- [x] **Resolve authentication**
   - Own generated runtime/auth assembly and request dispatch. Resolve effective endpoint policy before environment lookup/token acquisition; alternatives are alternatives, and replacement replaces API policy.
   - Public requests suppress all known API/endpoint credential locations, including supported programmatic injections and conflicting raw headers. Preserve ordinary headers/cookies and shared client state for the following authenticated call. Retain prior secret/redirect protections.
   - Mock generated clients for Authorization/custom-header/query/cookie auth, injected credentials, absent environment credentials on public calls, and authenticated calls afterward. Test distinct replacement sources and incompatible/missing sources under the recorded ruling. An unsupported representation emits its target diagnostic rather than relocating credentials.
   - Update shared Basic and OAuth2 generated credential consumers. Coordinate with OAuth and exporter owners rather than editing their files concurrently.
 
-- [ ] **Migrate OAuth consumers**
+- [x] **Migrate OAuth consumers**
   - Own `schematic/oauth/src/types.rs`, `manager/*`, and OAuth tests. Replace field access with grant-aware operations; migrate serialized fixtures explicitly.
   - Verify all grants, both PKCE modes, default scopes, client-authentication methods, revocation, existing refresh flows, and `oauth/tests/wiremock_flows.rs`. No shipped OAuth2 definition adoption.
 
-- [ ] **Connect exports**
+- [x] **Connect exports**
   - Own `define/src/openapi/export/*`, extension models, and `gen/src/export/*`. Emit typed path types/descriptions/required flags, endpoint/parameter deprecation, endpoint security, and all metadata fields.
   - For shared paths, emit a deterministic common parameter declaration and operation overrides for differing `(name, in)` metadata. Normalize `{+name}` for OpenAPI without changing Rust reserved expansion.
   - Register override-only security schemes with deterministic collision checks; export public `security: []` and Postman `noauth`. Never export environment variable names as credential values.
   - Export composition references with conflict checks. Preserve existing concrete Postman examples and emit the composition-specific unsupported diagnostic; invent no example payloads.
 
-- [ ] **Connect Rust output**
+- [x] **Connect Rust output**
   - Own request-struct path generation and module docs, enum machinery, and remaining OAuth2 generator consumers such as shared assembly. Agree file boundaries with the runtime owner first.
   - Emit typed path fields/docs and template-ordered constructors; stringify scalar/enum wire values before existing path encoding; reject non-finite numbers before send. Preserve legacy untyped constructors. Build enum naming/wire access once for path and later query use, including suffix/grouped-module collisions.
   - Typed paths remove `Default`; optional legacy requests retain existing behavior. Emit deprecation as documentation only, not Rust attributes. Show every metadata field in docs without adding runtime behavior.
 
 ### Wave 5: Integrate consumers
 
-- [ ] **Prove outputs**
+- [x] **Prove outputs**
   - Integrate all generator changes and compile generated fixture clients through spec 1's isolated harness. Exercise integer/boolean/number/enum paths, repeated/reserved placeholders, differing GET/DELETE metadata, duplicate declarations, and field/module collisions.
   - Add GitHub's restricted R12 metadata adoption and output assertions. Check that runtime source does not read metadata types and review the runtime diff for retry/sleep/enforcement additions.
   - Assert Basic output and environment docs remain byte-identical for Bitbucket/EMQX; retain ordered fallback tests and explicit mapping/policy precedence checks.
@@ -214,7 +317,7 @@ Waves are numbered uniquely across the plan. Tasks within one wave may run concu
 
 ### Wave 6: Bundle implementation
 
-- [ ] **Implement bundles**
+- [x] **Implement bundles**
   - Implement PD7 version-1 bundle construction from the context's canonical identities and Rust bindings. Include the full schema-reference closure: nested models, containers, aliases, arbitrary JSON, recursive references, and optional structural catalog.
   - Normalize local references to the bundle namespace and terminate cycles with a visited set. Reject unresolved/external references without fetching files or URLs; do not treat Rust paths or `Vec<Model>` spellings as component names.
   - Canonicalize map keys recursively while preserving meaningful array order. Preserve literals and environment names for equality without reading/resolving environment values. Review literals before committing generated fixtures.
@@ -225,7 +328,7 @@ Waves are numbered uniquely across the plan. Tasks within one wave may run concu
 
 ### Wave 7: Bundle evidence
 
-- [ ] **Verify isolation**
+- [x] **Verify isolation**
   - Generate real-tool bundle fixtures from typed fixture APIs and all shipped REST definitions; assert equal round trips and byte-equal canonical serialization using the refreshed API count rather than hard-coding 18.
   - Run one JSON matrix-walking test with a positive unedited control and exactly one edit per cell. Assert the public load-and-export result or diagnostic, including nested fields; a parser `Ok`/`Err` assertion alone is insufficient.
   - Prove loaded bundles export without invoking registry registration, including recursive/container/alias/JSON/composition schemas. Remove one referenced entry to prove a named load error. Exercise unsupported versions and recursive map determinism.
