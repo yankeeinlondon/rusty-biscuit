@@ -69,6 +69,7 @@ Prefer a Discord **webhook** over a bot when you only need one-way notifications
 - Attachments: supported (local path or in-memory bytes).
 - Replies: **not supported** — `plan_send()` and `send()` return `MessengerError::UnsupportedFeature { provider: DiscordWebhook, feature: "replies" }` before any network call. Use the bot adapter if you need threaded replies.
 - Thread routing: optional, supplied at dispatch time via `Target::discord_webhook_thread(thread_id)`. Thread IDs are not part of the route config.
+- Long messages: content over Discord's 2000-character limit is sent as consecutive posts, split at paragraph, then line, then character boundaries, with code blocks closed and reopened across posts. The receipt identifies the first post and lists every post id in `metadata["post_message_ids"]`. See [Discord: Long messages](platforms/discord.md#long-messages).
 
 **Environment variable:** `DISCORD_WEBHOOK_URL`
 
