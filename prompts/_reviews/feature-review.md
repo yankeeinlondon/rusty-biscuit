@@ -214,6 +214,7 @@ intermixed with the implementation where ever possible. As a result, the very fi
                 - set `created` property to "{{ctx.now}}"
                 - set `spec` property to "{{ parent_dir(spec) }}/{{ basename(spec) }}"
                 - set `implemented` property to `false`
+                - set `ready` property to `false` (a pending human decision is not production ready, and the review loop requires a boolean `ready`)
                 - set `description` property to "A **{{feature_or_fix}}** review of `{{ parent_dir(spec) }}/{{ basename(spec) }}`"
                 ::block when="next_spec"
                 - set `next_spec` property to "{{next_spec}}"
