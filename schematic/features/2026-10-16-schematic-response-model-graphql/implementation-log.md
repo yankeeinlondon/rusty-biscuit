@@ -56,18 +56,17 @@ human_review_items:
     they need) land, set this spec's `refresh_required` to `false` and rerun
     Phase 1 from the start.
 message_to_agent: |-
-  Phase 1 is still blocked (third run, 2026-10-22). Spec 4b
-  (2026-10-15-schematic-definition-vocabulary) has now landed in code
-  (bundle at schematic/define/src/bundle.rs, metadata at metadata.rs), so the
-  plan Rule 1 "surface absent" check passes. However, 4b's review-1.md is an
-  author-decision triage with human_resolved: false and six open decisions
-  (bundle v1 layout, auth-override precedence, retry vocabulary, OpenAI query
-  omission, explode default, OAuth client auth), and this spec is still
+  Phase 1 is still blocked (fourth run, 2026-10-22, HEAD 9a50aad7b). Nothing
+  changed since the third run. 4b's review-1.md
+  (2026-10-15-schematic-definition-vocabulary) still has human_resolved: false,
+  its "Human rulings" section still says "Pending", and its six decisions are
+  open (bundle v1 layout, auth-override precedence, retry vocabulary, OpenAI
+  query omission, explode default, OAuth client auth). This spec is still
   refresh_required: true. Rerun Phase 1 from the start only after those
   rulings are recorded and this spec is refreshed (refresh_required: false).
   The consumer/provider inventories, baseline, timeout spike, and contract
-  freeze have not been performed. The 2026-10-22 table in the log is the
-  current prerequisite snapshot.
+  freeze have not been done. The 2026-10-22 table in the log is the current
+  prerequisite snapshot.
 ---
 
 # Implementation Log for 2026-10-16-schematic-response-model-graphql (8 phases)
@@ -258,3 +257,28 @@ it saw included the two pre-existing 4b feature files. `just test` and
 `just lint` were therefore skipped. No dependent tests, cross-OS checks, or
 skill updates apply. Only this log changed in this run; the plan and spec were
 not edited.
+
+### Rerun on 2026-10-22 (fourth run): unchanged, still blocked
+
+The gate was checked again at HEAD `9a50aad7b`. Nothing that unblocks it has
+changed since the previous run:
+
+- 4b review 1 still has `human_resolved: false`. Its `## Human rulings`
+  section still says "Pending", and its six decisions are still open.
+- The uncommitted 4b log entry in the working tree records the 4b
+  review-to-implement pass. It says that pass had no findings to implement and
+  that it is still waiting on the author. It contains no rulings, and this run
+  did not touch it.
+- This spec is still `refresh_required: true` and `status: draft-spec`.
+
+The reasons in the previous section still apply, and so does the unblock path:
+rulings recorded, any code they require landed, this spec refreshed and set to
+`refresh_required: false`, then Phase 1 rerun from the start. No source, test,
+doc, plan, spec, or skill file changed, and no plan task was checked off. Only
+this log changed.
+
+**Gates.** The scope calculator was run after the edit
+(`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`).
+The result is recorded below.
+It returned `packages: []` and `change_class: documentation`, so `just test`
+and `just lint` were skipped.

@@ -1130,3 +1130,33 @@ The changes they exercise are code generation and encoding, with no path, proces
 **Scope calculator** (repository root, after every edit including plan, log, spec, and skill): `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` → `change_class: package`, `packages: [homelab, schematic-define, schematic-definitions, schematic-gen, schematic-runtime, sniff, test-toolkit, darkmatter]`. The uncommitted tree includes Phase 5, so these packages are Phases 5–6 together. The gates were required, and they ran (above). `test-toolkit` is the lint-companion row, as in earlier phases, and was not run locally.
 
 Last completed phase: 6. `human_review: false`: no blocking decision remains, and the review items above are for review 1.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-10-22T12:22:23-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-schematics/schematic/features/2026-10-15-schematic-definition-vocabulary/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- review 1 carries no code findings to implement:
+        - `findings: []` and `observations: []`, so the finding ledger is empty
+        - `review_scope: human-decision-triage-only`; the review compared no implementation to the spec, ran no tests, and states that production readiness was **not assessed**
+- no source, test, doc, or spec file was changed by this pass, and nothing was committed
+
+| Finding | Severity | Outcome |
+| ------- | -------- | ------- |
+| _none_  | —        | no finding was recorded in review 1 |
+
+## Follow-up Pass for Review #1
+
+- the review found in '/Volumes/coding/wt/rusty-biscuit/feat-better-schematics/schematic/features/2026-10-15-schematic-definition-vocabulary/review-1.md' indicated that the specification is **production ready**
+- the specification can be found at '/Volumes/coding/wt/rusty-biscuit/feat-better-schematics/schematic/features/2026-10-15-schematic-definition-vocabulary/spec.md'
+- caveat on that readiness signal: review 1 sets `ready: true` only because its finding inventory is empty, and says in its body that this is not a production-readiness endorsement
+- the review lists no follow-ups, so this pass made no change
+- the cycle is still paused for the author; review 1 has `human_review: true` and `human_resolved: false`, with six decisions left for the author under `human_in_the_loop`:
+        - credential sources and precedence for a replacement endpoint auth policy, and whether an anonymous call may bypass it
+        - omitting optional query parameters the Rust generator cannot serialize (fifteen OpenAI setters removed)
+        - the version-1 portable bundle layout (ordered `api.schemas` with bindings, instead of separate `bindings`/`schemas` maps)
+        - the OpenAI importer's form-style `explode` default change and the related mechanical edits
+        - `client_auth` now controlling OAuth client authentication (Basic header, request body, or none)
+        - keeping or dropping retry guidance, which has no shipped adopter
+- next step: the author records rulings under review 1's **Human rulings** section and sets `human_resolved: true`; review 1 says a later review must then do the implementation comparison and verification it skipped
