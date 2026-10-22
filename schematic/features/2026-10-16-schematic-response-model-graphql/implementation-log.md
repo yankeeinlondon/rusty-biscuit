@@ -14,62 +14,60 @@ packages: []
 human_review: true
 human_review_items:
   - |-
-    **The feature this one builds on has not been built yet. Should this run wait for it?**
+    **The earlier feature is now built, but its review is waiting on your decisions. This feature should wait for them.**
 
-    This feature (a new way for API definitions to describe their replies:
-    streams, several reply shapes, error tables, and GraphQL) is written on top
-    of an earlier feature, `2026-10-15-schematic-definition-vocabulary`. That
-    feature adds the self-contained "definition bundle" file format and new
-    endpoint metadata (rate limits, deprecation, per-endpoint auth). Its
-    specification says it must be **finished and reviewed first**. Today only
-    the first of its six phases is done. No code for it exists yet.
+    This feature lets API definitions describe more kinds of reply: streams,
+    several possible reply shapes, error tables, and GraphQL. It builds on an
+    earlier feature, `2026-10-15-schematic-definition-vocabulary`. That earlier
+    feature is now fully built and committed. Its first review, however,
+    stopped with six questions for you, and none has been answered yet
+    (`review-1.md` in that feature's folder).
 
-    Phase 2 of this plan starts changing the same files that phases 2–5 of the
-    earlier feature will change (`schematic/define/src/builders.rs`, `types.rs`,
-    the OpenAPI extension code, and the four provider definitions). This
-    feature's own plan says that if a prerequisite is missing, it records the
-    block and stops. Its specification is also still marked
-    `refresh_required: true` and `draft-spec`. It has to be updated with what
-    the earlier features actually built before anyone implements it.
+    Three of those answers set things this feature's first phase must lock
+    down for every later phase:
+
+    - the layout of the portable "definition bundle" file, which sets this
+      feature's bundle round-trip requirement and its file-format tests;
+    - the order in which an endpoint's replacement login credentials are
+      chosen, which sets what the exported OpenAPI extension describes;
+    - whether to keep the "retry guidance" fields, which changes that same
+      extension.
+
+    This feature's specification also says it must be refreshed from those
+    review outcomes before its plan runs. It is still marked
+    `refresh_required: true`.
 
     Options:
 
-    - **A. Pause this feature; finish and review the earlier feature first, then refresh this spec and rerun.**
-      - Pros: this is the order the specification requires. No two automated
-        runs edit the same files. The refreshed spec uses the real names and
-        file formats instead of guesses.
-      - Cons: this feature starts later.
-    - **B. Run this feature now, with the earlier feature on hold.**
-      - Pros: work starts right away.
-      - Cons: requirement R44 (the definition-bundle round trip), half of the
-        input-testing tables, and requirement R26 (the OpenAPI extension
-        carries rate-limit, deprecation, and auth fields) all depend on code
-        that does not exist yet. They would have to be skipped, faked, or
-        built here, which the plan forbids. When the earlier feature lands,
-        large parts would have to be merged again or redone.
-    - **C. Run this feature now, alongside the earlier feature.**
-      - Pros: both features move forward together.
-      - Cons: two runs would change the same files at the same time, which
-        means certain merge conflicts. This feature would also be built from
-        an outdated spec.
+    - **A. Answer the six questions in the earlier feature's review, refresh this spec, then rerun this phase.**
+      - Pros: this phase records final facts, so later phases do not have to
+        be redone.
+      - Cons: about one review session of your time before this feature
+        starts.
+    - **B. Run now against the code as built, assuming you accept every recommendation in that review.**
+      - Pros: work starts immediately. The review recommends "keep as built"
+        for most items.
+      - Cons: if you choose differently on the bundle layout or the
+        credentials order, the locked contracts and parts of Phases 2–8 must
+        be redone. The spec would also still be unrefreshed.
 
-    **Recommendation: A.** The specification and plan both require it. The
-    cost of waiting is only time; the other options create rework in shared
-    files. When this run is restarted, refresh `spec.md` first, as its
-    "Refresh notes" section describes, and then rerun Phase 1 from the start.
+    **Recommendation: A.** Answering the review takes far less work than
+    unwinding a phase built on a guess. After the rulings (and any code change
+    they need) land, set this spec's `refresh_required` to `false` and rerun
+    Phase 1 from the start.
 message_to_agent: |-
-  Phase 1 stopped at the prerequisite gate (plan Rule 1): spec 4b
-  (2026-10-15-schematic-definition-vocabulary) has only completed its Phase 1
-  of 6. Its bundle loader, endpoint metadata vocabulary, and auth override do
-  not exist in code. This spec is still draft-spec with refresh_required: true.
-  Do not start Phase 2 until 4b has landed and been reviewed, and this spec has
-  been refreshed. Then redo Phase 1 from the start: the consumer and provider
-  inventories, baseline, and timeout spike were deliberately not performed
-  because 4b changes the files they would capture. The prerequisite inventory
-  below is a snapshot of the tree on 2026-10-21 and must be refreshed.
-  Phase 1 was rerun once on 2026-10-21 with nothing changed and stopped at
-  the same gate (see "Rerun on 2026-10-21"); do not rerun it again until 4b
-  is landed and reviewed and this spec has refresh_required: false.
+  Phase 1 is still blocked (third run, 2026-10-22). Spec 4b
+  (2026-10-15-schematic-definition-vocabulary) has now landed in code
+  (bundle at schematic/define/src/bundle.rs, metadata at metadata.rs), so the
+  plan Rule 1 "surface absent" check passes. However, 4b's review-1.md is an
+  author-decision triage with human_resolved: false and six open decisions
+  (bundle v1 layout, auth-override precedence, retry vocabulary, OpenAI query
+  omission, explode default, OAuth client auth), and this spec is still
+  refresh_required: true. Rerun Phase 1 from the start only after those
+  rulings are recorded and this spec is refreshed (refresh_required: false).
+  The consumer/provider inventories, baseline, timeout spike, and contract
+  freeze have not been performed. The 2026-10-22 table in the log is the
+  current prerequisite snapshot.
 ---
 
 # Implementation Log for 2026-10-16-schematic-response-model-graphql (8 phases)
@@ -189,3 +187,74 @@ The scope calculator, run after every edit was saved
 returned `packages: []` and `change_class: documentation`, so `just test` and
 `just lint` were skipped as the run prompt allows. No dependent tests, cross-OS
 checks, or skill updates apply.
+
+### Rerun on 2026-10-22: prerequisite landed, still blocked on its review and this spec's refresh
+
+The prerequisite has moved since the 2026-10-21 runs, so the gate was
+re-evaluated rather than assumed closed. Tree: HEAD `ea86eb8ab`, branch
+`feat/better-schematics`. The working tree already had uncommitted changes to
+`features/2026-10-15-schematic-definition-vocabulary/spec.md` and an untracked
+`review-1.md` there. Both belong to someone else and were not touched.
+
+| Check | Result on 2026-10-22 |
+| --- | --- |
+| 4b code | **landed**: Phases 2–6 committed (`13c168975`, `69e819c97`, `c00790c57`, `cf1a27e80`, `ea86eb8ab`). `DefinitionBundle` with `to_json`/`from_json` and `format_version` at `schematic/define/src/bundle.rs:48`; `RateLimit` at `define/src/metadata.rs:99`, `RetryGuidance` at `metadata.rs:286` |
+| 4b spec | `implemented: true`, `review_iterations: 1`, still `status: draft-spec` and `refresh_required: true` |
+| 4b review 1 | a triage of decisions the author must make. No implementation review was done: `human_review: true`, **`human_resolved: false`**, and six open decisions (listed below) |
+| 4a | `status: human-in-the-loop` (unchanged) |
+| specs 2 and 3 | closed in `features/_completed/` (unchanged) |
+| 4a placeholders this spec fills | unchanged: `Success(ApiResponse)` at `define/src/builders.rs:48`, `ErrorSet { _private: () }` at `builders.rs:61`, `errors(self, _: ErrorSet)` at `builders.rs:125`, `Endpoint::response: ApiResponse` at `define/src/types.rs:466` |
+| this spec | `status: draft-spec`, **`refresh_required: true`** (unchanged) |
+| Rust files outside `target/` naming `ApiResponse` | 64 (raw `grep -l`, up from 62) |
+
+**Why this is still blocking.** Plan Rule 1's narrow "surface absent" condition
+no longer holds: the runtime, builders, and bundle all exist. Two other
+conditions still stop the run:
+
+1. **This spec has not been refreshed.** Its Refresh notes say "Before its
+   plan runs, refresh it", and they name the outcomes of 4a and 4b review 1
+   as "the largest source of change". Those review outcomes do not exist yet.
+   Refreshing the spec is an authoring step that comes before this plan, not a
+   Phase 1 task. The plan says it is "a plan for the tree after the
+   prerequisite reviews".
+2. **4b review 1 is waiting on the author, and three of its six open decisions
+   set inputs that this phase's Contract freeze must lock down:**
+    - the version-1 bundle layout (schemas and bindings kept together in
+      `api.schemas`, or separate maps). It decides R44 and the
+      definition-bundle input-robustness columns.
+    - the precedence for endpoint auth replacement, and whether anonymous calls
+      may bypass it. It decides what R26's `x-schematic` extension carries.
+    - whether to keep the retry-guidance vocabulary. It changes R26's field
+      list.
+
+    The other three decisions (omitting OpenAI query parameters, the importer's
+    explode default, and OAuth client authentication) affect the baseline the
+    Baseline capture task would compare against.
+
+The rule "conform to what landed" in the spec's Dependencies section was
+considered. It does not cover this case, because what landed is still waiting
+on author decisions that may change it. Locking down contracts that the author
+may reject in 4b is the costly wrong guess the blocking test describes. Phase 1
+takes inventories and freezes contracts for every later phase, so redoing it
+after the 4b rulings costs less than redoing Phases 2–8.
+
+**What did not change.** No source, test, generated artifact, doc page, or
+skill changed. No pre-authorization was used. Defaults D-4–D-31 are still
+not adopted. The Consumer inventory, Provider inventory, Baseline capture,
+Timeout spike, and Contract freeze tasks remain unchecked. The prerequisite
+inventory table above is superseded by this section's table for 4b.
+
+**What unblocks it:** (1) the author records rulings on the six 4b review 1
+decisions (`human_resolved: true`); (2) any code change those rulings require
+lands; (3) this spec is refreshed from the 4a/4b outcomes and set to
+`refresh_required: false`. Then rerun Phase 1 from the start.
+
+**Gates.** See the scope-calculator result recorded below.
+
+The scope calculator was run after all edits were saved
+(`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`).
+It returned `packages: []` and `change_class: documentation`. The working tree
+it saw included the two pre-existing 4b feature files. `just test` and
+`just lint` were therefore skipped. No dependent tests, cross-OS checks, or
+skill updates apply. Only this log changed in this run; the plan and spec were
+not edited.
