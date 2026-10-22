@@ -986,9 +986,8 @@ judgment at review 1.
 ## Pre-authorizations
 
 Taken from the parent's D50 list and specific to this spec. The author must
-confirm these before the unattended run (D50 item 8); until confirmed, none is
-assumed. Once confirmed, the implementer does not pause for them and logs each
-use.
+confirm these before the unattended run (D50 item 8); the author confirmed them
+on 2026-10-21. The implementer does not pause for them and logs each use.
 
 - Regenerate `schematic-schema` (large tree; generated output is never
   hand-edited) and regenerate the OpenAPI, Postman, and (new) AsyncAPI
@@ -1010,7 +1009,8 @@ use.
 - Edit `schematic-definitions` source files to adopt the single API list
   (R34). No vendor pagination preset moves (R43 is verification). This is *not* a
   rewrite of the roughly 519 endpoint literals; if a change would touch more than
-  the API-level constructor calls, stop and log it as an open question.
+  the API-level constructor calls, leave that change unmade, log it as an open
+  question, and continue (ruled 2026-10-21).
 - Build and test every dependent crate listed above (read-only use of their
   trees).
 - The stale tracked `schematic/gen/schematic/` tree is spec 1's only to
@@ -1228,6 +1228,8 @@ Recommend API-specific 3.0 documents because round-trip identity matters more
 than matching REST grouping. Validate shared-module filenames and preserve 2.x
 import fixtures. A schema validation gap may be recorded, but writing 2.x fields
 under a 3.0 version is a defect, not an accepted validation shortcut.
+
+**Ruled by the author on 2026-10-21:** option 1, API-specific 3.0 documents.
 
 ### Ruled since this spec was written
 
