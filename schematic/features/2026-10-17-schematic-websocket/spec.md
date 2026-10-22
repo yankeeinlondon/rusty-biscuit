@@ -885,9 +885,9 @@ the following hold and are recorded in `implementation-log.md`:
 
 ## Pre-authorizations
 
-These steps would otherwise pause an unattended run. The author must confirm
-them before the unattended run (D50 item 8); until then none is in force. The
-specifics are listed below.
+These steps would otherwise pause an unattended run. The author confirmed
+them on 2026-10-21 (D50 item 8); they are in force. The specifics are listed
+below.
 
 - Regenerating `schematic-schema` with the generator, repeatedly, in the
   phases listed.
