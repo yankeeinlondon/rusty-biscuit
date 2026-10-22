@@ -970,41 +970,119 @@ fn shipped_prompts_name_specs_by_directory_identity() {
     assert!(defects.is_empty(), "{}", defects.join("\n"));
 }
 
-fn assert_feature_review_next_spec_route(present: bool) {
-    let fixture = common::CliProcessFixture::named("feature-review-next-spec");
+/// The first review reads the decisions the implementation flagged for the
+/// author and no longer refreshes later pipeline specs; the implementation's
+/// final phase does that.
+#[test]
+fn feature_review_first_review_reads_decisions_for_author() {
+    let fixture = common::CliProcessFixture::named("feature-review-first-review");
     fixture.initialize_repository();
     fixture.seed_user_config();
     common::write_dry_run_provider_stub(fixture.bin_dir(), "codex");
     let prompts = fixture.cwd().join("prompts");
     copy_shipped_prompts(&prompts);
     common::write(&fixture.cwd().join("current/spec.md"), "---\nreview_iterations: 0\n---\nCurrent spec.\n");
-    common::write(&fixture.cwd().join("following/spec.md"), "# Following spec\n");
-    common::write(&fixture.cwd().join("following/plan.md"), "# Following plan\n");
-    let mut command = fixture.command();
-    command.arg("compose").arg(prompts.join("_reviews/feature-review.md"))
-        .arg("spec=current/spec.md").args(["--dry-run", "--codex"]);
-    if present { command.arg("next_spec=following/spec.md"); }
-    let output = command.output().expect("feature review composes");
+    let output = fixture.command()
+        .arg("compose").arg(prompts.join("_reviews/feature-review.md"))
+        .arg("spec=current/spec.md").args(["--dry-run", "--codex"])
+        .output().expect("feature review composes");
     let rendered = common::strip_ansi(&format!("{}{}",
         String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)));
     assert!(output.status.success(), "{rendered}");
-    assert_eq!(rendered.contains("### Spec and Plan Refresh"), present, "{rendered}");
-    if present {
-        assert!(rendered.contains("following/spec.md"), "{rendered}");
-        assert!(rendered.contains("following/plan.md"), "{rendered}");
-    }
+    assert!(rendered.contains("current/implementation-log.md"), "{rendered}");
+    assert!(rendered.contains("`decisions_for_author`"), "{rendered}");
+    assert!(rendered.contains("Never defer requested scope"), "{rendered}");
+    assert!(!rendered.contains("Spec and Plan Refresh"), "{rendered}");
     // The prompt's own prose may say "removed"; only the removed-grammar
     // diagnostics are defects.
     assert!(!rendered.contains("removed grammar") && !rendered.contains("removed validation/handler key"), "{rendered}");
     assert!(!fixture.audio_spool().exists(), "no audio may be published");
 }
 
-#[test]
-fn feature_review_next_spec_input_drives_refresh_paths() {
-    assert_feature_review_next_spec_route(true);
+/// `(file, flag)`: where an author decision can still be waiting when
+/// `implement-plan` starts.
+#[cfg(unix)]
+const WAITING_ON_AUTHOR_CASES: &[(&str, &str)] = &[
+    ("spec.md", "human_review: true"),
+    ("spec.md", "needs_rulings: true"),
+    ("plan.md", "human_review: true"),
+    ("implementation-log.md", "human_review: true"),
+];
+
+/// A spec, plan, or paused log that still waits on the author fails in
+/// `initialize`: no agent launches, and the terminal shows the open items.
+#[cfg(unix)]
+fn assert_implement_plan_refuses_while_waiting_on_author(row: usize) {
+    use common::{strip_ansi, write, write_executable};
+
+    let (waiting, flag) = WAITING_ON_AUTHOR_CASES[row];
+    let fixture = common::CliProcessFixture::named("implement-plan-waiting-on-author");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    let prompts = fixture.cwd().join("prompts");
+    copy_shipped_prompts(&prompts);
+    write(
+        &prompts.join("_implement/implement-plan.md"),
+        include_str!("../fixtures/shipped_implement_route/_implement/implement-plan.md"),
+    );
+    let case = fixture.cwd().join("fixes/case");
+    let items = "human_review_items:\n    - OPEN-DECISION-MARKER\nrequired_rulings:\n    - OPEN-DECISION-MARKER\n";
+    for (file, body, base) in [
+        ("spec.md", "# Spec\n", "status: draft\n"),
+        ("plan.md", "# Plan\n", "total_phases: 2\nphase: 1\n"),
+        ("implementation-log.md", "# Implementation Log\n", "started_phase: 1\n"),
+    ] {
+        let extra = if file == waiting { format!("{flag}\n{items}") } else { String::new() };
+        write(&case.join(file), &format!("---\n{base}{extra}---\n{body}"));
+    }
+    let launched = fixture.cwd().join("launched.txt");
+    write_executable(
+        &fixture.bin_dir().join("goose"),
+        "#!/bin/sh\ntouch \"$CLAUDINE_LAUNCH_MARKER\"\nexit 0\n",
+    );
+
+    let output = fixture
+        .command()
+        .env("CLAUDINE_LAUNCH_MARKER", &launched)
+        .arg("compose")
+        .arg(prompts.join("_implement/implement-plan.md"))
+        .arg(format!("spec={}", case.join("spec.md").display()))
+        .args(["--goose", "-y"])
+        .output()
+        .unwrap();
+    let rendered = strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ));
+    assert!(!output.status.success(), "{waiting} `{flag}` must refuse:\n{rendered}");
+    assert!(!launched.exists(), "no agent may launch:\n{rendered}");
+    assert!(rendered.contains("OPEN-DECISION-MARKER"), "the open items are shown:\n{rendered}");
+    // The error box wraps its text and prefixes each line with `┃`.
+    let flowing = rendered.replace('┃', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flowing.contains("`initialize` raised an error"), "{rendered}");
+    assert!(flowing.contains("until the author settles"), "{rendered}");
+    assert!(!fixture.audio_spool().exists(), "no audio may be published");
 }
 
-#[test]
-fn feature_review_without_next_spec_omits_refresh_instructions() {
-    assert_feature_review_next_spec_route(false);
+#[cfg(unix)]
+macro_rules! waiting_on_author_tests {
+    ($($name:ident => $row:literal),* $(,)?) => {
+        $(#[test]
+        fn $name() { assert_implement_plan_refuses_while_waiting_on_author($row); })*
+
+        #[test]
+        fn every_waiting_on_author_case_has_a_test() {
+            let covered = std::collections::BTreeSet::from([$($row),*]);
+            assert_eq!(covered, (0..WAITING_ON_AUTHOR_CASES.len()).collect());
+        }
+    };
+}
+
+#[cfg(unix)]
+waiting_on_author_tests! {
+    implement_plan_refuses_spec_with_human_review => 0,
+    implement_plan_refuses_spec_with_needs_rulings => 1,
+    implement_plan_refuses_plan_with_human_review => 2,
+    implement_plan_refuses_paused_log => 3,
 }

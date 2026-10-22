@@ -5,28 +5,18 @@ $schema:
     iteration: number -> the review's iteration number
     review: file -> the review file which will be created based on this prompt's execution
     spec_name: string -> the name of the spec (which is really just the spec's folder name)
-    next_spec: file(match(**/*spec*.md)) -> if the current spec is part of a multi-spec/multi-plan process then this points to the NEXT spec in the sequence
-    next_plan: file(match(**/*plan*.md)) -> if the current spec is part of a multi-spec/multi-plan process then this points to the NEXT plan in the sequence
-    human_in_the_loop: string[] -> filled out with review items when it has determined that a human review is required
 description: |-
     Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.
 
     > **Note:** the caller _can_ pass in the **iteration** number but it should be detected automatically.
 
-    There are two special cases in the review cycle that can be activated:
+    **First Review:** in the first review cycle, the very first thing we consider is whether the implementation surfaced a critical decision the author must make.
 
-    1. **First Review**
+    - if it did, this review is repurposed to document those decisions; `just fix` then opens an interactive session with the author to settle them
+    - if it did not, this review is conducted like a normal review that compares the implementation against what was specified
 
-        When we are in the first review cycle, the very first thing we will consider is whether there is a need for human-in-the-loop review.
+    Refreshing later specs in a multi-spec pipeline is not done here: the implementation's final phase does it.
 
-        - if there is then this review will be repurposed to focus on getting the review feedback from the caller
-        - if there is not then this review will be conducted like a normal review that compares the implementation against what was specified
-    
-    2. **Last Review** (_in a multi-spec pipeline_)
-
-        In the last review cycle (aka, when `ready` has been set to `true`) -- but _only_ if this spec is part of a multi-spec pipeline -- we will
-        look at whether the next spec and plan need to be refreshed based on the current spec's findings and decisions.
-    
 dir: "{{dirname(spec)}}"
 design: |-
     {{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}
@@ -38,13 +28,7 @@ review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
 # repo-relative `dir`.
 previous_review: "{{ iteration > 1 ? replace(spec, basename(spec), 'review-' + (iteration - 1) + '.md') : null }}"
 spec_name: "{{ parent_dir(spec) }}"
-next_plan: |-
-    {{
-        next_spec
-            ? replace(next_spec, "spec","plan")
-            : null
-    }}
-
+log: "{{ dirname(spec) + '/implementation-log.md' }}"
 
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
@@ -88,54 +72,13 @@ failure:
         💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area || ctx.repo }}** failed to complete ({{err.msg}})!
     effect: phase-jump-3
 finalize:
-    - when: "human_in_the_loop && !err"
-      message: |-
-        - the first review after the implementation of `{{spec_name}}` was conducted and there are decisions that require your attention:
+    - when: "!err && file_exists(review) && length(frontmatter(review, 'human_in_the_loop') || []) > 0"
+      then:
+          - info: |-
+                the first review after the implementation of {{ link(spec) }} found decisions that need the author:
 
-        {{human_in_the_loop}}
-      info: |-
-          - the first review after the implementation of {{ link(spec) }} was conducted and there are decisions that require your attention:
-    
-          {{human_in_the_loop}}
-      stop: null
-    - when: "refreshed && !err"
-      message: |-
-        - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
-        - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
-        - the spec and plan have been refreshed:
-
-        {{refreshed}}
-
-        > **Note:** no human review was needed for this refresh
-      info: |-
-        - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
-        - the next spec which will be implemented is `{{link(next_spec)}}`
-        - the spec and plan have been refreshed:
-
-        {{refreshed}}
-
-        > **Note:** no human review was needed for this refresh
-    - when: "refresh_review && !err"
-      message: |-
-        - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
-        - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
-        - the spec and plan have decisions that require human intervention:
-  
-        {{refresh_review}}
-      info: |-
-        - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
-        - the next spec which will be implemented is `{{link(next_spec)}}`
-        - the spec and plan have been refreshed:
-  
-        {{refreshed}}     
-      stop: null
-    - when: "no_refresh && !err"
-      message: |-
-        - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
-        - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
-      info: |-
-          - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
-          - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
+                {{ as_ordered_list(frontmatter(review, 'human_in_the_loop')) }}
+          - message: "🤷  the first review of `{{spec_name}}` found **{{ length(frontmatter(review, 'human_in_the_loop')) }}** decision(s) that need the author; `just fix` opens an interactive session to settle them"
 ---
 # Review of {{title_case(without_date(parent_dir(spec)))}}
 
@@ -186,50 +129,54 @@ earlier reviews. Observations are not findings and are not carried.
 ::block when="iteration == 1"
 ### Choose Course of Action
 
-You are in the first review cycle after the implementation. During the implementation the agent was told to avoid human-in-the-loop review cycles
-intermixed with the implementation where ever possible. As a result, the very first thing you are asked to do is:
+You are in the first review cycle after the implementation. The implementing
+agents were told to decide rather than ask, to record every decision (with the
+alternatives, why, and the downsides) in the implementation log, and to list a
+truly critical decision in the log's `decisions_for_author`. So the very first
+thing you do is:
 
-- have two sub-agent review:
-    - the implementation-log 
+- have two sub-agents review:
+    - the implementation log ({{log}}), including its `decisions_for_author` frontmatter
     - the spec file
-- both subagents should be instructed to:
-    - find any decisions which were made by the agent during the implementations
-    - find any rules or decisions that the agent flagged as needing to be made
-    - find any work that was deferred
-- based on what you hear back you need to choose one of the following courses of action:
-    1. **Human review:**
-        - There are impactful/meaningful design decisions or rules that need to be made 
-        - so we will report on this and stop the review cycle to allow for a human-in-the-loop review
-        - Process:
-            - Report back to caller using the **Writing Clearly** guidelines below
-            - the reporting should include rich context, give examples where possible
-            - use Mermaid code blocks for any diagrams you feel would help
-            - Set the following properties on the review file's Frontmatter:
-                - Synthesize your key points and set the `human_in_the_loop` Frontmatter property on this review file ({{review}}):
-                    - this property will be an array of points
-                    - you may use Markdown syntax to help your report be more easily digested
-                    - that includes using Mermaid code blocks -- where appropriate -- for diagrams
-                - set `reviewed_by` property to "{{ctx.agent}}/{{ctx.model}}" 
-                - set `created` property to "{{ctx.now}}"
-                - set `spec` property to "{{ parent_dir(spec) }}/{{ basename(spec) }}"
-                - set `implemented` property to `false`
-                - set `description` property to "A **{{feature_or_fix}}** review of `{{ parent_dir(spec) }}/{{ basename(spec) }}`"
-                ::block when="next_spec"
-                - set `next_spec` property to "{{next_spec}}"
-                - set `next_plan` property to "{{next_plan}}"
-                ::end-block
+- both sub-agents should be instructed to:
+    - find any decisions which were made by the agent during the implementation
+    - find any decision that the agent flagged for the author
+    - find any requested scope that was deferred, narrowed, or left "blocked on a ruling"
 
-        - You are done when:
-            - you have summarized -- in prose -- what needs to be reviewed back to the caller
-            - and documented those same idea/points in the `human_in_the_loop` frontmatter property of the {{review}} file
-            - all other required Frontmatter metadata is set on the review file
+Deferred scope is never a question for the author: deferring requested scope is
+forbidden, so each instance is a **high finding** in this review, and the
+repair implements it.
 
-        > **Note:** the exercise of comparing the implementation to the specification is **not** done during this review when you choose this course of action; the focus is exclusively to document what we need from the caller.
-    2. **Summary decisions and gather findings:**
-        - Small decisions were made by the agent but nothing that really warrants a human review
-        - so we will report these decisions to the caller for informational purposes, but
-        - set `human_in_the_loop` property on the review file to `null` 
-        - the review process will continue in a normal fashion
+::file ../_decisions.md
+
+Then choose one of these courses of action:
+
+1. **Human review:** at least one decision meets the bar in "When a human is needed" above (an item in `decisions_for_author` is a candidate; check it against the bar rather than passing it through).
+    - a decision the agent recorded with its alternatives and reasoning does not qualify just because the author has not seen it, and neither does a recommendation the spec or plan already made
+    - Process:
+        - Report back to caller using the **Writing Clearly** guidelines below
+        - the reporting should include rich context, give examples where possible
+        - use Mermaid code blocks for any diagrams you feel would help
+        - Set the following properties on the review file's Frontmatter:
+            - set `human_in_the_loop` to a list with one entry per decision (a YAML `|-` block each): what the decision is, why it is critical, the options with pros and cons, and your recommendation; Markdown, including Mermaid code blocks, is allowed
+            - set `human_resolved` to `false`
+            - set `ready` to `false`, and `findings` to the deferred-scope findings (an empty list when there are none)
+            - set `reviewed_by` property to "{{ctx.agent}}/{{ctx.model}}" 
+            - set `created` property to "{{ctx.now}}"
+            - set `spec` property to "{{ parent_dir(spec) }}/{{ basename(spec) }}"
+            - set `implemented` property to `false`
+            - set `description` property to "A **{{feature_or_fix}}** review of `{{ parent_dir(spec) }}/{{ basename(spec) }}`"
+
+    - You are done when:
+        - you have summarized -- in prose -- what needs to be reviewed back to the caller
+        - and documented those same decisions in the `human_in_the_loop` frontmatter property of the {{review}} file
+        - all other required Frontmatter metadata is set on the review file
+
+    > **Note:** the exercise of comparing the implementation to the specification is **not** done during this review when you choose this course of action; the focus is exclusively to document what we need from the author. The next review does the full comparison after the author's decisions are applied.
+2. **Summarize decisions and gather findings:** no decision meets the bar
+    - report the agent's decisions to the caller for informational purposes
+    - set `human_in_the_loop` property on the review file to `null` 
+    - the review process continues in the normal fashion
 ::end-block
 
 ## Spec Review
@@ -423,29 +370,9 @@ The spec file which underpins the requirements for this feature review needs to 
 
 ### Human in the Loop?
 
-This is the first review after the implementation completed:
-
-- during this implementation the agent was strongly encouraged to complete the work including making small design decisions where there was a gap
-- this means that there may now be several "decisions" that the agent made without a review or things that were deferred because a decision was needed. If either condition exists then we will stop now to get feedback:
-    - report all decisions/rules/deferred scope that needs to be reviewed
-    - take the time to write this clearly, giving examples where possible
-    - avoid jargon and do not assume that the caller knows this repo
-    - YOU MUST set the `human_in_the_loop` to `true` on the review file ({{review}})
-- if no review is required by the caller then you must set `human-in-the-loop` to `false` on the review file ({{review}})
-
-::end-block
-
-::block when="iteration == 1 && !is_empty(next_spec)"
-
-### Spec and Plan Refresh
-
-We are in a multi-plan based implementation:
-
-- the next spec is '{{next_spec}}', it has a plan located at '{{next_plan}}'
-- both the **spec** and the **plan** were written _before_ the current spec was implemented
-- we must now refresh the next spec and plan based on:
-    - what we've learned during the implementation of the current phase
-    - 
+This is the first review after the implementation completed. Make sure
+`human_in_the_loop` on the review file ({{review}}) matches the course of action
+you chose above: the list of decisions for the author, or `null`.
 
 ::end-block
 

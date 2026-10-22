@@ -23,7 +23,8 @@
 - set the `observations` frontmatter property to a list of the titles of the review's `## Observations` (an empty list when there are none)
 - set `human_review` to a boolean value to indicate whether human review is required prior to this specification being fully complete
     - the goal of this flag is to allow agents to do as much work as possible (aka, until the `ready` flag has been set to true) before they need to involve the human in review
-    - you should not assume that _every_ specification requires human review; rather only those which require important design decisions, or involve activities and tests that only the human can do (versus an agent) 
+    - you should not assume that _every_ specification requires human review; rather only those which involve activities and tests that only the human can do (versus an agent), or a design decision that meets the bar in "When a human is needed" (see the **Design Decisions** guidance)
+    - a decision the implementation recorded with its alternatives and reasoning, or a recommendation the spec or plan already made, is settled and is never a `human_review_items` entry
     - when you've set `human_review` to `true` you must also set the `human_review_items` as a list of things you want the human to review:
         - if any of the review's findings are blocked by this need for human review then make sure that the finding is clearly marked as blocked and the what is blocking it is also clear and then set the frontmatter property `has_blocked_findings` to `true`
             - if ALL of the reviews findings are blocked due to human review then set `blocked` to `true`

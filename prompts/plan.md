@@ -23,6 +23,18 @@ initialize:
       then:
           - message: "The **plan.md** planning prompt was run in the {{ctx.repo}} repo but no `spec` or `review` was provided! One -- _not both_ -- are required to use this prompt correctly!"
           - error: "The **plan.md** planning prompt was run in the {{ctx.repo}} repo but no `spec` or `review` was provided! One -- _not both_ -- are required to use this prompt correctly!"
+    # A spec that still waits on its author cannot be planned; settle it first
+    # rather than carrying its open decisions into Phase 1.
+    - when: "spec && (frontmatter(spec, 'human_review') == true || frontmatter(spec, 'needs_rulings') == true)"
+      then:
+          - message: "🤷  cannot plan `{{parent_dir(spec)}}`: its spec has **{{ length(frontmatter(spec, 'human_review_items') || frontmatter(spec, 'required_rulings') || []) }}** decision(s) waiting on the author"
+          - warn: |-
+                The spec {{link(spec)}} has decisions that need the author before it can be planned:
+
+                {{ as_ordered_list(frontmatter(spec, 'human_review_items') || frontmatter(spec, 'required_rulings') || []) }}
+
+                Settle them (for example with the **clarify** prompt), record them in the spec, set its `human_review` and `needs_rulings` to `false`, and run the plan prompt again.
+          - error: "`{{parent_dir(spec)}}` cannot be planned until the author settles its spec's open decisions"
 start:
     message: "🖊️ creating a plan for the `{{ parent_dir(underlying) }}` (**repo:** {{ctx.repo}}, {{ctx.area ? '**area:** ' + ctx.area : ''}}, **when:** {{current.time}})"
 success:
@@ -67,17 +79,17 @@ Your high level task is to convert the following documents into a high confidenc
     - if there is an opportunity to run multiple **tasks** concurrently then this should be represented as a **step** 
 - Each phase of the plan should be represented as an H2 heading the planning document
 - Once you have a first pass of the Phases and Tasks associated with each phase
+- Resolve every ambiguity while planning; a plan never starts with open questions
+    - add an H3 heading `### Decisions` under Phase 1 and record each decision there, following "Design Decisions" below
+    - a recommendation the {{ground_truth}} already makes is decided: write it into the plan as the rule to follow, never as a ruling the author must still give
+    - never write a task, rule, or acceptance note that waits on "an author ruling", "author sign-off", or "approval" before the work can proceed
 ::block when="spec"
-- If there are any aspects of the specification/design for this feature which you feel are unclear or require rulings on you should make sure that these rulings are explicitly mentioned and are attached to Phase 1
-    - add an H3 heading `### Necessary Rules` directly under 
-- After _rulings_ we need to consider if there are "spikes" that should be run to lower the risk for this implementation or to better inform the specification and/or design
+- After the decisions, consider whether "spikes" would lower the risk of this implementation or better inform the specification and/or design
     - a spike runs once, before the work it informs; do not schedule it again as a re-check in later phases
+    - a spike informs a decision; the plan states which option the spike's result selects, so the implementing agent never has to ask
     - a performance spike is one host and a quick sample, unless the spec names a known cost that is specific to one OS
-    - if the spec's own figures already answer a spike's question, record that as a ruling and drop the spike
-    - do not widen a spike beyond what the spec asks for; list any wider measurement you think is needed as a ruling for the author to decide
-::end-block
-::block when="review"
-- If there are any aspects of the review which you feel are unclear or require rulings on you should make sure that these rulings are explicitly mentioned and are attached to Phase 1
+    - if the spec's own figures already answer a spike's question, record that as a decision and drop the spike
+    - do not widen a spike beyond what the spec asks for, and do not leave a wider measurement for the author to decide
 ::end-block
 
 - Order tasks by dependency
@@ -87,6 +99,18 @@ Your high level task is to convert the following documents into a high confidenc
 - the tasks in the plan lead with a GFM inspired todo marker (e.g., `- [ ] {task}`)
     - this allows the implementation team to check off items in the plan as they complete them
 - plans should ALWAYS start with Phase 1 (not Phase 0 or something else non-standard)
+
+::file "./_decisions.md"
+
+### Decisions That Need the Author
+
+If, and only if, a decision meets the bar in "When a human is needed" above:
+
+- still write the complete plan, with the decision's options and your recommendation under `### Decisions`
+- set the plan's `human_review` frontmatter to `true` and list each such decision in `human_review_items` (each item a YAML `|-` block, written without repo jargon)
+
+Implementation refuses to start while `human_review` is `true`, so the author
+settles these before any phase runs. Otherwise set `human_review` to `false`.
 
 ::file "./_input-robustness.md"
 
@@ -102,3 +126,4 @@ Your high level task is to convert the following documents into a high confidenc
     - `phase` set this to the starting phase number; usually 1 but may be 0 sometimes
     - `agent` set this to "{{ ctx.agent }}/{{ ctx.model }}"
     - `yolo` set this to "{{ env.YOLO }}"
+    - `human_review` set this to `false` unless "Decisions That Need the Author" applies

@@ -18,6 +18,8 @@ cyan := '\033[36m'
 # implemented spec until a review marks it production ready (at most 5 cycles),
 # then run one follow-up pass for that review's open medium/low findings and
 # observations. Rerunning on a ready spec runs only a still-open follow-up pass.
+# When the first review raises decisions for the author (`human_in_the_loop`),
+# an interactive session settles them before the cycle continues.
 # Pass `--use-defaults` to skip the agent/model prompts and use the defaults.
 [positional-arguments]
 fix +args:
@@ -110,6 +112,15 @@ fix +args:
         fi
     fi
 
+    # A review's `human_in_the_loop` decisions that the author has not settled.
+    pending_decisions() {
+        local review="$1" resolved items
+        resolved="$(md get --raw "${review}" human_resolved)" || return 1
+        [[ "${resolved}" == "true" ]] && return 1
+        items="$(md get --raw "${review}" human_in_the_loop)" || return 1
+        [[ -n "$(printf '%s' "${items}" | tr -d '[:space:]')" ]]
+    }
+
     choose_agent() {
         local label="$1" default="$2"
         if [[ "${use_defaults}" == "true" ]]; then echo "${default}"; return; fi
@@ -144,6 +155,28 @@ fix +args:
         claudine compose "@prompts/_implement/implement-suggestions.md" -y --${implement_agent} --model "${implement_model}" spec="${spec}"
     }
 
+    # The author settles a first review's decisions in an interactive session;
+    # decisions that change the implementation come back as findings that the
+    # next cycle repairs.
+    settle_decisions() {
+        local review="$1"
+        if [[ ! -t 0 || ! -t 1 ]]; then
+            echo -e "{{ yellow }}$(just _link "${review}"){{ reset }} has decisions that need the author; run {{ bold }}just fix ${spec}{{ reset }} in an interactive terminal to settle them." >&2
+            exit 2
+        fi
+        echo -e "🤝 settling the decisions raised by $(just _link "${review}") with the author"
+        claudine compose "@prompts/_clarify/decisions.md" -i --${implement_agent} --model "${implement_model}" review="${review}"
+        if pending_decisions "${review}"; then
+            echo -e "{{ red }}ERROR:{{ reset }} the decisions in $(just _link "${review}") are still unresolved (human_resolved is not true)" >&2
+            exit 2
+        fi
+    }
+
+    review="$(latest_review)"
+    if [[ -n "${review}" && -f "${review}" ]] && pending_decisions "${review}"; then
+        settle_decisions "${review}"
+    fi
+
     if [[ "${followups_only}" == "true" ]]; then
         run_followups "${review}"
         exit 0
@@ -169,6 +202,10 @@ fix +args:
         claudine compose "@prompts/_reviews/feature-review.md" -y --${review_agent} --model "${review_model}" spec="${spec}"
 
         review="$(latest_review)"
+        if pending_decisions "${review}"; then
+            settle_decisions "${review}"
+            continue
+        fi
         ready="$(md get --raw "${review}" ready)"
         if [[ "${ready}" == "true" ]]; then
             echo -e "👍 $(just _link "${review}") marked the spec {{ green }}production ready{{ reset }} after ${cycle} cycle(s)"
