@@ -152,6 +152,20 @@ not see everything, so a stop report says what each check missed:
   is still a real directory once deletion stops, including
   `Discovery could not run (<error>).` when that check failed.
 
+When this run's check before the move (or before deleting from the moved
+directory) and its check of the moved directory after the stop missed the
+same things, the two share one line instead of repeating the sentence:
+
+```text
+Before the move, and again after the stop at /code/wts/repo/.wt-remove-feat-x-a91c0d2e4f6b8a10 (two separate checks with the same limits): Discovery could not run; the checkout's files were only partly read; the process list, open handles and working directories were not checked; the check ran out of time.
+```
+
+Two checks share a line only when both ran in this attempt, both returned a
+report, neither found a process, the second checked the moved directory, and
+their notes are word for word the same. An earlier attempt's check, a failed
+check, a check that found a process, or a check of the original path always
+keeps its own line. The saved report still lists every check separately.
+
 A check that saw everything adds no line, and a removal that finishes never
 mentions the usage check.
 
@@ -464,6 +478,59 @@ and a writer can start after the final check. Every report of a removal that
 deleted anything states this limit and lists the entries it deleted, rather
 than promise that every concurrent write was preserved.
 
+### Large, built checkouts
+
+A checkout that has been built, with a `target/` or `node_modules/` of
+hundreds of thousands of entries, is removed in one run like any other. Three
+things make that work.
+
+**The journal has no fixed size.** Every batch is written to the recovery
+record's journal before it is deleted (see
+[Recovery records and retry](#recovery-records-and-retry)). Before the move,
+`wt` works out from the list of entries exactly how large that journal can
+grow, counting each batch's plan and its worst-case results, and lets the
+journal grow to that size. A long path costs more than a short one, and the
+size is worked out per attempt, so the number of entries never stops a
+removal partway. If `wt` ever reaches that size, it is a defect in `wt`, and
+the stop says `wt reached an internal limit of its deletion journal; a retry
+continues`.
+
+**It checks free space before the move.** The journal of a checkout with
+500,000 long paths can run to a few hundred megabytes. It lives in the
+repository's `.git/wt-removal/`, which may be on a different disk from the
+checkout. Before it writes anything, `wt` reads the space available to you
+there and compares it with what the attempt needs: the journal, plus the
+removal's record on a first run, or plus a copy of the previous journal on a
+retry. When that does not fit, or the space cannot be read, `wt remove`
+refuses with exit 4 and nothing moves:
+
+```text
+Nothing was removed. wt stopped before moving worktree feat-x: /code/repo/.git/wt-removal has 104857600 bytes available, but this removal's deletion journal needs 218103808.
+  Run wt remove feat-x again.
+```
+
+Free some space on that disk, then run the command again. On a retry the
+check runs before the earlier journal is archived or replaced and before
+anything more is deleted, so the message reads `stopped before deleting more
+of worktree feat-x`, and the earlier record and journal still read as they
+did. Two limits apply:
+
+- the space the deletion would free is not counted, because the journal is
+  written before the files it describes are deleted;
+- a reading is not a reservation: another program can fill the disk after the
+  check. A write that then fails stops the removal like any other failure,
+  and a retry continues it.
+
+**The usage check reuses the list.** The list of entries `wt` builds before
+the move is handed to the [usage check](#background-programs-writing-into-the-worktree),
+so the check does not walk the checkout a second time and spends its time
+looking at processes. Each process check in the saved report records this as
+`"index_provenance": "supplied"` (`walked` when the check read the tree itself,
+as the checks after a stop do; `unknown` in a report saved before
+`report_version` 6). This makes the check faster on a large checkout, but it
+does not make it complete: a platform that cannot see a kind of usage still
+cannot, and a check that runs out of time still says what it did not reach.
+
 ### Interrupting a removal
 
 Pressing Ctrl-C (or Ctrl-Break on Windows, or sending `SIGTERM` or `SIGHUP`)
@@ -531,7 +598,9 @@ These checkouts are refused before anything changes:
   remove it from Windows instead. The same applies when change watching
   cannot be started or confirmed, or coverage is lost before the move (see
   [When watching stops](#when-watching-stops)), or the recovery record cannot
-  be written.
+  be written, including when the disk holding it has too little free space
+  for the journal or its free space cannot be read (see
+  [Large, built checkouts](#large-built-checkouts)).
 - On Windows, a move blocked by a file open anywhere in the checkout exits 4.
 
 Exits 3 and 4 always mean "nothing removed". A stop after the checkout

@@ -59,7 +59,7 @@ use worktree::remove::safety::{
 };
 use worktree::remove::missing::{MissingCheckout, MissingRefusal, remove_missing_record};
 use worktree::remove::repair::{self, RepairRefusal};
-use worktree::remove::recovery::space::NativeSpace;
+use worktree::remove::recovery::space::{NativeSpace, SpaceSource};
 use worktree::remove::usage::SniffUsage;
 use worktree::remove::{
     CheckoutState, Inventory, PrepareRefusal, branch_tip, collect_inventory, prepare, remove_local_branch,
@@ -766,6 +766,27 @@ fn map_inquire_err(e: InquireError) -> WorktreeError {
     }
 }
 
+/// Where the removal reads free space: the filesystem, or in a debug build
+/// the figure a binary test set through
+/// [`TEST_AVAILABLE_SPACE_VAR`](crate::env::TEST_AVAILABLE_SPACE_VAR).
+fn space_source() -> Box<dyn SpaceSource> {
+    #[cfg(debug_assertions)]
+    if let Some(bytes) = crate::env::test_available_space() {
+        return Box::new(FixedSpace(bytes));
+    }
+    Box::new(NativeSpace)
+}
+
+#[cfg(debug_assertions)]
+struct FixedSpace(u64);
+
+#[cfg(debug_assertions)]
+impl SpaceSource for FixedSpace {
+    fn available_bytes(&self, _path: &Path) -> Result<u64, String> {
+        Ok(self.0)
+    }
+}
+
 /// Removes the worktree, then the branch, then (with `--force-remote`) the
 /// branch on origin. Nothing after a failed step runs. A checkout that
 /// exists, or a pending removal, goes through the removal lifecycle; a
@@ -780,9 +801,10 @@ fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), W
     // Opened only now: an interrupt while asking keeps its default effect.
     let window = interrupt::Window::open();
     let interrupted = || window.interrupted();
+    let space = space_source();
     let env = Environment {
         usage: &usage,
-        space: &NativeSpace,
+        space: space.as_ref(),
         interrupted: &interrupted,
         observe: &native_observation,
         slow_startup: &|startup| print(terminal, recovery::slow_startup_markup(startup)),

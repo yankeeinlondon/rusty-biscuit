@@ -54,6 +54,14 @@ The variable turns a missing-backend skip into a failure.
 - `cli/tests/remove.rs` sets `NO_COLOR=1`. Its zero-network tests point origin
   at `http://gitea.test/…` with every proxy variable aimed at a local counting
   listener, since a file-path origin never reaches the PR lookup.
+- The free-space refusal (exit 4) cannot be provoked on a real filesystem, so
+  a binary test sets `WT_TEST_AVAILABLE_SPACE_BYTES`
+  (`worktree_cli::env::TEST_AVAILABLE_SPACE_VAR`, debug builds only) and
+  `wt remove` reads that figure instead of the filesystem. In-process tests
+  inject a `SpaceSource` through `Environment::space` instead.
+- Stop-message rendering (coverage notes, merged identical notes, journal
+  limit wording) is tested from library values in
+  `cli/tests/remove_recovery_report.rs`, never by provoking a real stop.
 - `cli/tests/level2_remove.rs` drives bash, zsh, and fish wrappers in tmux, with
   a `wt` shim that runs `WT_TEST_BETWEEN` before the handoff call.
 - `cli/tests/powershell_wrapper_exec.rs` is Windows-only L1.

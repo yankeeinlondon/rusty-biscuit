@@ -24,7 +24,9 @@ use worktree::remove::outcome::{
     DiscoveryRun, EarlierAttempt, EntryCounts, ObservedActivity, OperationReport, OriginalState, QuarantineReport,
     QuarantineState, RegistrationState, RemovalOutcome, ReportNote,
 };
+use worktree::remove::observation::deletion::Stop;
 use worktree::remove::recovery::OperationId;
+use worktree::remove::recovery::journal::JournalWriteError;
 use worktree::remove::recovery::lock::LockError;
 use worktree::remove::recovery::record::{
     BranchBinding, IntendedAction, Phase, RECORD_VERSION, RecoveryRecord, RepositoryBinding,
@@ -279,7 +281,12 @@ fn stopped_markup_of(report: OperationReport) -> String {
 /// could not see, beside the recovery guidance.
 #[test]
 fn a_stop_names_the_limits_of_each_process_check() {
-    for ((shape, before), (_, after)) in limited(ORIGINAL).into_iter().zip(limited(QUARANTINE)) {
+    // Each check before the move is paired with a differently limited check
+    // after the stop; identical notes are printed once (below).
+    let mut after = limited(QUARANTINE);
+    after.rotate_left(1);
+    for ((shape, before), (_, after)) in limited(ORIGINAL).into_iter().zip(after) {
+        assert_ne!(note(&before), note(&after), "{shape}");
         let mut report = moved(RemovalOutcome::ActivityDetected, 6);
         report.discovery.push(run(DiscoveryPurpose::Preflight, ORIGINAL, before.clone()));
         report.discovery.push(run(DiscoveryPurpose::Diagnostic, QUARANTINE, after.clone()));
@@ -293,6 +300,198 @@ fn a_stop_names_the_limits_of_each_process_check() {
         let guidance = markup.find("Stop any tasks using either path").expect("guidance");
         assert!(markup.find(&after_line).unwrap() < guidance, "{shape}: coverage precedes the guidance\n{markup}");
     }
+}
+
+/// The note from the stopped runs that motivated merging: the usage check
+/// ran out of time before the move and again on the moved directory.
+fn timed_out(path: &str) -> PathUsageReport {
+    discovery(
+        path,
+        "unavailable",
+        &[
+            ("process_enumeration", "not_attempted"),
+            ("tree_identity", "partial"),
+            ("open_handles", "not_attempted"),
+            ("working_directories", "not_attempted"),
+        ],
+        true,
+    )
+}
+
+/// `report` with one process holding the checkout open.
+fn holding(report: PathUsageReport) -> PathUsageReport {
+    let mut value = serde_json::to_value(report).expect("serializable");
+    value["processes"] = json!([{
+        "pid": 4242,
+        "creation_token": "77",
+        "start_time": null,
+        "identity_uncertain": false,
+        "name": {"display": "cargo"},
+        "executable": {"display": "/usr/bin/cargo"},
+        "user": "501",
+        "evidence": [{
+            "kind": "working_directory",
+            "mechanism": "working_directories",
+            "matched_paths": [{"display": QUARANTINE}],
+            "observed_path": {"display": QUARANTINE},
+            "match_basis": "identity",
+            "identity": {"kind": "unix", "device": "7", "inode": "3"},
+            "descriptor": null,
+            "watch": null,
+            "access": null,
+            "event_only": null
+        }]
+    }]);
+    serde_json::from_value(value).expect("valid report")
+}
+
+/// How many times `needle` appears in `haystack`.
+fn occurrences(haystack: &str, needle: &str) -> usize {
+    haystack.matches(needle).count()
+}
+
+/// The check before the move and the check of the moved directory after the
+/// stop that give the same note print it once, naming both checks and
+/// keeping their timing apart; the saved report still holds both runs.
+#[test]
+fn identical_notes_before_the_move_and_after_the_stop_print_once() {
+    for (shape, before) in limited(ORIGINAL).into_iter().chain([("timed out", timed_out(ORIGINAL))]) {
+        let after = limited(QUARANTINE).into_iter().chain([("timed out", timed_out(QUARANTINE))]).find(|(s, _)| *s == shape).unwrap().1;
+        let shared = note(&before);
+        assert_eq!(shared, note(&after), "{shape}");
+        let mut report = moved(RemovalOutcome::CleanupFailed, 6);
+        report.discovery.push(run(DiscoveryPurpose::Preflight, ORIGINAL, before));
+        report.discovery.push(run(DiscoveryPurpose::Diagnostic, QUARANTINE, after));
+
+        let markup = stopped_markup_of(report.clone());
+
+        let line = format!(
+            "<dim>Before the move, and again after the stop at {QUARANTINE} \
+            (two separate checks with the same limits): {shared}</dim>"
+        );
+        assert!(markup.contains(&line), "{shape}: {markup}");
+        assert_eq!(occurrences(&markup, &shared), 1, "{shape}: {markup}");
+        assert!(!markup.contains("After the stop, at"), "{shape}: {markup}");
+        assert_eq!(report.discovery.len(), 2, "rendering keeps both runs in the report");
+    }
+}
+
+/// A retry's check before deleting from the moved directory merges with the
+/// check of that directory after the stop in the same way.
+#[test]
+fn a_retrys_identical_notes_print_once() {
+    let mut report = moved(RemovalOutcome::CleanupFailed, 6);
+    report.discovery.push(run(DiscoveryPurpose::Preflight, QUARANTINE, timed_out(QUARANTINE)));
+    report.discovery.push(run(DiscoveryPurpose::Diagnostic, QUARANTINE, timed_out(QUARANTINE)));
+
+    let markup = stopped_markup_of(report);
+
+    let shared = note(&timed_out(QUARANTINE));
+    assert!(
+        markup.contains(&format!(
+            "<dim>Before deleting from the moved directory, and again after the stop at {QUARANTINE} \
+            (two separate checks with the same limits): {shared}</dim>"
+        )),
+        "{markup}"
+    );
+    assert_eq!(occurrences(&markup, &shared), 1, "{markup}");
+}
+
+/// The stop from the reported large-checkout runs: one discovery line for
+/// both checks, as rendered.
+#[test]
+fn a_stop_whose_checks_both_ran_out_of_time() {
+    let mut report = moved(RemovalOutcome::CleanupFailed, 305_230);
+    report.journal.deleted = files(1_200_000);
+    report.errors.push("wt reached an internal limit of its deletion journal; a retry continues".into());
+    report.discovery.push(run(DiscoveryPurpose::Preflight, ORIGINAL, timed_out(ORIGINAL)));
+    report.discovery.push(run(DiscoveryPurpose::Diagnostic, QUARANTINE, timed_out(QUARANTINE)));
+    not_attempted(&mut report);
+
+    insta::assert_snapshot!(stopped(&finished(report), Some("fix/path-spelling")));
+}
+
+/// Different notes, a check of another path, an earlier attempt's check,
+/// failed queries, and a check that found a process each keep their own
+/// line, even when the coverage they describe is the same.
+#[test]
+fn other_discovery_lines_are_never_merged() {
+    let separate = |report: OperationReport, case: &str, expected: usize| {
+        let markup = stopped_markup_of(report);
+        assert!(!markup.contains("two separate checks"), "{case}: {markup}");
+        assert_eq!(markup.matches("<dim>Before ").count() + markup.matches("<dim>After the stop").count(), expected, "{case}: {markup}");
+    };
+
+    // Different notes.
+    let [(_, partial), (_, unavailable), _] = limited(ORIGINAL);
+    let mut report = moved(RemovalOutcome::CleanupFailed, 6);
+    report.discovery.push(run(DiscoveryPurpose::Preflight, ORIGINAL, partial.clone()));
+    report.discovery.push(run(DiscoveryPurpose::Diagnostic, QUARANTINE, unavailable));
+    separate(report, "different notes", 2);
+
+    // A diagnostic of the original path, not the moved directory.
+    let mut report = moved(RemovalOutcome::ActivityDetected, 6);
+    report.discovery.push(run(DiscoveryPurpose::Preflight, ORIGINAL, partial.clone()));
+    report.discovery.push(run(DiscoveryPurpose::Diagnostic, ORIGINAL, partial.clone()));
+    separate(report, "original path", 2);
+
+    // An earlier attempt's check before the move.
+    let mut report = moved(RemovalOutcome::CleanupFailed, 6);
+    report.earlier_attempts.push(EarlierAttempt {
+        outcome: RemovalOutcome::CleanupFailed,
+        original_state: OriginalState::Moved,
+        quarantine: None,
+        registration: RegistrationState::AtQuarantine,
+        timeline: Vec::new(),
+        discovery: vec![run(DiscoveryPurpose::Preflight, ORIGINAL, timed_out(ORIGINAL))],
+        activity: Vec::new(),
+        activity_omitted: 0,
+        branches: Vec::new(),
+        errors: Vec::new(),
+        observation: None,
+    });
+    report.discovery.push(run(DiscoveryPurpose::Diagnostic, QUARANTINE, timed_out(QUARANTINE)));
+    let markup = stopped_markup_of(report.clone());
+    assert!(markup.contains("Before the move (earlier attempt): "), "{markup}");
+    separate(report, "earlier attempt", 2);
+
+    // Two failed queries with the same message.
+    let failed = |purpose, path| DiscoveryRun {
+        at_ms: AT_MS,
+        purpose,
+        path: native(path),
+        result: DiscoveryResult::Failed { kind: "root_identity".into(), message: "denied".into() },
+    };
+    let mut report = moved(RemovalOutcome::CleanupFailed, 6);
+    report.discovery.push(failed(DiscoveryPurpose::Preflight, ORIGINAL));
+    report.discovery.push(failed(DiscoveryPurpose::Diagnostic, QUARANTINE));
+    let markup = stopped_markup_of(report.clone());
+    assert_eq!(occurrences(&markup, "Discovery could not run (denied)."), 2, "{markup}");
+    separate(report, "failed queries", 2);
+
+    // A diagnostic that found a process, with the same coverage.
+    let mut report = moved(RemovalOutcome::ActivityDetected, 6);
+    report.discovery.push(run(DiscoveryPurpose::Preflight, ORIGINAL, timed_out(ORIGINAL)));
+    report.discovery.push(run(DiscoveryPurpose::Diagnostic, QUARANTINE, holding(timed_out(QUARANTINE))));
+    separate(report, "holder", 2);
+}
+
+/// A journal that reached its limit stops the removal as `wt`'s own
+/// internal limit, with no byte count, and says a retry continues.
+#[test]
+fn a_journal_limit_stop_is_an_internal_limit() {
+    let limit = JournalWriteError::LimitReached { limit: 67_108_864 };
+    let mut report = moved(RemovalOutcome::CleanupFailed, 6);
+    report.errors.push(Stop::Journal(limit).to_string());
+
+    let rendered = render(&stopped_markup_of(report));
+
+    assert!(
+        rendered.contains("Removal stopped: a step failed (wt reached an internal limit of its deletion journal; a retry continues)."),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("67108864") && !rendered.contains("MiB"), "{rendered}");
+    assert!(rendered.contains("Retry: "), "{rendered}");
 }
 
 /// Full coverage before the move and after the stop adds no line.

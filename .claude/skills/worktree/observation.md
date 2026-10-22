@@ -265,7 +265,12 @@ record, Arc<inventory>)` (the inventory is journal line 2), the move,
   a 12-run same-host comparison (2,048 / 512 / 256, fresh and settled
   101,002-entry trees) saw no drop at any interval while each halving
   roughly doubled deletion time, so it went back to 2,048. No interval rules
-  a drop out. A large-tree measurement harness must exclude Spotlight
+  a drop out. Past ~100,000 entries drops do happen: on 2026-10-22 three
+  `wt remove` runs of a 500,000-file synthetic `target/` under `/tmp` (dev
+  Mac, load ~13/16) each lost coverage with `user_dropped` +
+  `must_scan_sub_dirs` about 2,250 entries after a drain, the release build
+  first (130,500 deleted in 22 s), debug later (204,750). The journal's former
+  64 MiB ceiling (~136,000 entries) used to stop removals before this. A large-tree measurement harness must exclude Spotlight
   (a `*.noindex` parent) and Git auto-gc (`gc.auto=0`), or `mdworker_shared`
   and a detached `git gc` hold the fresh tree and the removal pauses with
   exit 3. Journal batches

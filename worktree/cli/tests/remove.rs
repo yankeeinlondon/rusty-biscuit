@@ -735,6 +735,56 @@ fn example_clean_and_merged_removes_worktree_and_branch() {
     );
 }
 
+/// Too little free space for the deletion journal refuses with exit 4
+/// before anything moves, naming the store, the bytes needed and the bytes
+/// available. The reading is a debug build's stand-in
+/// (`WT_TEST_AVAILABLE_SPACE_BYTES`); no real filesystem can be made to
+/// report a chosen figure.
+#[test]
+fn too_little_space_for_the_journal_refuses_before_the_move() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("chore/old-cleanup", "old-cleanup");
+    fixture.commit(&wt, "cleanup.txt");
+    git(&fixture.repo(), &["merge", "-q", "--no-ff", "-m", "merge", "chore/old-cleanup"]);
+
+    let output = fixture
+        .wt(&fixture.repo())
+        .args(["remove", "old-cleanup"])
+        .env(worktree_cli::env::TEST_AVAILABLE_SPACE_VAR, "100")
+        .assert()
+        .code(4)
+        .stdout("")
+        .stderr(predicate::str::contains("Nothing was removed."))
+        .stderr(predicate::str::contains("stopped before moving"))
+        .stderr(predicate::str::contains("Removed worktree").not())
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = String::from_utf8_lossy(&output).split_whitespace().collect::<Vec<_>>().join(" ");
+    // The store's trailing components only: the temp directory's spelling
+    // differs between the test and `wt` on macOS (`/private`), and Git may
+    // spell a Windows path with either separator.
+    let store = fixture.repo().join(".git").join(worktree::remove::recovery::store::STORE_DIR);
+    let (named, needed) = stderr
+        .split_once("wt-removal has 100 bytes available, but this removal's deletion journal needs ")
+        .unwrap_or_else(|| panic!("names the store and the reading: {stderr}"));
+    let parent = named.trim_end_matches(['/', '\\']);
+    assert!(parent.ends_with(".git") && parent.trim_end_matches(".git").trim_end_matches(['/', '\\']).ends_with("repo"), "{stderr}");
+    let needed: u64 = needed.split(|c: char| !c.is_ascii_digit()).next().and_then(|digits| digits.parse().ok()).expect("needed bytes");
+    assert!(needed > 100, "{stderr}");
+
+    assert!(wt.join("cleanup.txt").exists(), "the checkout stays");
+    assert!(fixture.branch_exists("chore/old-cleanup"), "the branch stays");
+    assert!(git(&fixture.repo(), &["worktree", "list", "--porcelain"]).contains("old-cleanup"), "the registration stays");
+    assert_eq!(pending_removals(&fixture), 0, "nothing is pending");
+    // Only the lock's bookkeeping may appear: no operation directory was
+    // published or staged.
+    let entries: Vec<String> = fs::read_dir(&store)
+        .map(|entries| entries.map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect())
+        .unwrap_or_default();
+    assert!(entries.iter().all(|name| name == worktree::remove::recovery::lock::LOCKS_DIR), "{entries:?}");
+}
+
 /// A clean, merged removal starts this many Git processes, each 20–50 ms
 /// on Windows; the lifecycle's share is pinned call by call in the library
 /// (`a_clean_removal_starts_only_its_deliberate_git_processes`). The rest

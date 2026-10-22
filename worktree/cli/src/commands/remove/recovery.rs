@@ -12,7 +12,9 @@
 //!
 //! The stopped and pending reports also say what each process check could
 //! not see ([`coverage_note`]), since a removal goes ahead despite limited
-//! discovery; a check that saw everything adds nothing.
+//! discovery; a check that saw everything adds nothing, and a note shared by
+//! the check before the move and the check of the moved directory after the
+//! stop is printed once for both.
 //!
 //! Every builder returns Prose markup, one line per `\n`, for stderr. Paths,
 //! names, and errors come from the filesystem, Git, and other processes, so
@@ -306,7 +308,9 @@ fn location_lines(report: &OperationReport) -> Vec<String> {
 /// One line per process check whose coverage was limited: the last check
 /// before a mutation (from an earlier attempt when this one made none), and
 /// each diagnostic check after this stop. A check that saw everything adds
-/// nothing.
+/// nothing. When this attempt's last check before a mutation and its check
+/// of the moved directory after the stop give the same note, it is printed
+/// once for both ([`shared_note`]).
 fn discovery_lines(report: &OperationReport) -> Vec<String> {
     let current = report.discovery.iter().any(|run| run.purpose == DiscoveryPurpose::Preflight);
     let earlier = report
@@ -316,11 +320,15 @@ fn discovery_lines(report: &OperationReport) -> Vec<String> {
         .flat_map(|attempt| attempt.discovery.iter().rev())
         .find(|run| run.purpose == DiscoveryPurpose::Preflight)
         .filter(|_| !current);
+    let shared = shared_note(report);
     earlier
         .map(|run| (run, " (earlier attempt)"))
         .into_iter()
         .chain(report.discovery.iter().map(|run| (run, "")))
         .filter_map(|(run, attempt)| {
+            if shared.as_ref().is_some_and(|(_, diagnostic, _)| std::ptr::eq(run, *diagnostic)) {
+                return None;
+            }
             let context = match run.purpose {
                 DiscoveryPurpose::Preflight if run.path == report.original => format!("Before the move{attempt}"),
                 DiscoveryPurpose::Preflight => format!("Before deleting from the moved directory{attempt}"),
@@ -328,9 +336,35 @@ fn discovery_lines(report: &OperationReport) -> Vec<String> {
                 // The recheck after it is the decisive preflight.
                 DiscoveryPurpose::WindowsSearchHold => return None,
             };
-            run_note(run).map(|note| format!("<dim>{context}: {note}</dim>"))
+            match &shared {
+                Some((preflight, diagnostic, note)) if std::ptr::eq(run, *preflight) => Some(format!(
+                    "<dim>{context}, and again after the stop at {} (two separate checks with the same limits): \
+                    {note}</dim>",
+                    native(&diagnostic.path)
+                )),
+                _ => run_note(run).map(|note| format!("<dim>{context}: {note}</dim>")),
+            }
         })
         .collect()
+}
+
+/// This attempt's last check before a mutation and its first check of the
+/// moved directory after the stop, with their note, when both produced a
+/// report, neither found a process using the checkout, and their notes are
+/// the same text. Only the rendered notes are compared: the reports' times
+/// and paths always differ. A failed query, a check that found a process,
+/// and an earlier attempt's check always keep their own line.
+fn shared_note(report: &OperationReport) -> Option<(&DiscoveryRun, &DiscoveryRun, String)> {
+    let moved = &report.quarantine.as_ref()?.path;
+    let preflight = report.discovery.iter().rev().find(|run| run.purpose == DiscoveryPurpose::Preflight)?;
+    let diagnostic =
+        report.discovery.iter().find(|run| run.purpose == DiscoveryPurpose::Diagnostic && &run.path == moved)?;
+    let note = |run: &DiscoveryRun| match &run.result {
+        DiscoveryResult::Report(found) if found.processes.is_empty() => coverage_note(&CoverageSummary::of(found)),
+        _ => None,
+    };
+    let shared = note(preflight)?;
+    (note(diagnostic)? == shared).then_some((preflight, diagnostic, shared))
 }
 
 /// [`coverage_note`] for `run`, or why the query itself failed.
