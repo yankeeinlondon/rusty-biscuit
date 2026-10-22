@@ -38,7 +38,7 @@ mod tests {
     use crate::headers::{EnvList, EnvMapping};
 
     fn create_test_api() -> RestApi {
-        RestApi { rate_limit: None, retry_guidance: None,
+        RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None,
             name: "TestAPI".to_string(),
             description: "Test API description".to_string(),
             base_url: "https://api.test.com/v1".to_string(),

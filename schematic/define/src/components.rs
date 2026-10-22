@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{ApiRequest, ApiResponse, DefinitionError, Endpoint, FormFieldKind, RestApi, TypeRef};
+use crate::{ApiRequest, ApiResponse, DefinitionError, Endpoint, ErrorEntry, FormFieldKind, ResponseShape, RestApi, TypeRef};
 
 /// One named schema component.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,8 +165,8 @@ fn strip(schema: &Value, root_name: &str) -> Value {
 }
 
 impl Endpoint {
-    /// The JSON body references of this endpoint: response, request, and
-    /// JSON form fields, in that order.
+    /// The JSON body references of this endpoint: response, request, JSON
+    /// form fields, then declared error entries, in that order.
     pub fn json_references(&self) -> Vec<&TypeRef> {
         let mut references = Vec::new();
         if let ApiResponse::Json(reference) = &self.response { references.push(reference); }
@@ -176,6 +176,7 @@ impl Endpoint {
                 fields.iter().filter_map(|field| match &field.kind { FormFieldKind::Json(reference) => Some(reference), _ => None })),
             _ => {}
         }
+        references.extend(error_references(&self.errors));
         references
     }
 }
@@ -212,21 +213,37 @@ impl RestApi {
                 return Err(invalid(format!("schema component \"{}\" is defined more than once", component.name)));
             }
         }
-        for endpoint in &self.endpoints {
-            for reference in endpoint.json_references() {
-                for name in reference.names() {
-                    if self.component(name).is_none_or(|c| c.rust_path.is_none()) {
-                        return Err(DefinitionError::UnresolvedReference { api: self.name.clone(), endpoint: endpoint.id.clone(), name: name.into() });
-                    }
-                }
-                if self.rust_type(reference).is_none() || has_empty_key(reference) {
-                    return Err(DefinitionError::InvalidDefinition { api: self.name.clone(), endpoint: endpoint.id.clone(),
-                        message: format!("unsupported schema reference {reference:?}") });
-                }
+        let api_errors = error_references(&self.errors).map(|reference| ("<api>", reference));
+        let endpoints = self.endpoints.iter().flat_map(|endpoint| endpoint.json_references().into_iter().map(|reference| (endpoint.id.as_str(), reference)));
+        for (endpoint, reference) in api_errors.chain(endpoints) {
+            if let Some(name) = self.unresolved_name(reference) {
+                return Err(DefinitionError::UnresolvedReference { api: self.name.clone(), endpoint: endpoint.into(), name: name.into() });
+            }
+            if self.rust_type(reference).is_none() || has_empty_key(reference) {
+                return Err(DefinitionError::InvalidDefinition { api: self.name.clone(), endpoint: endpoint.into(),
+                    message: format!("unsupported schema reference {reference:?}") });
+            }
+        }
+        for operation in self.graphql.iter().flat_map(|surface| &surface.operations) {
+            for reference in operation.json_references() {
+                let problem = match self.unresolved_name(reference) {
+                    Some(name) => format!("unresolved schema reference \"{name}\""),
+                    None if self.rust_type(reference).is_none() || has_empty_key(reference) => format!("unsupported schema reference {reference:?}"),
+                    None => continue,
+                };
+                return Err(DefinitionError::InvalidOperation { api: self.name.clone(), operation: operation.id.clone(), message: problem });
             }
         }
         Ok(())
     }
+
+    fn unresolved_name<'a>(&self, reference: &'a TypeRef) -> Option<&'a str> {
+        reference.names().into_iter().find(|name| self.component(name).is_none_or(|c| c.rust_path.is_none()))
+    }
+}
+
+fn error_references(entries: &[ErrorEntry]) -> impl Iterator<Item = &TypeRef> {
+    entries.iter().filter_map(|entry| match &entry.shape { ResponseShape::Json(reference) => Some(reference), _ => None })
 }
 
 fn has_empty_key(reference: &TypeRef) -> bool {

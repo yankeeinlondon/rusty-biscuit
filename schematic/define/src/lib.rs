@@ -132,6 +132,8 @@ pub mod params;
 pub mod prelude;
 pub mod request;
 pub mod response;
+pub mod error_table;
+pub mod graphql;
 pub mod schema;
 mod serde_presence;
 pub mod types;
@@ -163,7 +165,9 @@ pub use oauth::{
 };
 pub use params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
 pub use request::{ApiRequest, FormField, FormFieldKind};
-pub use response::ApiResponse;
+pub use response::{ApiResponse, JsonTag, ResponseShape, StreamEnd, StreamFraming, SuccessShape};
+pub use error_table::{ErrorEntry, ErrorTable, StatusMatch};
+pub use graphql::{AddressRule, GraphQlOperation, GraphQlOperationBuilder, GraphQlSurface, GraphQlVariables, OperationKind};
 pub use schema::{Schema, SchemaObject};
 pub use types::{Endpoint, ResolvedEndpointAuth, RestApi, RestMethod};
 pub use registration::{DefinitionContext, DefinitionError, MapKey, Registration, RustPath, TypeDesc, TypeRegistration};
@@ -173,4 +177,4 @@ pub use websocket::{
     WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
 };
 
-pub use builders::{EndpointBuilder, RestApiBuilder, Success, ErrorSet};
+pub use builders::{EndpointBuilder, ErrorSet, ErrorShape, RestApiBuilder, Success};

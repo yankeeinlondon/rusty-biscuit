@@ -87,6 +87,10 @@ pub enum DefinitionError {
     /// Invalid authored facts, with assembly context.
     #[error("{api} endpoint {endpoint}: {message}")]
     InvalidDefinition { api: String, endpoint: String, message: String },
+    /// Invalid GraphQL operation facts, including an unresolved variables,
+    /// data, or error reference, with assembly context.
+    #[error("{api} operation {operation}: {message}")]
+    InvalidOperation { api: String, operation: String, message: String },
     /// Containers, primitives, and free-form JSON do not define components.
     #[error("register_as requires a nominal leaf type")]
     NotLeaf,

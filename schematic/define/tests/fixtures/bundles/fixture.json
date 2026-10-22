@@ -60,6 +60,24 @@
     "endpoints": [
       {
         "description": "Get a node tree",
+        "errors": [
+          {
+            "shape": "Empty",
+            "status": {
+              "Exact": 404
+            }
+          },
+          {
+            "content_type": "text/html",
+            "shape": "Text",
+            "status": {
+              "Range": {
+                "hi": 429,
+                "lo": 420
+              }
+            }
+          }
+        ],
         "headers": [],
         "id": "GetNode",
         "method": "GET",
@@ -169,6 +187,7 @@
         "headers": [],
         "id": "Raw",
         "method": "GET",
+        "no_declared_errors": true,
         "path": "/raw",
         "response": {
           "Json": {
@@ -197,6 +216,153 @@
       }
     ],
     "env_auth": [],
+    "errors": [
+      {
+        "shape": {
+          "Json": {
+            "Named": "Problem"
+          }
+        },
+        "status": {
+          "Range": {
+            "hi": 599,
+            "lo": 500
+          }
+        }
+      },
+      {
+        "shape": "Text",
+        "status": {
+          "Exact": 404
+        }
+      }
+    ],
+    "graphql": {
+      "address": [
+        {
+          "ReplaceSuffix": {
+            "suffix": "/api/v3",
+            "with": "/api/graphql"
+          }
+        },
+        {
+          "Append": "/graphql"
+        }
+      ],
+      "operations": [
+        {
+          "data": {
+            "Named": "IssuesData"
+          },
+          "description": "Issues of an owner",
+          "document": "query Issues($owner: String!, $first: Int, $after: String) { issues { id } }",
+          "errors": [
+            {
+              "shape": {
+                "Json": {
+                  "Named": "Problem"
+                }
+              },
+              "status": {
+                "Exact": 403
+              }
+            }
+          ],
+          "id": "Issues",
+          "kind": "Query",
+          "operation_name": "Issues",
+          "pagination": {
+            "alternates": [],
+            "item_type": "Item",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "issues"
+                },
+                "each"
+              ]
+            },
+            "pagination": {
+              "policy": "explicit",
+              "strategy": {
+                "constants": [],
+                "kind": {
+                  "forward": {
+                    "boundary": {
+                      "boundary": "exclusive"
+                    },
+                    "parts": [
+                      {
+                        "param": {
+                          "in": "body",
+                          "name": [
+                            "variables",
+                            "after"
+                          ]
+                        },
+                        "source": {
+                          "from": "field",
+                          "source": {
+                            "at": [
+                              "pageInfo",
+                              "endCursor"
+                            ],
+                            "from": "body"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "kind": "cursor",
+                  "more": {
+                    "polarity": "true_means_more",
+                    "signal": "flag",
+                    "source": {
+                      "at": [
+                        "pageInfo",
+                        "hasNextPage"
+                      ],
+                      "from": "body"
+                    }
+                  },
+                  "resumable": false,
+                  "size": {
+                    "adjustable": false,
+                    "max": 100,
+                    "min": 1,
+                    "param": {
+                      "in": "body",
+                      "name": [
+                        "variables",
+                        "first"
+                      ]
+                    }
+                  }
+                },
+                "terminal_values": []
+              }
+            }
+          },
+          "variables": {
+            "Typed": {
+              "Named": "IssuesVars"
+            }
+          }
+        },
+        {
+          "data": {
+            "Primitive": "Json"
+          },
+          "description": "Touch nothing",
+          "document": "",
+          "id": "Touch",
+          "kind": "Mutation",
+          "no_declared_errors": true,
+          "variables": "Unit"
+        }
+      ]
+    },
     "headers": [
       [
         "X-Fixture-Version",
@@ -390,6 +556,67 @@
             "size"
           ],
           "title": "Widget",
+          "type": "object"
+        }
+      },
+      {
+        "name": "Problem",
+        "rust_path": "::fixture::models::Problem",
+        "schema": {
+          "properties": {
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message"
+          ],
+          "title": "Problem",
+          "type": "object"
+        }
+      },
+      {
+        "name": "IssuesVars",
+        "rust_path": "::fixture::models::IssuesVars",
+        "schema": {
+          "properties": {
+            "after": {
+              "nullable": true,
+              "type": "string"
+            },
+            "first": {
+              "format": "uint32",
+              "minimum": 0,
+              "nullable": true,
+              "type": "integer"
+            },
+            "owner": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner"
+          ],
+          "title": "IssuesVars",
+          "type": "object"
+        }
+      },
+      {
+        "name": "IssuesData",
+        "rust_path": "::fixture::models::IssuesData",
+        "schema": {
+          "properties": {
+            "issues": {
+              "items": {
+                "$ref": "#/components/schemas/Item"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "issues"
+          ],
+          "title": "IssuesData",
           "type": "object"
         }
       }

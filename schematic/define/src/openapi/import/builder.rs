@@ -394,7 +394,7 @@ impl OpenApiImport {
             }
         }
 
-        Ok(RestApi { rate_limit: None, retry_guidance: None,
+        Ok(RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None,
             name,
             description,
             base_url,

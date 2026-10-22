@@ -107,15 +107,15 @@ pub fn api_for(endpoint: &Endpoint) -> RestApi {
     with_referenced_components(api)
 }
 
-/// Gives `api` a component for every name its endpoints reference that it
+/// Gives `api` a component for every name its endpoints and GraphQL
+/// operations reference that it
 /// does not carry yet. Fixture names are not real Rust types, so each is
 /// spelled by its bare name and described as an unconstrained object.
 pub fn with_referenced_components(mut api: RestApi) -> RestApi {
     let mut names: Vec<String> = Vec::new();
-    for endpoint in &api.endpoints {
-        for reference in endpoint.json_references() {
-            names.extend(reference.names().into_iter().map(str::to_owned));
-        }
+    let operations = api.graphql.iter().flat_map(|surface| &surface.operations).flat_map(|operation| operation.json_references());
+    for reference in api.endpoints.iter().flat_map(|endpoint| endpoint.json_references()).chain(operations) {
+        names.extend(reference.names().into_iter().map(str::to_owned));
     }
     for name in names {
         if api.component(&name).is_none() {

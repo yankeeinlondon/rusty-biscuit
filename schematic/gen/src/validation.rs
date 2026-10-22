@@ -42,7 +42,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use schematic_define::openapi::import::naming::sanitize_rust_field_ident;
 use schematic_define::{
     ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, DefinitionError, Endpoint,
-    EnvAuthStrategy, FormFieldKind, ParamDef, QueryParamType, RestApi, TypeRef,
+    EnvAuthStrategy, ErrorEntry, FormFieldKind, GraphQlOperation, GraphQlVariables, ParamDef,
+    QueryParamType, ResponseShape, RestApi, TypeRef,
 };
 use schematic_define::pagination::{
     PaginationRuleGroup, Resolution, Step, resolve, validate_pagination,
@@ -368,6 +369,16 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
     check_module_path(api, diagnostics);
     check_api_key_param(api, diagnostics);
     check_endpoint_method_names(api, diagnostics);
+
+    for operation in api.graphql.iter().flat_map(|surface| &surface.operations) {
+        if let Err(reason) = check_type_ident(&operation.id) {
+            diagnostics.push(error(
+                Some(&operation.id),
+                Feature::InvalidIdentifier,
+                format!("GraphQL operation id `{}` {reason}", operation.id),
+            ));
+        }
+    }
 
     for endpoint in &api.endpoints {
         let id = Some(endpoint.id.as_str());
@@ -853,6 +864,7 @@ fn is_header_value(value: &str) -> bool {
 /// role each plays. A reference that does not resolve is left to
 /// [`check_schema_references`].
 fn referenced_type_names(api: &RestApi, endpoint: &Endpoint) -> Vec<(&'static str, String)> {
+    let errors = api.effective_errors(endpoint);
     let mut references: Vec<(&'static str, &TypeRef)> = Vec::new();
     match &endpoint.request {
         Some(ApiRequest::Json(reference)) => references.push(("request body", reference)),
@@ -868,10 +880,54 @@ fn referenced_type_names(api: &RestApi, endpoint: &Endpoint) -> Vec<(&'static st
     if let ApiResponse::Json(reference) = &endpoint.response {
         references.push(("response", reference));
     }
+    references.extend(errors.entries().iter().filter_map(error_reference));
     references
         .into_iter()
         .filter_map(|(role, reference)| Some((role, api.rust_type(reference)?)))
         .collect()
+}
+
+/// The body types a GraphQL operation's generated code names.
+fn operation_referenced_type_names(api: &RestApi, operation: &GraphQlOperation) -> Vec<(&'static str, String)> {
+    let errors = api.effective_operation_errors(operation);
+    let mut references: Vec<(&'static str, &TypeRef)> = vec![("data", &operation.data)];
+    if let GraphQlVariables::Typed(reference) = &operation.variables {
+        references.push(("variables", reference));
+    }
+    references.extend(errors.entries().iter().filter_map(error_reference));
+    references
+        .into_iter()
+        .filter_map(|(role, reference)| Some((role, api.rust_type(reference)?)))
+        .collect()
+}
+
+fn error_reference(entry: &ErrorEntry) -> Option<(&'static str, &TypeRef)> {
+    match &entry.shape {
+        ResponseShape::Json(reference) => Some(("error", reference)),
+        _ => None,
+    }
+}
+
+/// The success and failure enums generated for `endpoint` (Defaults D-15,
+/// D-23): `{id}Response` when it declares several success shapes, and
+/// `{id}Error` when its effective error table has several distinct shapes.
+fn endpoint_enum_names(api: &RestApi, endpoint: &Endpoint) -> Vec<(String, &'static str)> {
+    let mut names = Vec::new();
+    if endpoint.success_shapes().len() > 1 {
+        names.push((format!("{}Response", endpoint.id), "success enum"));
+    }
+    let table = api.effective_errors(endpoint);
+    let mut shapes: Vec<(&ResponseShape, Option<&str>)> = Vec::new();
+    for entry in table.entries() {
+        let shape = (&entry.shape, entry.content_type.as_deref());
+        if !shapes.contains(&shape) {
+            shapes.push(shape);
+        }
+    }
+    if shapes.len() > 1 {
+        names.push((format!("{}Error", endpoint.id), "failure enum"));
+    }
+    names
 }
 
 /// Checks an endpoint's declared path parameters against what the Rust
@@ -1135,6 +1191,13 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
                     });
                 }
             }
+            for (name, role) in endpoint_enum_names(api, endpoint) {
+                emitted.entry(name).or_default().push(Owner {
+                    api: &api.name,
+                    endpoint: Some(&endpoint.id),
+                    role: format!("the {role} of {}::{}", api.name, endpoint.id),
+                });
+            }
             if matches!(
                 endpoint.request,
                 Some(ApiRequest::FormData { .. } | ApiRequest::UrlEncoded { .. })
@@ -1147,6 +1210,17 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
                         endpoint: Some(&endpoint.id),
                         role: format!("the form body of {}::{}", api.name, endpoint.id),
                     });
+            }
+        }
+        // Operations share the endpoints' naming space (R35).
+        for operation in api.graphql.iter().flat_map(|surface| &surface.operations) {
+            let request = format!("{}{suffix}", operation.id);
+            for (name, role) in [(call_type_name(&request), "call type"), (request, "request struct")] {
+                emitted.entry(name).or_default().push(Owner {
+                    api: &api.name,
+                    endpoint: Some(&operation.id),
+                    role: format!("the {role} of GraphQL operation {}::{}", api.name, operation.id),
+                });
             }
         }
     }
@@ -1192,15 +1266,18 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
 
     for api in group {
         let suffix = get_request_suffix(api);
-        for endpoint in &api.endpoints {
-            for (role, type_name) in referenced_type_names(api, endpoint) {
+        let endpoints = api.endpoints.iter().map(|endpoint| (endpoint.id.as_str(), referenced_type_names(api, endpoint)));
+        let operations = api.graphql.iter().flat_map(|surface| &surface.operations)
+            .map(|operation| (operation.id.as_str(), operation_referenced_type_names(api, operation)));
+        for (id, references) in endpoints.chain(operations) {
+            for (role, type_name) in references {
                 let Some(owners) = emitted.get(type_name.as_str()) else {
                     continue;
                 };
                 if owners.is_empty() {
                     continue;
                 }
-                let own_wrapper = format!("{}{suffix}", endpoint.id);
+                let own_wrapper = format!("{id}{suffix}");
                 let hint = if type_name == own_wrapper {
                     format!(
                         "; rename the {role} type to `{}Body`",
@@ -1211,7 +1288,7 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
                 };
                 let referencing = Owner {
                     api: &api.name,
-                    endpoint: Some(&endpoint.id),
+                    endpoint: Some(id),
                     role: String::new(),
                 };
                 let mut involved: Vec<&Owner<'_>> = owners.iter().collect();
@@ -1219,9 +1296,8 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
                 diagnostics.push(diagnostic(
                     &involved,
                     format!(
-                        "{role} type `{type_name}` of {}::{} is shadowed by {}{hint}",
+                        "{role} type `{type_name}` of {}::{id} is shadowed by {}{hint}",
                         api.name,
-                        endpoint.id,
                         owners
                             .iter()
                             .map(|owner| owner.role.as_str())
@@ -2239,6 +2315,65 @@ mod tests {
             "`GetRequestKind` is generated for the `kind` path-parameter enum of First::Get and the \
              request struct of Second::GetRequest"
         );
+    }
+
+    fn operation(id: &str, data: &str) -> schematic_define::GraphQlOperation {
+        let mut ctx = schematic_define::DefinitionContext::types_in("::fixture");
+        let mut operation = schematic_define::GraphQlOperation::query(id, "{ a }").describes("An operation").no_variables()
+            .data::<serde_json::Value>(&mut ctx).build().unwrap();
+        operation.data = TypeRef::Named(data.into());
+        operation
+    }
+
+    fn with_operations(endpoints: Vec<Endpoint>, operations: Vec<schematic_define::GraphQlOperation>) -> RestApi {
+        let mut api = make_test_api();
+        api.endpoints = endpoints;
+        let mut surface = schematic_define::GraphQlSurface::new(schematic_define::AddressRule::github());
+        surface.operations = operations;
+        api.graphql = Some(surface);
+        crate::test_utils::with_referenced_components(api)
+    }
+
+    #[test]
+    fn an_operation_shares_the_endpoint_naming_space() {
+        let api = with_operations(vec![get("Viewer")], vec![operation("Viewer", "ViewerData")]);
+        let messages: Vec<String> = rust_only(&[&api]).into_iter().map(|d| d.message).collect();
+        assert!(messages.contains(&"`ViewerRequest` is generated for the request struct of TestApi::Viewer and the request struct of GraphQL operation TestApi::Viewer".to_string()), "{messages:?}");
+        assert!(messages.contains(&"`ViewerCall` is generated for the call type of TestApi::Viewer and the call type of GraphQL operation TestApi::Viewer".to_string()), "{messages:?}");
+
+        let api = with_operations(vec![get("List")], vec![operation("Viewer", "ListRequest")]);
+        let diagnostics = rust_only(&[&api]);
+        assert_eq!(features(&diagnostics), [(Severity::Error, Feature::GeneratedNameCollision)]);
+        assert_eq!(diagnostics[0].message, "data type `ListRequest` of TestApi::Viewer is shadowed by the request struct of TestApi::List");
+
+        let api = with_operations(vec![get("List")], vec![operation("Viewer", "ViewerData")]);
+        assert!(rust_only(&[&api]).is_empty());
+        let api = with_operations(vec![], vec![operation("viewer-data", "ViewerData")]);
+        assert!(rust(&api).iter().any(|d| d.feature == Feature::InvalidIdentifier && d.message.starts_with("GraphQL operation id `viewer-data`")));
+    }
+
+    #[test]
+    fn a_failure_enum_exists_for_several_distinct_error_shapes_and_may_shadow_a_type() {
+        use schematic_define::{ErrorEntry, ResponseShape, StatusMatch};
+        let mut endpoint = get("Get");
+        endpoint.errors = vec![ErrorEntry::new(StatusMatch::exact(404), ResponseShape::Json(TypeRef::Named("GetError".into())))];
+        let api = api_with(vec![endpoint.clone()]);
+        assert!(rust_only(&[&api]).is_empty(), "one distinct shape needs no failure enum");
+
+        endpoint.errors.push(ErrorEntry::new(StatusMatch::class(5), ResponseShape::Text));
+        let api = api_with(vec![endpoint.clone()]);
+        let diagnostics = rust_only(&[&api]);
+        assert_eq!(features(&diagnostics), [(Severity::Error, Feature::GeneratedNameCollision)]);
+        assert_eq!(diagnostics[0].message, "error type `GetError` of TestApi::Get is shadowed by the failure enum of TestApi::Get");
+
+        // An opted-out endpoint has no failure enum.
+        endpoint.errors.clear();
+        endpoint.no_declared_errors = true;
+        let mut api = api_with(vec![endpoint]);
+        api.errors = vec![ErrorEntry::new(StatusMatch::exact(404), ResponseShape::Json(TypeRef::Named("GetError".into()))),
+            ErrorEntry::new(StatusMatch::class(5), ResponseShape::Text)];
+        api.schemas.push(schematic_define::SchemaComponent { name: "GetError".into(), rust_path: Some("GetError".into()), schema: serde_json::json!({"type": "object"}) });
+        assert!(rust_only(&[&api]).is_empty());
     }
 
     #[test]

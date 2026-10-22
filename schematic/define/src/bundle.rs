@@ -321,9 +321,11 @@ fn reject_nulls(value: &Value, pointer: &mut String, grant: bool) -> Result<(), 
 
 /// Members serialized only when they differ from their default, so an
 /// explicit default is legitimate input the writer omits. Coupled to the
-/// `skip_serializing_if` attributes on `Endpoint`, `EndpointParams`,
-/// `ParamDef`, and `AuthPolicy`.
-const OMITTED_DEFAULTS: [&str; 5] = ["deprecated", "secret", "pager_managed", "path", "explicit"];
+/// `skip_serializing_if` attributes on `RestApi`, `Endpoint`,
+/// `EndpointParams`, `ParamDef`, `AuthPolicy`, `SuccessShape`,
+/// `ResponseShape::Stream`, `GraphQlSurface`, and `GraphQlOperation`.
+const OMITTED_DEFAULTS: [&str; 11] = ["deprecated", "secret", "pager_managed", "path", "explicit",
+    "errors", "no_declared_errors", "operations", "statuses", "fallback", "keep"];
 
 /// Every member of `input` must survive typed deserialization: `written`,
 /// the re-serialized bundle, holds it with the same value. This rejects keys

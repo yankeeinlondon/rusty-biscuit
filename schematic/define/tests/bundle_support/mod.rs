@@ -2,15 +2,17 @@
 //! registers (recursive roots, a nested type recursing into its root,
 //! containers, an alias, arbitrary JSON, a composition) and the additive
 //! vocabulary (typed paths, deprecation, metadata, endpoint authentication,
-//! ordered Basic lists, and all three OAuth2 grants).
+//! ordered Basic lists, all three OAuth2 grants, declared errors at both
+//! levels with an opt-out, and a paginated GraphQL operation).
 
 use std::collections::HashMap;
 
+use schematic_define::pagination::{Collection, CursorSource, InputParam, MoreSignal, PageSize, Strategy};
 use schematic_define::{
-    AuthMethod, AuthPolicy, AuthorizationCodeGrant, Backoff, ClientCredentialsGrant, DefinitionBundle,
-    DefinitionContext, DefinitionError, DeviceCodeGrant, Endpoint, EnvAuthStrategy, OAuth2ClientAuthMethod,
-    OAuth2Config, ParamDef, PkceRequirement, QueryParamType, RateLimit, ResetUnit, RestApi, RetryGuidance,
-    StatusSelector, definition_type, rust_path,
+    AddressRule, AuthMethod, AuthPolicy, AuthorizationCodeGrant, Backoff, ClientCredentialsGrant, DefinitionBundle,
+    DefinitionContext, DefinitionError, DeviceCodeGrant, Endpoint, EnvAuthStrategy, ErrorSet, ErrorShape, GraphQlOperation,
+    OAuth2ClientAuthMethod, OAuth2Config, ParamDef, PkceRequirement, QueryParamType, RateLimit, ResetUnit, RestApi,
+    RetryGuidance, StatusMatch, StatusSelector, definition_type, rust_path,
 };
 use schemars::JsonSchema;
 
@@ -29,6 +31,9 @@ pub mod models {
     definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Cat { pub meows: bool });
     definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Dog { pub barks: u8 });
     definition_type!(#[derive(JsonSchema)] #[serde(untagged)] #[allow(dead_code)] pub enum Pet { Cat(Cat), Dog(Dog) });
+    definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Problem { pub message: String });
+    definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct IssuesVars { pub owner: String, pub first: Option<u32>, pub after: Option<String> });
+    definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct IssuesData { pub issues: Vec<Item> });
     #[derive(JsonSchema)]
     #[allow(dead_code)]
     pub struct Widget { pub size: u32 }
@@ -68,6 +73,7 @@ pub fn fixture() -> (RestApi, schematic_define::ModelCatalog) {
     let node = Endpoint::get("GetNode", "/nodes/{id}").describes("Get a node tree")
         .path_param(ParamDef::path("id", QueryParamType::Integer).describes("Node id"))
         .rate_limit(rate_limit("node"))
+        .errors(ErrorSet::new().on(StatusMatch::exact(404), ErrorShape::empty()).on(StatusMatch::range(420, 429), ErrorShape::text().content_type("text/html")))
         .returns_json::<Node>(&mut ctx).build().unwrap();
     let parents = Endpoint::get("ListParents", "/parents").describes("List parents").deprecated()
         .query(ParamDef::new("order", QueryParamType::Enum(vec!["asc".into(), "desc".into()])).deprecated())
@@ -76,13 +82,23 @@ pub fn fixture() -> (RestApi, schematic_define::ModelCatalog) {
         .retry_guidance(RetryGuidance::new([StatusSelector::Code(503)], false, 2, Backoff::Fixed { delay_ms: 100 }).unwrap())
         .auth(AuthPolicy { explicit: vec![AuthMethod::Basic], env_fallback: None })
         .returns_json::<HashMap<String, Item>>(&mut ctx).build().unwrap();
-    let raw = Endpoint::get("Raw", "/raw").describes("Arbitrary JSON").public()
+    let raw = Endpoint::get("Raw", "/raw").describes("Arbitrary JSON").public().errors(ErrorSet::none())
         .returns_json::<serde_json::Value>(&mut ctx).build().unwrap();
     let (cat, dog) = (ctx.register::<Cat>().unwrap(), ctx.register::<Dog>().unwrap());
     ctx.one_of::<Pet>([cat, dog]).unwrap();
     let pets = Endpoint::post("CreatePet", "/pets").describes("Create a pet")
         .request_json::<Pet>(&mut ctx)
         .returns_json::<Option<Widget>>(&mut ctx).build().unwrap();
+    let problem = ctx.register::<Problem>().unwrap();
+    let issues = GraphQlOperation::query("Issues", "query Issues($owner: String!, $first: Int, $after: String) { issues { id } }")
+        .describes("Issues of an owner").variables::<IssuesVars>(&mut ctx).data::<IssuesData>(&mut ctx).operation_name("Issues")
+        .errors(ErrorSet::new().on(StatusMatch::exact(403), ErrorShape::json(problem.clone())))
+        .pagination(Collection::at("issues").item_type("Item").paginate(
+            Strategy::cursor(InputParam::body("variables.after"), CursorSource::body("pageInfo.endCursor"))
+                .more_when(MoreSignal::has_more("pageInfo.hasNextPage")).page_size(PageSize::new(InputParam::body("variables.first")).max(100))))
+        .build().unwrap();
+    let viewer = GraphQlOperation::mutation("Touch", "").describes("Touch nothing").no_variables()
+        .data::<serde_json::Value>(&mut ctx).errors(ErrorSet::none()).build().unwrap();
     let api = RestApi::builder(&ctx, "Fixture", "https://api.example.com/v1")
         .describes("Bundle fixture API")
         .basic_env("FIXTURE_USER", ["FIXTURE_PASSWORD", "FIXTURE_PASSWORD_OLD"])
@@ -94,7 +110,9 @@ pub fn fixture() -> (RestApi, schematic_define::ModelCatalog) {
         .rate_limit(rate_limit("api"))
         .retry_guidance(RetryGuidance::new([StatusSelector::Code(429), StatusSelector::Range { start: 500, end: 599 }], true, 3,
             Backoff::Exponential { base_ms: 250, cap_ms: 8000 }).unwrap())
+        .default_errors(ErrorSet::new().on(StatusMatch::class(5), ErrorShape::json(problem)).on(StatusMatch::exact(404), ErrorShape::text()))
         .endpoints([node, parents, lookup, raw, pets])
+        .graphql(AddressRule::github()).operations([issues, viewer])
         .build().unwrap();
     (api, ctx.models().clone())
 }

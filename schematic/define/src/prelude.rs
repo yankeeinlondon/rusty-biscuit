@@ -62,3 +62,4 @@ pub use crate::websocket::{
 };
 
 pub use crate::{DefinitionContext, DefinitionError, Registration, TypeDesc, Success, ErrorSet, EndpointBuilder, RestApiBuilder};
+pub use crate::{AddressRule, ErrorShape, GraphQlOperation, StatusMatch};

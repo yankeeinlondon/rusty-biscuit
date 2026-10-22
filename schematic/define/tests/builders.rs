@@ -79,7 +79,7 @@ fn endpoint_builder_equals_legacy_literal_without_normalization() {
 #[test]
 fn repeated_success_and_invalid_required_facts_report_errors() {
     let error = Endpoint::get("Get", "/").describes("Get").returns_empty().returns_text().build().unwrap_err().to_string();
-    assert!(error.contains("Get") && error.contains("several success shapes arrive with response model v2"));
+    assert!(error.contains("Get") && error.contains("are stored once Endpoint::response holds response model v2 shapes"), "{error}");
     for (id, path, description) in [("", "/", "Get"), ("Get", "items", "Get"), ("Get", "/", "  ")] {
         assert!(Endpoint::get(id, path).describes(description).returns_empty().build().is_err());
     }
@@ -276,6 +276,8 @@ fn public_default_set_equals_documented_allow_list() {
         include_str!("../src/builders.rs"),
         include_str!("../src/components.rs"),
         include_str!("../src/cross_origin.rs"),
+        include_str!("../src/error_table.rs"),
+        include_str!("../src/graphql.rs"),
         include_str!("../src/headers/builder/auth.rs"),
         include_str!("../src/headers/builder/env.rs"),
         include_str!("../src/headers/builder/mod.rs"),

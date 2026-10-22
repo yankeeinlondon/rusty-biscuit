@@ -39,7 +39,7 @@ pub use resolve::{
     ResolutionOrigin, ResolvedList, adopted_params, caller_knobs, param_adoptions, resolve,
     root_array_item_type, strategy_knobs,
 };
-pub(crate) use resolve::path_params;
+pub(crate) use resolve::{path_params, request_inputs};
 pub use selector::{ItemSelector, JsonPath, Step};
 pub use strategy::{
     Boundary, Carry, CountUnit, CursorBuilder, CursorLeg, CursorPart, CursorSource,

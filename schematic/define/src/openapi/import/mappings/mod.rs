@@ -81,7 +81,7 @@ pub fn map_operation(
     let params = parameters::map_parameters(&op.parameters, resolver, &mut diagnostics);
 
     Ok((
-        Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None,
+        Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
             id,
             method,
             path: path.to_string(),

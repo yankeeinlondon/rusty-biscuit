@@ -33,6 +33,10 @@
 //! ```
 
 use std::marker::PhantomData;
+use serde_json::Value;
+use crate::error_table::{validate_error_entries, validate_error_policy};
+use crate::response::validate_success_shapes;
+use crate::{AddressRule, ErrorEntry, GraphQlOperation, GraphQlSurface, JsonTag, ResponseShape, StatusMatch, StreamEnd, StreamFraming, SuccessShape, TypeRef};
 use crate::{ApiRequest, ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, CrossOrigin, DefinitionContext,
     DefinitionError, Endpoint, EndpointAuth, EndpointParams, EnvAuthStrategy, EnvList, EnvMapping, FormField,
     ParamDef, ParamStyle, QueryParamType, RateLimit, Registration, RestApi, RestMethod, RetryGuidance, TypeDesc};
@@ -42,26 +46,106 @@ pub struct Missing;
 /// A required fact has been declared.
 pub struct Present;
 
-/// One success shape. Several successes arrive with response model v2.
+/// One success shape and its selection facts; `.returns` may repeat.
+///
+/// A stream ends at connection close unless an `ends_*` modifier names a
+/// terminator. A JSON shape whose registered type is a sequence or a map is
+/// tagged as an array or object when another JSON shape shares its status and
+/// media type, unless it declares a tag.
 #[non_exhaustive]
 #[derive(Clone, Debug)]
-pub struct Success(ApiResponse);
+pub struct Success { shape: SuccessShape, inferred: Option<JsonTag>, misuse: Option<&'static str> }
 #[allow(missing_docs)]
 impl Success {
-    pub fn json(desc: TypeDesc) -> Self { Self(ApiResponse::Json(desc.into_type_ref())) }
-    pub fn text() -> Self { Self(ApiResponse::Text) }
-    pub fn binary() -> Self { Self(ApiResponse::Binary) }
-    pub fn empty() -> Self { Self(ApiResponse::Empty) }
-    fn lower(self) -> ApiResponse { self.0 }
+    fn of(shape: ResponseShape) -> Self { Self { shape: SuccessShape::new(shape), inferred: None, misuse: None } }
+    fn stream(framing: StreamFraming) -> Self {
+        Self::of(ResponseShape::Stream { framing, end: StreamEnd::ConnectionClose, keep: false })
+    }
+    pub fn json(desc: TypeDesc) -> Self {
+        let inferred = match desc.type_ref() {
+            TypeRef::Array(_) => Some(JsonTag::Array),
+            TypeRef::Map(_) | TypeRef::KeyedMap { .. } => Some(JsonTag::Object),
+            _ => None,
+        };
+        Self { inferred, ..Self::of(ResponseShape::Json(desc.into_type_ref())) }
+    }
+    pub fn text() -> Self { Self::of(ResponseShape::Text) }
+    pub fn binary() -> Self { Self::of(ResponseShape::Binary) }
+    pub fn empty() -> Self { Self::of(ResponseShape::Empty) }
+    /// Server-sent events whose data decodes as `item`.
+    pub fn sse(item: TypeDesc) -> Self { Self::stream(StreamFraming::Sse(item.into_type_ref())) }
+    /// One JSON `item` per line.
+    pub fn ndjson(item: TypeDesc) -> Self { Self::stream(StreamFraming::Ndjson(item.into_type_ref())) }
+    /// Raw byte chunks.
+    pub fn bytes() -> Self { Self::stream(StreamFraming::Bytes) }
+    pub fn content_type(mut self, content_type: impl Into<String>) -> Self { self.shape.content_type = Some(content_type.into()); self }
+    /// Selects this shape by an exact 2xx status (R3a); may repeat.
+    pub fn status(mut self, status: u16) -> Self { self.shape.statuses.push(status); self }
+    /// Selects this JSON shape by a top-level field's value (R3b).
+    pub fn tagged(mut self, name: impl Into<String>, value: impl Into<Value>) -> Self {
+        self.shape.json_tag = Some(JsonTag::Field { name: name.into(), value: value.into() }); self
+    }
+    pub fn json_array(mut self) -> Self { self.shape.json_tag = Some(JsonTag::Array); self }
+    pub fn json_object(mut self) -> Self { self.shape.json_tag = Some(JsonTag::Object); self }
+    /// Selected for any unmatched media type (R3c).
+    pub fn fallback(mut self) -> Self { self.shape.fallback = true; self }
+    /// When this shape is returned; variant rustdoc and export only.
+    pub fn note(mut self, note: impl Into<String>) -> Self { self.shape.note = Some(note.into()); self }
+    pub fn ends_at_data_line(self, data: impl Into<String>) -> Self { self.ends(StreamEnd::DataLineEquals(data.into())) }
+    pub fn ends_at_event(self, name: impl Into<String>) -> Self { self.ends(StreamEnd::EventNamed(name.into())) }
+    /// Ends at the item whose field at dotted `path` equals `value`.
+    pub fn ends_when_field(self, path: impl Into<String>, value: impl Into<Value>) -> Self {
+        self.ends(StreamEnd::FieldEquals { field: path.into(), value: value.into() })
+    }
+    /// Delivers the terminator as the last item instead of consuming it.
+    pub fn keep_end(mut self) -> Self {
+        match &mut self.shape.shape {
+            ResponseShape::Stream { keep, .. } => *keep = true,
+            _ => self.misuse = Some("`keep_end` applies only to a stream shape"),
+        }
+        self
+    }
+    fn ends(mut self, terminator: StreamEnd) -> Self {
+        match &mut self.shape.shape {
+            ResponseShape::Stream { end, .. } => *end = terminator,
+            _ => self.misuse = Some("an `ends_*` terminator applies only to a stream shape"),
+        }
+        self
+    }
 }
 
-/// Declared errors are reserved for response model v2; currently only none.
+/// An error body's shape and optional declared media type.
 #[non_exhaustive]
 #[derive(Clone, Debug)]
-pub struct ErrorSet { _private: () }
+pub struct ErrorShape { shape: ResponseShape, content_type: Option<String> }
+#[allow(missing_docs)]
+impl ErrorShape {
+    fn of(shape: ResponseShape) -> Self { Self { shape, content_type: None } }
+    pub fn json(desc: TypeDesc) -> Self { Self::of(ResponseShape::Json(desc.into_type_ref())) }
+    pub fn text() -> Self { Self::of(ResponseShape::Text) }
+    pub fn binary() -> Self { Self::of(ResponseShape::Binary) }
+    pub fn empty() -> Self { Self::of(ResponseShape::Empty) }
+    pub fn content_type(mut self, content_type: impl Into<String>) -> Self { self.content_type = Some(content_type.into()); self }
+}
+
+/// Declared error entries, or an opt-out from every one.
+///
+/// On an endpoint or operation, [`ErrorSet::none`] opts out of the API
+/// defaults as well; on an API it declares no defaults.
+#[non_exhaustive]
+#[derive(Clone, Debug)]
+pub struct ErrorSet { entries: Vec<ErrorEntry>, none: bool }
 impl ErrorSet {
     /// No declared errors; provider responses still use runtime error handling.
-    pub fn none() -> Self { Self { _private: () } }
+    pub fn none() -> Self { Self { entries: vec![], none: true } }
+    /// An empty set to add entries to.
+    #[allow(clippy::new_without_default)] // public `Default` impls are an allow-listed set
+    pub fn new() -> Self { Self { entries: vec![], none: false } }
+    /// Decode statuses `status` matches as `shape`.
+    pub fn on(mut self, status: StatusMatch, shape: ErrorShape) -> Self {
+        self.entries.push(ErrorEntry { content_type: shape.content_type, ..ErrorEntry::new(status, shape.shape) }); self
+    }
+    pub(crate) fn into_parts(self) -> (Vec<ErrorEntry>, bool) { (self.entries, self.none) }
 }
 
 impl FormField {
@@ -79,7 +163,8 @@ fn invalid(api: &str, endpoint: &str, message: impl Into<String>) -> DefinitionE
 /// registration errors instead of allowing later setters to conceal them.
 pub struct EndpointBuilder<D = Missing, S = Missing> {
     endpoint: Endpoint,
-    successes: usize,
+    // Lowered to `endpoint.response` at build.
+    successes: Vec<Success>,
     auth_choices: usize,
     error: Option<DefinitionError>,
     state: PhantomData<(D, S)>,
@@ -92,7 +177,7 @@ impl Endpoint {
         EndpointBuilder { endpoint: Endpoint { id: id.into(), method, path: path.into(),
             description: String::new(), request: None, response: ApiResponse::Empty,
             headers: vec![], params: None, cross_origin: None, pagination: None, rate_limit: None, retry_guidance: None,
-            deprecated: false, auth: None }, successes: 0, auth_choices: 0, error: None, state: PhantomData }
+            deprecated: false, auth: None, errors: vec![], no_declared_errors: false }, successes: vec![], auth_choices: 0, error: None, state: PhantomData }
     }
     pub fn get(id: impl Into<String>, path: impl Into<String>) -> EndpointBuilder { Self::new(id, RestMethod::Get, path) }
     pub fn post(id: impl Into<String>, path: impl Into<String>) -> EndpointBuilder { Self::new(id, RestMethod::Post, path) }
@@ -111,18 +196,31 @@ impl<D, S> EndpointBuilder<D, S> {
         self.endpoint.description = description.into(); self.cast()
     }
     pub fn returns(mut self, success: Success) -> EndpointBuilder<D, Present> {
-        self.successes += 1; self.endpoint.response = success.lower(); self.cast()
+        self.successes.push(success); self.cast()
     }
     pub fn returns_json<T: Registration>(mut self, ctx: &mut DefinitionContext) -> EndpointBuilder<D, Present> {
         match ctx.register_for::<T>("<endpoint>", &self.endpoint.id) {
-            Ok(desc) => self.returns(Success::json(desc)),
+            Ok(desc) => {
+                let mut success = Success::json(desc);
+                if success.inferred.is_none() && schemars::schema_for!(T).get("type") == Some(&Value::from("object")) {
+                    success.inferred = Some(JsonTag::Object);
+                }
+                self.returns(success)
+            }
             Err(error) => { if self.error.is_none() { self.error = Some(error); } self.cast() }
         }
     }
     pub fn returns_text(self) -> EndpointBuilder<D, Present> { self.returns(Success::text()) }
     pub fn returns_binary(self) -> EndpointBuilder<D, Present> { self.returns(Success::binary()) }
     pub fn returns_empty(self) -> EndpointBuilder<D, Present> { self.returns(Success::empty()) }
-    pub fn errors(self, _: ErrorSet) -> Self { self }
+    /// Adds entries overlaying the API defaults, or opts out with
+    /// [`ErrorSet::none`]; opting out and adding entries fails at build.
+    pub fn errors(mut self, errors: ErrorSet) -> Self {
+        let (entries, none) = errors.into_parts();
+        self.endpoint.errors.extend(entries);
+        self.endpoint.no_declared_errors |= none;
+        self
+    }
     pub fn request_json<T: Registration>(mut self, ctx: &mut DefinitionContext) -> Self {
         match ctx.register_for::<T>("<endpoint>", &self.endpoint.id) {
             Ok(desc) => self.endpoint.request = Some(ApiRequest::Json(desc.into_type_ref())),
@@ -172,8 +270,15 @@ impl EndpointBuilder<Present, Present> {
     /// at API build; API build alone checks references and credential sources.
     pub fn build(self) -> Result<Endpoint, DefinitionError> {
         if let Some(error) = self.error { return Err(error); }
-        let ep = self.endpoint;
-        if self.successes > 1 { return Err(invalid("<endpoint>", &ep.id, "several success shapes arrive with response model v2")); }
+        let mut ep = self.endpoint;
+        if let Some(misuse) = self.successes.iter().find_map(|success| success.misuse) { return Err(invalid("<endpoint>", &ep.id, misuse)); }
+        let shapes = infer_json_tags(self.successes);
+        validate_success_shapes(&shapes).map_err(|message| invalid("<endpoint>", &ep.id, message))?;
+        // Endpoint::response holds one ApiResponse until it holds success
+        // shapes; anything it cannot represent is refused, never dropped.
+        ep.response = match shapes.as_slice() { [only] => only.legacy_response(), _ => None }
+            .ok_or_else(|| invalid("<endpoint>", &ep.id, "several success shapes, streams, and success content types, statuses, \
+                tags, and notes are stored once Endpoint::response holds response model v2 shapes"))?;
         if ep.id.trim().is_empty() || ep.description.trim().is_empty() || !ep.path.starts_with('/') {
             return Err(invalid("<endpoint>", &ep.id, "id and description must be nonempty and path must start with /"));
         }
@@ -189,6 +294,22 @@ impl EndpointBuilder<Present, Present> {
         validate_endpoint_vocabulary("<endpoint>", &ep)?;
         Ok(ep)
     }
+}
+
+/// Applies each undeclared shape's inferred array or object tag when another
+/// JSON shape shares its media type and an applicable status.
+fn infer_json_tags(successes: Vec<Success>) -> Vec<SuccessShape> {
+    let shares = |a: &SuccessShape, b: &SuccessShape| matches!((&a.shape, &b.shape), (ResponseShape::Json(_), ResponseShape::Json(_)))
+        && a.media_type() == b.media_type()
+        && (a.statuses.is_empty() && b.statuses.is_empty() || a.statuses.iter().any(|status| b.statuses.contains(status)));
+    let shapes: Vec<SuccessShape> = successes.iter().map(|success| success.shape.clone()).collect();
+    successes.into_iter().enumerate().map(|(index, success)| {
+        let mut shape = success.shape;
+        if shape.json_tag.is_none() && shapes.iter().enumerate().any(|(other, peer)| other != index && shares(&shape, peer)) {
+            shape.json_tag = success.inferred;
+        }
+        shape
+    }).collect()
 }
 
 /// API description and authentication must be stated before build. The context
@@ -210,7 +331,7 @@ impl RestApi {
             docs_url: None, auth: AuthStrategy::None, auth_policy: None, env_auth: vec![],
             headers: vec![], endpoints: vec![], module_path: None, request_suffix: None, version: None,
             env_mapping: None, cross_origin: CrossOrigin::same_origin(), request_id_header: None, secret_names: vec![],
-            default_pagination: None, rate_limit: None, retry_guidance: None, schemas: vec![] }, auth_choices: 0, username: None, error: None, state: PhantomData }
+            default_pagination: None, rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, schemas: vec![] }, auth_choices: 0, username: None, error: None, state: PhantomData }
     }
 }
 #[allow(missing_docs)]
@@ -262,7 +383,24 @@ impl<'a, D, A> RestApiBuilder<'a, D, A> {
     pub fn rate_limit(mut self, rate_limit: RateLimit) -> Self { self.api.rate_limit = Some(rate_limit); self }
     /// Retry guidance inherited by every endpoint without its own.
     pub fn retry_guidance(mut self, guidance: RetryGuidance) -> Self { self.api.retry_guidance = Some(guidance); self }
-    pub fn default_errors(self, _: ErrorSet) -> Self { self }
+    /// Error entries every endpoint and operation inherits.
+    /// [`ErrorSet::none`] here adds nothing: an empty API table is not an
+    /// endpoint opt-out.
+    pub fn default_errors(mut self, errors: ErrorSet) -> Self { self.api.errors.extend(errors.into_parts().0); self }
+    /// Declares a GraphQL surface at `address`, replacing earlier rules.
+    pub fn graphql(mut self, address: impl IntoIterator<Item = AddressRule>) -> Self {
+        let address: Vec<AddressRule> = address.into_iter().collect();
+        match &mut self.api.graphql {
+            Some(surface) => surface.address = address,
+            None => self.api.graphql = Some(GraphQlSurface::new(address)),
+        }
+        self
+    }
+    /// Adds GraphQL operations; build fails unless [`Self::graphql`] gave
+    /// the surface an address.
+    pub fn operations(mut self, operations: impl IntoIterator<Item = GraphQlOperation>) -> Self {
+        self.api.graphql.get_or_insert_with(|| GraphQlSurface::new([])).operations.extend(operations); self
+    }
 }
 impl RestApiBuilder<'_, Present, Present> {
     /// Validate coherent authentication, every typed reference, and the
@@ -324,6 +462,8 @@ pub(crate) fn validate_api(api: &RestApi) -> Result<(), DefinitionError> {
     for name in &api.secret_names {
         if !valid_header_name(name) { return Err(fail("invalid secret header name")); }
     }
+    validate_error_entries(&api.errors).map_err(|message| fail(&message))?;
+    if let Some(surface) = &api.graphql { crate::graphql::validate_surface(api, surface)?; }
     if let Some(diagnostic) = crate::pagination::validate_pagination(api).into_iter().next() {
         return Err(invalid(&api.name, diagnostic.endpoint.as_deref().unwrap_or("<api>"),
             format!("{}: {}", diagnostic.error.rule(), diagnostic.error)));
@@ -339,6 +479,7 @@ pub(crate) fn validate_api(api: &RestApi) -> Result<(), DefinitionError> {
             validate_origin(policy).map_err(|message| invalid(&api.name, &ep.id, message))?;
         }
         validate_endpoint_vocabulary(&api.name, ep)?;
+        validate_error_policy(&api.errors, &ep.errors, ep.no_declared_errors).map_err(|message| invalid(&api.name, &ep.id, message))?;
         if let Some(message) = credential_source_problem(api, ep) { return Err(invalid(&api.name, &ep.id, message)); }
         if let Some(params) = &ep.params {
             for param in params.query.iter().chain(&params.header).chain(&params.cookie) {
@@ -362,6 +503,8 @@ fn validate_endpoint_vocabulary(api: &str, ep: &Endpoint) -> Result<(), Definiti
         }
         validate_oauth2(policy).map_err(|error| fail(format!("endpoint auth policy: {error}")))?;
     }
+    validate_success_shapes(&ep.success_shapes()).map_err(&fail)?;
+    validate_error_policy(&[], &ep.errors, ep.no_declared_errors).map_err(&fail)?;
     validate_typed_paths(ep).map_err(fail)
 }
 

@@ -59,7 +59,7 @@ fn allow_origins_keeps_order_and_exact_strings() {
 }
 
 #[test]
-fn endpoints_support_cross_origin_override_and_no_graphql_export() {
+fn endpoints_support_cross_origin_override() {
     let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Ping".to_string(); fixture.method = RestMethod::Get; fixture.path = "/ping".to_string(); fixture.description = "Ping".to_string(); fixture.request = None; fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     // The public transfer fields remain readable after construction.
@@ -87,17 +87,4 @@ fn endpoints_support_cross_origin_override_and_no_graphql_export() {
     assert!(cross_origin.is_none());
     assert!(pagination.is_none());
     assert_eq!(Endpoint::get("Ping", "/ping").describes("Ping").returns_empty().cross_origin(CrossOrigin::deny()).build().unwrap().cross_origin, Some(CrossOrigin::deny()));
-
-    let lib_source = include_str!("../src/lib.rs");
-    let exported = lib_source
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("//"))
-        .collect::<Vec<_>>()
-        .join("\n")
-        .to_lowercase();
-    assert!(
-        !exported.contains("graphql"),
-        "the crate root exports a GraphQL name"
-    );
-
 }

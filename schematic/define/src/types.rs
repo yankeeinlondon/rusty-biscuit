@@ -207,6 +207,14 @@ pub struct RestApi {
     /// [`Endpoint::retry_guidance`]. Descriptive only; nothing retries.
     #[serde(default, deserialize_with = "crate::serde_presence::non_null", skip_serializing_if = "Option::is_none")]
     pub retry_guidance: Option<RetryGuidance>,
+    /// Declared error entries every endpoint and operation inherits; empty
+    /// declares no defaults. See [`Self::effective_errors`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<crate::ErrorEntry>,
+    /// The API's GraphQL address rules and operations; `None` when it has no
+    /// GraphQL surface.
+    #[serde(default, deserialize_with = "crate::serde_presence::non_null", skip_serializing_if = "Option::is_none")]
+    pub graphql: Option<crate::GraphQlSurface>,
     /// Every schema component of this API's definition context, in
     /// registration order. JSON body references name these; see
     /// [`RestApi::validate_references`].
@@ -332,6 +340,21 @@ impl RestApi {
     #[must_use]
     pub fn effective_retry_guidance<'a>(&'a self, endpoint: &'a Endpoint) -> Option<&'a RetryGuidance> {
         endpoint.retry_guidance.as_ref().or(self.retry_guidance.as_ref())
+    }
+
+    /// The error table `endpoint` decodes non-2xx replies with: these API
+    /// defaults overlaid by the endpoint's entries, or nothing when it opts
+    /// out. See [`crate::ErrorTable::resolve`].
+    #[must_use]
+    pub fn effective_errors(&self, endpoint: &Endpoint) -> crate::ErrorTable {
+        crate::ErrorTable::resolve(&self.errors, &endpoint.errors, endpoint.no_declared_errors)
+    }
+
+    /// The HTTP error table of a GraphQL operation, resolved like
+    /// [`Self::effective_errors`].
+    #[must_use]
+    pub fn effective_operation_errors(&self, operation: &crate::GraphQlOperation) -> crate::ErrorTable {
+        crate::ErrorTable::resolve(&self.errors, &operation.errors, operation.no_declared_errors)
     }
 
     /// Resolves the authentication `endpoint` uses.
@@ -498,9 +521,24 @@ pub struct Endpoint {
     /// [`RestApi::endpoint_auth`].
     #[serde(default, deserialize_with = "crate::serde_presence::non_null", skip_serializing_if = "Option::is_none")]
     pub auth: Option<EndpointAuth>,
+    /// Entries overlaying [`RestApi::errors`]: an identical match replaces
+    /// the API entry, any other adds one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<crate::ErrorEntry>,
+    /// Opts out of every declared error, the API's included; set by
+    /// `ErrorSet::none()`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_declared_errors: bool,
 }
 
 impl Endpoint {
+    /// The endpoint's success shapes. While [`Self::response`] holds one
+    /// [`ApiResponse`], that is its only shape, with no selection facts.
+    #[must_use]
+    pub fn success_shapes(&self) -> Vec<crate::SuccessShape> {
+        vec![crate::SuccessShape::from(self.response.clone())]
+    }
+
     /// Placeholder names in [`Self::path`], `{+name}` read as `name`, each
     /// once in order of first occurrence.
     ///
@@ -618,6 +656,8 @@ mod tests {
             default_pagination: None,
             rate_limit: None,
             retry_guidance: None,
+            errors: vec![],
+            graphql: None,
             schemas: vec![],
             };
 
@@ -651,6 +691,8 @@ mod tests {
             default_pagination: None,
             rate_limit: None,
             retry_guidance: None,
+            errors: vec![],
+            graphql: None,
             schemas: vec![],
             };
 
@@ -690,6 +732,8 @@ mod tests {
             default_pagination: None,
             rate_limit: None,
             retry_guidance: None,
+            errors: vec![],
+            graphql: None,
             schemas: vec![],
             };
 
@@ -724,6 +768,8 @@ mod tests {
             default_pagination: None,
             rate_limit: None,
             retry_guidance: None,
+            errors: vec![],
+            graphql: None,
             schemas: vec![],
             };
 
@@ -759,6 +805,8 @@ mod tests {
             default_pagination: None,
             rate_limit: None,
             retry_guidance: None,
+            errors: vec![],
+            graphql: None,
             schemas: vec![],
             };
 
@@ -807,6 +855,8 @@ mod tests {
             default_pagination: None,
             rate_limit: None,
             retry_guidance: None,
+            errors: vec![],
+            graphql: None,
             schemas: vec![],
             };
 
@@ -848,6 +898,8 @@ mod tests {
             default_pagination: None,
             rate_limit: None,
             retry_guidance: None,
+            errors: vec![],
+            graphql: None,
             schemas: vec![],
             };
 
@@ -882,6 +934,8 @@ mod tests {
             default_pagination: None,
             rate_limit: None,
             retry_guidance: None,
+            errors: vec![],
+            graphql: None,
             schemas: vec![],
         }
     }
