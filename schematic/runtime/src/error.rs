@@ -182,6 +182,8 @@ pub enum BuildError {
     InvalidCertificate,
     /// The HTTP client could not be initialized.
     Transport,
+    /// The stream frame limit is zero.
+    InvalidMaxFrameBytes,
 }
 
 impl fmt::Display for BuildError {
@@ -206,6 +208,7 @@ impl fmt::Display for BuildError {
             Self::InvalidProxy => f.write_str("proxy URL is not valid"),
             Self::InvalidCertificate => f.write_str("root certificate could not be parsed"),
             Self::Transport => f.write_str("HTTP client could not be initialized"),
+            Self::InvalidMaxFrameBytes => f.write_str("the stream frame limit must be at least one byte"),
         }
     }
 }

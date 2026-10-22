@@ -148,6 +148,11 @@ pub enum ErrorKind<E> {
     /// A 2xx reply whose body did not decode, including a body whose content
     /// does not match the endpoint's codec.
     MalformedSuccess,
+    /// A 2xx reply to a multi-shape endpoint that no declared shape matches:
+    /// its status, its missing, invalid, conflicting, or unmatched
+    /// `Content-Type`, or its JSON tag. A single-shape endpoint never reports
+    /// it.
+    UnexpectedContentType,
     /// The body was cut off, or its read timed out, after the head arrived.
     BodyInterrupted,
     /// A redirect was received and not followed.
@@ -174,6 +179,7 @@ impl<E> fmt::Display for ErrorKind<E> {
             Self::Undeclared => f.write_str("undeclared error response"),
             Self::MalformedError => f.write_str("error response body could not be decoded"),
             Self::MalformedSuccess => f.write_str("success response body could not be decoded"),
+            Self::UnexpectedContentType => f.write_str("success response matches no declared shape"),
             Self::BodyInterrupted => f.write_str("response body was interrupted"),
             Self::RedirectRefused { reason } => write!(f, "redirect refused: {reason}"),
             Self::RedirectFailed { target, category } => {
@@ -261,7 +267,7 @@ impl std::error::Error for NoDeclaredError {}
 impl ErrorBody for NoDeclaredError {
     const DECLARED: bool = false;
 
-    fn decode_body(_: &[u8]) -> Option<Self> {
+    fn decode_body(_: usize, _: &[u8]) -> Option<Self> {
         None
     }
 }

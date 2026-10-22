@@ -10,8 +10,8 @@ use bytes::Bytes;
 use futures_util::{StreamExt, stream};
 use http::{HeaderMap, Method, StatusCode};
 use schematic_runtime::{
-    Api, BodyReadError, CallOptions, Deadline, Decode, DecodeFailure, DecodeFailureKind, EndpointSpec,
-    InvalidArgument, LiveBody, NoDeclaredError, RequestBody, RequestParts,
+    Api, BodyReadError, CallOptions, Deadline, Decode, DecodeFailure, DecodeFailureKind, EndpointSpec, ErrorRoute,
+    InvalidArgument, LiveBody, NoDeclaredError, RequestBody, RequestParts, StatusMatch,
 };
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -209,7 +209,11 @@ fn a_live_body_exposes_its_head_to_the_decoder() {
 fn an_endpoint_declares_its_identity_codec_and_request_parts() {
     assert_eq!(<GetItem as EndpointSpec>::ENDPOINT_ID, "get_item");
     assert_eq!(<<GetItem as EndpointSpec>::Api as Api>::NAME, "Fixture");
-    assert_eq!(<GetItem as EndpointSpec>::DECLARED_ERROR_STATUSES, 400..=599);
+    assert_eq!(
+        <GetItem as EndpointSpec>::ERRORS,
+        [ErrorRoute::new(StatusMatch::Range { lo: 400, hi: 599 }, 0)],
+        "the default table sends every 4xx and 5xx status to the one failure shape"
+    );
 
     let parts = GetItem {
         id: "7".to_string(),

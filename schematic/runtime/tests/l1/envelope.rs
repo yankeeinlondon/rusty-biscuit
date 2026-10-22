@@ -23,7 +23,7 @@ struct ProviderError {
 }
 
 impl ErrorBody for ProviderError {
-    fn decode_body(body: &[u8]) -> Option<Self> {
+    fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
         let message = std::str::from_utf8(body).ok()?.strip_prefix("error: ")?;
         Some(Self { message: message.to_string() })
     }
@@ -241,10 +241,10 @@ fn an_endpoint_without_a_declared_error_reports_undeclared_failures() {
         E::DECLARED
     }
     assert!(!declares::<NoDeclaredError>());
-    assert_eq!(NoDeclaredError::decode_body(b"{\"message\":\"nope\"}"), None);
+    assert_eq!(NoDeclaredError::decode_body(0, b"{\"message\":\"nope\"}"), None);
     assert!(declares::<ProviderError>());
     assert_eq!(
-        ProviderError::decode_body(b"error: quota"),
+        ProviderError::decode_body(0, b"error: quota"),
         Some(ProviderError { message: "quota".to_string() })
     );
 

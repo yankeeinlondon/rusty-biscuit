@@ -1,0 +1,89 @@
+error[E0277]: the trait bound `Sse<Value>: SupportsHooks` is not satisfied
+ --> tests/fixtures/compile_fail/mutator_on_a_stream_endpoint.rs
+  |
+  |         .mutate_response::<Get<Sse<serde_json::Value>>, _>(|_, _items| Ok(()))
+  |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `SupportsHooks` is not implemented for `Sse<Value>`
+  |
+help: the following other types implement trait `SupportsHooks`
+ --> src/shapes.rs
+  |
+  | impl<A: JsonAlternatives> SupportsHooks for Shapes<A> {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Shapes<A>`
+  |
+ ::: src/graphql.rs
+  |
+  | impl<D: DeserializeOwned + Send + 'static> SupportsHooks for GraphQl<D> {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `schematic_runtime::GraphQl<D>`
+  |
+ ::: src/codec.rs
+  |
+  | impl<T> SupportsHooks for Json<T> where T: serde::de::DeserializeOwned + Send + 'static {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `schematic_runtime::Json<T>`
+note: required by a bound in `Client::<A>::mutate_response`
+ --> src/client.rs
+  |
+  |     pub fn mutate_response<R, F>(self, hook: F) -> Self
+  |            --------------- required by a bound in this associated function
+...
+  |         R::Decoder: SupportsHooks,
+  |                     ^^^^^^^^^^^^^ required by this bound in `Client::<A>::mutate_response`
+
+error[E0277]: the trait bound `Ndjson<Value>: SupportsHooks` is not satisfied
+ --> tests/fixtures/compile_fail/mutator_on_a_stream_endpoint.rs
+  |
+  |         .mutate_response::<Get<Ndjson<serde_json::Value>>, _>(|_, _items| Ok(()))
+  |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `SupportsHooks` is not implemented for `Ndjson<Value>`
+  |
+help: the following other types implement trait `SupportsHooks`
+ --> src/shapes.rs
+  |
+  | impl<A: JsonAlternatives> SupportsHooks for Shapes<A> {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Shapes<A>`
+  |
+ ::: src/graphql.rs
+  |
+  | impl<D: DeserializeOwned + Send + 'static> SupportsHooks for GraphQl<D> {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `schematic_runtime::GraphQl<D>`
+  |
+ ::: src/codec.rs
+  |
+  | impl<T> SupportsHooks for Json<T> where T: serde::de::DeserializeOwned + Send + 'static {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `schematic_runtime::Json<T>`
+note: required by a bound in `Client::<A>::mutate_response`
+ --> src/client.rs
+  |
+  |     pub fn mutate_response<R, F>(self, hook: F) -> Self
+  |            --------------- required by a bound in this associated function
+...
+  |         R::Decoder: SupportsHooks,
+  |                     ^^^^^^^^^^^^^ required by this bound in `Client::<A>::mutate_response`
+
+error[E0277]: the trait bound `ByteStream: SupportsHooks` is not satisfied
+ --> tests/fixtures/compile_fail/mutator_on_a_stream_endpoint.rs
+  |
+  |         .mutate_response::<Get<ByteStream>, _>(|_, _bytes| Ok(()));
+  |                            ^^^^^^^^^^^^^^^ the trait `SupportsHooks` is not implemented for `ByteStream`
+  |
+help: the following other types implement trait `SupportsHooks`
+ --> src/shapes.rs
+  |
+  | impl<A: JsonAlternatives> SupportsHooks for Shapes<A> {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Shapes<A>`
+  |
+ ::: src/graphql.rs
+  |
+  | impl<D: DeserializeOwned + Send + 'static> SupportsHooks for GraphQl<D> {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `schematic_runtime::GraphQl<D>`
+  |
+ ::: src/codec.rs
+  |
+  | impl<T> SupportsHooks for Json<T> where T: serde::de::DeserializeOwned + Send + 'static {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `schematic_runtime::Json<T>`
+note: required by a bound in `Client::<A>::mutate_response`
+ --> src/client.rs
+  |
+  |     pub fn mutate_response<R, F>(self, hook: F) -> Self
+  |            --------------- required by a bound in this associated function
+...
+  |         R::Decoder: SupportsHooks,
+  |                     ^^^^^^^^^^^^^ required by this bound in `Client::<A>::mutate_response`

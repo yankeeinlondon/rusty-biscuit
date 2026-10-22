@@ -12,6 +12,12 @@
 //!   redaction that keeps credentials out of it ([`redact`]);
 //! - the [`Decode`] boundary through which codecs read a live response body,
 //!   and the built-in codecs [`Json`], [`Text`], [`Binary`], and [`Empty`];
+//! - the [`stream`] codecs [`Sse`], [`Ndjson`], and [`ByteStream`], which
+//!   yield items as they arrive, and their [`StreamError`];
+//! - the multi-shape codec [`Shapes`], which chooses one of an endpoint's
+//!   declared [`shapes`] for a 2xx reply, and the [`ErrorRoute`] table that
+//!   chooses a declared error shape for an error status;
+//! - the [`graphql`] codec [`GraphQl`] and its failure types;
 //! - the managed [`Client`], created infallibly from an [`ApiDefinition`]
 //!   and configured by chained settings that are validated on its first send
 //!   or by [`Client::build`], optionally sharing a [`SharedTransport`];
@@ -60,6 +66,7 @@ pub mod deadline;
 mod encode;
 pub mod endpoint;
 pub mod error;
+pub mod graphql;
 pub mod hooks;
 pub mod meta;
 pub mod options;
@@ -68,23 +75,32 @@ pub mod pager;
 pub mod raw;
 pub mod redact;
 pub mod response;
+pub mod shapes;
+pub mod stream;
 pub mod transport;
 
 pub use call::{Call, CallError, CallFuture, FullCall};
 pub use client::{ApiDefinition, Client, DEFAULT_TIMEOUT, MAX_REDIRECTS};
-pub use codec::{Binary, BodyReadError, Decode, DecodeFailure, DecodeFailureKind, Empty, Json, LiveBody, Text};
+pub use codec::{
+    Binary, BodyReadError, DEFAULT_MAX_FRAME_BYTES, Decode, DecodeFailure, DecodeFailureKind, Empty, Json, LiveBody,
+    Text,
+};
 pub use credentials::{AuthConfig, Credential, CredentialKind, CredentialPlacement, EnvFallback};
 pub use deadline::Deadline;
 pub use endpoint::{
-    Api, EndpointSpec, ErrorBody, FormPart, QueryDelimiter, QueryValue, RequestBody, RequestParts,
+    Api, EndpointSpec, ErrorBody, ErrorRoute, FormPart, QueryDelimiter, QueryValue, RequestBody, RequestParts,
+    StatusMatch,
 };
 pub use error::{BuildError, InvalidArgument, TransportError, TransportErrorKind};
+pub use graphql::{GraphQl, GraphQlError, GraphQlFailure, GraphQlOperationError, Location, PathSegment};
 pub use hooks::{HookError, HookStage, SupportsHooks};
 pub use meta::{AuthMethod, RequestMeta, ResponseMeta};
 pub use options::CallOptions;
 pub use origin::OriginPolicy;
 pub use raw::{RawCompletion, RawJsonError, RawResponse};
 pub use redact::{RedactedUrl, SecretNames};
+pub use shapes::{Alternatives, JsonAlternatives, JsonTag, Route, ShapeKind, Shapes};
+pub use stream::{ByteStream, EndCondition, ItemStream, Ndjson, Scalar, Sse, StreamEnd, StreamError, UntilClose};
 pub use transport::{SharedTransport, SharedTransportBuilder};
 
 /// The HTTP method type of [`EndpointSpec::METHOD`] and [`RequestParts::method`].

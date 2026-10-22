@@ -5,7 +5,8 @@
 //! that decodes its body. A send therefore never takes a caller-chosen
 //! response type.
 
-use std::ops::RangeInclusive;
+use std::any::Any;
+use std::fmt;
 
 use bytes::Bytes;
 use http::Method;
@@ -44,9 +45,14 @@ pub trait EndpointSpec: Send + 'static {
     /// assembled reports it; a sent request uses [`RequestParts::method`].
     const METHOD: Method;
 
-    /// Statuses whose body is decoded as [`Self::Failure`] when the endpoint
-    /// declares one. Any other non-2xx status is reported as undeclared.
-    const DECLARED_ERROR_STATUSES: RangeInclusive<u16> = 400..=599;
+    /// The endpoint's effective error table: which statuses decode as
+    /// [`Self::Failure`], and as which of its shapes.
+    ///
+    /// [`ErrorRoute::lookup`] chooses the entry: an exact status, then the
+    /// narrowest range. A status no entry matches is reported as undeclared.
+    /// The default sends every 4xx and 5xx status to alternative 0, the one
+    /// shape of a single-shape failure type.
+    const ERRORS: &'static [ErrorRoute] = &[ErrorRoute::new(StatusMatch::Range { lo: 400, hi: 599 }, 0)];
 
     /// Assembles the application-level request.
     ///
@@ -62,14 +68,122 @@ pub trait EndpointSpec: Send + 'static {
 
 /// A failure body that the runtime decodes when a declared error status
 /// arrives, so the caller never performs a decode step.
+///
+/// The runtime implements it for the plain shapes of a single-shape table:
+/// `String` (text, invalid UTF-8 replaced), [`Bytes`] (binary), `()`
+/// (empty), and [`serde_json::Value`] (any JSON). Generated code implements
+/// it for registered JSON types and for the enum of a table with several
+/// distinct shapes.
 pub trait ErrorBody: Sized + Send + 'static {
     /// `false` only for [`NoDeclaredError`](crate::NoDeclaredError): every
     /// error reply of such an endpoint is reported as undeclared.
     const DECLARED: bool = true;
 
-    /// Decodes a declared error body, or returns `None` when the bytes do not
-    /// form this type; the runtime then reports a malformed error body.
-    fn decode_body(body: &[u8]) -> Option<Self>;
+    /// Decodes a declared error body as the shape the matched
+    /// [`ErrorRoute::alternative`] names, or returns `None` when the bytes do
+    /// not form it; the runtime then reports a malformed error body.
+    fn decode_body(alternative: usize, body: &[u8]) -> Option<Self>;
+
+    /// Accepts a failure that a 2xx body carried, which a success codec
+    /// reported through [`DecodeFailure::declared`](crate::DecodeFailure::declared);
+    /// `None`, the default, makes the reply a malformed success.
+    fn from_declared(failure: Box<dyn Any + Send>) -> Option<Self> {
+        let _ = failure;
+        None
+    }
+}
+
+impl ErrorBody for String {
+    fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
+        Some(String::from_utf8_lossy(body).into_owned())
+    }
+}
+
+impl ErrorBody for Bytes {
+    fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
+        Some(Bytes::copy_from_slice(body))
+    }
+}
+
+impl ErrorBody for () {
+    fn decode_body(_: usize, _: &[u8]) -> Option<Self> {
+        Some(())
+    }
+}
+
+impl ErrorBody for serde_json::Value {
+    fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
+        serde_json::from_slice(body).ok()
+    }
+}
+
+/// The statuses one error entry matches; mirrors the definition's status
+/// match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StatusMatch {
+    /// One status.
+    Exact(u16),
+    /// Every status from `lo` to `hi`, both inclusive.
+    Range {
+        /// First matched status.
+        lo: u16,
+        /// Last matched status.
+        hi: u16,
+    },
+}
+
+impl StatusMatch {
+    /// Whether `status` is matched.
+    pub const fn contains(self, status: u16) -> bool {
+        match self {
+            Self::Exact(exact) => exact == status,
+            Self::Range { lo, hi } => lo <= status && status <= hi,
+        }
+    }
+
+    /// How many statuses are matched; an exact match is the narrowest.
+    pub const fn width(self) -> u16 {
+        match self {
+            Self::Exact(_) => 1,
+            Self::Range { lo, hi } => hi.saturating_sub(lo).saturating_add(1),
+        }
+    }
+}
+
+impl fmt::Display for StatusMatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Exact(status) => write!(f, "{status}"),
+            Self::Range { lo, hi } => write!(f, "{lo}-{hi}"),
+        }
+    }
+}
+
+/// One entry of an endpoint's effective error table: a status match and
+/// which shape of the failure type its body decodes as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ErrorRoute {
+    /// The statuses this entry matches.
+    pub status: StatusMatch,
+    /// The shape index handed to [`ErrorBody::decode_body`].
+    pub alternative: usize,
+}
+
+impl ErrorRoute {
+    /// An entry sending `status` to `alternative`.
+    pub const fn new(status: StatusMatch, alternative: usize) -> Self {
+        Self { status, alternative }
+    }
+
+    /// The most specific entry of `table` matching `status`: an exact match,
+    /// then the narrowest range. A validated table has no tie; on one, the
+    /// first entry wins.
+    pub fn lookup(table: &[Self], status: u16) -> Option<&Self> {
+        table
+            .iter()
+            .filter(|route| route.status.contains(status))
+            .min_by_key(|route| route.status.width())
+    }
 }
 
 /// The application-level request an endpoint sends, before credentials.

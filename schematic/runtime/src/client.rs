@@ -31,11 +31,11 @@ use tokio::time::Instant;
 use url::Url;
 
 use crate::call::Call;
-use crate::codec::{BodyReadError, Decode, DecodeFailureKind, LiveBody, StreamBounds};
+use crate::codec::{BodyReadError, DEFAULT_MAX_FRAME_BYTES, Decode, DecodeFailureKind, LiveBody, StreamBounds};
 use crate::credentials::{AuthConfig, Credential, CredentialPlacement, Resolved};
 use crate::deadline::{Deadline, Expiration, Limit};
 use crate::encode::{self, EncodedBody};
-use crate::endpoint::{Api, EndpointSpec, ErrorBody, QueryValue, RequestParts, encode_query_component};
+use crate::endpoint::{Api, EndpointSpec, ErrorBody, ErrorRoute, QueryValue, RequestParts, encode_query_component};
 use crate::hooks::{HookError, HookStage, Hooks, SupportsHooks};
 use crate::error::{BuildError, InvalidArgument, TransportError, TransportErrorKind};
 use crate::meta::{AuthMethod, RequestMeta, ResponseMeta};
@@ -228,6 +228,7 @@ struct Settings {
     credential: Option<ClientCredential>,
     env_order: Option<Vec<String>>,
     cross_origin: Option<OriginPolicy>,
+    max_frame_bytes: usize,
     hooks: Hooks,
 }
 
@@ -257,6 +258,7 @@ struct Inner {
     /// Every placement of the API's policy and of each endpoint replacement:
     /// what a public endpoint's send strips.
     public_placements: Vec<CredentialPlacement>,
+    max_frame_bytes: usize,
     hooks: Hooks,
 }
 
@@ -274,6 +276,7 @@ impl<A: Api> Client<A> {
                 credential: None,
                 env_order: None,
                 cross_origin: None,
+                max_frame_bytes: DEFAULT_MAX_FRAME_BYTES,
                 hooks: Hooks::default(),
             }),
             built: Arc::default(),
@@ -299,9 +302,25 @@ impl<A: Api> Client<A> {
     /// The per-request timeout (default 30 s). Under a shared
     /// [`Deadline`] a send is bounded by the earlier of the
     /// two.
+    ///
+    /// For a streamed body it bounds the wait for the head, then each wait
+    /// for the next item (an idle bound, not a total lifetime); only the
+    /// shared deadline bounds a whole stream.
     #[must_use]
     pub fn timeout(self, timeout: Duration) -> Self {
         self.update(|settings| settings.timeout = timeout)
+    }
+
+    /// The largest SSE event or NDJSON line the streaming codecs assemble
+    /// (default [`DEFAULT_MAX_FRAME_BYTES`], 16 MiB). A pending frame that
+    /// grows past it ends its stream with
+    /// [`StreamError::FrameLimitExceeded`](crate::StreamError::FrameLimitExceeded);
+    /// raw byte streams assemble no frame and ignore it.
+    ///
+    /// Zero is refused when the client is validated.
+    #[must_use]
+    pub fn max_frame_bytes(self, limit: usize) -> Self {
+        self.update(|settings| settings.max_frame_bytes = limit)
     }
 
     /// Bounds how long establishing a connection may take.
@@ -499,6 +518,9 @@ fn all_placements(definition: &ApiDefinition) -> impl Iterator<Item = &Credentia
 /// Validates `settings` into the state every send reads.
 fn validate(settings: &Settings) -> Result<Inner, BuildError> {
     let definition = &settings.definition;
+    if settings.max_frame_bytes == 0 {
+        return Err(BuildError::InvalidMaxFrameBytes);
+    }
     let base_url = parse_base_url(&definition.base_url)?;
     let origins = OriginRules::new(&base_url, &definition.cross_origin, settings.cross_origin.as_ref())?;
     let endpoint_origins = definition.endpoint_cross_origin.iter().map(|(endpoint, policy)| {
@@ -572,6 +594,7 @@ fn validate(settings: &Settings) -> Result<Inner, BuildError> {
         endpoint_origins,
         endpoint_auth: definition.endpoint_auth.clone(),
         public_placements: all_placements(definition).cloned().collect(),
+        max_frame_bytes: settings.max_frame_bytes,
         hooks: settings.hooks.clone(),
     })
 }
@@ -626,7 +649,7 @@ struct FirstHop {
 enum Exchange {
     /// A reply that is not a followable redirect, with its body unread, and
     /// the URL of the hop that received it, before any credential.
-    Final { meta: ResponseMeta, body: LiveBody, url: Url },
+    Final { meta: ResponseMeta, body: Box<LiveBody>, url: Url },
     /// A redirect that stopped the send, with its body read.
     Stopped { meta: ResponseMeta, body: Bytes, stop: Stop },
 }
@@ -695,7 +718,7 @@ impl<A: Api> Client<A> {
         let inner = self.validated_for::<R>(start)?;
         let (mut meta, outcome, url) = match inner.execute(request, options, start).await? {
             Exchange::Final { meta, body, url } => {
-                let outcome = classify_reply::<R>(body, inner.hooks.stage::<R>(&meta)).await;
+                let outcome = classify_reply::<R>(*body, inner.hooks.stage::<R>(&meta)).await;
                 (meta, outcome, Some(url))
             }
             Exchange::Stopped { meta, body, stop } => {
@@ -746,7 +769,7 @@ impl<A: Api> Client<A> {
         let start = Instant::now();
         let inner = self.validated_for::<R>(start)?;
         let (mut meta, body, completion) = match inner.execute(request, options, start).await? {
-            Exchange::Final { meta, body, .. } => match body.collect().await {
+            Exchange::Final { meta, body, .. } => match (*body).collect().await {
                 Ok(bytes) => (meta, bytes, RawCompletion::Complete),
                 Err(failure) => (meta, failure.retained, RawCompletion::BodyInterrupted),
             },
@@ -930,11 +953,11 @@ impl Inner {
                 inner.request_id_header.as_deref(),
                 start.elapsed(),
             );
-            let body = live_body(reply, &expiration);
+            let body = live_body(reply, &expiration, inner.max_frame_bytes);
             if !is_followable_redirect(status) {
                 return Ok(Exchange::Final {
                     meta: response_meta,
-                    body,
+                    body: Box::new(body),
                     url: current.url.clone(),
                 });
             }
@@ -1368,7 +1391,7 @@ fn completed<T, E>(deadline: Option<&Deadline>, meta: ResponseMeta, outcome: Out
 
 /// Wraps a received reply's body for a codec, bounded by the send's
 /// expiration.
-fn live_body(reply: reqwest::Response, expiration: &Expiration) -> LiveBody {
+fn live_body(reply: reqwest::Response, expiration: &Expiration, max_frame_bytes: usize) -> LiveBody {
     let status = reply.status();
     let headers = reply.headers().clone();
     let stream = futures_util::stream::unfold(Some(reply), |state| async move {
@@ -1384,20 +1407,26 @@ fn live_body(reply: reqwest::Response, expiration: &Expiration) -> LiveBody {
     LiveBody::new(status, headers, stream, Some(expiration.at)).with_stream_bounds(StreamBounds {
         idle: Some(expiration.timeout),
         deadline: expiration.deadline_at,
+        max_frame_bytes,
     })
 }
 
 /// Classifies a received reply: a 2xx through the endpoint's codec and the
-/// client's `hooks`, any other status by its declared error body.
+/// client's `hooks`, any other status by the endpoint's error table.
 async fn classify_reply<R: EndpointSpec>(body: LiveBody, hooks: HookStage<'_>) -> Outcome<R::Success, R::Failure> {
     let status = body.status();
     if status.is_success() {
         return match R::Decoder::decode_hooked(body, hooks).await {
             Ok(value) => Outcome::Success(value),
-            Err(failure) => {
+            Err(mut failure) => {
                 let kind = match failure.kind {
                     DecodeFailureKind::Interrupted => ErrorKind::BodyInterrupted,
                     DecodeFailureKind::Hook => ErrorKind::Hook,
+                    DecodeFailureKind::UnexpectedContentType => ErrorKind::UnexpectedContentType,
+                    DecodeFailureKind::Declared => match failure.take_declared().and_then(R::Failure::from_declared) {
+                        Some(declared) => ErrorKind::Declared(declared),
+                        None => ErrorKind::MalformedSuccess,
+                    },
                     _ => ErrorKind::MalformedSuccess,
                 };
                 Outcome::Failure(ApiError {
@@ -1416,13 +1445,13 @@ async fn classify_reply<R: EndpointSpec>(body: LiveBody, hooks: HookStage<'_>) -
             });
         }
     };
-    let kind = if R::Failure::DECLARED && R::DECLARED_ERROR_STATUSES.contains(&status.as_u16()) {
-        match R::Failure::decode_body(&bytes) {
+    let route = R::Failure::DECLARED.then(|| ErrorRoute::lookup(R::ERRORS, status.as_u16())).flatten();
+    let kind = match route {
+        Some(route) => match R::Failure::decode_body(route.alternative, &bytes) {
             Some(declared) => ErrorKind::Declared(declared),
             None => ErrorKind::MalformedError,
-        }
-    } else {
-        ErrorKind::Undeclared
+        },
+        None => ErrorKind::Undeclared,
     };
     Outcome::Failure(ApiError { kind, body: bytes })
 }
