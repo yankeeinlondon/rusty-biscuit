@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{ApiRequest, DefinitionError, Endpoint, ErrorEntry, FormFieldKind, ResponseShape, RestApi, SchemaReference, StreamFraming, TypeRef};
+use crate::{ApiRequest, DefinitionError, Endpoint, FormFieldKind, ResponseShape, RestApi, SchemaReference, StreamFraming, TypeRef};
 
 /// One named schema component.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -164,25 +164,51 @@ fn strip(schema: &Value, root_name: &str) -> Value {
     schema
 }
 
+/// The JSON body references of an endpoint, shared by
+/// [`Endpoint::json_references`] and [`Endpoint::json_references_mut`] so the
+/// locations reference validation reads and the locations a rename rewrites
+/// cannot drift apart. Pass `mut` for mutable references.
+macro_rules! endpoint_json_references {
+    ($endpoint:expr $(, $mutability:tt)?) => {{
+        let endpoint = $endpoint;
+        let mut references = Vec::new();
+        references.extend((&$($mutability)? endpoint.response).into_iter().filter_map(|success| match &$($mutability)? success.shape {
+            ResponseShape::Json(reference)
+            | ResponseShape::Stream { framing: StreamFraming::Sse(reference) | StreamFraming::Ndjson(reference), .. } => Some(reference),
+            _ => None,
+        }));
+        match &$($mutability)? endpoint.request {
+            Some(ApiRequest::Json(reference)) => references.push(reference),
+            Some(ApiRequest::FormData { fields } | ApiRequest::UrlEncoded { fields }) => references.extend(
+                fields.into_iter().filter_map(|field| match &$($mutability)? field.kind { FormFieldKind::Json(reference) => Some(reference), _ => None })),
+            _ => {}
+        }
+        references.extend(error_references!(&$($mutability)? endpoint.errors $(, $mutability)?));
+        references
+    }};
+}
+
+/// The JSON references of an error table's entries; `mut` for mutable ones.
+macro_rules! error_references {
+    ($entries:expr $(, $mutability:tt)?) => {
+        ($entries).into_iter().filter_map(|entry| match &$($mutability)? entry.shape { crate::ResponseShape::Json(reference) => Some(reference), _ => None })
+    };
+}
+pub(crate) use error_references;
+
 impl Endpoint {
     /// The JSON body references of this endpoint: success shapes (JSON
     /// bodies and SSE/NDJSON stream items, in declaration order), request,
     /// JSON form fields, then declared error entries, in that order.
     pub fn json_references(&self) -> Vec<&TypeRef> {
-        let mut references = Vec::new();
-        references.extend(self.response.iter().filter_map(|success| match &success.shape {
-            ResponseShape::Json(reference)
-            | ResponseShape::Stream { framing: StreamFraming::Sse(reference) | StreamFraming::Ndjson(reference), .. } => Some(reference),
-            _ => None,
-        }));
-        match &self.request {
-            Some(ApiRequest::Json(reference)) => references.push(reference),
-            Some(ApiRequest::FormData { fields } | ApiRequest::UrlEncoded { fields }) => references.extend(
-                fields.iter().filter_map(|field| match &field.kind { FormFieldKind::Json(reference) => Some(reference), _ => None })),
-            _ => {}
-        }
-        references.extend(error_references(&self.errors));
-        references
+        endpoint_json_references!(self)
+    }
+
+    /// [`Self::json_references`], mutably.
+    // OpenAPI import renames components through it.
+    #[cfg_attr(not(feature = "openapi"), allow(dead_code))]
+    pub(crate) fn json_references_mut(&mut self) -> Vec<&mut TypeRef> {
+        endpoint_json_references!(self, mut)
     }
 }
 
@@ -219,7 +245,8 @@ impl RestApi {
                 return Err(invalid(format!("schema component \"{}\" is defined more than once", component.name)));
             }
         }
-        let api_errors = error_references(&self.errors).map(|reference| ("<api>", reference));
+        // Reads exactly what `Self::json_references_mut` rewrites; keep the two in step.
+        let api_errors = error_references!(&self.errors).map(|reference| ("<api>", reference));
         let endpoints = self.endpoints.iter().flat_map(|endpoint| endpoint.json_references().into_iter().map(|reference| (endpoint.id.as_str(), reference)));
         for (endpoint, reference) in api_errors.chain(endpoints) {
             if let Some(name) = self.unresolved_name(reference) {
@@ -273,6 +300,19 @@ impl RestApi {
             });
         }
         if references.is_empty() { Ok(()) } else { Err(DefinitionError::UnresolvedSchemaReferences { api: self.name.clone(), references }) }
+    }
+
+    /// Every JSON reference of the definition, mutably: API-level error
+    /// defaults, each endpoint's [`Endpoint::json_references`], then each
+    /// GraphQL operation's. These are exactly the references
+    /// [`Self::validate_references`] reads, so renaming a component through
+    /// them leaves no reference to its old name.
+    #[cfg_attr(not(feature = "openapi"), allow(dead_code))]
+    pub(crate) fn json_references_mut(&mut self) -> Vec<&mut TypeRef> {
+        let mut references: Vec<&mut TypeRef> = error_references!(&mut self.errors, mut).collect();
+        references.extend(self.endpoints.iter_mut().flat_map(Endpoint::json_references_mut));
+        references.extend(self.graphql.iter_mut().flat_map(|surface| &mut surface.operations).flat_map(crate::GraphQlOperation::json_references_mut));
+        references
     }
 
     fn unresolved_name<'a>(&self, reference: &'a TypeRef) -> Option<&'a str> {
@@ -359,14 +399,59 @@ fn percent_decode(text: &str) -> Option<String> {
     String::from_utf8(decoded).ok()
 }
 
-fn error_references(entries: &[ErrorEntry]) -> impl Iterator<Item = &TypeRef> {
-    entries.iter().filter_map(|entry| match &entry.shape { ResponseShape::Json(reference) => Some(reference), _ => None })
-}
-
 fn has_empty_key(reference: &TypeRef) -> bool {
     match reference {
         TypeRef::KeyedMap { key, value } => key.trim().is_empty() || has_empty_key(value),
         TypeRef::Array(inner) | TypeRef::Optional(inner) | TypeRef::Map(inner) => has_empty_key(inner),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        AddressRule, ApiRequest, DefinitionContext, Endpoint, ErrorEntry, FormField, GraphQlOperation, GraphQlVariables, RestApi,
+        ResponseShape, StatusMatch, StreamEnd, StreamFraming, SuccessShape, TypeRef,
+    };
+
+    /// Every reference [`RestApi::validate_references`] reads, as names.
+    fn validated_names(api: &RestApi) -> Vec<String> {
+        let api_errors = error_references!(&api.errors);
+        let endpoints = api.endpoints.iter().flat_map(Endpoint::json_references);
+        let operations = api.graphql.iter().flat_map(|surface| &surface.operations).flat_map(GraphQlOperation::json_references);
+        api_errors.chain(endpoints).chain(operations).flat_map(TypeRef::names).map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn json_references_mut_reaches_every_reference_validation_reads() {
+        let named = || TypeRef::Named("Thing".into());
+        let wrapped = || TypeRef::Optional(Box::new(TypeRef::Array(Box::new(TypeRef::AnyOf(vec![named()])))));
+        let error = |reference| ErrorEntry::new(StatusMatch::exact(400), ResponseShape::Json(reference));
+        let stream = |framing| SuccessShape::new(ResponseShape::Stream { framing, end: StreamEnd::ConnectionClose, keep: false });
+        let mut ctx = DefinitionContext::types_in("::models");
+        let operation = GraphQlOperation::query("Q", "{ a }").describes("Q").no_variables()
+            .data::<serde_json::Value>(&mut ctx).build().unwrap();
+        let endpoint = Endpoint::get("E", "/e").describes("E").returns_empty().build().unwrap();
+        let mut api = RestApi::builder(&ctx, "A", "https://a.example.com").describes("A").no_auth()
+            .endpoints([endpoint.clone(), endpoint]).graphql(AddressRule::github()).operations([operation]).build().unwrap();
+        api.errors = vec![error(named()), error(wrapped())];
+        api.endpoints[0].response = vec![
+            SuccessShape::json(wrapped()), stream(StreamFraming::Sse(named())), stream(StreamFraming::Ndjson(wrapped())),
+        ];
+        api.endpoints[0].request = Some(ApiRequest::form_data(vec![FormField::json("a", named()), FormField::json("b", wrapped())]));
+        api.endpoints[0].errors = vec![error(wrapped())];
+        api.endpoints[1].request = Some(ApiRequest::json(wrapped()));
+        let operation = &mut api.graphql.as_mut().unwrap().operations[0];
+        operation.variables = GraphQlVariables::Typed(named());
+        operation.data = wrapped();
+        operation.errors = vec![error(named())];
+        let validated = validated_names(&api).len();
+
+        for name in api.json_references_mut().into_iter().flat_map(TypeRef::names_mut) {
+            *name = "Renamed".into();
+        }
+
+        assert_eq!(validated, 12);
+        assert_eq!(validated_names(&api), vec!["Renamed".to_owned(); validated]);
     }
 }

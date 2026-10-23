@@ -1,6 +1,8 @@
 //! Multipart and URL-encoded request bodies through OpenAPI: export writes
 //! `encoding` and array bounds, import reads them back into the same
-//! `FormField`s, and what the model cannot carry is reported (R18).
+//! `FormField`s, and what the model cannot carry is reported (R18). A
+//! component renamed away from the endpoint's reserved request type name is
+//! followed by every reference to it.
 
 #![cfg(feature = "openapi")]
 
@@ -9,8 +11,10 @@ use schematic_define::openapi::{
     export, serialize,
 };
 use schematic_define::{
-    ApiRequest, DefinitionContext, Endpoint, FormField, PrimitiveType, RestApi, RestMethod, TypeRef, definition_type,
+    ApiRequest, DefinitionContext, Endpoint, ErrorEntry, FormField, FormFieldKind, PrimitiveType, ResponseShape, RestApi, RestMethod,
+    StatusMatch, StreamEnd, StreamFraming, SuccessShape, TypeRef, definition_type,
 };
+use schematic_define::models::ModelDef;
 use serde_json::{Value, json};
 
 definition_type!(#[derive(schemars::JsonSchema)] #[allow(dead_code)] pub struct AddSampleResponse { pub sample_id: String });
@@ -387,4 +391,188 @@ fn binary_property_on_a_url_encoded_form_warns_and_imports_as_text() {
 
     assert_eq!(form_fields(&result), [FormField::text("audio").optional(), FormField::text("name").optional()]);
     assert_eq!(diagnostics_at(&result, SAMPLES_OP), [(DiagnosticSeverity::Warn, format!("{URL_ENCODED}/schema/properties/audio"))]);
+}
+
+
+// A component named like the request type the importer reserves for an
+// operation (`AddVoiceSampleRequest` for `AddVoiceSample`) is renamed to
+// `AddVoiceSampleRequest2`; every reference to it, at any location and
+// nesting depth, follows. `build()` succeeding proves reference validation
+// found no reference to the old name.
+
+const TAKEN: &str = "AddVoiceSampleRequest";
+const RENAMED: &str = "AddVoiceSampleRequest2";
+
+fn renamed() -> TypeRef {
+    TypeRef::Named(RENAMED.into())
+}
+
+fn metadata() -> TypeRef {
+    TypeRef::Named("Metadata".into())
+}
+
+fn array_of(reference: TypeRef) -> TypeRef {
+    TypeRef::Array(Box::new(reference))
+}
+
+/// Exports `api`, renames its `Metadata` component (and every reference to
+/// it) to the reserved request type name, and imports the result.
+fn import_colliding(api: &RestApi) -> OpenApiImportResult {
+    let text = export_text(api, ExportFormat::Json).replace("Metadata", TAKEN);
+    let result = import(OpenApiSource::json(text));
+    assert!(result.api.component(RENAMED).is_some(), "{:?}", result.api.schemas);
+    assert!(result.api.component(TAKEN).is_none());
+    result
+}
+
+fn stream(framing: StreamFraming) -> SuccessShape {
+    SuccessShape::new(ResponseShape::Stream { framing, end: StreamEnd::ConnectionClose, keep: false })
+}
+
+fn sse_item(api: &RestApi) -> &TypeRef {
+    match &api.endpoints[0].response[0].shape {
+        ResponseShape::Stream { framing: StreamFraming::Sse(item) | StreamFraming::Ndjson(item), .. } => item,
+        other => panic!("expected a stream, got {other:?}"),
+    }
+}
+
+fn json_shape(shape: &ResponseShape) -> &TypeRef {
+    match shape {
+        ResponseShape::Json(reference) => reference,
+        other => panic!("expected JSON, got {other:?}"),
+    }
+}
+
+/// One `#[test]` per (row, wrapper): `$set` places the `Metadata` reference
+/// `wrap(metadata())` on the definition, and `$get` reads the imported
+/// reference back, which must be `wrap(renamed())`.
+macro_rules! renamed_reference_rows {
+    ($($name:ident: $wrap:expr, $set:expr, $get:expr;)*) => {$(
+        #[test]
+        fn $name() {
+            let wrap: fn(TypeRef) -> TypeRef = $wrap;
+            let set: fn(&mut RestApi, TypeRef) = $set;
+            let get: fn(&RestApi) -> &TypeRef = $get;
+            let mut api = api_with(ApiRequest::form_data(add_voice_sample_fields()));
+            set(&mut api, wrap(metadata()));
+
+            let result = import_colliding(&api);
+
+            assert_eq!(get(&result.api), &wrap(renamed()));
+        }
+    )*};
+}
+
+fn identity(reference: TypeRef) -> TypeRef {
+    reference
+}
+
+fn set_part(api: &mut RestApi, reference: TypeRef) {
+    let mut fields = add_voice_sample_fields();
+    fields.push(FormField::json("metadata", reference));
+    api.endpoints[0].request = Some(ApiRequest::form_data(fields));
+}
+
+fn get_part(api: &RestApi) -> &TypeRef {
+    match &api.endpoints[0].request {
+        Some(ApiRequest::FormData { fields }) => match &fields.iter().find(|field| field.name == "metadata").unwrap().kind {
+            FormFieldKind::Json(reference) => reference,
+            other => panic!("expected a JSON part, got {other:?}"),
+        },
+        other => panic!("expected a multipart request, got {other:?}"),
+    }
+}
+
+renamed_reference_rows! {
+    renamed_component_in_json_part_is_followed: identity, set_part, get_part;
+    renamed_component_in_array_json_part_is_followed: array_of, set_part, get_part;
+    renamed_component_in_json_success_is_followed: identity,
+        |api, reference| api.endpoints[0].response = vec![SuccessShape::json(reference)],
+        |api| json_shape(&api.endpoints[0].response[0].shape);
+    renamed_component_in_array_json_success_is_followed: array_of,
+        |api, reference| api.endpoints[0].response = vec![SuccessShape::json(reference)],
+        |api| json_shape(&api.endpoints[0].response[0].shape);
+    renamed_component_in_sse_item_is_followed: identity,
+        |api, reference| api.endpoints[0].response = vec![stream(StreamFraming::Sse(reference))], sse_item;
+    renamed_component_in_array_sse_item_is_followed: array_of,
+        |api, reference| api.endpoints[0].response = vec![stream(StreamFraming::Sse(reference))], sse_item;
+    renamed_component_in_ndjson_item_is_followed: identity,
+        |api, reference| api.endpoints[0].response = vec![stream(StreamFraming::Ndjson(reference))], sse_item;
+    renamed_component_in_array_ndjson_item_is_followed: array_of,
+        |api, reference| api.endpoints[0].response = vec![stream(StreamFraming::Ndjson(reference))], sse_item;
+    renamed_component_in_endpoint_error_is_followed: identity,
+        |api, reference| api.endpoints[0].errors = vec![ErrorEntry::new(StatusMatch::exact(400), ResponseShape::Json(reference))],
+        |api| json_shape(&api.endpoints[0].errors[0].shape);
+    renamed_component_in_array_endpoint_error_is_followed: array_of,
+        |api, reference| api.endpoints[0].errors = vec![ErrorEntry::new(StatusMatch::exact(400), ResponseShape::Json(reference))],
+        |api| json_shape(&api.endpoints[0].errors[0].shape);
+    renamed_component_in_api_error_default_is_followed: identity,
+        |api, reference| api.errors = vec![ErrorEntry::new(StatusMatch::class(5), ResponseShape::Json(reference))],
+        |api| json_shape(&api.errors[0].shape);
+    renamed_component_in_array_api_error_default_is_followed: array_of,
+        |api, reference| api.errors = vec![ErrorEntry::new(StatusMatch::class(5), ResponseShape::Json(reference))],
+        |api| json_shape(&api.errors[0].shape);
+    renamed_component_in_json_request_is_followed: identity,
+        |api, reference| api.endpoints[0].request = Some(ApiRequest::json(reference)),
+        |api| match &api.endpoints[0].request {
+            Some(ApiRequest::Json(reference)) => reference,
+            other => panic!("expected a JSON request, got {other:?}"),
+        };
+    renamed_component_in_optional_json_success_is_followed: |reference| TypeRef::Optional(Box::new(reference)),
+        |api, reference| api.endpoints[0].response = vec![SuccessShape::json(reference)],
+        |api| json_shape(&api.endpoints[0].response[0].shape);
+    renamed_component_in_map_api_error_default_is_followed: |reference| TypeRef::Map(Box::new(reference)),
+        |api, reference| api.errors = vec![ErrorEntry::new(StatusMatch::class(5), ResponseShape::Json(reference))],
+        |api| json_shape(&api.errors[0].shape);
+    renamed_component_in_nested_sse_item_is_followed: |reference| TypeRef::Optional(Box::new(array_of(TypeRef::Map(Box::new(reference))))),
+        |api, reference| api.endpoints[0].response = vec![stream(StreamFraming::Sse(reference))], sse_item;
+}
+
+/// The ElevenLabs part as a document spells it, without `x-schematic`: a
+/// JSON-encoded part naming the reserved component.
+#[test]
+fn renamed_component_in_plain_multipart_part_is_followed() {
+    let result = import_body(
+        multipart(
+            json!({"type": "object", "properties": {"metadata": {"$ref": "#/components/schemas/AddVoiceSampleRequest"}}}),
+            json!({"metadata": {"contentType": "application/json"}}),
+        ),
+        json!({TAKEN: {"type": "object", "properties": {"title": {"type": "string"}}}}),
+    );
+
+    assert_eq!(form_fields(&result), [FormField::json("metadata", renamed()).optional()]);
+    assert_eq!(diagnostics_at(&result, SAMPLES_OP), []);
+}
+
+/// The catalog model and each component schema referencing it take the final
+/// name too.
+#[test]
+fn renamed_component_keeps_its_final_name_in_catalog_and_component_schemas() {
+    let result = import_body(
+        multipart(
+            json!({"type": "object", "properties": {"metadata": {"$ref": "#/components/schemas/Envelope"}}}),
+            json!({"metadata": {"contentType": "application/json"}}),
+        ),
+        json!({
+            TAKEN: {"type": "object", "properties": {"title": {"type": "string"}}},
+            "Envelope": {"type": "object", "properties": {"inner": {"$ref": "#/components/schemas/AddVoiceSampleRequest"}}},
+        }),
+    );
+
+    let model_names: Vec<&str> = result
+        .models
+        .types
+        .iter()
+        .map(|model| match model {
+            ModelDef::Struct(model) => model.name.as_str(),
+            ModelDef::Enum(model) => model.name.as_str(),
+            ModelDef::Alias(model) => model.name.as_str(),
+            _ => panic!("unexpected model kind"),
+        })
+        .collect();
+    assert_eq!(model_names, [RENAMED, "Envelope"]);
+    assert_eq!(
+        result.api.component("Envelope").unwrap().schema["properties"]["inner"],
+        json!({"$ref": "#/components/schemas/AddVoiceSampleRequest2"})
+    );
 }

@@ -47,8 +47,13 @@ assert_eq!(pet.rust_path.as_deref(), Some("items::Pet")); // `Pet` without modul
   path is set; the models are generated into that module.
 - **Renamed models** keep their references consistent. A schema whose name an
   endpoint's request struct claims (`CreatePetRequest` for the `CreatePet`
-  endpoint) becomes `CreatePetRequest2`; the component, endpoint references,
-  and `$ref`s inside other components all use the new name.
+  endpoint) becomes `CreatePetRequest2`; the component, the catalog model,
+  `$ref`s inside other components, and every reference the definition holds
+  use the new name. That covers JSON requests and JSON-encoded multipart
+  parts, JSON success bodies, SSE and NDJSON stream items, endpoint error
+  tables, and API-level error defaults, at any depth inside an array,
+  optional, map, or composition (`Vec<CreatePetRequest>` becomes
+  `Vec<CreatePetRequest2>`).
 - **A dangling reference fails the import.** If an operation's JSON request or
   response names a schema the document does not define, `build()` returns
   `OpenApiError::Definition(DefinitionError::UnresolvedReference { api,

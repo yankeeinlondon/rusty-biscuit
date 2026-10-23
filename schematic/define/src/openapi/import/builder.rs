@@ -194,9 +194,12 @@ impl OpenApiImport {
         let schema_result =
             mappings::map_all_schemas(&doc, &resolver, &mut diagnostics, &catalog_options, &reserved_names);
 
-        if !schema_result.name_mapping.is_empty() {
-            for endpoint in &mut api.endpoints {
-                Self::remap_reference_names(endpoint, &schema_result.name_mapping);
+        // A component that yielded its name (for example, to a request
+        // struct) is referenced by its final name everywhere reference
+        // validation reads, at any nesting depth.
+        for name in api.json_references_mut().into_iter().flat_map(crate::TypeRef::names_mut) {
+            if let Some(final_name) = schema_result.name_mapping.get(name) {
+                name.clone_from(final_name);
             }
         }
         api.schemas = schema_result.components;
@@ -225,37 +228,6 @@ impl OpenApiImport {
             models: schema_result.catalog,
             diagnostics,
         })
-    }
-
-    /// Renames an endpoint's JSON success, stream item, request, and error
-    /// references to the final names of models that yielded their name (for
-    /// example, to a request struct).
-    fn remap_reference_names(
-        endpoint: &mut crate::Endpoint,
-        name_mapping: &std::collections::HashMap<String, String>,
-    ) {
-        use crate::request::ApiRequest;
-        use crate::response::{ResponseShape, StreamFraming};
-        let successes = endpoint.response.iter_mut().filter_map(|success| match &mut success.shape {
-            ResponseShape::Json(reference)
-            | ResponseShape::Stream { framing: StreamFraming::Sse(reference) | StreamFraming::Ndjson(reference), .. } => Some(reference),
-            _ => None,
-        });
-        let errors = endpoint.errors.iter_mut().filter_map(|entry| match &mut entry.shape {
-            ResponseShape::Json(reference) => Some(reference),
-            _ => None,
-        });
-        let request = match &mut endpoint.request {
-            Some(ApiRequest::Json(reference)) => Some(reference),
-            _ => None,
-        };
-        for reference in successes.chain(request).chain(errors) {
-            if let crate::TypeRef::Named(name) = reference
-                && let Some(new_name) = name_mapping.get(name)
-            {
-                *name = new_name.clone();
-            }
-        }
     }
 
     /// Parses the OpenAPI document from the configured source.

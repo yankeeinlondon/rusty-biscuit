@@ -149,16 +149,31 @@ impl GraphQlOperation {
     /// The operation's JSON references: typed variables, data, then error
     /// entries.
     pub fn json_references(&self) -> Vec<&TypeRef> {
-        let mut references = Vec::new();
-        if let GraphQlVariables::Typed(reference) = &self.variables { references.push(reference); }
-        references.push(&self.data);
-        references.extend(self.errors.iter().filter_map(|entry| match &entry.shape {
-            crate::response::ResponseShape::Json(reference) => Some(reference),
-            _ => None,
-        }));
-        references
+        operation_json_references!(self)
+    }
+
+    /// [`Self::json_references`], mutably.
+    // OpenAPI import renames components through it.
+    #[cfg_attr(not(feature = "openapi"), allow(dead_code))]
+    pub(crate) fn json_references_mut(&mut self) -> Vec<&mut TypeRef> {
+        operation_json_references!(self, mut)
     }
 }
+
+/// The JSON references of an operation, shared by
+/// [`GraphQlOperation::json_references`] and its mutable counterpart so they
+/// cannot drift apart. Pass `mut` for mutable references.
+macro_rules! operation_json_references {
+    ($operation:expr $(, $mutability:tt)?) => {{
+        let operation = $operation;
+        let mut references = Vec::new();
+        if let GraphQlVariables::Typed(reference) = &$($mutability)? operation.variables { references.push(reference); }
+        references.push(&$($mutability)? operation.data);
+        references.extend(crate::components::error_references!(&$($mutability)? operation.errors $(, $mutability)?));
+        references
+    }};
+}
+use operation_json_references;
 
 /// Description, variables, and data are required facts; the type parameters
 /// track them so an operation missing one does not build.

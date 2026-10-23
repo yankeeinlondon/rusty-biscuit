@@ -240,6 +240,19 @@ impl TypeRef {
             Self::Primitive(_) | Self::Unknown => vec![],
         }
     }
+
+    /// Every component name this reference mentions, mutably, at any
+    /// nesting depth; the same names as [`Self::names`], in the same order.
+    // OpenAPI import renames components through it.
+    #[cfg_attr(not(feature = "openapi"), allow(dead_code))]
+    pub(crate) fn names_mut(&mut self) -> Vec<&mut String> {
+        match self {
+            Self::Named(name) => vec![name],
+            Self::Array(inner) | Self::Optional(inner) | Self::Map(inner) | Self::KeyedMap { value: inner, .. } => inner.names_mut(),
+            Self::OneOf(types) | Self::AnyOf(types) | Self::AllOf(types) => types.iter_mut().flat_map(Self::names_mut).collect(),
+            Self::Primitive(_) | Self::Unknown => vec![],
+        }
+    }
 }
 
 #[cfg(test)]

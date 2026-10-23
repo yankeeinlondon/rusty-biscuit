@@ -143,22 +143,8 @@ fn remap_type_refs_in_model(
 /// name. `mapping` is keyed by original name; a name absent from it (e.g. a
 /// dangling ref) falls back to plain sanitization so output stays valid Rust.
 fn remap_type_ref(type_ref: &mut TypeRef, mapping: &std::collections::HashMap<String, String>) {
-    match type_ref {
-        TypeRef::Named(name) => {
-            *name = mapping
-                .get(name)
-                .cloned()
-                .unwrap_or_else(|| sanitize_rust_ident(name));
-        }
-        TypeRef::Array(inner) | TypeRef::Map(inner) | TypeRef::Optional(inner) | TypeRef::KeyedMap { value: inner, .. } => {
-            remap_type_ref(inner, mapping);
-        }
-        TypeRef::OneOf(refs) | TypeRef::AnyOf(refs) | TypeRef::AllOf(refs) => {
-            for r in refs {
-                remap_type_ref(r, mapping);
-            }
-        }
-        TypeRef::Primitive(_) | TypeRef::Unknown => {}
+    for name in type_ref.names_mut() {
+        *name = mapping.get(name.as_str()).cloned().unwrap_or_else(|| sanitize_rust_ident(name));
     }
 }
 
