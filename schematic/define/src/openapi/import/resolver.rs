@@ -10,6 +10,7 @@ use openapiv3::{OpenAPI, Parameter, ReferenceOr, Response, Schema};
 
 use super::MAX_NESTING_DEPTH;
 use super::diagnostics::OpenApiDiagnostic;
+use super::normalize::{NO_SOURCE_KEYWORDS, SourceKeywords};
 use crate::models::TypeRef;
 
 /// Resolver for OpenAPI `$ref` references.
@@ -36,6 +37,8 @@ pub struct RefResolver<'a> {
     visited: RefCell<HashSet<String>>,
     /// Current nesting depth for depth limiting.
     depth: RefCell<usize>,
+    /// Exact source values of the keywords `openapiv3` narrows or drops.
+    keywords: &'a SourceKeywords,
 }
 
 impl<'a> RefResolver<'a> {
@@ -53,7 +56,21 @@ impl<'a> RefResolver<'a> {
             doc,
             visited: RefCell::new(HashSet::new()),
             depth: RefCell::new(0),
+            keywords: &NO_SOURCE_KEYWORDS,
         }
+    }
+
+    /// A resolver whose [`Self::source_schema`] restores `keywords`.
+    pub(crate) fn with_source_keywords(doc: &'a OpenAPI, keywords: &'a SourceKeywords) -> Self {
+        Self { keywords, ..Self::new(doc) }
+    }
+
+    /// The schema `schema`, found at the RFC 6901 `pointer`, as JSON with its
+    /// exact source numbers and `const` values restored and OpenAPI 3.0
+    /// Boolean exclusive bounds in numeric form. Read constraint values
+    /// from this, never from `openapiv3`'s narrowed numbers.
+    pub(crate) fn source_schema(&self, schema: &impl serde::Serialize, pointer: &str) -> serde_json::Value {
+        self.keywords.source_schema(schema, pointer)
     }
 
     /// The document this resolver reads.

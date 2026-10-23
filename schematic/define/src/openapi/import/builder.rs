@@ -4,6 +4,7 @@ use super::super::source::OpenApiSource;
 use super::diagnostics::OpenApiDiagnostic;
 use super::mappings;
 use super::{extension, reconcile};
+use super::normalize::SourceKeywords;
 use super::resolver::RefResolver;
 use crate::cross_origin::CrossOrigin;
 use crate::models::ModelCatalog;
@@ -172,12 +173,12 @@ impl OpenApiImport {
     pub fn build(self) -> Result<OpenApiImportResult, super::super::error::OpenApiError> {
         let mut diagnostics = Vec::new();
 
-        let mut doc = self.parse_source(&mut diagnostics)?;
+        let (mut doc, keywords) = self.parse_source(&mut diagnostics)?;
         super::query_paths::normalize(&mut doc, &mut diagnostics)?;
 
         self.validate_constraints(&doc)?;
 
-        let resolver = RefResolver::new(&doc);
+        let resolver = RefResolver::with_source_keywords(&doc, &keywords);
 
         let mut api = self.map_to_rest_api(&doc, &resolver, &mut diagnostics)?;
 
@@ -230,15 +231,22 @@ impl OpenApiImport {
         })
     }
 
-    /// Parses the OpenAPI document from the configured source.
+    /// Parses the OpenAPI document from the configured source, with the
+    /// exact source values of the keywords `openapiv3` narrows or drops.
     ///
-    /// Text sources are normalized by [`clamp_numeric_bounds`] first; any
-    /// clamped schema bound is reported through `diagnostics`.
+    /// Text sources are captured by [`SourceKeywords::capture`] before
+    /// [`super::normalize::stand_in_bounds`] makes them parseable. A parsed
+    /// [`OpenApiSource::Document`] has no source text, so its numbers are
+    /// read as `openapiv3` holds them.
     fn parse_source(
         &self,
         diagnostics: &mut Vec<OpenApiDiagnostic>,
-    ) -> Result<openapiv3::OpenAPI, super::super::error::OpenApiError> {
-        match &self.source {
+    ) -> Result<(openapiv3::OpenAPI, SourceKeywords), super::super::error::OpenApiError> {
+        let yaml_error = |e: serde_yaml_ng::Error| super::super::error::OpenApiError::Parse {
+            message: e.to_string(),
+            location: None,
+        };
+        let (content, json) = match &self.source {
             OpenApiSource::Path(path) => {
                 let content = std::fs::read_to_string(path).map_err(|e| {
                     super::super::error::OpenApiError::Io {
@@ -246,57 +254,38 @@ impl OpenApiImport {
                         message: e.to_string(),
                     }
                 })?;
+                (content, false)
+            }
+            OpenApiSource::Json(content) => (content.clone(), true),
+            OpenApiSource::Yaml(content) => (content.clone(), false),
+            OpenApiSource::Bytes(bytes) => (String::from_utf8_lossy(bytes).into_owned(), false),
+            OpenApiSource::Document(doc) => return Ok((*doc.clone(), SourceKeywords::default())),
+        };
 
-                let content = Self::normalize(&content, diagnostics);
-                super::query_paths::check_text(&content, false)?;
-                serde_yaml_ng::from_str(&content).map_err(|e| {
-                    super::super::error::OpenApiError::Parse {
-                        message: e.to_string(),
-                        location: None,
-                    }
-                })
-            }
-            OpenApiSource::Json(content) => {
-                let content = Self::normalize(content, diagnostics);
-                super::query_paths::check_text(&content, true)?;
-                serde_json::from_str(&content).map_err(|e| {
-                    super::super::error::OpenApiError::Parse {
-                        message: e.to_string(),
-                        location: Some(format!("line {}, column {}", e.line(), e.column())),
-                    }
-                })
-            }
-            OpenApiSource::Yaml(content) => {
-                let content = Self::normalize(content, diagnostics);
-                super::query_paths::check_text(&content, false)?;
-                serde_yaml_ng::from_str(&content).map_err(|e| {
-                    super::super::error::OpenApiError::Parse {
-                        message: e.to_string(),
-                        location: None,
-                    }
-                })
-            }
-            OpenApiSource::Bytes(bytes) => {
-                let content = String::from_utf8_lossy(bytes);
-                let content = Self::normalize(&content, diagnostics);
-                super::query_paths::check_text(&content, false)?;
-                serde_yaml_ng::from_str(&content).map_err(|e| {
-                    super::super::error::OpenApiError::Parse {
-                        message: e.to_string(),
-                        location: None,
-                    }
-                })
-            }
-            OpenApiSource::Document(doc) => Ok(*doc.clone()),
+        let captured = SourceKeywords::capture(&content, json);
+        if let Err(error @ super::super::error::OpenApiError::Validation { .. }) = captured {
+            return Err(error);
         }
-    }
-
-    /// Applies source-text normalization, forwarding its diagnostics.
-    fn normalize(content: &str, diagnostics: &mut Vec<OpenApiDiagnostic>) -> String {
-        let (normalized, mut normalization_diagnostics) =
-            super::normalize::clamp_numeric_bounds(content);
-        diagnostics.append(&mut normalization_diagnostics);
-        normalized
+        let content = super::normalize::stand_in_bounds(&content);
+        super::query_paths::check_text(&content, json)?;
+        let doc = if json {
+            serde_json::from_str(&content).map_err(|e| super::super::error::OpenApiError::Parse {
+                message: e.to_string(),
+                location: Some(format!("line {}, column {}", e.line(), e.column())),
+            })?
+        } else {
+            serde_yaml_ng::from_str(&content).map_err(yaml_error)?
+        };
+        // The capture reads anything the parse does, so this is a capture
+        // limit (a non-scalar under a numeric keyword name), never silent.
+        let keywords = captured.unwrap_or_else(|error| {
+            diagnostics.push(OpenApiDiagnostic::warn(
+                "#".to_string(),
+                format!("exact numeric bounds could not be captured ({error}); bounds are read as parsed"),
+            ));
+            SourceKeywords::default()
+        });
+        Ok((doc, keywords))
     }
 
     /// Validates input constraints (max depth, component count).

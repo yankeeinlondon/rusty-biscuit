@@ -37,6 +37,8 @@ pub(crate) struct PathField {
     pub value: PathValue,
     pub description: Option<String>,
     pub deprecated: bool,
+    /// The declaration's value rules, checked before the path is built.
+    pub constraints: Option<Box<schematic_define::constraints::Constraints>>,
 }
 
 impl PathField {
@@ -115,6 +117,7 @@ pub(crate) fn typed_path_fields(endpoint: &Endpoint, request_type: &str) -> Opti
                 value,
                 description: param.and_then(|param| param.description.clone()),
                 deprecated: param.is_some_and(|param| param.deprecated),
+                constraints: param.and_then(|param| param.constraints.clone()),
             }
         })
         .collect();
@@ -150,6 +153,13 @@ pub(super) fn generate_typed_path_fields(fields: &[PathField]) -> TokenStream {
         }];
         if path.deprecated {
             doc.extend([String::new(), " Deprecated.".to_string()]);
+        }
+        if let Some(rules) = &path.constraints {
+            let lines = crate::codegen::value_rules::rule_doc_lines(rules);
+            if !lines.is_empty() {
+                doc.push(String::new());
+                doc.extend(lines);
+            }
         }
         quote! {
             #(#[doc = #doc])*

@@ -164,11 +164,14 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
             let module_name = schematic_definitions::naming::resolve_module_name(&api);
 
             if has_types {
-                model_gen::generate_models_with(&models, definitions_dir, options.dry_run, true)?;
+                // The components are the imported source schemas, from
+                // which the models rebuild each field's value rules.
+                model_gen::generate_models_with(&models, Some(&api.schemas), definitions_dir, options.dry_run)?;
             }
 
             definition_gen::generate_definition_module(
                 &api,
+                &models,
                 &module_name,
                 &model_type_names(&models),
                 options.overlay.as_deref(),

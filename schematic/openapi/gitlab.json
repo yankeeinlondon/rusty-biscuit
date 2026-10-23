@@ -33,7 +33,9 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -270,7 +272,9 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -475,7 +479,9 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -629,7 +635,9 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -776,7 +784,9 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -929,7 +939,9 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -1081,7 +1093,9 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -1219,7 +1233,9 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -1409,7 +1425,9 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"

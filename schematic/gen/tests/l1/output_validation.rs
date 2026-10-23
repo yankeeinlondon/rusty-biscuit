@@ -5,7 +5,7 @@
 //! `pipeline::generate_batch` and the `schematic-gen` binary into temporary
 //! directories and assert what each output root holds afterward.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Command;
 
@@ -643,6 +643,12 @@ fn grouped_document_renames_a_shared_raw_id() {
 /// All nine original query-bearing routes have been normalized or merged.
 const EMBEDDED_QUERY_ENDPOINTS: [(&str, &str); 0] = [];
 
+/// The request value rules of the live definitions that the Rust client does
+/// not check, by endpoint: rules inside the members of a union component (a
+/// Rust enum of request structs), whose member the serialized body does not
+/// identify. Each is a `type-constraint` warning of the Rust output.
+const UNCHECKED_VALUE_RULES: [(&str, &str, usize); 1] = [("OpenAI", "CreateResponse", 42)];
+
 /// The fixed headers of the live definitions that OpenAPI operations cannot
 /// carry: an `Accept` value no success response declares as its media type.
 /// The value stays in `x-schematic`.
@@ -746,10 +752,28 @@ fn live_definitions_have_no_embedded_queries_or_validation_gaps() {
             BTreeSet::new()
         };
         assert_eq!(header_gaps, expected_header_gaps, "{output}");
+        let mut unchecked_rules: BTreeMap<(String, String), usize> = BTreeMap::new();
+        for d in diagnostics.iter().filter(|d| d.feature == Feature::TypeConstraint) {
+            assert_eq!((d.severity, d.output), (Severity::Warning, Output::Rust), "{d}");
+            assert!(d.message.ends_with("a union whose members are not checked"), "{d}");
+            *unchecked_rules.entry((d.api.join(","), d.endpoint.clone().unwrap())).or_default() += 1;
+        }
+        let expected_unchecked: BTreeMap<(String, String), usize> = if *output == Output::Rust {
+            UNCHECKED_VALUE_RULES
+                .iter()
+                .map(|(api, endpoint, count)| ((api.to_string(), endpoint.to_string()), *count))
+                .collect()
+        } else {
+            BTreeMap::new()
+        };
+        assert_eq!(unchecked_rules, expected_unchecked, "{output}");
         // Embedded queries are the only other accepted gap in any output.
         let other: Vec<_> = diagnostics
             .iter()
-            .filter(|d| ![Feature::QueryInPath, Feature::QueryParameter, Feature::FixedHeader].contains(&d.feature))
+            .filter(|d| {
+                ![Feature::QueryInPath, Feature::QueryParameter, Feature::FixedHeader, Feature::TypeConstraint]
+                    .contains(&d.feature)
+            })
             .collect();
         assert!(other.is_empty(), "{output}: {other:#?}");
 
@@ -1035,4 +1059,49 @@ fn a_contradictory_constraint_edited_after_build_blocks_every_output() {
         assert_eq!(found[0].output, output);
         assert_eq!(found[0].message, "query.limit `minimum` leaves no number between the lower and upper bounds");
     }
+}
+
+/// `api` whose `ListThings` posts a `Wrapper` body; `value` is the schema of
+/// its one property.
+fn with_wrapper_body(mut api: RestApi, value: serde_json::Value) -> RestApi {
+    api.schemas.push(SchemaComponent {
+        name: "Wrapper".into(),
+        rust_path: Some("Wrapper".into()),
+        schema: serde_json::json!({"type": "object", "properties": {"value": value}}),
+    });
+    api.endpoints[0].method = schematic_define::RestMethod::Post;
+    api.endpoints[0].request = Some(schematic_define::ApiRequest::json_type("Wrapper"));
+    api
+}
+
+#[test]
+fn a_request_rule_beneath_a_composition_blocks_only_the_rust_client() {
+    // Control: the same rule outside a composition is enforced, not reported.
+    let enforced = with_wrapper_body(fixture_api("Wrapped", "wrapped"), serde_json::json!({"type": "string", "maxLength": 3}));
+    assert!(validate_rust_client(&[&enforced]).iter().all(|d| d.feature != Feature::TypeConstraint));
+
+    let roots = Roots::new();
+    let rust_before = snapshot_or_absent(roots.schema_dir());
+    let composed = with_wrapper_body(
+        fixture_api("Wrapped", "wrapped"),
+        serde_json::json!({"oneOf": [{"type": "string", "maxLength": 3}, {"type": "integer"}]}),
+    );
+    let report = generate_batch(&[composed], &BatchScope::Complete, &roots.opts());
+    assert_eq!(report.succeeded(), vec![Output::OpenApi, Output::Postman], "only the Rust client cannot enforce it");
+    let rust = report.get(Output::Rust).unwrap();
+    assert_eq!(
+        rust.diagnostics,
+        vec![ValidationDiagnostic::new(
+            Severity::Error,
+            "Wrapped",
+            Some("ListThings"),
+            Feature::TypeConstraint,
+            Output::Rust,
+            "body (component `Wrapper` at `#/properties/value/oneOf/0`) `maxLength` is not enforced: \
+             beneath the `oneOf` at `#/properties/value` of component `Wrapper`; the client cannot check it, \
+             so remove the rule or the composition",
+        )]
+    );
+    assert!(matches!(&rust.result, Err(GeneratorError::Validation { output: Output::Rust, .. })));
+    assert_eq!(snapshot_or_absent(roots.schema_dir()), rust_before, "no Rust output is written");
 }

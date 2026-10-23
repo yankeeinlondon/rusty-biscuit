@@ -60,8 +60,20 @@ fn null_branch() -> Value {
 /// [`OpenApiError::Validation`] at the component's pointer when the converted
 /// JSON does not deserialize as an [`openapiv3::Schema`].
 pub(super) fn convert_component_schema(name: &str, value: &Value) -> Result<Schema, OpenApiError> {
-    let pointer = format!("#/components/schemas/{}", escape(name));
-    let converted = convert(value, &pointer)?;
+    convert_schema_at(value, &format!("#/components/schemas/{}", escape(name)))
+}
+
+/// Converts a JSON Schema `value` found at the JSON pointer `pointer` (an
+/// inline parameter, form-field, or body schema) exactly as
+/// [`convert_component_schema`] converts a component.
+///
+/// ## Errors
+///
+/// As [`convert_component_schema`], located at `pointer`.
+pub(super) fn convert_schema_at(value: &Value, pointer: &str) -> Result<Schema, OpenApiError> {
+    let pointer = pointer.to_owned();
+    let mut converted = convert(value, &pointer)?;
+    restore_exact_numbers(&mut converted);
     // `SchemaData::default` is an `Option`, so a source `"default": null`
     // (schemars writes one for every `#[serde(default)]` optional field) reads
     // as no default. Writing it back would make the document differ from its
@@ -78,6 +90,7 @@ fn convert(value: &Value, pointer: &str) -> Result<Value, OpenApiError> {
         Value::Object(object) => object,
         _ => return Err(unsupported("a schema that is neither an object nor a boolean", pointer)),
     };
+    let object = &carry_exact_numbers(object);
     if let Some(keyword) = object.keys().find(|key| {
         !(key.starts_with("x-") || ANNOTATIONS.contains(&key.as_str()) || IGNORED.contains(&key.as_str())
             || CONSTRAINTS.contains(&key.as_str()) || matches!(key.as_str(), "const" | "nullable"))
@@ -148,7 +161,7 @@ fn convert(value: &Value, pointer: &str) -> Result<Value, OpenApiError> {
                 }
                 Value::Array(converted)
             }
-            "exclusiveMinimum" | "exclusiveMaximum" if value.is_number() => {
+            "exclusiveMinimum" | "exclusiveMaximum" if value.is_number() || exact_text(value).is_some() => {
                 // 2020-12 numeric bound: OpenAPI 3.0 spells it as the bound plus
                 // a boolean flag.
                 let bound = if *key == "exclusiveMinimum" { "minimum" } else { "maximum" };
@@ -225,6 +238,53 @@ fn convert(value: &Value, pointer: &str) -> Result<Value, OpenApiError> {
     };
     converted.extend(annotations);
     Ok(Value::Object(converted))
+}
+
+/// Marks an exact-text stand-in for a numeric keyword while the schema is
+/// converted; never written out.
+const EXACT_MARK: &str = "\u{0}exact:";
+
+/// `object` with each numeric keyword's value replaced by its exact text
+/// (from [`crate::constraints::EXACT_EXTENSION`] or the number itself), so
+/// the text follows the keyword wherever conversion moves it. The extension
+/// itself is dropped; [`restore_exact_numbers`] rebuilds it.
+fn carry_exact_numbers(object: &Map<String, Value>) -> Map<String, Value> {
+    let mut carried = object.clone();
+    carried.remove(crate::constraints::EXACT_EXTENSION);
+    for keyword in crate::constraints::NUMERIC_KEYWORDS {
+        if let Some(number) = crate::constraints::exact_number(object, keyword) {
+            carried.insert(keyword.to_owned(), Value::String(format!("{EXACT_MARK}{number}")));
+        }
+    }
+    carried
+}
+
+/// The exact text a [`carry_exact_numbers`] value holds.
+fn exact_text(value: &Value) -> Option<&str> {
+    value.as_str()?.strip_prefix(EXACT_MARK)
+}
+
+/// Turns every carried exact text in `value` back into a number, adding a
+/// [`crate::constraints::EXACT_EXTENSION`] entry wherever `openapiv3`'s
+/// `i64`/`f64` would not hold it exactly.
+fn restore_exact_numbers(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            for keyword in crate::constraints::NUMERIC_KEYWORDS {
+                if let Some(text) = object.get(keyword).and_then(exact_text).map(str::to_owned) {
+                    crate::constraints::set_number(object, keyword, &crate::constraints::ConstraintNumber::from(text));
+                }
+            }
+            crate::constraints::mark_inexact_numbers(object);
+            for (key, child) in object.iter_mut() {
+                if !crate::constraints::is_data_keyword(key) {
+                    restore_exact_numbers(child);
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(restore_exact_numbers),
+        _ => {}
+    }
 }
 
 /// Folds the sole remaining member of an `anyOf`/`oneOf` into `body`: its own
@@ -338,6 +398,12 @@ fn enum_type(values: &[Value]) -> Option<&'static str> {
 /// `name` as a JSON-pointer reference token.
 fn escape(name: &str) -> String {
     name.replace('~', "~0").replace('/', "~1")
+}
+
+/// `name` as a JSON-pointer reference token, for callers that build the
+/// pointer [`convert_schema_at`] reports errors at.
+pub(super) fn pointer_token(name: &str) -> String {
+    escape(name)
 }
 
 fn unsupported(feature: &str, pointer: &str) -> OpenApiError {

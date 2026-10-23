@@ -116,6 +116,17 @@ const FIXTURE_COVERAGE: &[(&str, &[&str])] = &[
     ),
     ("FixtureGraphQl", &["graphql-typed-variables", "graphql-unit-variables", "graphql-address-rules", "graphql-http-errors",
         "graphql-relay-pager", "graphql-check-status-parity", "graphql-unparsed-document", "graphql-anonymous-bearer"]),
+    (
+        "FixtureRules",
+        &[
+            "value-rules-parameters",
+            "value-rules-json-body",
+            "value-rules-custom-serialization",
+            "value-rules-recursive-component",
+            "value-rules-text-body",
+            "value-rules-form-fields",
+        ],
+    ),
 ];
 
 /// Request and response types for the fixture APIs, one module per API.
@@ -346,6 +357,41 @@ pub struct ParityStateCount {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Problem {
     pub message: String,
+}
+"#,
+    ),
+    (
+        "fixture_rules",
+        r#"
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Line {
+    pub qty: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Extra {
+    pub note: String,
+}
+
+/// A renamed, a skipped, and a flattened field: its rules are checked on
+/// the JSON it serializes to.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct NewItem {
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+    #[serde(skip)]
+    pub internal: String,
+    #[serde(flatten)]
+    pub extra: Extra,
+    pub price: f64,
+    pub lines: Vec<Line>,
+    pub labels: std::collections::BTreeMap<String, String>,
+    pub parent: Option<Box<NewItem>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Meta {
+    pub title: String,
 }
 "#,
     ),
@@ -676,6 +722,7 @@ fn fixture_apis() -> Vec<RestApi> {
         query_fixture(),
         shapes_fixture(),
         graphql_fixture(),
+        rules_fixture(),
     ]
 }
 
@@ -720,6 +767,67 @@ fn shapes_fixture() -> RestApi {
     let mut api = fixture_api("FixtureShapes", "fixture_shapes", AuthStrategy::None, vec![create, chunks, download, source, submit]);
     api.errors = vec![ErrorEntry::new(StatusMatch::class(5), ResponseShape::Json(named("Problem")))];
     crate::common::components::with_referenced_components(api)
+}
+
+/// Value rules on every kind of request input: query and header
+/// parameters (checked as typed values), a JSON body whose stored
+/// components carry rules (a renamed, a skipped, and a flattened field, a
+/// map, array items, a decimal `multipleOf`, and a recursive reference), a
+/// text body, and multipart text and JSON fields.
+fn rules_fixture() -> RestApi {
+    use schematic_define::constraints::Constraints;
+    use schematic_define::SchemaComponent;
+
+    let rules = |param: ParamDef, constraints: Constraints| ParamDef { constraints: Some(Box::new(constraints)), ..param };
+    let mut list = endpoint("ListItems", RestMethod::Get, "/items", vec![SuccessShape::empty()]);
+    list.params = Some(located_params(
+        vec![
+            rules(named_param("limit", QueryParamType::Integer), Constraints::new().minimum(1).maximum(100)),
+            rules(named_param("name", QueryParamType::String), Constraints::new().min_length(1).max_length(5)),
+            rules(
+                named_param("ids", QueryParamType::Array(Box::new(QueryParamType::Integer))),
+                Constraints::new().min_items(1).max_items(3).unique_items().items(Constraints::new().minimum(1)),
+            ),
+        ],
+        vec![rules(named_param("X-Tag", QueryParamType::String), Constraints::new().pattern("^[a-z]+$"))],
+        vec![],
+    ));
+    let mut create = endpoint("CreateItem", RestMethod::Post, "/items", vec![SuccessShape::empty()]);
+    create.request = Some(ApiRequest::json_type("NewItem"));
+    let mut text = endpoint("SendText", RestMethod::Post, "/text", vec![SuccessShape::empty()]);
+    text.request = Some(ApiRequest::Text { content_type: "text/plain".to_string() });
+    text.request_constraints = Some(Box::new(Constraints::new().max_length(3)));
+    let mut upload = endpoint("Upload", RestMethod::Post, "/upload", vec![SuccessShape::empty()]);
+    upload.request = Some(ApiRequest::form_data(vec![
+        FormField::text("purpose").constraints(Constraints::new().allowed_values(["a", "b"])),
+        FormField::json("meta", named("Meta")),
+    ]));
+
+    let mut api = fixture_api("FixtureRules", "fixture_rules", AuthStrategy::None, vec![list, create, text, upload]);
+    let component = |name: &str, schema: serde_json::Value| SchemaComponent { name: name.to_string(), rust_path: Some(name.to_string()), schema };
+    api.schemas = vec![
+        component("NewItem", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "displayName": {"type": "string", "maxLength": 10},
+                "internal": {"type": "string", "maxLength": 1},
+                "note": {"type": "string", "maxLength": 4},
+                "price": {"type": "number", "format": "double", "multipleOf": 0.5},
+                "lines": {"type": "array", "maxItems": 3, "items": {"$ref": "#/components/schemas/Line"}},
+                "labels": {"type": "object", "additionalProperties": {"type": "string", "maxLength": 8}},
+                "parent": {"anyOf": [{"$ref": "#/components/schemas/NewItem"}, {"type": "null"}]},
+            },
+        })),
+        component("Line", serde_json::json!({
+            "type": "object",
+            "properties": {"qty": {"type": "integer", "format": "int64", "minimum": 1}},
+        })),
+        component("Meta", serde_json::json!({
+            "type": "object",
+            "properties": {"title": {"type": "string", "minLength": 1}},
+        })),
+    ];
+    api
 }
 
 /// The document sniff's `batch_query(3)` builds
@@ -886,6 +994,9 @@ use schematic_schema::fixture_query::{
     BrowseRequest, BrowseRequestSort, FindRequest, FindRequestKind, FindRequestKinds, FindRequestMarks, FixtureQuery,
 };
 use schematic_schema::fixture_settings::{Echo, EchoRequest, FixtureSettings, MovedRequest};
+use schematic_schema::fixture_rules::{
+    CreateItemRequest, Extra, FixtureRules, Line, ListItemsRequest, Meta, NewItem, SendTextRequest, UploadForm, UploadRequest,
+};
 use schematic_schema::prelude::*;
 use schematic_schema::schematic_runtime::{AuthMethod, ErrorKind, Outcome, RedirectRefusal, TransportErrorKind};
 use wiremock::matchers::{any, path};
@@ -2174,6 +2285,198 @@ async fn graphql_sends_report_their_credential_and_keep_unparsed_documents_and_t
     let outer = unreachable.send(ViewerRequest::new()).full().await;
     assert!(outer.is_err(), "the outer result carries transport failures only");
 }
+
+// ---- value rules ----
+
+fn assert_refused(error: &TransportError, expected: &str) {
+    let TransportErrorKind::InvalidArgument(argument) = &error.kind else {
+        panic!("expected an invalid argument, got {error:?}");
+    };
+    assert_eq!(argument.reason(), expected);
+}
+
+fn valid_item() -> NewItem {
+    NewItem {
+        display_name: "Lamp".to_string(),
+        internal: "not serialized, so not checked".to_string(),
+        extra: Extra { note: "ok".to_string() },
+        price: 2.5,
+        lines: vec![Line { qty: 1 }],
+        labels: [("room".to_string(), "den".to_string())].into(),
+        parent: None,
+    }
+}
+
+#[tokio::test]
+async fn a_violating_request_is_refused_on_every_send_path_and_nothing_is_sent() {
+    let server = start_server().await;
+    let client = FixtureRules::new().base_url(server.uri()).build().unwrap();
+    let expected = "2 constraint violations: \
+        query.limit violates maximum: must be at most 100; \
+        query.name violates maxLength: must be at most 5 characters long";
+    let request = || ListItemsRequest::default().with_limit(500).with_name("abcdef".to_string());
+
+    let violations = request().validate().unwrap_err();
+    let found: Vec<(String, &str)> = violations.iter().map(|v| (v.path_text(), v.keyword().as_str())).collect();
+    assert_eq!(found, [("query.limit".to_string(), "maximum"), ("query.name".to_string(), "maxLength")]);
+
+    let built = client.list_items().limit(500).name("abcdef".to_string()).build().unwrap_err();
+    assert_eq!(built.reason(), expected);
+    match client.list_items().limit(500).name("abcdef".to_string()).await {
+        Err(CallError::Transport(error)) => assert_refused(&error, expected),
+        other => panic!("an awaited call wraps the refusal as a transport error: {other:?}"),
+    }
+    assert_refused(&client.list_items().limit(500).name("abcdef".to_string()).full().await.unwrap_err(), expected);
+    match client.send(request()).await {
+        Err(CallError::Transport(error)) => assert_refused(&error, expected),
+        other => panic!("an awaited send wraps the refusal as a transport error: {other:?}"),
+    }
+    assert_refused(&client.send(request()).full().await.unwrap_err(), expected);
+    assert_refused(&client.send_raw(request(), &CallOptions::new()).await.unwrap_err(), expected);
+
+    // Each item of an array parameter, its count, and its uniqueness.
+    let ids = ListItemsRequest::default().with_ids(vec![0, 2, 2, 4]);
+    let found: Vec<(String, &str)> =
+        ids.validate().unwrap_err().iter().map(|v| (v.path_text(), v.keyword().as_str())).collect();
+    assert_eq!(found, [
+        ("query.ids".to_string(), "maxItems"),
+        ("query.ids".to_string(), "uniqueItems"),
+        ("query.ids[0]".to_string(), "minimum"),
+    ]);
+    assert!(client.send(ids).full().await.is_err());
+    let tag = ListItemsRequest::default().with_x_tag("Not lower".to_string());
+    assert_eq!(tag.validate().unwrap_err().to_string(), "header.x_tag violates pattern: must match the declared pattern");
+    assert_nothing_sent(&server).await;
+}
+
+#[tokio::test]
+async fn valid_values_pass_their_checks_and_are_sent_unchanged() {
+    let server = start_server().await;
+    let client = FixtureRules::new().base_url(server.uri()).build().unwrap();
+    // Five code points, eleven UTF-8 bytes: length counts code points.
+    let request = ListItemsRequest::default()
+        .with_limit(100)
+        .with_name("日本語ab".to_string())
+        .with_ids(vec![1, 2, 3])
+        .with_x_tag("abc".to_string());
+    request.validate().unwrap();
+    client.send(request).full().await.unwrap();
+    let received = only_request(&server).await;
+    assert_eq!(query(&received), "limit=100&name=%E6%97%A5%E6%9C%AC%E8%AA%9Eab&ids=1,2,3");
+    assert_eq!(header(&received, "x-tag"), ["abc"]);
+
+    let server = start_server().await;
+    let client = FixtureRules::new().base_url(server.uri()).build().unwrap();
+    let body = valid_item();
+    CreateItemRequest::new(body.clone()).validate().unwrap();
+    client.send(CreateItemRequest::new(body.clone())).full().await.unwrap();
+    let received = only_request(&server).await;
+    let sent: serde_json::Value = serde_json::from_slice(&received.body).unwrap();
+    assert_eq!(sent, serde_json::to_value(&body).unwrap(), "the checked value is the one sent");
+    assert_eq!(sent["displayName"], "Lamp");
+    assert_eq!(sent["note"], "ok", "a flattened field is sent at the top level");
+    assert!(sent.get("internal").is_none(), "a skipped field is neither sent nor checked");
+}
+
+#[tokio::test]
+async fn a_body_is_checked_as_it_serializes_including_renamed_flattened_and_recursive_fields() {
+    let mut body = valid_item();
+    body.display_name = "x".repeat(11);
+    body.internal = "y".repeat(50);
+    body.extra.note = "too long".to_string();
+    body.price = 2.25;
+    body.lines = vec![Line { qty: 3 }, Line { qty: 0 }];
+    body.parent = Some(Box::new(NewItem { display_name: "z".repeat(11), ..NewItem::default() }));
+    let violations = CreateItemRequest::new(body.clone()).validate().unwrap_err();
+    let found: Vec<(String, &str)> = violations.iter().map(|v| (v.path_text(), v.keyword().as_str())).collect();
+    assert_eq!(found, [
+        ("body.displayName".to_string(), "maxLength"),
+        ("body.lines[1].qty".to_string(), "minimum"),
+        ("body.note".to_string(), "maxLength"),
+        ("body.parent.displayName".to_string(), "maxLength"),
+        ("body.price".to_string(), "multipleOf"),
+    ]);
+
+    let server = start_server().await;
+    let client = FixtureRules::new().base_url(server.uri()).build().unwrap();
+    let error = client.send(CreateItemRequest::new(body)).full().await.unwrap_err();
+    assert_refused(&error, &violations.to_string());
+    assert_nothing_sent(&server).await;
+}
+
+#[tokio::test]
+async fn a_field_changed_after_validate_is_caught_by_the_send() {
+    let server = start_server().await;
+    let client = FixtureRules::new().base_url(server.uri()).build().unwrap();
+    let mut request = ListItemsRequest::default().with_limit(10);
+    request.validate().unwrap();
+    request.limit = Some(0);
+    let error = client.send(request).full().await.unwrap_err();
+    assert_refused(&error, "query.limit violates minimum: must be at least 1");
+
+    let mut create = CreateItemRequest::new(valid_item());
+    create.validate().unwrap();
+    create.body.lines.push(Line { qty: -1 });
+    let error = client.send(create).full().await.unwrap_err();
+    assert_refused(&error, "body.lines[1].qty violates minimum: must be at least 1");
+    assert_nothing_sent(&server).await;
+}
+
+#[tokio::test]
+async fn text_bodies_and_form_fields_are_checked_before_they_are_encoded() {
+    let server = start_server().await;
+    let client = FixtureRules::new().base_url(server.uri()).build().unwrap();
+    let error = client.send(SendTextRequest::new("abcd".to_string())).full().await.unwrap_err();
+    assert_refused(&error, "body violates maxLength: must be at most 3 characters long");
+    let form = UploadForm { purpose: "c".to_string(), meta: Meta { title: String::new() } };
+    let error = client.send(UploadRequest::new(form)).full().await.unwrap_err();
+    assert_refused(&error, "2 constraint violations: \
+        body.purpose violates enum: must be one of the 2 allowed values; \
+        body.meta.title violates minLength: must be at least 1 character long");
+    assert_nothing_sent(&server).await;
+
+    client.send(SendTextRequest::new("abc".to_string())).full().await.unwrap();
+    assert_eq!(only_request(&server).await.body, b"abc");
+
+    let server = start_server().await;
+    let client = FixtureRules::new().base_url(server.uri()).build().unwrap();
+    let form = UploadForm { purpose: "a".to_string(), meta: Meta { title: "t".to_string() } };
+    UploadRequest::new(form.clone()).validate().unwrap();
+    client.send(UploadRequest::new(form)).full().await.unwrap();
+    let body = String::from_utf8(only_request(&server).await.body).unwrap();
+    assert!(body.contains("name=\"purpose\""), "{body}");
+    assert!(body.contains("name=\"meta\"") && body.contains(r#"{"title":"t"}"#), "the checked JSON part is sent: {body}");
+}
+
+#[tokio::test]
+async fn reports_of_secret_values_and_map_keys_never_contain_them() {
+    let server = start_server().await;
+    let client = FixtureRules::new().base_url(server.uri()).build().unwrap();
+    let mut body = valid_item();
+    body.labels = [("api-token-SECRETKEY".to_string(), "s3cr3t-value".to_string())].into();
+    let request = CreateItemRequest::new(body);
+    let violations = request.clone().validate().unwrap_err();
+    assert_eq!(violations.to_string(), "body.labels[[redacted]] violates maxLength: must be at most 8 characters long");
+    let error = client.send(request).full().await.unwrap_err();
+    let named = ListItemsRequest::default().with_name("SECRETNAME".to_string());
+    let named_violations = named.validate().unwrap_err();
+    let built = client.list_items().name("SECRETNAME".to_string()).build().unwrap_err();
+    for rendered in [
+        violations.to_string(),
+        format!("{violations:?}"),
+        error.to_string(),
+        format!("{error:?}"),
+        named_violations.to_string(),
+        format!("{named_violations:?}"),
+        built.to_string(),
+        format!("{built:?}"),
+    ] {
+        for secret in ["SECRET", "s3cr3t"] {
+            assert!(!rendered.contains(secret), "{secret} leaked: {rendered}");
+        }
+    }
+    assert_nothing_sent(&server).await;
+}
 "##;
 
 /// Environment for the child test process; see [`REQUEST_SIDE_TEST`].
@@ -2230,6 +2533,12 @@ const REQUEST_SIDE_TESTS: &[&str] = &[
     "a_generated_relay_pager_pages_data_and_stops_at_graphql_errors",
     "check_status_parity_preserves_every_sniff_fixture",
     "graphql_sends_report_their_credential_and_keep_unparsed_documents_and_transport_failures_apart",
+    "a_violating_request_is_refused_on_every_send_path_and_nothing_is_sent",
+    "valid_values_pass_their_checks_and_are_sent_unchanged",
+    "a_body_is_checked_as_it_serializes_including_renamed_flattened_and_recursive_fields",
+    "a_field_changed_after_validate_is_caught_by_the_send",
+    "text_bodies_and_form_fields_are_checked_before_they_are_encoded",
+    "reports_of_secret_values_and_map_keys_never_contain_them",
 ];
 
 /// Renders a `format!` template whose arguments are all named in `args`:

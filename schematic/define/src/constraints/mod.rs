@@ -31,6 +31,7 @@ mod check;
 mod number;
 mod pattern;
 mod registered;
+mod schema;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -40,6 +41,9 @@ pub(crate) use check::endpoint_problems;
 pub use number::{ConstraintNumber, MAX_EXPONENT};
 pub use pattern::{PatternAdmission, admit_pattern};
 pub use registered::*;
+pub use schema::{EXACT_EXTENSION, NUMERIC_KEYWORDS, exact_number, json_number};
+#[cfg(feature = "openapi")]
+pub(crate) use schema::{is_data_keyword, mark_inexact_numbers, normalize_exclusive_flags, set_number};
 
 /// JSON Schema validation keywords for one value.
 ///

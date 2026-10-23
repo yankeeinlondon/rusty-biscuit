@@ -4,13 +4,21 @@ use super::super::diagnostics::OpenApiDiagnostic;
 use super::super::naming::sanitize_rust_ident;
 use super::super::resolver::RefResolver;
 use super::super::{ContentPreference, OpenApiImportOptions};
+use super::import_constraints;
+use crate::constraints::Constraints;
 use crate::request::{ApiRequest, FormField, FormFieldKind};
 use crate::{PrimitiveType, TypeRef};
 
 /// Reference used when a body or response has no named schema to reference.
 pub(super) const JSON_VALUE: TypeRef = TypeRef::Primitive(PrimitiveType::Json);
 
-/// Maps an operation's request body.
+/// A mapped request body and the value rules of its root, if any.
+pub type MappedRequest = (ApiRequest, Option<Box<Constraints>>);
+
+/// Maps an operation's request body, with the rules of an inline JSON or
+/// text body root (for [`crate::Endpoint::request_constraints`]). A body
+/// whose schema references a component has no root rules: they live in the
+/// component. Form fields carry their own rules.
 ///
 /// `location` is the operation's JSON pointer (`#/paths/{path}/{method}`);
 /// form diagnostics are located beneath it.
@@ -20,7 +28,7 @@ pub fn map_request_body(
     resolver: &RefResolver,
     diagnostics: &mut Vec<OpenApiDiagnostic>,
     options: &OpenApiImportOptions,
-) -> Option<ApiRequest> {
+) -> Option<MappedRequest> {
     let body = match body {
         Some(ReferenceOr::Item(b)) => b,
         Some(ReferenceOr::Reference { reference }) => {
@@ -73,21 +81,30 @@ fn map_media_type_to_request(
     media_location: &str,
     resolver: &RefResolver,
     diagnostics: &mut Vec<OpenApiDiagnostic>,
-) -> Option<ApiRequest> {
+) -> Option<MappedRequest> {
     let ct_lower = content_type.to_lowercase();
+    let root_rules = |diagnostics: &mut Vec<OpenApiDiagnostic>| match &media_type.schema {
+        Some(schema @ ReferenceOr::Item(_)) => {
+            import_constraints(schema, &format!("{media_location}/schema"), resolver, diagnostics)
+        }
+        _ => None,
+    };
 
     if ct_lower.contains("json") {
         if let Some(ref schema) = media_type.schema {
-            return Some(ApiRequest::json(reference_from_schema(schema, resolver, diagnostics)));
+            let request = ApiRequest::json(reference_from_schema(schema, resolver, diagnostics));
+            return Some((request, root_rules(diagnostics)));
         }
     } else if ct_lower.contains("octet-stream") || ct_lower.contains("binary") {
-        return Some(ApiRequest::binary(content_type));
+        return Some((ApiRequest::binary(content_type), None));
     } else if ct_lower.contains("form-data") {
-        return map_form_fields(media_type, media_location, resolver, diagnostics, FormFlavor::Multipart);
+        return map_form_fields(media_type, media_location, resolver, diagnostics, FormFlavor::Multipart)
+            .map(|request| (request, None));
     } else if ct_lower.contains("x-www-form-urlencoded") {
-        return map_form_fields(media_type, media_location, resolver, diagnostics, FormFlavor::UrlEncoded);
+        return map_form_fields(media_type, media_location, resolver, diagnostics, FormFlavor::UrlEncoded)
+            .map(|request| (request, None));
     } else if ct_lower.contains("text") {
-        return Some(ApiRequest::text(content_type));
+        return Some((ApiRequest::text(content_type), root_rules(diagnostics)));
     }
 
     None
@@ -217,6 +234,11 @@ fn warn_unrepresentable_encoding(
 /// `string` + `format: binary` is the OpenAPI spelling of a file part; an array
 /// of those is a repeated part sharing one name (RFC 7578). URL-encoded forms
 /// have no file concept, so every property there stays a text field.
+///
+/// A text or JSON part whose property schema is inline takes that schema's
+/// value rules as [`FormField::constraints`]. A file-shaped property, a
+/// non-file array or object imported as text (already reported), and a
+/// `$ref` property (whose rules live in the component) take none.
 #[allow(clippy::too_many_arguments)]
 fn map_form_field(
     name: &str,
@@ -229,6 +251,11 @@ fn map_form_field(
     required: bool,
 ) -> Option<FormField> {
     let shape = classify_form_property(property, location, resolver, diagnostics)?;
+    let text_carries_rules = match &shape {
+        FormPropertyShape::Text => true,
+        FormPropertyShape::Composite { object_valued } => !object_valued,
+        FormPropertyShape::File | FormPropertyShape::Files { .. } | FormPropertyShape::TextArray | FormPropertyShape::Named { .. } => false,
+    };
     let kind = match flavor {
         FormFlavor::UrlEncoded => {
             if matches!(shape, FormPropertyShape::File | FormPropertyShape::Files { .. }) {
@@ -245,7 +272,16 @@ fn map_form_field(
         }
     };
 
-    let field = FormField { constraints: None, name: name.to_string(), kind, required: true, description: None };
+    let carries_rules = match &kind {
+        FormFieldKind::Text => text_carries_rules,
+        FormFieldKind::Json(_) => true,
+        FormFieldKind::File { .. } | FormFieldKind::Files { .. } => false,
+    };
+    let constraints = match property {
+        ReferenceOr::Item(_) if carries_rules => import_constraints(property, &location.schema, resolver, diagnostics),
+        _ => None,
+    };
+    let field = FormField { constraints, name: name.to_string(), kind, required: true, description: None };
     let field = if required { field } else { field.optional() };
 
     Some(match describe_form_property(property, resolver) {

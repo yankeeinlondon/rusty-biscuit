@@ -44,6 +44,30 @@ pub struct UnenforceableRule {
     pub keyword: &'static str,
     /// Why it cannot be enforced, naming the composition or reference.
     pub reason: String,
+    /// The composition the rule sits beneath; `None` when it sits beside
+    /// an unresolved reference instead.
+    pub composition: Option<CompositionSite>,
+}
+
+/// Where the composition above an [`UnenforceableRule`] is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CompositionSite {
+    /// The schema component holding the composition; `None` for the body's
+    /// own wire schema.
+    pub component: Option<String>,
+    /// JSON pointer, inside that schema, to the schema object holding it;
+    /// `""` when the composition is the schema's root, which is how a Rust
+    /// enum's schema appears.
+    pub pointer: String,
+    /// `oneOf`, `anyOf`, `allOf`, or `not`.
+    pub keyword: &'static str,
+}
+
+/// Why the rules found beneath one point of a walk are unenforceable.
+struct Blocked {
+    reason: String,
+    site: Option<CompositionSite>,
 }
 
 /// Every rule of the JSON body `body` that sits beneath `oneOf`, `allOf`,
@@ -106,16 +130,17 @@ struct Walk<'a> {
 impl<'a> Walk<'a> {
     /// Walks the schema `value` of `component` at `pointer`; `blocked` is
     /// the reason every rule found is unenforceable, once one applies.
-    fn schema(&mut self, value: &Value, component: Option<&'a str>, pointer: &mut String, blocked: Option<&str>) {
+    fn schema(&mut self, value: &Value, component: Option<&'a str>, pointer: &mut String, blocked: Option<&Blocked>) {
         let Some(object) = value.as_object() else { return };
-        if let Some(reason) = blocked {
-            self.report(object, component, pointer, reason);
+        if let Some(blocked) = blocked {
+            self.report(object, component, pointer, blocked);
         }
         if let Some(reference) = object.get("$ref") {
             match self.resolve(reference, component) {
                 Some(target) => self.component(target, blocked),
                 None if blocked.is_none() => {
-                    self.report(object, component, pointer, &format!("beside the unresolved reference {reference}"));
+                    let unresolved = Blocked { reason: format!("beside the unresolved reference {reference}"), site: None };
+                    self.report(object, component, pointer, &unresolved);
                 }
                 None => {}
             }
@@ -141,8 +166,11 @@ impl<'a> Walk<'a> {
         for key in ["anyOf", "oneOf", "allOf", "not"] {
             let Some(child) = object.get(key) else { continue };
             let option = key == "anyOf" && child.as_array().is_some_and(|members| members.len() == 2 && members.iter().any(admits_only_null));
-            let reason = format!("beneath the `{key}` at {}", place(component, pointer));
-            let inner = if option { blocked } else { Some(blocked.unwrap_or(&reason)) };
+            let here = Blocked {
+                reason: format!("beneath the `{key}` at {}", place(component, pointer)),
+                site: Some(CompositionSite { component: component.map(str::to_owned), pointer: pointer.clone(), keyword: key }),
+            };
+            let inner = if option { blocked } else { Some(blocked.unwrap_or(&here)) };
             let length = push_token(pointer, key);
             match child {
                 Value::Array(members) => self.members(members, component, pointer, inner),
@@ -154,7 +182,7 @@ impl<'a> Walk<'a> {
 
     /// Walks each member of a schema list, skipping a member that only
     /// marks nullability.
-    fn members(&mut self, members: &[Value], component: Option<&'a str>, pointer: &mut String, blocked: Option<&str>) {
+    fn members(&mut self, members: &[Value], component: Option<&'a str>, pointer: &mut String, blocked: Option<&Blocked>) {
         for (index, member) in members.iter().enumerate().filter(|(_, member)| !admits_only_null(member)) {
             let length = push_token(pointer, &index.to_string());
             self.schema(member, component, pointer, blocked);
@@ -162,26 +190,17 @@ impl<'a> Walk<'a> {
         }
     }
 
-    fn component(&mut self, target: &'a SchemaComponent, blocked: Option<&str>) {
+    fn component(&mut self, target: &'a SchemaComponent, blocked: Option<&Blocked>) {
         if self.visited.insert((target.name.as_str(), blocked.is_some())) {
             self.schema(&target.schema, Some(&target.name), &mut String::new(), blocked);
         }
     }
 
     fn resolve(&self, reference: &Value, current: Option<&str>) -> Option<&'a SchemaComponent> {
-        let reference = reference.as_str()?;
-        let name = if reference == "#" {
-            current?.to_owned()
-        } else {
-            let fragment = percent_decode(reference.strip_prefix('#')?)?;
-            let token = COMPONENT_PREFIXES.iter().find_map(|prefix| fragment.strip_prefix(prefix))?;
-            if token.is_empty() || token.contains('/') { return None }
-            token.replace("~1", "/").replace("~0", "~")
-        };
-        self.api.component(&name)
+        referenced_component(self.api, reference.as_str()?, current)
     }
 
-    fn report(&mut self, object: &Map<String, Value>, component: Option<&str>, pointer: &str, reason: &str) {
+    fn report(&mut self, object: &Map<String, Value>, component: Option<&str>, pointer: &str, blocked: &Blocked) {
         for keyword in RULE_KEYWORDS {
             let Some(value) = object.get(keyword) else { continue };
             if value == &Value::Bool(false) || implicit_bound(object, keyword, value) { continue }
@@ -189,10 +208,53 @@ impl<'a> Walk<'a> {
                 component: component.map(str::to_owned),
                 pointer: pointer.to_owned(),
                 keyword,
-                reason: reason.to_owned(),
+                reason: blocked.reason.clone(),
+                composition: blocked.site.clone(),
             });
         }
     }
+}
+
+/// The component of `api` that the local reference `reference` names, read
+/// from inside the component `current` (`None` for an endpoint's own wire
+/// schema): `#/components/schemas/{name}`, `#/$defs/{name}`,
+/// `#/definitions/{name}`, or `#` for `current` itself. `None` when it
+/// names no component.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::constraints::referenced_component;
+/// # use schematic_define::{DefinitionContext, Endpoint, RestApi, definition_type};
+/// # use schemars::JsonSchema;
+/// # definition_type!(#[derive(JsonSchema)] pub struct Tag { pub label: String });
+/// # let mut ctx = DefinitionContext::types_in("::docs::models");
+/// # let create = Endpoint::post("CreateTag", "/tags").describes("Create a tag")
+/// #     .request_json::<Tag>(&mut ctx).returns_empty().build()?;
+/// # let api = RestApi::builder(&ctx, "Tags", "https://example.test")
+/// #     .describes("Tags").no_auth().endpoints([create]).build()?;
+/// assert_eq!(referenced_component(&api, "#/components/schemas/Tag", None).map(|c| c.name.as_str()), Some("Tag"));
+/// assert_eq!(referenced_component(&api, "#", Some("Tag")).map(|c| c.name.as_str()), Some("Tag"));
+/// assert!(referenced_component(&api, "#/components/schemas/Missing", None).is_none());
+/// # Ok::<(), schematic_define::DefinitionError>(())
+/// ```
+pub fn referenced_component<'a>(api: &'a RestApi, reference: &str, current: Option<&str>) -> Option<&'a SchemaComponent> {
+    let name = if reference == "#" {
+        current?.to_owned()
+    } else {
+        let fragment = percent_decode(reference.strip_prefix('#')?)?;
+        let token = COMPONENT_PREFIXES.iter().find_map(|prefix| fragment.strip_prefix(prefix))?;
+        if token.is_empty() || token.contains('/') { return None }
+        token.replace("~1", "/").replace("~0", "~")
+    };
+    api.component(&name)
+}
+
+/// Whether `object`'s `keyword` is the bound Schemars writes for the Rust
+/// integer width its `format` names (`minimum: 0` on a `uint32`), rather
+/// than an authored rule.
+pub fn is_width_bound(object: &Map<String, Value>, keyword: &str) -> bool {
+    object.get(keyword).is_some_and(|value| implicit_bound(object, keyword, value))
 }
 
 fn place(component: Option<&str>, pointer: &str) -> String {
@@ -204,8 +266,9 @@ fn place(component: Option<&str>, pointer: &str) -> String {
 
 /// Whether `member` admits only `null`: `{"type": "null"}` (draft 2020-12)
 /// or `{"enum": [null], "nullable": true}` (OpenAPI 3.0), with nothing but
-/// annotations beside it.
-fn admits_only_null(member: &Value) -> bool {
+/// annotations beside it. An `anyOf` of exactly two members, one of them
+/// this, is how Schemars writes an `Option`.
+pub fn admits_only_null(member: &Value) -> bool {
     let Some(member) = member.as_object() else { return false };
     let only_null = |values: &Value| values.as_array().is_some_and(|values| !values.is_empty() && values.iter().all(Value::is_null));
     let restricted = member.get("enum").is_some_and(only_null) || member.get("const") == Some(&Value::Null);

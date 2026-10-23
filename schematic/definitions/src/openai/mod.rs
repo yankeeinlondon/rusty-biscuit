@@ -1818,6 +1818,16 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                         .optional()
                         .with_description(
                             "The format of the output, in one of these options: `json`, `text`, `srt`, `verbose_json`, or `vtt`.\n",
+                        )
+                        .constraints(
+                            schematic_define::constraints::Constraints::new()
+                                .allowed_values([
+                                    "json",
+                                    "text",
+                                    "srt",
+                                    "verbose_json",
+                                    "vtt",
+                                ]),
                         ),
                     FormField::text("temperature")
                         .optional()
@@ -3130,6 +3140,17 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                     FormField::text("purpose")
                         .with_description(
                             "The intended purpose of the uploaded file. One of:\n- `assistants`: Used in the Assistants API\n- `batch`: Used in the Batch API\n- `fine-tune`: Used for fine-tuning\n- `vision`: Images used for vision fine-tuning\n- `user_data`: Flexible file type for any purpose\n- `evals`: Used for eval data sets\n",
+                        )
+                        .constraints(
+                            schematic_define::constraints::Constraints::new()
+                                .allowed_values([
+                                    "assistants",
+                                    "batch",
+                                    "fine-tune",
+                                    "vision",
+                                    "user_data",
+                                    "evals",
+                                ]),
                         ),
                     FormField::text("expires_after")
                         .optional()
@@ -3525,11 +3546,19 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                         .optional()
                         .with_description(
                             "The format in which the generated images are returned. Must be one of `url` or `b64_json`. URLs are only valid for 60 minutes after the image has been generated.",
+                        )
+                        .constraints(
+                            schematic_define::constraints::Constraints::new()
+                                .allowed_values(["url", "b64_json"]),
                         ),
                     FormField::text("size")
                         .optional()
                         .with_description(
                             "The size of the generated images. Must be one of `256x256`, `512x512`, or `1024x1024`.",
+                        )
+                        .constraints(
+                            schematic_define::constraints::Constraints::new()
+                                .allowed_values(["256x256", "512x512", "1024x1024"]),
                         ),
                     FormField::text("user")
                         .optional()
@@ -3963,7 +3992,15 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["content"]),
+                            ),
+                    ),
+                ),
             })
             .build()
     }
@@ -4101,7 +4138,15 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["project_id", "line_item", "api_key_id"]),
+                            ),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -4179,7 +4224,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -4279,7 +4330,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -4377,7 +4434,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -4862,7 +4925,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -5213,7 +5282,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -5452,7 +5527,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -5540,7 +5621,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -5779,7 +5866,20 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "model",
+                                    ]),
+                            ),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -5955,7 +6055,20 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "model",
+                                    ]),
+                            ),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -6087,7 +6200,15 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["project_id"]),
+                            ),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -6281,7 +6402,22 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "model",
+                                        "batch",
+                                        "service_tier",
+                                    ]),
+                            ),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -6457,7 +6593,20 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "model",
+                                    ]),
+                            ),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -6635,7 +6784,20 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "vector_store_id",
+                                    ]),
+                            ),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -6754,7 +6916,19 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "image.generation",
+                                        "image.edit",
+                                        "image.variation",
+                                    ]),
+                            ),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "sizes".to_string(),
@@ -6784,7 +6958,21 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "256x256",
+                                        "512x512",
+                                        "1024x1024",
+                                        "1792x1792",
+                                        "1024x1792",
+                                    ]),
+                            ),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "project_ids".to_string(),
@@ -6867,7 +7055,22 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "model",
+                                        "size",
+                                        "source",
+                                    ]),
+                            ),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -7043,7 +7246,20 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "model",
+                                    ]),
+                            ),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -7173,7 +7389,15 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["project_id"]),
+                            ),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -7347,7 +7571,15 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["low", "medium", "high"]),
+                            ),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "group_by".to_string(),
@@ -7377,7 +7609,21 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "model",
+                                        "context_level",
+                                    ]),
+                            ),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -7512,7 +7758,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -7608,7 +7860,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -7702,7 +7960,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -7806,7 +8070,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -8047,7 +8317,15 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: false,
                 style: ParamStyle::Simple,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["responses_multi_agent=v1"]),
+                            ),
+                    ),
+                ),
             })
             .build()
     }
@@ -8152,7 +8430,15 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: false,
                 style: ParamStyle::Simple,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["responses_multi_agent=v1"]),
+                            ),
+                    ),
+                ),
             })
             .build()
     }
@@ -8200,7 +8486,15 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: false,
                 style: ParamStyle::Simple,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["responses_multi_agent=v1"]),
+                            ),
+                    ),
+                ),
             })
             .build()
     }
@@ -8254,7 +8548,15 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: false,
                 style: ParamStyle::Simple,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["responses_multi_agent=v1"]),
+                            ),
+                    ),
+                ),
             })
             .build()
     }
@@ -8364,7 +8666,15 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: false,
                 style: ParamStyle::Simple,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["responses_multi_agent=v1"]),
+                            ),
+                    ),
+                ),
             })
             .build()
     }
@@ -9007,7 +9317,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -9063,7 +9379,12 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                     FormField::file("video")
                         .with_description("Video file used to create a character."),
                     FormField::text("name")
-                        .with_description("Display name for this API character."),
+                        .with_description("Display name for this API character.")
+                        .constraints(
+                            schematic_define::constraints::Constraints::new()
+                                .min_length(1u64)
+                                .max_length(80u64),
+                        ),
                 ]),
             )
             .build()
@@ -9192,7 +9513,15 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: false,
                 style: ParamStyle::Simple,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["responses_multi_agent=v1"]),
+                            ),
+                    ),
+                ),
             })
             .build()
     }
@@ -9236,7 +9565,15 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: false,
                 style: ParamStyle::Simple,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["responses_multi_agent=v1"]),
+                            ),
+                    ),
+                ),
             })
             .build()
     }
@@ -9256,7 +9593,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -9354,7 +9697,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -9476,7 +9825,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -9567,7 +9922,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -9631,7 +9992,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
-                constraints: None,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .min_length(1u64)
+                            .max_length(512u64),
+                    ),
+                ),
             })
             .build()
     }

@@ -16,8 +16,9 @@ use crate::codegen::pagination::{api_pager_view, ordinary_send_defaults};
 use crate::codegen::responses::api_error_body_impls;
 use crate::codegen::{
     ModuleDocBuilder, generate_api_struct, generate_endpoint_methods, generate_pagination_impls,
-    generate_request_struct_with_defaults,
+    generate_request_struct_with_rules,
 };
+use crate::codegen::value_rules::ApiValueRules;
 
 use super::helpers::{build_definitions_import, get_request_suffix};
 use schematic_definitions::naming::resolve_module_name;
@@ -44,7 +45,8 @@ pub struct SplitApiParts {
 /// impls, call types, and endpoint methods of one API.
 ///
 /// They are generated from the API's pager view, so a parameter a
-/// pagination strategy adopts is in none of them.
+/// pagination strategy adopts is in none of them. The value-rule plans of
+/// every request share one plans module.
 ///
 /// An API-level `Cookie` header cannot be a client default header: the
 /// runtime refuses a default header that can carry a credential. So the API's
@@ -67,17 +69,20 @@ fn api_requests(api: &RestApi, module_path: &str) -> TokenStream {
         .collect();
 
     let mut tokens = TokenStream::new();
+    let mut rules = ApiValueRules::new(api);
     for (endpoint, original) in api.endpoints.iter().zip(&declared.endpoints) {
         let endpoint = with_api_cookies(endpoint, &api_cookies);
-        tokens.extend(generate_request_struct_with_defaults(
+        tokens.extend(generate_request_struct_with_rules(
             api,
             &endpoint,
             &suffix,
             Some(module_path),
             &api_tag_name(api),
             &ordinary_send_defaults(declared, original),
+            &mut rules,
         ));
     }
+    tokens.extend(rules.into_tokens());
     for operation in api.graphql.iter().flat_map(|surface| &surface.operations) {
         tokens.extend(crate::codegen::graphql::generate_operation_request(api, operation, &suffix, &api_tag_name(api)));
     }

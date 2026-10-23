@@ -19,7 +19,9 @@ fn import(value: &Value, yaml: bool) -> Result<schematic_define::openapi::OpenAp
 }
 
 fn matrix(yaml: bool, provider_source: &str) {
-    let (source, _) = schematic_define::openapi::import::clamp_numeric_bounds(provider_source);
+    // `serde_yaml_ng` cannot read OpenAI's out-of-`i64` `seed` bounds into a
+    // `Value`; this test slices the document and never reads those bounds.
+    let source = provider_source.replace("9223372036854776000", "9223372036854775807");
     let provider: Value = serde_yaml_ng::from_str(&source).unwrap();
     let path = "/responses/{response_id}/input_items?beta=true";
     // The response names this component; an import whose references dangle fails.

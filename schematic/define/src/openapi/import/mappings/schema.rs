@@ -60,7 +60,9 @@ pub fn map_all_schemas(
             {
                 remap_type_refs_in_model(&mut model, &final_by_original);
                 types.push(model);
-                model_components.push(source_component(&final_name, schema_ref, &final_by_original, options));
+                let pointer = format!("#/components/schemas/{}", name.replace('~', "~0").replace('/', "~1"));
+                let schema = resolver.source_schema(schema_ref, &pointer);
+                model_components.push(source_component(&final_name, schema, &final_by_original, options));
             }
         }
     }
@@ -75,18 +77,18 @@ pub fn map_all_schemas(
     }
 }
 
-/// The component of the model `final_name`, imported from `schema_ref`.
+/// The component of the model `final_name`, holding its source `schema`
+/// (exact numbers, `const`, and numeric exclusive bounds restored by
+/// [`RefResolver::source_schema`]).
 ///
 /// The Rust path follows the catalog's `module_path` (the module the models
 /// are generated into), or is the bare name when none is set.
 fn source_component(
     final_name: &str,
-    schema_ref: &ReferenceOr<Schema>,
+    mut schema: serde_json::Value,
     final_by_original: &std::collections::HashMap<String, String>,
     options: &super::super::OpenApiImportOptions,
 ) -> crate::SchemaComponent {
-    // An `openapiv3` schema always serializes; `{}` keeps the component valid.
-    let mut schema = serde_json::to_value(schema_ref).unwrap_or_else(|_| serde_json::json!({}));
     rename_schema_refs(&mut schema, final_by_original);
     crate::SchemaComponent {
         name: final_name.to_string(),
@@ -285,10 +287,10 @@ fn map_schema_to_model(
                 map_object_to_struct(rust_name, description, &object, resolver, diagnostics);
             Some(ModelDef::Struct(struct_def))
         }
-        openapiv3::SchemaKind::Any(_) => Some(ModelDef::Alias(TypeAlias {
+        openapiv3::SchemaKind::Any(any) => Some(ModelDef::Alias(TypeAlias {
             name: rust_name.to_string(),
             description,
-            target: TypeRef::Primitive(PrimitiveType::Json),
+            target: TypeRef::Primitive(any_primitive(any)),
             discriminator: None,
         })),
         openapiv3::SchemaKind::Not { .. } => {
@@ -509,7 +511,19 @@ fn map_schema_to_type_ref_inner(
                 .collect();
             TypeRef::AllOf(variants)
         }
-        openapiv3::SchemaKind::Any(_) => TypeRef::Primitive(PrimitiveType::Json),
+        openapiv3::SchemaKind::Any(any) => TypeRef::Primitive(any_primitive(any)),
         openapiv3::SchemaKind::Not { .. } => TypeRef::Unknown,
+    }
+}
+
+/// The primitive an `Any` schema names through its `type`. `openapiv3`
+/// demotes an integer schema to `Any` when a bound does not fit `i64` (the
+/// stand-in for an exact bound beyond it), so `integer` and `number` keep
+/// their type; anything else is free-form JSON.
+fn any_primitive(any: &openapiv3::AnySchema) -> PrimitiveType {
+    match any.typ.as_deref() {
+        Some("integer") if any.properties.is_empty() => PrimitiveType::Integer,
+        Some("number") if any.properties.is_empty() => PrimitiveType::Number,
+        _ => PrimitiveType::Json,
     }
 }

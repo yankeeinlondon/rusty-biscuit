@@ -186,10 +186,12 @@ pub(super) fn generate_query_param_fields(query_params: &[QueryParamInfo]) -> To
         let field_type = if qp.required { rust_type } else { quote! { Option<#rust_type> } };
         let doc_str = format!(" Query parameter: {}", qp.description.as_deref().unwrap_or(&qp.name));
         let deprecated = qp.deprecation_doc();
+        let rules = qp.rules_doc();
 
         quote! {
             #[doc = #doc_str]
             #deprecated
+            #rules
             #rename
             pub #field_name: #field_type,
         }

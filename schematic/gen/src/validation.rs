@@ -143,6 +143,7 @@ pub fn validate_rust_client_in(
         check_routes(api, Output::Rust, &mut diagnostics);
         check_schema_references(api, Output::Rust, &mut diagnostics);
         check_constraints(api, Output::Rust, &mut diagnostics);
+        check_value_rules(api, &mut diagnostics);
         check_rust_api(api, registrations, &mut diagnostics);
     }
     check_stem_case_collisions(apis, Output::Rust, &mut diagnostics);
@@ -225,6 +226,25 @@ fn check_constraints(api: &RestApi, output: Output, diagnostics: &mut Vec<Valida
             Feature::TypeConstraint,
             output,
             format!("{} `{}` {}", problem.path, problem.keyword, problem.reason),
+        ));
+    }
+}
+
+/// Reports every request value rule the Rust client does not enforce: an
+/// error for a supported rule beneath a composition or beside an unresolved
+/// reference, which the client would otherwise claim to check; a warning
+/// for a format (an annotation only), a pattern outside the enforced
+/// subset, and a rule inside a member of a union component.
+fn check_value_rules(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    let view = crate::codegen::pagination::api_pager_view(api);
+    for (endpoint, finding) in crate::codegen::value_rules::api_findings(&view) {
+        diagnostics.push(ValidationDiagnostic::new(
+            finding.severity,
+            &api.name,
+            endpoint.as_deref(),
+            Feature::TypeConstraint,
+            Output::Rust,
+            finding.message(),
         ));
     }
 }

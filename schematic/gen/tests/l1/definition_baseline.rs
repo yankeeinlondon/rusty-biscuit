@@ -35,6 +35,81 @@ const UNUSED_USERNAME_APIS: &[&str] = &["unfolded-circle-core-rest"];
 // and cookie parameter, and the vendored document declares none of them.
 const FORM_EXPLODE_DEFAULT_APIS: &[&str] = &["openai"];
 
+// Imported before the importer kept value rules: their snapshots carry no
+// parameter, form-field, or body `constraints`, and their registered models
+// had no Schemars `extend` rules on fields. The current definition is
+// compared with both removed (see `without_value_rules`); its rules are
+// checked by artifact_drift and the import_overlay re-import test.
+const VALUE_RULE_APIS: &[&str] = &["openai"];
+
+/// The keywords `import --definitions-out` adds to a model field through
+/// `#[schemars(extend(..))]`; schemars writes none of them on a field of the
+/// types OpenAI's models use.
+const FIELD_RULE_KEYWORDS: &[&str] = &[
+    "minLength", "maxLength", "pattern", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+    "multipleOf", "minItems", "maxItems", "uniqueItems", "enum", "const", "x-schematic-exact",
+];
+
+/// `api` as a [`VALUE_RULE_APIS`] snapshot recorded it: no endpoint
+/// constraints, and no field rules in any component schema. Other APIs are
+/// returned unchanged.
+fn without_value_rules(key: &str, api: &RestApi) -> RestApi {
+    let mut api = api.clone();
+    if !VALUE_RULE_APIS.contains(&key) {
+        return api;
+    }
+    for endpoint in &mut api.endpoints {
+        endpoint.request_constraints = None;
+        if let Some(params) = &mut endpoint.params {
+            for param in params.path.iter_mut().chain(&mut params.query).chain(&mut params.header).chain(&mut params.cookie) {
+                param.constraints = None;
+            }
+        }
+        if let Some(schematic_define::ApiRequest::FormData { fields } | schematic_define::ApiRequest::UrlEncoded { fields }) = &mut endpoint.request {
+            for field in fields {
+                field.constraints = None;
+            }
+        }
+    }
+    for component in &mut api.schemas {
+        strip_field_rules(&mut component.schema);
+    }
+    api
+}
+
+/// Removes [`FIELD_RULE_KEYWORDS`] from every property schema below
+/// `schema`, from its `items`, and from the members of a nullable `anyOf`.
+/// An `enum` of only `null` is schemars' own null branch and stays.
+fn strip_field_rules(schema: &mut Value) {
+    fn strip_property(property: &mut Value) {
+        if let Some(object) = property.as_object_mut() {
+            object.retain(|key, value| {
+                let null_branch = key == "enum" && value.as_array().is_some_and(|values| values.iter().all(Value::is_null));
+                null_branch || !FIELD_RULE_KEYWORDS.contains(&key.as_str())
+            });
+            if let Some(items) = object.get_mut("items") {
+                strip_property(items);
+            }
+            if let Some(Value::Array(members)) = object.get_mut("anyOf") {
+                members.iter_mut().for_each(strip_property);
+            }
+        }
+        strip_field_rules(property);
+    }
+    match schema {
+        Value::Object(object) => {
+            for (key, child) in object.iter_mut() {
+                match (key.as_str(), child) {
+                    ("properties", Value::Object(properties)) => properties.values_mut().for_each(strip_property),
+                    (_, child) => strip_field_rules(child),
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_field_rules),
+        _ => {}
+    }
+}
+
 /// Deliberate definition adoptions made after the snapshots were taken: one
 /// API, one top-level definition field, and the exact value adopted. A
 /// snapshot that already has the field, or a current value that differs, is
@@ -268,7 +343,7 @@ fn apply_form_explode_default(historical: &mut Value) {
 /// snapshot and `api`, after normalization and the migration allow-lists.
 fn historical_differences(key: &str, historical: Value, api: &RestApi) -> Vec<String> {
     let expected = canonical(without_migrated_components(key, normalize_historical(key, historical)));
-    let current = snapshot(api);
+    let current = snapshot(&without_value_rules(key, api));
     for (api, name, reason) in MIGRATED_COMPONENTS.iter().filter(|(api, ..)| *api == key) {
         assert!(!reason.trim().is_empty(), "missing reason for {api} {name}");
         assert!(current["registry"].as_array().unwrap().iter().any(|entry| entry["name"] == *name), "stale migrated component: {api} {name}");

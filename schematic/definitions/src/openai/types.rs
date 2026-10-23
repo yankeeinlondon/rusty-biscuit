@@ -28,6 +28,7 @@ impl schematic_define::Registration for AddUploadPartRequest2 {
 #[derive(JsonSchema)]
 pub struct AdminApiKey {
     ///The object type, which is always `organization.admin_api_key`
+    #[schemars(extend("enum" = ["organization.admin_api_key"]))]
     pub object: String,
     ///The identifier, which can be referenced in API endpoints
     pub id: String,
@@ -72,6 +73,7 @@ impl schematic_define::Registration for AdminApiKeyCreateResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ApiKeyList {
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     pub data: Vec<AdminApiKey>,
     pub has_more: bool,
@@ -132,6 +134,7 @@ pub struct AssistantObject {
     ///The identifier, which can be referenced in API endpoints.
     pub id: String,
     ///The object type, which is always `assistant`.
+    #[schemars(extend("enum" = ["assistant"]))]
     pub object: String,
     ///The Unix timestamp (in seconds) for when the assistant was created.
     pub created_at: i64,
@@ -141,6 +144,7 @@ pub struct AssistantObject {
     pub model: String,
     pub instructions: serde_json::Value,
     ///A list of tool enabled on the assistant. There can be a maximum of 128 tools per assistant. Tools can be of types `code_interpreter`, `file_search`, or `function`.
+    #[schemars(extend("maxItems" = 128u64))]
     pub tools: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_resources: Option<serde_json::Value>,
@@ -308,6 +312,7 @@ impl schematic_define::Registration for AssistantSupportedModels {
 pub struct AssistantToolsCode {
     ///The type of tool being defined: `code_interpreter`
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["code_interpreter"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for AssistantToolsCode {
@@ -323,6 +328,7 @@ impl schematic_define::Registration for AssistantToolsCode {
 pub struct AssistantToolsFileSearch {
     ///The type of tool being defined: `file_search`
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_search"]))]
     pub type_: String,
     ///Overrides for the file search tool.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -343,6 +349,7 @@ impl schematic_define::Registration for AssistantToolsFileSearch {
 pub struct AssistantToolsFileSearchTypeOnly {
     ///The type of tool being defined: `file_search`
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_search"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for AssistantToolsFileSearchTypeOnly {
@@ -360,6 +367,7 @@ impl schematic_define::Registration for AssistantToolsFileSearchTypeOnly {
 pub struct AssistantToolsFunction {
     ///The type of tool being defined: `function`
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: String,
     pub function: FunctionObject,
 }
@@ -439,6 +447,7 @@ impl schematic_define::Registration for AssistantsApiToolChoiceOption {
 pub struct AssistantsNamedToolChoice {
     ///The type of the tool. If type is `function`, the function name must be set
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function", "code_interpreter", "file_search"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<serde_json::Value>,
@@ -492,6 +501,7 @@ will improve accuracy and latency.*/
     pub language: Option<String>,
     ///Possible languages of the input audio, in [ISO-639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) format. Supported by `gpt-transcribe` and `gpt-live-transcribe`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minItems" = 1u64))]
     pub languages: Option<Vec<String>>,
     ///Words or phrases to guide transcription of the input audio. Supported by `gpt-transcribe` and `gpt-live-transcribe`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -507,6 +517,7 @@ Prompt is not supported with `gpt-realtime-whisper` in GA Realtime sessions.*/
 Higher values can improve transcription accuracy at the cost of latency.
 Only supported with `gpt-realtime-whisper` in GA Realtime sessions.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["minimal", "low", "medium", "high", "xhigh", null]))]
     pub delay: Option<String>,
 }
 impl schematic_define::Registration for AudioTranscription {
@@ -528,6 +539,7 @@ pub struct AudioTranscriptionResponse {
     pub language: Option<String>,
     ///The possible input audio languages configured for transcription, in [ISO-639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) format.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minItems" = 1u64))]
     pub languages: Option<Vec<String>>,
     ///The prompt configured for input audio transcription, when present.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -794,6 +806,7 @@ pub struct AuditLogActor {
     ///The type of actor. Is either `session` or `api_key`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["session", "api_key", null]))]
     pub type_: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<AuditLogActorSession>,
@@ -818,6 +831,7 @@ pub struct AuditLogActorApiKey {
     ///The type of API key. Can be either `user` or `service_account`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["user", "service_account", null]))]
     pub type_: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<AuditLogActorUser>,
@@ -1193,6 +1207,7 @@ impl schematic_define::Registration for AuditLogEventType {
 pub struct AutoChunkingStrategyRequestParam {
     ///Always `auto`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["auto"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for AutoChunkingStrategyRequestParam {
@@ -1210,6 +1225,7 @@ impl schematic_define::Registration for AutoChunkingStrategyRequestParam {
 pub struct Batch {
     pub id: String,
     ///The object type, which is always `batch`.
+    #[schemars(extend("enum" = ["batch"]))]
     pub object: String,
     ///The OpenAI API endpoint used by the batch.
     pub endpoint: String,
@@ -1226,6 +1242,18 @@ guide](/docs/models) to browse and compare available models.*/
     ///The time frame within which the batch should be processed.
     pub completion_window: String,
     ///The current status of the batch.
+    #[schemars(
+        extend(
+            "enum" = ["validating",
+            "failed",
+            "in_progress",
+            "finalizing",
+            "completed",
+            "expired",
+            "cancelling",
+            "cancelled"]
+        )
+    )]
     pub status: String,
     ///The ID of the file containing the outputs of successfully executed requests.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1304,8 +1332,10 @@ impl schematic_define::Registration for BatchError {
 #[derive(JsonSchema)]
 pub struct BatchFileExpirationAfter {
     ///Anchor timestamp after which the expiration policy applies. Supported anchors: `created_at`. Note that the anchor is the file creation time, not the time the batch is created.
+    #[schemars(extend("enum" = ["created_at"]))]
     pub anchor: String,
     ///The number of seconds after the anchor time that the file will expire. Must be between 3600 (1 hour) and 2592000 (30 days).
+    #[schemars(extend("maximum" = 2592000u64, "minimum" = 3600u64))]
     pub seconds: i64,
 }
 impl schematic_define::Registration for BatchFileExpirationAfter {
@@ -1346,6 +1376,13 @@ pub struct Certificate {
 - If creating, updating, or getting a specific certificate, the object type is `certificate`.
 - If listing, activating, or deactivating certificates for the organization, the object type is `organization.certificate`.
 - If listing, activating, or deactivating certificates for a project, the object type is `organization.project.certificate`.*/
+    #[schemars(
+        extend(
+            "enum" = ["certificate",
+            "organization.certificate",
+            "organization.project.certificate"]
+        )
+    )]
     pub object: String,
     ///The identifier, which can be referenced in API endpoints
     pub id: String,
@@ -1376,6 +1413,7 @@ pub struct ChatCompletionAllowedTools {
 message.
 
 `required` requires the model to call one or more of the allowed tools.*/
+    #[schemars(extend("enum" = ["auto", "required"]))]
     pub mode: String,
     /**A list of tool definitions that the model should be allowed to call.
 
@@ -1404,6 +1442,7 @@ impl schematic_define::Registration for ChatCompletionAllowedTools {
 pub struct ChatCompletionAllowedToolsChoice {
     ///Allowed tool configuration type. Always `allowed_tools`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["allowed_tools"]))]
     pub type_: String,
     pub allowed_tools: ChatCompletionAllowedTools,
 }
@@ -1421,6 +1460,7 @@ impl schematic_define::Registration for ChatCompletionAllowedToolsChoice {
 #[derive(JsonSchema)]
 pub struct ChatCompletionDeleted {
     ///The type of object being deleted.
+    #[schemars(extend("enum" = ["chat.completion.deleted"]))]
     pub object: String,
     ///The ID of the chat completion that was deleted.
     pub id: String,
@@ -1480,6 +1520,7 @@ impl schematic_define::Registration for ChatCompletionFunctions {
 #[derive(JsonSchema)]
 pub struct ChatCompletionList {
     ///The type of this object. It is always set to "list".
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///An array of chat completion objects.
     pub data: Vec<CreateChatCompletionResponse>,
@@ -1506,6 +1547,7 @@ pub struct ChatCompletionMessageCustomToolCall {
     pub id: String,
     ///The type of the tool. Always `custom`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["custom"]))]
     pub type_: String,
     ///The custom tool that the model called.
     pub custom: serde_json::Value,
@@ -1525,6 +1567,7 @@ impl schematic_define::Registration for ChatCompletionMessageCustomToolCall {
 #[derive(JsonSchema)]
 pub struct ChatCompletionMessageList {
     ///The type of this object. It is always set to "list".
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///An array of chat completion message objects.
     pub data: Vec<serde_json::Value>,
@@ -1553,6 +1596,7 @@ pub struct ChatCompletionMessageToolCall {
     pub id: String,
     ///The type of the tool. Currently, only `function` is supported.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: String,
     ///The function that the model called.
     pub function: serde_json::Value,
@@ -1577,6 +1621,7 @@ pub struct ChatCompletionMessageToolCallChunk {
     ///The type of the tool. Currently, only `function` is supported.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["function", null]))]
     pub type_: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<serde_json::Value>,
@@ -1641,6 +1686,7 @@ impl schematic_define::Registration for ChatCompletionModeration {
 pub struct ChatCompletionModerationError {
     ///The object type, which is always `error`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["error"]))]
     pub type_: String,
     ///The error code.
     pub code: String,
@@ -1663,6 +1709,7 @@ impl schematic_define::Registration for ChatCompletionModerationError {
 pub struct ChatCompletionModerationResults {
     ///The object type, which is always `moderation_results`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["moderation_results"]))]
     pub type_: String,
     ///The moderation model used to generate the results.
     pub model: String,
@@ -1685,6 +1732,7 @@ impl schematic_define::Registration for ChatCompletionModerationResults {
 pub struct ChatCompletionNamedToolChoice {
     ///For function calling, the type is always `function`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: String,
     pub function: serde_json::Value,
 }
@@ -1704,6 +1752,7 @@ impl schematic_define::Registration for ChatCompletionNamedToolChoice {
 pub struct ChatCompletionNamedToolChoiceCustom {
     ///For custom tool calling, the type is always `custom`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["custom"]))]
     pub type_: String,
     pub custom: serde_json::Value,
 }
@@ -1726,6 +1775,7 @@ pub struct ChatCompletionRequestAssistantMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refusal: Option<serde_json::Value>,
     ///The role of the messages author, in this case `assistant`.
+    #[schemars(extend("enum" = ["assistant"]))]
     pub role: String,
     ///An optional name for the participant. Provides the model information to differentiate between participants of the same role.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1831,6 +1881,7 @@ pub struct ChatCompletionRequestDeveloperMessage {
     ///The contents of the developer message.
     pub content: serde_json::Value,
     ///The role of the messages author, in this case `developer`.
+    #[schemars(extend("enum" = ["developer"]))]
     pub role: String,
     ///An optional name for the participant. Provides the model information to differentiate between participants of the same role.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1850,6 +1901,7 @@ impl schematic_define::Registration for ChatCompletionRequestDeveloperMessage {
 #[derive(JsonSchema)]
 pub struct ChatCompletionRequestFunctionMessage {
     ///The role of the messages author, in this case `function`.
+    #[schemars(extend("enum" = ["function"]))]
     pub role: String,
     pub content: serde_json::Value,
     ///The name of the function to call.
@@ -1958,6 +2010,7 @@ impl schematic_define::Registration for ChatCompletionRequestMessage {
 pub struct ChatCompletionRequestMessageContentPartAudio {
     ///The type of the content part. Always `input_audio`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio"]))]
     pub type_: String,
     pub input_audio: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1979,6 +2032,7 @@ impl schematic_define::Registration for ChatCompletionRequestMessageContentPartA
 pub struct ChatCompletionRequestMessageContentPartFile {
     ///The type of the content part. Always `file`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file"]))]
     pub type_: String,
     pub file: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2000,6 +2054,7 @@ impl schematic_define::Registration for ChatCompletionRequestMessageContentPartF
 pub struct ChatCompletionRequestMessageContentPartImage {
     ///The type of the content part.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image_url"]))]
     pub type_: String,
     pub image_url: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2020,6 +2075,7 @@ impl schematic_define::Registration for ChatCompletionRequestMessageContentPartI
 pub struct ChatCompletionRequestMessageContentPartRefusal {
     ///The type of the content part.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["refusal"]))]
     pub type_: String,
     ///The refusal message generated by the model.
     pub refusal: String,
@@ -2040,6 +2096,7 @@ impl schematic_define::Registration for ChatCompletionRequestMessageContentPartR
 pub struct ChatCompletionRequestMessageContentPartText {
     ///The type of the content part.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["text"]))]
     pub type_: String,
     ///The text content.
     pub text: String,
@@ -2065,6 +2122,7 @@ pub struct ChatCompletionRequestSystemMessage {
     ///The contents of the system message.
     pub content: serde_json::Value,
     ///The role of the messages author, in this case `system`.
+    #[schemars(extend("enum" = ["system"]))]
     pub role: String,
     ///An optional name for the participant. Provides the model information to differentiate between participants of the same role.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2108,6 +2166,7 @@ impl schematic_define::Registration for ChatCompletionRequestSystemMessageConten
 #[derive(JsonSchema)]
 pub struct ChatCompletionRequestToolMessage {
     ///The role of the messages author, in this case `tool`.
+    #[schemars(extend("enum" = ["tool"]))]
     pub role: String,
     ///The contents of the tool message.
     pub content: serde_json::Value,
@@ -2156,6 +2215,7 @@ pub struct ChatCompletionRequestUserMessage {
     ///The contents of the user message.
     pub content: serde_json::Value,
     ///The role of the messages author, in this case `user`.
+    #[schemars(extend("enum" = ["user"]))]
     pub role: String,
     ///An optional name for the participant. Provides the model information to differentiate between participants of the same role.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2217,6 +2277,7 @@ pub struct ChatCompletionResponseMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotations: Option<Vec<serde_json::Value>>,
     ///The role of the author of this message.
+    #[schemars(extend("enum" = ["assistant"]))]
     pub role: String,
     ///Deprecated and replaced by `tool_calls`. The name and arguments of a function that should be called, as generated by the model.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2296,6 +2357,9 @@ pub struct ChatCompletionStreamResponseDelta {
     pub tool_calls: Option<Vec<ChatCompletionMessageToolCallChunk>>,
     ///The role of the author of this message.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("enum" = ["developer", "system", "user", "assistant", "tool", null])
+    )]
     pub role: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refusal: Option<serde_json::Value>,
@@ -2337,6 +2401,7 @@ impl schematic_define::Registration for ChatCompletionTokenLogprob {
 pub struct ChatCompletionTool {
     ///The type of the tool. Currently, only `function` is supported.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: String,
     pub function: FunctionObject,
 }
@@ -2388,6 +2453,7 @@ pub type ChunkingStrategyRequestParam = serde_json::Value;
 pub struct CodeInterpreterFileOutput {
     ///The type of the code interpreter file output. Always `files`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["files"]))]
     pub type_: String,
     pub files: Vec<serde_json::Value>,
 }
@@ -2407,6 +2473,7 @@ impl schematic_define::Registration for CodeInterpreterFileOutput {
 pub struct CodeInterpreterTextOutput {
     ///The type of the code interpreter text output. Always `logs`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["logs"]))]
     pub type_: String,
     ///The logs of the code interpreter tool call.
     pub logs: String,
@@ -2427,6 +2494,7 @@ impl schematic_define::Registration for CodeInterpreterTextOutput {
 pub struct CodeInterpreterTool {
     ///The type of the code interpreter tool. Always `code_interpreter`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["code_interpreter"]))]
     pub type_: String,
     /**The code interpreter container. Can be a container ID or an object that
 specifies uploaded file IDs to make available to your code, along with an
@@ -2449,10 +2517,20 @@ impl schematic_define::Registration for CodeInterpreterTool {
 pub struct CodeInterpreterToolCall {
     ///The type of the code interpreter tool call. Always `code_interpreter_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["code_interpreter_call"]))]
     pub type_: String,
     ///The unique ID of the code interpreter tool call.
     pub id: String,
     ///The status of the code interpreter tool call. Valid values are `in_progress`, `completed`, `incomplete`, `interpreting`, and `failed`.
+    #[schemars(
+        extend(
+            "enum" = ["in_progress",
+            "completed",
+            "incomplete",
+            "interpreting",
+            "failed"]
+        )
+    )]
     pub status: String,
     ///The ID of the container used to run the code.
     pub container_id: String,
@@ -2483,6 +2561,7 @@ pub struct ComparisonFilter {
 - `in`: in
 - `nin`: not in*/
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["eq", "ne", "gt", "gte", "lt", "lte", "in", "nin"]))]
     pub type_: String,
     ///The key to compare against the value.
     pub key: String,
@@ -2547,6 +2626,7 @@ impl schematic_define::Registration for CompletionUsage {
 pub struct CompoundFilter {
     ///Type of operation: `and` or `or`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["and", "or"]))]
     pub type_: String,
     ///Array of filters to combine. Items can be `ComparisonFilter` or `CompoundFilter`.
     pub filters: Vec<serde_json::Value>,
@@ -2641,6 +2721,7 @@ pub struct ComputerScreenshotImage {
     /**Specifies the event type. For a computer screenshot, this property is
 always set to `computer_screenshot`.*/
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["computer_screenshot"]))]
     pub type_: String,
     ///The URL of the screenshot image.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2666,6 +2747,7 @@ impl schematic_define::Registration for ComputerScreenshotImage {
 pub struct ComputerToolCall {
     ///The type of the computer call. Always `computer_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["computer_call"]))]
     pub type_: String,
     ///The unique ID of the computer call.
     pub id: String,
@@ -2679,6 +2761,7 @@ pub struct ComputerToolCall {
     pub pending_safety_checks: Vec<ComputerCallSafetyCheckParam>,
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: String,
 }
 impl schematic_define::Registration for ComputerToolCall {
@@ -2695,6 +2778,7 @@ impl schematic_define::Registration for ComputerToolCall {
 pub struct ComputerToolCallOutput {
     ///The type of the computer tool call output. Always `computer_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["computer_call_output"]))]
     pub type_: String,
     ///The ID of the computer tool call output.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2709,6 +2793,7 @@ developer.*/
     /**The status of the message input. One of `in_progress`, `completed`, or
 `incomplete`. Populated when input items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
     pub status: Option<String>,
 }
 impl schematic_define::Registration for ComputerToolCallOutput {
@@ -2743,6 +2828,7 @@ impl schematic_define::Registration for ComputerToolCallOutputResource {
 #[derive(JsonSchema)]
 pub struct ContainerFileListResource {
     ///The type of object returned, must be 'list'.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///A list of container files.
     pub data: Vec<ContainerFileResource>,
@@ -2795,6 +2881,7 @@ impl schematic_define::Registration for ContainerFileResource {
 #[derive(JsonSchema)]
 pub struct ContainerListResource {
     ///The type of object returned, must be 'list'.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///A list of containers.
     pub data: Vec<ContainerResource>,
@@ -2838,6 +2925,7 @@ The minutes is the number of minutes after the anchor before the container expir
     pub expires_after: Option<serde_json::Value>,
     ///The memory limit configured for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["1g", "4g", "16g", "64g", null]))]
     pub memory_limit: Option<String>,
     ///Network access policy for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3023,6 +3111,7 @@ impl schematic_define::Registration for ConversationItem {
 #[derive(JsonSchema)]
 pub struct ConversationItemList {
     ///The type of object returned, must be `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///A list of conversation items.
     pub data: Vec<ConversationItem>,
@@ -3068,6 +3157,7 @@ impl schematic_define::Registration for ConversationParam {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CostsResult {
+    #[schemars(extend("enum" = ["organization.costs.result"]))]
     pub object: String,
     ///The monetary value in its associated currency.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3104,6 +3194,7 @@ pub struct CreateAssistantRequest2 {
     pub reasoning_effort: Option<ReasoningEffort>,
     ///A list of tool enabled on the assistant. There can be a maximum of 128 tools per assistant. Tools can be of types `code_interpreter`, `file_search`, or `function`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 128u64))]
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_resources: Option<serde_json::Value>,
@@ -3136,8 +3227,21 @@ See [upload file](/docs/api-reference/files/create) for how to upload a file.
 Your input file must be formatted as a [JSONL file](/docs/api-reference/batch/request-input), and must be uploaded with the purpose `batch`. The file can contain up to 50,000 requests, and can be up to 200 MB in size.*/
     pub input_file_id: String,
     ///The endpoint to be used for all requests in the batch. Currently `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/completions`, `/v1/moderations`, `/v1/images/generations`, `/v1/images/edits`, and `/v1/videos` are supported. Note that `/v1/embeddings` batches are also restricted to a maximum of 50,000 embedding inputs across all requests in the batch.
+    #[schemars(
+        extend(
+            "enum" = ["/v1/responses",
+            "/v1/chat/completions",
+            "/v1/embeddings",
+            "/v1/completions",
+            "/v1/moderations",
+            "/v1/images/generations",
+            "/v1/images/edits",
+            "/v1/videos"]
+        )
+    )]
     pub endpoint: String,
     ///The time frame within which the batch should be processed. Currently only `24h` is supported.
+    #[schemars(extend("enum" = ["24h"]))]
     pub completion_window: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
@@ -3190,6 +3294,7 @@ Can be used in conjunction with the `seed` request parameter to understand when 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_fingerprint: Option<String>,
     ///The object type, which is always `chat.completion`.
+    #[schemars(extend("enum" = ["chat.completion"]))]
     pub object: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<CompletionUsage>,
@@ -3228,6 +3333,7 @@ Can be used in conjunction with the `seed` request parameter to understand when 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_fingerprint: Option<String>,
     ///The object type, which is always `chat.completion.chunk`.
+    #[schemars(extend("enum" = ["chat.completion.chunk"]))]
     pub object: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<CompletionUsage>,
@@ -3259,6 +3365,7 @@ When used with `n`, `best_of` controls the number of candidate completions and `
 
 **Note:** Because this parameter generates many completions, it can quickly consume your token quota. Use carefully and ensure that you have reasonable settings for `max_tokens` and `stop`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 20u64, "minimum" = 0u64))]
     pub best_of: Option<i64>,
     ///Echo back the prompt in addition to the completion
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3267,6 +3374,7 @@ When used with `n`, `best_of` controls the number of candidate completions and `
 
 [See more information about frequency and presence penalties.](/docs/guides/text-generation)*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 2u64, "minimum" = -2i64))]
     pub frequency_penalty: Option<f64>,
     /**Modify the likelihood of specified tokens appearing in the completion.
 
@@ -3279,21 +3387,25 @@ As an example, you can pass `{"50256": -100}` to prevent the <|endoftext|> token
 
 The maximum value for `logprobs` is 5.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 5u64, "minimum" = 0u64))]
     pub logprobs: Option<i64>,
     /**The maximum number of [tokens](/tokenizer) that can be generated in the completion.
 
 The token count of your prompt plus `max_tokens` cannot exceed the model's context length. [Example Python code](https://cookbook.openai.com/examples/how_to_count_tokens_with_tiktoken) for counting tokens.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 0u64))]
     pub max_tokens: Option<i64>,
     /**How many completions to generate for each prompt.
 
 **Note:** Because this parameter generates many completions, it can quickly consume your token quota. Use carefully and ensure that you have reasonable settings for `max_tokens` and `stop`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 128u64, "minimum" = 1u64))]
     pub n: Option<i64>,
     /**Number between -2.0 and 2.0. Positive values penalize new tokens based on whether they appear in the text so far, increasing the model's likelihood to talk about new topics.
 
 [See more information about frequency and presence penalties.](/docs/guides/text-generation)*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 2u64, "minimum" = -2i64))]
     pub presence_penalty: Option<f64>,
     /**If specified, our system will make a best effort to sample deterministically, such that repeated requests with the same `seed` and parameters should return the same result.
 
@@ -3316,11 +3428,13 @@ This parameter is only supported for `gpt-3.5-turbo-instruct`.*/
 
 We generally recommend altering this or `top_p` but not both.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 2u64, "minimum" = 0u64))]
     pub temperature: Option<f64>,
     /**An alternative to sampling with temperature, called nucleus sampling, where the model considers the results of the tokens with top_p probability mass. So 0.1 means only the tokens comprising the top 10% probability mass are considered.
 
 We generally recommend altering this or `temperature` but not both.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 1u64, "minimum" = 0u64))]
     pub top_p: Option<f64>,
     ///A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse. [Learn more](/docs/guides/safety-best-practices#end-user-ids).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3354,6 +3468,7 @@ Can be used in conjunction with the `seed` request parameter to understand when 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_fingerprint: Option<String>,
     ///The object type, which is always "text_completion"
+    #[schemars(extend("enum" = ["text_completion"]))]
     pub object: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<CompletionUsage>,
@@ -3384,6 +3499,7 @@ pub struct CreateContainerBody {
     pub skills: Option<Vec<serde_json::Value>>,
     ///Optional memory limit for the container. Defaults to "1g".
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["1g", "4g", "16g", "64g", null]))]
     pub memory_limit: Option<String>,
     ///Network access policy for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3426,9 +3542,11 @@ pub struct CreateEmbeddingRequest2 {
     pub model: serde_json::Value,
     ///The format to return the embeddings in. Can be either `float` or [`base64`](https://pypi.org/project/pybase64/).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["float", "base64", null]))]
     pub encoding_format: Option<String>,
     ///The number of dimensions the resulting output embeddings should have. Only supported in `text-embedding-3` and later models.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 1u64))]
     pub dimensions: Option<i64>,
     ///A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse. [Learn more](/docs/guides/safety-best-practices#end-user-ids).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3452,6 +3570,7 @@ pub struct CreateEmbeddingResponse {
     ///The name of the model used to generate the embedding.
     pub model: String,
     ///The object type, which is always "list".
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///The usage information for the request.
     pub usage: serde_json::Value,
@@ -3472,6 +3591,7 @@ impl schematic_define::Registration for CreateEmbeddingResponse {
 pub struct CreateEvalCompletionsRunDataSource {
     ///The type of run data source. Always `completions`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["completions"]))]
     pub type_: String,
     ///Used when sampling from a model. Dictates the structure of the messages passed into the model. Can either be a reference to a prebuilt trajectory (ie, `item.input_trajectory`), or a template with variable references to the `item` namespace.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3503,6 +3623,7 @@ This schema is used to define the shape of the data that will be:
 pub struct CreateEvalCustomDataSourceConfig {
     ///The type of data source. Always `custom`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["custom"]))]
     pub type_: String,
     ///The json schema for each row in the data source.
     pub item_schema: serde_json::Value,
@@ -3528,6 +3649,7 @@ pub type CreateEvalItem = serde_json::Value;
 pub struct CreateEvalJsonlRunDataSource {
     ///The type of data source. Always `jsonl`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["jsonl"]))]
     pub type_: String,
     ///Determines what populates the `item` namespace in the data source.
     pub source: serde_json::Value,
@@ -3549,6 +3671,7 @@ in the evaluation.*/
 pub struct CreateEvalLabelModelGrader {
     ///The object type, which is always `label_model`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["label_model"]))]
     pub type_: String,
     ///The name of the grader.
     pub name: String,
@@ -3578,6 +3701,7 @@ This is usually metadata like `usecase=chatbot` or `prompt-version=v2`, etc.*/
 pub struct CreateEvalLogsDataSourceConfig {
     ///The type of data source. Always `logs`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["logs"]))]
     pub type_: String,
     ///Metadata filters for the logs data source.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3620,6 +3744,7 @@ impl schematic_define::Registration for CreateEvalRequest2 {
 pub struct CreateEvalResponsesRunDataSource {
     ///The type of run data source. Always `responses`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["responses"]))]
     pub type_: String,
     ///Used when sampling from a model. Dictates the structure of the messages passed into the model. Can either be a reference to a prebuilt trajectory (ie, `item.input_trajectory`), or a template with variable references to the `item` namespace.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3669,6 +3794,7 @@ impl schematic_define::Registration for CreateEvalRunRequest2 {
 pub struct CreateEvalStoredCompletionsDataSourceConfig {
     ///The type of data source. Always `stored_completions`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["stored_completions"]))]
     pub type_: String,
     ///Metadata filters for the stored completions data source.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3696,6 +3822,16 @@ pub struct CreateFileRequest2 {
 - `vision`: Images used for vision fine-tuning
 - `user_data`: Flexible file type for any purpose
 - `evals`: Used for eval data sets*/
+    #[schemars(
+        extend(
+            "enum" = ["assistants",
+            "batch",
+            "fine-tune",
+            "vision",
+            "user_data",
+            "evals"]
+        )
+    )]
     pub purpose: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_after: Option<FileExpirationAfter>,
@@ -3748,6 +3884,7 @@ This value is now deprecated in favor of `method`, and should be passed in under
 
 For example, a `suffix` of "custom-model-name" would produce a model name like `ft:gpt-4o-mini:openai:custom-model-name:7p4lURel`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub suffix: Option<String>,
     /**The ID of an uploaded file that contains validation data.
 
@@ -3767,6 +3904,7 @@ See the [fine-tuning guide](/docs/guides/model-optimization) for more details.*/
     /**The seed controls the reproducibility of the job. Passing in the same seed and job parameters should produce the same results, but may differ in rare cases.
 If a seed is not specified, one will be generated for you.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 2147483647u64, "minimum" = 0u64))]
     pub seed: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub method: Option<FineTuneMethod>,
@@ -3788,6 +3926,7 @@ impl schematic_define::Registration for CreateFineTuningJobRequest2 {
 #[derive(JsonSchema)]
 pub struct CreateGroupBody {
     ///Human readable name for the group.
+    #[schemars(extend("maxLength" = 255u64, "minLength" = 1u64))]
     pub name: String,
 }
 impl schematic_define::Registration for CreateGroupBody {
@@ -3838,23 +3977,27 @@ model will automatically determine the best background for the image.
 If `transparent`, the output format needs to support transparency, so it
 should be set to either `png` (default value) or `webp`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["transparent", "opaque", "auto", null]))]
     pub background: Option<String>,
     ///The model to use for image generation. Defaults to `gpt-image-1.5`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<serde_json::Value>,
     ///The number of images to generate. Must be between 1 and 10.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 10u64, "minimum" = 1u64))]
     pub n: Option<i64>,
     ///The size of the generated images. For `gpt-image-2` and `gpt-image-2-2026-04-21`, arbitrary resolutions are supported as `WIDTHxHEIGHT` strings, for example `1536x864`. Width and height must both be divisible by 16 and the requested aspect ratio must be between 1:3 and 3:1. Resolutions above `2560x1440` are experimental, and the maximum supported resolution is `3840x2160`. The requested size must also satisfy the model's current pixel and edge limits. The standard sizes `1024x1024`, `1536x1024`, and `1024x1536` are supported by the GPT image models; `auto` is supported for models that allow automatic sizing. For `dall-e-2`, use one of `256x256`, `512x512`, or `1024x1024`. For `dall-e-3`, use one of `1024x1024`, `1792x1024`, or `1024x1792`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<serde_json::Value>,
     ///The format in which the generated images are returned. Must be one of `url` or `b64_json`. URLs are only valid for 60 minutes after the image has been generated. This parameter is only supported for `dall-e-2` (default is `url` for `dall-e-2`), as GPT image models always return base64-encoded images.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["url", "b64_json", null]))]
     pub response_format: Option<String>,
     /**The format in which the generated images are returned. This parameter is
 only supported for the GPT image models. Must be one of `png`, `jpeg`, or `webp`.
 The default value is `png`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["png", "jpeg", "webp", null]))]
     pub output_format: Option<String>,
     /**The compression level (0-100%) for the generated images. This parameter
 is only supported for the GPT image models with the `webp` or `jpeg` output
@@ -3874,6 +4017,7 @@ formats, and defaults to 100.*/
     pub partial_images: Option<PartialImages>,
     ///The quality of the image that will be generated for GPT image models. Defaults to `auto`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["standard", "low", "medium", "high", "auto", null]))]
     pub quality: Option<String>,
 }
 impl schematic_define::Registration for CreateImageEditRequest2 {
@@ -3896,6 +4040,7 @@ pub struct CreateImageRequest2 {
     pub model: Option<serde_json::Value>,
     ///The number of images to generate. Must be between 1 and 10. For `dall-e-3`, only `n=1` is supported.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 10u64, "minimum" = 1u64))]
     pub n: Option<i64>,
     /**The quality of the image that will be generated.
 
@@ -3904,12 +4049,17 @@ pub struct CreateImageRequest2 {
 - `hd` and `standard` are supported for `dall-e-3`.
 - `standard` is the only option for `dall-e-2`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("enum" = ["standard", "hd", "low", "medium", "high", "auto", null])
+    )]
     pub quality: Option<String>,
     ///The format in which generated images with `dall-e-2` and `dall-e-3` are returned. Must be one of `url` or `b64_json`. URLs are only valid for 60 minutes after the image has been generated. This parameter isn't supported for the GPT image models, which always return base64-encoded images.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["url", "b64_json", null]))]
     pub response_format: Option<String>,
     ///The format in which the generated images are returned. This parameter is only supported for the GPT image models. Must be one of `png`, `jpeg`, or `webp`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["png", "jpeg", "webp", null]))]
     pub output_format: Option<String>,
     ///The compression level (0-100%) for the generated images. This parameter is only supported for the GPT image models with the `webp` or `jpeg` output formats, and defaults to 100.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3926,6 +4076,7 @@ This parameter is only supported for the GPT image models.*/
     pub size: Option<serde_json::Value>,
     ///Control the content-moderation level for images generated by the GPT image models. Must be either `low` for less restrictive filtering or `auto` (default value).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["low", "auto", null]))]
     pub moderation: Option<String>,
     /**Allows to set transparency for the background of the generated image(s).
 This parameter is only supported for the GPT image models. Must be one of
@@ -3935,9 +4086,11 @@ model will automatically determine the best background for the image.
 If `transparent`, the output format needs to support transparency, so it
 should be set to either `png` (default value) or `webp`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["transparent", "opaque", "auto", null]))]
     pub background: Option<String>,
     ///The style of the generated images. This parameter is only supported for `dall-e-3`. Must be one of `vivid` or `natural`. Vivid causes the model to lean towards generating hyper-real and dramatic images. Natural causes the model to produce more natural, less hyper-real looking images.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["vivid", "natural", null]))]
     pub style: Option<String>,
     ///A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse. [Learn more](/docs/guides/safety-best-practices#end-user-ids).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3961,12 +4114,15 @@ pub struct CreateImageVariationRequest2 {
     pub model: Option<serde_json::Value>,
     ///The number of images to generate. Must be between 1 and 10.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 10u64, "minimum" = 1u64))]
     pub n: Option<i64>,
     ///The format in which the generated images are returned. Must be one of `url` or `b64_json`. URLs are only valid for 60 minutes after the image has been generated.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["url", "b64_json", null]))]
     pub response_format: Option<String>,
     ///The size of the generated images. Must be one of `256x256`, `512x512`, or `1024x1024`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["256x256", "512x512", "1024x1024", null]))]
     pub size: Option<String>,
     ///A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse. [Learn more](/docs/guides/safety-best-practices#end-user-ids).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3988,6 +4144,7 @@ pub struct CreateMessageRequest2 {
     /**The role of the entity that is creating the message. Allowed values include:
 - `user`: Indicates the message is sent by an actual user and should be used in most cases to represent user-generated messages.
 - `assistant`: Indicates the message is generated by the assistant. Use this value to insert messages from the assistant into the conversation.*/
+    #[schemars(extend("enum" = ["user", "assistant"]))]
     pub role: String,
     pub content: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4105,25 +4262,30 @@ pub struct CreateRunRequest2 {
     pub additional_messages: Option<Vec<CreateMessageRequest2>>,
     ///Override the tools the assistant can use for this run. This is useful for modifying the behavior on a per-run basis.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 20u64))]
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
     ///What sampling temperature to use, between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 2u64, "minimum" = 0u64))]
     pub temperature: Option<f64>,
     /**An alternative to sampling with temperature, called nucleus sampling, where the model considers the results of the tokens with top_p probability mass. So 0.1 means only the tokens comprising the top 10% probability mass are considered.
 
 We generally recommend altering this or temperature but not both.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 1u64, "minimum" = 0u64))]
     pub top_p: Option<f64>,
     ///If `true`, returns a stream of events that happen during the Run as server-sent events, terminating when the Run enters a terminal state with a `data: [DONE]` message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
     ///The maximum number of prompt tokens that may be used over the course of the run. The run will make a best effort to use only the number of prompt tokens specified, across multiple turns of the run. If the run exceeds the number of prompt tokens specified, the run will end with status `incomplete`. See `incomplete_details` for more info.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 256u64))]
     pub max_prompt_tokens: Option<i64>,
     ///The maximum number of completion tokens that may be used over the course of the run. The run will make a best effort to use only the number of completion tokens specified, across multiple turns of the run. If the run exceeds the number of completion tokens specified, the run will end with status `incomplete`. See `incomplete_details` for more info.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 256u64))]
     pub max_completion_tokens: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub truncation_strategy: Option<serde_json::Value>,
@@ -4148,19 +4310,24 @@ pub struct CreateSpeechRequest2 {
     ///One of the available [TTS models](/docs/models#tts): `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts`, or `gpt-4o-mini-tts-2025-12-15`.
     pub model: serde_json::Value,
     ///The text to generate audio for. The maximum length is 4096 characters.
+    #[schemars(extend("maxLength" = 4096u64))]
     pub input: String,
     ///Control the voice of your generated audio with additional instructions. Does not work with `tts-1` or `tts-1-hd`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 4096u64))]
     pub instructions: Option<String>,
     pub voice: VoiceIdsOrCustomVoice,
     ///The format to audio in. Supported formats are `mp3`, `opus`, `aac`, `flac`, `wav`, and `pcm`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["mp3", "opus", "aac", "flac", "wav", "pcm", null]))]
     pub response_format: Option<String>,
     ///The speed of the generated audio. Select a value from `0.25` to `4.0`. `1.0` is the default.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 4u64, "minimum" = 0.25f64))]
     pub speed: Option<f64>,
     ///The format to stream the audio in. Supported formats are `sse` and `audio`. `sse` is not supported for `tts-1` or `tts-1-hd`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["sse", "audio", null]))]
     pub stream_format: Option<String>,
 }
 impl schematic_define::Registration for CreateSpeechRequest2 {
@@ -4243,10 +4410,13 @@ impl schematic_define::Registration for CreateSpeechResponseStreamEvent {
 #[derive(JsonSchema)]
 pub struct CreateSpendAlertBody {
     ///The alert threshold amount, in cents.
+    #[schemars(extend("minimum" = 0u64))]
     pub threshold_amount: i64,
     ///The currency for the threshold amount.
+    #[schemars(extend("enum" = ["USD"]))]
     pub currency: String,
     ///The time interval for evaluating spend against the threshold.
+    #[schemars(extend("enum" = ["month"]))]
     pub interval: String,
     pub notification_channel: SpendAlertNotificationChannel,
 }
@@ -4273,6 +4443,7 @@ pub struct CreateThreadAndRunRequest2 {
     pub instructions: Option<String>,
     ///Override the tools the assistant can use for this run. This is useful for modifying the behavior on a per-run basis.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 20u64))]
     pub tools: Option<Vec<serde_json::Value>>,
     ///A set of resources that are used by the assistant's tools. The resources are specific to the type of tool. For example, the `code_interpreter` tool requires a list of file IDs, while the `file_search` tool requires a list of vector store IDs.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4281,20 +4452,24 @@ pub struct CreateThreadAndRunRequest2 {
     pub metadata: Option<Metadata>,
     ///What sampling temperature to use, between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 2u64, "minimum" = 0u64))]
     pub temperature: Option<f64>,
     /**An alternative to sampling with temperature, called nucleus sampling, where the model considers the results of the tokens with top_p probability mass. So 0.1 means only the tokens comprising the top 10% probability mass are considered.
 
 We generally recommend altering this or temperature but not both.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 1u64, "minimum" = 0u64))]
     pub top_p: Option<f64>,
     ///If `true`, returns a stream of events that happen during the Run as server-sent events, terminating when the Run enters a terminal state with a `data: [DONE]` message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
     ///The maximum number of prompt tokens that may be used over the course of the run. The run will make a best effort to use only the number of prompt tokens specified, across multiple turns of the run. If the run exceeds the number of prompt tokens specified, the run will end with status `incomplete`. See `incomplete_details` for more info.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 256u64))]
     pub max_prompt_tokens: Option<i64>,
     ///The maximum number of completion tokens that may be used over the course of the run. The run will make a best effort to use only the number of completion tokens specified, across multiple turns of the run. If the run exceeds the number of completion tokens specified, the run will end with status `incomplete`. See `incomplete_details` for more info.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 256u64))]
     pub max_completion_tokens: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub truncation_strategy: Option<serde_json::Value>,
@@ -4348,6 +4523,7 @@ pub struct CreateTranscriptionRequest2 {
     pub language: Option<String>,
     ///Possible languages of the input audio, in [ISO-639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) format. Supported by `gpt-transcribe`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minItems" = 1u64))]
     pub languages: Option<Vec<String>>,
     ///Words or phrases to guide transcription of the input audio. Supported by `gpt-transcribe`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4370,6 +4546,7 @@ the models `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, and `gpt-4o-mini-trans
     /**The timestamp granularities to populate for this transcription. `response_format` must be set `verbose_json` to use timestamp granularities. Either or both of these options are supported: `word`, or `segment`. Note: There is no additional latency for segment timestamps, but generating word timestamps incurs additional latency.
 This option is not available for `gpt-4o-transcribe-diarize`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"enum":["word", "segment"], "type":"string"}))]
     pub timestamp_granularities: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<serde_json::Value>,
@@ -4377,9 +4554,11 @@ This option is not available for `gpt-4o-transcribe-diarize`.*/
     pub chunking_strategy: Option<serde_json::Value>,
     ///Optional list of speaker names that correspond to the audio samples provided in `known_speaker_references[]`. Each entry should be a short identifier (for example `customer` or `agent`). Up to 4 speakers are supported.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 4u64))]
     pub known_speaker_names: Option<Vec<String>>,
     ///Optional list of audio samples (as [data URLs](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Data_URLs)) that contain known speaker references matching `known_speaker_names[]`. Each sample must be between 2 and 10 seconds, and can use any of the same input audio formats supported by `file`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 4u64))]
     pub known_speaker_references: Option<Vec<String>>,
 }
 impl schematic_define::Registration for CreateTranscriptionRequest2 {
@@ -4397,6 +4576,7 @@ impl schematic_define::Registration for CreateTranscriptionRequest2 {
 #[derive(JsonSchema)]
 pub struct CreateTranscriptionResponseDiarizedJson {
     ///The type of task that was run. Always `transcribe`.
+    #[schemars(extend("enum" = ["transcribe"]))]
     pub task: String,
     ///Duration of the input audio in seconds.
     pub duration: f64,
@@ -4557,6 +4737,7 @@ pub struct CreateTranslationRequest2 {
     pub prompt: Option<String>,
     ///The format of the output, in one of these options: `json`, `text`, `srt`, `verbose_json`, or `vtt`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["json", "text", "srt", "verbose_json", "vtt", null]))]
     pub response_format: Option<String>,
     ///The sampling temperature, between 0 and 1. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. If set to 0, the model will use [log probability](https://en.wikipedia.org/wiki/Log_probability) to automatically increase the temperature until certain thresholds are hit.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4619,6 +4800,7 @@ pub struct CreateUploadRequest2 {
 
 See the [documentation on File
 purposes](/docs/api-reference/files/create#files-create-purpose).*/
+    #[schemars(extend("enum" = ["assistants", "batch", "fine-tune", "vision"]))]
     pub purpose: String,
     ///The number of bytes in the file you are uploading.
     pub bytes: i64,
@@ -4644,9 +4826,11 @@ impl schematic_define::Registration for CreateUploadRequest2 {
 pub struct CreateVectorStoreFileBatchRequest2 {
     ///A list of [File](/docs/api-reference/files) IDs that the vector store should use. Useful for tools like `file_search` that can access files.  If `attributes` or `chunking_strategy` are provided, they will be  applied to all files in the batch. The maximum batch size is 2000 files. This endpoint is recommended for multi-file ingestion and helps reduce per-vector-store write request pressure. Mutually exclusive with `files`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 2000u64, "minItems" = 1u64))]
     pub file_ids: Option<Vec<String>>,
     ///A list of objects that each include a `file_id` plus optional `attributes` or `chunking_strategy`. Use this when you need to override metadata for specific files. The global `attributes` or `chunking_strategy` will be ignored and must be specified for each file. The maximum batch size is 2000 files. This endpoint is recommended for multi-file ingestion and helps reduce per-vector-store write request pressure. Mutually exclusive with `file_ids`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 2000u64, "minItems" = 1u64))]
     pub files: Option<Vec<CreateVectorStoreFileRequest2>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chunking_strategy: Option<ChunkingStrategyRequestParam>,
@@ -4688,6 +4872,7 @@ impl schematic_define::Registration for CreateVectorStoreFileRequest2 {
 pub struct CreateVectorStoreRequest2 {
     ///A list of [File](/docs/api-reference/files) IDs that the vector store should use. Useful for tools like `file_search` that can access files.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 500u64))]
     pub file_ids: Option<Vec<String>>,
     ///The name of the vector store.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4763,6 +4948,7 @@ impl schematic_define::Registration for CreateVoiceRequest2 {
 pub struct CustomToolCall {
     ///The type of the custom tool call. Always `custom_tool_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["custom_tool_call"]))]
     pub type_: String,
     ///The unique ID of the custom tool call in the OpenAI platform.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4793,6 +4979,7 @@ impl schematic_define::Registration for CustomToolCall {
 pub struct CustomToolCallOutput {
     ///The type of the custom tool call output. Always `custom_tool_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["custom_tool_call_output"]))]
     pub type_: String,
     ///The unique ID of the custom tool call output in the OpenAI platform.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4855,6 +5042,7 @@ impl schematic_define::Registration for CustomToolCallResource {
 pub struct CustomToolChatCompletions {
     ///The type of the custom tool. Always `custom`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["custom"]))]
     pub type_: String,
     ///Properties of the custom tool.
     pub custom: serde_json::Value,
@@ -4874,6 +5062,7 @@ impl schematic_define::Registration for CustomToolChatCompletions {
 pub struct DeleteAssistantResponse {
     pub id: String,
     pub deleted: bool,
+    #[schemars(extend("enum" = ["assistant.deleted"]))]
     pub object: String,
 }
 impl schematic_define::Registration for DeleteAssistantResponse {
@@ -4890,6 +5079,7 @@ impl schematic_define::Registration for DeleteAssistantResponse {
 #[derive(JsonSchema)]
 pub struct DeleteCertificateResponse {
     ///The object type, must be `certificate.deleted`.
+    #[schemars(extend("enum" = ["certificate.deleted"]))]
     pub object: String,
     ///The ID of the certificate that was deleted.
     pub id: String,
@@ -4908,6 +5098,7 @@ impl schematic_define::Registration for DeleteCertificateResponse {
 #[derive(JsonSchema)]
 pub struct DeleteFileResponse {
     pub id: String,
+    #[schemars(extend("enum" = ["file"]))]
     pub object: String,
     pub deleted: bool,
 }
@@ -4925,6 +5116,7 @@ pub struct DeleteFineTuningCheckpointPermissionResponse {
     ///The ID of the fine-tuned model checkpoint permission that was deleted.
     pub id: String,
     ///The object type, which is always "checkpoint.permission".
+    #[schemars(extend("enum" = ["checkpoint.permission"]))]
     pub object: String,
     ///Whether the fine-tuned model checkpoint permission was successfully deleted.
     pub deleted: bool,
@@ -4944,6 +5136,7 @@ impl schematic_define::Registration for DeleteFineTuningCheckpointPermissionResp
 pub struct DeleteMessageResponse {
     pub id: String,
     pub deleted: bool,
+    #[schemars(extend("enum" = ["thread.message.deleted"]))]
     pub object: String,
 }
 impl schematic_define::Registration for DeleteMessageResponse {
@@ -4976,6 +5169,7 @@ impl schematic_define::Registration for DeleteModelResponse {
 pub struct DeleteThreadResponse {
     pub id: String,
     pub deleted: bool,
+    #[schemars(extend("enum" = ["thread.deleted"]))]
     pub object: String,
 }
 impl schematic_define::Registration for DeleteThreadResponse {
@@ -4991,6 +5185,7 @@ impl schematic_define::Registration for DeleteThreadResponse {
 pub struct DeleteVectorStoreFileResponse {
     pub id: String,
     pub deleted: bool,
+    #[schemars(extend("enum" = ["vector_store.file.deleted"]))]
     pub object: String,
 }
 impl schematic_define::Registration for DeleteVectorStoreFileResponse {
@@ -5008,6 +5203,7 @@ impl schematic_define::Registration for DeleteVectorStoreFileResponse {
 pub struct DeleteVectorStoreResponse {
     pub id: String,
     pub deleted: bool,
+    #[schemars(extend("enum" = ["vector_store.deleted"]))]
     pub object: String,
 }
 impl schematic_define::Registration for DeleteVectorStoreResponse {
@@ -5057,7 +5253,9 @@ impl schematic_define::Registration for DeletedRoleAssignmentResource {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct DoneEvent {
+    #[schemars(extend("enum" = ["done"]))]
     pub event: String,
+    #[schemars(extend("enum" = ["[DONE]"]))]
     pub data: String,
 }
 impl schematic_define::Registration for DoneEvent {
@@ -5078,6 +5276,7 @@ interactions.*/
 pub struct EasyInputMessage {
     /**The role of the message input. One of `user`, `assistant`, `system`, or
 `developer`.*/
+    #[schemars(extend("enum" = ["user", "assistant", "system", "developer"]))]
     pub role: String,
     /**Text, image, or audio input to the model, used to generate a response.
 Can also contain previous assistant responses.*/
@@ -5087,6 +5286,7 @@ Can also contain previous assistant responses.*/
     ///The type of the message input. Always `message`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["message", null]))]
     pub type_: Option<String>,
 }
 impl schematic_define::Registration for EasyInputMessage {
@@ -5110,10 +5310,12 @@ pub struct EditImageBodyJsonParam {
     pub model: Option<serde_json::Value>,
     /**Input image references to edit.
 For GPT image models, you can provide up to 16 images.*/
+    #[schemars(extend("maxItems" = 16u64, "minItems" = 1u64))]
     pub images: Vec<ImageRefParam>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mask: Option<ImageRefParam>,
     ///A text description of the desired image edit.
+    #[schemars(extend("maxLength" = 32000u64, "minLength" = 1u64))]
     pub prompt: String,
     ///The number of edited images to generate.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5168,6 +5370,7 @@ pub struct Embedding {
     ///The embedding vector, which is a list of floats. The length of vector depends on the model as listed in the [embedding guide](/docs/guides/embeddings).
     pub embedding: Vec<f64>,
     ///The object type, which is always "embedding".
+    #[schemars(extend("enum" = ["embedding"]))]
     pub object: String,
 }
 impl schematic_define::Registration for Embedding {
@@ -5199,6 +5402,7 @@ impl schematic_define::Registration for Error {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ErrorEvent {
+    #[schemars(extend("enum" = ["error"]))]
     pub event: String,
     pub data: Error,
 }
@@ -5233,6 +5437,7 @@ Like:
 #[derive(JsonSchema)]
 pub struct Eval {
     ///The object type.
+    #[schemars(extend("enum" = ["eval"]))]
     pub object: String,
     ///Unique identifier for the evaluation.
     pub id: String,
@@ -5280,6 +5485,7 @@ The response schema defines the shape of the data that will be:
 pub struct EvalCustomDataSourceConfig {
     ///The type of data source. Always `custom`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["custom"]))]
     pub type_: String,
     /**The json schema for the run data source items.
 Learn how to build JSON schemas [here](https://json-schema.org/).*/
@@ -5310,11 +5516,13 @@ interactions.*/
 pub struct EvalItem {
     /**The role of the message input. One of `user`, `assistant`, `system`, or
 `developer`.*/
+    #[schemars(extend("enum" = ["user", "assistant", "system", "developer"]))]
     pub role: String,
     pub content: EvalItemContent,
     ///The type of the message input. Always `message`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["message", null]))]
     pub type_: Option<String>,
 }
 impl schematic_define::Registration for EvalItem {
@@ -5381,6 +5589,7 @@ impl schematic_define::Registration for EvalItemContentItem {
 pub struct EvalItemContentOutputText {
     ///The type of the output text. Always `output_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["output_text"]))]
     pub type_: String,
     ///The text output from the model.
     pub text: String,
@@ -5403,6 +5612,7 @@ pub type EvalItemContentText = String;
 pub struct EvalItemInputImage {
     ///The type of the image input. Always `input_image`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_image"]))]
     pub type_: String,
     ///The URL of the image input.
     pub image_url: String,
@@ -5423,6 +5633,7 @@ impl schematic_define::Registration for EvalItemInputImage {
 pub struct EvalJsonlFileContentSource {
     ///The type of jsonl source. Always `file_content`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_content"]))]
     pub type_: String,
     ///The content of the jsonl file.
     pub content: Vec<serde_json::Value>,
@@ -5442,6 +5653,7 @@ impl schematic_define::Registration for EvalJsonlFileContentSource {
 pub struct EvalJsonlFileIdSource {
     ///The type of jsonl source. Always `file_id`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_id"]))]
     pub type_: String,
     ///The identifier of the file.
     pub id: String,
@@ -5461,6 +5673,7 @@ impl schematic_define::Registration for EvalJsonlFileIdSource {
 #[derive(JsonSchema)]
 pub struct EvalList {
     ///The type of this object. It is always set to "list".
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///An array of eval objects.
     pub data: Vec<Eval>,
@@ -5488,6 +5701,7 @@ The schema returned by this data source config is used to defined what variables
 pub struct EvalLogsDataSourceConfig {
     ///The type of data source. Always `logs`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["logs"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
@@ -5511,6 +5725,7 @@ impl schematic_define::Registration for EvalLogsDataSourceConfig {
 pub struct EvalResponsesSource {
     ///The type of run data source. Always `responses`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["responses"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
@@ -5546,6 +5761,7 @@ impl schematic_define::Registration for EvalResponsesSource {
 #[derive(JsonSchema)]
 pub struct EvalRun {
     ///The type of the object. Always "eval.run".
+    #[schemars(extend("enum" = ["eval.run"]))]
     pub object: String,
     ///Unique identifier for the evaluation run.
     pub id: String,
@@ -5585,6 +5801,7 @@ impl schematic_define::Registration for EvalRun {
 #[derive(JsonSchema)]
 pub struct EvalRunList {
     ///The type of this object. It is always set to "list".
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///An array of eval run objects.
     pub data: Vec<EvalRun>,
@@ -5608,6 +5825,7 @@ impl schematic_define::Registration for EvalRunList {
 #[derive(JsonSchema)]
 pub struct EvalRunOutputItem {
     ///The type of the object. Always "eval.run.output_item".
+    #[schemars(extend("enum" = ["eval.run.output_item"]))]
     pub object: String,
     ///Unique identifier for the evaluation run output item.
     pub id: String,
@@ -5641,6 +5859,7 @@ impl schematic_define::Registration for EvalRunOutputItem {
 #[derive(JsonSchema)]
 pub struct EvalRunOutputItemList {
     ///The type of this object. It is always set to "list".
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///An array of eval run output item objects.
     pub data: Vec<EvalRunOutputItem>,
@@ -5698,6 +5917,7 @@ impl schematic_define::Registration for EvalRunOutputItemResult {
 pub struct EvalStoredCompletionsDataSourceConfig {
     ///The type of data source. Always `stored_completions`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["stored_completions"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
@@ -5721,6 +5941,7 @@ impl schematic_define::Registration for EvalStoredCompletionsDataSourceConfig {
 pub struct EvalStoredCompletionsSource {
     ///The type of source. Always `stored_completions`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["stored_completions"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
@@ -5748,8 +5969,10 @@ impl schematic_define::Registration for EvalStoredCompletionsSource {
 #[derive(JsonSchema)]
 pub struct FileExpirationAfter {
     ///Anchor timestamp after which the expiration policy applies. Supported anchors: `created_at`.
+    #[schemars(extend("enum" = ["created_at"]))]
     pub anchor: String,
     ///The number of seconds after the anchor time that the file will expire. Must be between 3600 (1 hour) and 2592000 (30 days).
+    #[schemars(extend("maximum" = 2592000u64, "minimum" = 3600u64))]
     pub seconds: i64,
 }
 impl schematic_define::Registration for FileExpirationAfter {
@@ -5766,6 +5989,7 @@ impl schematic_define::Registration for FileExpirationAfter {
 pub struct FilePath {
     ///The type of the file path. Always `file_path`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_path"]))]
     pub type_: String,
     ///The ID of the file.
     pub file_id: String,
@@ -5807,6 +6031,7 @@ pub struct FileSearchRankingOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ranker: Option<FileSearchRanker>,
     ///The score threshold for the file search. All values must be a floating point number between 0 and 1.
+    #[schemars(extend("maximum" = 1u64, "minimum" = 0u64))]
     pub score_threshold: f64,
 }
 impl schematic_define::Registration for FileSearchRankingOptions {
@@ -5828,9 +6053,19 @@ pub struct FileSearchToolCall {
     pub id: String,
     ///The type of the file search tool call. Always `file_search_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_search_call"]))]
     pub type_: String,
     /**The status of the file search tool call. One of `in_progress`,
 `searching`, `incomplete` or `failed`,*/
+    #[schemars(
+        extend(
+            "enum" = ["in_progress",
+            "searching",
+            "completed",
+            "incomplete",
+            "failed"]
+        )
+    )]
     pub status: String,
     ///The queries used to search for files.
     pub queries: Vec<String>,
@@ -5894,6 +6129,7 @@ impl schematic_define::Registration for FineTuneDPOMethod {
 pub struct FineTuneMethod {
     ///The type of method. Is either `supervised`, `dpo`, or `reinforcement`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["supervised", "dpo", "reinforcement"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supervised: Option<FineTuneSupervisedMethod>,
@@ -5925,6 +6161,7 @@ pub struct FineTuneReinforcementHyperparameters {
     pub n_epochs: Option<serde_json::Value>,
     ///Level of reasoning effort.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["default", "low", "medium", "high", null]))]
     pub reasoning_effort: Option<String>,
     ///Multiplier on amount of compute used for exploring search space during training.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -6017,6 +6254,7 @@ pub struct FineTuningCheckpointPermission {
     ///The project identifier that the permission is for.
     pub project_id: String,
     ///The object type, which is always "checkpoint.permission".
+    #[schemars(extend("enum" = ["checkpoint.permission"]))]
     pub object: String,
 }
 impl schematic_define::Registration for FineTuningCheckpointPermission {
@@ -6034,6 +6272,7 @@ impl schematic_define::Registration for FineTuningCheckpointPermission {
 pub struct FineTuningIntegration {
     ///The type of the integration being enabled for the fine-tuning job
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["wandb"]))]
     pub type_: String,
     /**The settings for your integration with Weights and Biases. This payload specifies the project that
 metrics will be sent to. Optionally, you can set an explicit display name for your run, add tags
@@ -6066,12 +6305,23 @@ pub struct FineTuningJob {
     ///The base model that is being fine-tuned.
     pub model: String,
     ///The object type, which is always "fine_tuning.job".
+    #[schemars(extend("enum" = ["fine_tuning.job"]))]
     pub object: String,
     ///The organization that owns the fine-tuning job.
     pub organization_id: String,
     ///The compiled results file ID(s) for the fine-tuning job. You can retrieve the results with the [Files API](/docs/api-reference/files/retrieve-contents).
     pub result_files: Vec<String>,
     ///The current status of the fine-tuning job, which can be either `validating_files`, `queued`, `running`, `succeeded`, `failed`, or `cancelled`.
+    #[schemars(
+        extend(
+            "enum" = ["validating_files",
+            "queued",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled"]
+        )
+    )]
     pub status: String,
     pub trained_tokens: serde_json::Value,
     ///The file ID used for training. You can retrieve the training data with the [Files API](/docs/api-reference/files/retrieve-contents).
@@ -6113,6 +6363,7 @@ pub struct FineTuningJobCheckpoint {
     ///The name of the fine-tuning job that this checkpoint was created from.
     pub fine_tuning_job_id: String,
     ///The object type, which is always "fine_tuning.job.checkpoint".
+    #[schemars(extend("enum" = ["fine_tuning.job.checkpoint"]))]
     pub object: String,
 }
 impl schematic_define::Registration for FineTuningJobCheckpoint {
@@ -6130,18 +6381,21 @@ impl schematic_define::Registration for FineTuningJobCheckpoint {
 #[derive(JsonSchema)]
 pub struct FineTuningJobEvent {
     ///The object type, which is always "fine_tuning.job.event".
+    #[schemars(extend("enum" = ["fine_tuning.job.event"]))]
     pub object: String,
     ///The object identifier.
     pub id: String,
     ///The Unix timestamp (in seconds) for when the fine-tuning job was created.
     pub created_at: i64,
     ///The log level of the event.
+    #[schemars(extend("enum" = ["info", "warn", "error"]))]
     pub level: String,
     ///The message of the event.
     pub message: String,
     ///The type of event.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["message", "metrics", null]))]
     pub type_: Option<String>,
     ///The data associated with the event.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -6269,6 +6523,7 @@ pub struct FunctionToolCall {
     pub id: Option<String>,
     ///The type of the function tool call. Always `function_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function_call"]))]
     pub type_: String,
     ///The unique ID of the function tool call generated by the model.
     pub call_id: String,
@@ -6284,6 +6539,7 @@ pub struct FunctionToolCall {
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
     pub status: Option<String>,
 }
 impl schematic_define::Registration for FunctionToolCall {
@@ -6304,6 +6560,7 @@ is returned via API.*/
     pub id: Option<String>,
     ///The type of the function tool call output. Always `function_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function_call_output"]))]
     pub type_: String,
     ///The unique ID of the function tool call generated by the model.
     pub call_id: String,
@@ -6321,6 +6578,7 @@ Can be a string or an list of output content.*/
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
     pub status: Option<String>,
 }
 impl schematic_define::Registration for FunctionToolCallOutput {
@@ -6376,6 +6634,7 @@ in the evaluation.*/
 pub struct GraderLabelModel {
     ///The object type, which is always `label_model`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["label_model"]))]
     pub type_: String,
     ///The name of the grader.
     pub name: String,
@@ -6401,6 +6660,7 @@ impl schematic_define::Registration for GraderLabelModel {
 pub struct GraderMulti {
     ///The object type, which is always `multi`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["multi"]))]
     pub type_: String,
     ///The name of the grader.
     pub name: String,
@@ -6422,6 +6682,7 @@ impl schematic_define::Registration for GraderMulti {
 pub struct GraderPython {
     ///The object type, which is always `python`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["python"]))]
     pub type_: String,
     ///The name of the grader.
     pub name: String,
@@ -6445,6 +6706,7 @@ impl schematic_define::Registration for GraderPython {
 pub struct GraderScoreModel {
     ///The object type, which is always `score_model`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["score_model"]))]
     pub type_: String,
     ///The name of the grader.
     pub name: String,
@@ -6473,6 +6735,7 @@ impl schematic_define::Registration for GraderScoreModel {
 pub struct GraderStringCheck {
     ///The object type, which is always `string_check`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["string_check"]))]
     pub type_: String,
     ///The name of the grader.
     pub name: String,
@@ -6481,6 +6744,7 @@ pub struct GraderStringCheck {
     ///The reference text. This may include template strings.
     pub reference: String,
     ///The string check operation to perform. One of `eq`, `ne`, `like`, or `ilike`.
+    #[schemars(extend("enum" = ["eq", "ne", "like", "ilike"]))]
     pub operation: String,
 }
 impl schematic_define::Registration for GraderStringCheck {
@@ -6497,6 +6761,7 @@ impl schematic_define::Registration for GraderStringCheck {
 pub struct GraderTextSimilarity {
     ///The type of grader.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["text_similarity"]))]
     pub type_: String,
     ///The name of the grader.
     pub name: String,
@@ -6507,6 +6772,21 @@ pub struct GraderTextSimilarity {
     /**The evaluation metric to use. One of `cosine`, `fuzzy_match`, `bleu`,
 `gleu`, `meteor`, `rouge_1`, `rouge_2`, `rouge_3`, `rouge_4`, `rouge_5`,
 or `rouge_l`.*/
+    #[schemars(
+        extend(
+            "enum" = ["cosine",
+            "fuzzy_match",
+            "bleu",
+            "gleu",
+            "meteor",
+            "rouge_1",
+            "rouge_2",
+            "rouge_3",
+            "rouge_4",
+            "rouge_5",
+            "rouge_l"]
+        )
+    )]
     pub evaluation_metric: String,
 }
 impl schematic_define::Registration for GraderTextSimilarity {
@@ -6522,6 +6802,7 @@ impl schematic_define::Registration for GraderTextSimilarity {
 #[derive(JsonSchema)]
 pub struct Group {
     ///Always `group`.
+    #[schemars(extend("enum" = ["group"]))]
     pub object: String,
     ///Identifier for the group.
     pub id: String,
@@ -6545,6 +6826,7 @@ impl schematic_define::Registration for Group {
 #[derive(JsonSchema)]
 pub struct GroupDeletedResource {
     ///Always `group.deleted`.
+    #[schemars(extend("enum" = ["group.deleted"]))]
     pub object: String,
     ///Identifier of the deleted group.
     pub id: String,
@@ -6564,6 +6846,7 @@ impl schematic_define::Registration for GroupDeletedResource {
 #[derive(JsonSchema)]
 pub struct GroupListResource {
     ///Always `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///Groups returned in the current page.
     pub data: Vec<GroupResponse>,
@@ -6595,6 +6878,7 @@ pub struct GroupMemberUser {
     ///Whether the user is a service account.
     pub is_service_account: serde_json::Value,
     ///The type of user.
+    #[schemars(extend("enum" = ["user", "tenant_user"]))]
     pub user_type: String,
 }
 impl schematic_define::Registration for GroupMemberUser {
@@ -6641,6 +6925,7 @@ pub struct GroupResponse {
     ///Whether the group is managed through SCIM and controlled by your identity provider.
     pub is_scim_managed: bool,
     ///The type of the group.
+    #[schemars(extend("enum" = ["group", "tenant_group"]))]
     pub group_type: String,
 }
 impl schematic_define::Registration for GroupResponse {
@@ -6656,6 +6941,7 @@ impl schematic_define::Registration for GroupResponse {
 #[derive(JsonSchema)]
 pub struct GroupRoleAssignment {
     ///Always `group.role`.
+    #[schemars(extend("enum" = ["group.role"]))]
     pub object: String,
     pub group: Group,
     pub role: Role,
@@ -6692,6 +6978,7 @@ impl schematic_define::Registration for GroupUser {
 #[derive(JsonSchema)]
 pub struct GroupUserAssignment {
     ///Always `group.user`.
+    #[schemars(extend("enum" = ["group.user"]))]
     pub object: String,
     ///Identifier of the user that was added.
     pub user_id: String,
@@ -6711,6 +6998,7 @@ impl schematic_define::Registration for GroupUserAssignment {
 #[derive(JsonSchema)]
 pub struct GroupUserDeletedResource {
     ///Always `group.user.deleted`.
+    #[schemars(extend("enum" = ["group.user.deleted"]))]
     pub object: String,
     ///Whether the group membership was removed.
     pub deleted: bool,
@@ -6784,18 +7072,23 @@ impl schematic_define::Registration for Image {
 pub struct ImageEditCompletedEvent {
     ///The type of the event. Always `image_edit.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image_edit.completed"]))]
     pub type_: String,
     ///Base64-encoded final edited image data, suitable for rendering as an image.
     pub b64_json: String,
     ///The Unix timestamp when the event was created.
     pub created_at: i64,
     ///The size of the edited image.
+    #[schemars(extend("enum" = ["1024x1024", "1024x1536", "1536x1024", "auto"]))]
     pub size: String,
     ///The quality setting for the edited image.
+    #[schemars(extend("enum" = ["low", "medium", "high", "auto"]))]
     pub quality: String,
     ///The background setting for the edited image.
+    #[schemars(extend("enum" = ["transparent", "opaque", "auto"]))]
     pub background: String,
     ///The output format for the edited image.
+    #[schemars(extend("enum" = ["png", "webp", "jpeg"]))]
     pub output_format: String,
     pub usage: ImagesUsage,
 }
@@ -6815,18 +7108,23 @@ impl schematic_define::Registration for ImageEditCompletedEvent {
 pub struct ImageEditPartialImageEvent {
     ///The type of the event. Always `image_edit.partial_image`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image_edit.partial_image"]))]
     pub type_: String,
     ///Base64-encoded partial image data, suitable for rendering as an image.
     pub b64_json: String,
     ///The Unix timestamp when the event was created.
     pub created_at: i64,
     ///The size of the requested edited image.
+    #[schemars(extend("enum" = ["1024x1024", "1024x1536", "1536x1024", "auto"]))]
     pub size: String,
     ///The quality setting for the requested edited image.
+    #[schemars(extend("enum" = ["low", "medium", "high", "auto"]))]
     pub quality: String,
     ///The background setting for the requested edited image.
+    #[schemars(extend("enum" = ["transparent", "opaque", "auto"]))]
     pub background: String,
     ///The output format for the requested edited image.
+    #[schemars(extend("enum" = ["png", "webp", "jpeg"]))]
     pub output_format: String,
     ///0-based index for the partial image (streaming).
     pub partial_image_index: i64,
@@ -6909,18 +7207,23 @@ impl schematic_define::Registration for ImageEditStreamEvent {
 pub struct ImageGenCompletedEvent {
     ///The type of the event. Always `image_generation.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image_generation.completed"]))]
     pub type_: String,
     ///Base64-encoded image data, suitable for rendering as an image.
     pub b64_json: String,
     ///The Unix timestamp when the event was created.
     pub created_at: i64,
     ///The size of the generated image.
+    #[schemars(extend("enum" = ["1024x1024", "1024x1536", "1536x1024", "auto"]))]
     pub size: String,
     ///The quality setting for the generated image.
+    #[schemars(extend("enum" = ["low", "medium", "high", "auto"]))]
     pub quality: String,
     ///The background setting for the generated image.
+    #[schemars(extend("enum" = ["transparent", "opaque", "auto"]))]
     pub background: String,
     ///The output format for the generated image.
+    #[schemars(extend("enum" = ["png", "webp", "jpeg"]))]
     pub output_format: String,
     pub usage: ImagesUsage,
 }
@@ -6940,18 +7243,23 @@ impl schematic_define::Registration for ImageGenCompletedEvent {
 pub struct ImageGenPartialImageEvent {
     ///The type of the event. Always `image_generation.partial_image`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image_generation.partial_image"]))]
     pub type_: String,
     ///Base64-encoded partial image data, suitable for rendering as an image.
     pub b64_json: String,
     ///The Unix timestamp when the event was created.
     pub created_at: i64,
     ///The size of the requested image.
+    #[schemars(extend("enum" = ["1024x1024", "1024x1536", "1536x1024", "auto"]))]
     pub size: String,
     ///The quality setting for the requested image.
+    #[schemars(extend("enum" = ["low", "medium", "high", "auto"]))]
     pub quality: String,
     ///The background setting for the requested image.
+    #[schemars(extend("enum" = ["transparent", "opaque", "auto"]))]
     pub background: String,
     ///The output format for the requested image.
+    #[schemars(extend("enum" = ["png", "webp", "jpeg"]))]
     pub output_format: String,
     ///0-based index for the partial image (streaming).
     pub partial_image_index: i64,
@@ -7034,12 +7342,14 @@ impl schematic_define::Registration for ImageGenStreamEvent {
 pub struct ImageGenTool {
     ///The type of the image generation tool. Always `image_generation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image_generation"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<serde_json::Value>,
     /**The quality of the generated image. One of `low`, `medium`, `high`,
 or `auto`. Default: `auto`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["low", "medium", "high", "auto", null]))]
     pub quality: Option<String>,
     ///The size of the generated images. For `gpt-image-2` and `gpt-image-2-2026-04-21`, arbitrary resolutions are supported as `WIDTHxHEIGHT` strings, for example `1536x864`. Width and height must both be divisible by 16 and the requested aspect ratio must be between 1:3 and 3:1. Resolutions above `2560x1440` are experimental, and the maximum supported resolution is `3840x2160`. The requested size must also satisfy the model's current pixel and edge limits. The standard sizes `1024x1024`, `1536x1024`, and `1024x1536` are supported by the GPT image models; `auto` is supported for models that allow automatic sizing. For `dall-e-2`, use one of `256x256`, `512x512`, or `1024x1024`. For `dall-e-3`, use one of `1024x1024`, `1792x1024`, or `1024x1792`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -7047,16 +7357,20 @@ or `auto`. Default: `auto`.*/
     /**The output format of the generated image. One of `png`, `webp`, or
 `jpeg`. Default: `png`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["png", "webp", "jpeg", null]))]
     pub output_format: Option<String>,
     ///Compression level for the output image. Default: 100.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 100u64, "minimum" = 0u64))]
     pub output_compression: Option<i64>,
     ///Moderation level for the generated image. Default: `auto`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["auto", "low", null]))]
     pub moderation: Option<String>,
     /**Background type for the generated image. One of `transparent`,
 `opaque`, or `auto`. Default: `auto`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["transparent", "opaque", "auto", null]))]
     pub background: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_fidelity: Option<serde_json::Value>,
@@ -7066,6 +7380,7 @@ or `auto`. Default: `auto`.*/
     pub input_image_mask: Option<serde_json::Value>,
     ///Number of partial images to generate in streaming mode, from 0 (default value) to 3.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 3u64, "minimum" = 0u64))]
     pub partial_images: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<ImageGenActionEnum>,
@@ -7084,10 +7399,12 @@ impl schematic_define::Registration for ImageGenTool {
 pub struct ImageGenToolCall {
     ///The type of the image generation call. Always `image_generation_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image_generation_call"]))]
     pub type_: String,
     ///The unique ID of the image generation call.
     pub id: String,
     ///The status of the image generation call.
+    #[schemars(extend("enum" = ["in_progress", "completed", "generating", "failed"]))]
     pub status: String,
     pub result: serde_json::Value,
 }
@@ -7106,6 +7423,7 @@ Provide exactly one of `image_url` or `file_id`.*/
 pub struct ImageRefParam {
     ///A fully qualified URL or base64-encoded data URL.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 20971520u64))]
     pub image_url: Option<String>,
     ///The File API ID of an uploaded image to use as input.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -7130,15 +7448,19 @@ pub struct ImagesResponse {
     pub data: Option<Vec<Image>>,
     ///The background parameter used for the image generation. Either `transparent` or `opaque`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["transparent", "opaque", null]))]
     pub background: Option<String>,
     ///The output format of the image generation. Either `png`, `webp`, or `jpeg`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["png", "webp", "jpeg", null]))]
     pub output_format: Option<String>,
     ///The size of the image generated. Either `1024x1024`, `1024x1536`, or `1536x1024`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["1024x1024", "1024x1536", "1536x1024", null]))]
     pub size: Option<String>,
     ///The quality of the image generated. Either `low`, `medium`, or `high`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["low", "medium", "high", null]))]
     pub quality: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<ImageGenUsage>,
@@ -7178,6 +7500,7 @@ impl schematic_define::Registration for ImagesUsage {
 pub struct InputAudio {
     ///The type of the input item. Always `input_audio`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio"]))]
     pub type_: String,
     pub input_audio: serde_json::Value,
 }
@@ -7281,12 +7604,15 @@ pub struct InputMessage {
     ///The type of the message input. Always set to `message`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["message", null]))]
     pub type_: Option<String>,
     ///The role of the message input. One of `user`, `system`, or `developer`.
+    #[schemars(extend("enum" = ["user", "system", "developer"]))]
     pub role: String,
     /**The status of item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
     pub status: Option<String>,
     pub content: InputMessageContentList,
 }
@@ -7351,14 +7677,17 @@ impl schematic_define::Registration for InputParam {
 #[derive(JsonSchema)]
 pub struct Invite {
     ///The object type, which is always `organization.invite`
+    #[schemars(extend("enum" = ["organization.invite"]))]
     pub object: String,
     ///The identifier, which can be referenced in API endpoints
     pub id: String,
     ///The email address of the individual to whom the invite was sent
     pub email: String,
     ///`owner` or `reader`
+    #[schemars(extend("enum" = ["owner", "reader"]))]
     pub role: String,
     ///`accepted`,`expired`, or `pending`
+    #[schemars(extend("enum" = ["accepted", "expired", "pending"]))]
     pub status: String,
     ///The Unix timestamp (in seconds) of when the invite was sent.
     pub created_at: i64,
@@ -7383,6 +7712,7 @@ impl schematic_define::Registration for Invite {
 #[derive(JsonSchema)]
 pub struct InviteDeleteResponse {
     ///The object type, which is always `organization.invite.deleted`
+    #[schemars(extend("enum" = ["organization.invite.deleted"]))]
     pub object: String,
     pub id: String,
     pub deleted: bool,
@@ -7399,6 +7729,7 @@ impl schematic_define::Registration for InviteDeleteResponse {
 #[derive(JsonSchema)]
 pub struct InviteListResponse {
     ///The object type, which is always `list`
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     pub data: Vec<Invite>,
     ///The first `invite_id` in the retrieved `list`
@@ -7443,6 +7774,7 @@ pub struct InviteRequest {
     ///Send an email to this address
     pub email: String,
     ///`owner` or `reader`
+    #[schemars(extend("enum" = ["reader", "owner"]))]
     pub role: String,
     ///An array of projects to which membership is granted at the same time the org invite is accepted. If omitted, the user will be invited to the default project for compatibility with legacy behavior. If empty list is passed, the user will not be invited to any projects, including the default one.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -7631,6 +7963,7 @@ impl schematic_define::Registration for ListAssistantsResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ListAuditLogsResponse {
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     pub data: Vec<AuditLog>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -7658,6 +7991,7 @@ pub struct ListBatchesResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_id: Option<String>,
     pub has_more: bool,
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
 }
 impl schematic_define::Registration for ListBatchesResponse {
@@ -7675,6 +8009,7 @@ pub struct ListCertificatesResponse {
     pub first_id: serde_json::Value,
     pub last_id: serde_json::Value,
     pub has_more: bool,
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
 }
 impl schematic_define::Registration for ListCertificatesResponse {
@@ -7708,6 +8043,7 @@ impl schematic_define::Registration for ListFilesResponse {
 #[derive(JsonSchema)]
 pub struct ListFineTuningCheckpointPermissionResponse {
     pub data: Vec<FineTuningCheckpointPermission>,
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_id: Option<serde_json::Value>,
@@ -7729,6 +8065,7 @@ impl schematic_define::Registration for ListFineTuningCheckpointPermissionRespon
 #[derive(JsonSchema)]
 pub struct ListFineTuningJobCheckpointsResponse {
     pub data: Vec<FineTuningJobCheckpoint>,
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_id: Option<serde_json::Value>,
@@ -7750,6 +8087,7 @@ impl schematic_define::Registration for ListFineTuningJobCheckpointsResponse {
 #[derive(JsonSchema)]
 pub struct ListFineTuningJobEventsResponse {
     pub data: Vec<FineTuningJobEvent>,
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     pub has_more: bool,
 }
@@ -7783,6 +8121,7 @@ impl schematic_define::Registration for ListMessagesResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ListModelsResponse {
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     pub data: Vec<Model>,
 }
@@ -7799,6 +8138,7 @@ impl schematic_define::Registration for ListModelsResponse {
 pub struct ListPaginatedFineTuningJobsResponse {
     pub data: Vec<FineTuningJob>,
     pub has_more: bool,
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
 }
 impl schematic_define::Registration for ListPaginatedFineTuningJobsResponse {
@@ -7818,6 +8158,7 @@ pub struct ListProjectCertificatesResponse {
     pub first_id: serde_json::Value,
     pub last_id: serde_json::Value,
     pub has_more: bool,
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
 }
 impl schematic_define::Registration for ListProjectCertificatesResponse {
@@ -7908,6 +8249,7 @@ impl schematic_define::Registration for ListVectorStoresResponse {
 pub struct LocalShellToolCall {
     ///The type of the local shell call. Always `local_shell_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["local_shell_call"]))]
     pub type_: String,
     ///The unique ID of the local shell call.
     pub id: String,
@@ -7915,6 +8257,7 @@ pub struct LocalShellToolCall {
     pub call_id: String,
     pub action: LocalShellExecAction,
     ///The status of the local shell call.
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: String,
 }
 impl schematic_define::Registration for LocalShellToolCall {
@@ -7931,6 +8274,7 @@ impl schematic_define::Registration for LocalShellToolCall {
 pub struct LocalShellToolCallOutput {
     ///The type of the local shell tool call output. Always `local_shell_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["local_shell_call_output"]))]
     pub type_: String,
     ///The unique ID of the local shell tool call generated by the model.
     pub id: String,
@@ -7974,6 +8318,7 @@ impl schematic_define::Registration for LogProbProperties {
 pub struct MCPApprovalRequest {
     ///The type of the item. Always `mcp_approval_request`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_approval_request"]))]
     pub type_: String,
     ///The unique ID of the approval request.
     pub id: String,
@@ -7998,6 +8343,7 @@ impl schematic_define::Registration for MCPApprovalRequest {
 pub struct MCPApprovalResponse {
     ///The type of the item. Always `mcp_approval_response`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_approval_response"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
@@ -8022,6 +8368,7 @@ impl schematic_define::Registration for MCPApprovalResponse {
 pub struct MCPApprovalResponseResource {
     ///The type of the item. Always `mcp_approval_response`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_approval_response"]))]
     pub type_: String,
     ///The unique ID of the approval response
     pub id: String,
@@ -8048,6 +8395,7 @@ impl schematic_define::Registration for MCPApprovalResponseResource {
 pub struct MCPListTools {
     ///The type of the item. Always `mcp_list_tools`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_list_tools"]))]
     pub type_: String,
     ///The unique ID of the list.
     pub id: String,
@@ -8094,6 +8442,7 @@ impl schematic_define::Registration for MCPListToolsTool {
 pub struct MCPTool {
     ///The type of the MCP tool. Always `mcp`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp"]))]
     pub type_: String,
     ///A label for this MCP server, used to identify it in tool calls.
     pub server_label: String,
@@ -8116,10 +8465,24 @@ Currently supported `connector_id` values are:
 - Outlook Email: `connector_outlookemail`
 - SharePoint: `connector_sharepoint`*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "enum" = ["connector_dropbox",
+            "connector_gmail",
+            "connector_googlecalendar",
+            "connector_googledrive",
+            "connector_microsoftteams",
+            "connector_outlookcalendar",
+            "connector_outlookemail",
+            "connector_sharepoint",
+            null]
+        )
+    )]
     pub connector_id: Option<String>,
     /**The Secure MCP Tunnel ID to use instead of a direct server URL. One of
 `server_url`, `connector_id`, or `tunnel_id` must be provided.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("pattern" = "^tunnel_[a-z0-9]{32}$"))]
     pub tunnel_id: Option<String>,
     /**An OAuth access token that can be used with a remote MCP server, either
 with a custom MCP server URL or a service connector. Your application
@@ -8155,6 +8518,7 @@ impl schematic_define::Registration for MCPTool {
 pub struct MCPToolCall {
     ///The type of the item. Always `mcp_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_call"]))]
     pub type_: String,
     ///The unique ID of the tool call.
     pub id: String,
@@ -8208,6 +8572,7 @@ impl schematic_define::Registration for MCPToolFilter {
 pub struct MessageContentImageFileObject {
     ///Always `image_file`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image_file"]))]
     pub type_: String,
     pub image_file: serde_json::Value,
 }
@@ -8227,6 +8592,7 @@ impl schematic_define::Registration for MessageContentImageFileObject {
 pub struct MessageContentImageUrlObject {
     ///The type of the content part.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image_url"]))]
     pub type_: String,
     pub image_url: serde_json::Value,
 }
@@ -8246,6 +8612,7 @@ impl schematic_define::Registration for MessageContentImageUrlObject {
 pub struct MessageContentRefusalObject {
     ///Always `refusal`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["refusal"]))]
     pub type_: String,
     pub refusal: String,
 }
@@ -8265,11 +8632,14 @@ impl schematic_define::Registration for MessageContentRefusalObject {
 pub struct MessageContentTextAnnotationsFileCitationObject {
     ///Always `file_citation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_citation"]))]
     pub type_: String,
     ///The text in the message content that needs to be replaced.
     pub text: String,
     pub file_citation: serde_json::Value,
+    #[schemars(extend("minimum" = 0u64))]
     pub start_index: i64,
+    #[schemars(extend("minimum" = 0u64))]
     pub end_index: i64,
 }
 impl schematic_define::Registration for MessageContentTextAnnotationsFileCitationObject {
@@ -8288,11 +8658,14 @@ impl schematic_define::Registration for MessageContentTextAnnotationsFileCitatio
 pub struct MessageContentTextAnnotationsFilePathObject {
     ///Always `file_path`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_path"]))]
     pub type_: String,
     ///The text in the message content that needs to be replaced.
     pub text: String,
     pub file_path: serde_json::Value,
+    #[schemars(extend("minimum" = 0u64))]
     pub start_index: i64,
+    #[schemars(extend("minimum" = 0u64))]
     pub end_index: i64,
 }
 impl schematic_define::Registration for MessageContentTextAnnotationsFilePathObject {
@@ -8311,6 +8684,7 @@ impl schematic_define::Registration for MessageContentTextAnnotationsFilePathObj
 pub struct MessageContentTextObject {
     ///Always `text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["text"]))]
     pub type_: String,
     pub text: serde_json::Value,
 }
@@ -8332,6 +8706,7 @@ pub struct MessageDeltaContentImageFileObject {
     pub index: i64,
     ///Always `image_file`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image_file"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_file: Option<serde_json::Value>,
@@ -8354,6 +8729,7 @@ pub struct MessageDeltaContentImageUrlObject {
     pub index: i64,
     ///Always `image_url`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image_url"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_url: Option<serde_json::Value>,
@@ -8376,6 +8752,7 @@ pub struct MessageDeltaContentRefusalObject {
     pub index: i64,
     ///Always `refusal`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["refusal"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
@@ -8398,6 +8775,7 @@ pub struct MessageDeltaContentTextAnnotationsFileCitationObject {
     pub index: i64,
     ///Always `file_citation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_citation"]))]
     pub type_: String,
     ///The text in the message content that needs to be replaced.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -8405,8 +8783,10 @@ pub struct MessageDeltaContentTextAnnotationsFileCitationObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_citation: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 0u64))]
     pub start_index: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 0u64))]
     pub end_index: Option<i64>,
 }
 impl schematic_define::Registration
@@ -8428,6 +8808,7 @@ pub struct MessageDeltaContentTextAnnotationsFilePathObject {
     pub index: i64,
     ///Always `file_path`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_path"]))]
     pub type_: String,
     ///The text in the message content that needs to be replaced.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -8435,8 +8816,10 @@ pub struct MessageDeltaContentTextAnnotationsFilePathObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_path: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 0u64))]
     pub start_index: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 0u64))]
     pub end_index: Option<i64>,
 }
 impl schematic_define::Registration
@@ -8458,6 +8841,7 @@ pub struct MessageDeltaContentTextObject {
     pub index: i64,
     ///Always `text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["text"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<serde_json::Value>,
@@ -8479,6 +8863,7 @@ pub struct MessageDeltaObject {
     ///The identifier of the message, which can be referenced in API endpoints.
     pub id: String,
     ///The object type, which is always `thread.message.delta`.
+    #[schemars(extend("enum" = ["thread.message.delta"]))]
     pub object: String,
     ///The delta containing the fields that have changed on the Message.
     pub delta: serde_json::Value,
@@ -8498,17 +8883,20 @@ pub struct MessageObject {
     ///The identifier, which can be referenced in API endpoints.
     pub id: String,
     ///The object type, which is always `thread.message`.
+    #[schemars(extend("enum" = ["thread.message"]))]
     pub object: String,
     ///The Unix timestamp (in seconds) for when the message was created.
     pub created_at: i64,
     ///The [thread](/docs/api-reference/threads) ID that this message belongs to.
     pub thread_id: String,
     ///The status of the message, which can be either `in_progress`, `incomplete`, or `completed`.
+    #[schemars(extend("enum" = ["in_progress", "incomplete", "completed"]))]
     pub status: String,
     pub incomplete_details: serde_json::Value,
     pub completed_at: serde_json::Value,
     pub incomplete_at: serde_json::Value,
     ///The entity that produced the message. One of `user` or `assistant`.
+    #[schemars(extend("enum" = ["user", "assistant"]))]
     pub role: String,
     ///The content of the message in array of text and/or images.
     pub content: Vec<serde_json::Value>,
@@ -8551,6 +8939,7 @@ impl schematic_define::Registration for MessagePhase {
 pub struct MessageRequestContentTextObject {
     ///Always `text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["text"]))]
     pub type_: String,
     ///Text content to be sent to the model
     pub text: String,
@@ -8619,6 +9008,7 @@ pub struct Model {
     ///The Unix timestamp (in seconds) when the model was created.
     pub created: i64,
     ///The object type, which is always "model".
+    #[schemars(extend("enum" = ["model"]))]
     pub object: String,
     ///The organization that owns the model.
     pub owned_by: String,
@@ -8768,6 +9158,7 @@ pub struct ModifyAssistantRequest2 {
     pub instructions: Option<serde_json::Value>,
     ///A list of tool enabled on the assistant. There can be a maximum of 128 tools per assistant. Tools can be of types `code_interpreter`, `file_search`, or `function`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 128u64))]
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_resources: Option<serde_json::Value>,
@@ -8887,10 +9278,24 @@ pub struct OpenAIFile {
     ///The name of the file.
     pub filename: String,
     ///The object type, which is always `file`.
+    #[schemars(extend("enum" = ["file"]))]
     pub object: String,
     ///The intended purpose of the file. Supported values are `assistants`, `assistants_output`, `batch`, `batch_output`, `fine-tune`, `fine-tune-results`, `vision`, and `user_data`.
+    #[schemars(
+        extend(
+            "enum" = ["assistants",
+            "assistants_output",
+            "batch",
+            "batch_output",
+            "fine-tune",
+            "fine-tune-results",
+            "vision",
+            "user_data"]
+        )
+    )]
     pub purpose: String,
     ///Deprecated. The current status of the file, which can be either `uploaded`, `processed`, or `error`.
+    #[schemars(extend("enum" = ["uploaded", "processed", "error"]))]
     pub status: String,
     ///Deprecated. For details on why a fine-tuning training file failed validation, see the `error` field on `fine_tuning.job`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -8909,6 +9314,7 @@ impl schematic_define::Registration for OpenAIFile {
 #[derive(JsonSchema)]
 pub struct OrganizationCertificate {
     ///The object type, which is always `organization.certificate`.
+    #[schemars(extend("enum" = ["organization.certificate"]))]
     pub object: String,
     ///The identifier, which can be referenced in API endpoints
     pub id: String,
@@ -8934,6 +9340,7 @@ impl schematic_define::Registration for OrganizationCertificate {
 #[derive(JsonSchema)]
 pub struct OrganizationCertificateActivationResponse {
     ///The organization certificate activation result type.
+    #[schemars(extend("enum" = ["organization.certificate.activation"]))]
     pub object: String,
     pub data: Vec<OrganizationCertificate>,
 }
@@ -8951,6 +9358,7 @@ impl schematic_define::Registration for OrganizationCertificateActivationRespons
 #[derive(JsonSchema)]
 pub struct OrganizationCertificateDeactivationResponse {
     ///The organization certificate deactivation result type.
+    #[schemars(extend("enum" = ["organization.certificate.deactivation"]))]
     pub object: String,
     pub data: Vec<OrganizationCertificate>,
 }
@@ -8969,9 +9377,18 @@ impl schematic_define::Registration for OrganizationCertificateDeactivationRespo
 #[derive(JsonSchema)]
 pub struct OrganizationDataRetention {
     ///The object type, which is always `organization.data_retention`.
+    #[schemars(extend("enum" = ["organization.data_retention"]))]
     pub object: String,
     ///The configured organization data retention type.
     #[serde(rename = "type")]
+    #[schemars(
+        extend(
+            "enum" = ["zero_data_retention",
+            "modified_abuse_monitoring",
+            "enhanced_zero_data_retention",
+            "enhanced_modified_abuse_monitoring"]
+        )
+    )]
     pub type_: String,
 }
 impl schematic_define::Registration for OrganizationDataRetention {
@@ -8989,6 +9406,7 @@ impl schematic_define::Registration for OrganizationDataRetention {
 #[derive(JsonSchema)]
 pub struct OrganizationProjectCertificate {
     ///The object type, which is always `organization.project.certificate`.
+    #[schemars(extend("enum" = ["organization.project.certificate"]))]
     pub object: String,
     ///The identifier, which can be referenced in API endpoints
     pub id: String,
@@ -9014,6 +9432,7 @@ impl schematic_define::Registration for OrganizationProjectCertificate {
 #[derive(JsonSchema)]
 pub struct OrganizationProjectCertificateActivationResponse {
     ///The project certificate activation result type.
+    #[schemars(extend("enum" = ["organization.project.certificate.activation"]))]
     pub object: String,
     pub data: Vec<OrganizationProjectCertificate>,
 }
@@ -9032,6 +9451,7 @@ for OrganizationProjectCertificateActivationResponse {
 #[derive(JsonSchema)]
 pub struct OrganizationProjectCertificateDeactivationResponse {
     ///The project certificate deactivation result type.
+    #[schemars(extend("enum" = ["organization.project.certificate.deactivation"]))]
     pub object: String,
     pub data: Vec<OrganizationProjectCertificate>,
 }
@@ -9053,12 +9473,15 @@ pub struct OrganizationSpendAlert {
     ///The identifier, which can be referenced in API endpoints.
     pub id: String,
     ///The object type, which is always `organization.spend_alert`.
+    #[schemars(extend("enum" = ["organization.spend_alert"]))]
     pub object: String,
     ///The alert threshold amount, in cents.
     pub threshold_amount: i64,
     ///The currency for the threshold amount.
+    #[schemars(extend("enum" = ["USD"]))]
     pub currency: String,
     ///The time interval for evaluating spend against the threshold.
+    #[schemars(extend("enum" = ["month"]))]
     pub interval: String,
     pub notification_channel: SpendAlertNotificationChannel,
 }
@@ -9079,6 +9502,7 @@ pub struct OrganizationSpendAlertDeletedResource {
     ///The deleted spend alert ID.
     pub id: String,
     ///Always `organization.spend_alert.deleted`.
+    #[schemars(extend("enum" = ["organization.spend_alert.deleted"]))]
     pub object: String,
     ///Whether the spend alert was deleted.
     pub deleted: bool,
@@ -9098,6 +9522,7 @@ impl schematic_define::Registration for OrganizationSpendAlertDeletedResource {
 #[derive(JsonSchema)]
 pub struct OrganizationSpendAlertListResource {
     ///Always `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///Spend alerts returned in the current page.
     pub data: Vec<OrganizationSpendAlert>,
@@ -9124,6 +9549,7 @@ impl schematic_define::Registration for OrganizationSpendAlertListResource {
 pub struct OtherChunkingStrategyResponseParam {
     ///Always `other`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["other"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for OtherChunkingStrategyResponseParam {
@@ -9142,6 +9568,7 @@ impl schematic_define::Registration for OtherChunkingStrategyResponseParam {
 pub struct OutputAudio {
     ///The type of the output audio. Always `output_audio`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["output_audio"]))]
     pub type_: String,
     ///Base64-encoded audio data from the model.
     pub data: String,
@@ -9364,8 +9791,10 @@ pub struct OutputMessage {
     pub id: String,
     ///The type of the output message. Always `message`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["message"]))]
     pub type_: String,
     ///The role of the output message. Always `assistant`.
+    #[schemars(extend("enum" = ["assistant"]))]
     pub role: String,
     ///The content of the output message.
     pub content: Vec<OutputMessageContent>,
@@ -9373,6 +9802,7 @@ pub struct OutputMessage {
     pub phase: Option<serde_json::Value>,
     /**The status of the message input. One of `in_progress`, `completed`, or
 `incomplete`. Populated when input items are returned via API.*/
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: String,
 }
 impl schematic_define::Registration for OutputMessage {
@@ -9472,6 +9902,7 @@ pub struct PredictionContent {
     /**The type of the predicted content you want to provide. This type is
 currently always `content`.*/
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["content"]))]
     pub type_: String,
     /**The content that should be matched when generating a model response.
 If generated tokens would match this content, the entire model response
@@ -9493,6 +9924,7 @@ pub struct Project {
     ///The identifier, which can be referenced in API endpoints
     pub id: String,
     ///The object type, which is always `organization.project`
+    #[schemars(extend("enum" = ["organization.project"]))]
     pub object: String,
     ///The name of the project. This appears in reporting.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -9521,6 +9953,7 @@ impl schematic_define::Registration for Project {
 #[derive(JsonSchema)]
 pub struct ProjectApiKey {
     ///The object type, which is always `organization.project.api_key`
+    #[schemars(extend("enum" = ["organization.project.api_key"]))]
     pub object: String,
     ///The redacted value of the API key
     pub redacted_value: String,
@@ -9533,6 +9966,7 @@ pub struct ProjectApiKey {
     ///The identifier, which can be referenced in API endpoints
     pub id: String,
     ///Whether the API key's owner currently has effective access to the project.
+    #[schemars(extend("enum" = ["active", "inactive"]))]
     pub owner_project_access: String,
     pub owner: serde_json::Value,
 }
@@ -9547,6 +9981,7 @@ impl schematic_define::Registration for ProjectApiKey {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectApiKeyDeleteResponse {
+    #[schemars(extend("enum" = ["organization.project.api_key.deleted"]))]
     pub object: String,
     pub id: String,
     pub deleted: bool,
@@ -9564,6 +9999,7 @@ impl schematic_define::Registration for ProjectApiKeyDeleteResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectApiKeyListResponse {
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     pub data: Vec<ProjectApiKey>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -9655,9 +10091,20 @@ impl schematic_define::Registration for ProjectCreateRequest {
 #[derive(JsonSchema)]
 pub struct ProjectDataRetention {
     ///The object type, which is always `project.data_retention`.
+    #[schemars(extend("enum" = ["project.data_retention"]))]
     pub object: String,
     ///The configured project data retention type.
     #[serde(rename = "type")]
+    #[schemars(
+        extend(
+            "enum" = ["organization_default",
+            "none",
+            "zero_data_retention",
+            "modified_abuse_monitoring",
+            "enhanced_zero_data_retention",
+            "enhanced_modified_abuse_monitoring"]
+        )
+    )]
     pub type_: String,
 }
 impl schematic_define::Registration for ProjectDataRetention {
@@ -9673,6 +10120,7 @@ impl schematic_define::Registration for ProjectDataRetention {
 #[derive(JsonSchema)]
 pub struct ProjectGroup {
     ///Always `project.group`.
+    #[schemars(extend("enum" = ["project.group"]))]
     pub object: String,
     ///Identifier of the project.
     pub project_id: String,
@@ -9681,6 +10129,7 @@ pub struct ProjectGroup {
     ///Display name of the group.
     pub group_name: String,
     ///The type of the group.
+    #[schemars(extend("enum" = ["group", "tenant_group"]))]
     pub group_type: String,
     ///Unix timestamp (in seconds) when the group was granted project access.
     pub created_at: i64,
@@ -9698,6 +10147,7 @@ impl schematic_define::Registration for ProjectGroup {
 #[derive(JsonSchema)]
 pub struct ProjectGroupDeletedResource {
     ///Always `project.group.deleted`.
+    #[schemars(extend("enum" = ["project.group.deleted"]))]
     pub object: String,
     ///Whether the group membership in the project was removed.
     pub deleted: bool,
@@ -9717,6 +10167,7 @@ impl schematic_define::Registration for ProjectGroupDeletedResource {
 #[derive(JsonSchema)]
 pub struct ProjectGroupListResource {
     ///Always `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///Project group memberships returned in the current page.
     pub data: Vec<ProjectGroup>,
@@ -9787,6 +10238,7 @@ impl schematic_define::Registration for ProjectHostedToolPermissionsUpdateReques
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectListResponse {
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     pub data: Vec<Project>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -9808,8 +10260,10 @@ impl schematic_define::Registration for ProjectListResponse {
 #[derive(JsonSchema)]
 pub struct ProjectModelPermissions {
     ///The object type, which is always `project.model_permissions`.
+    #[schemars(extend("enum" = ["project.model_permissions"]))]
     pub object: String,
     ///Whether the project uses an allowlist or a denylist.
+    #[schemars(extend("enum" = ["allow_list", "deny_list"]))]
     pub mode: String,
     ///The model IDs included in the model permissions policy.
     pub model_ids: Vec<String>,
@@ -9829,6 +10283,7 @@ impl schematic_define::Registration for ProjectModelPermissions {
 #[derive(JsonSchema)]
 pub struct ProjectModelPermissionsDeleteResponse {
     ///The object type, which is always `project.model_permissions.deleted`.
+    #[schemars(extend("enum" = ["project.model_permissions.deleted"]))]
     pub object: String,
     ///Whether the project model permissions were deleted.
     pub deleted: bool,
@@ -9847,6 +10302,7 @@ impl schematic_define::Registration for ProjectModelPermissionsDeleteResponse {
 #[derive(JsonSchema)]
 pub struct ProjectModelPermissionsUpdateRequest {
     ///The model permissions mode to apply.
+    #[schemars(extend("enum" = ["allow_list", "deny_list"]))]
     pub mode: String,
     ///The model IDs included in this permissions policy.
     pub model_ids: Vec<String>,
@@ -9866,6 +10322,7 @@ impl schematic_define::Registration for ProjectModelPermissionsUpdateRequest {
 #[derive(JsonSchema)]
 pub struct ProjectRateLimit {
     ///The object type, which is always `project.rate_limit`
+    #[schemars(extend("enum" = ["project.rate_limit"]))]
     pub object: String,
     ///The identifier, which can be referenced in API endpoints.
     pub id: String,
@@ -9899,6 +10356,7 @@ impl schematic_define::Registration for ProjectRateLimit {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectRateLimitListResponse {
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     pub data: Vec<ProjectRateLimit>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -9954,12 +10412,14 @@ impl schematic_define::Registration for ProjectRateLimitUpdateRequest {
 #[derive(JsonSchema)]
 pub struct ProjectServiceAccount {
     ///The object type, which is always `organization.project.service_account`
+    #[schemars(extend("enum" = ["organization.project.service_account"]))]
     pub object: String,
     ///The identifier, which can be referenced in API endpoints
     pub id: String,
     ///The name of the service account
     pub name: String,
     ///`owner`, `member`, or `none`
+    #[schemars(extend("enum" = ["owner", "member", "none"]))]
     pub role: String,
     ///The Unix timestamp (in seconds) of when the service account was created
     pub created_at: i64,
@@ -9978,6 +10438,7 @@ impl schematic_define::Registration for ProjectServiceAccount {
 #[derive(JsonSchema)]
 pub struct ProjectServiceAccountApiKey {
     ///The object type, which is always `organization.project.service_account.api_key`
+    #[schemars(extend("enum" = ["organization.project.service_account.api_key"]))]
     pub object: String,
     pub value: String,
     pub name: String,
@@ -10015,10 +10476,12 @@ impl schematic_define::Registration for ProjectServiceAccountCreateRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectServiceAccountCreateResponse {
+    #[schemars(extend("enum" = ["organization.project.service_account"]))]
     pub object: String,
     pub id: String,
     pub name: String,
     ///Service accounts created with default project membership have role `member`. Accounts created with `create_service_account_only` have role `none`.
+    #[schemars(extend("enum" = ["member", "none"]))]
     pub role: String,
     pub created_at: i64,
     pub api_key: serde_json::Value,
@@ -10036,6 +10499,7 @@ impl schematic_define::Registration for ProjectServiceAccountCreateResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectServiceAccountDeleteResponse {
+    #[schemars(extend("enum" = ["organization.project.service_account.deleted"]))]
     pub object: String,
     pub id: String,
     pub deleted: bool,
@@ -10053,6 +10517,7 @@ impl schematic_define::Registration for ProjectServiceAccountDeleteResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectServiceAccountListResponse {
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     pub data: Vec<ProjectServiceAccount>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -10078,12 +10543,15 @@ pub struct ProjectSpendAlert {
     ///The identifier, which can be referenced in API endpoints.
     pub id: String,
     ///The object type, which is always `project.spend_alert`.
+    #[schemars(extend("enum" = ["project.spend_alert"]))]
     pub object: String,
     ///The alert threshold amount, in cents.
     pub threshold_amount: i64,
     ///The currency for the threshold amount.
+    #[schemars(extend("enum" = ["USD"]))]
     pub currency: String,
     ///The time interval for evaluating spend against the threshold.
+    #[schemars(extend("enum" = ["month"]))]
     pub interval: String,
     pub notification_channel: SpendAlertNotificationChannel,
 }
@@ -10102,6 +10570,7 @@ pub struct ProjectSpendAlertDeletedResource {
     ///The deleted spend alert ID.
     pub id: String,
     ///Always `project.spend_alert.deleted`.
+    #[schemars(extend("enum" = ["project.spend_alert.deleted"]))]
     pub object: String,
     ///Whether the spend alert was deleted.
     pub deleted: bool,
@@ -10121,6 +10590,7 @@ impl schematic_define::Registration for ProjectSpendAlertDeletedResource {
 #[derive(JsonSchema)]
 pub struct ProjectSpendAlertListResource {
     ///Always `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///Spend alerts returned in the current page.
     pub data: Vec<ProjectSpendAlert>,
@@ -10167,6 +10637,7 @@ impl schematic_define::Registration for ProjectUpdateRequest {
 #[derive(JsonSchema)]
 pub struct ProjectUser {
     ///The object type, which is always `organization.project.user`
+    #[schemars(extend("enum" = ["organization.project.user"]))]
     pub object: String,
     ///The identifier, which can be referenced in API endpoints
     pub id: String,
@@ -10214,6 +10685,7 @@ impl schematic_define::Registration for ProjectUserCreateRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectUserDeleteResponse {
+    #[schemars(extend("enum" = ["organization.project.user.deleted"]))]
     pub object: String,
     pub id: String,
     pub deleted: bool,
@@ -10331,6 +10803,7 @@ impl schematic_define::Registration for PublicCreateOrganizationRoleBody {
 #[derive(JsonSchema)]
 pub struct PublicRoleListResource {
     ///Always `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///Roles returned in the current page.
     pub data: Vec<Role>,
@@ -10407,9 +10880,11 @@ event, otherwise an `error` event will be sent.*/
 pub struct RealtimeBetaClientEventConversationItemCreate {
     ///Optional client-generated ID used to identify this event.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 512u64))]
     pub event_id: Option<String>,
     ///The event type, must be `conversation.item.create`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.create"]))]
     pub type_: String,
     /**The ID of the preceding item after which the new item will be inserted.
 If not set, the new item will be appended to the end of the conversation.
@@ -10442,6 +10917,7 @@ pub struct RealtimeBetaClientEventConversationItemDelete {
     pub event_id: Option<String>,
     ///The event type, must be `conversation.item.delete`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.delete"]))]
     pub type_: String,
     ///The ID of the item to delete.
     pub item_id: String,
@@ -10468,6 +10944,7 @@ pub struct RealtimeBetaClientEventConversationItemRetrieve {
     pub event_id: Option<String>,
     ///The event type, must be `conversation.item.retrieve`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.retrieve"]))]
     pub type_: String,
     ///The ID of the item to retrieve.
     pub item_id: String,
@@ -10501,6 +10978,7 @@ pub struct RealtimeBetaClientEventConversationItemTruncate {
     pub event_id: Option<String>,
     ///The event type, must be `conversation.item.truncate`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.truncate"]))]
     pub type_: String,
     /**The ID of the assistant message item to truncate. Only assistant message
 items can be truncated.*/
@@ -10540,6 +11018,7 @@ pub struct RealtimeBetaClientEventInputAudioBufferAppend {
     pub event_id: Option<String>,
     ///The event type, must be `input_audio_buffer.append`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.append"]))]
     pub type_: String,
     /**Base64-encoded audio bytes. This must be in the format specified by the
 `input_audio_format` field in the session configuration.*/
@@ -10565,6 +11044,7 @@ pub struct RealtimeBetaClientEventInputAudioBufferClear {
     pub event_id: Option<String>,
     ///The event type, must be `input_audio_buffer.clear`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.clear"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for RealtimeBetaClientEventInputAudioBufferClear {
@@ -10595,6 +11075,7 @@ pub struct RealtimeBetaClientEventInputAudioBufferCommit {
     pub event_id: Option<String>,
     ///The event type, must be `input_audio_buffer.commit`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.commit"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for RealtimeBetaClientEventInputAudioBufferCommit {
@@ -10616,6 +11097,7 @@ pub struct RealtimeBetaClientEventOutputAudioBufferClear {
     pub event_id: Option<String>,
     ///The event type, must be `output_audio_buffer.clear`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["output_audio_buffer.clear"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for RealtimeBetaClientEventOutputAudioBufferClear {
@@ -10639,6 +11121,7 @@ pub struct RealtimeBetaClientEventResponseCancel {
     pub event_id: Option<String>,
     ///The event type, must be `response.cancel`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.cancel"]))]
     pub type_: String,
     /**A specific response ID to cancel - if not provided, will cancel an
 in-progress response in the default conversation.*/
@@ -10687,6 +11170,7 @@ pub struct RealtimeBetaClientEventResponseCreate {
     pub event_id: Option<String>,
     ///The event type, must be `response.create`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.create"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<RealtimeBetaResponseCreateParams>,
@@ -10719,6 +11203,7 @@ pub struct RealtimeBetaClientEventSessionUpdate {
     pub event_id: Option<String>,
     ///The event type, must be `session.update`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.update"]))]
     pub type_: String,
     pub session: RealtimeSessionCreateRequest,
 }
@@ -10741,6 +11226,7 @@ pub struct RealtimeBetaClientEventTranscriptionSessionUpdate {
     pub event_id: Option<String>,
     ///The event type, must be `transcription_session.update`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["transcription_session.update"]))]
     pub type_: String,
     pub session: RealtimeTranscriptionSessionCreateRequest,
 }
@@ -10764,10 +11250,21 @@ pub struct RealtimeBetaResponse {
     pub id: Option<String>,
     ///The object type, must be `realtime.response`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["realtime.response", null]))]
     pub object: Option<String>,
     /**The final status of the response (`completed`, `cancelled`, `failed`, or
 `incomplete`, `in_progress`).*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "enum" = ["completed",
+            "cancelled",
+            "failed",
+            "incomplete",
+            "in_progress",
+            null]
+        )
+    )]
     pub status: Option<String>,
     ///Additional details about the status.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -10798,9 +11295,11 @@ the `conversation_id` will be an id like `conv_1234`.*/
 the model will pick one, for example if `modalities` is `["text", "audio"]`, the model
 could be responding in either text or audio.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"enum":["text", "audio"], "type":"string"}))]
     pub modalities: Option<Vec<String>>,
     ///The format of output audio. Options are `pcm16`, `g711_ulaw`, or `g711_alaw`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw", null]))]
     pub output_audio_format: Option<String>,
     ///Sampling temperature for the model, limited to [0.6, 1.2]. Defaults to 0.8.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -10825,6 +11324,7 @@ pub struct RealtimeBetaResponseCreateParams {
     /**The set of modalities the model can respond with. To disable audio,
 set this to ["text"].*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"enum":["text", "audio"], "type":"string"}))]
     pub modalities: Option<Vec<String>>,
     /**The default system instructions (i.e. system message) prepended to model
 calls. This field allows the client to guide the model on desired
@@ -10844,6 +11344,7 @@ start of the session.*/
     pub voice: Option<VoiceIdsOrCustomVoice>,
     ///The format of output audio. Options are `pcm16`, `g711_ulaw`, or `g711_alaw`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw", null]))]
     pub output_audio_format: Option<String>,
     ///Tools (functions) available to the model.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -10905,6 +11406,7 @@ pub struct RealtimeBetaServerEventConversationItemCreated {
     pub event_id: String,
     ///The event type, must be `conversation.item.created`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.created"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_item_id: Option<serde_json::Value>,
@@ -10930,6 +11432,7 @@ pub struct RealtimeBetaServerEventConversationItemDeleted {
     pub event_id: String,
     ///The event type, must be `conversation.item.deleted`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.deleted"]))]
     pub type_: String,
     ///The ID of the item that was deleted.
     pub item_id: String,
@@ -10962,6 +11465,9 @@ pub struct RealtimeBetaServerEventConversationItemInputAudioTranscriptionComplet
     /**The event type, must be
 `conversation.item.input_audio_transcription.completed`.*/
     #[serde(rename = "type")]
+    #[schemars(
+        extend("enum" = ["conversation.item.input_audio_transcription.completed"])
+    )]
     pub type_: String,
     ///The ID of the user message item containing the audio.
     pub item_id: String,
@@ -10998,6 +11504,7 @@ pub struct RealtimeBetaServerEventConversationItemInputAudioTranscriptionDelta {
     pub event_id: String,
     ///The event type, must be `conversation.item.input_audio_transcription.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.input_audio_transcription.delta"]))]
     pub type_: String,
     ///The ID of the item.
     pub item_id: String,
@@ -11032,6 +11539,7 @@ pub struct RealtimeBetaServerEventConversationItemInputAudioTranscriptionFailed 
     /**The event type, must be
 `conversation.item.input_audio_transcription.failed`.*/
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.input_audio_transcription.failed"]))]
     pub type_: String,
     ///The ID of the user message item.
     pub item_id: String,
@@ -11059,6 +11567,7 @@ pub struct RealtimeBetaServerEventConversationItemInputAudioTranscriptionSegment
     pub event_id: String,
     ///The event type, must be `conversation.item.input_audio_transcription.segment`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.input_audio_transcription.segment"]))]
     pub type_: String,
     ///The ID of the item containing the input audio content.
     pub item_id: String,
@@ -11094,6 +11603,7 @@ pub struct RealtimeBetaServerEventConversationItemRetrieved {
     pub event_id: String,
     ///The event type, must be `conversation.item.retrieved`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.retrieved"]))]
     pub type_: String,
     pub item: RealtimeConversationItem,
 }
@@ -11121,6 +11631,7 @@ pub struct RealtimeBetaServerEventConversationItemTruncated {
     pub event_id: String,
     ///The event type, must be `conversation.item.truncated`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.truncated"]))]
     pub type_: String,
     ///The ID of the assistant message item that was truncated.
     pub item_id: String,
@@ -11150,6 +11661,7 @@ pub struct RealtimeBetaServerEventError {
     pub event_id: String,
     ///The event type, must be `error`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["error"]))]
     pub type_: String,
     ///Details of the error.
     pub error: serde_json::Value,
@@ -11173,6 +11685,7 @@ pub struct RealtimeBetaServerEventInputAudioBufferCleared {
     pub event_id: String,
     ///The event type, must be `input_audio_buffer.cleared`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.cleared"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for RealtimeBetaServerEventInputAudioBufferCleared {
@@ -11196,6 +11709,7 @@ pub struct RealtimeBetaServerEventInputAudioBufferCommitted {
     pub event_id: String,
     ///The event type, must be `input_audio_buffer.committed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.committed"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_item_id: Option<serde_json::Value>,
@@ -11230,6 +11744,7 @@ pub struct RealtimeBetaServerEventInputAudioBufferSpeechStarted {
     pub event_id: String,
     ///The event type, must be `input_audio_buffer.speech_started`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.speech_started"]))]
     pub type_: String,
     /**Milliseconds from the start of all audio written to the buffer during the
 session when speech was first detected. This will correspond to the
@@ -11260,6 +11775,7 @@ pub struct RealtimeBetaServerEventInputAudioBufferSpeechStopped {
     pub event_id: String,
     ///The event type, must be `input_audio_buffer.speech_stopped`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.speech_stopped"]))]
     pub type_: String,
     /**Milliseconds since the session started when speech stopped. This will
 correspond to the end of audio sent to the model, and thus includes the
@@ -11287,6 +11803,7 @@ pub struct RealtimeBetaServerEventMCPListToolsCompleted {
     pub event_id: String,
     ///The event type, must be `mcp_list_tools.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_list_tools.completed"]))]
     pub type_: String,
     ///The ID of the MCP list tools item.
     pub item_id: String,
@@ -11309,6 +11826,7 @@ pub struct RealtimeBetaServerEventMCPListToolsFailed {
     pub event_id: String,
     ///The event type, must be `mcp_list_tools.failed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_list_tools.failed"]))]
     pub type_: String,
     ///The ID of the MCP list tools item.
     pub item_id: String,
@@ -11331,6 +11849,7 @@ pub struct RealtimeBetaServerEventMCPListToolsInProgress {
     pub event_id: String,
     ///The event type, must be `mcp_list_tools.in_progress`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_list_tools.in_progress"]))]
     pub type_: String,
     ///The ID of the MCP list tools item.
     pub item_id: String,
@@ -11356,6 +11875,7 @@ pub struct RealtimeBetaServerEventRateLimitsUpdated {
     pub event_id: String,
     ///The event type, must be `rate_limits.updated`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["rate_limits.updated"]))]
     pub type_: String,
     ///List of rate limit information.
     pub rate_limits: Vec<serde_json::Value>,
@@ -11378,6 +11898,7 @@ pub struct RealtimeBetaServerEventResponseAudioDelta {
     pub event_id: String,
     ///The event type, must be `response.output_audio.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_audio.delta"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -11409,6 +11930,7 @@ pub struct RealtimeBetaServerEventResponseAudioDone {
     pub event_id: String,
     ///The event type, must be `response.output_audio.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_audio.done"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -11437,6 +11959,7 @@ pub struct RealtimeBetaServerEventResponseAudioTranscriptDelta {
     pub event_id: String,
     ///The event type, must be `response.output_audio_transcript.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_audio_transcript.delta"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -11470,6 +11993,7 @@ pub struct RealtimeBetaServerEventResponseAudioTranscriptDone {
     pub event_id: String,
     ///The event type, must be `response.output_audio_transcript.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_audio_transcript.done"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -11502,6 +12026,7 @@ pub struct RealtimeBetaServerEventResponseContentPartAdded {
     pub event_id: String,
     ///The event type, must be `response.content_part.added`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.content_part.added"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -11533,6 +12058,7 @@ pub struct RealtimeBetaServerEventResponseContentPartDone {
     pub event_id: String,
     ///The event type, must be `response.content_part.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.content_part.done"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -11564,6 +12090,7 @@ pub struct RealtimeBetaServerEventResponseCreated {
     pub event_id: String,
     ///The event type, must be `response.created`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.created"]))]
     pub type_: String,
     pub response: RealtimeBetaResponse,
 }
@@ -11587,6 +12114,7 @@ pub struct RealtimeBetaServerEventResponseDone {
     pub event_id: String,
     ///The event type, must be `response.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.done"]))]
     pub type_: String,
     pub response: RealtimeBetaResponse,
 }
@@ -11608,6 +12136,7 @@ pub struct RealtimeBetaServerEventResponseFunctionCallArgumentsDelta {
     pub event_id: String,
     ///The event type, must be `response.function_call_arguments.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.function_call_arguments.delta"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -11640,6 +12169,7 @@ pub struct RealtimeBetaServerEventResponseFunctionCallArgumentsDone {
     pub event_id: String,
     ///The event type, must be `response.function_call_arguments.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.function_call_arguments.done"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -11673,6 +12203,7 @@ pub struct RealtimeBetaServerEventResponseMCPCallArgumentsDelta {
     pub event_id: String,
     ///The event type, must be `response.mcp_call_arguments.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call_arguments.delta"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -11704,6 +12235,7 @@ pub struct RealtimeBetaServerEventResponseMCPCallArgumentsDone {
     pub event_id: String,
     ///The event type, must be `response.mcp_call_arguments.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call_arguments.done"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -11733,6 +12265,7 @@ pub struct RealtimeBetaServerEventResponseMCPCallCompleted {
     pub event_id: String,
     ///The event type, must be `response.mcp_call.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call.completed"]))]
     pub type_: String,
     ///The index of the output item in the response.
     pub output_index: i64,
@@ -11757,6 +12290,7 @@ pub struct RealtimeBetaServerEventResponseMCPCallFailed {
     pub event_id: String,
     ///The event type, must be `response.mcp_call.failed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call.failed"]))]
     pub type_: String,
     ///The index of the output item in the response.
     pub output_index: i64,
@@ -11781,6 +12315,7 @@ pub struct RealtimeBetaServerEventResponseMCPCallInProgress {
     pub event_id: String,
     ///The event type, must be `response.mcp_call.in_progress`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call.in_progress"]))]
     pub type_: String,
     ///The index of the output item in the response.
     pub output_index: i64,
@@ -11806,6 +12341,7 @@ pub struct RealtimeBetaServerEventResponseOutputItemAdded {
     pub event_id: String,
     ///The event type, must be `response.output_item.added`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_item.added"]))]
     pub type_: String,
     ///The ID of the Response to which the item belongs.
     pub response_id: String,
@@ -11832,6 +12368,7 @@ pub struct RealtimeBetaServerEventResponseOutputItemDone {
     pub event_id: String,
     ///The event type, must be `response.output_item.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_item.done"]))]
     pub type_: String,
     ///The ID of the Response to which the item belongs.
     pub response_id: String,
@@ -11857,6 +12394,7 @@ pub struct RealtimeBetaServerEventResponseTextDelta {
     pub event_id: String,
     ///The event type, must be `response.output_text.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_text.delta"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -11888,6 +12426,7 @@ pub struct RealtimeBetaServerEventResponseTextDone {
     pub event_id: String,
     ///The event type, must be `response.output_text.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_text.done"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -11920,6 +12459,7 @@ pub struct RealtimeBetaServerEventSessionCreated {
     pub event_id: String,
     ///The event type, must be `session.created`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.created"]))]
     pub type_: String,
     pub session: RealtimeSession,
 }
@@ -11942,6 +12482,7 @@ pub struct RealtimeBetaServerEventSessionUpdated {
     pub event_id: String,
     ///The event type, must be `session.updated`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.updated"]))]
     pub type_: String,
     pub session: RealtimeSession,
 }
@@ -11963,6 +12504,7 @@ pub struct RealtimeBetaServerEventTranscriptionSessionCreated {
     pub event_id: String,
     ///The event type, must be `transcription_session.created`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["transcription_session.created"]))]
     pub type_: String,
     pub session: RealtimeTranscriptionSessionCreateResponse,
 }
@@ -11986,6 +12528,7 @@ pub struct RealtimeBetaServerEventTranscriptionSessionUpdated {
     pub event_id: String,
     ///The event type, must be `transcription_session.updated`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["transcription_session.updated"]))]
     pub type_: String,
     pub session: RealtimeTranscriptionSessionCreateResponse,
 }
@@ -12187,9 +12730,11 @@ event, otherwise an `error` event will be sent.*/
 pub struct RealtimeClientEventConversationItemCreate {
     ///Optional client-generated ID used to identify this event.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 512u64))]
     pub event_id: Option<String>,
     ///The event type, must be `conversation.item.create`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.create"]))]
     pub type_: String,
     /**The ID of the preceding item after which the new item will be inserted. If not set, the new item will be appended to the end of the conversation.
 
@@ -12219,9 +12764,11 @@ server will respond with an error.*/
 pub struct RealtimeClientEventConversationItemDelete {
     ///Optional client-generated ID used to identify this event.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 512u64))]
     pub event_id: Option<String>,
     ///The event type, must be `conversation.item.delete`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.delete"]))]
     pub type_: String,
     ///The ID of the item to delete.
     pub item_id: String,
@@ -12245,9 +12792,11 @@ server will respond with an error.*/
 pub struct RealtimeClientEventConversationItemRetrieve {
     ///Optional client-generated ID used to identify this event.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 512u64))]
     pub event_id: Option<String>,
     ///The event type, must be `conversation.item.retrieve`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.retrieve"]))]
     pub type_: String,
     ///The ID of the item to retrieve.
     pub item_id: String,
@@ -12278,9 +12827,11 @@ event.*/
 pub struct RealtimeClientEventConversationItemTruncate {
     ///Optional client-generated ID used to identify this event.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 512u64))]
     pub event_id: Option<String>,
     ///The event type, must be `conversation.item.truncate`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.truncate"]))]
     pub type_: String,
     /**The ID of the assistant message item to truncate. Only assistant message
 items can be truncated.*/
@@ -12320,9 +12871,11 @@ not send a confirmation response to this event.*/
 pub struct RealtimeClientEventInputAudioBufferAppend {
     ///Optional client-generated ID used to identify this event.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 512u64))]
     pub event_id: Option<String>,
     ///The event type, must be `input_audio_buffer.append`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.append"]))]
     pub type_: String,
     /**Base64-encoded audio bytes. This must be in the format specified by the
 `input_audio_format` field in the session configuration.*/
@@ -12345,9 +12898,11 @@ respond with an `input_audio_buffer.cleared` event.*/
 pub struct RealtimeClientEventInputAudioBufferClear {
     ///Optional client-generated ID used to identify this event.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 512u64))]
     pub event_id: Option<String>,
     ///The event type, must be `input_audio_buffer.clear`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.clear"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for RealtimeClientEventInputAudioBufferClear {
@@ -12368,9 +12923,11 @@ Committing the input audio buffer will trigger input audio transcription  (if en
 pub struct RealtimeClientEventInputAudioBufferCommit {
     ///Optional client-generated ID used to identify this event.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 512u64))]
     pub event_id: Option<String>,
     ///The event type, must be `input_audio_buffer.commit`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.commit"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for RealtimeClientEventInputAudioBufferCommit {
@@ -12392,6 +12949,7 @@ pub struct RealtimeClientEventOutputAudioBufferClear {
     pub event_id: Option<String>,
     ///The event type, must be `output_audio_buffer.clear`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["output_audio_buffer.clear"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for RealtimeClientEventOutputAudioBufferClear {
@@ -12414,9 +12972,11 @@ returned the session will remain unaffected.*/
 pub struct RealtimeClientEventResponseCancel {
     ///Optional client-generated ID used to identify this event.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 512u64))]
     pub event_id: Option<String>,
     ///The event type, must be `response.cancel`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.cancel"]))]
     pub type_: String,
     /**A specific response ID to cancel - if not provided, will cancel an
 in-progress response in the default conversation.*/
@@ -12463,9 +13023,11 @@ raw Items and references to existing Items.*/
 pub struct RealtimeClientEventResponseCreate {
     ///Optional client-generated ID used to identify this event.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 512u64))]
     pub event_id: Option<String>,
     ///The event type, must be `response.create`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.create"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<RealtimeResponseCreateParams>,
@@ -12494,9 +13056,11 @@ To clear a field like `turn_detection`, pass `null`.*/
 pub struct RealtimeClientEventSessionUpdate {
     ///Optional client-generated ID used to identify this event. This is an arbitrary string that a client may assign. It will be passed back if there is an error with the event, but the corresponding `session.updated` event will not include it.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 512u64))]
     pub event_id: Option<String>,
     ///The event type, must be `session.update`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.update"]))]
     pub type_: String,
     /**Update the Realtime session. Choose either a realtime
 session or a transcription session.*/
@@ -12521,6 +13085,7 @@ pub struct RealtimeClientEventTranscriptionSessionUpdate {
     pub event_id: Option<String>,
     ///The event type, must be `transcription_session.update`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["transcription_session.update"]))]
     pub type_: String,
     pub session: RealtimeTranscriptionSessionCreateRequest,
 }
@@ -12642,12 +13207,15 @@ pub struct RealtimeConversationItemFunctionCall {
     pub id: Option<String>,
     ///Identifier for the API object being returned - always `realtime.item`. Optional when creating a new item.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["realtime.item", null]))]
     pub object: Option<String>,
     ///The type of the item. Always `function_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function_call"]))]
     pub type_: String,
     ///The status of the item. Has no effect on the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress", null]))]
     pub status: Option<String>,
     ///The ID of the function call.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -12676,12 +13244,15 @@ pub struct RealtimeConversationItemFunctionCallOutput {
     pub id: Option<String>,
     ///Identifier for the API object being returned - always `realtime.item`. Optional when creating a new item.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["realtime.item", null]))]
     pub object: Option<String>,
     ///The type of the item. Always `function_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function_call_output"]))]
     pub type_: String,
     ///The status of the item. Has no effect on the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress", null]))]
     pub status: Option<String>,
     ///The ID of the function call this output is for.
     pub call_id: String,
@@ -12707,14 +13278,18 @@ pub struct RealtimeConversationItemMessageAssistant {
     pub id: Option<String>,
     ///Identifier for the API object being returned - always `realtime.item`. Optional when creating a new item.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["realtime.item", null]))]
     pub object: Option<String>,
     ///The type of the item. Always `message`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["message"]))]
     pub type_: String,
     ///The status of the item. Has no effect on the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress", null]))]
     pub status: Option<String>,
     ///The role of the message sender. Always `assistant`.
+    #[schemars(extend("enum" = ["assistant"]))]
     pub role: String,
     ///The content of the message.
     pub content: Vec<serde_json::Value>,
@@ -12738,14 +13313,18 @@ pub struct RealtimeConversationItemMessageSystem {
     pub id: Option<String>,
     ///Identifier for the API object being returned - always `realtime.item`. Optional when creating a new item.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["realtime.item", null]))]
     pub object: Option<String>,
     ///The type of the item. Always `message`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["message"]))]
     pub type_: String,
     ///The status of the item. Has no effect on the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress", null]))]
     pub status: Option<String>,
     ///The role of the message sender. Always `system`.
+    #[schemars(extend("enum" = ["system"]))]
     pub role: String,
     ///The content of the message.
     pub content: Vec<serde_json::Value>,
@@ -12769,14 +13348,18 @@ pub struct RealtimeConversationItemMessageUser {
     pub id: Option<String>,
     ///Identifier for the API object being returned - always `realtime.item`. Optional when creating a new item.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["realtime.item", null]))]
     pub object: Option<String>,
     ///The type of the item. Always `message`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["message"]))]
     pub type_: String,
     ///The status of the item. Has no effect on the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress", null]))]
     pub status: Option<String>,
     ///The role of the message sender. Always `user`.
+    #[schemars(extend("enum" = ["user"]))]
     pub role: String,
     ///The content of the message.
     pub content: Vec<serde_json::Value>,
@@ -12806,18 +13389,24 @@ reference to any item that has previously existed in the conversation.*/
     ///The type of the item (`message`, `function_call`, `function_call_output`, `item_reference`).
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("enum" = ["message", "function_call", "function_call_output", null])
+    )]
     pub type_: Option<String>,
     ///Identifier for the API object being returned - always `realtime.item`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["realtime.item", null]))]
     pub object: Option<String>,
     /**The status of the item (`completed`, `incomplete`, `in_progress`). These have no effect
 on the conversation, but are accepted for consistency with the
 `conversation.item.created` event.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress", null]))]
     pub status: Option<String>,
     /**The role of the message sender (`user`, `assistant`, `system`), only
 applicable for `message` items.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["user", "assistant", "system", null]))]
     pub role: Option<String>,
     /**The content of the message, applicable for `message` items.
 - Message items of role `system` support only `input_text` content
@@ -12906,6 +13495,7 @@ pub struct RealtimeFunctionTool {
     ///The type of the tool, i.e. `function`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["function", null]))]
     pub type_: Option<String>,
     ///The name of the function.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -12933,6 +13523,7 @@ impl schematic_define::Registration for RealtimeFunctionTool {
 pub struct RealtimeMCPApprovalRequest {
     ///The type of the item. Always `mcp_approval_request`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_approval_request"]))]
     pub type_: String,
     ///The unique ID of the approval request.
     pub id: String,
@@ -12959,6 +13550,7 @@ impl schematic_define::Registration for RealtimeMCPApprovalRequest {
 pub struct RealtimeMCPApprovalResponse {
     ///The type of the item. Always `mcp_approval_response`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_approval_response"]))]
     pub type_: String,
     ///The unique ID of the approval response.
     pub id: String,
@@ -12983,6 +13575,7 @@ impl schematic_define::Registration for RealtimeMCPApprovalResponse {
 #[derive(JsonSchema)]
 pub struct RealtimeMCPHTTPError {
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["http_error"]))]
     pub type_: String,
     pub code: i64,
     pub message: String,
@@ -13001,6 +13594,7 @@ impl schematic_define::Registration for RealtimeMCPHTTPError {
 pub struct RealtimeMCPListTools {
     ///The type of the item. Always `mcp_list_tools`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_list_tools"]))]
     pub type_: String,
     ///The unique ID of the list.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -13022,6 +13616,7 @@ impl schematic_define::Registration for RealtimeMCPListTools {
 #[derive(JsonSchema)]
 pub struct RealtimeMCPProtocolError {
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["protocol_error"]))]
     pub type_: String,
     pub code: i64,
     pub message: String,
@@ -13042,6 +13637,7 @@ impl schematic_define::Registration for RealtimeMCPProtocolError {
 pub struct RealtimeMCPToolCall {
     ///The type of the item. Always `mcp_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_call"]))]
     pub type_: String,
     ///The unique ID of the tool call.
     pub id: String,
@@ -13070,6 +13666,7 @@ impl schematic_define::Registration for RealtimeMCPToolCall {
 #[derive(JsonSchema)]
 pub struct RealtimeMCPToolExecutionError {
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["tool_execution_error"]))]
     pub type_: String,
     pub message: String,
 }
@@ -13134,10 +13731,21 @@ pub struct RealtimeResponse {
     pub id: Option<String>,
     ///The object type, must be `realtime.response`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["realtime.response", null]))]
     pub object: Option<String>,
     /**The final status of the response (`completed`, `cancelled`, `failed`, or
 `incomplete`, `in_progress`).*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "enum" = ["completed",
+            "cancelled",
+            "failed",
+            "incomplete",
+            "in_progress",
+            null]
+        )
+    )]
     pub status: Option<String>,
     ///Additional details about the status.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -13168,6 +13776,7 @@ automatically by VAD the response will be added to the default conversation*/
 `[\"audio\"]`, `[\"text\"]`. Audio output always include a text transcript. Setting the
 output to mode `text` will disable audio output from the model.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"enum":["text", "audio"], "type":"string"}))]
     pub output_modalities: Option<Vec<String>>,
     /**Maximum number of output tokens for a single assistant response,
 inclusive of tool calls, that was used in this response.*/
@@ -13190,6 +13799,7 @@ pub struct RealtimeResponseCreateParams {
 `[\"audio\"]`, `[\"text\"]`. Audio output always include a text transcript. Setting the
 output to mode `text` will disable audio output from the model.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"enum":["text", "audio"], "type":"string"}))]
     pub output_modalities: Option<Vec<String>>,
     /**The default system instructions (i.e. system message) prepended to model calls. This field allows the client to guide the model on desired responses. The model can be instructed on response content and format, (e.g. "be extremely succinct", "act friendly", "here are examples of good responses") and on audio behavior (e.g. "talk quickly", "inject emotion into your voice", "laugh frequently"). The instructions are not guaranteed to be followed by the model, but they provide guidance to the model on the desired behavior.
 Note that the server sets default instructions which will be used if this field is not set and are visible in the `session.created` event at the start of the session.*/
@@ -13599,6 +14209,7 @@ pub struct RealtimeServerEventConversationCreated {
     pub event_id: String,
     ///The event type, must be `conversation.created`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.created"]))]
     pub type_: String,
     ///The conversation resource.
     pub conversation: serde_json::Value,
@@ -13626,6 +14237,7 @@ pub struct RealtimeServerEventConversationItemAdded {
     pub event_id: String,
     ///The event type, must be `conversation.item.added`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.added"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_item_id: Option<serde_json::Value>,
@@ -13657,6 +14269,7 @@ pub struct RealtimeServerEventConversationItemCreated {
     pub event_id: String,
     ///The event type, must be `conversation.item.created`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.created"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_item_id: Option<serde_json::Value>,
@@ -13682,6 +14295,7 @@ pub struct RealtimeServerEventConversationItemDeleted {
     pub event_id: String,
     ///The event type, must be `conversation.item.deleted`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.deleted"]))]
     pub type_: String,
     ///The ID of the item that was deleted.
     pub item_id: String,
@@ -13706,6 +14320,7 @@ pub struct RealtimeServerEventConversationItemDone {
     pub event_id: String,
     ///The event type, must be `conversation.item.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.done"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_item_id: Option<serde_json::Value>,
@@ -13739,6 +14354,9 @@ pub struct RealtimeServerEventConversationItemInputAudioTranscriptionCompleted {
     /**The event type, must be
 `conversation.item.input_audio_transcription.completed`.*/
     #[serde(rename = "type")]
+    #[schemars(
+        extend("enum" = ["conversation.item.input_audio_transcription.completed"])
+    )]
     pub type_: String,
     ///The ID of the item containing the audio that is being transcribed.
     pub item_id: String,
@@ -13773,6 +14391,7 @@ pub struct RealtimeServerEventConversationItemInputAudioTranscriptionDelta {
     pub event_id: String,
     ///The event type, must be `conversation.item.input_audio_transcription.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.input_audio_transcription.delta"]))]
     pub type_: String,
     ///The ID of the item containing the audio that is being transcribed.
     pub item_id: String,
@@ -13807,6 +14426,7 @@ pub struct RealtimeServerEventConversationItemInputAudioTranscriptionFailed {
     /**The event type, must be
 `conversation.item.input_audio_transcription.failed`.*/
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.input_audio_transcription.failed"]))]
     pub type_: String,
     ///The ID of the user message item.
     pub item_id: String,
@@ -13834,6 +14454,7 @@ pub struct RealtimeServerEventConversationItemInputAudioTranscriptionSegment {
     pub event_id: String,
     ///The event type, must be `conversation.item.input_audio_transcription.segment`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.input_audio_transcription.segment"]))]
     pub type_: String,
     ///The ID of the item containing the input audio content.
     pub item_id: String,
@@ -13869,6 +14490,7 @@ pub struct RealtimeServerEventConversationItemRetrieved {
     pub event_id: String,
     ///The event type, must be `conversation.item.retrieved`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.retrieved"]))]
     pub type_: String,
     pub item: RealtimeConversationItem,
 }
@@ -13895,6 +14517,7 @@ pub struct RealtimeServerEventConversationItemTruncated {
     pub event_id: String,
     ///The event type, must be `conversation.item.truncated`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["conversation.item.truncated"]))]
     pub type_: String,
     ///The ID of the assistant message item that was truncated.
     pub item_id: String,
@@ -13923,6 +14546,7 @@ pub struct RealtimeServerEventError {
     pub event_id: String,
     ///The event type, must be `error`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["error"]))]
     pub type_: String,
     ///Details of the error.
     pub error: serde_json::Value,
@@ -13946,6 +14570,7 @@ pub struct RealtimeServerEventInputAudioBufferCleared {
     pub event_id: String,
     ///The event type, must be `input_audio_buffer.cleared`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.cleared"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for RealtimeServerEventInputAudioBufferCleared {
@@ -13969,6 +14594,7 @@ pub struct RealtimeServerEventInputAudioBufferCommitted {
     pub event_id: String,
     ///The event type, must be `input_audio_buffer.committed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.committed"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_item_id: Option<serde_json::Value>,
@@ -13991,6 +14617,7 @@ impl schematic_define::Registration for RealtimeServerEventInputAudioBufferCommi
 pub struct RealtimeServerEventInputAudioBufferDtmfEventReceived {
     ///The event type, must be `input_audio_buffer.dtmf_event_received`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.dtmf_event_received"]))]
     pub type_: String,
     ///The telephone keypad that was pressed by the user.
     pub event: String,
@@ -14025,6 +14652,7 @@ pub struct RealtimeServerEventInputAudioBufferSpeechStarted {
     pub event_id: String,
     ///The event type, must be `input_audio_buffer.speech_started`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.speech_started"]))]
     pub type_: String,
     /**Milliseconds from the start of all audio written to the buffer during the
 session when speech was first detected. This will correspond to the
@@ -14055,6 +14683,7 @@ pub struct RealtimeServerEventInputAudioBufferSpeechStopped {
     pub event_id: String,
     ///The event type, must be `input_audio_buffer.speech_stopped`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.speech_stopped"]))]
     pub type_: String,
     /**Milliseconds since the session started when speech stopped. This will
 correspond to the end of audio sent to the model, and thus includes the
@@ -14094,6 +14723,7 @@ pub struct RealtimeServerEventInputAudioBufferTimeoutTriggered {
     pub event_id: String,
     ///The event type, must be `input_audio_buffer.timeout_triggered`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio_buffer.timeout_triggered"]))]
     pub type_: String,
     ///Millisecond offset of audio written to the input audio buffer that was after the playback time of the last model response.
     pub audio_start_ms: i64,
@@ -14121,6 +14751,7 @@ pub struct RealtimeServerEventMCPListToolsCompleted {
     pub event_id: String,
     ///The event type, must be `mcp_list_tools.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_list_tools.completed"]))]
     pub type_: String,
     ///The ID of the MCP list tools item.
     pub item_id: String,
@@ -14143,6 +14774,7 @@ pub struct RealtimeServerEventMCPListToolsFailed {
     pub event_id: String,
     ///The event type, must be `mcp_list_tools.failed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_list_tools.failed"]))]
     pub type_: String,
     ///The ID of the MCP list tools item.
     pub item_id: String,
@@ -14165,6 +14797,7 @@ pub struct RealtimeServerEventMCPListToolsInProgress {
     pub event_id: String,
     ///The event type, must be `mcp_list_tools.in_progress`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_list_tools.in_progress"]))]
     pub type_: String,
     ///The ID of the MCP list tools item.
     pub item_id: String,
@@ -14187,6 +14820,7 @@ pub struct RealtimeServerEventOutputAudioBufferCleared {
     pub event_id: String,
     ///The event type, must be `output_audio_buffer.cleared`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["output_audio_buffer.cleared"]))]
     pub type_: String,
     ///The unique ID of the response that produced the audio.
     pub response_id: String,
@@ -14209,6 +14843,7 @@ pub struct RealtimeServerEventOutputAudioBufferStarted {
     pub event_id: String,
     ///The event type, must be `output_audio_buffer.started`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["output_audio_buffer.started"]))]
     pub type_: String,
     ///The unique ID of the response that produced the audio.
     pub response_id: String,
@@ -14231,6 +14866,7 @@ pub struct RealtimeServerEventOutputAudioBufferStopped {
     pub event_id: String,
     ///The event type, must be `output_audio_buffer.stopped`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["output_audio_buffer.stopped"]))]
     pub type_: String,
     ///The unique ID of the response that produced the audio.
     pub response_id: String,
@@ -14256,6 +14892,7 @@ pub struct RealtimeServerEventRateLimitsUpdated {
     pub event_id: String,
     ///The event type, must be `rate_limits.updated`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["rate_limits.updated"]))]
     pub type_: String,
     ///List of rate limit information.
     pub rate_limits: Vec<serde_json::Value>,
@@ -14278,6 +14915,7 @@ pub struct RealtimeServerEventResponseAudioDelta {
     pub event_id: String,
     ///The event type, must be `response.output_audio.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_audio.delta"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -14309,6 +14947,7 @@ pub struct RealtimeServerEventResponseAudioDone {
     pub event_id: String,
     ///The event type, must be `response.output_audio.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_audio.done"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -14337,6 +14976,7 @@ pub struct RealtimeServerEventResponseAudioTranscriptDelta {
     pub event_id: String,
     ///The event type, must be `response.output_audio_transcript.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_audio_transcript.delta"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -14369,6 +15009,7 @@ pub struct RealtimeServerEventResponseAudioTranscriptDone {
     pub event_id: String,
     ///The event type, must be `response.output_audio_transcript.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_audio_transcript.done"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -14400,6 +15041,7 @@ pub struct RealtimeServerEventResponseContentPartAdded {
     pub event_id: String,
     ///The event type, must be `response.content_part.added`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.content_part.added"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -14431,6 +15073,7 @@ pub struct RealtimeServerEventResponseContentPartDone {
     pub event_id: String,
     ///The event type, must be `response.content_part.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.content_part.done"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -14462,6 +15105,7 @@ pub struct RealtimeServerEventResponseCreated {
     pub event_id: String,
     ///The event type, must be `response.created`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.created"]))]
     pub type_: String,
     pub response: RealtimeResponse,
 }
@@ -14491,6 +15135,7 @@ pub struct RealtimeServerEventResponseDone {
     pub event_id: String,
     ///The event type, must be `response.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.done"]))]
     pub type_: String,
     pub response: RealtimeResponse,
 }
@@ -14512,6 +15157,7 @@ pub struct RealtimeServerEventResponseFunctionCallArgumentsDelta {
     pub event_id: String,
     ///The event type, must be `response.function_call_arguments.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.function_call_arguments.delta"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -14544,6 +15190,7 @@ pub struct RealtimeServerEventResponseFunctionCallArgumentsDone {
     pub event_id: String,
     ///The event type, must be `response.function_call_arguments.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.function_call_arguments.done"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -14577,6 +15224,7 @@ pub struct RealtimeServerEventResponseMCPCallArgumentsDelta {
     pub event_id: String,
     ///The event type, must be `response.mcp_call_arguments.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call_arguments.delta"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -14608,6 +15256,7 @@ pub struct RealtimeServerEventResponseMCPCallArgumentsDone {
     pub event_id: String,
     ///The event type, must be `response.mcp_call_arguments.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call_arguments.done"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -14636,6 +15285,7 @@ pub struct RealtimeServerEventResponseMCPCallCompleted {
     pub event_id: String,
     ///The event type, must be `response.mcp_call.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call.completed"]))]
     pub type_: String,
     ///The index of the output item in the response.
     pub output_index: i64,
@@ -14660,6 +15310,7 @@ pub struct RealtimeServerEventResponseMCPCallFailed {
     pub event_id: String,
     ///The event type, must be `response.mcp_call.failed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call.failed"]))]
     pub type_: String,
     ///The index of the output item in the response.
     pub output_index: i64,
@@ -14684,6 +15335,7 @@ pub struct RealtimeServerEventResponseMCPCallInProgress {
     pub event_id: String,
     ///The event type, must be `response.mcp_call.in_progress`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call.in_progress"]))]
     pub type_: String,
     ///The index of the output item in the response.
     pub output_index: i64,
@@ -14708,6 +15360,7 @@ pub struct RealtimeServerEventResponseOutputItemAdded {
     pub event_id: String,
     ///The event type, must be `response.output_item.added`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_item.added"]))]
     pub type_: String,
     ///The ID of the Response to which the item belongs.
     pub response_id: String,
@@ -14734,6 +15387,7 @@ pub struct RealtimeServerEventResponseOutputItemDone {
     pub event_id: String,
     ///The event type, must be `response.output_item.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_item.done"]))]
     pub type_: String,
     ///The ID of the Response to which the item belongs.
     pub response_id: String,
@@ -14759,6 +15413,7 @@ pub struct RealtimeServerEventResponseTextDelta {
     pub event_id: String,
     ///The event type, must be `response.output_text.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_text.delta"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -14790,6 +15445,7 @@ pub struct RealtimeServerEventResponseTextDone {
     pub event_id: String,
     ///The event type, must be `response.output_text.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_text.done"]))]
     pub type_: String,
     ///The ID of the response.
     pub response_id: String,
@@ -14822,6 +15478,7 @@ pub struct RealtimeServerEventSessionCreated {
     pub event_id: String,
     ///The event type, must be `session.created`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.created"]))]
     pub type_: String,
     ///The session configuration.
     pub session: serde_json::Value,
@@ -14845,6 +15502,7 @@ pub struct RealtimeServerEventSessionUpdated {
     pub event_id: String,
     ///The event type, must be `session.updated`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.updated"]))]
     pub type_: String,
     ///The session configuration.
     pub session: serde_json::Value,
@@ -14868,6 +15526,7 @@ pub struct RealtimeServerEventTranscriptionSessionUpdated {
     pub event_id: String,
     ///The event type, must be `transcription_session.updated`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["transcription_session.updated"]))]
     pub type_: String,
     pub session: RealtimeTranscriptionSessionCreateResponse,
 }
@@ -14890,6 +15549,7 @@ pub struct RealtimeSession {
     pub id: Option<String>,
     ///The object type. Always `realtime.session`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["realtime.session", null]))]
     pub object: Option<String>,
     /**The set of modalities the model can respond with. To disable audio,
 set this to ["text"].*/
@@ -14919,10 +15579,12 @@ start of the session.*/
 For `pcm16`, input audio must be 16-bit PCM at a 24kHz sample rate,
 single channel (mono), and little-endian byte order.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw", null]))]
     pub input_audio_format: Option<String>,
     /**The format of output audio. Options are `pcm16`, `g711_ulaw`, or `g711_alaw`.
 For `pcm16`, output audio is sampled at a rate of 24kHz.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw", null]))]
     pub output_audio_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_audio_transcription: Option<serde_json::Value>,
@@ -14937,6 +15599,7 @@ Filtering the audio can improve VAD and turn detection accuracy (reducing false 
 the minimum speed. 1.5 is the maximum speed. This value can only be changed
 in between model turns, not while a response is in progress.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 1.5f64, "minimum" = 0.25f64))]
     pub speed: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tracing: Option<serde_json::Value>,
@@ -15006,6 +15669,7 @@ rather than the representation understood by the model.*/
 the minimum speed. 1.5 is the maximum speed. This value can only be changed
 in between model turns, not while a response is in progress.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 1.5f64, "minimum" = 0.25f64))]
     pub speed: Option<f64>,
     /**Configuration options for tracing. Set to null to disable tracing. Once
 tracing is enabled for a session, the configuration cannot be modified.
@@ -15056,11 +15720,13 @@ impl schematic_define::Registration for RealtimeSessionCreateRequest {
 pub struct RealtimeSessionCreateRequestGA {
     ///The type of session to create. Always `realtime` for the Realtime API.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["realtime"]))]
     pub type_: String,
     /**The set of modalities the model can respond with. It defaults to `["audio"]`, indicating
 that the model will respond with audio plus a transcript. `["text"]` can be used to make
 the model respond with text only. It is not possible to request both `text` and `audio` at the same time.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"enum":["text", "audio"], "type":"string"}))]
     pub output_modalities: Option<Vec<String>>,
     ///The Realtime model used for this session.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -15077,6 +15743,12 @@ Note that the server sets default instructions which will be used if this field 
 
 `item.input_audio_transcription.logprobs`: Include logprobs for input audio transcription.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "items" = {"enum":["item.input_audio_transcription.logprobs"],
+            "type":"string"}
+        )
+    )]
     pub include: Option<Vec<String>>,
     /**Realtime API can write session traces to the [Traces Dashboard](https://platform.openai.com/logs?api=traces). Set to null to disable tracing. Once
 tracing is enabled for a session, the configuration cannot be modified.
@@ -15135,6 +15807,12 @@ pub struct RealtimeSessionCreateResponse {
     /**Additional fields to include in server outputs.
 - `item.input_audio_transcription.logprobs`: Include logprobs for input audio transcription.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "items" = {"enum":["item.input_audio_transcription.logprobs"],
+            "type":"string"}
+        )
+    )]
     pub include: Option<Vec<String>>,
     ///The Realtime model used for this session.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -15202,10 +15880,12 @@ impl schematic_define::Registration for RealtimeSessionCreateResponse {
 pub struct RealtimeSessionCreateResponseGA {
     ///The type of session to create. Always `realtime` for the Realtime API.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["realtime"]))]
     pub type_: String,
     ///Unique identifier for the session that looks like `sess_1234567890abcdef`.
     pub id: String,
     ///The object type. Always `realtime.session`.
+    #[schemars(extend("enum" = ["realtime.session"]))]
     pub object: String,
     ///Expiration timestamp for the session, in seconds since epoch.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -15214,6 +15894,7 @@ pub struct RealtimeSessionCreateResponseGA {
 that the model will respond with audio plus a transcript. `["text"]` can be used to make
 the model respond with text only. It is not possible to request both `text` and `audio` at the same time.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"enum":["text", "audio"], "type":"string"}))]
     pub output_modalities: Option<Vec<String>>,
     ///The Realtime model used for this session.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -15230,6 +15911,12 @@ Note that the server sets default instructions which will be used if this field 
 
 `item.input_audio_transcription.logprobs`: Include logprobs for input audio transcription.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "items" = {"enum":["item.input_audio_transcription.logprobs"],
+            "type":"string"}
+        )
+    )]
     pub include: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tracing: Option<serde_json::Value>,
@@ -15279,12 +15966,19 @@ Filtering the audio can improve VAD and turn detection accuracy (reducing false 
 For `pcm16`, input audio must be 16-bit PCM at a 24kHz sample rate,
 single channel (mono), and little-endian byte order.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw", null]))]
     pub input_audio_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_audio_transcription: Option<AudioTranscription>,
     /**The set of items to include in the transcription. Current available items are:
 `item.input_audio_transcription.logprobs`*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "items" = {"enum":["item.input_audio_transcription.logprobs"],
+            "type":"string"}
+        )
+    )]
     pub include: Option<Vec<String>>,
 }
 impl schematic_define::Registration for RealtimeTranscriptionSessionCreateRequest {
@@ -15303,6 +15997,7 @@ impl schematic_define::Registration for RealtimeTranscriptionSessionCreateReques
 pub struct RealtimeTranscriptionSessionCreateRequestGA {
     ///The type of session to create. Always `transcription` for transcription sessions.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["transcription"]))]
     pub type_: String,
     ///Configuration for input and output audio.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -15311,6 +16006,12 @@ pub struct RealtimeTranscriptionSessionCreateRequestGA {
 
 `item.input_audio_transcription.logprobs`: Include logprobs for input audio transcription.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "items" = {"enum":["item.input_audio_transcription.logprobs"],
+            "type":"string"}
+        )
+    )]
     pub include: Option<Vec<String>>,
 }
 impl schematic_define::Registration for RealtimeTranscriptionSessionCreateRequestGA {
@@ -15365,6 +16066,7 @@ impl schematic_define::Registration for RealtimeTranscriptionSessionCreateRespon
 pub struct RealtimeTranscriptionSessionCreateResponseGA {
     ///The type of session. Always `transcription` for transcription sessions.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["transcription"]))]
     pub type_: String,
     ///Unique identifier for the session that looks like `sess_1234567890abcdef`.
     pub id: String,
@@ -15376,6 +16078,12 @@ pub struct RealtimeTranscriptionSessionCreateResponseGA {
     /**Additional fields to include in server outputs.
 - `item.input_audio_transcription.logprobs`: Include logprobs for input audio transcription.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "items" = {"enum":["item.input_audio_transcription.logprobs"],
+            "type":"string"}
+        )
+    )]
     pub include: Option<Vec<String>>,
     ///Configuration for input audio for the session.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -15492,9 +16200,11 @@ the previous audio rather than as a real-world pause.*/
 pub struct RealtimeTranslationClientEventInputAudioBufferAppend {
     ///Optional client-generated ID used to identify this event.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 512u64))]
     pub event_id: Option<String>,
     ///The event type, must be `session.input_audio_buffer.append`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.input_audio_buffer.append"]))]
     pub type_: String,
     ///Base64-encoded 24 kHz PCM16 mono audio bytes.
     pub audio: String,
@@ -15518,9 +16228,11 @@ session.*/
 pub struct RealtimeTranslationClientEventSessionClose {
     ///Optional client-generated ID used to identify this event.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 512u64))]
     pub event_id: Option<String>,
     ///The event type, must be `session.close`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.close"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for RealtimeTranslationClientEventSessionClose {
@@ -15541,9 +16253,11 @@ and `audio.input.noise_reduction`.*/
 pub struct RealtimeTranslationClientEventSessionUpdate {
     ///Optional client-generated ID used to identify this event.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 512u64))]
     pub event_id: Option<String>,
     ///The event type, must be `session.update`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.update"]))]
     pub type_: String,
     pub session: RealtimeTranslationSessionUpdateRequest,
 }
@@ -15713,6 +16427,7 @@ pub struct RealtimeTranslationServerEventSessionClosed {
     pub event_id: String,
     ///The event type, must be `session.closed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.closed"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for RealtimeTranslationServerEventSessionClosed {
@@ -15735,6 +16450,7 @@ pub struct RealtimeTranslationServerEventSessionCreated {
     pub event_id: String,
     ///The event type, must be `session.created`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.created"]))]
     pub type_: String,
     pub session: RealtimeTranslationSession,
 }
@@ -15760,6 +16476,7 @@ pub struct RealtimeTranslationServerEventSessionInputTranscriptDelta {
     pub event_id: String,
     ///The event type, must be `session.input_transcript.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.input_transcript.delta"]))]
     pub type_: String,
     ///Append-only source-language transcript text.
     pub delta: String,
@@ -15786,6 +16503,7 @@ pub struct RealtimeTranslationServerEventSessionOutputAudioDelta {
     pub event_id: String,
     ///The event type, must be `session.output_audio.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.output_audio.delta"]))]
     pub type_: String,
     ///Base64-encoded translated audio data.
     pub delta: String,
@@ -15797,6 +16515,7 @@ pub struct RealtimeTranslationServerEventSessionOutputAudioDelta {
     pub channels: Option<i64>,
     ///Audio encoding for `delta`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["pcm16", null]))]
     pub format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<serde_json::Value>,
@@ -15823,6 +16542,7 @@ pub struct RealtimeTranslationServerEventSessionOutputTranscriptDelta {
     pub event_id: String,
     ///The event type, must be `session.output_transcript.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.output_transcript.delta"]))]
     pub type_: String,
     ///Append-only transcript text for the translated output audio.
     pub delta: String,
@@ -15849,6 +16569,7 @@ pub struct RealtimeTranslationServerEventSessionUpdated {
     pub event_id: String,
     ///The event type, must be `session.updated`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["session.updated"]))]
     pub type_: String,
     pub session: RealtimeTranslationSession,
 }
@@ -15871,6 +16592,7 @@ pub struct RealtimeTranslationSession {
     pub id: String,
     ///The session type. Always `translation` for Realtime translation sessions.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["translation"]))]
     pub type_: String,
     ///Expiration timestamp for the session, in seconds since epoch.
     pub expires_at: i64,
@@ -16033,6 +16755,7 @@ for subsequent turns of a conversation if you are manually
 pub struct ReasoningItem {
     ///The type of the object. Always `reasoning`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["reasoning"]))]
     pub type_: String,
     ///The unique identifier of the reasoning content.
     pub id: String,
@@ -16046,6 +16769,7 @@ pub struct ReasoningItem {
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
     pub status: Option<String>,
 }
 impl schematic_define::Registration for ReasoningItem {
@@ -16080,6 +16804,7 @@ impl schematic_define::Registration for Response {
 pub struct ResponseAudioDeltaEvent {
     ///The type of the event. Always `response.audio.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.audio.delta"]))]
     pub type_: String,
     ///A sequence number for this chunk of the stream response.
     pub sequence_number: i64,
@@ -16102,6 +16827,7 @@ impl schematic_define::Registration for ResponseAudioDeltaEvent {
 pub struct ResponseAudioDoneEvent {
     ///The type of the event. Always `response.audio.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.audio.done"]))]
     pub type_: String,
     ///The sequence number of the delta.
     pub sequence_number: i64,
@@ -16122,6 +16848,7 @@ impl schematic_define::Registration for ResponseAudioDoneEvent {
 pub struct ResponseAudioTranscriptDeltaEvent {
     ///The type of the event. Always `response.audio.transcript.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.audio.transcript.delta"]))]
     pub type_: String,
     ///The partial transcript of the audio response.
     pub delta: String,
@@ -16144,6 +16871,7 @@ impl schematic_define::Registration for ResponseAudioTranscriptDeltaEvent {
 pub struct ResponseAudioTranscriptDoneEvent {
     ///The type of the event. Always `response.audio.transcript.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.audio.transcript.done"]))]
     pub type_: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
@@ -16164,6 +16892,7 @@ impl schematic_define::Registration for ResponseAudioTranscriptDoneEvent {
 pub struct ResponseCodeInterpreterCallCodeDeltaEvent {
     ///The type of the event. Always `response.code_interpreter_call_code.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.code_interpreter_call_code.delta"]))]
     pub type_: String,
     ///The index of the output item in the response for which the code is being streamed.
     pub output_index: i64,
@@ -16190,6 +16919,7 @@ impl schematic_define::Registration for ResponseCodeInterpreterCallCodeDeltaEven
 pub struct ResponseCodeInterpreterCallCodeDoneEvent {
     ///The type of the event. Always `response.code_interpreter_call_code.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.code_interpreter_call_code.done"]))]
     pub type_: String,
     ///The index of the output item in the response for which the code is finalized.
     pub output_index: i64,
@@ -16216,6 +16946,7 @@ impl schematic_define::Registration for ResponseCodeInterpreterCallCodeDoneEvent
 pub struct ResponseCodeInterpreterCallCompletedEvent {
     ///The type of the event. Always `response.code_interpreter_call.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.code_interpreter_call.completed"]))]
     pub type_: String,
     ///The index of the output item in the response for which the code interpreter call is completed.
     pub output_index: i64,
@@ -16240,6 +16971,7 @@ impl schematic_define::Registration for ResponseCodeInterpreterCallCompletedEven
 pub struct ResponseCodeInterpreterCallInProgressEvent {
     ///The type of the event. Always `response.code_interpreter_call.in_progress`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.code_interpreter_call.in_progress"]))]
     pub type_: String,
     ///The index of the output item in the response for which the code interpreter call is in progress.
     pub output_index: i64,
@@ -16264,6 +16996,7 @@ impl schematic_define::Registration for ResponseCodeInterpreterCallInProgressEve
 pub struct ResponseCodeInterpreterCallInterpretingEvent {
     ///The type of the event. Always `response.code_interpreter_call.interpreting`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.code_interpreter_call.interpreting"]))]
     pub type_: String,
     ///The index of the output item in the response for which the code interpreter is interpreting code.
     pub output_index: i64,
@@ -16288,6 +17021,7 @@ impl schematic_define::Registration for ResponseCodeInterpreterCallInterpretingE
 pub struct ResponseCompletedEvent {
     ///The type of the event. Always `response.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.completed"]))]
     pub type_: String,
     pub response: Response,
     ///The sequence number for this event.
@@ -16309,6 +17043,7 @@ impl schematic_define::Registration for ResponseCompletedEvent {
 pub struct ResponseContentPartAddedEvent {
     ///The type of the event. Always `response.content_part.added`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.content_part.added"]))]
     pub type_: String,
     ///The ID of the output item that the content part was added to.
     pub item_id: String,
@@ -16336,6 +17071,7 @@ impl schematic_define::Registration for ResponseContentPartAddedEvent {
 pub struct ResponseContentPartDoneEvent {
     ///The type of the event. Always `response.content_part.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.content_part.done"]))]
     pub type_: String,
     ///The ID of the output item that the content part was added to.
     pub item_id: String,
@@ -16363,6 +17099,7 @@ impl schematic_define::Registration for ResponseContentPartDoneEvent {
 pub struct ResponseCreatedEvent {
     ///The type of the event. Always `response.created`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.created"]))]
     pub type_: String,
     pub response: Response,
     ///The sequence number for this event.
@@ -16382,6 +17119,7 @@ impl schematic_define::Registration for ResponseCreatedEvent {
 pub struct ResponseCustomToolCallInputDeltaEvent {
     ///The event type identifier.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.custom_tool_call_input.delta"]))]
     pub type_: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
@@ -16408,6 +17146,7 @@ impl schematic_define::Registration for ResponseCustomToolCallInputDeltaEvent {
 pub struct ResponseCustomToolCallInputDoneEvent {
     ///The event type identifier.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.custom_tool_call_input.done"]))]
     pub type_: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
@@ -16509,6 +17248,7 @@ impl schematic_define::Registration for ResponseErrorCode {
 pub struct ResponseErrorEvent {
     ///The type of the event. Always `error`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["error"]))]
     pub type_: String,
     pub code: serde_json::Value,
     ///The error message.
@@ -16531,6 +17271,7 @@ impl schematic_define::Registration for ResponseErrorEvent {
 pub struct ResponseFailedEvent {
     ///The type of the event. Always `response.failed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.failed"]))]
     pub type_: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
@@ -16550,6 +17291,7 @@ impl schematic_define::Registration for ResponseFailedEvent {
 pub struct ResponseFileSearchCallCompletedEvent {
     ///The type of the event. Always `response.file_search_call.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.file_search_call.completed"]))]
     pub type_: String,
     ///The index of the output item that the file search call is initiated.
     pub output_index: i64,
@@ -16574,6 +17316,7 @@ impl schematic_define::Registration for ResponseFileSearchCallCompletedEvent {
 pub struct ResponseFileSearchCallInProgressEvent {
     ///The type of the event. Always `response.file_search_call.in_progress`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.file_search_call.in_progress"]))]
     pub type_: String,
     ///The index of the output item that the file search call is initiated.
     pub output_index: i64,
@@ -16598,6 +17341,7 @@ impl schematic_define::Registration for ResponseFileSearchCallInProgressEvent {
 pub struct ResponseFileSearchCallSearchingEvent {
     ///The type of the event. Always `response.file_search_call.searching`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.file_search_call.searching"]))]
     pub type_: String,
     ///The index of the output item that the file search call is searching.
     pub output_index: i64,
@@ -16625,6 +17369,7 @@ to do so.*/
 pub struct ResponseFormatJsonObject {
     ///The type of response format being defined. Always `json_object`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["json_object"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for ResponseFormatJsonObject {
@@ -16644,6 +17389,7 @@ Learn more about [Structured Outputs](/docs/guides/structured-outputs).*/
 pub struct ResponseFormatJsonSchema {
     ///The type of response format being defined. Always `json_schema`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["json_schema"]))]
     pub type_: String,
     ///Structured Outputs configuration options, including a JSON Schema.
     pub json_schema: serde_json::Value,
@@ -16683,6 +17429,7 @@ impl schematic_define::Registration for ResponseFormatJsonSchemaSchema {
 pub struct ResponseFormatText {
     ///The type of response format being defined. Always `text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["text"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for ResponseFormatText {
@@ -16700,6 +17447,7 @@ Learn more in the [custom grammars guide](/docs/guides/custom-grammars).*/
 pub struct ResponseFormatTextGrammar {
     ///The type of response format being defined. Always `grammar`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["grammar"]))]
     pub type_: String,
     ///The custom grammar for the model to follow.
     pub grammar: String,
@@ -16721,6 +17469,7 @@ impl schematic_define::Registration for ResponseFormatTextGrammar {
 pub struct ResponseFormatTextPython {
     ///The type of response format being defined. Always `python`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["python"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for ResponseFormatTextPython {
@@ -16739,6 +17488,7 @@ impl schematic_define::Registration for ResponseFormatTextPython {
 pub struct ResponseFunctionCallArgumentsDeltaEvent {
     ///The type of the event. Always `response.function_call_arguments.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.function_call_arguments.delta"]))]
     pub type_: String,
     ///The ID of the output item that the function-call arguments delta is added to.
     pub item_id: String,
@@ -16764,6 +17514,7 @@ impl schematic_define::Registration for ResponseFunctionCallArgumentsDeltaEvent 
 #[derive(JsonSchema)]
 pub struct ResponseFunctionCallArgumentsDoneEvent {
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.function_call_arguments.done"]))]
     pub type_: String,
     ///The ID of the item.
     pub item_id: String,
@@ -16792,6 +17543,7 @@ impl schematic_define::Registration for ResponseFunctionCallArgumentsDoneEvent {
 pub struct ResponseImageGenCallCompletedEvent {
     ///The type of the event. Always 'response.image_generation_call.completed'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.image_generation_call.completed"]))]
     pub type_: String,
     ///The index of the output item in the response's output array.
     pub output_index: i64,
@@ -16816,6 +17568,7 @@ impl schematic_define::Registration for ResponseImageGenCallCompletedEvent {
 pub struct ResponseImageGenCallGeneratingEvent {
     ///The type of the event. Always 'response.image_generation_call.generating'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.image_generation_call.generating"]))]
     pub type_: String,
     ///The index of the output item in the response's output array.
     pub output_index: i64,
@@ -16840,6 +17593,7 @@ impl schematic_define::Registration for ResponseImageGenCallGeneratingEvent {
 pub struct ResponseImageGenCallInProgressEvent {
     ///The type of the event. Always 'response.image_generation_call.in_progress'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.image_generation_call.in_progress"]))]
     pub type_: String,
     ///The index of the output item in the response's output array.
     pub output_index: i64,
@@ -16864,6 +17618,7 @@ impl schematic_define::Registration for ResponseImageGenCallInProgressEvent {
 pub struct ResponseImageGenCallPartialImageEvent {
     ///The type of the event. Always 'response.image_generation_call.partial_image'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.image_generation_call.partial_image"]))]
     pub type_: String,
     ///The index of the output item in the response's output array.
     pub output_index: i64,
@@ -16892,6 +17647,7 @@ impl schematic_define::Registration for ResponseImageGenCallPartialImageEvent {
 pub struct ResponseInProgressEvent {
     ///The type of the event. Always `response.in_progress`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.in_progress"]))]
     pub type_: String,
     pub response: Response,
     ///The sequence number of this event.
@@ -16913,6 +17669,7 @@ impl schematic_define::Registration for ResponseInProgressEvent {
 pub struct ResponseIncompleteEvent {
     ///The type of the event. Always `response.incomplete`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.incomplete"]))]
     pub type_: String,
     pub response: Response,
     ///The sequence number of this event.
@@ -16933,6 +17690,7 @@ impl schematic_define::Registration for ResponseIncompleteEvent {
 #[derive(JsonSchema)]
 pub struct ResponseItemList {
     ///The type of object returned, must be `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///A list of items used to generate this response.
     pub data: Vec<ItemResource>,
@@ -16979,6 +17737,7 @@ impl schematic_define::Registration for ResponseLogProb {
 pub struct ResponseMCPCallArgumentsDeltaEvent {
     ///The type of the event. Always 'response.mcp_call_arguments.delta'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call_arguments.delta"]))]
     pub type_: String,
     ///The index of the output item in the response's output array.
     pub output_index: i64,
@@ -17005,6 +17764,7 @@ impl schematic_define::Registration for ResponseMCPCallArgumentsDeltaEvent {
 pub struct ResponseMCPCallArgumentsDoneEvent {
     ///The type of the event. Always 'response.mcp_call_arguments.done'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call_arguments.done"]))]
     pub type_: String,
     ///The index of the output item in the response's output array.
     pub output_index: i64,
@@ -17031,6 +17791,7 @@ impl schematic_define::Registration for ResponseMCPCallArgumentsDoneEvent {
 pub struct ResponseMCPCallCompletedEvent {
     ///The type of the event. Always 'response.mcp_call.completed'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call.completed"]))]
     pub type_: String,
     ///The ID of the MCP tool call item that completed.
     pub item_id: String,
@@ -17055,6 +17816,7 @@ impl schematic_define::Registration for ResponseMCPCallCompletedEvent {
 pub struct ResponseMCPCallFailedEvent {
     ///The type of the event. Always 'response.mcp_call.failed'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call.failed"]))]
     pub type_: String,
     ///The ID of the MCP tool call item that failed.
     pub item_id: String,
@@ -17079,6 +17841,7 @@ impl schematic_define::Registration for ResponseMCPCallFailedEvent {
 pub struct ResponseMCPCallInProgressEvent {
     ///The type of the event. Always 'response.mcp_call.in_progress'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call.in_progress"]))]
     pub type_: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
@@ -17103,6 +17866,7 @@ impl schematic_define::Registration for ResponseMCPCallInProgressEvent {
 pub struct ResponseMCPListToolsCompletedEvent {
     ///The type of the event. Always 'response.mcp_list_tools.completed'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_list_tools.completed"]))]
     pub type_: String,
     ///The ID of the MCP tool call item that produced this output.
     pub item_id: String,
@@ -17127,6 +17891,7 @@ impl schematic_define::Registration for ResponseMCPListToolsCompletedEvent {
 pub struct ResponseMCPListToolsFailedEvent {
     ///The type of the event. Always 'response.mcp_list_tools.failed'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_list_tools.failed"]))]
     pub type_: String,
     ///The ID of the MCP tool call item that failed.
     pub item_id: String,
@@ -17151,6 +17916,7 @@ impl schematic_define::Registration for ResponseMCPListToolsFailedEvent {
 pub struct ResponseMCPListToolsInProgressEvent {
     ///The type of the event. Always 'response.mcp_list_tools.in_progress'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_list_tools.in_progress"]))]
     pub type_: String,
     ///The ID of the MCP tool call item that is being processed.
     pub item_id: String,
@@ -17196,6 +17962,7 @@ impl schematic_define::Registration for ResponseModalities {
 pub struct ResponseOutputItemAddedEvent {
     ///The type of the event. Always `response.output_item.added`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_item.added"]))]
     pub type_: String,
     ///The index of the output item that was added.
     pub output_index: i64,
@@ -17219,6 +17986,7 @@ impl schematic_define::Registration for ResponseOutputItemAddedEvent {
 pub struct ResponseOutputItemDoneEvent {
     ///The type of the event. Always `response.output_item.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_item.done"]))]
     pub type_: String,
     ///The index of the output item that was marked done.
     pub output_index: i64,
@@ -17242,6 +18010,7 @@ impl schematic_define::Registration for ResponseOutputItemDoneEvent {
 pub struct ResponseOutputTextAnnotationAddedEvent {
     ///The type of the event. Always 'response.output_text.annotation.added'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_text.annotation.added"]))]
     pub type_: String,
     ///The unique identifier of the item to which the annotation is being added.
     pub item_id: String,
@@ -17323,6 +18092,7 @@ impl schematic_define::Registration for ResponseProperties {
 pub struct ResponseQueuedEvent {
     ///The type of the event. Always 'response.queued'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.queued"]))]
     pub type_: String,
     pub response: Response,
     ///The sequence number for this event.
@@ -17342,6 +18112,7 @@ impl schematic_define::Registration for ResponseQueuedEvent {
 pub struct ResponseReasoningSummaryPartAddedEvent {
     ///The type of the event. Always `response.reasoning_summary_part.added`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.reasoning_summary_part.added"]))]
     pub type_: String,
     ///The ID of the item this summary part is associated with.
     pub item_id: String,
@@ -17370,6 +18141,7 @@ impl schematic_define::Registration for ResponseReasoningSummaryPartAddedEvent {
 pub struct ResponseReasoningSummaryPartDoneEvent {
     ///The type of the event. Always `response.reasoning_summary_part.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.reasoning_summary_part.done"]))]
     pub type_: String,
     ///The ID of the item this summary part is associated with.
     pub item_id: String,
@@ -17380,6 +18152,7 @@ pub struct ResponseReasoningSummaryPartDoneEvent {
     /**The completion status of the summary part. Omitted when the part completed
 normally and set to `incomplete` when generation was interrupted.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["incomplete", null]))]
     pub status: Option<String>,
     ///The sequence number of this event.
     pub sequence_number: i64,
@@ -17402,6 +18175,7 @@ impl schematic_define::Registration for ResponseReasoningSummaryPartDoneEvent {
 pub struct ResponseReasoningSummaryTextDeltaEvent {
     ///The type of the event. Always `response.reasoning_summary_text.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.reasoning_summary_text.delta"]))]
     pub type_: String,
     ///The ID of the item this summary text delta is associated with.
     pub item_id: String,
@@ -17430,6 +18204,7 @@ impl schematic_define::Registration for ResponseReasoningSummaryTextDeltaEvent {
 pub struct ResponseReasoningSummaryTextDoneEvent {
     ///The type of the event. Always `response.reasoning_summary_text.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.reasoning_summary_text.done"]))]
     pub type_: String,
     ///The ID of the item this summary text is associated with.
     pub item_id: String,
@@ -17458,6 +18233,7 @@ impl schematic_define::Registration for ResponseReasoningSummaryTextDoneEvent {
 pub struct ResponseReasoningTextDeltaEvent {
     ///The type of the event. Always `response.reasoning_text.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.reasoning_text.delta"]))]
     pub type_: String,
     ///The ID of the item this reasoning text delta is associated with.
     pub item_id: String,
@@ -17486,6 +18262,7 @@ impl schematic_define::Registration for ResponseReasoningTextDeltaEvent {
 pub struct ResponseReasoningTextDoneEvent {
     ///The type of the event. Always `response.reasoning_text.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.reasoning_text.done"]))]
     pub type_: String,
     ///The ID of the item this reasoning text is associated with.
     pub item_id: String,
@@ -17514,6 +18291,7 @@ impl schematic_define::Registration for ResponseReasoningTextDoneEvent {
 pub struct ResponseRefusalDeltaEvent {
     ///The type of the event. Always `response.refusal.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.refusal.delta"]))]
     pub type_: String,
     ///The ID of the output item that the refusal text is added to.
     pub item_id: String,
@@ -17542,6 +18320,7 @@ impl schematic_define::Registration for ResponseRefusalDeltaEvent {
 pub struct ResponseRefusalDoneEvent {
     ///The type of the event. Always `response.refusal.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.refusal.done"]))]
     pub type_: String,
     ///The ID of the output item that the refusal text is finalized.
     pub item_id: String,
@@ -17890,6 +18669,7 @@ impl schematic_define::Registration for ResponseStreamOptions {
 pub struct ResponseTextDeltaEvent {
     ///The type of the event. Always `response.output_text.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_text.delta"]))]
     pub type_: String,
     ///The ID of the output item that the text delta was added to.
     pub item_id: String,
@@ -17920,6 +18700,7 @@ impl schematic_define::Registration for ResponseTextDeltaEvent {
 pub struct ResponseTextDoneEvent {
     ///The type of the event. Always `response.output_text.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_text.done"]))]
     pub type_: String,
     ///The ID of the output item that the text content is finalized.
     pub item_id: String,
@@ -17994,6 +18775,7 @@ impl schematic_define::Registration for ResponseUsage {
 pub struct ResponseWebSearchCallCompletedEvent {
     ///The type of the event. Always `response.web_search_call.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.web_search_call.completed"]))]
     pub type_: String,
     ///The index of the output item that the web search call is associated with.
     pub output_index: i64,
@@ -18018,6 +18800,7 @@ impl schematic_define::Registration for ResponseWebSearchCallCompletedEvent {
 pub struct ResponseWebSearchCallInProgressEvent {
     ///The type of the event. Always `response.web_search_call.in_progress`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.web_search_call.in_progress"]))]
     pub type_: String,
     ///The index of the output item that the web search call is associated with.
     pub output_index: i64,
@@ -18042,6 +18825,7 @@ impl schematic_define::Registration for ResponseWebSearchCallInProgressEvent {
 pub struct ResponseWebSearchCallSearchingEvent {
     ///The type of the event. Always `response.web_search_call.searching`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.web_search_call.searching"]))]
     pub type_: String,
     ///The index of the output item that the web search call is associated with.
     pub output_index: i64,
@@ -18241,6 +19025,7 @@ impl schematic_define::Registration for ResponsesServerEvent {
 #[derive(JsonSchema)]
 pub struct Role {
     ///Always `role`.
+    #[schemars(extend("enum" = ["role"]))]
     pub object: String,
     ///Identifier for the role.
     pub id: String,
@@ -18268,6 +19053,7 @@ impl schematic_define::Registration for Role {
 #[derive(JsonSchema)]
 pub struct RoleDeletedResource {
     ///Always `role.deleted`.
+    #[schemars(extend("enum" = ["role.deleted"]))]
     pub object: String,
     ///Identifier of the deleted role.
     pub id: String,
@@ -18287,6 +19073,7 @@ impl schematic_define::Registration for RoleDeletedResource {
 #[derive(JsonSchema)]
 pub struct RoleListResource {
     ///Always `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///Role assignments returned in the current page.
     pub data: Vec<AssignedRoleDetails>,
@@ -18370,6 +19157,7 @@ pub struct RunObject {
     ///The identifier, which can be referenced in API endpoints.
     pub id: String,
     ///The object type, which is always `thread.run`.
+    #[schemars(extend("enum" = ["thread.run"]))]
     pub object: String,
     ///The Unix timestamp (in seconds) for when the run was created.
     pub created_at: i64,
@@ -18378,6 +19166,19 @@ pub struct RunObject {
     ///The ID of the [assistant](/docs/api-reference/assistants) used for execution of this run.
     pub assistant_id: String,
     ///The status of the run, which can be either `queued`, `in_progress`, `requires_action`, `cancelling`, `cancelled`, `failed`, `completed`, `incomplete`, or `expired`.
+    #[schemars(
+        extend(
+            "enum" = ["queued",
+            "in_progress",
+            "requires_action",
+            "cancelling",
+            "cancelled",
+            "failed",
+            "completed",
+            "incomplete",
+            "expired"]
+        )
+    )]
     pub status: String,
     ///Details on the action required to continue the run. Will be `null` if no action is required.
     pub required_action: serde_json::Value,
@@ -18400,6 +19201,7 @@ pub struct RunObject {
     ///The instructions that the [assistant](/docs/api-reference/assistants) used for this run.
     pub instructions: String,
     ///The list of tools that the [assistant](/docs/api-reference/assistants) used for this run.
+    #[schemars(extend("maxItems" = 20u64))]
     pub tools: Vec<serde_json::Value>,
     pub metadata: Metadata,
     pub usage: RunCompletionUsage,
@@ -18410,8 +19212,10 @@ pub struct RunObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f64>,
     ///The maximum number of prompt tokens specified to have been used over the course of the run.
+    #[schemars(extend("minimum" = 256u64))]
     pub max_prompt_tokens: i64,
     ///The maximum number of completion tokens specified to have been used over the course of the run.
+    #[schemars(extend("minimum" = 256u64))]
     pub max_completion_tokens: i64,
     pub truncation_strategy: serde_json::Value,
     pub tool_choice: serde_json::Value,
@@ -18456,6 +19260,7 @@ pub struct RunStepDeltaObject {
     ///The identifier of the run step, which can be referenced in API endpoints.
     pub id: String,
     ///The object type, which is always `thread.run.step.delta`.
+    #[schemars(extend("enum" = ["thread.run.step.delta"]))]
     pub object: String,
     ///The delta containing the fields that have changed on the run step.
     pub delta: serde_json::Value,
@@ -18474,6 +19279,7 @@ impl schematic_define::Registration for RunStepDeltaObject {
 pub struct RunStepDeltaStepDetailsMessageCreationObject {
     ///Always `message_creation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["message_creation"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_creation: Option<serde_json::Value>,
@@ -18499,6 +19305,7 @@ pub struct RunStepDeltaStepDetailsToolCallsCodeObject {
     pub id: Option<String>,
     ///The type of tool call. This is always going to be `code_interpreter` for this type of tool call.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["code_interpreter"]))]
     pub type_: String,
     ///The Code Interpreter tool call definition.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -18521,6 +19328,7 @@ pub struct RunStepDeltaStepDetailsToolCallsCodeOutputImageObject {
     pub index: i64,
     ///Always `image`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image: Option<serde_json::Value>,
@@ -18544,6 +19352,7 @@ pub struct RunStepDeltaStepDetailsToolCallsCodeOutputLogsObject {
     pub index: i64,
     ///Always `logs`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["logs"]))]
     pub type_: String,
     ///The text output from the Code Interpreter tool call.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -18570,6 +19379,7 @@ pub struct RunStepDeltaStepDetailsToolCallsFileSearchObject {
     pub id: Option<String>,
     ///The type of tool call. This is always going to be `file_search` for this type of tool call.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_search"]))]
     pub type_: String,
     ///For now, this is always going to be an empty object.
     pub file_search: serde_json::Value,
@@ -18595,6 +19405,7 @@ pub struct RunStepDeltaStepDetailsToolCallsFunctionObject {
     pub id: Option<String>,
     ///The type of tool call. This is always going to be `function` for this type of tool call.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: String,
     ///The definition of the function that was called.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -18616,6 +19427,7 @@ impl schematic_define::Registration for RunStepDeltaStepDetailsToolCallsFunction
 pub struct RunStepDeltaStepDetailsToolCallsObject {
     ///Always `tool_calls`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["tool_calls"]))]
     pub type_: String,
     ///An array of tool calls the run step was involved in. These can be associated with one of three types of tools: `code_interpreter`, `file_search`, or `function`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -18637,6 +19449,7 @@ impl schematic_define::Registration for RunStepDeltaStepDetailsToolCallsObject {
 pub struct RunStepDetailsMessageCreationObject {
     ///Always `message_creation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["message_creation"]))]
     pub type_: String,
     pub message_creation: serde_json::Value,
 }
@@ -18658,6 +19471,7 @@ pub struct RunStepDetailsToolCallsCodeObject {
     pub id: String,
     ///The type of tool call. This is always going to be `code_interpreter` for this type of tool call.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["code_interpreter"]))]
     pub type_: String,
     ///The Code Interpreter tool call definition.
     pub code_interpreter: serde_json::Value,
@@ -18677,6 +19491,7 @@ impl schematic_define::Registration for RunStepDetailsToolCallsCodeObject {
 pub struct RunStepDetailsToolCallsCodeOutputImageObject {
     ///Always `image`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image"]))]
     pub type_: String,
     pub image: serde_json::Value,
 }
@@ -18696,6 +19511,7 @@ impl schematic_define::Registration for RunStepDetailsToolCallsCodeOutputImageOb
 pub struct RunStepDetailsToolCallsCodeOutputLogsObject {
     ///Always `logs`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["logs"]))]
     pub type_: String,
     ///The text output from the Code Interpreter tool call.
     pub logs: String,
@@ -18717,6 +19533,7 @@ pub struct RunStepDetailsToolCallsFileSearchObject {
     pub id: String,
     ///The type of tool call. This is always going to be `file_search` for this type of tool call.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_search"]))]
     pub type_: String,
     ///For now, this is always going to be an empty object.
     pub file_search: serde_json::Value,
@@ -18737,6 +19554,7 @@ impl schematic_define::Registration for RunStepDetailsToolCallsFileSearchObject 
 pub struct RunStepDetailsToolCallsFileSearchRankingOptionsObject {
     pub ranker: FileSearchRanker,
     ///The score threshold for the file search. All values must be a floating point number between 0 and 1.
+    #[schemars(extend("maximum" = 1u64, "minimum" = 0u64))]
     pub score_threshold: f64,
 }
 impl schematic_define::Registration
@@ -18759,6 +19577,7 @@ pub struct RunStepDetailsToolCallsFileSearchResultObject {
     ///The name of the file that result was found in.
     pub file_name: String,
     ///The score of the result. All values must be a floating point number between 0 and 1.
+    #[schemars(extend("maximum" = 1u64, "minimum" = 0u64))]
     pub score: f64,
     ///The content of the result that was found. The content is only included if requested via the include query parameter.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -18781,6 +19600,7 @@ pub struct RunStepDetailsToolCallsFunctionObject {
     pub id: String,
     ///The type of tool call. This is always going to be `function` for this type of tool call.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: String,
     ///The definition of the function that was called.
     pub function: serde_json::Value,
@@ -18801,6 +19621,7 @@ impl schematic_define::Registration for RunStepDetailsToolCallsFunctionObject {
 pub struct RunStepDetailsToolCallsObject {
     ///Always `tool_calls`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["tool_calls"]))]
     pub type_: String,
     ///An array of tool calls the run step was involved in. These can be associated with one of three types of tools: `code_interpreter`, `file_search`, or `function`.
     pub tool_calls: Vec<serde_json::Value>,
@@ -18822,6 +19643,7 @@ pub struct RunStepObject {
     ///The identifier of the run step, which can be referenced in API endpoints.
     pub id: String,
     ///The object type, which is always `thread.run.step`.
+    #[schemars(extend("enum" = ["thread.run.step"]))]
     pub object: String,
     ///The Unix timestamp (in seconds) for when the run step was created.
     pub created_at: i64,
@@ -18833,8 +19655,12 @@ pub struct RunStepObject {
     pub run_id: String,
     ///The type of run step, which can be either `message_creation` or `tool_calls`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["message_creation", "tool_calls"]))]
     pub type_: String,
     ///The status of the run step, which can be either `in_progress`, `cancelled`, `failed`, `completed`, or `expired`.
+    #[schemars(
+        extend("enum" = ["in_progress", "cancelled", "failed", "completed", "expired"])
+    )]
     pub status: String,
     ///The details of the run step.
     pub step_details: serde_json::Value,
@@ -18917,6 +19743,7 @@ pub struct RunToolCallObject {
     pub id: String,
     ///The type of tool call the output is required for. For now, this is always `function`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: String,
     ///The function definition.
     pub function: serde_json::Value,
@@ -18956,6 +19783,7 @@ impl schematic_define::Registration for ServiceTier {
 pub struct SpeechAudioDeltaEvent {
     ///The type of the event. Always `speech.audio.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["speech.audio.delta"]))]
     pub type_: String,
     ///A chunk of Base64-encoded audio data.
     pub audio: String,
@@ -18976,6 +19804,7 @@ impl schematic_define::Registration for SpeechAudioDeltaEvent {
 pub struct SpeechAudioDoneEvent {
     ///The type of the event. Always `speech.audio.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["speech.audio.done"]))]
     pub type_: String,
     ///Token usage statistics for the request.
     pub usage: serde_json::Value,
@@ -18994,6 +19823,7 @@ impl schematic_define::Registration for SpeechAudioDoneEvent {
 pub struct SpendAlertNotificationChannel {
     ///The notification channel type. Currently only `email` is supported.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["email"]))]
     pub type_: String,
     ///Email addresses that receive the spend alert notification.
     pub recipients: Vec<String>,
@@ -19015,6 +19845,7 @@ impl schematic_define::Registration for SpendAlertNotificationChannel {
 #[derive(JsonSchema)]
 pub struct StaticChunkingStrategy {
     ///The maximum number of tokens in each chunk. The default value is `800`. The minimum value is `100` and the maximum value is `4096`.
+    #[schemars(extend("maximum" = 4096u64, "minimum" = 100u64))]
     pub max_chunk_size_tokens: i64,
     /**The number of tokens that overlap between chunks. The default value is `400`.
 
@@ -19037,6 +19868,7 @@ impl schematic_define::Registration for StaticChunkingStrategy {
 pub struct StaticChunkingStrategyRequestParam {
     ///Always `static`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["static"]))]
     pub type_: String,
     #[serde(rename = "static")]
     pub static_: StaticChunkingStrategy,
@@ -19056,6 +19888,7 @@ impl schematic_define::Registration for StaticChunkingStrategyRequestParam {
 pub struct StaticChunkingStrategyResponseParam {
     ///Always `static`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["static"]))]
     pub type_: String,
     #[serde(rename = "static")]
     pub static_: StaticChunkingStrategy,
@@ -19157,6 +19990,7 @@ Learn more about [Structured Outputs](/docs/guides/structured-outputs).*/
 pub struct TextResponseFormatJsonSchema {
     ///The type of response format being defined. Always `json_schema`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["json_schema"]))]
     pub type_: String,
     /**A description of what the response format is for, used by the model to
 determine how to respond in the format.*/
@@ -19186,6 +20020,7 @@ pub struct ThreadObject {
     ///The identifier, which can be referenced in API endpoints.
     pub id: String,
     ///The object type, which is always `thread`.
+    #[schemars(extend("enum" = ["thread"]))]
     pub object: String,
     ///The Unix timestamp (in seconds) for when the thread was created.
     pub created_at: i64,
@@ -19223,6 +20058,7 @@ impl schematic_define::Registration for ThreadStreamEvent {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ToggleCertificatesRequest {
+    #[schemars(extend("maxItems" = 10u64, "minItems" = 1u64))]
     pub certificate_ids: Vec<String>,
 }
 impl schematic_define::Registration for ToggleCertificatesRequest {
@@ -19334,6 +20170,7 @@ impl schematic_define::Registration for Tool {
 pub struct ToolChoiceAllowed {
     ///Allowed tool configuration type. Always `allowed_tools`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["allowed_tools"]))]
     pub type_: String,
     /**Constrains the tools available to the model to a pre-defined set.
 
@@ -19341,6 +20178,7 @@ pub struct ToolChoiceAllowed {
 message.
 
 `required` requires the model to call one or more of the allowed tools.*/
+    #[schemars(extend("enum" = ["auto", "required"]))]
     pub mode: String,
     /**A list of tool definitions that the model should be allowed to call.
 
@@ -19368,6 +20206,7 @@ impl schematic_define::Registration for ToolChoiceAllowed {
 pub struct ToolChoiceCustom {
     ///For custom tool calling, the type is always `custom`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["custom"]))]
     pub type_: String,
     ///The name of the custom tool to call.
     pub name: String,
@@ -19386,6 +20225,7 @@ impl schematic_define::Registration for ToolChoiceCustom {
 pub struct ToolChoiceFunction {
     ///For function calling, the type is always `function`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: String,
     ///The name of the function to call.
     pub name: String,
@@ -19404,6 +20244,7 @@ impl schematic_define::Registration for ToolChoiceFunction {
 pub struct ToolChoiceMCP {
     ///For MCP tools, the type is always `mcp`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp"]))]
     pub type_: String,
     ///The label of the MCP server to use.
     pub server_label: String,
@@ -19493,6 +20334,18 @@ Allowed values are:
 - `code_interpreter`
 - `image_generation`*/
     #[serde(rename = "type")]
+    #[schemars(
+        extend(
+            "enum" = ["file_search",
+            "web_search_preview",
+            "computer",
+            "computer_use_preview",
+            "computer_use",
+            "web_search_preview_2025_03_11",
+            "image_generation",
+            "code_interpreter"]
+        )
+    )]
     pub type_: String,
 }
 impl schematic_define::Registration for ToolChoiceTypes {
@@ -19526,6 +20379,7 @@ pub type ToolsArray = Vec<Tool>;
 pub struct TranscriptTextDeltaEvent {
     ///The type of the event. Always `transcript.text.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["transcript.text.delta"]))]
     pub type_: String,
     ///The text delta that was additionally transcribed.
     pub delta: String,
@@ -19552,6 +20406,7 @@ impl schematic_define::Registration for TranscriptTextDeltaEvent {
 pub struct TranscriptTextDoneEvent {
     ///The type of the event. Always `transcript.text.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["transcript.text.done"]))]
     pub type_: String,
     ///The text that was transcribed.
     pub text: String,
@@ -19580,6 +20435,7 @@ impl schematic_define::Registration for TranscriptTextDoneEvent {
 pub struct TranscriptTextSegmentEvent {
     ///The type of the event. Always `transcript.text.segment`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["transcript.text.segment"]))]
     pub type_: String,
     ///Unique identifier for the segment.
     pub id: String,
@@ -19608,6 +20464,7 @@ impl schematic_define::Registration for TranscriptTextSegmentEvent {
 pub struct TranscriptTextUsageDuration {
     ///The type of the usage object. Always `duration` for this variant.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["duration"]))]
     pub type_: String,
     ///Duration of the input audio in seconds.
     pub seconds: f64,
@@ -19628,6 +20485,7 @@ impl schematic_define::Registration for TranscriptTextUsageDuration {
 pub struct TranscriptTextUsageTokens {
     ///The type of the usage object. Always `tokens` for this variant.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["tokens"]))]
     pub type_: String,
     ///Number of input tokens billed for this request.
     pub input_tokens: i64,
@@ -19660,6 +20518,7 @@ pub type TranscriptionChunkingStrategy = serde_json::Value;
 pub struct TranscriptionDiarizedSegment {
     ///The type of the segment. Always `transcript.text.segment`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["transcript.text.segment"]))]
     pub type_: String,
     ///Unique identifier for the segment.
     pub id: String,
@@ -19770,6 +20629,7 @@ impl schematic_define::Registration for TranscriptionWord {
 pub struct TruncationObject {
     ///The truncation strategy to use for the thread. The default is `auto`. If set to `last_messages`, the thread will be truncated to the n most recent messages in the thread. When set to `auto`, messages in the middle of the thread will be dropped to fit the context length of the model, `max_prompt_tokens`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["auto", "last_messages"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_messages: Option<serde_json::Value>,
@@ -19787,6 +20647,7 @@ impl schematic_define::Registration for TruncationObject {
 #[derive(JsonSchema)]
 pub struct UpdateGroupBody {
     ///New display name for the group.
+    #[schemars(extend("maxLength" = 255u64, "minLength" = 1u64))]
     pub name: String,
 }
 impl schematic_define::Registration for UpdateGroupBody {
@@ -19802,6 +20663,14 @@ impl schematic_define::Registration for UpdateGroupBody {
 #[derive(JsonSchema)]
 pub struct UpdateOrganizationDataRetentionBody {
     ///The desired organization data retention type.
+    #[schemars(
+        extend(
+            "enum" = ["zero_data_retention",
+            "modified_abuse_monitoring",
+            "enhanced_zero_data_retention",
+            "enhanced_modified_abuse_monitoring"]
+        )
+    )]
     pub retention_type: String,
 }
 impl schematic_define::Registration for UpdateOrganizationDataRetentionBody {
@@ -19819,6 +20688,16 @@ impl schematic_define::Registration for UpdateOrganizationDataRetentionBody {
 #[derive(JsonSchema)]
 pub struct UpdateProjectDataRetentionBody {
     ///The desired project data retention type.
+    #[schemars(
+        extend(
+            "enum" = ["organization_default",
+            "none",
+            "zero_data_retention",
+            "modified_abuse_monitoring",
+            "enhanced_zero_data_retention",
+            "enhanced_modified_abuse_monitoring"]
+        )
+    )]
     pub retention_type: String,
 }
 impl schematic_define::Registration for UpdateProjectDataRetentionBody {
@@ -19840,6 +20719,7 @@ pub struct UpdateProjectServiceAccountBody {
     pub name: Option<String>,
     ///The updated service account role.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["member", "owner", null]))]
     pub role: Option<String>,
 }
 impl schematic_define::Registration for UpdateProjectServiceAccountBody {
@@ -19919,11 +20799,13 @@ pub struct Upload {
     ///The intended purpose of the file. [Please refer here](/docs/api-reference/files/object#files/object-purpose) for acceptable values.
     pub purpose: String,
     ///The status of the Upload.
+    #[schemars(extend("enum" = ["pending", "completed", "cancelled", "expired"]))]
     pub status: String,
     ///The Unix timestamp (in seconds) for when the Upload will expire.
     pub expires_at: i64,
     ///The object type, which is always "upload".
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["upload", null]))]
     pub object: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<serde_json::Value>,
@@ -19966,6 +20848,7 @@ pub struct UploadPart {
     ///The ID of the Upload object that this Part was added to.
     pub upload_id: String,
     ///The object type, which is always `upload.part`.
+    #[schemars(extend("enum" = ["upload.part"]))]
     pub object: String,
 }
 impl schematic_define::Registration for UploadPart {
@@ -19980,6 +20863,7 @@ impl schematic_define::Registration for UploadPart {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UsageAudioSpeechesResult {
+    #[schemars(extend("enum" = ["organization.usage.audio_speeches.result"]))]
     pub object: String,
     ///The number of characters processed.
     pub characters: i64,
@@ -20008,6 +20892,7 @@ impl schematic_define::Registration for UsageAudioSpeechesResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UsageAudioTranscriptionsResult {
+    #[schemars(extend("enum" = ["organization.usage.audio_transcriptions.result"]))]
     pub object: String,
     ///The number of seconds processed.
     pub seconds: i64,
@@ -20036,6 +20921,7 @@ impl schematic_define::Registration for UsageAudioTranscriptionsResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UsageCodeInterpreterSessionsResult {
+    #[schemars(extend("enum" = ["organization.usage.code_interpreter_sessions.result"]))]
     pub object: String,
     ///The number of code interpreter sessions.
     pub num_sessions: i64,
@@ -20056,6 +20942,7 @@ impl schematic_define::Registration for UsageCodeInterpreterSessionsResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UsageCompletionsResult {
+    #[schemars(extend("enum" = ["organization.usage.completions.result"]))]
     pub object: String,
     ///The aggregated number of input tokens used, including cached and cache-write tokens. This includes text, audio, and image tokens. For customers subscribed to Scale Tier, this includes Scale Tier tokens.
     pub input_tokens: i64,
@@ -20126,6 +21013,7 @@ impl schematic_define::Registration for UsageCompletionsResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UsageEmbeddingsResult {
+    #[schemars(extend("enum" = ["organization.usage.embeddings.result"]))]
     pub object: String,
     ///The aggregated number of input tokens used.
     pub input_tokens: i64,
@@ -20154,6 +21042,7 @@ impl schematic_define::Registration for UsageEmbeddingsResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UsageFileSearchCallsResult {
+    #[schemars(extend("enum" = ["organization.usage.file_searches.result"]))]
     pub object: String,
     ///The count of file search calls.
     pub num_requests: i64,
@@ -20180,6 +21069,7 @@ impl schematic_define::Registration for UsageFileSearchCallsResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UsageImagesResult {
+    #[schemars(extend("enum" = ["organization.usage.images.result"]))]
     pub object: String,
     ///The number of images processed.
     pub images: i64,
@@ -20210,6 +21100,7 @@ impl schematic_define::Registration for UsageImagesResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UsageModerationsResult {
+    #[schemars(extend("enum" = ["organization.usage.moderations.result"]))]
     pub object: String,
     ///The aggregated number of input tokens used.
     pub input_tokens: i64,
@@ -20237,6 +21128,7 @@ impl schematic_define::Registration for UsageModerationsResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UsageResponse {
+    #[schemars(extend("enum" = ["page"]))]
     pub object: String,
     pub data: Vec<UsageTimeBucket>,
     pub has_more: bool,
@@ -20253,6 +21145,7 @@ impl schematic_define::Registration for UsageResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UsageTimeBucket {
+    #[schemars(extend("enum" = ["bucket"]))]
     pub object: String,
     pub start_time: i64,
     pub end_time: i64,
@@ -20270,6 +21163,7 @@ impl schematic_define::Registration for UsageTimeBucket {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UsageVectorStoresResult {
+    #[schemars(extend("enum" = ["organization.usage.vector_stores.result"]))]
     pub object: String,
     ///The vector stores usage in bytes.
     pub usage_bytes: i64,
@@ -20290,6 +21184,7 @@ impl schematic_define::Registration for UsageVectorStoresResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UsageWebSearchCallsResult {
+    #[schemars(extend("enum" = ["organization.usage.web_searches.result"]))]
     pub object: String,
     ///The count of model requests.
     pub num_model_requests: i64,
@@ -20321,6 +21216,7 @@ impl schematic_define::Registration for UsageWebSearchCallsResult {
 #[derive(JsonSchema)]
 pub struct User {
     ///The object type, which is always `organization.user`
+    #[schemars(extend("enum" = ["organization.user"]))]
     pub object: String,
     ///The identifier, which can be referenced in API endpoints
     pub id: String,
@@ -20377,6 +21273,7 @@ impl schematic_define::Registration for User {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UserDeleteResponse {
+    #[schemars(extend("enum" = ["organization.user.deleted"]))]
     pub object: String,
     pub id: String,
     pub deleted: bool,
@@ -20394,6 +21291,7 @@ impl schematic_define::Registration for UserDeleteResponse {
 #[derive(JsonSchema)]
 pub struct UserListResource {
     ///Always `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///Users in the current page.
     pub data: Vec<GroupUser>,
@@ -20413,6 +21311,7 @@ impl schematic_define::Registration for UserListResource {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UserListResponse {
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     pub data: Vec<User>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -20434,6 +21333,7 @@ impl schematic_define::Registration for UserListResponse {
 #[derive(JsonSchema)]
 pub struct UserRoleAssignment {
     ///Always `user.role`.
+    #[schemars(extend("enum" = ["user.role"]))]
     pub object: String,
     pub user: User,
     pub role: Role,
@@ -20477,6 +21377,7 @@ impl schematic_define::Registration for UserRoleUpdateRequest {
 pub struct VadConfig {
     ///Must be set to `server_vad` to enable manual chunking using server side VAD.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["server_vad"]))]
     pub type_: String,
     /**Amount of audio to include before the VAD detected speech (in
 milliseconds).*/
@@ -20539,8 +21440,10 @@ impl schematic_define::Registration for ValidateGraderResponse {
 #[derive(JsonSchema)]
 pub struct VectorStoreExpirationAfter {
     ///Anchor timestamp after which the expiration policy applies. Supported anchors: `last_active_at`.
+    #[schemars(extend("enum" = ["last_active_at"]))]
     pub anchor: String,
     ///The number of days after the anchor time that the vector store will expire.
+    #[schemars(extend("maximum" = 365u64, "minimum" = 1u64))]
     pub days: i64,
 }
 impl schematic_define::Registration for VectorStoreExpirationAfter {
@@ -20583,12 +21486,14 @@ pub struct VectorStoreFileBatchObject {
     ///The identifier, which can be referenced in API endpoints.
     pub id: String,
     ///The object type, which is always `vector_store.file_batch`.
+    #[schemars(extend("enum" = ["vector_store.files_batch"]))]
     pub object: String,
     ///The Unix timestamp (in seconds) for when the vector store files batch was created.
     pub created_at: i64,
     ///The ID of the [vector store](/docs/api-reference/vector-stores/object) that the [File](/docs/api-reference/files) is attached to.
     pub vector_store_id: String,
     ///The status of the vector store files batch, which can be either `in_progress`, `completed`, `cancelled` or `failed`.
+    #[schemars(extend("enum" = ["in_progress", "completed", "cancelled", "failed"]))]
     pub status: String,
     pub file_counts: serde_json::Value,
 }
@@ -20607,6 +21512,7 @@ impl schematic_define::Registration for VectorStoreFileBatchObject {
 #[derive(JsonSchema)]
 pub struct VectorStoreFileContentResponse {
     ///The object type, which is always `vector_store.file_content.page`
+    #[schemars(extend("enum" = ["vector_store.file_content.page"]))]
     pub object: String,
     ///Parsed content of the file.
     pub data: Vec<serde_json::Value>,
@@ -20631,6 +21537,7 @@ pub struct VectorStoreFileObject {
     ///The identifier, which can be referenced in API endpoints.
     pub id: String,
     ///The object type, which is always `vector_store.file`.
+    #[schemars(extend("enum" = ["vector_store.file"]))]
     pub object: String,
     ///The total vector store usage in bytes. Note that this may be different from the original file size.
     pub usage_bytes: i64,
@@ -20639,6 +21546,7 @@ pub struct VectorStoreFileObject {
     ///The ID of the [vector store](/docs/api-reference/vector-stores/object) that the [File](/docs/api-reference/files) is attached to.
     pub vector_store_id: String,
     ///The status of the vector store file, which can be either `in_progress`, `completed`, `cancelled`, or `failed`. The status `completed` indicates that the vector store file is ready for use.
+    #[schemars(extend("enum" = ["in_progress", "completed", "cancelled", "failed"]))]
     pub status: String,
     pub last_error: serde_json::Value,
     ///The strategy used to chunk the file.
@@ -20664,6 +21572,7 @@ pub struct VectorStoreObject {
     ///The identifier, which can be referenced in API endpoints.
     pub id: String,
     ///The object type, which is always `vector_store`.
+    #[schemars(extend("enum" = ["vector_store"]))]
     pub object: String,
     ///The Unix timestamp (in seconds) for when the vector store was created.
     pub created_at: i64,
@@ -20673,6 +21582,7 @@ pub struct VectorStoreObject {
     pub usage_bytes: i64,
     pub file_counts: serde_json::Value,
     ///The status of the vector store, which can be either `expired`, `in_progress`, or `completed`. A status of `completed` indicates that the vector store is ready for use.
+    #[schemars(extend("enum" = ["expired", "in_progress", "completed"]))]
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_after: Option<VectorStoreExpirationAfter>,
@@ -20699,6 +21609,7 @@ pub struct VectorStoreSearchRequest {
     pub rewrite_query: Option<bool>,
     ///The maximum number of results to return. This number should be between 1 and 50 inclusive.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 50u64, "minimum" = 1u64))]
     pub max_num_results: Option<i64>,
     ///A filter to apply based on file attributes.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -20722,6 +21633,7 @@ impl schematic_define::Registration for VectorStoreSearchRequest {
 pub struct VectorStoreSearchResultContentObject {
     ///The type of content.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["text"]))]
     pub type_: String,
     ///The text content returned from search.
     pub text: String,
@@ -20744,6 +21656,7 @@ pub struct VectorStoreSearchResultItem {
     ///The name of the vector store file.
     pub filename: String,
     ///The similarity score for the result.
+    #[schemars(extend("maximum" = 1u64, "minimum" = 0u64))]
     pub score: f64,
     pub attributes: VectorStoreFileAttributes,
     ///Content chunks from the file.
@@ -20763,6 +21676,7 @@ impl schematic_define::Registration for VectorStoreSearchResultItem {
 #[derive(JsonSchema)]
 pub struct VectorStoreSearchResultsPage {
     ///The object type, which is always `vector_store.search_results.page`
+    #[schemars(extend("enum" = ["vector_store.search_results.page"]))]
     pub object: String,
     pub search_query: Vec<serde_json::Value>,
     ///The list of search result items.
@@ -20807,6 +21721,7 @@ impl schematic_define::Registration for Verbosity {
 pub struct VoiceConsentDeletedResource {
     ///The consent recording identifier.
     pub id: String,
+    #[schemars(extend("enum" = ["audio.voice_consent"]))]
     pub object: String,
     pub deleted: bool,
 }
@@ -20823,6 +21738,7 @@ impl schematic_define::Registration for VoiceConsentDeletedResource {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct VoiceConsentListResource {
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     pub data: Vec<VoiceConsentResource>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -20846,6 +21762,7 @@ impl schematic_define::Registration for VoiceConsentListResource {
 #[derive(JsonSchema)]
 pub struct VoiceConsentResource {
     ///The object type, which is always `audio.voice_consent`.
+    #[schemars(extend("enum" = ["audio.voice_consent"]))]
     pub object: String,
     ///The consent recording identifier.
     pub id: String,
@@ -20914,6 +21831,7 @@ impl schematic_define::Registration for VoiceIdsShared {
 #[derive(JsonSchema)]
 pub struct VoiceResource {
     ///The object type, which is always `audio.voice`.
+    #[schemars(extend("enum" = ["audio.voice"]))]
     pub object: String,
     ///The voice identifier, which can be referenced in API endpoints.
     pub id: String,
@@ -20936,6 +21854,7 @@ impl schematic_define::Registration for VoiceResource {
 pub struct WebSearchActionFind {
     ///The action type.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["find_in_page"]))]
     pub type_: String,
     ///The URL of the page searched for the pattern.
     pub url: String,
@@ -20956,6 +21875,7 @@ impl schematic_define::Registration for WebSearchActionFind {
 pub struct WebSearchActionOpenPage {
     ///The action type.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["open_page"]))]
     pub type_: String,
     ///The URL opened by the model.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -20977,6 +21897,7 @@ impl schematic_define::Registration for WebSearchActionOpenPage {
 pub struct WebSearchActionSearch {
     ///The action type.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["search"]))]
     pub type_: String,
     ///The search query.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -21077,6 +21998,7 @@ impl schematic_define::Registration for WebSearchLocation {
 pub struct WebSearchTool {
     ///The type of the web search tool. One of `web_search` or `web_search_2025_08_26`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["web_search", "web_search_2025_08_26"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filters: Option<serde_json::Value>,
@@ -21084,6 +22006,7 @@ pub struct WebSearchTool {
     pub user_location: Option<WebSearchApproximateLocation>,
     ///High level guidance for the amount of context window space to use for the search. One of `low`, `medium`, or `high`. `medium` is the default.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["low", "medium", "high", null]))]
     pub search_context_size: Option<String>,
 }
 impl schematic_define::Registration for WebSearchTool {
@@ -21103,8 +22026,10 @@ pub struct WebSearchToolCall {
     pub id: String,
     ///The type of the web search tool call. Always `web_search_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["web_search_call"]))]
     pub type_: String,
     ///The status of the web search tool call.
+    #[schemars(extend("enum" = ["in_progress", "searching", "completed", "failed"]))]
     pub status: String,
     /**An object describing the specific action taken in this web search call.
 Includes details on how the model used the web (search, open_page, find_in_page).*/
@@ -21130,9 +22055,11 @@ pub struct WebhookBatchCancelled {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `batch.cancelled`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["batch.cancelled"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookBatchCancelled {
@@ -21157,9 +22084,11 @@ pub struct WebhookBatchCompleted {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `batch.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["batch.completed"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookBatchCompleted {
@@ -21184,9 +22113,11 @@ pub struct WebhookBatchExpired {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `batch.expired`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["batch.expired"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookBatchExpired {
@@ -21209,9 +22140,11 @@ pub struct WebhookBatchFailed {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `batch.failed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["batch.failed"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookBatchFailed {
@@ -21234,9 +22167,11 @@ pub struct WebhookEvalRunCanceled {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `eval.run.canceled`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["eval.run.canceled"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookEvalRunCanceled {
@@ -21261,9 +22196,11 @@ pub struct WebhookEvalRunFailed {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `eval.run.failed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["eval.run.failed"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookEvalRunFailed {
@@ -21286,9 +22223,11 @@ pub struct WebhookEvalRunSucceeded {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `eval.run.succeeded`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["eval.run.succeeded"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookEvalRunSucceeded {
@@ -21313,9 +22252,11 @@ pub struct WebhookFineTuningJobCancelled {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `fine_tuning.job.cancelled`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["fine_tuning.job.cancelled"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookFineTuningJobCancelled {
@@ -21340,9 +22281,11 @@ pub struct WebhookFineTuningJobFailed {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `fine_tuning.job.failed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["fine_tuning.job.failed"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookFineTuningJobFailed {
@@ -21367,9 +22310,11 @@ pub struct WebhookFineTuningJobSucceeded {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `fine_tuning.job.succeeded`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["fine_tuning.job.succeeded"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookFineTuningJobSucceeded {
@@ -21396,9 +22341,11 @@ pub struct WebhookLiveCallIncoming {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `live.call.incoming`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["live.call.incoming"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookLiveCallIncoming {
@@ -21425,9 +22372,11 @@ pub struct WebhookRealtimeCallIncoming {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `realtime.call.incoming`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["realtime.call.incoming"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookRealtimeCallIncoming {
@@ -21452,9 +22401,11 @@ pub struct WebhookResponseCancelled {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `response.cancelled`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.cancelled"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookResponseCancelled {
@@ -21479,9 +22430,11 @@ pub struct WebhookResponseCompleted {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `response.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.completed"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookResponseCompleted {
@@ -21506,9 +22459,11 @@ pub struct WebhookResponseFailed {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `response.failed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.failed"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookResponseFailed {
@@ -21533,9 +22488,11 @@ pub struct WebhookResponseIncomplete {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["event", null]))]
     pub object: Option<String>,
     ///The type of the event. Always `response.incomplete`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.incomplete"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WebhookResponseIncomplete {
@@ -21571,6 +22528,7 @@ impl schematic_define::Registration for ModerationInputType {
 pub struct ModerationResultBody {
     ///The object type, which was always `moderation_result` for successful moderation results.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["moderation_result"]))]
     pub type_: String,
     ///The moderation model that produced this result.
     pub model: String,
@@ -21647,6 +22605,7 @@ impl schematic_define::Registration for PromptCacheOptionsParam {
 #[derive(JsonSchema)]
 pub struct PromptCacheBreakpointParam {
     ///The breakpoint mode. Always `explicit`.
+    #[schemars(extend("enum" = ["explicit"]))]
     pub mode: String,
 }
 impl schematic_define::Registration for PromptCacheBreakpointParam {
@@ -21733,8 +22692,10 @@ impl schematic_define::Registration for ModerationParam {
 pub struct SkillReferenceParam {
     ///References a skill created with the /v1/skills endpoint.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["skill_reference"]))]
     pub type_: String,
     ///The ID of the referenced skill.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub skill_id: String,
     ///Optional skill version. Use a positive integer or 'latest'. Omit for default.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -21754,10 +22715,13 @@ impl schematic_define::Registration for SkillReferenceParam {
 pub struct InlineSkillSourceParam {
     ///The type of the inline skill source. Must be `base64`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["base64"]))]
     pub type_: String,
     ///The media type of the inline skill payload. Must be `application/zip`.
+    #[schemars(extend("enum" = ["application/zip"]))]
     pub media_type: String,
     ///Base64-encoded skill zip bundle.
+    #[schemars(extend("maxLength" = 70254592u64, "minLength" = 1u64))]
     pub data: String,
 }
 impl schematic_define::Registration for InlineSkillSourceParam {
@@ -21775,6 +22739,7 @@ impl schematic_define::Registration for InlineSkillSourceParam {
 pub struct InlineSkillParam {
     ///Defines an inline skill for this request.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["inline"]))]
     pub type_: String,
     ///The name of the skill.
     pub name: String,
@@ -21795,6 +22760,7 @@ impl schematic_define::Registration for InlineSkillParam {
 pub struct ContainerNetworkPolicyDisabledParam {
     ///Disable outbound network access. Always `disabled`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["disabled"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for ContainerNetworkPolicyDisabledParam {
@@ -21811,10 +22777,13 @@ impl schematic_define::Registration for ContainerNetworkPolicyDisabledParam {
 #[derive(JsonSchema)]
 pub struct ContainerNetworkPolicyDomainSecretParam {
     ///The domain associated with the secret.
+    #[schemars(extend("minLength" = 1u64))]
     pub domain: String,
     ///The name of the secret to inject for the domain.
+    #[schemars(extend("minLength" = 1u64))]
     pub name: String,
     ///The secret value to inject for the domain.
+    #[schemars(extend("maxLength" = 10485760u64, "minLength" = 1u64))]
     pub value: String,
 }
 impl schematic_define::Registration for ContainerNetworkPolicyDomainSecretParam {
@@ -21832,11 +22801,14 @@ impl schematic_define::Registration for ContainerNetworkPolicyDomainSecretParam 
 pub struct ContainerNetworkPolicyAllowlistParam {
     ///Allow outbound network access only to specified domains. Always `allowlist`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["allowlist"]))]
     pub type_: String,
     ///A list of allowed domains when type is `allowlist`.
+    #[schemars(extend("minItems" = 1u64))]
     pub allowed_domains: Vec<String>,
     ///Optional domain-scoped secrets for allowlisted domains.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minItems" = 1u64))]
     pub domain_secrets: Option<Vec<ContainerNetworkPolicyDomainSecretParam>>,
 }
 impl schematic_define::Registration for ContainerNetworkPolicyAllowlistParam {
@@ -21940,6 +22912,7 @@ impl schematic_define::Registration for MessageRole {
 #[derive(JsonSchema)]
 pub struct PromptCacheBreakpointConfig {
     ///The breakpoint mode. Always `explicit`.
+    #[schemars(extend("enum" = ["explicit"]))]
     pub mode: String,
 }
 impl schematic_define::Registration for PromptCacheBreakpointConfig {
@@ -21958,6 +22931,7 @@ impl schematic_define::Registration for PromptCacheBreakpointConfig {
 pub struct InputTextContent {
     ///The type of the input item. Always `input_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_text"]))]
     pub type_: String,
     ///The text input to the model.
     pub text: String,
@@ -21978,6 +22952,7 @@ impl schematic_define::Registration for InputTextContent {
 pub struct FileCitationBody {
     ///The type of the file citation. Always `file_citation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_citation"]))]
     pub type_: String,
     ///The ID of the file.
     pub file_id: String,
@@ -22000,6 +22975,7 @@ impl schematic_define::Registration for FileCitationBody {
 pub struct UrlCitationBody {
     ///The type of the URL citation. Always `url_citation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["url_citation"]))]
     pub type_: String,
     ///The URL of the web resource.
     pub url: String,
@@ -22024,6 +23000,7 @@ impl schematic_define::Registration for UrlCitationBody {
 pub struct ContainerFileCitationBody {
     ///The type of the container file citation. Always `container_file_citation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["container_file_citation"]))]
     pub type_: String,
     ///The ID of the container file.
     pub container_id: String,
@@ -22146,6 +23123,7 @@ impl schematic_define::Registration for LogProb {
 pub struct OutputTextContent {
     ///The type of the output text. Always `output_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["output_text"]))]
     pub type_: String,
     ///The text output from the model.
     pub text: String,
@@ -22166,6 +23144,7 @@ impl schematic_define::Registration for OutputTextContent {
 #[derive(JsonSchema)]
 pub struct TextContent {
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["text"]))]
     pub type_: String,
     pub text: String,
 }
@@ -22183,6 +23162,7 @@ impl schematic_define::Registration for TextContent {
 pub struct SummaryTextContent {
     ///The type of the object. Always `summary_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["summary_text"]))]
     pub type_: String,
     ///A summary of the reasoning output from the model so far.
     pub text: String,
@@ -22201,6 +23181,7 @@ impl schematic_define::Registration for SummaryTextContent {
 pub struct ReasoningTextContent {
     ///The type of the reasoning text. Always `reasoning_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["reasoning_text"]))]
     pub type_: String,
     ///The reasoning text from the model.
     pub text: String,
@@ -22219,6 +23200,7 @@ impl schematic_define::Registration for ReasoningTextContent {
 pub struct RefusalContent {
     ///The type of the refusal. Always `refusal`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["refusal"]))]
     pub type_: String,
     ///The refusal explanation from the model.
     pub refusal: String,
@@ -22258,6 +23240,7 @@ impl schematic_define::Registration for ImageDetail {
 pub struct InputImageContent {
     ///The type of the input item. Always `input_image`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_image"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_url: Option<serde_json::Value>,
@@ -22281,6 +23264,7 @@ impl schematic_define::Registration for InputImageContent {
 pub struct ComputerScreenshotContent {
     ///Specifies the event type. For a computer screenshot, this property is always set to `computer_screenshot`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["computer_screenshot"]))]
     pub type_: String,
     pub image_url: serde_json::Value,
     pub file_id: serde_json::Value,
@@ -22323,6 +23307,7 @@ impl schematic_define::Registration for FileInputDetail {
 pub struct InputFileContent {
     ///The type of the input item. Always `input_file`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_file"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_id: Option<serde_json::Value>,
@@ -22371,6 +23356,7 @@ impl schematic_define::Registration for MessagePhase2 {
 pub struct Message {
     ///The type of the message. Always set to `message`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["message"]))]
     pub type_: String,
     ///The unique ID of the message.
     pub id: String,
@@ -22393,6 +23379,7 @@ impl schematic_define::Registration for Message {
 #[derive(JsonSchema)]
 pub struct DirectToolCallCaller {
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["direct"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for DirectToolCallCaller {
@@ -22407,6 +23394,7 @@ impl schematic_define::Registration for DirectToolCallCaller {
 #[derive(JsonSchema)]
 pub struct ProgramToolCallCaller {
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["program"]))]
     pub type_: String,
     ///The call ID of the program item that produced this tool call.
     pub caller_id: String,
@@ -22504,6 +23492,7 @@ impl schematic_define::Registration for FunctionCallStatus {
 pub struct DirectToolCallCallerParam {
     ///The caller type. Always `direct`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["direct"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for DirectToolCallCallerParam {
@@ -22521,8 +23510,10 @@ impl schematic_define::Registration for DirectToolCallCallerParam {
 pub struct ProgramToolCallCallerParam {
     ///The caller type. Always `program`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["program"]))]
     pub type_: String,
     ///The call ID of the program item that produced this tool call.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub caller_id: String,
 }
 impl schematic_define::Registration for ProgramToolCallCallerParam {
@@ -22648,6 +23639,7 @@ impl schematic_define::Registration for ClickButtonType {
 pub struct ClickParam {
     ///Specifies the event type. For a click action, this property is always `click`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["click"]))]
     pub type_: String,
     pub button: ClickButtonType,
     ///The x-coordinate where the click occurred.
@@ -22671,6 +23663,7 @@ impl schematic_define::Registration for ClickParam {
 pub struct DoubleClickAction {
     ///Specifies the event type. For a double click action, this property is always set to `double_click`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["double_click"]))]
     pub type_: String,
     ///The x-coordinate where the double click occurred.
     pub x: i64,
@@ -22709,6 +23702,7 @@ impl schematic_define::Registration for CoordParam {
 pub struct DragParam {
     ///Specifies the event type. For a drag action, this property is always set to `drag`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["drag"]))]
     pub type_: String,
     /**An array of coordinates representing the path of the drag action. Coordinates will appear as an array of objects, eg
 ```text
@@ -22735,6 +23729,7 @@ impl schematic_define::Registration for DragParam {
 pub struct KeyPressAction {
     ///Specifies the event type. For a keypress action, this property is always set to `keypress`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["keypress"]))]
     pub type_: String,
     ///The combination of keys the model is requesting to be pressed. This is an array of strings, each representing a key.
     pub keys: Vec<String>,
@@ -22753,6 +23748,7 @@ impl schematic_define::Registration for KeyPressAction {
 pub struct MoveParam {
     ///Specifies the event type. For a move action, this property is always set to `move`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["move"]))]
     pub type_: String,
     ///The x-coordinate to move to.
     pub x: i64,
@@ -22775,6 +23771,7 @@ impl schematic_define::Registration for MoveParam {
 pub struct ScreenshotParam {
     ///Specifies the event type. For a screenshot action, this property is always set to `screenshot`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["screenshot"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for ScreenshotParam {
@@ -22791,6 +23788,7 @@ impl schematic_define::Registration for ScreenshotParam {
 pub struct ScrollParam {
     ///Specifies the event type. For a scroll action, this property is always set to `scroll`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["scroll"]))]
     pub type_: String,
     ///The x-coordinate where the scroll occurred.
     pub x: i64,
@@ -22817,6 +23815,7 @@ impl schematic_define::Registration for ScrollParam {
 pub struct TypeParam {
     ///Specifies the event type. For a type action, this property is always set to `type`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["type"]))]
     pub type_: String,
     ///The text to type.
     pub text: String,
@@ -22835,6 +23834,7 @@ impl schematic_define::Registration for TypeParam {
 pub struct WaitParam {
     ///Specifies the event type. For a wait action, this property is always set to `wait`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["wait"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for WaitParam {
@@ -22911,6 +23911,7 @@ impl schematic_define::Registration for ToolSearchExecutionType {
 pub struct ToolSearchCall {
     ///The type of the item. Always `tool_search_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["tool_search_call"]))]
     pub type_: String,
     ///The unique ID of the tool search call item.
     pub id: String,
@@ -22956,6 +23957,7 @@ impl schematic_define::Registration for CallableToolAllowedCaller {
 pub struct FunctionTool {
     ///The type of the function tool. Always `function`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: String,
     ///The name of the function to call.
     pub name: String,
@@ -23058,6 +24060,7 @@ impl schematic_define::Registration for Filters {
 pub struct FileSearchTool {
     ///The type of the file search tool. Always `file_search`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_search"]))]
     pub type_: String,
     ///The IDs of the vector stores to search.
     pub vector_store_ids: Vec<String>,
@@ -23083,6 +24086,7 @@ impl schematic_define::Registration for FileSearchTool {
 pub struct ComputerTool {
     ///The type of the computer tool. Always `computer`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["computer"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for ComputerTool {
@@ -23122,6 +24126,7 @@ impl schematic_define::Registration for ComputerEnvironment {
 pub struct ComputerUsePreviewTool {
     ///The type of the computer use tool. Always `computer_use_preview`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["computer_use_preview"]))]
     pub type_: String,
     pub environment: ComputerEnvironment,
     ///The width of the computer display.
@@ -23166,9 +24171,11 @@ impl schematic_define::Registration for ContainerMemoryLimit {
 pub struct AutoCodeInterpreterToolParam {
     ///Always `auto`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["auto"]))]
     pub type_: String,
     ///An optional list of uploaded files to make available to your code.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 50u64))]
     pub file_ids: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_limit: Option<serde_json::Value>,
@@ -23191,6 +24198,7 @@ impl schematic_define::Registration for AutoCodeInterpreterToolParam {
 pub struct ProgrammaticToolCallingParam {
     ///The type of the tool. Always `programmatic_tool_calling`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["programmatic_tool_calling"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for ProgrammaticToolCallingParam {
@@ -23246,6 +24254,7 @@ impl schematic_define::Registration for ImageGenActionEnum {
 pub struct LocalShellToolParam {
     ///The type of the local shell tool. Always `local_shell`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["local_shell"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for LocalShellToolParam {
@@ -23261,9 +24270,11 @@ impl schematic_define::Registration for LocalShellToolParam {
 pub struct ContainerAutoParam {
     ///Automatically creates a container for this request
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["container_auto"]))]
     pub type_: String,
     ///An optional list of uploaded files to make available to your code.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 50u64))]
     pub file_ids: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_limit: Option<serde_json::Value>,
@@ -23272,6 +24283,7 @@ pub struct ContainerAutoParam {
     pub network_policy: Option<serde_json::Value>,
     ///An optional list of skills referenced by id or inline data.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 200u64))]
     pub skills: Option<Vec<serde_json::Value>>,
 }
 impl schematic_define::Registration for ContainerAutoParam {
@@ -23305,9 +24317,11 @@ impl schematic_define::Registration for LocalSkillParam {
 pub struct LocalEnvironmentParam {
     ///Use a local computer environment.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["local"]))]
     pub type_: String,
     ///An optional list of skills.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 200u64))]
     pub skills: Option<Vec<LocalSkillParam>>,
 }
 impl schematic_define::Registration for LocalEnvironmentParam {
@@ -23325,6 +24339,7 @@ impl schematic_define::Registration for LocalEnvironmentParam {
 pub struct ContainerReferenceParam {
     ///References a container created with the /v1/containers endpoint
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["container_reference"]))]
     pub type_: String,
     ///The ID of the referenced container.
     pub container_id: String,
@@ -23345,6 +24360,7 @@ impl schematic_define::Registration for ContainerReferenceParam {
 pub struct FunctionShellToolParam {
     ///The type of the shell tool. Always `shell`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["shell"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<serde_json::Value>,
@@ -23367,6 +24383,7 @@ impl schematic_define::Registration for FunctionShellToolParam {
 pub struct CustomTextFormatParam {
     ///Unconstrained text format. Always `text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["text"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for CustomTextFormatParam {
@@ -23402,6 +24419,7 @@ impl schematic_define::Registration for GrammarSyntax1 {
 pub struct CustomGrammarFormatParam {
     ///Grammar format. Always `grammar`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["grammar"]))]
     pub type_: String,
     pub syntax: GrammarSyntax1,
     ///The grammar definition.
@@ -23423,6 +24441,7 @@ impl schematic_define::Registration for CustomGrammarFormatParam {
 pub struct CustomToolParam {
     ///The type of the custom tool. Always `custom`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["custom"]))]
     pub type_: String,
     ///The name of the custom tool, used to identify it in tool calls.
     pub name: String,
@@ -23460,6 +24479,9 @@ impl schematic_define::Registration for EmptyModelParam {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct FunctionToolParam {
+    #[schemars(
+        extend("maxLength" = 128u64, "minLength" = 1u64, "pattern" = "^[a-zA-Z0-9_-]+$")
+    )]
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<serde_json::Value>,
@@ -23468,6 +24490,7 @@ pub struct FunctionToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strict: Option<serde_json::Value>,
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<serde_json::Value>,
@@ -23491,12 +24514,16 @@ impl schematic_define::Registration for FunctionToolParam {
 pub struct NamespaceToolParam {
     ///The type of the tool. Always `namespace`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["namespace"]))]
     pub type_: String,
     ///The namespace name used in tool calls (for example, `crm`).
+    #[schemars(extend("minLength" = 1u64))]
     pub name: String,
     ///A description of the namespace shown to the model.
+    #[schemars(extend("minLength" = 1u64))]
     pub description: String,
     ///The function/custom tools available inside this namespace.
+    #[schemars(extend("minItems" = 1u64))]
     pub tools: Vec<serde_json::Value>,
 }
 impl schematic_define::Registration for NamespaceToolParam {
@@ -23513,6 +24540,7 @@ impl schematic_define::Registration for NamespaceToolParam {
 pub struct ToolSearchToolParam {
     ///The type of the tool. Always `tool_search`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["tool_search"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution: Option<ToolSearchExecutionType>,
@@ -23534,6 +24562,7 @@ impl schematic_define::Registration for ToolSearchToolParam {
 pub struct ApproximateLocation {
     ///The type of location approximation. Always `approximate`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["approximate"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub country: Option<serde_json::Value>,
@@ -23594,6 +24623,7 @@ impl schematic_define::Registration for SearchContentType {
 pub struct WebSearchPreviewTool {
     ///The type of the web search tool. One of `web_search_preview` or `web_search_preview_2025_03_11`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["web_search_preview", "web_search_preview_2025_03_11"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_location: Option<serde_json::Value>,
@@ -23616,6 +24646,7 @@ impl schematic_define::Registration for WebSearchPreviewTool {
 pub struct ApplyPatchToolParam {
     ///The type of the tool. Always `apply_patch`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["apply_patch"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_callers: Option<serde_json::Value>,
@@ -23633,6 +24664,7 @@ impl schematic_define::Registration for ApplyPatchToolParam {
 pub struct ToolSearchOutput {
     ///The type of the item. Always `tool_search_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["tool_search_output"]))]
     pub type_: String,
     ///The unique ID of the tool search output item.
     pub id: String,
@@ -23658,6 +24690,7 @@ impl schematic_define::Registration for ToolSearchOutput {
 pub struct AdditionalTools {
     ///The type of the item. Always `additional_tools`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["additional_tools"]))]
     pub type_: String,
     ///The unique ID of the additional tools item.
     pub id: String,
@@ -23678,6 +24711,7 @@ impl schematic_define::Registration for AdditionalTools {
 pub struct Program {
     ///The type of the item. Always `program`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["program"]))]
     pub type_: String,
     ///The unique ID of the program item.
     pub id: String,
@@ -23718,6 +24752,7 @@ impl schematic_define::Registration for ProgramOutputStatus {
 pub struct ProgramOutput {
     ///The type of the item. Always `program_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["program_output"]))]
     pub type_: String,
     ///The unique ID of the program output item.
     pub id: String,
@@ -23741,6 +24776,7 @@ impl schematic_define::Registration for ProgramOutput {
 pub struct CompactionBody {
     ///The type of the item. Always `compaction`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["compaction"]))]
     pub type_: String,
     ///The unique ID of the compaction item.
     pub id: String,
@@ -23764,6 +24800,7 @@ impl schematic_define::Registration for CompactionBody {
 pub struct CodeInterpreterOutputLogs {
     ///The type of the output. Always `logs`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["logs"]))]
     pub type_: String,
     ///The logs output from the code interpreter.
     pub logs: String,
@@ -23784,6 +24821,7 @@ impl schematic_define::Registration for CodeInterpreterOutputLogs {
 pub struct CodeInterpreterOutputImage {
     ///The type of the output. Always `image`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image"]))]
     pub type_: String,
     ///The URL of the image output from the code interpreter.
     pub url: String,
@@ -23804,6 +24842,7 @@ impl schematic_define::Registration for CodeInterpreterOutputImage {
 pub struct LocalShellExecAction {
     ///The type of the local shell action. Always `exec`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["exec"]))]
     pub type_: String,
     ///The command to run.
     pub command: Vec<String>,
@@ -23867,6 +24906,7 @@ impl schematic_define::Registration for FunctionShellCallStatus {
 pub struct LocalEnvironmentResource {
     ///The environment type. Always `local`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["local"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for LocalEnvironmentResource {
@@ -23885,6 +24925,7 @@ impl schematic_define::Registration for LocalEnvironmentResource {
 pub struct ContainerReferenceResource {
     ///The environment type. Always `container_reference`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["container_reference"]))]
     pub type_: String,
     pub container_id: String,
 }
@@ -23904,6 +24945,7 @@ impl schematic_define::Registration for ContainerReferenceResource {
 pub struct FunctionShellCall {
     ///The type of the item. Always `shell_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["shell_call"]))]
     pub type_: String,
     ///The unique ID of the shell tool call. Populated when this item is returned via API.
     pub id: String,
@@ -23953,6 +24995,7 @@ impl schematic_define::Registration for FunctionShellCallOutputStatusEnum {
 pub struct FunctionShellCallOutputTimeoutOutcome {
     ///The outcome type. Always `timeout`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["timeout"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for FunctionShellCallOutputTimeoutOutcome {
@@ -23971,6 +25014,7 @@ impl schematic_define::Registration for FunctionShellCallOutputTimeoutOutcome {
 pub struct FunctionShellCallOutputExitOutcome {
     ///The outcome type. Always `exit`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["exit"]))]
     pub type_: String,
     ///Exit code from the shell process.
     pub exit_code: i64,
@@ -24015,6 +25059,7 @@ impl schematic_define::Registration for FunctionShellCallOutputContent {
 pub struct FunctionShellCallOutput {
     ///The type of the shell call output. Always `shell_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["shell_call_output"]))]
     pub type_: String,
     ///The unique ID of the shell call output. Populated when this item is returned via API.
     pub id: String,
@@ -24063,6 +25108,7 @@ impl schematic_define::Registration for ApplyPatchCallStatus {
 pub struct ApplyPatchCreateFileOperation {
     ///Create a new file with the provided diff.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["create_file"]))]
     pub type_: String,
     ///Path of the file to create.
     pub path: String,
@@ -24085,6 +25131,7 @@ impl schematic_define::Registration for ApplyPatchCreateFileOperation {
 pub struct ApplyPatchDeleteFileOperation {
     ///Delete the specified file.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["delete_file"]))]
     pub type_: String,
     ///Path of the file to delete.
     pub path: String,
@@ -24105,6 +25152,7 @@ impl schematic_define::Registration for ApplyPatchDeleteFileOperation {
 pub struct ApplyPatchUpdateFileOperation {
     ///Update an existing file with the provided diff.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["update_file"]))]
     pub type_: String,
     ///Path of the file to update.
     pub path: String,
@@ -24127,6 +25175,7 @@ impl schematic_define::Registration for ApplyPatchUpdateFileOperation {
 pub struct ApplyPatchToolCall {
     ///The type of the item. Always `apply_patch_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["apply_patch_call"]))]
     pub type_: String,
     ///The unique ID of the apply patch tool call. Populated when this item is returned via API.
     pub id: String,
@@ -24174,6 +25223,7 @@ impl schematic_define::Registration for ApplyPatchCallOutputStatus {
 pub struct ApplyPatchToolCallOutput {
     ///The type of the item. Always `apply_patch_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["apply_patch_call_output"]))]
     pub type_: String,
     ///The unique ID of the apply patch tool call output. Populated when this item is returned via API.
     pub id: String,
@@ -24270,9 +25320,11 @@ pub struct ComputerCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     ///The ID of the computer tool call that produced the output.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     ///The type of the computer tool call output. Always `computer_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["computer_call_output"]))]
     pub type_: String,
     pub output: ComputerScreenshotImage,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -24296,8 +25348,10 @@ impl schematic_define::Registration for ComputerCallOutputItemParam {
 pub struct InputTextContentParam {
     ///The type of the input item. Always `input_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_text"]))]
     pub type_: String,
     ///The text input to the model.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<serde_json::Value>,
@@ -24318,6 +25372,7 @@ impl schematic_define::Registration for InputTextContentParam {
 pub struct InputImageContentParamAutoParam {
     ///The type of the input item. Always `input_image`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_image"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_url: Option<serde_json::Value>,
@@ -24363,6 +25418,7 @@ impl schematic_define::Registration for FileDetailEnum {
 pub struct InputFileContentParam {
     ///The type of the input item. Always `input_file`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_file"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_id: Option<serde_json::Value>,
@@ -24394,9 +25450,11 @@ pub struct FunctionCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     ///The unique ID of the function tool call generated by the model.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     ///The type of the function tool call output. Always `function_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function_call_output"]))]
     pub type_: String,
     ///Text, image, or file output of the function tool call.
     pub output: serde_json::Value,
@@ -24424,8 +25482,10 @@ impl schematic_define::Registration for FunctionCallOutputItemParam {
 pub struct FileCitationParam {
     ///The citation type. Always `file_citation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_citation"]))]
     pub type_: String,
     ///The index of the file in the list of files.
+    #[schemars(extend("minimum" = 0u64))]
     pub index: i64,
     ///The ID of the file.
     pub file_id: String,
@@ -24445,10 +25505,13 @@ impl schematic_define::Registration for FileCitationParam {
 pub struct UrlCitationParam {
     ///The citation type. Always `url_citation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["url_citation"]))]
     pub type_: String,
     ///The index of the first character of the citation in the message.
+    #[schemars(extend("minimum" = 0u64))]
     pub start_index: i64,
     ///The index of the last character of the citation in the message.
+    #[schemars(extend("minimum" = 0u64))]
     pub end_index: i64,
     ///The URL of the cited resource.
     pub url: String,
@@ -24468,10 +25531,13 @@ impl schematic_define::Registration for UrlCitationParam {
 pub struct ContainerFileCitationParam {
     ///The citation type. Always `container_file_citation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["container_file_citation"]))]
     pub type_: String,
     ///The index of the first character of the citation in the message.
+    #[schemars(extend("minimum" = 0u64))]
     pub start_index: i64,
     ///The index of the last character of the citation in the message.
+    #[schemars(extend("minimum" = 0u64))]
     pub end_index: i64,
     ///The ID of the container.
     pub container_id: String,
@@ -24499,6 +25565,7 @@ pub struct ToolSearchCallItemParam {
     pub call_id: Option<serde_json::Value>,
     ///The item type. Always `tool_search_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["tool_search_call"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution: Option<ToolSearchExecutionType>,
@@ -24525,6 +25592,7 @@ pub struct ToolSearchOutputItemParam {
     pub call_id: Option<serde_json::Value>,
     ///The item type. Always `tool_search_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["tool_search_output"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution: Option<ToolSearchExecutionType>,
@@ -24550,8 +25618,10 @@ pub struct AdditionalToolsItemParam {
     pub id: Option<serde_json::Value>,
     ///The item type. Always `additional_tools`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["additional_tools"]))]
     pub type_: String,
     ///The role that provided the additional tools. Only `developer` is supported.
+    #[schemars(extend("enum" = ["developer"]))]
     pub role: String,
     ///A list of additional tools made available at this item.
     pub tools: Vec<Tool>,
@@ -24574,8 +25644,10 @@ pub struct CompactionSummaryItemParam {
     pub id: Option<serde_json::Value>,
     ///The type of the item. Always `compaction`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["compaction"]))]
     pub type_: String,
     ///The encrypted content of the compaction summary.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub encrypted_content: String,
 }
 impl schematic_define::Registration for CompactionSummaryItemParam {
@@ -24638,11 +25710,13 @@ pub struct FunctionShellCallItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     ///The unique ID of the shell tool call generated by the model.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller: Option<serde_json::Value>,
     ///The type of the item. Always `shell_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["shell_call"]))]
     pub type_: String,
     pub action: FunctionShellActionParam,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -24666,6 +25740,7 @@ impl schematic_define::Registration for FunctionShellCallItemParam {
 pub struct FunctionShellCallOutputTimeoutOutcomeParam {
     ///The outcome type. Always `timeout`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["timeout"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for FunctionShellCallOutputTimeoutOutcomeParam {
@@ -24684,6 +25759,7 @@ impl schematic_define::Registration for FunctionShellCallOutputTimeoutOutcomePar
 pub struct FunctionShellCallOutputExitOutcomeParam {
     ///The outcome type. Always `exit`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["exit"]))]
     pub type_: String,
     ///The exit code returned by the shell process.
     pub exit_code: i64,
@@ -24776,8 +25852,10 @@ impl schematic_define::Registration for FunctionShellCallOutputOutcomeParam {
 #[derive(JsonSchema)]
 pub struct FunctionShellCallOutputContentParam {
     ///Captured stdout output for the shell call.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub stdout: String,
     ///Captured stderr output for the shell call.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub stderr: String,
     pub outcome: FunctionShellCallOutputOutcomeParam,
 }
@@ -24798,11 +25876,13 @@ pub struct FunctionShellCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     ///The unique ID of the shell tool call generated by the model.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller: Option<serde_json::Value>,
     ///The type of the item. Always `shell_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["shell_call_output"]))]
     pub type_: String,
     ///Captured chunks of stdout and stderr output, along with their associated outcomes.
     pub output: Vec<FunctionShellCallOutputContentParam>,
@@ -24847,10 +25927,13 @@ impl schematic_define::Registration for ApplyPatchCallStatusParam {
 pub struct ApplyPatchCreateFileOperationParam {
     ///The operation type. Always `create_file`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["create_file"]))]
     pub type_: String,
     ///Path of the file to create relative to the workspace root.
+    #[schemars(extend("minLength" = 1u64))]
     pub path: String,
     ///Unified diff content to apply when creating the file.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub diff: String,
 }
 impl schematic_define::Registration for ApplyPatchCreateFileOperationParam {
@@ -24869,8 +25952,10 @@ impl schematic_define::Registration for ApplyPatchCreateFileOperationParam {
 pub struct ApplyPatchDeleteFileOperationParam {
     ///The operation type. Always `delete_file`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["delete_file"]))]
     pub type_: String,
     ///Path of the file to delete relative to the workspace root.
+    #[schemars(extend("minLength" = 1u64))]
     pub path: String,
 }
 impl schematic_define::Registration for ApplyPatchDeleteFileOperationParam {
@@ -24889,10 +25974,13 @@ impl schematic_define::Registration for ApplyPatchDeleteFileOperationParam {
 pub struct ApplyPatchUpdateFileOperationParam {
     ///The operation type. Always `update_file`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["update_file"]))]
     pub type_: String,
     ///Path of the file to update relative to the workspace root.
+    #[schemars(extend("minLength" = 1u64))]
     pub path: String,
     ///Unified diff content to apply to the existing file.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub diff: String,
 }
 impl schematic_define::Registration for ApplyPatchUpdateFileOperationParam {
@@ -24986,10 +26074,12 @@ impl schematic_define::Registration for ApplyPatchOperationParam {
 pub struct ApplyPatchToolCallItemParam {
     ///The type of the item. Always `apply_patch_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["apply_patch_call"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     ///The unique ID of the apply patch tool call generated by the model.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller: Option<serde_json::Value>,
@@ -25032,10 +26122,12 @@ impl schematic_define::Registration for ApplyPatchCallOutputStatusParam {
 pub struct ApplyPatchToolCallOutputItemParam {
     ///The type of the item. Always `apply_patch_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["apply_patch_call_output"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     ///The unique ID of the apply patch tool call generated by the model.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller: Option<serde_json::Value>,
@@ -25059,6 +26151,7 @@ impl schematic_define::Registration for ApplyPatchToolCallOutputItemParam {
 pub struct CompactionTriggerItemParam {
     ///The type of the item. Always `compaction_trigger`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["compaction_trigger"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for CompactionTriggerItemParam {
@@ -25096,12 +26189,16 @@ pub struct ProgramItemParam {
     pub id: String,
     ///The item type. Always `program`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["program"]))]
     pub type_: String,
     ///The stable call ID of the program item.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     ///The JavaScript source executed by programmatic tool calling.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub code: String,
     ///Opaque program replay fingerprint that must be round-tripped.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub fingerprint: String,
 }
 impl schematic_define::Registration for ProgramItemParam {
@@ -25138,10 +26235,13 @@ pub struct ProgramOutputItemParam {
     pub id: String,
     ///The item type. Always `program_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["program_output"]))]
     pub type_: String,
     ///The call ID of the program item.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     ///The result produced by the program item.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub result: String,
     pub status: ProgramOutputItemStatus,
 }
@@ -25161,6 +26261,7 @@ pub struct ConversationResource {
     ///The unique ID of the conversation.
     pub id: String,
     ///The object type, which is always `conversation`.
+    #[schemars(extend("enum" = ["conversation"]))]
     pub object: String,
     /**Set of 16 key-value pairs that can be attached to an object. This can be         useful for storing additional information about the object in a structured         format, and querying for objects via API or the dashboard.
         Keys are strings with a maximum length of 64 characters. Values are strings         with a maximum length of 512 characters.*/
@@ -25241,6 +26342,7 @@ impl schematic_define::Registration for ImageGenUsage {
 pub struct SpecificProgrammaticToolCallingParam {
     ///The tool to call. Always `programmatic_tool_calling`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["programmatic_tool_calling"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for SpecificProgrammaticToolCallingParam {
@@ -25259,6 +26361,7 @@ impl schematic_define::Registration for SpecificProgrammaticToolCallingParam {
 pub struct SpecificApplyPatchParam {
     ///The tool to call. Always `apply_patch`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["apply_patch"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for SpecificApplyPatchParam {
@@ -25277,6 +26380,7 @@ impl schematic_define::Registration for SpecificApplyPatchParam {
 pub struct SpecificFunctionShellParam {
     ///The tool to call. Always `shell`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["shell"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for SpecificFunctionShellParam {
@@ -25365,6 +26469,7 @@ impl schematic_define::Registration for PromptCacheOptions {
 pub struct ModerationErrorBody {
     ///The object type, which was always `error` for moderation failures.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["error"]))]
     pub type_: String,
     ///The error code.
     pub code: String,
@@ -25447,6 +26552,7 @@ impl schematic_define::Registration for UpdateConversationBody {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct DeletedConversationResource {
+    #[schemars(extend("enum" = ["conversation.deleted"]))]
     pub object: String,
     pub deleted: bool,
     pub id: String,
@@ -25547,6 +26653,7 @@ impl schematic_define::Registration for SpendLimitEnforcement {
 #[derive(JsonSchema)]
 pub struct OrganizationSpendLimitResource {
     ///The object type, which is always `organization.spend_limit`.
+    #[schemars(extend("enum" = ["organization.spend_limit"]))]
     pub object: String,
     ///The hard spend limit amount, in cents.
     pub threshold_amount: i64,
@@ -25569,10 +26676,13 @@ impl schematic_define::Registration for OrganizationSpendLimitResource {
 #[derive(JsonSchema)]
 pub struct UpdateOrganizationSpendLimitBody {
     ///The hard spend limit amount, in cents.
+    #[schemars(extend("minimum" = 1u64))]
     pub threshold_amount: i64,
     ///The currency for the threshold amount. Currently, only `USD` is supported.
+    #[schemars(extend("enum" = ["USD"]))]
     pub currency: String,
     ///The time interval for evaluating spend against the threshold. Currently, only `month` is supported.
+    #[schemars(extend("enum" = ["month"]))]
     pub interval: String,
 }
 impl schematic_define::Registration for UpdateOrganizationSpendLimitBody {
@@ -25590,6 +26700,7 @@ impl schematic_define::Registration for UpdateOrganizationSpendLimitBody {
 #[derive(JsonSchema)]
 pub struct OrganizationSpendLimitDeletedResource {
     ///The object type, which is always `organization.spend_limit.deleted`.
+    #[schemars(extend("enum" = ["organization.spend_limit.deleted"]))]
     pub object: String,
     ///Whether the hard spend limit was deleted.
     pub deleted: bool,
@@ -25609,6 +26720,7 @@ impl schematic_define::Registration for OrganizationSpendLimitDeletedResource {
 #[derive(JsonSchema)]
 pub struct ProjectSpendLimitResource {
     ///The object type, which is always `project.spend_limit`.
+    #[schemars(extend("enum" = ["project.spend_limit"]))]
     pub object: String,
     ///The hard spend limit amount, in cents.
     pub threshold_amount: i64,
@@ -25631,10 +26743,13 @@ impl schematic_define::Registration for ProjectSpendLimitResource {
 #[derive(JsonSchema)]
 pub struct UpdateProjectSpendLimitBody {
     ///The hard spend limit amount, in cents.
+    #[schemars(extend("minimum" = 1u64))]
     pub threshold_amount: i64,
     ///The currency for the threshold amount. Currently, only `USD` is supported.
+    #[schemars(extend("enum" = ["USD"]))]
     pub currency: String,
     ///The time interval for evaluating spend against the threshold. Currently, only `month` is supported.
+    #[schemars(extend("enum" = ["month"]))]
     pub interval: String,
 }
 impl schematic_define::Registration for UpdateProjectSpendLimitBody {
@@ -25652,6 +26767,7 @@ impl schematic_define::Registration for UpdateProjectSpendLimitBody {
 #[derive(JsonSchema)]
 pub struct ProjectSpendLimitDeletedResource {
     ///The object type, which is always `project.spend_limit.deleted`.
+    #[schemars(extend("enum" = ["project.spend_limit.deleted"]))]
     pub object: String,
     ///Whether the hard spend limit was deleted.
     pub deleted: bool,
@@ -25691,6 +26807,7 @@ impl schematic_define::Registration for CreateProjectServiceAccountApiKeyBody {
 #[derive(JsonSchema)]
 pub struct ServiceAccountApiKeyBody {
     ///The object type, which is always `organization.project.service_account.api_key`
+    #[schemars(extend("enum" = ["organization.project.service_account.api_key"]))]
     pub object: String,
     ///The unredacted API key value.
     pub value: String,
@@ -25791,6 +26908,7 @@ impl schematic_define::Registration for C2PAValidationStateApi {
 pub struct C2PAProvenanceResult {
     ///The provenance signal type. Always `c2pa`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["c2pa"]))]
     pub type_: String,
     pub outcome: ProvenanceDetectionResultApi,
     pub validation_state: C2PAValidationStateApi,
@@ -25811,6 +26929,7 @@ impl schematic_define::Registration for C2PAProvenanceResult {
 pub struct SynthIDProvenanceResult {
     ///The provenance signal type. Always `synthid`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["synthid"]))]
     pub type_: String,
     pub outcome: ProvenanceDetectionResultApi,
     pub model: serde_json::Value,
@@ -25947,6 +27066,7 @@ pub struct VideoResource {
     ///Unique identifier for the video job.
     pub id: String,
     ///The object type, which is always `video`.
+    #[schemars(extend("enum" = ["video"]))]
     pub object: String,
     pub model: VideoModel,
     pub status: VideoStatus,
@@ -25975,6 +27095,7 @@ impl schematic_define::Registration for VideoResource {
 #[derive(JsonSchema)]
 pub struct VideoListResource {
     ///The type of object returned, must be `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///A list of items
     pub data: Vec<VideoResource>,
@@ -25996,6 +27117,7 @@ impl schematic_define::Registration for VideoListResource {
 pub struct ImageRefParam2 {
     ///A fully qualified URL or base64-encoded data URL.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxLength" = 20971520u64))]
     pub image_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_id: Option<String>,
@@ -26034,6 +27156,7 @@ pub struct CreateVideoMultipartBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<VideoModel>,
     ///Text prompt that describes the video to generate.
+    #[schemars(extend("maxLength" = 32000u64, "minLength" = 1u64))]
     pub prompt: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_reference: Option<serde_json::Value>,
@@ -26059,6 +27182,7 @@ pub struct CreateVideoJsonBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<VideoModel>,
     ///Text prompt that describes the video to generate.
+    #[schemars(extend("maxLength" = 32000u64, "minLength" = 1u64))]
     pub prompt: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_reference: Option<ImageRefParam2>,
@@ -26082,6 +27206,7 @@ pub struct CreateVideoCharacterBody {
     ///Video file used to create a character.
     pub video: String,
     ///Display name for this API character.
+    #[schemars(extend("maxLength" = 80u64, "minLength" = 1u64))]
     pub name: String,
 }
 impl schematic_define::Registration for CreateVideoCharacterBody {
@@ -26135,6 +27260,7 @@ impl schematic_define::Registration for VideoReferenceInputParam {
 pub struct CreateVideoEditMultipartBody {
     pub video: serde_json::Value,
     ///Text prompt that describes how to edit the source video.
+    #[schemars(extend("maxLength" = 32000u64, "minLength" = 1u64))]
     pub prompt: String,
 }
 impl schematic_define::Registration for CreateVideoEditMultipartBody {
@@ -26153,6 +27279,7 @@ impl schematic_define::Registration for CreateVideoEditMultipartBody {
 pub struct CreateVideoEditJsonBody {
     pub video: VideoReferenceInputParam,
     ///Text prompt that describes how to edit the source video.
+    #[schemars(extend("maxLength" = 32000u64, "minLength" = 1u64))]
     pub prompt: String,
 }
 impl schematic_define::Registration for CreateVideoEditJsonBody {
@@ -26171,6 +27298,7 @@ impl schematic_define::Registration for CreateVideoEditJsonBody {
 pub struct CreateVideoExtendMultipartBody {
     pub video: serde_json::Value,
     ///Updated text prompt that directs the extension generation.
+    #[schemars(extend("maxLength" = 32000u64, "minLength" = 1u64))]
     pub prompt: String,
     pub seconds: VideoSeconds,
 }
@@ -26190,6 +27318,7 @@ impl schematic_define::Registration for CreateVideoExtendMultipartBody {
 pub struct CreateVideoExtendJsonBody {
     pub video: VideoReferenceInputParam,
     ///Updated text prompt that directs the extension generation.
+    #[schemars(extend("maxLength" = 32000u64, "minLength" = 1u64))]
     pub prompt: String,
     pub seconds: VideoSeconds,
 }
@@ -26208,6 +27337,7 @@ impl schematic_define::Registration for CreateVideoExtendJsonBody {
 #[derive(JsonSchema)]
 pub struct DeletedVideoResource {
     ///The object type that signals the deletion response.
+    #[schemars(extend("enum" = ["video.deleted"]))]
     pub object: String,
     ///Indicates that the video resource was deleted.
     pub deleted: bool,
@@ -26246,6 +27376,7 @@ impl schematic_define::Registration for VideoContentVariant {
 #[derive(JsonSchema)]
 pub struct CreateVideoRemixBody {
     ///Updated text prompt that directs the remix generation.
+    #[schemars(extend("maxLength" = 32000u64, "minLength" = 1u64))]
     pub prompt: String,
 }
 impl schematic_define::Registration for CreateVideoRemixBody {
@@ -26333,6 +27464,7 @@ impl schematic_define::Registration for TokenCountsBody {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct TokenCountsResource {
+    #[schemars(extend("enum" = ["response.input_tokens"]))]
     pub object: String,
     pub input_tokens: i64,
 }
@@ -26560,6 +27692,7 @@ pub struct CompactResource {
     ///The unique identifier for the compacted response.
     pub id: String,
     ///The object type. Always `response.compaction`.
+    #[schemars(extend("enum" = ["response.compaction"]))]
     pub object: String,
     ///The compacted list of output items.
     pub output: Vec<ItemField>,
@@ -26581,6 +27714,7 @@ pub struct SkillResource {
     ///Unique identifier for the skill.
     pub id: String,
     ///The object type, which is `skill`.
+    #[schemars(extend("enum" = ["skill"]))]
     pub object: String,
     ///Name of the skill.
     pub name: String,
@@ -26605,6 +27739,7 @@ impl schematic_define::Registration for SkillResource {
 #[derive(JsonSchema)]
 pub struct SkillListResource {
     ///The type of object returned, must be `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///A list of items
     pub data: Vec<SkillResource>,
@@ -26655,6 +27790,7 @@ impl schematic_define::Registration for SetDefaultSkillVersionBody {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct DeletedSkillResource {
+    #[schemars(extend("enum" = ["skill.deleted"]))]
     pub object: String,
     pub deleted: bool,
     pub id: String,
@@ -26671,6 +27807,7 @@ impl schematic_define::Registration for DeletedSkillResource {
 #[derive(JsonSchema)]
 pub struct SkillVersionResource {
     ///The object type, which is `skill.version`.
+    #[schemars(extend("enum" = ["skill.version"]))]
     pub object: String,
     ///Unique identifier for the skill version.
     pub id: String,
@@ -26697,6 +27834,7 @@ impl schematic_define::Registration for SkillVersionResource {
 #[derive(JsonSchema)]
 pub struct SkillVersionListResource {
     ///The type of object returned, must be `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///A list of items
     pub data: Vec<SkillVersionResource>,
@@ -26737,6 +27875,7 @@ impl schematic_define::Registration for CreateSkillVersionBody {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct DeletedSkillVersionResource {
+    #[schemars(extend("enum" = ["skill.version.deleted"]))]
     pub object: String,
     pub deleted: bool,
     pub id: String,
@@ -26901,6 +28040,7 @@ pub struct ChatSessionResource {
     ///Identifier for the ChatKit session.
     pub id: String,
     ///Type discriminator that is always `chatkit.session`.
+    #[schemars(extend("enum" = ["chatkit.session"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the session expires.
     pub expires_at: i64,
@@ -26967,8 +28107,10 @@ impl schematic_define::Registration for WorkflowParam {
 #[derive(JsonSchema)]
 pub struct ExpiresAfterParam {
     ///Base timestamp used to calculate expiration. Currently fixed to `created_at`.
+    #[schemars(extend("enum" = ["created_at"]))]
     pub anchor: String,
     ///Number of seconds after the anchor when the session expires.
+    #[schemars(extend("maximum" = 600u64, "minimum" = 1u64))]
     pub seconds: i64,
 }
 impl schematic_define::Registration for ExpiresAfterParam {
@@ -26985,6 +28127,7 @@ impl schematic_define::Registration for ExpiresAfterParam {
 pub struct RateLimitsParam {
     ///Maximum number of requests allowed per minute for the session. Defaults to 10.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 1u64))]
     pub max_requests_per_1_minute: Option<i64>,
 }
 impl schematic_define::Registration for RateLimitsParam {
@@ -27022,9 +28165,11 @@ pub struct FileUploadParam {
     pub enabled: Option<bool>,
     ///Maximum size in megabytes for each uploaded file. Defaults to 512 MB, which is the maximum allowable size.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 512u64, "minimum" = 1u64))]
     pub max_file_size: Option<i64>,
     ///Maximum number of files that can be uploaded to the session. Defaults to 10.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 1u64))]
     pub max_files: Option<i64>,
 }
 impl schematic_define::Registration for FileUploadParam {
@@ -27044,6 +28189,7 @@ pub struct HistoryParam {
     pub enabled: Option<bool>,
     ///Number of recent ChatKit threads users have access to. Defaults to unlimited when unset.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 1u64))]
     pub recent_threads: Option<i64>,
 }
 impl schematic_define::Registration for HistoryParam {
@@ -27081,6 +28227,7 @@ impl schematic_define::Registration for ChatkitConfigurationParam {
 pub struct CreateChatSessionBody {
     pub workflow: WorkflowParam,
     ///A free-form string that identifies your end user; ensures this Session can access other objects that have the same `user` scope.
+    #[schemars(extend("minLength" = 1u64))]
     pub user: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_after: Option<ExpiresAfterParam>,
@@ -27105,6 +28252,7 @@ impl schematic_define::Registration for CreateChatSessionBody {
 pub struct UserMessageInputText {
     ///Type discriminator that is always `input_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_text"]))]
     pub type_: String,
     ///Plain-text content supplied by the user.
     pub text: String,
@@ -27123,6 +28271,7 @@ impl schematic_define::Registration for UserMessageInputText {
 pub struct UserMessageQuotedText {
     ///Type discriminator that is always `quoted_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["quoted_text"]))]
     pub type_: String,
     ///Quoted text content.
     pub text: String,
@@ -27213,12 +28362,14 @@ pub struct UserMessageItem {
     ///Identifier of the thread item.
     pub id: String,
     ///Type discriminator that is always `chatkit.thread_item`.
+    #[schemars(extend("enum" = ["chatkit.thread_item"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the item was created.
     pub created_at: i64,
     ///Identifier of the parent thread.
     pub thread_id: String,
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["chatkit.user_message"]))]
     pub type_: String,
     ///Ordered content elements supplied by the user.
     pub content: Vec<serde_json::Value>,
@@ -27240,6 +28391,7 @@ impl schematic_define::Registration for UserMessageItem {
 pub struct FileAnnotationSource {
     ///Type discriminator that is always `file`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file"]))]
     pub type_: String,
     ///Filename referenced by the annotation.
     pub filename: String,
@@ -27258,6 +28410,7 @@ impl schematic_define::Registration for FileAnnotationSource {
 pub struct FileAnnotation {
     ///Type discriminator that is always `file` for this annotation.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file"]))]
     pub type_: String,
     pub source: FileAnnotationSource,
 }
@@ -27275,6 +28428,7 @@ impl schematic_define::Registration for FileAnnotation {
 pub struct UrlAnnotationSource {
     ///Type discriminator that is always `url`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["url"]))]
     pub type_: String,
     ///URL referenced by the annotation.
     pub url: String,
@@ -27293,6 +28447,7 @@ impl schematic_define::Registration for UrlAnnotationSource {
 pub struct UrlAnnotation {
     ///Type discriminator that is always `url` for this annotation.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["url"]))]
     pub type_: String,
     pub source: UrlAnnotationSource,
 }
@@ -27310,6 +28465,7 @@ impl schematic_define::Registration for UrlAnnotation {
 pub struct ResponseOutputText {
     ///Type discriminator that is always `output_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["output_text"]))]
     pub type_: String,
     ///Assistant generated text.
     pub text: String,
@@ -27331,6 +28487,7 @@ pub struct AssistantMessageItem {
     ///Identifier of the thread item.
     pub id: String,
     ///Type discriminator that is always `chatkit.thread_item`.
+    #[schemars(extend("enum" = ["chatkit.thread_item"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the item was created.
     pub created_at: i64,
@@ -27338,6 +28495,7 @@ pub struct AssistantMessageItem {
     pub thread_id: String,
     ///Type discriminator that is always `chatkit.assistant_message`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["chatkit.assistant_message"]))]
     pub type_: String,
     ///Ordered assistant response segments.
     pub content: Vec<ResponseOutputText>,
@@ -27357,6 +28515,7 @@ pub struct WidgetMessageItem {
     ///Identifier of the thread item.
     pub id: String,
     ///Type discriminator that is always `chatkit.thread_item`.
+    #[schemars(extend("enum" = ["chatkit.thread_item"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the item was created.
     pub created_at: i64,
@@ -27364,6 +28523,7 @@ pub struct WidgetMessageItem {
     pub thread_id: String,
     ///Type discriminator that is always `chatkit.widget`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["chatkit.widget"]))]
     pub type_: String,
     ///Serialized widget payload rendered in the UI.
     pub widget: String,
@@ -27400,6 +28560,7 @@ pub struct ClientToolCallItem {
     ///Identifier of the thread item.
     pub id: String,
     ///Type discriminator that is always `chatkit.thread_item`.
+    #[schemars(extend("enum" = ["chatkit.thread_item"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the item was created.
     pub created_at: i64,
@@ -27407,6 +28568,7 @@ pub struct ClientToolCallItem {
     pub thread_id: String,
     ///Type discriminator that is always `chatkit.client_tool_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["chatkit.client_tool_call"]))]
     pub type_: String,
     pub status: ClientToolCallStatus,
     ///Identifier for the client tool call.
@@ -27449,6 +28611,7 @@ pub struct TaskItem {
     ///Identifier of the thread item.
     pub id: String,
     ///Type discriminator that is always `chatkit.thread_item`.
+    #[schemars(extend("enum" = ["chatkit.thread_item"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the item was created.
     pub created_at: i64,
@@ -27456,6 +28619,7 @@ pub struct TaskItem {
     pub thread_id: String,
     ///Type discriminator that is always `chatkit.task`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["chatkit.task"]))]
     pub type_: String,
     pub task_type: TaskType,
     pub heading: serde_json::Value,
@@ -27493,6 +28657,7 @@ pub struct TaskGroupItem {
     ///Identifier of the thread item.
     pub id: String,
     ///Type discriminator that is always `chatkit.thread_item`.
+    #[schemars(extend("enum" = ["chatkit.thread_item"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the item was created.
     pub created_at: i64,
@@ -27500,6 +28665,7 @@ pub struct TaskGroupItem {
     pub thread_id: String,
     ///Type discriminator that is always `chatkit.task_group`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["chatkit.task_group"]))]
     pub type_: String,
     ///Tasks included in the group.
     pub tasks: Vec<TaskGroupTask>,
@@ -27589,6 +28755,7 @@ impl schematic_define::Registration for ThreadItem {
 #[derive(JsonSchema)]
 pub struct ThreadItemListResource {
     ///The type of object returned, must be `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///A list of items
     pub data: Vec<ThreadItem>,
@@ -27613,6 +28780,7 @@ impl schematic_define::Registration for ThreadItemListResource {
 pub struct ActiveStatus {
     ///Status discriminator that is always `active`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["active"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for ActiveStatus {
@@ -27629,6 +28797,7 @@ impl schematic_define::Registration for ActiveStatus {
 pub struct LockedStatus {
     ///Status discriminator that is always `locked`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["locked"]))]
     pub type_: String,
     pub reason: serde_json::Value,
 }
@@ -27646,6 +28815,7 @@ impl schematic_define::Registration for LockedStatus {
 pub struct ClosedStatus {
     ///Status discriminator that is always `closed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["closed"]))]
     pub type_: String,
     pub reason: serde_json::Value,
 }
@@ -27664,6 +28834,7 @@ pub struct ThreadResource {
     ///Identifier of the thread.
     pub id: String,
     ///Type discriminator that is always `chatkit.thread`.
+    #[schemars(extend("enum" = ["chatkit.thread"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the thread was created.
     pub created_at: i64,
@@ -27688,6 +28859,7 @@ pub struct DeletedThreadResource {
     ///Identifier of the deleted thread.
     pub id: String,
     ///Type discriminator that is always `chatkit.thread.deleted`.
+    #[schemars(extend("enum" = ["chatkit.thread.deleted"]))]
     pub object: String,
     ///Indicates that the thread has been deleted.
     pub deleted: bool,
@@ -27707,6 +28879,7 @@ impl schematic_define::Registration for DeletedThreadResource {
 #[derive(JsonSchema)]
 pub struct ThreadListResource {
     ///The type of object returned, must be `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///A list of items
     pub data: Vec<ThreadResource>,
@@ -27743,6 +28916,7 @@ impl schematic_define::Registration for DragPoint {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaTokenCountsResource {
+    #[schemars(extend("enum" = ["response.input_tokens"]))]
     pub object: String,
     pub input_tokens: i64,
 }
@@ -27829,6 +29003,7 @@ impl schematic_define::Registration for BetaToolChoiceParam {
 pub struct BetaSpecificFunctionShellParam {
     ///The tool to call. Always `shell`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["shell"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaSpecificFunctionShellParam {
@@ -27847,6 +29022,7 @@ impl schematic_define::Registration for BetaSpecificFunctionShellParam {
 pub struct BetaSpecificApplyPatchParam {
     ///The tool to call. Always `apply_patch`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["apply_patch"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaSpecificApplyPatchParam {
@@ -27864,6 +29040,7 @@ impl schematic_define::Registration for BetaSpecificApplyPatchParam {
 pub struct BetaSpecificProgrammaticToolCallingParam {
     ///The tool to call. Always `programmatic_tool_calling`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["programmatic_tool_calling"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaSpecificProgrammaticToolCallingParam {
@@ -27882,6 +29059,7 @@ impl schematic_define::Registration for BetaSpecificProgrammaticToolCallingParam
 pub struct BetaToolChoiceCustom {
     ///For custom tool calling, the type is always `custom`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["custom"]))]
     pub type_: String,
     ///The name of the custom tool to call.
     pub name: String,
@@ -27900,6 +29078,7 @@ impl schematic_define::Registration for BetaToolChoiceCustom {
 pub struct BetaToolChoiceMCP {
     ///For MCP tools, the type is always `mcp`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp"]))]
     pub type_: String,
     ///The label of the MCP server to use.
     pub server_label: String,
@@ -27920,6 +29099,7 @@ impl schematic_define::Registration for BetaToolChoiceMCP {
 pub struct BetaToolChoiceFunction {
     ///For function calling, the type is always `function`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: String,
     ///The name of the function to call.
     pub name: String,
@@ -27951,6 +29131,18 @@ Allowed values are:
 - `code_interpreter`
 - `image_generation`*/
     #[serde(rename = "type")]
+    #[schemars(
+        extend(
+            "enum" = ["file_search",
+            "web_search_preview",
+            "computer",
+            "computer_use_preview",
+            "computer_use",
+            "web_search_preview_2025_03_11",
+            "image_generation",
+            "code_interpreter"]
+        )
+    )]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaToolChoiceTypes {
@@ -27967,6 +29159,7 @@ impl schematic_define::Registration for BetaToolChoiceTypes {
 pub struct BetaToolChoiceAllowed {
     ///Allowed tool configuration type. Always `allowed_tools`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["allowed_tools"]))]
     pub type_: String,
     /**Constrains the tools available to the model to a pre-defined set.
 
@@ -27974,6 +29167,7 @@ pub struct BetaToolChoiceAllowed {
 message.
 
 `required` requires the model to call one or more of the allowed tools.*/
+    #[schemars(extend("enum" = ["auto", "required"]))]
     pub mode: String,
     /**A list of tool definitions that the model should be allowed to call.
 
@@ -28262,6 +29456,7 @@ to do so.*/
 pub struct BetaResponseFormatJsonObject {
     ///The type of response format being defined. Always `json_object`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["json_object"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaResponseFormatJsonObject {
@@ -28281,6 +29476,7 @@ Learn more about [Structured Outputs](/docs/guides/structured-outputs).*/
 pub struct BetaTextResponseFormatJsonSchema {
     ///The type of response format being defined. Always `json_schema`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["json_schema"]))]
     pub type_: String,
     /**A description of what the response format is for, used by the model to
 determine how to respond in the format.*/
@@ -28328,6 +29524,7 @@ impl schematic_define::Registration for BetaResponseFormatJsonSchemaSchema {
 pub struct BetaResponseFormatText {
     ///The type of response format being defined. Always `text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["text"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaResponseFormatText {
@@ -28451,6 +29648,7 @@ impl schematic_define::Registration for BetaTool {
 pub struct BetaApplyPatchToolParam {
     ///The type of the tool. Always `apply_patch`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["apply_patch"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_callers: Option<serde_json::Value>,
@@ -28490,6 +29688,7 @@ impl schematic_define::Registration for BetaCallableToolAllowedCaller {
 pub struct BetaWebSearchPreviewTool {
     ///The type of the web search tool. One of `web_search_preview` or `web_search_preview_2025_03_11`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["web_search_preview", "web_search_preview_2025_03_11"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_location: Option<serde_json::Value>,
@@ -28553,6 +29752,7 @@ impl schematic_define::Registration for BetaSearchContextSize {
 pub struct BetaApproximateLocation {
     ///The type of location approximation. Always `approximate`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["approximate"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub country: Option<serde_json::Value>,
@@ -28579,6 +29779,7 @@ impl schematic_define::Registration for BetaApproximateLocation {
 pub struct BetaToolSearchToolParam {
     ///The type of the tool. Always `tool_search`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["tool_search"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution: Option<BetaToolSearchExecutionType>,
@@ -28633,12 +29834,16 @@ impl schematic_define::Registration for BetaToolSearchExecutionType {
 pub struct BetaNamespaceToolParam {
     ///The type of the tool. Always `namespace`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["namespace"]))]
     pub type_: String,
     ///The namespace name used in tool calls (for example, `crm`).
+    #[schemars(extend("minLength" = 1u64))]
     pub name: String,
     ///A description of the namespace shown to the model.
+    #[schemars(extend("minLength" = 1u64))]
     pub description: String,
     ///The function/custom tools available inside this namespace.
+    #[schemars(extend("minItems" = 1u64))]
     pub tools: Vec<serde_json::Value>,
 }
 impl schematic_define::Registration for BetaNamespaceToolParam {
@@ -28657,6 +29862,7 @@ impl schematic_define::Registration for BetaNamespaceToolParam {
 pub struct BetaCustomToolParam {
     ///The type of the custom tool. Always `custom`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["custom"]))]
     pub type_: String,
     ///The name of the custom tool, used to identify it in tool calls.
     pub name: String,
@@ -28686,6 +29892,7 @@ impl schematic_define::Registration for BetaCustomToolParam {
 pub struct BetaCustomGrammarFormatParam {
     ///Grammar format. Always `grammar`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["grammar"]))]
     pub type_: String,
     pub syntax: BetaGrammarSyntax1,
     ///The grammar definition.
@@ -28724,6 +29931,7 @@ impl schematic_define::Registration for BetaGrammarSyntax1 {
 pub struct BetaCustomTextFormatParam {
     ///Unconstrained text format. Always `text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["text"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaCustomTextFormatParam {
@@ -28739,6 +29947,9 @@ impl schematic_define::Registration for BetaCustomTextFormatParam {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaFunctionToolParam {
+    #[schemars(
+        extend("maxLength" = 128u64, "minLength" = 1u64, "pattern" = "^[a-zA-Z0-9_-]+$")
+    )]
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<serde_json::Value>,
@@ -28747,6 +29958,7 @@ pub struct BetaFunctionToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strict: Option<serde_json::Value>,
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<serde_json::Value>,
@@ -28772,6 +29984,7 @@ impl schematic_define::Registration for BetaFunctionToolParam {
 pub struct BetaFunctionShellToolParam {
     ///The type of the shell tool. Always `shell`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["shell"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<serde_json::Value>,
@@ -28793,6 +30006,7 @@ impl schematic_define::Registration for BetaFunctionShellToolParam {
 pub struct BetaContainerReferenceParam {
     ///References a container created with the /v1/containers endpoint
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["container_reference"]))]
     pub type_: String,
     ///The ID of the referenced container.
     pub container_id: String,
@@ -28812,9 +30026,11 @@ impl schematic_define::Registration for BetaContainerReferenceParam {
 pub struct BetaLocalEnvironmentParam {
     ///Use a local computer environment.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["local"]))]
     pub type_: String,
     ///An optional list of skills.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 200u64))]
     pub skills: Option<Vec<BetaLocalSkillParam>>,
 }
 impl schematic_define::Registration for BetaLocalEnvironmentParam {
@@ -28850,9 +30066,11 @@ impl schematic_define::Registration for BetaLocalSkillParam {
 pub struct BetaContainerAutoParam {
     ///Automatically creates a container for this request
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["container_auto"]))]
     pub type_: String,
     ///An optional list of uploaded files to make available to your code.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 50u64))]
     pub file_ids: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_limit: Option<serde_json::Value>,
@@ -28861,6 +30079,7 @@ pub struct BetaContainerAutoParam {
     pub network_policy: Option<serde_json::Value>,
     ///An optional list of skills referenced by id or inline data.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 200u64))]
     pub skills: Option<Vec<serde_json::Value>>,
 }
 impl schematic_define::Registration for BetaContainerAutoParam {
@@ -28878,6 +30097,7 @@ impl schematic_define::Registration for BetaContainerAutoParam {
 pub struct BetaInlineSkillParam {
     ///Defines an inline skill for this request.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["inline"]))]
     pub type_: String,
     ///The name of the skill.
     pub name: String,
@@ -28899,10 +30119,13 @@ impl schematic_define::Registration for BetaInlineSkillParam {
 pub struct BetaInlineSkillSourceParam {
     ///The type of the inline skill source. Must be `base64`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["base64"]))]
     pub type_: String,
     ///The media type of the inline skill payload. Must be `application/zip`.
+    #[schemars(extend("enum" = ["application/zip"]))]
     pub media_type: String,
     ///Base64-encoded skill zip bundle.
+    #[schemars(extend("maxLength" = 70254592u64, "minLength" = 1u64))]
     pub data: String,
 }
 impl schematic_define::Registration for BetaInlineSkillSourceParam {
@@ -28920,8 +30143,10 @@ impl schematic_define::Registration for BetaInlineSkillSourceParam {
 pub struct BetaSkillReferenceParam {
     ///References a skill created with the /v1/skills endpoint.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["skill_reference"]))]
     pub type_: String,
     ///The ID of the referenced skill.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub skill_id: String,
     ///Optional skill version. Use a positive integer or 'latest'. Omit for default.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -28942,11 +30167,14 @@ impl schematic_define::Registration for BetaSkillReferenceParam {
 pub struct BetaContainerNetworkPolicyAllowlistParam {
     ///Allow outbound network access only to specified domains. Always `allowlist`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["allowlist"]))]
     pub type_: String,
     ///A list of allowed domains when type is `allowlist`.
+    #[schemars(extend("minItems" = 1u64))]
     pub allowed_domains: Vec<String>,
     ///Optional domain-scoped secrets for allowlisted domains.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minItems" = 1u64))]
     pub domain_secrets: Option<Vec<BetaContainerNetworkPolicyDomainSecretParam>>,
 }
 impl schematic_define::Registration for BetaContainerNetworkPolicyAllowlistParam {
@@ -28963,10 +30191,13 @@ impl schematic_define::Registration for BetaContainerNetworkPolicyAllowlistParam
 #[derive(JsonSchema)]
 pub struct BetaContainerNetworkPolicyDomainSecretParam {
     ///The domain associated with the secret.
+    #[schemars(extend("minLength" = 1u64))]
     pub domain: String,
     ///The name of the secret to inject for the domain.
+    #[schemars(extend("minLength" = 1u64))]
     pub name: String,
     ///The secret value to inject for the domain.
+    #[schemars(extend("maxLength" = 10485760u64, "minLength" = 1u64))]
     pub value: String,
 }
 impl schematic_define::Registration for BetaContainerNetworkPolicyDomainSecretParam {
@@ -28984,6 +30215,7 @@ impl schematic_define::Registration for BetaContainerNetworkPolicyDomainSecretPa
 pub struct BetaContainerNetworkPolicyDisabledParam {
     ///Disable outbound network access. Always `disabled`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["disabled"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaContainerNetworkPolicyDisabledParam {
@@ -29025,6 +30257,7 @@ impl schematic_define::Registration for BetaContainerMemoryLimit {
 pub struct BetaLocalShellToolParam {
     ///The type of the local shell tool. Always `local_shell`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["local_shell"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaLocalShellToolParam {
@@ -29043,12 +30276,14 @@ impl schematic_define::Registration for BetaLocalShellToolParam {
 pub struct BetaImageGenTool {
     ///The type of the image generation tool. Always `image_generation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image_generation"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<serde_json::Value>,
     /**The quality of the generated image. One of `low`, `medium`, `high`,
 or `auto`. Default: `auto`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["low", "medium", "high", "auto", null]))]
     pub quality: Option<String>,
     ///The size of the generated images. For `gpt-image-2` and `gpt-image-2-2026-04-21`, arbitrary resolutions are supported as `WIDTHxHEIGHT` strings, for example `1536x864`. Width and height must both be divisible by 16 and the requested aspect ratio must be between 1:3 and 3:1. Resolutions above `2560x1440` are experimental, and the maximum supported resolution is `3840x2160`. The requested size must also satisfy the model's current pixel and edge limits. The standard sizes `1024x1024`, `1536x1024`, and `1024x1536` are supported by the GPT image models; `auto` is supported for models that allow automatic sizing. For `dall-e-2`, use one of `256x256`, `512x512`, or `1024x1024`. For `dall-e-3`, use one of `1024x1024`, `1792x1024`, or `1024x1792`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -29056,16 +30291,20 @@ or `auto`. Default: `auto`.*/
     /**The output format of the generated image. One of `png`, `webp`, or
 `jpeg`. Default: `png`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["png", "webp", "jpeg", null]))]
     pub output_format: Option<String>,
     ///Compression level for the output image. Default: 100.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 100u64, "minimum" = 0u64))]
     pub output_compression: Option<i64>,
     ///Moderation level for the generated image. Default: `auto`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["auto", "low", null]))]
     pub moderation: Option<String>,
     /**Background type for the generated image. One of `transparent`,
 `opaque`, or `auto`. Default: `auto`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["transparent", "opaque", "auto", null]))]
     pub background: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_fidelity: Option<serde_json::Value>,
@@ -29075,6 +30314,7 @@ or `auto`. Default: `auto`.*/
     pub input_image_mask: Option<serde_json::Value>,
     ///Number of partial images to generate in streaming mode, from 0 (default value) to 3.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maximum" = 3u64, "minimum" = 0u64))]
     pub partial_images: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<BetaImageGenActionEnum>,
@@ -29131,6 +30371,7 @@ impl schematic_define::Registration for BetaInputFidelity {
 pub struct BetaProgrammaticToolCallingParam {
     ///The type of the tool. Always `programmatic_tool_calling`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["programmatic_tool_calling"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaProgrammaticToolCallingParam {
@@ -29149,6 +30390,7 @@ impl schematic_define::Registration for BetaProgrammaticToolCallingParam {
 pub struct BetaCodeInterpreterTool {
     ///The type of the code interpreter tool. Always `code_interpreter`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["code_interpreter"]))]
     pub type_: String,
     /**The code interpreter container. Can be a container ID or an object that
 specifies uploaded file IDs to make available to your code, along with an
@@ -29173,9 +30415,11 @@ impl schematic_define::Registration for BetaCodeInterpreterTool {
 pub struct BetaAutoCodeInterpreterToolParam {
     ///Always `auto`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["auto"]))]
     pub type_: String,
     ///An optional list of uploaded files to make available to your code.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("maxItems" = 50u64))]
     pub file_ids: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_limit: Option<serde_json::Value>,
@@ -29200,6 +30444,7 @@ impl schematic_define::Registration for BetaAutoCodeInterpreterToolParam {
 pub struct BetaMCPTool {
     ///The type of the MCP tool. Always `mcp`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp"]))]
     pub type_: String,
     ///A label for this MCP server, used to identify it in tool calls.
     pub server_label: String,
@@ -29222,10 +30467,24 @@ Currently supported `connector_id` values are:
 - Outlook Email: `connector_outlookemail`
 - SharePoint: `connector_sharepoint`*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "enum" = ["connector_dropbox",
+            "connector_gmail",
+            "connector_googlecalendar",
+            "connector_googledrive",
+            "connector_microsoftteams",
+            "connector_outlookcalendar",
+            "connector_outlookemail",
+            "connector_sharepoint",
+            null]
+        )
+    )]
     pub connector_id: Option<String>,
     /**The Secure MCP Tunnel ID to use instead of a direct server URL. One of
 `server_url`, `connector_id`, or `tunnel_id` must be provided.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("pattern" = "^tunnel_[a-z0-9]{32}$"))]
     pub tunnel_id: Option<String>,
     /**An OAuth access token that can be used with a remote MCP server, either
 with a custom MCP server URL or a service connector. Your application
@@ -29283,6 +30542,7 @@ impl schematic_define::Registration for BetaMCPToolFilter {
 pub struct BetaWebSearchTool {
     ///The type of the web search tool. One of `web_search` or `web_search_2025_08_26`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["web_search", "web_search_2025_08_26"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filters: Option<serde_json::Value>,
@@ -29290,6 +30550,7 @@ pub struct BetaWebSearchTool {
     pub user_location: Option<BetaWebSearchApproximateLocation>,
     ///High level guidance for the amount of context window space to use for the search. One of `low`, `medium`, or `high`. `medium` is the default.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["low", "medium", "high", null]))]
     pub search_context_size: Option<String>,
 }
 impl schematic_define::Registration for BetaWebSearchTool {
@@ -29329,6 +30590,7 @@ impl schematic_define::Registration for BetaWebSearchApproximateLocation {
 pub struct BetaComputerUsePreviewTool {
     ///The type of the computer use tool. Always `computer_use_preview`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["computer_use_preview"]))]
     pub type_: String,
     pub environment: BetaComputerEnvironment,
     ///The width of the computer display.
@@ -29377,6 +30639,7 @@ impl schematic_define::Registration for BetaComputerEnvironment {
 pub struct BetaComputerTool {
     ///The type of the computer tool. Always `computer`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["computer"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaComputerTool {
@@ -29393,6 +30656,7 @@ impl schematic_define::Registration for BetaComputerTool {
 pub struct BetaFileSearchTool {
     ///The type of the file search tool. Always `file_search`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_search"]))]
     pub type_: String,
     ///The IDs of the vector stores to search.
     pub vector_store_ids: Vec<String>,
@@ -29439,6 +30703,7 @@ impl schematic_define::Registration for BetaFilters {
 pub struct BetaCompoundFilter {
     ///Type of operation: `and` or `or`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["and", "or"]))]
     pub type_: String,
     ///Array of filters to combine. Items can be `ComparisonFilter` or `CompoundFilter`.
     pub filters: Vec<serde_json::Value>,
@@ -29465,6 +30730,7 @@ pub struct BetaComparisonFilter {
 - `in`: in
 - `nin`: not in*/
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["eq", "ne", "gt", "gte", "lt", "lte", "in", "nin"]))]
     pub type_: String,
     ///The key to compare against the value.
     pub key: String,
@@ -29541,6 +30807,7 @@ impl schematic_define::Registration for BetaRankerVersionType {
 pub struct BetaFunctionTool {
     ///The type of the function tool. Always `function`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: String,
     ///The name of the function to call.
     pub name: String,
@@ -29598,10 +30865,13 @@ pub struct BetaProgramOutputItemParam {
     pub id: String,
     ///The item type. Always `program_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["program_output"]))]
     pub type_: String,
     ///The call ID of the program item.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     ///The result produced by the program item.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub result: String,
     pub status: BetaProgramOutputItemStatus,
 }
@@ -29658,12 +30928,16 @@ pub struct BetaProgramItemParam {
     pub id: String,
     ///The item type. Always `program`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["program"]))]
     pub type_: String,
     ///The stable call ID of the program item.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     ///The JavaScript source executed by programmatic tool calling.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub code: String,
     ///Opaque program replay fingerprint that must be round-tripped.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub fingerprint: String,
 }
 impl schematic_define::Registration for BetaProgramItemParam {
@@ -29704,6 +30978,7 @@ pub struct BetaCompactionTriggerItemParam {
     pub agent: Option<serde_json::Value>,
     ///The type of the item. Always `compaction_trigger`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["compaction_trigger"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaCompactionTriggerItemParam {
@@ -29727,6 +31002,7 @@ pub struct BetaCustomToolCall {
     pub agent: Option<serde_json::Value>,
     ///The type of the custom tool call. Always `custom_tool_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["custom_tool_call"]))]
     pub type_: String,
     ///The unique ID of the custom tool call in the OpenAI platform.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -29816,6 +31092,7 @@ impl schematic_define::Registration for BetaToolCallCaller {
 #[derive(JsonSchema)]
 pub struct BetaProgramToolCallCaller {
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["program"]))]
     pub type_: String,
     ///The call ID of the program item that produced this tool call.
     pub caller_id: String,
@@ -29834,6 +31111,7 @@ impl schematic_define::Registration for BetaProgramToolCallCaller {
 #[derive(JsonSchema)]
 pub struct BetaDirectToolCallCaller {
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["direct"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaDirectToolCallCaller {
@@ -29869,6 +31147,7 @@ pub struct BetaCustomToolCallOutput {
     pub agent: Option<serde_json::Value>,
     ///The type of the custom tool call output. Always `custom_tool_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["custom_tool_call_output"]))]
     pub type_: String,
     ///The unique ID of the custom tool call output in the OpenAI platform.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -29965,6 +31244,7 @@ impl schematic_define::Registration for BetaFunctionAndCustomToolCallOutput {
 pub struct BetaInputFileContent {
     ///The type of the input item. Always `input_file`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_file"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_id: Option<serde_json::Value>,
@@ -30014,6 +31294,7 @@ impl schematic_define::Registration for BetaFileInputDetail {
 #[derive(JsonSchema)]
 pub struct BetaPromptCacheBreakpointConfig {
     ///The breakpoint mode. Always `explicit`.
+    #[schemars(extend("enum" = ["explicit"]))]
     pub mode: String,
 }
 impl schematic_define::Registration for BetaPromptCacheBreakpointConfig {
@@ -30032,6 +31313,7 @@ impl schematic_define::Registration for BetaPromptCacheBreakpointConfig {
 pub struct BetaInputImageContent {
     ///The type of the input item. Always `input_image`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_image"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_url: Option<serde_json::Value>,
@@ -30078,6 +31360,7 @@ impl schematic_define::Registration for BetaImageDetail {
 pub struct BetaInputTextContent {
     ///The type of the input item. Always `input_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_text"]))]
     pub type_: String,
     ///The text input to the model.
     pub text: String,
@@ -30165,8 +31448,10 @@ impl schematic_define::Registration for BetaToolCallCallerParam {
 pub struct BetaProgramToolCallCallerParam {
     ///The caller type. Always `program`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["program"]))]
     pub type_: String,
     ///The call ID of the program item that produced this tool call.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub caller_id: String,
 }
 impl schematic_define::Registration for BetaProgramToolCallCallerParam {
@@ -30184,6 +31469,7 @@ impl schematic_define::Registration for BetaProgramToolCallCallerParam {
 pub struct BetaDirectToolCallCallerParam {
     ///The caller type. Always `direct`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["direct"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaDirectToolCallCallerParam {
@@ -30205,6 +31491,7 @@ pub struct BetaMCPToolCall {
     pub agent: Option<serde_json::Value>,
     ///The type of the item. Always `mcp_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_call"]))]
     pub type_: String,
     ///The unique ID of the tool call.
     pub id: String,
@@ -30265,6 +31552,7 @@ pub struct BetaMCPApprovalResponse {
     pub agent: Option<serde_json::Value>,
     ///The type of the item. Always `mcp_approval_response`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_approval_response"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
@@ -30294,6 +31582,7 @@ pub struct BetaMCPApprovalRequest {
     pub agent: Option<serde_json::Value>,
     ///The type of the item. Always `mcp_approval_request`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_approval_request"]))]
     pub type_: String,
     ///The unique ID of the approval request.
     pub id: String,
@@ -30323,6 +31612,7 @@ pub struct BetaMCPListTools {
     pub agent: Option<serde_json::Value>,
     ///The type of the item. Always `mcp_list_tools`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_list_tools"]))]
     pub type_: String,
     ///The unique ID of the list.
     pub id: String,
@@ -30370,10 +31660,12 @@ pub struct BetaApplyPatchToolCallOutputItemParam {
     pub agent: Option<serde_json::Value>,
     ///The type of the item. Always `apply_patch_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["apply_patch_call_output"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     ///The unique ID of the apply patch tool call generated by the model.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller: Option<serde_json::Value>,
@@ -30419,10 +31711,12 @@ pub struct BetaApplyPatchToolCallItemParam {
     pub agent: Option<serde_json::Value>,
     ///The type of the item. Always `apply_patch_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["apply_patch_call"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     ///The unique ID of the apply patch tool call generated by the model.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller: Option<serde_json::Value>,
@@ -30520,10 +31814,13 @@ impl schematic_define::Registration for BetaApplyPatchOperationParam {
 pub struct BetaApplyPatchUpdateFileOperationParam {
     ///The operation type. Always `update_file`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["update_file"]))]
     pub type_: String,
     ///Path of the file to update relative to the workspace root.
+    #[schemars(extend("minLength" = 1u64))]
     pub path: String,
     ///Unified diff content to apply to the existing file.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub diff: String,
 }
 impl schematic_define::Registration for BetaApplyPatchUpdateFileOperationParam {
@@ -30542,8 +31839,10 @@ impl schematic_define::Registration for BetaApplyPatchUpdateFileOperationParam {
 pub struct BetaApplyPatchDeleteFileOperationParam {
     ///The operation type. Always `delete_file`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["delete_file"]))]
     pub type_: String,
     ///Path of the file to delete relative to the workspace root.
+    #[schemars(extend("minLength" = 1u64))]
     pub path: String,
 }
 impl schematic_define::Registration for BetaApplyPatchDeleteFileOperationParam {
@@ -30562,10 +31861,13 @@ impl schematic_define::Registration for BetaApplyPatchDeleteFileOperationParam {
 pub struct BetaApplyPatchCreateFileOperationParam {
     ///The operation type. Always `create_file`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["create_file"]))]
     pub type_: String,
     ///Path of the file to create relative to the workspace root.
+    #[schemars(extend("minLength" = 1u64))]
     pub path: String,
     ///Unified diff content to apply when creating the file.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub diff: String,
 }
 impl schematic_define::Registration for BetaApplyPatchCreateFileOperationParam {
@@ -30607,11 +31909,13 @@ pub struct BetaFunctionShellCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     ///The unique ID of the shell tool call generated by the model.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller: Option<serde_json::Value>,
     ///The type of the item. Always `shell_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["shell_call_output"]))]
     pub type_: String,
     ///Captured chunks of stdout and stderr output, along with their associated outcomes.
     pub output: Vec<BetaFunctionShellCallOutputContentParam>,
@@ -30657,8 +31961,10 @@ impl schematic_define::Registration for BetaFunctionShellCallItemStatus {
 #[derive(JsonSchema)]
 pub struct BetaFunctionShellCallOutputContentParam {
     ///Captured stdout output for the shell call.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub stdout: String,
     ///Captured stderr output for the shell call.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub stderr: String,
     pub outcome: BetaFunctionShellCallOutputOutcomeParam,
 }
@@ -30753,6 +32059,7 @@ impl schematic_define::Registration for BetaFunctionShellCallOutputOutcomeParam 
 pub struct BetaFunctionShellCallOutputExitOutcomeParam {
     ///The outcome type. Always `exit`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["exit"]))]
     pub type_: String,
     ///The exit code returned by the shell process.
     pub exit_code: i64,
@@ -30773,6 +32080,7 @@ impl schematic_define::Registration for BetaFunctionShellCallOutputExitOutcomePa
 pub struct BetaFunctionShellCallOutputTimeoutOutcomeParam {
     ///The outcome type. Always `timeout`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["timeout"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaFunctionShellCallOutputTimeoutOutcomeParam {
@@ -30794,11 +32102,13 @@ pub struct BetaFunctionShellCallItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     ///The unique ID of the shell tool call generated by the model.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller: Option<serde_json::Value>,
     ///The type of the item. Always `shell_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["shell_call"]))]
     pub type_: String,
     pub action: BetaFunctionShellActionParam,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30846,6 +32156,7 @@ pub struct BetaLocalShellToolCallOutput {
     pub agent: Option<serde_json::Value>,
     ///The type of the local shell tool call output. Always `local_shell_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["local_shell_call_output"]))]
     pub type_: String,
     ///The unique ID of the local shell tool call generated by the model.
     pub id: String,
@@ -30873,6 +32184,7 @@ pub struct BetaLocalShellToolCall {
     pub agent: Option<serde_json::Value>,
     ///The type of the local shell call. Always `local_shell_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["local_shell_call"]))]
     pub type_: String,
     ///The unique ID of the local shell call.
     pub id: String,
@@ -30880,6 +32192,7 @@ pub struct BetaLocalShellToolCall {
     pub call_id: String,
     pub action: BetaLocalShellExecAction,
     ///The status of the local shell call.
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: String,
 }
 impl schematic_define::Registration for BetaLocalShellToolCall {
@@ -30898,6 +32211,7 @@ impl schematic_define::Registration for BetaLocalShellToolCall {
 pub struct BetaLocalShellExecAction {
     ///The type of the local shell action. Always `exec`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["exec"]))]
     pub type_: String,
     ///The command to run.
     pub command: Vec<String>,
@@ -30929,10 +32243,20 @@ pub struct BetaCodeInterpreterToolCall {
     pub agent: Option<serde_json::Value>,
     ///The type of the code interpreter tool call. Always `code_interpreter_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["code_interpreter_call"]))]
     pub type_: String,
     ///The unique ID of the code interpreter tool call.
     pub id: String,
     ///The status of the code interpreter tool call. Valid values are `in_progress`, `completed`, `incomplete`, `interpreting`, and `failed`.
+    #[schemars(
+        extend(
+            "enum" = ["in_progress",
+            "completed",
+            "incomplete",
+            "interpreting",
+            "failed"]
+        )
+    )]
     pub status: String,
     ///The ID of the container used to run the code.
     pub container_id: String,
@@ -30955,6 +32279,7 @@ impl schematic_define::Registration for BetaCodeInterpreterToolCall {
 pub struct BetaCodeInterpreterOutputImage {
     ///The type of the output. Always `image`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image"]))]
     pub type_: String,
     ///The URL of the image output from the code interpreter.
     pub url: String,
@@ -30975,6 +32300,7 @@ impl schematic_define::Registration for BetaCodeInterpreterOutputImage {
 pub struct BetaCodeInterpreterOutputLogs {
     ///The type of the output. Always `logs`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["logs"]))]
     pub type_: String,
     ///The logs output from the code interpreter.
     pub logs: String,
@@ -30998,10 +32324,12 @@ pub struct BetaImageGenToolCall {
     pub agent: Option<serde_json::Value>,
     ///The type of the image generation call. Always `image_generation_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["image_generation_call"]))]
     pub type_: String,
     ///The unique ID of the image generation call.
     pub id: String,
     ///The status of the image generation call.
+    #[schemars(extend("enum" = ["in_progress", "completed", "generating", "failed"]))]
     pub status: String,
     pub result: serde_json::Value,
 }
@@ -31023,8 +32351,10 @@ pub struct BetaCompactionSummaryItemParam {
     pub id: Option<serde_json::Value>,
     ///The type of the item. Always `compaction`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["compaction"]))]
     pub type_: String,
     ///The encrypted content of the compaction summary.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub encrypted_content: String,
 }
 impl schematic_define::Registration for BetaCompactionSummaryItemParam {
@@ -31049,6 +32379,7 @@ pub struct BetaReasoningItem {
     pub agent: Option<serde_json::Value>,
     ///The type of the object. Always `reasoning`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["reasoning"]))]
     pub type_: String,
     ///The unique identifier of the reasoning content.
     pub id: String,
@@ -31062,6 +32393,7 @@ pub struct BetaReasoningItem {
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
     pub status: Option<String>,
 }
 impl schematic_define::Registration for BetaReasoningItem {
@@ -31078,6 +32410,7 @@ impl schematic_define::Registration for BetaReasoningItem {
 pub struct BetaReasoningTextContent {
     ///The type of the reasoning text. Always `reasoning_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["reasoning_text"]))]
     pub type_: String,
     ///The reasoning text from the model.
     pub text: String,
@@ -31098,6 +32431,7 @@ impl schematic_define::Registration for BetaReasoningTextContent {
 pub struct BetaSummaryTextContent {
     ///The type of the object. Always `summary_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["summary_text"]))]
     pub type_: String,
     ///A summary of the reasoning output from the model so far.
     pub text: String,
@@ -31121,8 +32455,10 @@ pub struct BetaAdditionalToolsItemParam {
     pub id: Option<serde_json::Value>,
     ///The item type. Always `additional_tools`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["additional_tools"]))]
     pub type_: String,
     ///The role that provided the additional tools. Only `developer` is supported.
+    #[schemars(extend("enum" = ["developer"]))]
     pub role: String,
     ///A list of additional tools made available at this item.
     pub tools: Vec<BetaTool>,
@@ -31148,6 +32484,7 @@ pub struct BetaToolSearchOutputItemParam {
     pub call_id: Option<serde_json::Value>,
     ///The item type. Always `tool_search_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["tool_search_output"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution: Option<BetaToolSearchExecutionType>,
@@ -31198,6 +32535,7 @@ pub struct BetaToolSearchCallItemParam {
     pub call_id: Option<serde_json::Value>,
     ///The item type. Always `tool_search_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["tool_search_call"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution: Option<BetaToolSearchExecutionType>,
@@ -31223,9 +32561,11 @@ pub struct BetaMultiAgentCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     ///The unique ID of the multi-agent call.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     ///The item type. Always `multi_agent_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["multi_agent_call_output"]))]
     pub type_: String,
     pub action: BetaMultiAgentAction1,
     ///Text output returned by the multi-agent action.
@@ -31246,8 +32586,10 @@ impl schematic_define::Registration for BetaMultiAgentCallOutputItemParam {
 pub struct BetaOutputTextContentParam {
     ///The content type. Always `output_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["output_text"]))]
     pub type_: String,
     ///The text content.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub text: String,
     ///Citations associated with the text content.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31268,10 +32610,13 @@ impl schematic_define::Registration for BetaOutputTextContentParam {
 pub struct BetaContainerFileCitationParam {
     ///The citation type. Always `container_file_citation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["container_file_citation"]))]
     pub type_: String,
     ///The index of the first character of the citation in the message.
+    #[schemars(extend("minimum" = 0u64))]
     pub start_index: i64,
     ///The index of the last character of the citation in the message.
+    #[schemars(extend("minimum" = 0u64))]
     pub end_index: i64,
     ///The ID of the container.
     pub container_id: String,
@@ -31295,10 +32640,13 @@ impl schematic_define::Registration for BetaContainerFileCitationParam {
 pub struct BetaUrlCitationParam {
     ///The citation type. Always `url_citation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["url_citation"]))]
     pub type_: String,
     ///The index of the first character of the citation in the message.
+    #[schemars(extend("minimum" = 0u64))]
     pub start_index: i64,
     ///The index of the last character of the citation in the message.
+    #[schemars(extend("minimum" = 0u64))]
     pub end_index: i64,
     ///The URL of the cited resource.
     pub url: String,
@@ -31318,8 +32666,10 @@ impl schematic_define::Registration for BetaUrlCitationParam {
 pub struct BetaFileCitationParam {
     ///The citation type. Always `file_citation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_citation"]))]
     pub type_: String,
     ///The index of the file in the list of files.
+    #[schemars(extend("minimum" = 0u64))]
     pub index: i64,
     ///The ID of the file.
     pub file_id: String,
@@ -31371,9 +32721,11 @@ pub struct BetaMultiAgentCallItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     ///The unique ID linking this call to its output.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     ///The item type. Always `multi_agent_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["multi_agent_call"]))]
     pub type_: String,
     pub action: BetaMultiAgentAction1,
     ///The action arguments as a JSON string.
@@ -31399,6 +32751,7 @@ pub struct BetaAgentMessageItemParam {
     pub id: Option<serde_json::Value>,
     ///The item type. Always `agent_message`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["agent_message"]))]
     pub type_: String,
     ///The sending agent identity.
     pub author: String,
@@ -31423,8 +32776,10 @@ impl schematic_define::Registration for BetaAgentMessageItemParam {
 pub struct BetaEncryptedContentParam {
     ///The type of the input item. Always `encrypted_content`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["encrypted_content"]))]
     pub type_: String,
     ///Opaque encrypted content.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub encrypted_content: String,
 }
 impl schematic_define::Registration for BetaEncryptedContentParam {
@@ -31443,6 +32798,7 @@ impl schematic_define::Registration for BetaEncryptedContentParam {
 pub struct BetaInputImageContentParamAutoParam {
     ///The type of the input item. Always `input_image`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_image"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_url: Option<serde_json::Value>,
@@ -31468,6 +32824,7 @@ impl schematic_define::Registration for BetaInputImageContentParamAutoParam {
 #[derive(JsonSchema)]
 pub struct BetaPromptCacheBreakpointParam {
     ///The breakpoint mode. Always `explicit`.
+    #[schemars(extend("enum" = ["explicit"]))]
     pub mode: String,
 }
 impl schematic_define::Registration for BetaPromptCacheBreakpointParam {
@@ -31507,8 +32864,10 @@ impl schematic_define::Registration for BetaDetailEnum {
 pub struct BetaInputTextContentParam {
     ///The type of the input item. Always `input_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_text"]))]
     pub type_: String,
     ///The text input to the model.
+    #[schemars(extend("maxLength" = 10485760u64))]
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<serde_json::Value>,
@@ -31532,9 +32891,11 @@ pub struct BetaFunctionCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     ///The unique ID of the function tool call generated by the model.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     ///The type of the function tool call output. Always `function_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function_call_output"]))]
     pub type_: String,
     ///Text, image, or file output of the function tool call.
     pub output: serde_json::Value,
@@ -31563,6 +32924,7 @@ impl schematic_define::Registration for BetaFunctionCallOutputItemParam {
 pub struct BetaInputFileContentParam {
     ///The type of the input item. Always `input_file`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_file"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_id: Option<serde_json::Value>,
@@ -31619,6 +32981,7 @@ pub struct BetaFunctionToolCall {
     pub id: Option<String>,
     ///The type of the function tool call. Always `function_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function_call"]))]
     pub type_: String,
     ///The unique ID of the function tool call generated by the model.
     pub call_id: String,
@@ -31634,6 +32997,7 @@ pub struct BetaFunctionToolCall {
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
     pub status: Option<String>,
 }
 impl schematic_define::Registration for BetaFunctionToolCall {
@@ -31656,8 +33020,10 @@ pub struct BetaWebSearchToolCall {
     pub id: String,
     ///The type of the web search tool call. Always `web_search_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["web_search_call"]))]
     pub type_: String,
     ///The status of the web search tool call.
+    #[schemars(extend("enum" = ["in_progress", "searching", "completed", "failed"]))]
     pub status: String,
     /**An object describing the specific action taken in this web search call.
 Includes details on how the model used the web (search, open_page, find_in_page).*/
@@ -31679,6 +33045,7 @@ impl schematic_define::Registration for BetaWebSearchToolCall {
 pub struct BetaWebSearchActionFind {
     ///The action type.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["find_in_page"]))]
     pub type_: String,
     ///The URL of the page searched for the pattern.
     pub url: String,
@@ -31701,6 +33068,7 @@ impl schematic_define::Registration for BetaWebSearchActionFind {
 pub struct BetaWebSearchActionOpenPage {
     ///The action type.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["open_page"]))]
     pub type_: String,
     ///The URL opened by the model.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31722,6 +33090,7 @@ impl schematic_define::Registration for BetaWebSearchActionOpenPage {
 pub struct BetaWebSearchActionSearch {
     ///The action type.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["search"]))]
     pub type_: String,
     ///The search query.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31752,9 +33121,11 @@ pub struct BetaComputerCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     ///The ID of the computer tool call that produced the output.
+    #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     ///The type of the computer tool call output. Always `computer_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["computer_call_output"]))]
     pub type_: String,
     pub output: BetaComputerScreenshotImage,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31800,6 +33171,7 @@ pub struct BetaComputerScreenshotImage {
     /**Specifies the event type. For a computer screenshot, this property is
 always set to `computer_screenshot`.*/
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["computer_screenshot"]))]
     pub type_: String,
     ///The URL of the screenshot image.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31828,6 +33200,7 @@ pub struct BetaComputerToolCall {
     pub agent: Option<serde_json::Value>,
     ///The type of the computer call. Always `computer_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["computer_call"]))]
     pub type_: String,
     ///The unique ID of the computer call.
     pub id: String,
@@ -31841,6 +33214,7 @@ pub struct BetaComputerToolCall {
     pub pending_safety_checks: Vec<BetaComputerCallSafetyCheckParam>,
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: String,
 }
 impl schematic_define::Registration for BetaComputerToolCall {
@@ -31934,6 +33308,7 @@ impl schematic_define::Registration for BetaComputerAction {
 pub struct BetaWaitParam {
     ///Specifies the event type. For a wait action, this property is always set to `wait`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["wait"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaWaitParam {
@@ -31950,6 +33325,7 @@ impl schematic_define::Registration for BetaWaitParam {
 pub struct BetaTypeParam {
     ///Specifies the event type. For a type action, this property is always set to `type`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["type"]))]
     pub type_: String,
     ///The text to type.
     pub text: String,
@@ -31968,6 +33344,7 @@ impl schematic_define::Registration for BetaTypeParam {
 pub struct BetaScrollParam {
     ///Specifies the event type. For a scroll action, this property is always set to `scroll`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["scroll"]))]
     pub type_: String,
     ///The x-coordinate where the scroll occurred.
     pub x: i64,
@@ -31994,6 +33371,7 @@ impl schematic_define::Registration for BetaScrollParam {
 pub struct BetaScreenshotParam {
     ///Specifies the event type. For a screenshot action, this property is always set to `screenshot`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["screenshot"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaScreenshotParam {
@@ -32010,6 +33388,7 @@ impl schematic_define::Registration for BetaScreenshotParam {
 pub struct BetaMoveParam {
     ///Specifies the event type. For a move action, this property is always set to `move`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["move"]))]
     pub type_: String,
     ///The x-coordinate to move to.
     pub x: i64,
@@ -32032,6 +33411,7 @@ impl schematic_define::Registration for BetaMoveParam {
 pub struct BetaKeyPressAction {
     ///Specifies the event type. For a keypress action, this property is always set to `keypress`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["keypress"]))]
     pub type_: String,
     ///The combination of keys the model is requesting to be pressed. This is an array of strings, each representing a key.
     pub keys: Vec<String>,
@@ -32050,6 +33430,7 @@ impl schematic_define::Registration for BetaKeyPressAction {
 pub struct BetaDragParam {
     ///Specifies the event type. For a drag action, this property is always set to `drag`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["drag"]))]
     pub type_: String,
     /**An array of coordinates representing the path of the drag action. Coordinates will appear as an array of objects, eg
 ```text
@@ -32093,6 +33474,7 @@ impl schematic_define::Registration for BetaCoordParam {
 pub struct BetaDoubleClickAction {
     ///Specifies the event type. For a double click action, this property is always set to `double_click`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["double_click"]))]
     pub type_: String,
     ///The x-coordinate where the double click occurred.
     pub x: i64,
@@ -32116,6 +33498,7 @@ impl schematic_define::Registration for BetaDoubleClickAction {
 pub struct BetaClickParam {
     ///Specifies the event type. For a click action, this property is always `click`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["click"]))]
     pub type_: String,
     pub button: BetaClickButtonType,
     ///The x-coordinate where the click occurred.
@@ -32168,9 +33551,19 @@ pub struct BetaFileSearchToolCall {
     pub id: String,
     ///The type of the file search tool call. Always `file_search_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_search_call"]))]
     pub type_: String,
     /**The status of the file search tool call. One of `in_progress`,
 `searching`, `incomplete` or `failed`,*/
+    #[schemars(
+        extend(
+            "enum" = ["in_progress",
+            "searching",
+            "completed",
+            "incomplete",
+            "failed"]
+        )
+    )]
     pub status: String,
     ///The queries used to search for files.
     pub queries: Vec<String>,
@@ -32221,8 +33614,10 @@ pub struct BetaOutputMessage {
     pub id: String,
     ///The type of the output message. Always `message`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["message"]))]
     pub type_: String,
     ///The role of the output message. Always `assistant`.
+    #[schemars(extend("enum" = ["assistant"]))]
     pub role: String,
     ///The content of the output message.
     pub content: Vec<BetaOutputMessageContent>,
@@ -32230,6 +33625,7 @@ pub struct BetaOutputMessage {
     pub phase: Option<serde_json::Value>,
     /**The status of the message input. One of `in_progress`, `completed`, or
 `incomplete`. Populated when input items are returned via API.*/
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: String,
 }
 impl schematic_define::Registration for BetaOutputMessage {
@@ -32331,6 +33727,7 @@ impl schematic_define::Registration for BetaOutputMessageContent {
 pub struct BetaRefusalContent {
     ///The type of the refusal. Always `refusal`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["refusal"]))]
     pub type_: String,
     ///The refusal explanation from the model.
     pub refusal: String,
@@ -32349,6 +33746,7 @@ impl schematic_define::Registration for BetaRefusalContent {
 pub struct BetaOutputTextContent {
     ///The type of the output text. Always `output_text`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["output_text"]))]
     pub type_: String,
     ///The text output from the model.
     pub text: String,
@@ -32474,6 +33872,7 @@ impl schematic_define::Registration for BetaAnnotation {
 pub struct BetaFilePath {
     ///The type of the file path. Always `file_path`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_path"]))]
     pub type_: String,
     ///The ID of the file.
     pub file_id: String,
@@ -32494,6 +33893,7 @@ impl schematic_define::Registration for BetaFilePath {
 pub struct BetaContainerFileCitationBody {
     ///The type of the container file citation. Always `container_file_citation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["container_file_citation"]))]
     pub type_: String,
     ///The ID of the container file.
     pub container_id: String,
@@ -32522,6 +33922,7 @@ impl schematic_define::Registration for BetaContainerFileCitationBody {
 pub struct BetaUrlCitationBody {
     ///The type of the URL citation. Always `url_citation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["url_citation"]))]
     pub type_: String,
     ///The URL of the web resource.
     pub url: String,
@@ -32546,6 +33947,7 @@ impl schematic_define::Registration for BetaUrlCitationBody {
 pub struct BetaFileCitationBody {
     ///The type of the file citation. Always `file_citation`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["file_citation"]))]
     pub type_: String,
     ///The ID of the file.
     pub file_id: String,
@@ -32574,12 +33976,15 @@ pub struct BetaInputMessage {
     ///The type of the message input. Always set to `message`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["message", null]))]
     pub type_: Option<String>,
     ///The role of the message input. One of `user`, `system`, or `developer`.
+    #[schemars(extend("enum" = ["user", "system", "developer"]))]
     pub role: String,
     /**The status of item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
     pub status: Option<String>,
     pub content: BetaInputMessageContentList,
 }
@@ -32666,6 +34071,7 @@ interactions.*/
 pub struct BetaEasyInputMessage {
     /**The role of the message input. One of `user`, `assistant`, `system`, or
 `developer`.*/
+    #[schemars(extend("enum" = ["user", "assistant", "system", "developer"]))]
     pub role: String,
     /**Text, image, or audio input to the model, used to generate a response.
 Can also contain previous assistant responses.*/
@@ -32675,6 +34081,7 @@ Can also contain previous assistant responses.*/
     ///The type of the message input. Always `message`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["message", null]))]
     pub type_: Option<String>,
 }
 impl schematic_define::Registration for BetaEasyInputMessage {
@@ -32902,6 +34309,7 @@ impl schematic_define::Registration for BetaError {
 #[derive(JsonSchema)]
 pub struct BetaResponseItemList {
     ///The type of object returned, must be `list`.
+    #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///A list of items used to generate this response.
     pub data: Vec<BetaItemResource>,
@@ -33180,6 +34588,7 @@ pub struct BetaMCPApprovalResponseResource {
     pub agent: Option<serde_json::Value>,
     ///The type of the item. Always `mcp_approval_response`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["mcp_approval_response"]))]
     pub type_: String,
     ///The unique ID of the approval response
     pub id: String,
@@ -33208,6 +34617,7 @@ pub struct BetaApplyPatchToolCallOutput {
     pub agent: Option<BetaAgentTag>,
     ///The type of the item. Always `apply_patch_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["apply_patch_call_output"]))]
     pub type_: String,
     ///The unique ID of the apply patch tool call output. Populated when this item is returned via API.
     pub id: String,
@@ -33259,6 +34669,7 @@ pub struct BetaApplyPatchToolCall {
     pub agent: Option<BetaAgentTag>,
     ///The type of the item. Always `apply_patch_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["apply_patch_call"]))]
     pub type_: String,
     ///The unique ID of the apply patch tool call. Populated when this item is returned via API.
     pub id: String,
@@ -33289,6 +34700,7 @@ impl schematic_define::Registration for BetaApplyPatchToolCall {
 pub struct BetaApplyPatchUpdateFileOperation {
     ///Update an existing file with the provided diff.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["update_file"]))]
     pub type_: String,
     ///Path of the file to update.
     pub path: String,
@@ -33311,6 +34723,7 @@ impl schematic_define::Registration for BetaApplyPatchUpdateFileOperation {
 pub struct BetaApplyPatchDeleteFileOperation {
     ///Delete the specified file.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["delete_file"]))]
     pub type_: String,
     ///Path of the file to delete.
     pub path: String,
@@ -33331,6 +34744,7 @@ impl schematic_define::Registration for BetaApplyPatchDeleteFileOperation {
 pub struct BetaApplyPatchCreateFileOperation {
     ///Create a new file with the provided diff.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["create_file"]))]
     pub type_: String,
     ///Path of the file to create.
     pub path: String,
@@ -33374,6 +34788,7 @@ pub struct BetaFunctionShellCallOutput {
     pub agent: Option<BetaAgentTag>,
     ///The type of the shell call output. Always `shell_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["shell_call_output"]))]
     pub type_: String,
     ///The unique ID of the shell call output. Populated when this item is returned via API.
     pub id: String,
@@ -33429,6 +34844,7 @@ impl schematic_define::Registration for BetaFunctionShellCallOutputContent {
 pub struct BetaFunctionShellCallOutputExitOutcome {
     ///The outcome type. Always `exit`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["exit"]))]
     pub type_: String,
     ///Exit code from the shell process.
     pub exit_code: i64,
@@ -33449,6 +34865,7 @@ impl schematic_define::Registration for BetaFunctionShellCallOutputExitOutcome {
 pub struct BetaFunctionShellCallOutputTimeoutOutcome {
     ///The outcome type. Always `timeout`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["timeout"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaFunctionShellCallOutputTimeoutOutcome {
@@ -33490,6 +34907,7 @@ pub struct BetaFunctionShellCall {
     pub agent: Option<BetaAgentTag>,
     ///The type of the item. Always `shell_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["shell_call"]))]
     pub type_: String,
     ///The unique ID of the shell tool call. Populated when this item is returned via API.
     pub id: String,
@@ -33520,6 +34938,7 @@ impl schematic_define::Registration for BetaFunctionShellCall {
 pub struct BetaContainerReferenceResource {
     ///The environment type. Always `container_reference`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["container_reference"]))]
     pub type_: String,
     pub container_id: String,
 }
@@ -33539,6 +34958,7 @@ impl schematic_define::Registration for BetaContainerReferenceResource {
 pub struct BetaLocalEnvironmentResource {
     ///The environment type. Always `local`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["local"]))]
     pub type_: String,
 }
 impl schematic_define::Registration for BetaLocalEnvironmentResource {
@@ -33598,6 +35018,7 @@ pub struct BetaCompactionBody {
     pub agent: Option<BetaAgentTag>,
     ///The type of the item. Always `compaction`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["compaction"]))]
     pub type_: String,
     ///The unique ID of the compaction item.
     pub id: String,
@@ -33622,6 +35043,7 @@ pub struct BetaProgramOutput {
     pub agent: Option<BetaAgentTag>,
     ///The type of the item. Always `program_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["program_output"]))]
     pub type_: String,
     ///The unique ID of the program output item.
     pub id: String,
@@ -33665,6 +35087,7 @@ pub struct BetaProgram {
     pub agent: Option<BetaAgentTag>,
     ///The type of the item. Always `program`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["program"]))]
     pub type_: String,
     ///The unique ID of the program item.
     pub id: String,
@@ -33690,6 +35113,7 @@ pub struct BetaAdditionalTools {
     pub agent: Option<BetaAgentTag>,
     ///The type of the item. Always `additional_tools`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["additional_tools"]))]
     pub type_: String,
     ///The unique ID of the additional tools item.
     pub id: String,
@@ -33741,6 +35165,7 @@ pub struct BetaToolSearchOutput {
     pub agent: Option<BetaAgentTag>,
     ///The type of the item. Always `tool_search_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["tool_search_output"]))]
     pub type_: String,
     ///The unique ID of the tool search output item.
     pub id: String,
@@ -33768,6 +35193,7 @@ pub struct BetaToolSearchCall {
     pub agent: Option<BetaAgentTag>,
     ///The type of the item. Always `tool_search_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["tool_search_call"]))]
     pub type_: String,
     ///The unique ID of the tool search call item.
     pub id: String,
@@ -33795,6 +35221,7 @@ pub struct BetaMultiAgentCallOutput {
     pub agent: Option<BetaAgentTag>,
     ///The type of the multi-agent result. Always `multi_agent_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["multi_agent_call_output"]))]
     pub type_: String,
     ///The unique ID of the multi-agent call output item.
     pub id: String,
@@ -33846,6 +35273,7 @@ pub struct BetaMultiAgentCall {
     pub agent: Option<BetaAgentTag>,
     ///The type of the multi-agent call. Always `multi_agent_call`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["multi_agent_call"]))]
     pub type_: String,
     ///The unique ID of the multi-agent call item.
     pub id: String,
@@ -33870,6 +35298,7 @@ pub struct BetaAgentMessage {
     pub agent: Option<BetaAgentTag>,
     ///The type of the item. Always `agent_message`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["agent_message"]))]
     pub type_: String,
     ///The unique ID of the agent message.
     pub id: String,
@@ -33894,6 +35323,7 @@ impl schematic_define::Registration for BetaAgentMessage {
 pub struct BetaEncryptedContent {
     ///The type of the input item. Always `encrypted_content`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["encrypted_content"]))]
     pub type_: String,
     ///Opaque encrypted content.
     pub encrypted_content: String,
@@ -33912,6 +35342,7 @@ impl schematic_define::Registration for BetaEncryptedContent {
 pub struct BetaComputerScreenshotContent {
     ///Specifies the event type. For a computer screenshot, this property is always set to `computer_screenshot`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["computer_screenshot"]))]
     pub type_: String,
     pub image_url: serde_json::Value,
     pub file_id: serde_json::Value,
@@ -33934,6 +35365,7 @@ impl schematic_define::Registration for BetaComputerScreenshotContent {
 #[derive(JsonSchema)]
 pub struct BetaTextContent {
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["text"]))]
     pub type_: String,
     pub text: String,
 }
@@ -33976,6 +35408,7 @@ is returned via API.*/
     pub id: Option<String>,
     ///The type of the function tool call output. Always `function_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["function_call_output"]))]
     pub type_: String,
     ///The unique ID of the function tool call generated by the model.
     pub call_id: String,
@@ -33993,6 +35426,7 @@ Can be a string or an list of output content.*/
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
     pub status: Option<String>,
 }
 impl schematic_define::Registration for BetaFunctionToolCallOutput {
@@ -34071,6 +35505,7 @@ pub struct BetaComputerToolCallOutput {
     pub agent: Option<serde_json::Value>,
     ///The type of the computer tool call output. Always `computer_call_output`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["computer_call_output"]))]
     pub type_: String,
     ///The ID of the computer tool call output.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -34085,6 +35520,7 @@ developer.*/
     /**The status of the message input. One of `in_progress`, `completed`, or
 `incomplete`. Populated when input items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
     pub status: Option<String>,
 }
 impl schematic_define::Registration for BetaComputerToolCallOutput {
@@ -34121,6 +35557,7 @@ pub struct BetaCompactResource {
     ///The unique identifier for the compacted response.
     pub id: String,
     ///The object type. Always `response.compaction`.
+    #[schemars(extend("enum" = ["response.compaction"]))]
     pub object: String,
     ///The compacted list of output items.
     pub output: Vec<BetaItemField>,
@@ -34334,6 +35771,7 @@ pub struct BetaMessage {
     pub agent: Option<BetaAgentTag>,
     ///The type of the message. Always set to `message`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["message"]))]
     pub type_: String,
     ///The unique ID of the message.
     pub id: String,
@@ -34397,6 +35835,7 @@ pub struct BetaResponseCustomToolCallInputDoneEvent {
     pub agent: Option<serde_json::Value>,
     ///The event type identifier.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.custom_tool_call_input.done"]))]
     pub type_: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
@@ -34426,6 +35865,7 @@ pub struct BetaResponseCustomToolCallInputDeltaEvent {
     pub agent: Option<serde_json::Value>,
     ///The event type identifier.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.custom_tool_call_input.delta"]))]
     pub type_: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
@@ -34455,6 +35895,7 @@ pub struct BetaResponseQueuedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always 'response.queued'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.queued"]))]
     pub type_: String,
     pub response: BetaResponse,
     ///The sequence number for this event.
@@ -34528,6 +35969,7 @@ impl schematic_define::Registration for BetaModeration {
 pub struct BetaModerationErrorBody {
     ///The object type, which was always `error` for moderation failures.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["error"]))]
     pub type_: String,
     ///The error code.
     pub code: String,
@@ -34550,6 +35992,7 @@ impl schematic_define::Registration for BetaModerationErrorBody {
 pub struct BetaModerationResultBody {
     ///The object type, which was always `moderation_result` for successful moderation results.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["moderation_result"]))]
     pub type_: String,
     ///The moderation model that produced this result.
     pub model: String,
@@ -35028,6 +36471,7 @@ pub struct BetaResponseOutputTextAnnotationAddedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always 'response.output_text.annotation.added'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_text.annotation.added"]))]
     pub type_: String,
     ///The unique identifier of the item to which the annotation is being added.
     pub item_id: String,
@@ -35061,6 +36505,7 @@ pub struct BetaResponseMCPListToolsInProgressEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always 'response.mcp_list_tools.in_progress'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_list_tools.in_progress"]))]
     pub type_: String,
     ///The ID of the MCP tool call item that is being processed.
     pub item_id: String,
@@ -35088,6 +36533,7 @@ pub struct BetaResponseMCPListToolsFailedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always 'response.mcp_list_tools.failed'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_list_tools.failed"]))]
     pub type_: String,
     ///The ID of the MCP tool call item that failed.
     pub item_id: String,
@@ -35115,6 +36561,7 @@ pub struct BetaResponseMCPListToolsCompletedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always 'response.mcp_list_tools.completed'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_list_tools.completed"]))]
     pub type_: String,
     ///The ID of the MCP tool call item that produced this output.
     pub item_id: String,
@@ -35142,6 +36589,7 @@ pub struct BetaResponseMCPCallInProgressEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always 'response.mcp_call.in_progress'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call.in_progress"]))]
     pub type_: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
@@ -35169,6 +36617,7 @@ pub struct BetaResponseMCPCallFailedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always 'response.mcp_call.failed'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call.failed"]))]
     pub type_: String,
     ///The ID of the MCP tool call item that failed.
     pub item_id: String,
@@ -35196,6 +36645,7 @@ pub struct BetaResponseMCPCallCompletedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always 'response.mcp_call.completed'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call.completed"]))]
     pub type_: String,
     ///The ID of the MCP tool call item that completed.
     pub item_id: String,
@@ -35223,6 +36673,7 @@ pub struct BetaResponseMCPCallArgumentsDoneEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always 'response.mcp_call_arguments.done'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call_arguments.done"]))]
     pub type_: String,
     ///The index of the output item in the response's output array.
     pub output_index: i64,
@@ -35252,6 +36703,7 @@ pub struct BetaResponseMCPCallArgumentsDeltaEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always 'response.mcp_call_arguments.delta'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.mcp_call_arguments.delta"]))]
     pub type_: String,
     ///The index of the output item in the response's output array.
     pub output_index: i64,
@@ -35281,6 +36733,7 @@ pub struct BetaResponseImageGenCallPartialImageEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always 'response.image_generation_call.partial_image'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.image_generation_call.partial_image"]))]
     pub type_: String,
     ///The index of the output item in the response's output array.
     pub output_index: i64,
@@ -35312,6 +36765,7 @@ pub struct BetaResponseImageGenCallInProgressEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always 'response.image_generation_call.in_progress'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.image_generation_call.in_progress"]))]
     pub type_: String,
     ///The index of the output item in the response's output array.
     pub output_index: i64,
@@ -35339,6 +36793,7 @@ pub struct BetaResponseImageGenCallGeneratingEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always 'response.image_generation_call.generating'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.image_generation_call.generating"]))]
     pub type_: String,
     ///The index of the output item in the response's output array.
     pub output_index: i64,
@@ -35366,6 +36821,7 @@ pub struct BetaResponseImageGenCallCompletedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always 'response.image_generation_call.completed'.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.image_generation_call.completed"]))]
     pub type_: String,
     ///The index of the output item in the response's output array.
     pub output_index: i64,
@@ -35393,6 +36849,7 @@ pub struct BetaResponseReasoningTextDoneEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.reasoning_text.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.reasoning_text.done"]))]
     pub type_: String,
     ///The ID of the item this reasoning text is associated with.
     pub item_id: String,
@@ -35424,6 +36881,7 @@ pub struct BetaResponseReasoningTextDeltaEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.reasoning_text.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.reasoning_text.delta"]))]
     pub type_: String,
     ///The ID of the item this reasoning text delta is associated with.
     pub item_id: String,
@@ -35455,6 +36913,7 @@ pub struct BetaResponseReasoningSummaryTextDoneEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.reasoning_summary_text.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.reasoning_summary_text.done"]))]
     pub type_: String,
     ///The ID of the item this summary text is associated with.
     pub item_id: String,
@@ -35486,6 +36945,7 @@ pub struct BetaResponseReasoningSummaryTextDeltaEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.reasoning_summary_text.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.reasoning_summary_text.delta"]))]
     pub type_: String,
     ///The ID of the item this summary text delta is associated with.
     pub item_id: String,
@@ -35517,6 +36977,7 @@ pub struct BetaResponseReasoningSummaryPartDoneEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.reasoning_summary_part.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.reasoning_summary_part.done"]))]
     pub type_: String,
     ///The ID of the item this summary part is associated with.
     pub item_id: String,
@@ -35527,6 +36988,7 @@ pub struct BetaResponseReasoningSummaryPartDoneEvent {
     /**The completion status of the summary part. Omitted when the part completed
 normally and set to `incomplete` when generation was interrupted.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("enum" = ["incomplete", null]))]
     pub status: Option<String>,
     ///The sequence number of this event.
     pub sequence_number: i64,
@@ -35552,6 +37014,7 @@ pub struct BetaResponseReasoningSummaryPartAddedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.reasoning_summary_part.added`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.reasoning_summary_part.added"]))]
     pub type_: String,
     ///The ID of the item this summary part is associated with.
     pub item_id: String,
@@ -35583,6 +37046,7 @@ pub struct BetaResponseTextDoneEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.output_text.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_text.done"]))]
     pub type_: String,
     ///The ID of the output item that the text content is finalized.
     pub item_id: String,
@@ -35638,6 +37102,7 @@ pub struct BetaResponseTextDeltaEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.output_text.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_text.delta"]))]
     pub type_: String,
     ///The ID of the output item that the text delta was added to.
     pub item_id: String,
@@ -35671,6 +37136,7 @@ pub struct BetaResponseRefusalDoneEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.refusal.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.refusal.done"]))]
     pub type_: String,
     ///The ID of the output item that the refusal text is finalized.
     pub item_id: String,
@@ -35702,6 +37168,7 @@ pub struct BetaResponseRefusalDeltaEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.refusal.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.refusal.delta"]))]
     pub type_: String,
     ///The ID of the output item that the refusal text is added to.
     pub item_id: String,
@@ -35733,6 +37200,7 @@ pub struct BetaResponseOutputItemDoneEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.output_item.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_item.done"]))]
     pub type_: String,
     ///The index of the output item that was marked done.
     pub output_index: i64,
@@ -35759,6 +37227,7 @@ pub struct BetaResponseOutputItemAddedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.output_item.added`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.output_item.added"]))]
     pub type_: String,
     ///The index of the output item that was added.
     pub output_index: i64,
@@ -35785,6 +37254,7 @@ pub struct BetaResponseInProgressEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.in_progress`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.in_progress"]))]
     pub type_: String,
     pub response: BetaResponse,
     ///The sequence number of this event.
@@ -35808,6 +37278,7 @@ pub struct BetaResponseFunctionCallArgumentsDoneEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<serde_json::Value>,
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.function_call_arguments.done"]))]
     pub type_: String,
     ///The ID of the item.
     pub item_id: String,
@@ -35839,6 +37310,7 @@ pub struct BetaResponseFunctionCallArgumentsDeltaEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.function_call_arguments.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.function_call_arguments.delta"]))]
     pub type_: String,
     ///The ID of the output item that the function-call arguments delta is added to.
     pub item_id: String,
@@ -35868,6 +37340,7 @@ pub struct BetaResponseFileSearchCallSearchingEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.file_search_call.searching`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.file_search_call.searching"]))]
     pub type_: String,
     ///The index of the output item that the file search call is searching.
     pub output_index: i64,
@@ -35895,6 +37368,7 @@ pub struct BetaResponseFileSearchCallInProgressEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.file_search_call.in_progress`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.file_search_call.in_progress"]))]
     pub type_: String,
     ///The index of the output item that the file search call is initiated.
     pub output_index: i64,
@@ -35922,6 +37396,7 @@ pub struct BetaResponseFileSearchCallCompletedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.file_search_call.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.file_search_call.completed"]))]
     pub type_: String,
     ///The index of the output item that the file search call is initiated.
     pub output_index: i64,
@@ -35949,6 +37424,7 @@ pub struct BetaResponseErrorEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `error`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["error"]))]
     pub type_: String,
     pub code: serde_json::Value,
     ///The error message.
@@ -35976,6 +37452,7 @@ pub struct BetaResponseCreatedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.created`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.created"]))]
     pub type_: String,
     pub response: BetaResponse,
     ///The sequence number for this event.
@@ -36000,6 +37477,7 @@ pub struct BetaResponseContentPartDoneEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.content_part.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.content_part.done"]))]
     pub type_: String,
     ///The ID of the output item that the content part was added to.
     pub item_id: String,
@@ -36094,6 +37572,7 @@ pub struct BetaResponseContentPartAddedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.content_part.added`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.content_part.added"]))]
     pub type_: String,
     ///The ID of the output item that the content part was added to.
     pub item_id: String,
@@ -36124,6 +37603,7 @@ pub struct BetaResponseCompletedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.completed"]))]
     pub type_: String,
     pub response: BetaResponse,
     ///The sequence number for this event.
@@ -36148,6 +37628,7 @@ pub struct BetaResponseCodeInterpreterCallInterpretingEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.code_interpreter_call.interpreting`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.code_interpreter_call.interpreting"]))]
     pub type_: String,
     ///The index of the output item in the response for which the code interpreter is interpreting code.
     pub output_index: i64,
@@ -36176,6 +37657,7 @@ pub struct BetaResponseCodeInterpreterCallInProgressEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.code_interpreter_call.in_progress`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.code_interpreter_call.in_progress"]))]
     pub type_: String,
     ///The index of the output item in the response for which the code interpreter call is in progress.
     pub output_index: i64,
@@ -36203,6 +37685,7 @@ pub struct BetaResponseCodeInterpreterCallCompletedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.code_interpreter_call.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.code_interpreter_call.completed"]))]
     pub type_: String,
     ///The index of the output item in the response for which the code interpreter call is completed.
     pub output_index: i64,
@@ -36230,6 +37713,7 @@ pub struct BetaResponseCodeInterpreterCallCodeDoneEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.code_interpreter_call_code.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.code_interpreter_call_code.done"]))]
     pub type_: String,
     ///The index of the output item in the response for which the code is finalized.
     pub output_index: i64,
@@ -36259,6 +37743,7 @@ pub struct BetaResponseCodeInterpreterCallCodeDeltaEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.code_interpreter_call_code.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.code_interpreter_call_code.delta"]))]
     pub type_: String,
     ///The index of the output item in the response for which the code is being streamed.
     pub output_index: i64,
@@ -36288,6 +37773,7 @@ pub struct BetaResponseAudioTranscriptDoneEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.audio.transcript.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.audio.transcript.done"]))]
     pub type_: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
@@ -36311,6 +37797,7 @@ pub struct BetaResponseAudioTranscriptDeltaEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.audio.transcript.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.audio.transcript.delta"]))]
     pub type_: String,
     ///The partial transcript of the audio response.
     pub delta: String,
@@ -36336,6 +37823,7 @@ pub struct BetaResponseAudioDoneEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.audio.done`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.audio.done"]))]
     pub type_: String,
     ///The sequence number of the delta.
     pub sequence_number: i64,
@@ -36359,6 +37847,7 @@ pub struct BetaResponseAudioDeltaEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.audio.delta`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.audio.delta"]))]
     pub type_: String,
     ///A sequence number for this chunk of the stream response.
     pub sequence_number: i64,
@@ -36384,6 +37873,7 @@ pub struct BetaResponseIncompleteEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.incomplete`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.incomplete"]))]
     pub type_: String,
     pub response: BetaResponse,
     ///The sequence number of this event.
@@ -36408,6 +37898,7 @@ pub struct BetaResponseFailedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.failed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.failed"]))]
     pub type_: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
@@ -36432,6 +37923,7 @@ pub struct BetaResponseWebSearchCallCompletedEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.web_search_call.completed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.web_search_call.completed"]))]
     pub type_: String,
     ///The index of the output item that the web search call is associated with.
     pub output_index: i64,
@@ -36459,6 +37951,7 @@ pub struct BetaResponseWebSearchCallSearchingEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.web_search_call.searching`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.web_search_call.searching"]))]
     pub type_: String,
     ///The index of the output item that the web search call is associated with.
     pub output_index: i64,
@@ -36486,6 +37979,7 @@ pub struct BetaResponseWebSearchCallInProgressEvent {
     pub agent: Option<serde_json::Value>,
     ///The type of the event. Always `response.web_search_call.in_progress`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.web_search_call.in_progress"]))]
     pub type_: String,
     ///The index of the output item that the web search call is associated with.
     pub output_index: i64,
@@ -36510,6 +38004,7 @@ impl schematic_define::Registration for BetaResponseWebSearchCallInProgressEvent
 pub struct BetaOutputAudio {
     ///The type of the output audio. Always `output_audio`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["output_audio"]))]
     pub type_: String,
     ///Base64-encoded audio data from the model.
     pub data: String,
@@ -36530,6 +38025,7 @@ impl schematic_define::Registration for BetaOutputAudio {
 pub struct BetaInputAudio {
     ///The type of the input item. Always `input_audio`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["input_audio"]))]
     pub type_: String,
     pub input_audio: serde_json::Value,
 }
@@ -36743,6 +38239,7 @@ response when appropriate.*/
 pub struct BetaResponseInjectFailedEvent {
     ///The event discriminator. Always `response.inject.failed`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.inject.failed"]))]
     pub type_: String,
     ///The ID of the response that rejected the input.
     pub response_id: String,
@@ -36774,6 +38271,7 @@ active response.*/
 pub struct BetaResponseInjectCreatedEvent {
     ///The event discriminator. Always `response.inject.created`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.inject.created"]))]
     pub type_: String,
     ///The ID of the response that accepted the input.
     pub response_id: String,
@@ -37196,10 +38694,12 @@ accepts client-owned tool outputs that resume a waiting agent.*/
 pub struct BetaResponseInjectEvent {
     ///The event discriminator. Always `response.inject`.
     #[serde(rename = "type")]
+    #[schemars(extend("enum" = ["response.inject"]))]
     pub type_: String,
     ///The ID of the active response that should receive the input.
     pub response_id: String,
     ///Input items to inject into the active response.
+    #[schemars(extend("maxItems" = 16384u64))]
     pub input: Vec<BetaInputItem>,
 }
 impl schematic_define::Registration for BetaResponseInjectEvent {
@@ -37263,6 +38763,7 @@ pub struct BetaMultiAgentParam {
     /**`max_concurrent_subagents` sets the maximum number of subagents that can be active simultaneously across the entire agent tree. It includes all descendants—children, grandchildren, and deeper subagents—but excludes the root agent.
 The API does not impose a fixed upper bound on this setting. The default is `3`, which is recommended for most workloads. Multi-agent runs also have no fixed limit on tree depth or the total number of subagents created during a run.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 1u64))]
     pub max_concurrent_subagents: Option<i64>,
 }
 impl schematic_define::Registration for BetaMultiAgentParam {

@@ -188,7 +188,9 @@
             "name": "pagelen",
             "description": "Items per page (default: 50, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -321,7 +323,9 @@
             "name": "pagelen",
             "description": "Items per page (default: 50, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -398,7 +402,9 @@
             "name": "pagelen",
             "description": "Items per page (default: 50, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -521,7 +527,9 @@
             "name": "pagelen",
             "description": "Items per page (default: 50, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -598,7 +606,9 @@
             "name": "pagelen",
             "description": "Items per page (default: 50, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -730,7 +740,9 @@
             "name": "pagelen",
             "description": "Items per page (default: 50, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -853,7 +865,9 @@
             "name": "pagelen",
             "description": "Items per page (default: 50, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -973,7 +987,9 @@
             "name": "pagelen",
             "description": "Items per page (default: 50, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"

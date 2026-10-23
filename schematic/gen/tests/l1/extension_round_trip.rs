@@ -184,6 +184,11 @@ const DOCUMENT_TOLERANCES: &[Tolerance] = &[
 ///   document comparison holds `components.schemas` equal, so the schemas
 ///   mean the same.
 /// - `pagination`: pagination is outside v1 (D7).
+/// - `page-size-bounds`: export writes an adopted page-size parameter's
+///   strategy bounds into its schema, and the re-import, which has no
+///   pagination, keeps them as the parameter's own `minimum`/`maximum`. A
+///   page-size parameter that declares exactly its strategy's bounds is the
+///   same definition as one that declares none.
 /// - `grouped-operation-ids`: the grouped writer prefixes a later member's
 ///   clashing `operationId`; one document imports as one API (D8).
 /// - `grouped-auth-union`: the grouped writer merges two members' operation
@@ -203,6 +208,12 @@ const DEFINITION_TOLERANCES: &[Tolerance] = &[
     } },
     Tolerance { category: "pagination", pattern: "/endpoints/*/pagination", accepts: |_, difference| {
         difference.expected.is_some() && difference.actual.is_none()
+    } },
+    Tolerance { category: "page-size-bounds", pattern: "/endpoints/*/params/*/*/constraints", accepts: |_, difference| {
+        difference.expected.is_none()
+            && difference.actual.as_ref().and_then(Value::as_object).is_some_and(|rules| {
+                rules.contains_key("minimum") && rules.keys().all(|keyword| keyword == "minimum" || keyword == "maximum")
+            })
     } },
     Tolerance { category: "grouped-operation-ids", pattern: "/endpoints/*/id", accepts: |_, difference| {
         matches!((string(&difference.expected), string(&difference.actual)),
@@ -327,26 +338,28 @@ fn expected(module: &str) -> Expected {
     let plain = &["schema-json-normalized", "schema-rust-path", "version-default"];
     let paginated = &["pagination", "schema-json-normalized", "schema-rust-path", "version-default"];
     let renamed = &["grouped-name", "pagination", "schema-json-normalized", "schema-rust-path", "version-default"];
+    let sized = &["grouped-name", "page-size-bounds", "pagination", "schema-json-normalized", "schema-rust-path", "version-default"];
     match module {
         "anthropic" => Expected { document: TITLE, definition: paginated },
         "artificial_analysis" => Expected { document: RENAMED, definition: &["grouped-name", "schema-rust-path", "version-default"] },
         "bitbucket" => Expected {
             document: &["generic-component-names", "grouped-from-sibling", "grouped-title"],
-            definition: &["generic-component-names", "pagination", "schema-json-normalized", "schema-rust-path", "version-default"],
+            definition: &["generic-component-names", "page-size-bounds", "pagination", "schema-json-normalized", "schema-rust-path", "version-default"],
         },
-        "elevenlabs" | "github" | "gitlab" | "huggingface" => Expected { document: RENAMED, definition: renamed },
+        "elevenlabs" | "huggingface" => Expected { document: RENAMED, definition: renamed },
+        "github" | "gitlab" => Expected { document: RENAMED, definition: sized },
         "emqx" => Expected {
             document: RENAMED,
             definition: &["grouped-auth-union", "grouped-name", "pagination", "schema-json-normalized", "schema-rust-path", "version-default"],
         },
         "eversolo" | "samsung_smart_tv" | "unfolded_circle_core_rest" => Expected { document: TITLE, definition: plain },
-        "gitea" => Expected { document: TITLE, definition: paginated },
+        "gitea" => Expected { document: TITLE, definition: &["page-size-bounds", "pagination", "schema-json-normalized", "schema-rust-path", "version-default"] },
         "lmstudio" => Expected { document: RENAMED, definition: &["grouped-name", "schema-json-normalized", "schema-rust-path", "version-default"] },
         "ollama" => Expected {
             document: RENAMED,
             definition: &["grouped-name", "grouped-operation-ids", "schema-json-normalized", "schema-rust-path", "version-default"],
         },
-        "openai" => Expected { document: RENAMED, definition: renamed },
+        "openai" => Expected { document: RENAMED, definition: sized },
         other => panic!("no round-trip expectation for module `{other}`"),
     }
 }

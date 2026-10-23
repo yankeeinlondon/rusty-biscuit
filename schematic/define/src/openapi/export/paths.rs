@@ -5,11 +5,13 @@ use super::super::OpenApiError;
 use super::super::extensions::{AuthDetail, ParamDetail, SchematicOpExtension};
 use super::super::options::ExportOptions;
 use super::headers::{HeaderGap, apply_fixed_headers, credential_headers};
-use super::parameters::{map_parameters, param_schema};
-use super::request_body::map_request_body;
+use super::conversion::pointer_token;
+use super::parameters::{constrained_param_schema, effective_constraints, map_parameters};
+use super::request_body::map_constrained_request_body;
 use super::responses::map_responses;
 use super::security::endpoint_security;
 use crate::auth::EndpointAuth;
+use crate::pagination::{AdoptedPageSize, ParamLocation, adopted_page_size};
 use crate::params::{EndpointParams, ParamDef};
 use crate::request::ApiRequest;
 use crate::response::ResponseShape;
@@ -26,6 +28,10 @@ use crate::types::{Endpoint, RestMethod};
 /// Endpoint security schemes are registered in `security_schemes`. Fixed
 /// headers become operation-level header parameters; the ones that cannot
 /// are appended to `header_gaps`.
+///
+/// Every parameter carries its value rules; the page-size parameter an
+/// endpoint's pagination strategy adopts carries the strategy's effective
+/// bounds ([`adopted_page_size`]).
 pub(super) fn map_paths(
     api: &crate::types::RestApi,
     options: &ExportOptions,
@@ -41,6 +47,7 @@ pub(super) fn map_paths(
             Some((requirements, details)) => (Some(requirements), details),
             None => (None, IndexMap::new()),
         };
+        let adopted = adopted_page_size(api, endpoint);
         let mut operation = map_operation(api, endpoint, options, auth_details)?;
         operation.security = security;
         let credentials = credential_headers(
@@ -52,12 +59,13 @@ pub(super) fn map_paths(
         // A reserved-expansion marker (`{+name}`) is a runtime encoding hint;
         // the exported OpenAPI path key must render as valid `{name}`.
         let path_key = strip_reserved_markers(&endpoint.path);
+        let path_parameters = endpoint_path_parameters(endpoint, adopted.as_ref(), &format!("#/paths/{}", pointer_token(&path_key)))?;
         let path_item = paths.entry(path_key.clone()).or_default();
         *operation_slot(path_item, endpoint.method) = Some(operation);
         declarations
             .entry(path_key)
             .or_default()
-            .push((endpoint.method, endpoint_path_parameters(endpoint)));
+            .push((endpoint.method, path_parameters));
     }
 
     for (path_key, operations) in declarations {
@@ -107,8 +115,14 @@ fn operation_slot(item: &mut PathItem, method: RestMethod) -> &mut Option<Operat
 ///
 /// Declared (typed) parameters follow the template's placeholder order; an
 /// endpoint that declares none gets today's untyped string parameter per
-/// placeholder.
-fn endpoint_path_parameters(endpoint: &Endpoint) -> Vec<Parameter> {
+/// placeholder. `adopted` is the endpoint's adopted page-size parameter and
+/// `pointer` the path item's JSON pointer, which locates a schema that fails
+/// to convert.
+///
+/// ## Errors
+///
+/// [`OpenApiError`] when a parameter's rules do not convert to OpenAPI 3.0.3.
+fn endpoint_path_parameters(endpoint: &Endpoint, adopted: Option<&AdoptedPageSize>, pointer: &str) -> Result<Vec<Parameter>, OpenApiError> {
     let declared = endpoint.params.as_ref().map_or(&[][..], |params| params.path.as_slice());
     if declared.is_empty() {
         let mut params: Vec<Parameter> = Vec::new();
@@ -117,35 +131,41 @@ fn endpoint_path_parameters(endpoint: &Endpoint) -> Vec<Parameter> {
                 params.push(param);
             }
         }
-        return params;
+        return Ok(params);
     }
     endpoint
         .path_placeholders()
         .into_iter()
         .filter_map(|name| declared.iter().find(|param| param.name == name))
-        .map(typed_path_parameter)
+        .enumerate()
+        .map(|(index, param)| {
+            typed_path_parameter(param, effective_constraints(param, ParamLocation::Path, adopted), &format!("{pointer}/parameters/{index}/schema"))
+        })
         .collect()
 }
 
-/// A declared path parameter: its type's schema, description, and
-/// deprecation; always required, `simple` style with the default explode.
-fn typed_path_parameter(param: &ParamDef) -> Parameter {
-    Parameter::Path {
+/// A declared path parameter: its type's schema with `rules`, located at
+/// `pointer`, its description, and deprecation; always required, `simple`
+/// style with the default explode.
+fn typed_path_parameter(param: &ParamDef, rules: Option<&crate::constraints::Constraints>, pointer: &str) -> Result<Parameter, OpenApiError> {
+    Ok(Parameter::Path {
         parameter_data: openapiv3::ParameterData {
             name: param.name.clone(),
             description: param.description.clone(),
             required: true,
             deprecated: param.deprecated.then_some(true),
-            format: openapiv3::ParameterSchemaOrContent::Schema(ReferenceOr::Item(param_schema(
+            format: openapiv3::ParameterSchemaOrContent::Schema(ReferenceOr::Item(constrained_param_schema(
                 &param.param_type,
-            ))),
+                rules,
+                pointer,
+            )?)),
             example: None,
             examples: IndexMap::new(),
             explode: None,
             extensions: IndexMap::new(),
         },
         style: openapiv3::PathStyle::Simple,
-    }
+    })
 }
 
 /// Declares each path parameter of `operations` once on `item`, with an
@@ -195,17 +215,24 @@ fn share_path_parameters(item: &mut PathItem, operations: &[(RestMethod, Vec<Par
 ///
 /// Path parameters and `security` are added by [`map_paths`];
 /// `auth_details` are those of the schemes the operation's own `security`
-/// names.
+/// names. Parameters and the request body carry their value rules, the
+/// adopted page-size parameter its effective bounds.
 pub(super) fn map_operation(
     api: &crate::types::RestApi,
     endpoint: &Endpoint,
     options: &ExportOptions,
     auth_details: IndexMap<String, AuthDetail>,
 ) -> Result<Operation, OpenApiError> {
+    let pointer = format!("#/paths/{}/{}", pointer_token(&strip_reserved_markers(&endpoint.path)), endpoint.method.to_string().to_lowercase());
     let request_body = endpoint
         .request
         .as_ref()
-        .map(|req| map_request_body(req).map(ReferenceOr::Item)).transpose()?;
+        .map(|req| {
+            map_constrained_request_body(req, endpoint.request_constraints.as_deref(), &format!("{pointer}/requestBody"))
+                .map(ReferenceOr::Item)
+        })
+        .transpose()?;
+    let parameters = map_parameters(endpoint.params.as_ref(), adopted_page_size(api, endpoint).as_ref(), &pointer)?;
 
     let shapes = endpoint.success_shapes();
     let responses = map_responses(shapes, &api.effective_errors(endpoint))?;
@@ -247,7 +274,7 @@ pub(super) fn map_operation(
         description: Some(endpoint.description.clone()),
         request_body,
         responses,
-        parameters: map_parameters(endpoint.params.as_ref()),
+        parameters,
         deprecated: endpoint.deprecated,
         extensions,
         ..Default::default()

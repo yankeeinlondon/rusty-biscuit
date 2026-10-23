@@ -25,11 +25,15 @@
 //! endpoint, and some depend on `bucket_width`. A collection authors a maximum only
 //! where the vendored `specs/openai/openapi.yaml` states one that holds for every
 //! request. Where the provider documents a minimum of 0, the minimum stays at 1,
-//! the lowest the pagination model accepts.
+//! the lowest the pagination model accepts. An adopted `limit` parameter
+//! carries the bounds the import read from the document, and a page-size
+//! parameter must agree with the strategy that adopts it, so [`apply`]
+//! rewrites each adopted parameter's `minimum`/`maximum` to its strategy's
+//! ([`align_page_size_bounds`]).
 
 use schematic_define::{ResponseShape, RestApi, StreamEnd, StreamFraming, SuccessShape, TypeRef};
 use schematic_define::pagination::{
-    Collection, CursorSource, MoreSignal, PageSize, Strategy,
+    Collection, CursorSource, MoreSignal, PageSize, ParamLocation, Strategy, adopted_page_size,
 };
 
 /// Sets the OpenAI default strategy and a collection on each list endpoint,
@@ -50,7 +54,28 @@ pub fn apply(mut api: RestApi) -> RestApi {
     }
     keep_conversation_item_union(&mut api);
     stream_get_response(&mut api);
+    align_page_size_bounds(&mut api);
     api
+}
+
+/// Gives each adopted page-size parameter its strategy's bounds, replacing
+/// the document's (`minimum: 0` where the strategy's minimum is 1, and no
+/// `maximum` where the strategy leaves the size unbounded). Its other rules,
+/// such as `format`, are kept.
+fn align_page_size_bounds(api: &mut RestApi) {
+    let adopted: Vec<_> = api.endpoints.iter().map(|endpoint| adopted_page_size(api, endpoint)).collect();
+    for (endpoint, adopted) in api.endpoints.iter_mut().zip(adopted) {
+        let (Some(adopted), Some(params)) = (adopted, endpoint.params.as_mut()) else { continue };
+        let declared = match adopted.location {
+            ParamLocation::Query => &mut params.query,
+            ParamLocation::Header => &mut params.header,
+            ParamLocation::Cookie => &mut params.cookie,
+            ParamLocation::Path => &mut params.path,
+        };
+        if let Some(param) = declared.iter_mut().find(|param| param.name == adopted.name && param.constraints.is_some()) {
+            param.constraints = Some(Box::new(adopted.constraints));
+        }
+    }
 }
 
 /// The import separates `ConversationItem`, a `type`-discriminated `oneOf`

@@ -102,6 +102,8 @@ pub struct QueryParamInfo {
     /// The Rust type and wire form of a query parameter; `None` for header
     /// and cookie parameters.
     pub shape: Option<QueryShape>,
+    /// The parameter's value rules, checked before it is encoded.
+    pub constraints: Option<Box<schematic_define::constraints::Constraints>>,
 }
 
 impl QueryParamInfo {
@@ -118,6 +120,16 @@ impl QueryParamInfo {
         } else {
             quote! {}
         }
+    }
+
+    /// The doc attributes labelling the parameter's value rules, after a
+    /// blank line; none without rules.
+    pub fn rules_doc(&self) -> TokenStream {
+        let lines = self.constraints.as_deref().map(crate::codegen::value_rules::rule_doc_lines).unwrap_or_default();
+        if lines.is_empty() {
+            return quote! {};
+        }
+        quote! { #[doc = ""] #(#[doc = #lines])* }
     }
 
     pub fn serde_rename(&self) -> TokenStream {
@@ -194,6 +206,7 @@ fn param_info(p: &ParamDef) -> QueryParamInfo {
         deprecated: p.deprecated,
         required: false,
         shape: None,
+        constraints: p.constraints.clone(),
     }
 }
 

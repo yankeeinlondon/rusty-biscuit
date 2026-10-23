@@ -3,15 +3,18 @@
 //! Transforms `ModelCatalog` type definitions into Rust source code with
 //! serde derives, doc comments, and correct type mappings.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use proc_macro2::TokenStream;
+use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote};
+use schematic_define::SchemaComponent;
+use schematic_define::constraints::Constraints;
 use schematic_define::models::{
     EnumDef, EnumVariant, FieldDef, ModelCatalog, ModelDef, PrimitiveType, StructDef, TypeAlias,
     TypeRef, UnionDiscriminator,
 };
+use serde_json::{Map, Value};
 
 use crate::errors::GeneratorError;
 use crate::output::{format_code, validate_code, write_atomic};
@@ -35,12 +38,14 @@ pub fn generate_models(
     output_dir: &Path,
     dry_run: bool,
 ) -> Result<String, GeneratorError> {
-    generate_models_with(catalog, output_dir, dry_run, false)
+    generate_models_with(catalog, None, output_dir, dry_run)
 }
 
 /// Generates Rust source code from a `ModelCatalog`.
 ///
-/// `derive_json_schema` adds `schemars::JsonSchema` to every emitted type.
+/// `json_schema`, when given, adds `schemars::JsonSchema` to every emitted
+/// type and rebuilds each struct field's value rules from these imported
+/// source components (see [`assemble_model_tokens_with`]).
 ///
 /// ## Errors
 ///
@@ -49,11 +54,11 @@ pub fn generate_models(
 /// - File writing fails (when not dry-run)
 pub fn generate_models_with(
     catalog: &ModelCatalog,
+    json_schema: Option<&[SchemaComponent]>,
     output_dir: &Path,
     dry_run: bool,
-    derive_json_schema: bool,
 ) -> Result<String, GeneratorError> {
-    let tokens = assemble_model_tokens_with(catalog, derive_json_schema);
+    let tokens = assemble_model_tokens_with(catalog, json_schema);
     let file = validate_code(&tokens)?;
     let formatted = format_code(&file);
 
@@ -68,21 +73,30 @@ pub fn generate_models_with(
 
 /// Assembles token stream for all model definitions.
 pub fn assemble_model_tokens(catalog: &ModelCatalog) -> TokenStream {
-    assemble_model_tokens_with(catalog, false)
+    assemble_model_tokens_with(catalog, None)
 }
 
 /// Assembles token stream for all model definitions.
 ///
-/// `derive_json_schema` adds `schemars::JsonSchema` and nominal typed registration. The
-/// definitions crate needs it so its definition context can register the types;
-/// the standalone client output does not depend on `schemars`.
-pub fn assemble_model_tokens_with(catalog: &ModelCatalog, derive_json_schema: bool) -> TokenStream {
+/// `json_schema`, when given, adds `schemars::JsonSchema` and nominal typed
+/// registration. The definitions crate needs it so its definition context can
+/// register the types; the standalone client output does not depend on
+/// `schemars`.
+///
+/// The given components are the imported source schemas, one per catalog
+/// model under the model's name. A struct field whose property carries value
+/// rules gets a `#[schemars(extend(..))]` attribute, so the schema Schemars
+/// derives for the field states the same rules as the source property (see
+/// [`RuleSource`]). A field without rules gets no attribute.
+pub fn assemble_model_tokens_with(catalog: &ModelCatalog, json_schema: Option<&[SchemaComponent]>) -> TokenStream {
+    let derive_json_schema = json_schema.is_some();
+    let rules = json_schema.map(|components| RuleSource::new(catalog, components));
     let type_defs: Vec<TokenStream> = catalog
         .types
         .iter()
         .map(|model| {
             let tokens = match model {
-                ModelDef::Struct(s) => generate_struct_with(s, derive_json_schema),
+                ModelDef::Struct(s) => generate_struct_with(s, derive_json_schema, rules.as_ref()),
                 ModelDef::Enum(e) => generate_enum_with(e, derive_json_schema),
                 ModelDef::Alias(a) => generate_alias_with(a, derive_json_schema),
                 _ => TokenStream::new(),
@@ -92,10 +106,7 @@ pub fn assemble_model_tokens_with(catalog: &ModelCatalog, derive_json_schema: bo
             let nominal = match model {
                 ModelDef::Struct(s) => Some(&s.name),
                 ModelDef::Enum(e) => Some(&e.name),
-                ModelDef::Alias(a) => match &a.target {
-                    TypeRef::OneOf(v) | TypeRef::AnyOf(v) | TypeRef::AllOf(v) if !v.is_empty() => Some(&a.name),
-                    _ => None,
-                },
+                ModelDef::Alias(a) if is_nominal_alias(a) => Some(&a.name),
                 _ => None,
             };
             if derive_json_schema && let Some(name) = nominal {
@@ -143,11 +154,17 @@ fn json_schema_derive(enabled: bool) -> TokenStream {
 }
 
 /// Generates a Rust struct from a `StructDef`, optionally deriving `JsonSchema`.
-fn generate_struct_with(def: &StructDef, derive_json_schema: bool) -> TokenStream {
+///
+/// `rules`, when given, supplies each field's rebuilt value-rule attribute.
+fn generate_struct_with(def: &StructDef, derive_json_schema: bool, rules: Option<&RuleSource>) -> TokenStream {
     let name = format_ident!("{}", def.name);
     let doc = doc_comment(&def.description);
 
-    let fields: Vec<TokenStream> = def.fields.iter().map(generate_field).collect();
+    let fields: Vec<TokenStream> = def
+        .fields
+        .iter()
+        .map(|field| generate_field(field, rules.and_then(|rules| rules.field_attribute(&def.name, field))))
+        .collect();
 
     // If the struct has additional_properties, add a flattened HashMap field
     let extra_field = def.additional_properties.as_ref().map(|type_ref| {
@@ -176,8 +193,9 @@ fn generate_struct_with(def: &StructDef, derive_json_schema: bool) -> TokenStrea
     }
 }
 
-/// Generates a single struct field.
-fn generate_field(def: &FieldDef) -> TokenStream {
+/// Generates a single struct field, with `rules` (a `#[schemars(..)]`
+/// attribute) after its serde attributes.
+fn generate_field(def: &FieldDef, rules: Option<TokenStream>) -> TokenStream {
     let name = format_ident!("{}", def.name);
     let doc = doc_comment(&def.description);
 
@@ -202,7 +220,232 @@ fn generate_field(def: &FieldDef) -> TokenStream {
         #doc
         #rename
         #skip_none
+        #rules
         pub #name: #field_type,
+    }
+}
+
+/// Alias chains longer than this are treated as cycles and carry no rules.
+const MAX_ALIAS_DEPTH: usize = 32;
+
+/// The imported source schemas a definitions-out module rebuilds value rules
+/// from.
+///
+/// Every rule is written through `extend`, never a native attribute such as
+/// `length` or `range`: Schemars drops a native rule without a diagnostic when
+/// the field's type does not match it, cannot express `exclusiveMinimum`,
+/// `multipleOf`, `enum`, `const`, or `uniqueItems` at all, and turns an
+/// unsuffixed large literal into an `i32` overflow. `extend` always attaches
+/// and takes JSON values, so one spelling covers every keyword and every
+/// exact-number stand-in.
+///
+/// `format` is an annotation, not a rule, and is not rebuilt: Schemars writes
+/// its own (`int64`, `double`) for the Rust type.
+pub(crate) struct RuleSource<'a> {
+    /// Source schema objects by model name.
+    components: HashMap<&'a str, &'a Map<String, Value>>,
+    /// Targets of the aliases emitted as `pub type`, which Schemars inlines
+    /// rather than registering as components.
+    aliases: HashMap<&'a str, &'a TypeRef>,
+}
+
+impl<'a> RuleSource<'a> {
+    /// Indexes `components` by name and the catalog's plain aliases.
+    pub(crate) fn new(catalog: &'a ModelCatalog, components: &'a [SchemaComponent]) -> Self {
+        let components = components
+            .iter()
+            .filter_map(|component| Some((component.name.as_str(), component.schema.as_object()?)))
+            .collect();
+        let aliases = catalog
+            .types
+            .iter()
+            .filter_map(|model| match model {
+                ModelDef::Alias(alias) if !is_nominal_alias(alias) => Some((alias.name.as_str(), &alias.target)),
+                _ => None,
+            })
+            .collect();
+        Self { components, aliases }
+    }
+
+    /// The `#[schemars(extend(..))]` attribute rebuilding the rules of
+    /// `field`'s property in `model`'s source schema, found by wire name.
+    ///
+    /// An optional field's `enum` gains `null`, and its `const` becomes a
+    /// two-member `enum` with `null`, because Schemars admits `null` for the
+    /// `Option` and the rule must not reject what the type accepts. `None`
+    /// when the property has no rule this field can carry.
+    pub(crate) fn field_attribute(&self, model: &str, field: &FieldDef) -> Option<TokenStream> {
+        let wire_name = field.serde_rename.as_deref().unwrap_or(&field.name);
+        let own = self
+            .components
+            .get(model)
+            .and_then(|schema| schema.get("properties")?.get(wire_name)?.as_object())
+            .map(rule_keywords)
+            .unwrap_or_default();
+        let mut rules = self.rules(&field.field_type, own, true, 0);
+        if rules.is_empty() {
+            return None;
+        }
+        if !field.required || matches!(field.field_type, TypeRef::Optional(_)) {
+            admit_null(&mut rules);
+        }
+        let entries = rules.iter().map(|(keyword, value)| {
+            let value = json_tokens(value);
+            quote! { #keyword = #value }
+        });
+        Some(quote! { #[schemars(extend(#(#entries),*))] })
+    }
+
+    /// The rules of a JSON request body whose type is `reference`, when it
+    /// names a plain alias: the generated alias is not a component once
+    /// assembled, so its rules belong on the endpoint. `None` otherwise or
+    /// when the alias has no rules.
+    pub(crate) fn body_constraints(&self, reference: &TypeRef) -> Option<Constraints> {
+        let TypeRef::Named(name) = reference else { return None };
+        if !self.aliases.contains_key(name.as_str()) {
+            return None;
+        }
+        let rules = self.rules(reference, Map::new(), false, 0);
+        (!rules.is_empty()).then(|| Constraints::from_schema(&rules))
+    }
+
+    /// `own` merged beneath the rules of every alias `type_ref` passes
+    /// through (an outer rule wins), keeping only what the inlined schema of
+    /// `type_ref`'s Rust type can carry.
+    ///
+    /// Item rules survive only for items of a primitive or array type, the
+    /// items whose schema `extend` can restate whole. With `with_base`, the
+    /// `items` object also carries the `type` (and `format`) Schemars would
+    /// have written, because `extend` replaces Schemars' own `items`. A named
+    /// model's rules live in its own component, so a field typed by one
+    /// carries none.
+    fn rules(&self, type_ref: &TypeRef, mut own: Map<String, Value>, with_base: bool, depth: usize) -> Map<String, Value> {
+        match type_ref {
+            TypeRef::Optional(inner) => self.rules(inner, own, with_base, depth),
+            TypeRef::Named(name) => match self.aliases.get(name.as_str()) {
+                Some(target) if depth < MAX_ALIAS_DEPTH => {
+                    let mut merged = self.components.get(name.as_str()).map(|schema| rule_keywords(schema)).unwrap_or_default();
+                    merged.append(&mut own);
+                    self.rules(target, merged, with_base, depth + 1)
+                }
+                _ => Map::new(),
+            },
+            TypeRef::Primitive(PrimitiveType::String | PrimitiveType::Integer | PrimitiveType::Number | PrimitiveType::Boolean) => {
+                own.remove("items");
+                own
+            }
+            TypeRef::Array(item) => {
+                let item_own = match own.remove("items") {
+                    Some(Value::Object(item_own)) => item_own,
+                    _ => Map::new(),
+                };
+                let mut item_rules = self.rules(item, item_own, with_base, depth);
+                if item_rules.is_empty() {
+                    return own;
+                }
+                if with_base {
+                    let Some(mut base) = self.base_schema(item, depth) else { return own };
+                    base.append(&mut item_rules);
+                    item_rules = base;
+                }
+                own.insert("items".to_owned(), Value::Object(item_rules));
+                own
+            }
+            _ => Map::new(),
+        }
+    }
+
+    /// The schema Schemars derives for `type_ref`'s Rust type, for the types
+    /// whose schema is inline: primitives other than JSON and bytes, arrays of
+    /// them, and plain aliases of either.
+    fn base_schema(&self, type_ref: &TypeRef, depth: usize) -> Option<Map<String, Value>> {
+        let schema = match type_ref {
+            TypeRef::Primitive(PrimitiveType::String) => serde_json::json!({"type": "string"}),
+            TypeRef::Primitive(PrimitiveType::Integer) => serde_json::json!({"type": "integer", "format": "int64"}),
+            TypeRef::Primitive(PrimitiveType::Number) => serde_json::json!({"type": "number", "format": "double"}),
+            TypeRef::Primitive(PrimitiveType::Boolean) => serde_json::json!({"type": "boolean"}),
+            TypeRef::Array(item) => serde_json::json!({"type": "array", "items": self.base_schema(item, depth)?}),
+            TypeRef::Named(name) if depth < MAX_ALIAS_DEPTH => return self.base_schema(self.aliases.get(name.as_str())?, depth + 1),
+            _ => return None,
+        };
+        match schema {
+            Value::Object(schema) => Some(schema),
+            _ => None,
+        }
+    }
+}
+
+/// Whether `alias` is emitted as a real enum or struct (a non-empty
+/// combinator), and so registered under its own name.
+fn is_nominal_alias(alias: &TypeAlias) -> bool {
+    matches!(&alias.target, TypeRef::OneOf(v) | TypeRef::AnyOf(v) | TypeRef::AllOf(v) if !v.is_empty())
+}
+
+/// The value rules of `schema` as JSON Schema keywords
+/// ([`Constraints::to_schema`]): numeric exclusive bounds, exact numbers as
+/// JSON numbers or stand-ins with their `x-schematic-exact` text, and an
+/// `items` object of item rules. `format` is dropped at every level.
+fn rule_keywords(schema: &Map<String, Value>) -> Map<String, Value> {
+    fn without_format(rules: &mut Constraints) {
+        rules.format = None;
+        if let Some(items) = rules.items.as_deref_mut() {
+            without_format(items);
+        }
+        if rules.items.as_deref().is_some_and(Constraints::is_empty) {
+            rules.items = None;
+        }
+    }
+    let mut rules = Constraints::from_schema(schema);
+    without_format(&mut rules);
+    rules.to_schema()
+}
+
+/// Makes `rules` admit `null`: a non-null `const` becomes `enum: [const,
+/// null]` when there is no `enum`, and an `enum` without `null` gains it.
+fn admit_null(rules: &mut Map<String, Value>) {
+    if !rules.contains_key("enum")
+        && let Some(constant) = rules.get("const").filter(|constant| !constant.is_null()).cloned()
+    {
+        rules.remove("const");
+        rules.insert("enum".to_owned(), Value::Array(vec![constant, Value::Null]));
+    }
+    if let Some(Value::Array(values)) = rules.get_mut("enum")
+        && !values.contains(&Value::Null)
+    {
+        values.push(Value::Null);
+    }
+}
+
+/// `value` in `serde_json::json!` syntax. Integers carry a `u64`/`i64`
+/// suffix, because `json!` types an unsuffixed literal as `i32`; a float is
+/// written with an `f64` suffix in the shortest text that reads back as the
+/// same `f64`.
+pub(crate) fn json_tokens(value: &Value) -> TokenStream {
+    match value {
+        Value::Null => quote! { null },
+        Value::Bool(flag) => quote! { #flag },
+        Value::Number(number) => {
+            let literal = if let Some(unsigned) = number.as_u64() {
+                Literal::u64_suffixed(unsigned)
+            } else if let Some(signed) = number.as_i64() {
+                Literal::i64_suffixed(signed)
+            } else {
+                Literal::f64_suffixed(number.as_f64().expect("a JSON number that is no integer is a finite float"))
+            };
+            quote! { #literal }
+        }
+        Value::String(text) => quote! { #text },
+        Value::Array(values) => {
+            let values = values.iter().map(json_tokens);
+            quote! { [#(#values),*] }
+        }
+        Value::Object(entries) => {
+            let entries = entries.iter().map(|(key, value)| {
+                let value = json_tokens(value);
+                quote! { #key: #value }
+            });
+            quote! { { #(#entries),* } }
+        }
     }
 }
 
@@ -1106,5 +1349,138 @@ mod tests {
         let result = generate_models(&catalog, temp_dir.path(), false);
         assert!(result.is_ok());
         assert!(temp_dir.path().join("types.rs").exists());
+    }
+
+    fn field(name: &str, rename: Option<&str>, required: bool, field_type: TypeRef) -> FieldDef {
+        FieldDef { name: name.into(), serde_rename: rename.map(str::to_string), description: None, required, field_type }
+    }
+
+    fn primitive(primitive: PrimitiveType) -> TypeRef {
+        TypeRef::Primitive(primitive)
+    }
+
+    /// A model with one field per rule shape, an unconstrained model, two
+    /// primitive aliases, and their source components.
+    fn constrained_catalog() -> (ModelCatalog, Vec<SchemaComponent>) {
+        let catalog = ModelCatalog {
+            module_path: None,
+            types: vec![
+                ModelDef::Struct(StructDef {
+                    name: "Widget".into(),
+                    description: None,
+                    fields: vec![
+                        field("name", None, true, primitive(PrimitiveType::String)),
+                        field("count", None, true, primitive(PrimitiveType::Integer)),
+                        field("ratio", None, true, primitive(PrimitiveType::Number)),
+                        field("tags", None, true, TypeRef::Array(Box::new(primitive(PrimitiveType::String)))),
+                        field("display_name", Some("displayName"), true, primitive(PrimitiveType::String)),
+                        field("mode", None, false, primitive(PrimitiveType::String)),
+                        field("kind", None, false, primitive(PrimitiveType::String)),
+                        field("slug", None, true, TypeRef::Named("Slug".into())),
+                        field("codes", None, true, TypeRef::Array(Box::new(TypeRef::Named("Code".into())))),
+                        field("big", None, true, primitive(PrimitiveType::Integer)),
+                        field("owner", None, true, TypeRef::Named("Plain".into())),
+                        field("plain", None, true, primitive(PrimitiveType::String)),
+                    ],
+                    additional_properties: None,
+                }),
+                ModelDef::Struct(StructDef {
+                    name: "Plain".into(),
+                    description: None,
+                    fields: vec![
+                        field("label", None, true, primitive(PrimitiveType::String)),
+                        field("size", None, false, primitive(PrimitiveType::Integer)),
+                    ],
+                    additional_properties: None,
+                }),
+                ModelDef::Alias(TypeAlias { name: "Slug".into(), description: None, target: primitive(PrimitiveType::String), discriminator: None }),
+                ModelDef::Alias(TypeAlias { name: "Code".into(), description: None, target: primitive(PrimitiveType::String), discriminator: None }),
+            ],
+        };
+        let component = |name: &str, schema: Value| SchemaComponent { name: name.into(), rust_path: Some(name.into()), schema };
+        let components = vec![
+            component("Widget", serde_json::json!({"type": "object", "properties": {
+                "name": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z]+$", "format": "slug"},
+                "count": {"type": "integer", "format": "int32", "minimum": -5, "maximum": 100, "multipleOf": 5},
+                "ratio": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1.5},
+                "tags": {"type": "array", "minItems": 1, "maxItems": 10, "uniqueItems": true, "items": {"type": "string", "maxLength": 5}},
+                "displayName": {"type": "string", "minLength": 2},
+                "mode": {"type": "string", "enum": ["fast", "slow"]},
+                "kind": {"type": "string", "const": "v1"},
+                "slug": {"$ref": "#/components/schemas/Slug"},
+                "codes": {"type": "array", "items": {"$ref": "#/components/schemas/Code"}},
+                "big": {"type": "integer", "maximum": 1.8446744073709552e19, "x-schematic-exact": {"maximum": "18446744073709551616"}},
+                "owner": {"$ref": "#/components/schemas/Plain"},
+                "plain": {"type": "string", "description": "no rules"}
+            }})),
+            component("Plain", serde_json::json!({"type": "object", "properties": {"label": {"type": "string"}, "size": {"type": "integer"}}})),
+            component("Slug", serde_json::json!({"type": "string", "maxLength": 8, "pattern": "^[a-z-]+$"})),
+            component("Code", serde_json::json!({"type": "string", "minLength": 3})),
+        ];
+        (catalog, components)
+    }
+
+    /// The emitted source of `model` without whitespace, so assertions do not
+    /// depend on the formatter's line breaks.
+    fn compact_model_source(catalog: &ModelCatalog, components: &[SchemaComponent], model: &str) -> String {
+        let code = format_code(&validate_code(&assemble_model_tokens_with(catalog, Some(components))).expect("emitted models parse"));
+        let start = code.find(&format!("pub struct {model} ")).expect("model is emitted");
+        let end = code[start..].find("\n}").map_or(code.len(), |end| start + end);
+        code[start..end].split_whitespace().collect()
+    }
+
+    #[test]
+    fn definitions_out_fields_rebuild_every_source_rule_through_extend() {
+        let (catalog, components) = constrained_catalog();
+
+        let widget = compact_model_source(&catalog, &components, "Widget");
+
+        for expected in [
+            r#"#[schemars(extend("maxLength"=64u64,"minLength"=1u64,"pattern"="^[a-z]+$"))]pubname:String"#,
+            r#"#[schemars(extend("maximum"=100u64,"minimum"=-5i64,"multipleOf"=5u64))]pubcount:i64"#,
+            r#"#[schemars(extend("exclusiveMaximum"=1.5f64,"exclusiveMinimum"=0u64))]pubratio:f64"#,
+            r#"#[schemars(extend("items"={"maxLength":5u64,"type":"string"},"maxItems"=10u64,"minItems"=1u64,"uniqueItems"=true))]pubtags:Vec<String>"#,
+            r#"#[serde(rename="displayName")]#[schemars(extend("minLength"=2u64))]pubdisplay_name:String"#,
+            r#"#[schemars(extend("enum"=["fast","slow",null]))]pubmode:Option<String>"#,
+            r#"#[schemars(extend("enum"=["v1",null]))]pubkind:Option<String>"#,
+            r#"#[schemars(extend("maxLength"=8u64,"pattern"="^[a-z-]+$"))]pubslug:Slug"#,
+            r#"#[schemars(extend("items"={"minLength":3u64,"type":"string"}))]pubcodes:Vec<Code>"#,
+            r#"#[schemars(extend("maximum"=18446744073709552000f64,"x-schematic-exact"={"maximum":"18446744073709551616"}))]pubbig:i64"#,
+            "pubowner:Plain,pubplain:String,",
+        ] {
+            assert!(widget.contains(expected), "missing {expected}\n{widget}");
+        }
+        assert!(!widget.contains("format"), "format is an annotation, not a rule: {widget}");
+    }
+
+    #[test]
+    fn definitions_out_models_without_rules_emit_no_schemars_attribute() {
+        let (catalog, components) = constrained_catalog();
+
+        let plain = compact_model_source(&catalog, &components, "Plain");
+
+        assert!(!plain.contains("schemars("), "{plain}");
+        let client = format_code(&validate_code(&assemble_model_tokens(&catalog)).unwrap());
+        assert!(!client.contains("schemars"), "the client path has no rules: {client}");
+    }
+
+    #[test]
+    fn a_nullable_source_enum_keeps_its_single_null() {
+        let mut rules = serde_json::json!({"enum": ["a", null]}).as_object().unwrap().clone();
+        admit_null(&mut rules);
+        assert_eq!(Value::Object(rules), serde_json::json!({"enum": ["a", null]}));
+    }
+
+    #[test]
+    fn plain_alias_body_rules_become_constraints_but_nominal_bodies_do_not() {
+        let (catalog, components) = constrained_catalog();
+        let rules = RuleSource::new(&catalog, &components);
+
+        assert_eq!(
+            rules.body_constraints(&TypeRef::Named("Slug".into())),
+            Some(Constraints::new().max_length(8).pattern("^[a-z-]+$"))
+        );
+        assert_eq!(rules.body_constraints(&TypeRef::Named("Plain".into())), None);
+        assert_eq!(rules.body_constraints(&primitive(PrimitiveType::String)), None);
     }
 }

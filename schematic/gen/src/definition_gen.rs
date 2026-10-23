@@ -17,6 +17,8 @@ use std::path::Path;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use schematic_define::constraints::Constraints;
+use schematic_define::models::ModelCatalog;
 use schematic_define::{
     ApiKeyLocation, ApiRequest, AuthStrategy, CrossOrigin, Endpoint, ErrorEntry,
     FormField, FormFieldKind, JsonTag, OAuth2Config, ParamDef, ParamStyle, PrimitiveType,
@@ -25,12 +27,19 @@ use schematic_define::{
 };
 
 use crate::errors::GeneratorError;
+use crate::model_gen::{RuleSource, json_tokens};
 use crate::output::{format_code, validate_code, write_atomic};
 
 /// Writes `mod.rs` for a definitions-crate module describing `api`.
 ///
 /// `overlay`, when given, is the Rust path of a `fn(RestApi) -> RestApi` the
 /// emitted factory applies to the imported value (see the module docs).
+///
+/// Value rules on parameters, form fields, and request bodies are emitted
+/// as builder calls. A JSON body typed by a plain alias in `models` (one
+/// emitted as `pub type`) is inline once assembled, so the alias' rules from
+/// its component in `api.schemas` become the endpoint's request rules unless
+/// the import already gave it some.
 ///
 /// ## Errors
 ///
@@ -40,6 +49,7 @@ use crate::output::{format_code, validate_code, write_atomic};
 /// written on error.
 pub fn generate_definition_module(
     api: &RestApi,
+    models: &ModelCatalog,
     module_name: &str,
     model_names: &[String],
     overlay: Option<&str>,
@@ -47,7 +57,8 @@ pub fn generate_definition_module(
     dry_run: bool,
 ) -> Result<String, GeneratorError> {
     let overlay = overlay.map(parse_overlay_path).transpose()?;
-    let tokens = assemble_definition_module(api, module_name, model_names, overlay.as_ref());
+    let rules = RuleSource::new(models, &api.schemas);
+    let tokens = assemble_definition_module(api, &rules, module_name, model_names, overlay.as_ref());
     let file = validate_code(&tokens)?;
     let formatted = format_code(&file);
 
@@ -98,12 +109,13 @@ fn path_text(path: &syn::Path) -> String {
 /// Assembles the full module token stream.
 fn assemble_definition_module(
     api: &RestApi,
+    rules: &RuleSource,
     module_name: &str,
     model_names: &[String],
     overlay: Option<&syn::Path>,
 ) -> TokenStream {
     let fn_name = format_ident!("define_{}_api", module_name);
-    let api_expr = rest_api_tokens(api, overlay);
+    let api_expr = rest_api_tokens(api, rules, overlay);
     // Bound debug-build stack use even for documents with thousands of models.
     let registrations = model_names.chunks(32).enumerate().map(|(index, names)| {
         let function = format_ident!("register_types_{}", index);
@@ -157,7 +169,7 @@ fn assemble_definition_module(
     }
 }
 
-fn rest_api_tokens(api: &RestApi, overlay: Option<&syn::Path>) -> TokenStream {
+fn rest_api_tokens(api: &RestApi, rules: &RuleSource, overlay: Option<&syn::Path>) -> TokenStream {
     let name = &api.name;
     let description = &api.description;
     let base_url = &api.base_url;
@@ -184,7 +196,7 @@ fn rest_api_tokens(api: &RestApi, overlay: Option<&syn::Path>) -> TokenStream {
     }
     let endpoints = api.endpoints.iter().enumerate().map(|(index, endpoint)| {
         let function = format_ident!("endpoint_{}", index);
-        let expression = endpoint_tokens(endpoint);
+        let expression = endpoint_tokens(endpoint, rules);
         let typed_request = match &endpoint.request {
             Some(ApiRequest::Json(_)) => true,
             Some(ApiRequest::FormData { fields } | ApiRequest::UrlEncoded { fields }) => fields.iter().any(|field| matches!(field.kind, FormFieldKind::Json(_))),
@@ -208,7 +220,9 @@ fn rest_api_tokens(api: &RestApi, overlay: Option<&syn::Path>) -> TokenStream {
     }
 }
 
-fn endpoint_tokens(endpoint: &Endpoint) -> TokenStream {
+/// The builder expression for `endpoint`; `rules` supplies an alias-typed
+/// JSON body's rules (see [`generate_definition_module`]).
+fn endpoint_tokens(endpoint: &Endpoint, rules: &RuleSource) -> TokenStream {
     let id = &endpoint.id;
     let method = method_tokens(endpoint.method);
     let path = &endpoint.path;
@@ -254,13 +268,28 @@ fn endpoint_tokens(endpoint: &Endpoint) -> TokenStream {
             ApiRequest::Binary { content_type } => quote! { #builder.request_binary_with_content_type(#content_type) },
             _ => builder,
         };
+        let alias_rules = match request {
+            ApiRequest::Json(reference) if endpoint.request_constraints.is_none() => rules.body_constraints(reference),
+            _ => None,
+        };
+        if let Some(body_rules) = endpoint.request_constraints.as_deref().or(alias_rules.as_ref()) {
+            let body_rules = constraints_tokens(body_rules);
+            builder = quote! { #builder.request_constraints(#body_rules) };
+        }
     }
     if let Some(policy) = &endpoint.cross_origin {
         let policy = cross_origin_tokens(policy);
         builder = quote! { #builder.cross_origin(#policy) };
     }
     if let Some(params) = &endpoint.params {
-        for (params, setter) in [(&params.query, "query"), (&params.header, "header_param"), (&params.cookie, "cookie")] {
+        // Typed path parameters are emitted only when one carries value
+        // rules, so the rules survive assembly. Emitting every typed one (a
+        // described or deprecated string, which the import also declares)
+        // would change the generated clients of imported APIs, so that stays
+        // a separate change. They go first: once one is declared, build
+        // requires one per placeholder.
+        let path: &[ParamDef] = if params.path.iter().any(|param| param.constraints.is_some()) { &params.path } else { &[] };
+        for (params, setter) in [(path, "path_param"), (params.query.as_slice(), "query"), (params.header.as_slice(), "header_param"), (params.cookie.as_slice(), "cookie")] {
             let setter = format_ident!("{}", setter);
             for param in params { let param = param_def_tokens(param); builder = quote! { #builder.#setter(#param) }; }
         }
@@ -426,8 +455,16 @@ fn form_field_tokens(field: &FormField) -> TokenStream {
         quote! { #base.optional() }
     };
 
-    match &field.description {
+    let base = match &field.description {
         Some(description) => quote! { #base.with_description(#description) },
+        None => base,
+    };
+
+    match field.constraints.as_deref() {
+        Some(rules) => {
+            let rules = constraints_tokens(rules);
+            quote! { #base.constraints(#rules) }
+        }
         None => base,
     }
 }
@@ -444,6 +481,13 @@ fn param_def_tokens(param: &ParamDef) -> TokenStream {
     let param_type = query_param_type_tokens(&param.param_type);
     let explode = param.explode;
     let style = param_style_tokens(param.style);
+    let constraints = match param.constraints.as_deref() {
+        Some(rules) => {
+            let rules = constraints_tokens(rules);
+            quote! { Some(Box::new(#rules)) }
+        }
+        None => quote! { None },
+    };
 
     quote! {
         ParamDef {
@@ -457,9 +501,76 @@ fn param_def_tokens(param: &ParamDef) -> TokenStream {
             param_type: #param_type,
             explode: #explode,
             style: #style,
-            constraints: None,
+            constraints: #constraints,
         }
     }
+}
+
+/// A `Constraints` builder expression reproducing `rules`.
+///
+/// Numbers are passed as their exact text (`.maximum("18446744073709551616")`),
+/// the builders' lossless form; `enum` and `const` values are
+/// `serde_json::json!` literals, or plain string literals when every allowed
+/// value is a string.
+fn constraints_tokens(rules: &Constraints) -> TokenStream {
+    let mut tokens = quote! { schematic_define::constraints::Constraints::new() };
+    for (count, setter) in [(rules.min_length, "min_length"), (rules.max_length, "max_length")] {
+        if let Some(count) = count {
+            let setter = format_ident!("{}", setter);
+            tokens = quote! { #tokens.#setter(#count) };
+        }
+    }
+    if let Some(pattern) = &rules.pattern {
+        let setter = if rules.pattern_unenforced { format_ident!("unenforced_pattern") } else { format_ident!("pattern") };
+        tokens = quote! { #tokens.#setter(#pattern) };
+    }
+    if let Some(format) = &rules.format {
+        tokens = quote! { #tokens.format(#format) };
+    }
+    for (number, setter) in [
+        (&rules.minimum, "minimum"),
+        (&rules.maximum, "maximum"),
+        (&rules.exclusive_minimum, "exclusive_minimum"),
+        (&rules.exclusive_maximum, "exclusive_maximum"),
+        (&rules.multiple_of, "multiple_of"),
+    ] {
+        if let Some(number) = number {
+            let setter = format_ident!("{}", setter);
+            let text = number.as_str();
+            tokens = quote! { #tokens.#setter(#text) };
+        }
+    }
+    for (count, setter) in [(rules.min_items, "min_items"), (rules.max_items, "max_items")] {
+        if let Some(count) = count {
+            let setter = format_ident!("{}", setter);
+            tokens = quote! { #tokens.#setter(#count) };
+        }
+    }
+    if rules.unique_items {
+        tokens = quote! { #tokens.unique_items() };
+    }
+    if let Some(values) = &rules.allowed_values {
+        let strings: Option<Vec<&str>> = values.iter().map(serde_json::Value::as_str).collect();
+        tokens = match strings {
+            Some(strings) if !strings.is_empty() => quote! { #tokens.allowed_values([#(#strings),*]) },
+            _ => {
+                let values = values.iter().map(|value| {
+                    let value = json_tokens(value);
+                    quote! { serde_json::json!(#value) }
+                });
+                quote! { #tokens.allowed_values(Vec::<serde_json::Value>::from([#(#values),*])) }
+            }
+        };
+    }
+    if let Some(constant) = &rules.constant {
+        let constant = json_tokens(constant);
+        tokens = quote! { #tokens.constant(serde_json::json!(#constant)) };
+    }
+    if let Some(items) = &rules.items {
+        let items = constraints_tokens(items);
+        tokens = quote! { #tokens.items(#items) };
+    }
+    tokens
 }
 
 fn query_param_type_tokens(param_type: &QueryParamType) -> TokenStream {
@@ -595,6 +706,14 @@ mod tests {
     use super::*;
     use schematic_define::EndpointParams;
 
+    const EMPTY_CATALOG: ModelCatalog = ModelCatalog { module_path: None, types: Vec::new() };
+
+    /// A rule source with no models or components.
+    fn no_rules() -> RuleSource<'static> {
+        static CATALOG: ModelCatalog = EMPTY_CATALOG;
+        RuleSource::new(&CATALOG, &[])
+    }
+
     fn sample_api() -> RestApi {
         {
             let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "Sample".to_string(), "https://api.example.com/v1".to_string())
@@ -616,13 +735,13 @@ mod tests {
 
     #[test]
     fn emits_parseable_rust() {
-        let tokens = assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()], None);
+        let tokens = assemble_definition_module(&sample_api(), &no_rules(), "sample", &["ListItemsResponse".to_string()], None);
         assert!(validate_code(&tokens).is_ok());
     }
 
     #[test]
     fn emits_the_conventional_function_name() {
-        let tokens = assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()], None);
+        let tokens = assemble_definition_module(&sample_api(), &no_rules(), "sample", &["ListItemsResponse".to_string()], None);
         let code = format_code(&validate_code(&tokens).unwrap());
 
         assert!(code.contains("pub fn define_sample_api() -> RestApi"));
@@ -659,7 +778,7 @@ mod tests {
         opted_out.no_declared_errors = true;
         api.endpoints.push(opted_out);
 
-        let code = format_code(&validate_code(&assemble_definition_module(&api, "sample", &[], None)).unwrap());
+        let code = format_code(&validate_code(&assemble_definition_module(&api, &no_rules(), "sample", &[], None)).unwrap());
         // Compare without whitespace or the formatter's trailing commas.
         let code: String = code.split_whitespace().collect::<String>().replace(",)", ")");
 
@@ -702,7 +821,7 @@ mod tests {
             query: vec![ParamDef::new("ref", QueryParamType::String).rust_name("git_ref").secret()],
             ..Default::default()
         });
-        let code = format_code(&validate_code(&assemble_definition_module(&api, "sample", &["ListItemsResponse".into()], None)).unwrap());
+        let code = format_code(&validate_code(&assemble_definition_module(&api, &no_rules(), "sample", &["ListItemsResponse".into()], None)).unwrap());
         assert!(code.contains(".cross_origin(CrossOrigin::deny())"));
         assert!(code.contains(r#".request_id_header("x-request-id")"#));
         assert!(code.contains(r#".secret_header("X-Pin")"#));
@@ -712,7 +831,7 @@ mod tests {
 
     fn emit(overlay: Option<&str>) -> String {
         let overlay = overlay.map(|value| parse_overlay_path(value).unwrap());
-        format_code(&validate_code(&assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".into()], overlay.as_ref())).unwrap())
+        format_code(&validate_code(&assemble_definition_module(&sample_api(), &no_rules(), "sample", &["ListItemsResponse".into()], overlay.as_ref())).unwrap())
     }
 
     #[test]
@@ -795,6 +914,7 @@ mod tests {
 
         let result = generate_definition_module(
             &sample_api(),
+            &EMPTY_CATALOG,
             "sample",
             &[],
             Some("crate::x::<T>"),
@@ -840,8 +960,137 @@ mod tests {
             password_env: schematic_define::EnvList::from_strs(&["PASS", "SECRET"]),
         };
         api.env_auth = vec![];
-        let code = rest_api_tokens(&api, None).to_string().replace(' ', "");
+        let code = rest_api_tokens(&api, &no_rules(), None).to_string().replace(' ', "");
         assert!(code.contains(r#"AuthStrategy::Basic{username_env:EnvList::new(Vec::<String>::from(["USER".to_string(),"LOGIN".to_string()])),password_env:EnvList::new(Vec::<String>::from(["PASS".to_string(),"SECRET".to_string()]))}"#), "{code}");
         assert!(!code.contains("env_username"));
+    }
+
+    /// `expression`'s source text and value, so a test can compare emitted
+    /// text against code that is known to compile.
+    macro_rules! source_and_value {
+        ($expression:expr) => {
+            (stringify!($expression), $expression)
+        };
+    }
+
+    fn compact(text: &str) -> String {
+        text.split_whitespace().collect()
+    }
+
+    #[test]
+    fn definition_gen_constraints_emit_compiling_builder_calls_for_every_keyword() {
+        use schematic_define::constraints::Constraints;
+        let (source, rebuilt) = source_and_value!(schematic_define::constraints::Constraints::new()
+            .min_length(1u64)
+            .max_length(64u64)
+            .pattern("^[a-z]+$")
+            .format("slug")
+            .minimum("1")
+            .maximum("18446744073709551616")
+            .exclusive_minimum("-1.5")
+            .exclusive_maximum("0.10000000000000000001")
+            .multiple_of("0.1")
+            .min_items(1u64)
+            .max_items(10u64)
+            .unique_items()
+            .allowed_values(Vec::<serde_json::Value>::from([serde_json::json!(1u64), serde_json::json!("a"), serde_json::json!(null)]))
+            .constant(serde_json::json!({ "k": [true, -2i64, 0.5f64] }))
+            .items(schematic_define::constraints::Constraints::new().unenforced_pattern("\\p{Lu}").allowed_values(["x", "y"])));
+        let rules = Constraints::new()
+            .min_length(1).max_length(64).pattern("^[a-z]+$").format("slug")
+            .minimum(1).maximum("18446744073709551616").exclusive_minimum(-1.5).exclusive_maximum("0.10000000000000000001").multiple_of("0.1")
+            .min_items(1).max_items(10).unique_items()
+            .allowed_values([serde_json::json!(1), serde_json::json!("a"), serde_json::Value::Null])
+            .constant(serde_json::json!({"k": [true, -2, 0.5]}))
+            .items(Constraints::new().unenforced_pattern(r"\p{Lu}").allowed_values(["x", "y"]));
+
+        assert_eq!(rebuilt, rules, "the expected source does not rebuild the rules");
+        assert_eq!(compact(&constraints_tokens(&rules).to_string()), compact(source));
+    }
+
+    #[test]
+    fn definition_gen_emits_parameter_form_and_body_rules() {
+        use schematic_define::constraints::Constraints;
+        use schematic_define::models::{ModelDef, TypeAlias};
+        let mut api = sample_api();
+        let mut endpoint = api.endpoints[0].clone();
+        endpoint.params = Some(EndpointParams {
+            query: vec![
+                ParamDef::new("limit", QueryParamType::Integer).constraints(Constraints::new().minimum(1).maximum(100)),
+                ParamDef::new("cursor", QueryParamType::String),
+            ],
+            ..Default::default()
+        });
+        api.endpoints = vec![endpoint.clone()];
+        for (id, request, body_rules) in [
+            ("Upload", ApiRequest::FormData { fields: vec![FormField::text("title").constraints(Constraints::new().max_length(200))] }, None),
+            ("Echo", ApiRequest::Text { content_type: "text/plain".into() }, Some(Constraints::new().min_length(1))),
+            ("Rename", ApiRequest::Json(TypeRef::Named("Slug".into())), None),
+            ("Create", ApiRequest::Json(TypeRef::Named("ListItemsResponse".into())), None),
+        ] {
+            let mut endpoint = endpoint.clone();
+            endpoint.id = id.into();
+            endpoint.params = None;
+            endpoint.request = Some(request);
+            endpoint.request_constraints = body_rules.map(Box::new);
+            api.endpoints.push(endpoint);
+        }
+        api.schemas = vec![schematic_define::SchemaComponent {
+            name: "Slug".into(),
+            rust_path: Some("Slug".into()),
+            schema: serde_json::json!({"type": "string", "maxLength": 8}),
+        }];
+        let catalog = ModelCatalog {
+            module_path: None,
+            types: vec![ModelDef::Alias(TypeAlias { name: "Slug".into(), description: None, target: TypeRef::Primitive(PrimitiveType::String), discriminator: None })],
+        };
+
+        let tokens = assemble_definition_module(&api, &RuleSource::new(&catalog, &api.schemas), "sample", &["ListItemsResponse".into()], None);
+        // Compare without whitespace or the formatter's trailing commas.
+        let code = compact(&format_code(&validate_code(&tokens).expect("emitted module parses"))).replace(",)", ")");
+
+        for expected in [
+            r#"name:"limit".to_string(),"#,
+            r#"constraints:Some(Box::new(schematic_define::constraints::Constraints::new().minimum("1").maximum("100"))),"#,
+            r#"name:"cursor".to_string(),"#,
+            "constraints:None,",
+            r#"FormField::text("title").constraints(schematic_define::constraints::Constraints::new().max_length(200u64))"#,
+            r#".request_text_with_content_type("text/plain").request_constraints(schematic_define::constraints::Constraints::new().min_length(1u64))"#,
+            r#".request_json::<Slug>(ctx).request_constraints(schematic_define::constraints::Constraints::new().max_length(8u64))"#,
+        ] {
+            assert!(code.contains(expected), "missing {expected}\n{code}");
+        }
+        assert!(!code.contains(".request_json::<ListItemsResponse>(ctx).request_constraints"), "a component body's rules stay on its model");
+        assert_eq!(code.matches(".request_constraints(").count(), 2);
+    }
+
+    #[test]
+    fn definition_gen_emits_typed_path_parameters_only_when_one_carries_rules() {
+        use schematic_define::constraints::Constraints;
+        let mut api = sample_api();
+        let template = api.endpoints[0].clone();
+        api.endpoints.clear();
+        for (id, rules) in [("GetConstrained", Some(Constraints::new().max_length(64))), ("GetDescribed", None)] {
+            let mut endpoint = template.clone();
+            endpoint.id = id.into();
+            endpoint.path = "/items/{id}/{rev}".into();
+            let mut id_param = ParamDef::path("id", QueryParamType::String);
+            id_param.description = Some("The item".into());
+            id_param.constraints = rules.map(Box::new);
+            endpoint.params = Some(EndpointParams { path: vec![id_param, ParamDef::path("rev", QueryParamType::String)], ..Default::default() });
+            api.endpoints.push(endpoint);
+        }
+        let catalog = ModelCatalog { module_path: None, types: vec![] };
+
+        let tokens = assemble_definition_module(&api, &RuleSource::new(&catalog, &api.schemas), "sample", &["ListItemsResponse".into()], None);
+        let code = compact(&format_code(&validate_code(&tokens).expect("emitted module parses")));
+
+        // Both placeholders of the constrained endpoint are declared, so its
+        // build still finds one parameter per placeholder; the endpoint whose
+        // typed parameters carry only a description emits none, as before.
+        assert_eq!(code.matches(".path_param(").count(), 2, "{code}");
+        assert!(code.contains(r#"max_length(64u64)"#), "{code}");
+        let described = &code[code.find(r#""GetDescribed""#).expect("second endpoint")..];
+        assert!(!described.contains(".path_param("), "{described}");
     }
 }

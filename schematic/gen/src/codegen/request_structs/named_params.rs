@@ -57,10 +57,12 @@ pub(super) fn generate_named_param_fields(
         );
 
         let deprecated = param.deprecation_doc();
+        let rules = param.rules_doc();
 
         quote! {
             #[doc = #doc]
             #deprecated
+            #rules
             #rename
             pub #field_name: Option<#rust_type>,
         }

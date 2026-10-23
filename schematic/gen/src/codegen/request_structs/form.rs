@@ -48,7 +48,7 @@ pub(super) fn generate_form_struct(api: &RestApi, endpoint: &Endpoint) -> TokenS
     let multipart = is_multipart(endpoint);
 
     let declarations = fields.iter().map(|field| declare_field(api, field, multipart));
-    let parts = fields.iter().map(|field| build_part(field, multipart));
+    let parts = fields.iter().map(|field| build_part(field, multipart, &quote! { self }, false));
 
     let doc = format!(
         " Body for the `{}` endpoint, sent as `{}`.",
@@ -110,6 +110,12 @@ fn declare_field(api: &RestApi, field: &FormField, multipart: bool) -> TokenStre
         }
         None => quote! {},
     };
+    let rules = field.constraints.as_deref().map(crate::codegen::value_rules::rule_doc_lines).unwrap_or_default();
+    let doc = match (doc.is_empty(), rules.is_empty()) {
+        (_, true) => doc,
+        (true, false) => quote! { #(#[doc = #rules])* },
+        (false, false) => quote! { #doc #[doc = ""] #(#[doc = #rules])* },
+    };
 
     let base = field_base_type(api, field, multipart);
 
@@ -145,18 +151,48 @@ fn field_base_type(api: &RestApi, field: &FormField, multipart: bool) -> TokenSt
     }
 }
 
-/// Emits the statement that appends one field's value to the body parts.
-fn build_part(field: &FormField, multipart: bool) -> TokenStream {
+/// The statements of a request's `into_parts` that build the multipart
+/// parts of its `body` into `parts`, sending each field named in `checked`
+/// from the `serde_json::Value` already bound to `checked_{field}` (the
+/// value its rules were checked against) rather than serializing it again.
+pub(super) fn generate_checked_form_parts(endpoint: &Endpoint, checked: &[String]) -> TokenStream {
+    let Some(fields) = form_fields(endpoint) else { return quote! {} };
+    let parts = fields.iter().map(|field| {
+        let is_checked = checked.contains(&param_field_name(&field.name));
+        build_part(field, true, &quote! { self.body }, is_checked)
+    });
+    quote! {
+        let mut parts = Vec::new();
+        #(#parts)*
+    }
+}
+
+/// Emits the statement that appends one field's value, read from
+/// `receiver`, to the body parts; a `checked` JSON field is read from its
+/// `checked_{field}` binding instead.
+fn build_part(field: &FormField, multipart: bool, receiver: &TokenStream, checked: bool) -> TokenStream {
     let name = format_ident!("{}", param_field_name(&field.name));
     let wire_name = &field.name;
 
+    let source = if checked {
+        let binding = format_ident!("checked_{}", param_field_name(&field.name));
+        quote! { #binding }
+    } else {
+        quote! { #receiver.#name }
+    };
     let push = |value: TokenStream| {
         if field.required {
-            quote! { { let value = self.#name; #value } }
+            quote! { { let value = #source; #value } }
         } else {
-            quote! { if let Some(value) = self.#name { #value } }
+            quote! { if let Some(value) = #source { #value } }
         }
     };
+
+    if checked {
+        return push(quote! {
+            parts.push(schematic_runtime::FormPart::Json { name: #wire_name.to_string(), value: value.to_string() });
+        });
+    }
 
     if !multipart {
         return push(quote! { parts.push((#wire_name.to_string(), value)); });

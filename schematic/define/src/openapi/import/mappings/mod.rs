@@ -10,12 +10,14 @@ pub use schema::map_all_schemas;
 use std::collections::HashSet;
 
 use openapiv3::{Operation, Parameter, ReferenceOr, SecurityScheme, Server};
+use serde_json::{Map, Value};
 
 use super::diagnostics::OpenApiDiagnostic;
 use super::naming::{deconflict_name, operation_id_fallback, sanitize_rust_ident};
 use super::resolver::RefResolver;
 use super::{BaseUrlPolicy, OpenApiImportOptions};
 use crate::auth::{ApiKeyLocation, AuthStrategy};
+use crate::constraints::{Constraints, PatternAdmission, admit_pattern, endpoint_problems};
 use crate::headers::EnvList;
 use crate::types::Endpoint;
 use crate::types::RestMethod;
@@ -41,6 +43,11 @@ pub fn map_server(servers: &[Server], policy: &BaseUrlPolicy) -> String {
 
 /// Maps one operation; `path_item_parameters` are the enclosing path item's
 /// `parameters`, which the operation's own list overrides by name and location.
+///
+/// Value rules the endpoint cannot carry (a numeric rule on a text form
+/// field, a source `minimum` above its `maximum`) are removed from the input
+/// that names them, each reported as a WARN at the operation's pointer; the
+/// import itself never fails for them.
 #[allow(clippy::too_many_arguments)]
 pub fn map_operation<'a>(
     api: &str,
@@ -53,17 +60,18 @@ pub fn map_operation<'a>(
     options: &OpenApiImportOptions,
 ) -> Result<(Endpoint, Vec<OpenApiDiagnostic>), String> {
     let mut diagnostics = Vec::new();
+    let operation_pointer = format!(
+        "#/paths/{}/{}",
+        path.replace('~', "~0").replace('/', "~1"),
+        method.to_string().to_lowercase()
+    );
 
     let raw_id = match &op.operation_id {
         Some(id) => id.clone(),
         None => {
             let fallback = operation_id_fallback(&method.to_string(), path);
             diagnostics.push(OpenApiDiagnostic::info(
-                format!(
-                    "#/paths/{}/{}",
-                    path.replace('~', "~0").replace('/', "~1"),
-                    method.to_string().to_lowercase()
-                ),
+                operation_pointer.clone(),
                 format!("Missing operationId, using fallback: {}", fallback),
             ));
             fallback
@@ -80,8 +88,9 @@ pub fn map_operation<'a>(
         .or_else(|| op.description.clone())
         .unwrap_or_else(|| format!("{} {}", method, path));
 
-    let request =
-        responses::map_request_body(&op.request_body, &format!("#/paths/{}/{}", path.replace('~', "~0").replace('/', "~1"), method.to_string().to_lowercase()), resolver, &mut diagnostics, options);
+    let (request, request_constraints) =
+        responses::map_request_body(&op.request_body, &operation_pointer, resolver, &mut diagnostics, options)
+            .map_or((None, None), |(request, rules)| (Some(request), rules));
 
     let classification = classify_responses(api, &id, &op.responses, resolver).map_err(|error| error.to_string())?;
     diagnostics.extend(classification.diagnostics);
@@ -95,28 +104,118 @@ pub fn map_operation<'a>(
         &mut diagnostics,
     );
 
-    Ok((
-        Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: op.deprecated, auth: None, errors: classification.errors, no_declared_errors: false,
-            id,
-            method,
-            path: path.to_string(),
-            description,
-            request,
-            response: classification.successes,
-            headers: vec![],
-            params: if params.query.is_empty()
-                && params.header.is_empty()
-                && params.cookie.is_empty()
-                && params.path.is_empty()
-            {
-                None
-            } else {
-                Some(params)
-            },
-            cross_origin: None, pagination: None,
+    let mut endpoint = Endpoint { request_constraints, rate_limit: None, retry_guidance: None, deprecated: op.deprecated, auth: None, errors: classification.errors, no_declared_errors: false,
+        id,
+        method,
+        path: path.to_string(),
+        description,
+        request,
+        response: classification.successes,
+        headers: vec![],
+        params: if params.query.is_empty()
+            && params.header.is_empty()
+            && params.cookie.is_empty()
+            && params.path.is_empty()
+        {
+            None
+        } else {
+            Some(params)
         },
-        diagnostics,
-    ))
+        cross_origin: None, pagination: None,
+    };
+    drop_unpreservable_rules(&mut endpoint, &operation_pointer, &mut diagnostics);
+    Ok((endpoint, diagnostics))
+}
+
+/// Keywords no parameter, form field, or body root rule can carry.
+const UNCARRIED_KEYWORDS: [&str; 7] =
+    ["minProperties", "maxProperties", "patternProperties", "propertyNames", "contains", "prefixItems", "dependencies"];
+
+/// The value rules of an inline input schema found at the RFC 6901
+/// `pointer`, read from its exact source form; `None` when it has none.
+///
+/// Every pattern (the root's and its `items`') is checked with
+/// [`admit_pattern`]: one outside the enforced subset, or not a valid
+/// regular expression, is kept unenforced and reported as a WARN at
+/// `{pointer}/pattern`. A keyword in [`UNCARRIED_KEYWORDS`] is reported as a
+/// WARN at `{pointer}/{keyword}`. `format`, `title`, and `description` are
+/// annotations and draw no diagnostic.
+pub(super) fn import_constraints(
+    schema: &impl serde::Serialize,
+    pointer: &str,
+    resolver: &RefResolver,
+    diagnostics: &mut Vec<OpenApiDiagnostic>,
+) -> Option<Box<Constraints>> {
+    let Value::Object(source) = resolver.source_schema(schema, pointer) else { return None };
+    let rules = admit_rules(&source, pointer, diagnostics);
+    (!rules.is_empty()).then(|| Box::new(rules))
+}
+
+fn admit_rules(source: &Map<String, Value>, pointer: &str, diagnostics: &mut Vec<OpenApiDiagnostic>) -> Constraints {
+    for keyword in UNCARRIED_KEYWORDS.into_iter().filter(|keyword| source.contains_key(*keyword)) {
+        diagnostics.push(OpenApiDiagnostic::warn(
+            format!("{pointer}/{keyword}"),
+            format!("`{keyword}` cannot be carried by a parameter, form field, or body rule; not preserved"),
+        ));
+    }
+    let mut rules = Constraints::from_schema(source);
+    rules.items = match source.get("items") {
+        Some(Value::Object(items)) => {
+            Some(Box::new(admit_rules(items, &format!("{pointer}/items"), diagnostics))).filter(|items| !items.is_empty())
+        }
+        _ => None,
+    };
+    let Some(pattern) = rules.pattern.take() else { return rules };
+    let (message, rules) = match admit_pattern(&pattern) {
+        PatternAdmission::Enforced { .. } => return rules.pattern(pattern),
+        PatternAdmission::Unsupported { reason } => (
+            format!("Pattern is outside the enforced pattern subset ({reason}); preserved and not enforced"),
+            rules.unenforced_pattern(pattern),
+        ),
+        PatternAdmission::Invalid { reason } => (
+            format!("Pattern is not a valid regular expression ({reason}); preserved and not enforced"),
+            rules.unenforced_pattern(pattern),
+        ),
+    };
+    diagnostics.push(OpenApiDiagnostic::warn(format!("{pointer}/pattern"), message));
+    rules
+}
+
+/// Removes the rules of every input [`endpoint_problems`] names, reporting
+/// each problem as a WARN at `operation_pointer`.
+fn drop_unpreservable_rules(endpoint: &mut Endpoint, operation_pointer: &str, diagnostics: &mut Vec<OpenApiDiagnostic>) {
+    let problems = endpoint_problems(endpoint);
+    if problems.is_empty() {
+        return;
+    }
+    for problem in &problems {
+        diagnostics.push(OpenApiDiagnostic::warn(
+            operation_pointer.to_string(),
+            format!("Rule `{}` on {} not preserved: {}", problem.keyword, problem.path, problem.reason),
+        ));
+    }
+    // A problem path is its input's path plus one `[]` per array level.
+    let named = |input: &str| {
+        problems.iter().any(|problem| {
+            problem.path.strip_prefix(input).is_some_and(|rest| rest.split("[]").all(str::is_empty))
+        })
+    };
+    if let Some(params) = &mut endpoint.params {
+        let located = [("path", &mut params.path), ("query", &mut params.query), ("header", &mut params.header), ("cookie", &mut params.cookie)];
+        for (location, params) in located {
+            for param in params.iter_mut().filter(|param| named(&format!("{location}.{}", param.name))) {
+                param.constraints = None;
+            }
+        }
+    }
+    if let Some(crate::ApiRequest::FormData { fields } | crate::ApiRequest::UrlEncoded { fields }) = &mut endpoint.request {
+        for field in fields.iter_mut().filter(|field| named(&format!("form.{}", field.name))) {
+            field.constraints = None;
+        }
+    }
+    if named("body") {
+        endpoint.request_constraints = None;
+    }
 }
 
 pub fn map_security_scheme(

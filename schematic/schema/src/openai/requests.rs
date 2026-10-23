@@ -5,6 +5,10 @@ use super::responses::*;
 use super::{OpenAI, OpenAIApi};
 /// Request for `CreateSpeech` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -23,6 +27,26 @@ impl CreateSpeechRequest {
     pub fn new(body: ::schematic_definitions::openai::CreateSpeechRequest2) -> Self {
         Self { body }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_SPEECH_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl From<::schematic_definitions::openai::CreateSpeechRequest2>
 for CreateSpeechRequest {
@@ -40,6 +64,20 @@ impl schematic_runtime::EndpointSpec for CreateSpeechRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_SPEECH_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/audio/speech".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -49,7 +87,7 @@ impl schematic_runtime::EndpointSpec for CreateSpeechRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -255,6 +293,8 @@ pub struct CreateTranslationForm {
     /// An optional text to guide the model's style or continue a previous audio segment. The [prompt](/docs/guides/speech-to-text#prompting) should be in English.
     pub prompt: Option<String>,
     /// The format of the output, in one of these options: `json`, `text`, `srt`, `verbose_json`, or `vtt`.
+    ///
+    /// Value rules checked before sending: `enum` (5 values).
     pub response_format: Option<String>,
     /// The sampling temperature, between 0 and 1. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. If set to 0, the model will use [log probability](https://en.wikipedia.org/wiki/Log_probability) to automatically increase the temperature until certain thresholds are hit.
     pub temperature: Option<String>,
@@ -301,6 +341,10 @@ impl CreateTranslationForm {
 }
 /// Request for `CreateTranslation` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -319,6 +363,29 @@ impl CreateTranslationRequest {
     pub fn new(body: CreateTranslationForm) -> Self {
         Self { body }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.body.response_format {
+            schematic_runtime::validate::check_str(
+                value,
+                &open_ai_value_rules::CREATE_TRANSLATION_REQUEST_FORM_RESPONSE_FORMAT,
+                &[
+                    schematic_runtime::validate::PathSegment::Name("body"),
+                    schematic_runtime::validate::PathSegment::Name("response_format"),
+                ],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl From<CreateTranslationForm> for CreateTranslationRequest {
     fn from(body: CreateTranslationForm) -> Self {
@@ -335,6 +402,19 @@ impl schematic_runtime::EndpointSpec for CreateTranslationRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.body.response_format {
+            schematic_runtime::validate::check_str(
+                value,
+                &open_ai_value_rules::CREATE_TRANSLATION_REQUEST_FORM_RESPONSE_FORMAT,
+                &[
+                    schematic_runtime::validate::PathSegment::Name("body"),
+                    schematic_runtime::validate::PathSegment::Name("response_format"),
+                ],
+                &mut violations,
+            );
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/audio/translations".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -784,6 +864,10 @@ impl schematic_runtime::EndpointSpec for ListBatchesRequest {
 }
 /// Request for `CreateBatch` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -802,6 +886,26 @@ impl CreateBatchRequest {
     pub fn new(body: ::schematic_definitions::openai::CreateBatchRequest2) -> Self {
         Self { body }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_BATCH_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl From<::schematic_definitions::openai::CreateBatchRequest2> for CreateBatchRequest {
     fn from(body: ::schematic_definitions::openai::CreateBatchRequest2) -> Self {
@@ -818,6 +922,20 @@ impl schematic_runtime::EndpointSpec for CreateBatchRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_BATCH_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/batches".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -827,7 +945,7 @@ impl schematic_runtime::EndpointSpec for CreateBatchRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -1383,6 +1501,10 @@ impl schematic_runtime::EndpointSpec for GetChatCompletionMessagesRequest {
 }
 /// Request for `CreateCompletion` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -1400,6 +1522,26 @@ impl CreateCompletionRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: ::schematic_definitions::openai::CreateCompletionRequest2) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_COMPLETION_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::CreateCompletionRequest2>
@@ -1420,6 +1562,20 @@ impl schematic_runtime::EndpointSpec for CreateCompletionRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_COMPLETION_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/completions".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -1429,7 +1585,7 @@ impl schematic_runtime::EndpointSpec for CreateCompletionRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -1531,6 +1687,10 @@ impl schematic_runtime::EndpointSpec for ListContainersRequest {
 }
 /// Request for `CreateContainer` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -1548,6 +1708,26 @@ impl CreateContainerRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: ::schematic_definitions::openai::CreateContainerBody) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_CONTAINER_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::CreateContainerBody>
@@ -1568,6 +1748,20 @@ impl schematic_runtime::EndpointSpec for CreateContainerRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_CONTAINER_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/containers".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -1577,7 +1771,7 @@ impl schematic_runtime::EndpointSpec for CreateContainerRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -2292,6 +2486,10 @@ impl schematic_runtime::EndpointSpec for DeleteConversationItemRequest {
 }
 /// Request for `CreateEmbedding` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -2309,6 +2507,26 @@ impl CreateEmbeddingRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: ::schematic_definitions::openai::CreateEmbeddingRequest2) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_EMBEDDING_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::CreateEmbeddingRequest2>
@@ -2329,6 +2547,20 @@ impl schematic_runtime::EndpointSpec for CreateEmbeddingRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_EMBEDDING_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/embeddings".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -2338,7 +2570,7 @@ impl schematic_runtime::EndpointSpec for CreateEmbeddingRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -3329,6 +3561,8 @@ pub struct CreateFileForm {
 - `vision`: Images used for vision fine-tuning
 - `user_data`: Flexible file type for any purpose
 - `evals`: Used for eval data sets*/
+    ///
+    /// Value rules checked before sending: `enum` (6 values).
     pub purpose: String,
     /// The expiration policy for a file. By default, files with `purpose=batch` expire after 30 days and all other files are persisted until they are manually deleted.
     pub expires_after: Option<String>,
@@ -3361,6 +3595,10 @@ impl CreateFileForm {
 }
 /// Request for `CreateFile` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -3379,6 +3617,30 @@ impl CreateFileRequest {
     pub fn new(body: CreateFileForm) -> Self {
         Self { body }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        {
+            let value = &self.body.purpose;
+            schematic_runtime::validate::check_str(
+                value,
+                &open_ai_value_rules::CREATE_FILE_REQUEST_FORM_PURPOSE,
+                &[
+                    schematic_runtime::validate::PathSegment::Name("body"),
+                    schematic_runtime::validate::PathSegment::Name("purpose"),
+                ],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl From<CreateFileForm> for CreateFileRequest {
     fn from(body: CreateFileForm) -> Self {
@@ -3395,6 +3657,20 @@ impl schematic_runtime::EndpointSpec for CreateFileRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        {
+            let value = &self.body.purpose;
+            schematic_runtime::validate::check_str(
+                value,
+                &open_ai_value_rules::CREATE_FILE_REQUEST_FORM_PURPOSE,
+                &[
+                    schematic_runtime::validate::PathSegment::Name("body"),
+                    schematic_runtime::validate::PathSegment::Name("purpose"),
+                ],
+                &mut violations,
+            );
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/files".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -3957,6 +4233,10 @@ impl schematic_runtime::EndpointSpec for ListPaginatedFineTuningJobsRequest {
 }
 /// Request for `CreateFineTuningJob` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -3977,6 +4257,26 @@ impl CreateFineTuningJobRequest {
     ) -> Self {
         Self { body }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_FINE_TUNING_JOB_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl From<::schematic_definitions::openai::CreateFineTuningJobRequest2>
 for CreateFineTuningJobRequest {
@@ -3996,6 +4296,20 @@ impl schematic_runtime::EndpointSpec for CreateFineTuningJobRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_FINE_TUNING_JOB_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/fine_tuning/jobs".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -4005,7 +4319,7 @@ impl schematic_runtime::EndpointSpec for CreateFineTuningJobRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -4383,6 +4697,10 @@ impl schematic_runtime::EndpointSpec for ResumeFineTuningJobRequest {
 }
 /// Request for `CreateImageEdit` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -4400,6 +4718,26 @@ impl CreateImageEditRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: ::schematic_definitions::openai::EditImageBodyJsonParam) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_IMAGE_EDIT_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::EditImageBodyJsonParam>
@@ -4420,6 +4758,20 @@ impl schematic_runtime::EndpointSpec for CreateImageEditRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_IMAGE_EDIT_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/images/edits".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -4429,7 +4781,7 @@ impl schematic_runtime::EndpointSpec for CreateImageEditRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -4440,6 +4792,10 @@ impl schematic_runtime::EndpointSpec for CreateImageEditRequest {
     }
 }
 /// Request for `CreateImage` endpoint.
+///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
 /// ## Example
 ///
@@ -4459,6 +4815,26 @@ impl CreateImageRequest {
     pub fn new(body: ::schematic_definitions::openai::CreateImageRequest2) -> Self {
         Self { body }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_IMAGE_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl From<::schematic_definitions::openai::CreateImageRequest2> for CreateImageRequest {
     fn from(body: ::schematic_definitions::openai::CreateImageRequest2) -> Self {
@@ -4477,6 +4853,20 @@ impl schematic_runtime::EndpointSpec for CreateImageRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_IMAGE_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/images/generations".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -4486,7 +4876,7 @@ impl schematic_runtime::EndpointSpec for CreateImageRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -4506,8 +4896,12 @@ pub struct CreateImageVariationForm {
     /// The number of images to generate. Must be between 1 and 10.
     pub n: Option<String>,
     /// The format in which the generated images are returned. Must be one of `url` or `b64_json`. URLs are only valid for 60 minutes after the image has been generated.
+    ///
+    /// Value rules checked before sending: `enum` (2 values).
     pub response_format: Option<String>,
     /// The size of the generated images. Must be one of `256x256`, `512x512`, or `1024x1024`.
+    ///
+    /// Value rules checked before sending: `enum` (3 values).
     pub size: Option<String>,
     /// A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse. [Learn more](/docs/guides/safety-best-practices#end-user-ids).
     pub user: Option<String>,
@@ -4560,6 +4954,10 @@ impl CreateImageVariationForm {
 }
 /// Request for `CreateImageVariation` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -4577,6 +4975,40 @@ impl CreateImageVariationRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: CreateImageVariationForm) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.body.response_format {
+            schematic_runtime::validate::check_str(
+                value,
+                &open_ai_value_rules::CREATE_IMAGE_VARIATION_REQUEST_FORM_RESPONSE_FORMAT,
+                &[
+                    schematic_runtime::validate::PathSegment::Name("body"),
+                    schematic_runtime::validate::PathSegment::Name("response_format"),
+                ],
+                &mut violations,
+            );
+        }
+        if let Some(value) = &self.body.size {
+            schematic_runtime::validate::check_str(
+                value,
+                &open_ai_value_rules::CREATE_IMAGE_VARIATION_REQUEST_FORM_SIZE,
+                &[
+                    schematic_runtime::validate::PathSegment::Name("body"),
+                    schematic_runtime::validate::PathSegment::Name("size"),
+                ],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<CreateImageVariationForm> for CreateImageVariationRequest {
@@ -4596,6 +5028,30 @@ impl schematic_runtime::EndpointSpec for CreateImageVariationRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.body.response_format {
+            schematic_runtime::validate::check_str(
+                value,
+                &open_ai_value_rules::CREATE_IMAGE_VARIATION_REQUEST_FORM_RESPONSE_FORMAT,
+                &[
+                    schematic_runtime::validate::PathSegment::Name("body"),
+                    schematic_runtime::validate::PathSegment::Name("response_format"),
+                ],
+                &mut violations,
+            );
+        }
+        if let Some(value) = &self.body.size {
+            schematic_runtime::validate::check_str(
+                value,
+                &open_ai_value_rules::CREATE_IMAGE_VARIATION_REQUEST_FORM_SIZE,
+                &[
+                    schematic_runtime::validate::PathSegment::Name("body"),
+                    schematic_runtime::validate::PathSegment::Name("size"),
+                ],
+                &mut violations,
+            );
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/images/variations".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -5319,6 +5775,10 @@ impl schematic_runtime::EndpointSpec for UploadCertificateRequest {
 }
 /// Request for `ActivateOrganizationCertificates` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -5339,6 +5799,26 @@ impl ActivateOrganizationCertificatesRequest {
     ) -> Self {
         Self { body }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::ACTIVATE_ORGANIZATION_CERTIFICATES_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl From<::schematic_definitions::openai::ToggleCertificatesRequest>
 for ActivateOrganizationCertificatesRequest {
@@ -5358,6 +5838,20 @@ impl schematic_runtime::EndpointSpec for ActivateOrganizationCertificatesRequest
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::ACTIVATE_ORGANIZATION_CERTIFICATES_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/certificates/activate".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -5367,7 +5861,7 @@ impl schematic_runtime::EndpointSpec for ActivateOrganizationCertificatesRequest
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -5378,6 +5872,10 @@ impl schematic_runtime::EndpointSpec for ActivateOrganizationCertificatesRequest
     }
 }
 /// Request for `DeactivateOrganizationCertificates` endpoint.
+///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
 /// ## Example
 ///
@@ -5399,6 +5897,26 @@ impl DeactivateOrganizationCertificatesRequest {
     ) -> Self {
         Self { body }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::DEACTIVATE_ORGANIZATION_CERTIFICATES_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl From<::schematic_definitions::openai::ToggleCertificatesRequest>
 for DeactivateOrganizationCertificatesRequest {
@@ -5418,6 +5936,20 @@ impl schematic_runtime::EndpointSpec for DeactivateOrganizationCertificatesReque
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::DEACTIVATE_ORGANIZATION_CERTIFICATES_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/certificates/deactivate".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -5427,7 +5959,7 @@ impl schematic_runtime::EndpointSpec for DeactivateOrganizationCertificatesReque
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -5460,6 +5992,10 @@ impl ::core::fmt::Display for GetCertificateRequestInclude {
 }
 /// Request for `GetCertificate` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -5473,6 +6009,8 @@ pub struct GetCertificateRequest {
     /// Path parameter: certificate_id
     pub certificate_id: String,
     /// Query parameter: A list of additional fields to include in the response. Currently the only supported value is `content` to fetch the PEM content of the certificate.
+    ///
+    /// Value rules checked before sending: each item's `enum` (1 value).
     pub include: Option<Vec<GetCertificateRequestInclude>>,
 }
 impl GetCertificateRequest {
@@ -5482,6 +6020,32 @@ impl GetCertificateRequest {
             certificate_id: certificate_id.into(),
             include: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.include {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::GET_CERTIFICATE_REQUEST_QUERY_INCLUDE_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("include"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `include` query parameter.
     pub fn with_include(mut self, value: Vec<GetCertificateRequestInclude>) -> Self {
@@ -5515,6 +6079,22 @@ impl schematic_runtime::EndpointSpec for GetCertificateRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.include {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::GET_CERTIFICATE_REQUEST_QUERY_INCLUDE_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("include"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/organization/certificates/{}", urlencoding::encode(& self.certificate_id
             .to_string())
@@ -5712,6 +6292,10 @@ impl ::core::fmt::Display for UsageCostsRequestGroupBy {
 }
 /// Request for `UsageCosts` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -5737,6 +6321,8 @@ pub struct UsageCostsRequest {
     /// Query parameter: Return only costs for these API keys.
     pub api_key_ids: Option<Vec<String>>,
     /// Query parameter: Group the costs by the specified fields. Support fields include `project_id`, `line_item`, `api_key_id` and any combination of them.
+    ///
+    /// Value rules checked before sending: each item's `enum` (3 values).
     pub group_by: Option<Vec<UsageCostsRequestGroupBy>>,
 }
 impl UsageCostsRequest {
@@ -5750,6 +6336,32 @@ impl UsageCostsRequest {
             api_key_ids: None,
             group_by: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_COSTS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
@@ -5794,6 +6406,22 @@ impl schematic_runtime::EndpointSpec for UsageCostsRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_COSTS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/costs".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let value = &self.start_time;
@@ -5875,6 +6503,10 @@ impl schematic_runtime::EndpointSpec for RetrieveOrganizationDataRetentionReques
 }
 /// Request for `UpdateOrganizationDataRetention` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -5894,6 +6526,26 @@ impl UpdateOrganizationDataRetentionRequest {
         body: ::schematic_definitions::openai::UpdateOrganizationDataRetentionBody,
     ) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::UPDATE_ORGANIZATION_DATA_RETENTION_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::UpdateOrganizationDataRetentionBody>
@@ -5916,6 +6568,20 @@ impl schematic_runtime::EndpointSpec for UpdateOrganizationDataRetentionRequest 
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::UPDATE_ORGANIZATION_DATA_RETENTION_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/data_retention".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -5925,7 +6591,7 @@ impl schematic_runtime::EndpointSpec for UpdateOrganizationDataRetentionRequest 
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -6015,6 +6681,10 @@ impl schematic_runtime::EndpointSpec for ListGroupsRequest {
 }
 /// Request for `CreateGroup` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -6032,6 +6702,26 @@ impl CreateGroupRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: ::schematic_definitions::openai::CreateGroupBody) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_GROUP_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::CreateGroupBody> for CreateGroupRequest {
@@ -6051,6 +6741,20 @@ impl schematic_runtime::EndpointSpec for CreateGroupRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_GROUP_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/groups".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -6060,7 +6764,7 @@ impl schematic_runtime::EndpointSpec for CreateGroupRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -6130,6 +6834,10 @@ impl schematic_runtime::EndpointSpec for RetrieveGroupRequest {
 }
 /// Request for `UpdateGroup` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -6156,6 +6864,26 @@ impl UpdateGroupRequest {
             body,
         }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::UPDATE_GROUP_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl schematic_runtime::EndpointSpec for UpdateGroupRequest {
     type Api = OpenAIApi;
@@ -6169,6 +6897,20 @@ impl schematic_runtime::EndpointSpec for UpdateGroupRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::UPDATE_GROUP_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/organization/groups/{}", urlencoding::encode(& self.group_id.to_string())
         );
@@ -6180,7 +6922,7 @@ impl schematic_runtime::EndpointSpec for UpdateGroupRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -6823,6 +7565,10 @@ impl schematic_runtime::EndpointSpec for ListInvitesRequest {
 }
 /// Request for `InviteUser` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -6841,6 +7587,26 @@ impl InviteUserRequest {
     pub fn new(body: ::schematic_definitions::openai::InviteRequest) -> Self {
         Self { body }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::INVITE_USER_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl From<::schematic_definitions::openai::InviteRequest> for InviteUserRequest {
     fn from(body: ::schematic_definitions::openai::InviteRequest) -> Self {
@@ -6857,6 +7623,20 @@ impl schematic_runtime::EndpointSpec for InviteUserRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::INVITE_USER_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/invites".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -6866,7 +7646,7 @@ impl schematic_runtime::EndpointSpec for InviteUserRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -7601,6 +8381,10 @@ impl schematic_runtime::EndpointSpec for ListProjectCertificatesRequest {
 }
 /// Request for `ActivateProjectCertificates` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -7627,6 +8411,26 @@ impl ActivateProjectCertificatesRequest {
             body,
         }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::ACTIVATE_PROJECT_CERTIFICATES_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl schematic_runtime::EndpointSpec for ActivateProjectCertificatesRequest {
     type Api = OpenAIApi;
@@ -7640,6 +8444,20 @@ impl schematic_runtime::EndpointSpec for ActivateProjectCertificatesRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::ACTIVATE_PROJECT_CERTIFICATES_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/organization/projects/{}/certificates/activate", urlencoding::encode(& self
             .project_id.to_string())
@@ -7652,7 +8470,7 @@ impl schematic_runtime::EndpointSpec for ActivateProjectCertificatesRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -7663,6 +8481,10 @@ impl schematic_runtime::EndpointSpec for ActivateProjectCertificatesRequest {
     }
 }
 /// Request for `DeactivateProjectCertificates` endpoint.
+///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
 /// ## Example
 ///
@@ -7690,6 +8512,26 @@ impl DeactivateProjectCertificatesRequest {
             body,
         }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::DEACTIVATE_PROJECT_CERTIFICATES_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl schematic_runtime::EndpointSpec for DeactivateProjectCertificatesRequest {
     type Api = OpenAIApi;
@@ -7703,6 +8545,20 @@ impl schematic_runtime::EndpointSpec for DeactivateProjectCertificatesRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::DEACTIVATE_PROJECT_CERTIFICATES_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/organization/projects/{}/certificates/deactivate", urlencoding::encode(&
             self.project_id.to_string())
@@ -7715,7 +8571,7 @@ impl schematic_runtime::EndpointSpec for DeactivateProjectCertificatesRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -7788,6 +8644,10 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectDataRetentionRequest {
 }
 /// Request for `UpdateProjectDataRetention` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -7814,6 +8674,26 @@ impl UpdateProjectDataRetentionRequest {
             body,
         }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::UPDATE_PROJECT_DATA_RETENTION_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectDataRetentionRequest {
     type Api = OpenAIApi;
@@ -7827,6 +8707,20 @@ impl schematic_runtime::EndpointSpec for UpdateProjectDataRetentionRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::UPDATE_PROJECT_DATA_RETENTION_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/organization/projects/{}/data_retention", urlencoding::encode(& self
             .project_id.to_string())
@@ -7839,7 +8733,7 @@ impl schematic_runtime::EndpointSpec for UpdateProjectDataRetentionRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -8345,6 +9239,10 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectModelPermissionsRequest 
 }
 /// Request for `UpdateProjectModelPermissions` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -8371,6 +9269,26 @@ impl UpdateProjectModelPermissionsRequest {
             body,
         }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::UPDATE_PROJECT_MODEL_PERMISSIONS_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectModelPermissionsRequest {
     type Api = OpenAIApi;
@@ -8384,6 +9302,20 @@ impl schematic_runtime::EndpointSpec for UpdateProjectModelPermissionsRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::UPDATE_PROJECT_MODEL_PERMISSIONS_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/organization/projects/{}/model_permissions", urlencoding::encode(& self
             .project_id.to_string())
@@ -8396,7 +9328,7 @@ impl schematic_runtime::EndpointSpec for UpdateProjectModelPermissionsRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -8778,6 +9710,10 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectServiceAccountRequest {
 }
 /// Request for `UpdateProjectServiceAccount` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -8808,6 +9744,26 @@ impl UpdateProjectServiceAccountRequest {
             body,
         }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::UPDATE_PROJECT_SERVICE_ACCOUNT_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectServiceAccountRequest {
     type Api = OpenAIApi;
@@ -8821,6 +9777,20 @@ impl schematic_runtime::EndpointSpec for UpdateProjectServiceAccountRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::UPDATE_PROJECT_SERVICE_ACCOUNT_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/organization/projects/{}/service_accounts/{}", urlencoding::encode(& self
             .project_id.to_string()), urlencoding::encode(& self.service_account_id
@@ -8834,7 +9804,7 @@ impl schematic_runtime::EndpointSpec for UpdateProjectServiceAccountRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -9004,6 +9974,10 @@ impl schematic_runtime::EndpointSpec for ListProjectSpendAlertsRequest {
 }
 /// Request for `CreateProjectSpendAlert` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -9030,6 +10004,26 @@ impl CreateProjectSpendAlertRequest {
             body,
         }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_PROJECT_SPEND_ALERT_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl schematic_runtime::EndpointSpec for CreateProjectSpendAlertRequest {
     type Api = OpenAIApi;
@@ -9043,6 +10037,20 @@ impl schematic_runtime::EndpointSpec for CreateProjectSpendAlertRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_PROJECT_SPEND_ALERT_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/organization/projects/{}/spend_alerts", urlencoding::encode(& self
             .project_id.to_string())
@@ -9055,7 +10063,7 @@ impl schematic_runtime::EndpointSpec for CreateProjectSpendAlertRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -9119,6 +10127,10 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectSpendAlertRequest {
 }
 /// Request for `UpdateProjectSpendAlert` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -9149,6 +10161,26 @@ impl UpdateProjectSpendAlertRequest {
             body,
         }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::UPDATE_PROJECT_SPEND_ALERT_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectSpendAlertRequest {
     type Api = OpenAIApi;
@@ -9162,6 +10194,20 @@ impl schematic_runtime::EndpointSpec for UpdateProjectSpendAlertRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::UPDATE_PROJECT_SPEND_ALERT_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/organization/projects/{}/spend_alerts/{}", urlencoding::encode(& self
             .project_id.to_string()), urlencoding::encode(& self.alert_id.to_string())
@@ -9174,7 +10220,7 @@ impl schematic_runtime::EndpointSpec for UpdateProjectSpendAlertRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -9913,6 +10959,10 @@ impl schematic_runtime::EndpointSpec for ListOrganizationSpendAlertsRequest {
 }
 /// Request for `CreateOrganizationSpendAlert` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -9930,6 +10980,26 @@ impl CreateOrganizationSpendAlertRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: ::schematic_definitions::openai::CreateSpendAlertBody) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_ORGANIZATION_SPEND_ALERT_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::CreateSpendAlertBody>
@@ -9950,6 +11020,20 @@ impl schematic_runtime::EndpointSpec for CreateOrganizationSpendAlertRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_ORGANIZATION_SPEND_ALERT_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/spend_alerts".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -9959,7 +11043,7 @@ impl schematic_runtime::EndpointSpec for CreateOrganizationSpendAlertRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -10030,6 +11114,10 @@ impl schematic_runtime::EndpointSpec for RetrieveOrganizationSpendAlertRequest {
 }
 /// Request for `UpdateOrganizationSpendAlert` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -10056,6 +11144,26 @@ impl UpdateOrganizationSpendAlertRequest {
             body,
         }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::UPDATE_ORGANIZATION_SPEND_ALERT_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl schematic_runtime::EndpointSpec for UpdateOrganizationSpendAlertRequest {
     type Api = OpenAIApi;
@@ -10069,6 +11177,20 @@ impl schematic_runtime::EndpointSpec for UpdateOrganizationSpendAlertRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::UPDATE_ORGANIZATION_SPEND_ALERT_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/organization/spend_alerts/{}", urlencoding::encode(& self.alert_id
             .to_string())
@@ -10081,7 +11203,7 @@ impl schematic_runtime::EndpointSpec for UpdateOrganizationSpendAlertRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -10214,6 +11336,10 @@ impl ::core::fmt::Display for UsageAudioSpeechesRequestGroupBy {
 }
 /// Request for `UsageAudioSpeeches` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -10245,6 +11371,8 @@ pub struct UsageAudioSpeechesRequest {
     /// Query parameter: Return only usage for these models.
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    ///
+    /// Value rules checked before sending: each item's `enum` (4 values).
     pub group_by: Option<Vec<UsageAudioSpeechesRequestGroupBy>>,
 }
 impl UsageAudioSpeechesRequest {
@@ -10260,6 +11388,32 @@ impl UsageAudioSpeechesRequest {
             models: None,
             group_by: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_AUDIO_SPEECHES_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
@@ -10320,6 +11474,22 @@ impl schematic_runtime::EndpointSpec for UsageAudioSpeechesRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_AUDIO_SPEECHES_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/usage/audio_speeches".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let value = &self.start_time;
@@ -10444,6 +11614,10 @@ impl ::core::fmt::Display for UsageAudioTranscriptionsRequestGroupBy {
 }
 /// Request for `UsageAudioTranscriptions` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -10475,6 +11649,8 @@ pub struct UsageAudioTranscriptionsRequest {
     /// Query parameter: Return only usage for these models.
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    ///
+    /// Value rules checked before sending: each item's `enum` (4 values).
     pub group_by: Option<Vec<UsageAudioTranscriptionsRequestGroupBy>>,
 }
 impl UsageAudioTranscriptionsRequest {
@@ -10490,6 +11666,32 @@ impl UsageAudioTranscriptionsRequest {
             models: None,
             group_by: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_AUDIO_TRANSCRIPTIONS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
@@ -10550,6 +11752,22 @@ impl schematic_runtime::EndpointSpec for UsageAudioTranscriptionsRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_AUDIO_TRANSCRIPTIONS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/usage/audio_transcriptions".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let value = &self.start_time;
@@ -10662,6 +11880,10 @@ impl ::core::fmt::Display for UsageCodeInterpreterSessionsRequestGroupBy {
 }
 /// Request for `UsageCodeInterpreterSessions` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -10684,6 +11906,8 @@ pub struct UsageCodeInterpreterSessionsRequest {
     /// Query parameter: Return only usage for these projects.
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`.
+    ///
+    /// Value rules checked before sending: each item's `enum` (1 value).
     pub group_by: Option<Vec<UsageCodeInterpreterSessionsRequestGroupBy>>,
 }
 impl UsageCodeInterpreterSessionsRequest {
@@ -10696,6 +11920,32 @@ impl UsageCodeInterpreterSessionsRequest {
             project_ids: None,
             group_by: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_CODE_INTERPRETER_SESSIONS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
@@ -10741,6 +11991,22 @@ impl schematic_runtime::EndpointSpec for UsageCodeInterpreterSessionsRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_CODE_INTERPRETER_SESSIONS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/usage/code_interpreter_sessions".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let value = &self.start_time;
@@ -10849,6 +12115,10 @@ impl ::core::fmt::Display for UsageCompletionsRequestGroupBy {
 }
 /// Request for `UsageCompletions` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -10884,6 +12154,8 @@ pub struct UsageCompletionsRequest {
 */
     pub batch: Option<bool>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `batch`, `service_tier` or any combination of them.
+    ///
+    /// Value rules checked before sending: each item's `enum` (6 values).
     pub group_by: Option<Vec<UsageCompletionsRequestGroupBy>>,
 }
 impl UsageCompletionsRequest {
@@ -10900,6 +12172,32 @@ impl UsageCompletionsRequest {
             batch: None,
             group_by: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_COMPLETIONS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
@@ -10962,6 +12260,22 @@ impl schematic_runtime::EndpointSpec for UsageCompletionsRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_COMPLETIONS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/usage/completions".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let value = &self.start_time;
@@ -11089,6 +12403,10 @@ impl ::core::fmt::Display for UsageEmbeddingsRequestGroupBy {
 }
 /// Request for `UsageEmbeddings` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -11120,6 +12438,8 @@ pub struct UsageEmbeddingsRequest {
     /// Query parameter: Return only usage for these models.
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    ///
+    /// Value rules checked before sending: each item's `enum` (4 values).
     pub group_by: Option<Vec<UsageEmbeddingsRequestGroupBy>>,
 }
 impl UsageEmbeddingsRequest {
@@ -11135,6 +12455,32 @@ impl UsageEmbeddingsRequest {
             models: None,
             group_by: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_EMBEDDINGS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
@@ -11192,6 +12538,22 @@ impl schematic_runtime::EndpointSpec for UsageEmbeddingsRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_EMBEDDINGS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/usage/embeddings".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let value = &self.start_time;
@@ -11316,6 +12678,10 @@ impl ::core::fmt::Display for UsageFileSearchCallsRequestGroupBy {
 }
 /// Request for `UsageFileSearchCalls` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -11347,6 +12713,8 @@ pub struct UsageFileSearchCallsRequest {
     /// Query parameter: Return only usage for these vector stores.
     pub vector_store_ids: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `vector_store_id` or any combination of them.
+    ///
+    /// Value rules checked before sending: each item's `enum` (4 values).
     pub group_by: Option<Vec<UsageFileSearchCallsRequestGroupBy>>,
 }
 impl UsageFileSearchCallsRequest {
@@ -11362,6 +12730,32 @@ impl UsageFileSearchCallsRequest {
             vector_store_ids: None,
             group_by: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_FILE_SEARCH_CALLS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
@@ -11422,6 +12816,22 @@ impl schematic_runtime::EndpointSpec for UsageFileSearchCallsRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_FILE_SEARCH_CALLS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/usage/file_search_calls".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let value = &self.start_time;
@@ -11620,6 +13030,10 @@ impl ::core::fmt::Display for UsageImagesRequestGroupBy {
 }
 /// Request for `UsageImages` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -11645,8 +13059,12 @@ pub struct UsageImagesRequest {
     /// Query parameter: Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
     pub bucket_width: Option<UsageImagesRequestBucketWidth>,
     /// Query parameter: Return only usages for these sources. Possible values are `image.generation`, `image.edit`, `image.variation` or any combination of them.
+    ///
+    /// Value rules checked before sending: each item's `enum` (3 values).
     pub sources: Option<Vec<UsageImagesRequestSources>>,
     /// Query parameter: Return only usages for these image sizes. Possible values are `256x256`, `512x512`, `1024x1024`, `1792x1792`, `1024x1792` or any combination of them.
+    ///
+    /// Value rules checked before sending: each item's `enum` (5 values).
     pub sizes: Option<Vec<UsageImagesRequestSizes>>,
     /// Query parameter: Return only usage for these projects.
     pub project_ids: Option<Vec<String>>,
@@ -11657,6 +13075,8 @@ pub struct UsageImagesRequest {
     /// Query parameter: Return only usage for these models.
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `size`, `source` or any combination of them.
+    ///
+    /// Value rules checked before sending: each item's `enum` (6 values).
     pub group_by: Option<Vec<UsageImagesRequestGroupBy>>,
 }
 impl UsageImagesRequest {
@@ -11674,6 +13094,60 @@ impl UsageImagesRequest {
             models: None,
             group_by: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.sources {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_IMAGES_REQUEST_QUERY_SOURCES_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("sources"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        if let Some(value) = &self.sizes {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_IMAGES_REQUEST_QUERY_SIZES_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("sizes"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_IMAGES_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
@@ -11738,6 +13212,50 @@ impl schematic_runtime::EndpointSpec for UsageImagesRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.sources {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_IMAGES_REQUEST_QUERY_SOURCES_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("sources"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        if let Some(value) = &self.sizes {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_IMAGES_REQUEST_QUERY_SIZES_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("sizes"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_IMAGES_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/usage/images".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let value = &self.start_time;
@@ -11878,6 +13396,10 @@ impl ::core::fmt::Display for UsageModerationsRequestGroupBy {
 }
 /// Request for `UsageModerations` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -11909,6 +13431,8 @@ pub struct UsageModerationsRequest {
     /// Query parameter: Return only usage for these models.
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    ///
+    /// Value rules checked before sending: each item's `enum` (4 values).
     pub group_by: Option<Vec<UsageModerationsRequestGroupBy>>,
 }
 impl UsageModerationsRequest {
@@ -11924,6 +13448,32 @@ impl UsageModerationsRequest {
             models: None,
             group_by: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_MODERATIONS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
@@ -11981,6 +13531,22 @@ impl schematic_runtime::EndpointSpec for UsageModerationsRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_MODERATIONS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/usage/moderations".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let value = &self.start_time;
@@ -12093,6 +13659,10 @@ impl ::core::fmt::Display for UsageVectorStoresRequestGroupBy {
 }
 /// Request for `UsageVectorStores` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -12115,6 +13685,8 @@ pub struct UsageVectorStoresRequest {
     /// Query parameter: Return only usage for these projects.
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`.
+    ///
+    /// Value rules checked before sending: each item's `enum` (1 value).
     pub group_by: Option<Vec<UsageVectorStoresRequestGroupBy>>,
 }
 impl UsageVectorStoresRequest {
@@ -12127,6 +13699,32 @@ impl UsageVectorStoresRequest {
             project_ids: None,
             group_by: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_VECTOR_STORES_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
@@ -12169,6 +13767,22 @@ impl schematic_runtime::EndpointSpec for UsageVectorStoresRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_VECTOR_STORES_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/usage/vector_stores".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let value = &self.start_time;
@@ -12302,6 +13916,10 @@ impl ::core::fmt::Display for UsageWebSearchCallsRequestGroupBy {
 }
 /// Request for `UsageWebSearchCalls` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -12334,8 +13952,12 @@ pub struct UsageWebSearchCallsRequest {
     /// Query parameter: Return only usage for these models.
     pub models: Option<Vec<String>>,
     /// Query parameter: Return only web search usage for these context levels.
+    ///
+    /// Value rules checked before sending: each item's `enum` (3 values).
     pub context_levels: Option<Vec<UsageWebSearchCallsRequestContextLevels>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `context_level` or any combination of them.
+    ///
+    /// Value rules checked before sending: each item's `enum` (5 values).
     pub group_by: Option<Vec<UsageWebSearchCallsRequestGroupBy>>,
 }
 impl UsageWebSearchCallsRequest {
@@ -12352,6 +13974,46 @@ impl UsageWebSearchCallsRequest {
             context_levels: None,
             group_by: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.context_levels {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_WEB_SEARCH_CALLS_REQUEST_QUERY_CONTEXT_LEVELS_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("context_levels"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_WEB_SEARCH_CALLS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `start_time` query parameter.
     pub fn with_start_time(mut self, value: i64) -> Self {
@@ -12420,6 +14082,36 @@ impl schematic_runtime::EndpointSpec for UsageWebSearchCallsRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.context_levels {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_WEB_SEARCH_CALLS_REQUEST_QUERY_CONTEXT_LEVELS_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("context_levels"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        if let Some(value) = &self.group_by {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element.as_str(),
+                    &open_ai_value_rules::USAGE_WEB_SEARCH_CALLS_REQUEST_QUERY_GROUP_BY_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("query"),
+                        schematic_runtime::validate::PathSegment::Name("group_by"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/usage/web_search_calls".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let value = &self.start_time;
@@ -13953,6 +15645,10 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeCallRequest {
 }
 /// Request for `AcceptRealtimeCall` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -13979,6 +15675,26 @@ impl AcceptRealtimeCallRequest {
             body,
         }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::ACCEPT_REALTIME_CALL_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl schematic_runtime::EndpointSpec for AcceptRealtimeCallRequest {
     type Api = OpenAIApi;
@@ -13990,6 +15706,20 @@ impl schematic_runtime::EndpointSpec for AcceptRealtimeCallRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::ACCEPT_REALTIME_CALL_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/realtime/calls/{}/accept", urlencoding::encode(& self.call_id.to_string())
         );
@@ -14001,7 +15731,7 @@ impl schematic_runtime::EndpointSpec for AcceptRealtimeCallRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -14249,6 +15979,10 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeClientSecretRequest {
 }
 /// Request for `CreateRealtimeSession` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -14268,6 +16002,26 @@ impl CreateRealtimeSessionRequest {
         body: ::schematic_definitions::openai::RealtimeSessionCreateRequest,
     ) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_REALTIME_SESSION_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::RealtimeSessionCreateRequest>
@@ -14290,6 +16044,20 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeSessionRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_REALTIME_SESSION_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/realtime/sessions".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -14299,7 +16067,7 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeSessionRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -14310,6 +16078,10 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeSessionRequest {
     }
 }
 /// Request for `CreateRealtimeTranscriptionSession` endpoint.
+///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
 /// ## Example
 ///
@@ -14330,6 +16102,26 @@ impl CreateRealtimeTranscriptionSessionRequest {
         body: ::schematic_definitions::openai::RealtimeTranscriptionSessionCreateRequest,
     ) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_REALTIME_TRANSCRIPTION_SESSION_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::RealtimeTranscriptionSessionCreateRequest>
@@ -14352,6 +16144,20 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranscriptionSessionReque
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_REALTIME_TRANSCRIPTION_SESSION_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/realtime/transcription_sessions".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -14361,7 +16167,7 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranscriptionSessionReque
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -14435,6 +16241,55 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranslationClientSecretRe
 }
 /// Request for `CreateResponse` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
+/// Not checked:
+///
+/// - body (component `BetaResponseFormatText` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a union whose members are not checked
+/// - body (component `BetaTextResponseFormatJsonSchema` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a union whose members are not checked
+/// - body (component `BetaResponseFormatJsonObject` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a union whose members are not checked
+/// - body (component `BetaToolChoiceAllowed` at `#/properties/mode`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaToolChoiceAllowed` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaToolChoiceTypes` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaToolChoiceFunction` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaToolChoiceMCP` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaToolChoiceCustom` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaSpecificProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaSpecificApplyPatchParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaSpecificFunctionShellParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaFunctionTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaFileSearchTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaComputerTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaComputerUsePreviewTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaWebSearchTool` at `#/properties/search_context_size`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaWebSearchTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaMCPTool` at `#/properties/connector_id`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaMCPTool` at `#/properties/tunnel_id`) `pattern`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaMCPTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaCodeInterpreterTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/background`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/moderation`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/output_compression`) `minimum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/output_compression`) `maximum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/output_format`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/partial_images`) `minimum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/partial_images`) `maximum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/quality`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaLocalShellToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaFunctionShellToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaCustomToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaNamespaceToolParam` at `#/properties/description`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaNamespaceToolParam` at `#/properties/name`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaNamespaceToolParam` at `#/properties/tools`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaNamespaceToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaToolSearchToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaWebSearchPreviewTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaApplyPatchToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+///
 /// ## Example
 ///
 /// ```no_run
@@ -14450,6 +16305,8 @@ pub struct CreateResponseRequest {
     /// Query parameter: beta
     pub beta: Option<bool>,
     /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    ///
+    /// Value rules checked before sending: each item's `enum` (1 value).
     #[serde(rename = "openai-beta")]
     pub openai_beta: Option<Vec<String>>,
     /// Request body
@@ -14463,6 +16320,32 @@ impl CreateResponseRequest {
             openai_beta: None,
             body,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.openai_beta {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element,
+                    &open_ai_value_rules::CREATE_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("header"),
+                        schematic_runtime::validate::PathSegment::Name("openai_beta"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `beta` query parameter.
     pub fn with_beta(mut self, value: bool) -> Self {
@@ -14497,6 +16380,22 @@ impl schematic_runtime::EndpointSpec for CreateResponseRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.openai_beta {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element,
+                    &open_ai_value_rules::CREATE_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("header"),
+                        schematic_runtime::validate::PathSegment::Name("openai_beta"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/responses".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.beta {
@@ -14529,6 +16428,10 @@ impl schematic_runtime::EndpointSpec for CreateResponseRequest {
     }
 }
 /// Request for `GetResponse` endpoint.
+///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
 /// ## Example
 ///
@@ -14567,6 +16470,8 @@ the network links between your application and the OpenAI API.
     /// Query parameter: beta
     pub beta: Option<bool>,
     /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    ///
+    /// Value rules checked before sending: each item's `enum` (1 value).
     #[serde(rename = "openai-beta")]
     pub openai_beta: Option<Vec<String>>,
 }
@@ -14581,6 +16486,32 @@ impl GetResponseRequest {
             beta: None,
             openai_beta: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.openai_beta {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element,
+                    &open_ai_value_rules::GET_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("header"),
+                        schematic_runtime::validate::PathSegment::Name("openai_beta"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `stream` query parameter.
     pub fn with_stream(mut self, value: bool) -> Self {
@@ -14689,6 +16620,22 @@ impl schematic_runtime::EndpointSpec for GetResponseRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.openai_beta {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element,
+                    &open_ai_value_rules::GET_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("header"),
+                        schematic_runtime::validate::PathSegment::Name("openai_beta"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/responses/{}", urlencoding::encode(& self.response_id.to_string())
         );
@@ -14726,6 +16673,10 @@ impl schematic_runtime::EndpointSpec for GetResponseRequest {
 }
 /// Request for `DeleteResponse` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -14742,6 +16693,8 @@ pub struct DeleteResponseRequest {
     /// Query parameter: beta
     pub beta: Option<bool>,
     /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    ///
+    /// Value rules checked before sending: each item's `enum` (1 value).
     #[serde(rename = "openai-beta")]
     pub openai_beta: Option<Vec<String>>,
 }
@@ -14753,6 +16706,32 @@ impl DeleteResponseRequest {
             beta: None,
             openai_beta: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.openai_beta {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element,
+                    &open_ai_value_rules::DELETE_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("header"),
+                        schematic_runtime::validate::PathSegment::Name("openai_beta"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `beta` query parameter.
     pub fn with_beta(mut self, value: bool) -> Self {
@@ -14793,6 +16772,22 @@ impl schematic_runtime::EndpointSpec for DeleteResponseRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.openai_beta {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element,
+                    &open_ai_value_rules::DELETE_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("header"),
+                        schematic_runtime::validate::PathSegment::Name("openai_beta"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/responses/{}", urlencoding::encode(& self.response_id.to_string())
         );
@@ -14821,6 +16816,10 @@ impl schematic_runtime::EndpointSpec for DeleteResponseRequest {
 }
 /// Request for `CancelResponse` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -14837,6 +16836,8 @@ pub struct CancelResponseRequest {
     /// Query parameter: beta
     pub beta: Option<bool>,
     /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    ///
+    /// Value rules checked before sending: each item's `enum` (1 value).
     #[serde(rename = "openai-beta")]
     pub openai_beta: Option<Vec<String>>,
 }
@@ -14848,6 +16849,32 @@ impl CancelResponseRequest {
             beta: None,
             openai_beta: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.openai_beta {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element,
+                    &open_ai_value_rules::CANCEL_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("header"),
+                        schematic_runtime::validate::PathSegment::Name("openai_beta"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `beta` query parameter.
     pub fn with_beta(mut self, value: bool) -> Self {
@@ -14890,6 +16917,22 @@ impl schematic_runtime::EndpointSpec for CancelResponseRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.openai_beta {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element,
+                    &open_ai_value_rules::CANCEL_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("header"),
+                        schematic_runtime::validate::PathSegment::Name("openai_beta"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/responses/{}/cancel", urlencoding::encode(& self.response_id.to_string())
         );
@@ -14943,6 +16986,10 @@ impl ::core::fmt::Display for ListInputItemsRequestOrder {
 }
 /// Request for `ListInputItems` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -14965,6 +17012,8 @@ pub struct ListInputItemsRequest {
     /// Query parameter: beta
     pub beta: Option<bool>,
     /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    ///
+    /// Value rules checked before sending: each item's `enum` (1 value).
     #[serde(rename = "openai-beta")]
     pub openai_beta: Option<Vec<String>>,
 }
@@ -14977,6 +17026,32 @@ impl ListInputItemsRequest {
             beta: None,
             openai_beta: None,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.openai_beta {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element,
+                    &open_ai_value_rules::LIST_INPUT_ITEMS_REQUEST_HEADER_OPENAI_BETA_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("header"),
+                        schematic_runtime::validate::PathSegment::Name("openai_beta"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: ListInputItemsRequestOrder) -> Self {
@@ -15026,6 +17101,22 @@ impl schematic_runtime::EndpointSpec for ListInputItemsRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.openai_beta {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element,
+                    &open_ai_value_rules::LIST_INPUT_ITEMS_REQUEST_HEADER_OPENAI_BETA_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("header"),
+                        schematic_runtime::validate::PathSegment::Name("openai_beta"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/responses/{}/input_items", urlencoding::encode(& self.response_id
             .to_string())
@@ -15058,6 +17149,10 @@ impl schematic_runtime::EndpointSpec for ListInputItemsRequest {
 }
 /// Request for `CreateUpload` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -15076,6 +17171,26 @@ impl CreateUploadRequest {
     pub fn new(body: ::schematic_definitions::openai::CreateUploadRequest2) -> Self {
         Self { body }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_UPLOAD_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl From<::schematic_definitions::openai::CreateUploadRequest2>
 for CreateUploadRequest {
@@ -15093,6 +17208,20 @@ impl schematic_runtime::EndpointSpec for CreateUploadRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_UPLOAD_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/uploads".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -15102,7 +17231,7 @@ impl schematic_runtime::EndpointSpec for CreateUploadRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -15378,6 +17507,10 @@ impl schematic_runtime::EndpointSpec for ListVectorStoresRequest {
 }
 /// Request for `CreateVectorStore` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -15398,6 +17531,26 @@ impl CreateVectorStoreRequest {
     ) -> Self {
         Self { body }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_VECTOR_STORE_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl From<::schematic_definitions::openai::CreateVectorStoreRequest2>
 for CreateVectorStoreRequest {
@@ -15417,6 +17570,20 @@ impl schematic_runtime::EndpointSpec for CreateVectorStoreRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_VECTOR_STORE_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/vector_stores".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -15426,7 +17593,7 @@ impl schematic_runtime::EndpointSpec for CreateVectorStoreRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -15620,6 +17787,10 @@ impl schematic_runtime::EndpointSpec for DeleteVectorStoreRequest {
 }
 /// Request for `CreateVectorStoreFileBatch` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -15646,6 +17817,26 @@ impl CreateVectorStoreFileBatchRequest {
             body,
         }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_VECTOR_STORE_FILE_BATCH_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl schematic_runtime::EndpointSpec for CreateVectorStoreFileBatchRequest {
     type Api = OpenAIApi;
@@ -15659,6 +17850,20 @@ impl schematic_runtime::EndpointSpec for CreateVectorStoreFileBatchRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_VECTOR_STORE_FILE_BATCH_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/vector_stores/{}/file_batches", urlencoding::encode(& self.vector_store_id
             .to_string())
@@ -15671,7 +17876,7 @@ impl schematic_runtime::EndpointSpec for CreateVectorStoreFileBatchRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -16365,6 +18570,10 @@ impl schematic_runtime::EndpointSpec for RetrieveVectorStoreFileContentRequest {
 }
 /// Request for `SearchVectorStore` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -16391,6 +18600,26 @@ impl SearchVectorStoreRequest {
             body,
         }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::SEARCH_VECTOR_STORE_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl schematic_runtime::EndpointSpec for SearchVectorStoreRequest {
     type Api = OpenAIApi;
@@ -16404,6 +18633,20 @@ impl schematic_runtime::EndpointSpec for SearchVectorStoreRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::SEARCH_VECTOR_STORE_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/vector_stores/{}/search", urlencoding::encode(& self.vector_store_id
             .to_string())
@@ -16416,7 +18659,7 @@ impl schematic_runtime::EndpointSpec for SearchVectorStoreRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -16703,6 +18946,10 @@ impl schematic_runtime::EndpointSpec for GetorganizationspendlimitRequest {
 }
 /// Request for `Updateorganizationspendlimit` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -16722,6 +18969,26 @@ impl UpdateorganizationspendlimitRequest {
         body: ::schematic_definitions::openai::UpdateOrganizationSpendLimitBody,
     ) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::UPDATEORGANIZATIONSPENDLIMIT_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::UpdateOrganizationSpendLimitBody>
@@ -16744,6 +19011,20 @@ impl schematic_runtime::EndpointSpec for UpdateorganizationspendlimitRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::UPDATEORGANIZATIONSPENDLIMIT_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/organization/spend_limit".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -16753,7 +19034,7 @@ impl schematic_runtime::EndpointSpec for UpdateorganizationspendlimitRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -16861,6 +19142,10 @@ impl schematic_runtime::EndpointSpec for GetprojectspendlimitRequest {
 }
 /// Request for `Updateprojectspendlimit` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -16887,6 +19172,26 @@ impl UpdateprojectspendlimitRequest {
             body,
         }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::UPDATEPROJECTSPENDLIMIT_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl schematic_runtime::EndpointSpec for UpdateprojectspendlimitRequest {
     type Api = OpenAIApi;
@@ -16900,6 +19205,20 @@ impl schematic_runtime::EndpointSpec for UpdateprojectspendlimitRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::UPDATEPROJECTSPENDLIMIT_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/organization/projects/{}/spend_limit", urlencoding::encode(& self
             .project_id.to_string())
@@ -16912,7 +19231,7 @@ impl schematic_runtime::EndpointSpec for UpdateprojectspendlimitRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -17155,6 +19474,10 @@ impl schematic_runtime::EndpointSpec for ListVideosRequest {
 }
 /// Request for `CreateVideo` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -17172,6 +19495,26 @@ impl CreateVideoRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: ::schematic_definitions::openai::CreateVideoJsonBody) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_VIDEO_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::CreateVideoJsonBody> for CreateVideoRequest {
@@ -17191,6 +19534,20 @@ impl schematic_runtime::EndpointSpec for CreateVideoRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_VIDEO_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/videos".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -17200,7 +19557,7 @@ impl schematic_runtime::EndpointSpec for CreateVideoRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -17216,6 +19573,8 @@ pub struct CreateVideoCharacterForm {
     /// Video file used to create a character.
     pub video: crate::shared::FormFile,
     /// Display name for this API character.
+    ///
+    /// Value rules checked before sending: `minLength` 1, `maxLength` 80.
     pub name: String,
 }
 impl CreateVideoCharacterForm {
@@ -17239,6 +19598,10 @@ impl CreateVideoCharacterForm {
 }
 /// Request for `CreateVideoCharacter` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -17256,6 +19619,30 @@ impl CreateVideoCharacterRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: CreateVideoCharacterForm) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        {
+            let value = &self.body.name;
+            schematic_runtime::validate::check_str(
+                value,
+                &open_ai_value_rules::CREATE_VIDEO_CHARACTER_REQUEST_FORM_NAME,
+                &[
+                    schematic_runtime::validate::PathSegment::Name("body"),
+                    schematic_runtime::validate::PathSegment::Name("name"),
+                ],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<CreateVideoCharacterForm> for CreateVideoCharacterRequest {
@@ -17275,6 +19662,20 @@ impl schematic_runtime::EndpointSpec for CreateVideoCharacterRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        {
+            let value = &self.body.name;
+            schematic_runtime::validate::check_str(
+                value,
+                &open_ai_value_rules::CREATE_VIDEO_CHARACTER_REQUEST_FORM_NAME,
+                &[
+                    schematic_runtime::validate::PathSegment::Name("body"),
+                    schematic_runtime::validate::PathSegment::Name("name"),
+                ],
+                &mut violations,
+            );
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/videos/characters".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -17349,6 +19750,10 @@ impl schematic_runtime::EndpointSpec for GetVideoCharacterRequest {
 }
 /// Request for `CreateVideoEdit` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -17366,6 +19771,26 @@ impl CreateVideoEditRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: ::schematic_definitions::openai::CreateVideoEditJsonBody) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_VIDEO_EDIT_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::CreateVideoEditJsonBody>
@@ -17386,6 +19811,20 @@ impl schematic_runtime::EndpointSpec for CreateVideoEditRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_VIDEO_EDIT_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/videos/edits".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -17395,7 +19834,7 @@ impl schematic_runtime::EndpointSpec for CreateVideoEditRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -17406,6 +19845,10 @@ impl schematic_runtime::EndpointSpec for CreateVideoEditRequest {
     }
 }
 /// Request for `CreateVideoExtend` endpoint.
+///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
 /// ## Example
 ///
@@ -17427,6 +19870,26 @@ impl CreateVideoExtendRequest {
     ) -> Self {
         Self { body }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_VIDEO_EXTEND_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl From<::schematic_definitions::openai::CreateVideoExtendJsonBody>
 for CreateVideoExtendRequest {
@@ -17446,6 +19909,20 @@ impl schematic_runtime::EndpointSpec for CreateVideoExtendRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_VIDEO_EXTEND_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/videos/extensions".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -17455,7 +19932,7 @@ impl schematic_runtime::EndpointSpec for CreateVideoExtendRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -17639,6 +20116,10 @@ impl schematic_runtime::EndpointSpec for RetrieveVideoContentRequest {
 }
 /// Request for `CreateVideoRemix` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -17665,6 +20146,26 @@ impl CreateVideoRemixRequest {
             body,
         }
     }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_VIDEO_REMIX_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
+    }
 }
 impl schematic_runtime::EndpointSpec for CreateVideoRemixRequest {
     type Api = OpenAIApi;
@@ -17678,6 +20179,20 @@ impl schematic_runtime::EndpointSpec for CreateVideoRemixRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_VIDEO_REMIX_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = format!(
             "/videos/{}/remix", urlencoding::encode(& self.video_id.to_string())
         );
@@ -17689,7 +20204,7 @@ impl schematic_runtime::EndpointSpec for CreateVideoRemixRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -17700,6 +20215,10 @@ impl schematic_runtime::EndpointSpec for CreateVideoRemixRequest {
     }
 }
 /// Request for `Getinputtokencounts` endpoint.
+///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
 /// ## Example
 ///
@@ -17716,6 +20235,8 @@ pub struct GetinputtokencountsRequest {
     /// Query parameter: beta
     pub beta: Option<bool>,
     /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    ///
+    /// Value rules checked before sending: each item's `enum` (1 value).
     #[serde(rename = "openai-beta")]
     pub openai_beta: Option<Vec<String>>,
     /// Request body
@@ -17729,6 +20250,32 @@ impl GetinputtokencountsRequest {
             openai_beta: None,
             body,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.openai_beta {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element,
+                    &open_ai_value_rules::GETINPUTTOKENCOUNTS_REQUEST_HEADER_OPENAI_BETA_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("header"),
+                        schematic_runtime::validate::PathSegment::Name("openai_beta"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `beta` query parameter.
     pub fn with_beta(mut self, value: bool) -> Self {
@@ -17763,6 +20310,22 @@ impl schematic_runtime::EndpointSpec for GetinputtokencountsRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.openai_beta {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element,
+                    &open_ai_value_rules::GETINPUTTOKENCOUNTS_REQUEST_HEADER_OPENAI_BETA_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("header"),
+                        schematic_runtime::validate::PathSegment::Name("openai_beta"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/responses/input_tokens".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.beta {
@@ -17796,6 +20359,10 @@ impl schematic_runtime::EndpointSpec for GetinputtokencountsRequest {
 }
 /// Request for `Compactconversation` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -17811,6 +20378,8 @@ pub struct CompactconversationRequest {
     /// Query parameter: beta
     pub beta: Option<bool>,
     /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    ///
+    /// Value rules checked before sending: each item's `enum` (1 value).
     #[serde(rename = "openai-beta")]
     pub openai_beta: Option<Vec<String>>,
     /// Request body
@@ -17826,6 +20395,32 @@ impl CompactconversationRequest {
             openai_beta: None,
             body,
         }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.openai_beta {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element,
+                    &open_ai_value_rules::COMPACTCONVERSATION_REQUEST_HEADER_OPENAI_BETA_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("header"),
+                        schematic_runtime::validate::PathSegment::Name("openai_beta"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result()
     }
     /// Sets the `beta` query parameter.
     pub fn with_beta(mut self, value: bool) -> Self {
@@ -17862,6 +20457,22 @@ impl schematic_runtime::EndpointSpec for CompactconversationRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.openai_beta {
+            for (index, element) in value.iter().enumerate() {
+                schematic_runtime::validate::check_str(
+                    element,
+                    &open_ai_value_rules::COMPACTCONVERSATION_REQUEST_HEADER_OPENAI_BETA_ITEMS,
+                    &[
+                        schematic_runtime::validate::PathSegment::Name("header"),
+                        schematic_runtime::validate::PathSegment::Name("openai_beta"),
+                        schematic_runtime::validate::PathSegment::Index(index),
+                    ],
+                    &mut violations,
+                );
+            }
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/responses/compact".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.beta {
@@ -18556,6 +21167,10 @@ impl schematic_runtime::EndpointSpec for CancelChatSessionMethodRequest {
 }
 /// Request for `CreateChatSessionMethod` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -18573,6 +21188,26 @@ impl CreateChatSessionMethodRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: ::schematic_definitions::openai::CreateChatSessionBody) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_CHAT_SESSION_METHOD_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::CreateChatSessionBody>
@@ -18593,6 +21228,20 @@ impl schematic_runtime::EndpointSpec for CreateChatSessionMethodRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_CHAT_SESSION_METHOD_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/chatkit/sessions".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -18602,7 +21251,7 @@ impl schematic_runtime::EndpointSpec for CreateChatSessionMethodRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -18795,6 +21444,10 @@ impl schematic_runtime::EndpointSpec for DeleteThreadMethodRequest {
 }
 /// Request for `ListThreadsMethod` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -18806,12 +21459,37 @@ impl schematic_runtime::EndpointSpec for DeleteThreadMethodRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListThreadsMethodRequest {
     /// Query parameter: Filter threads that belong to this user identifier. Defaults to null to return all users.
+    ///
+    /// Value rules checked before sending: `minLength` 1, `maxLength` 512.
     pub user: Option<String>,
 }
 impl ListThreadsMethodRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
         Self { user: None }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.user {
+            schematic_runtime::validate::check_str(
+                value,
+                &open_ai_value_rules::LIST_THREADS_METHOD_REQUEST_QUERY_USER,
+                &[
+                    schematic_runtime::validate::PathSegment::Name("query"),
+                    schematic_runtime::validate::PathSegment::Name("user"),
+                ],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
     /// Sets the `user` query parameter.
     pub fn with_user(mut self, value: String) -> Self {
@@ -18831,6 +21509,19 @@ impl schematic_runtime::EndpointSpec for ListThreadsMethodRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Some(value) = &self.user {
+            schematic_runtime::validate::check_str(
+                value,
+                &open_ai_value_rules::LIST_THREADS_METHOD_REQUEST_QUERY_USER,
+                &[
+                    schematic_runtime::validate::PathSegment::Name("query"),
+                    schematic_runtime::validate::PathSegment::Name("user"),
+                ],
+                &mut violations,
+            );
+        }
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/chatkit/threads".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.user {
@@ -18845,6 +21536,1078 @@ impl schematic_runtime::EndpointSpec for ListThreadsMethodRequest {
             body: schematic_runtime::RequestBody::Empty,
         })
     }
+}
+/// Value-rule plans of the `OpenAI` requests.
+mod open_ai_value_rules {
+    #[allow(unused_imports)]
+    use schematic_runtime::validate::{Literal, Pattern, Plan, Property};
+    pub(super) static CREATE_SPEECH_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_0_CREATE_SPEECH_REQUEST2,
+    );
+    pub(super) static CREATE_TRANSLATION_REQUEST_FORM_RESPONSE_FORMAT: Plan = Plan::new()
+        .allowed_values(
+            &[
+                Literal::String("json"),
+                Literal::String("text"),
+                Literal::String("srt"),
+                Literal::String("verbose_json"),
+                Literal::String("vtt"),
+            ],
+        );
+    pub(super) static CREATE_BATCH_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_3_CREATE_BATCH_REQUEST2,
+    );
+    pub(super) static CREATE_COMPLETION_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_8_CREATE_COMPLETION_REQUEST2,
+    );
+    pub(super) static CREATE_CONTAINER_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_11_CREATE_CONTAINER_BODY,
+    );
+    pub(super) static CREATE_EMBEDDING_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_13_CREATE_EMBEDDING_REQUEST2,
+    );
+    pub(super) static CREATE_FILE_REQUEST_FORM_PURPOSE: Plan = Plan::new()
+        .allowed_values(
+            &[
+                Literal::String("assistants"),
+                Literal::String("batch"),
+                Literal::String("fine-tune"),
+                Literal::String("vision"),
+                Literal::String("user_data"),
+                Literal::String("evals"),
+            ],
+        );
+    pub(super) static CREATE_FINE_TUNING_JOB_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_19_CREATE_FINE_TUNING_JOB_REQUEST2,
+    );
+    pub(super) static CREATE_IMAGE_EDIT_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_27_EDIT_IMAGE_BODY_JSON_PARAM,
+    );
+    pub(super) static CREATE_IMAGE_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_30_CREATE_IMAGE_REQUEST2,
+    );
+    pub(super) static CREATE_IMAGE_VARIATION_REQUEST_FORM_RESPONSE_FORMAT: Plan = Plan::new()
+        .allowed_values(&[Literal::String("url"), Literal::String("b64_json")]);
+    pub(super) static CREATE_IMAGE_VARIATION_REQUEST_FORM_SIZE: Plan = Plan::new()
+        .allowed_values(
+            &[
+                Literal::String("256x256"),
+                Literal::String("512x512"),
+                Literal::String("1024x1024"),
+            ],
+        );
+    pub(super) static ACTIVATE_ORGANIZATION_CERTIFICATES_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_33_TOGGLE_CERTIFICATES_REQUEST,
+    );
+    pub(super) static DEACTIVATE_ORGANIZATION_CERTIFICATES_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_33_TOGGLE_CERTIFICATES_REQUEST,
+    );
+    pub(super) static GET_CERTIFICATE_REQUEST_QUERY_INCLUDE_ITEMS: Plan = Plan::new()
+        .allowed_values(&[Literal::String("content")]);
+    pub(super) static USAGE_COSTS_REQUEST_QUERY_GROUP_BY_ITEMS: Plan = Plan::new()
+        .allowed_values(
+            &[
+                Literal::String("project_id"),
+                Literal::String("line_item"),
+                Literal::String("api_key_id"),
+            ],
+        );
+    pub(super) static UPDATE_ORGANIZATION_DATA_RETENTION_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_35_UPDATE_ORGANIZATION_DATA_RETENTION_BODY,
+    );
+    pub(super) static CREATE_GROUP_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_36_CREATE_GROUP_BODY,
+    );
+    pub(super) static UPDATE_GROUP_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_37_UPDATE_GROUP_BODY,
+    );
+    pub(super) static INVITE_USER_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_40_INVITE_REQUEST,
+    );
+    pub(super) static ACTIVATE_PROJECT_CERTIFICATES_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_33_TOGGLE_CERTIFICATES_REQUEST,
+    );
+    pub(super) static DEACTIVATE_PROJECT_CERTIFICATES_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_33_TOGGLE_CERTIFICATES_REQUEST,
+    );
+    pub(super) static UPDATE_PROJECT_DATA_RETENTION_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_43_UPDATE_PROJECT_DATA_RETENTION_BODY,
+    );
+    pub(super) static UPDATE_PROJECT_MODEL_PERMISSIONS_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_46_PROJECT_MODEL_PERMISSIONS_UPDATE_REQUEST,
+    );
+    pub(super) static UPDATE_PROJECT_SERVICE_ACCOUNT_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_49_UPDATE_PROJECT_SERVICE_ACCOUNT_BODY,
+    );
+    pub(super) static CREATE_PROJECT_SPEND_ALERT_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_50_CREATE_SPEND_ALERT_BODY,
+    );
+    pub(super) static UPDATE_PROJECT_SPEND_ALERT_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_50_CREATE_SPEND_ALERT_BODY,
+    );
+    pub(super) static CREATE_ORGANIZATION_SPEND_ALERT_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_50_CREATE_SPEND_ALERT_BODY,
+    );
+    pub(super) static UPDATE_ORGANIZATION_SPEND_ALERT_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_50_CREATE_SPEND_ALERT_BODY,
+    );
+    pub(super) static USAGE_AUDIO_SPEECHES_REQUEST_QUERY_GROUP_BY_ITEMS: Plan = Plan::new()
+        .allowed_values(
+            &[
+                Literal::String("project_id"),
+                Literal::String("user_id"),
+                Literal::String("api_key_id"),
+                Literal::String("model"),
+            ],
+        );
+    pub(super) static USAGE_AUDIO_TRANSCRIPTIONS_REQUEST_QUERY_GROUP_BY_ITEMS: Plan = Plan::new()
+        .allowed_values(
+            &[
+                Literal::String("project_id"),
+                Literal::String("user_id"),
+                Literal::String("api_key_id"),
+                Literal::String("model"),
+            ],
+        );
+    pub(super) static USAGE_CODE_INTERPRETER_SESSIONS_REQUEST_QUERY_GROUP_BY_ITEMS: Plan = Plan::new()
+        .allowed_values(&[Literal::String("project_id")]);
+    pub(super) static USAGE_COMPLETIONS_REQUEST_QUERY_GROUP_BY_ITEMS: Plan = Plan::new()
+        .allowed_values(
+            &[
+                Literal::String("project_id"),
+                Literal::String("user_id"),
+                Literal::String("api_key_id"),
+                Literal::String("model"),
+                Literal::String("batch"),
+                Literal::String("service_tier"),
+            ],
+        );
+    pub(super) static USAGE_EMBEDDINGS_REQUEST_QUERY_GROUP_BY_ITEMS: Plan = Plan::new()
+        .allowed_values(
+            &[
+                Literal::String("project_id"),
+                Literal::String("user_id"),
+                Literal::String("api_key_id"),
+                Literal::String("model"),
+            ],
+        );
+    pub(super) static USAGE_FILE_SEARCH_CALLS_REQUEST_QUERY_GROUP_BY_ITEMS: Plan = Plan::new()
+        .allowed_values(
+            &[
+                Literal::String("project_id"),
+                Literal::String("user_id"),
+                Literal::String("api_key_id"),
+                Literal::String("vector_store_id"),
+            ],
+        );
+    pub(super) static USAGE_IMAGES_REQUEST_QUERY_SOURCES_ITEMS: Plan = Plan::new()
+        .allowed_values(
+            &[
+                Literal::String("image.generation"),
+                Literal::String("image.edit"),
+                Literal::String("image.variation"),
+            ],
+        );
+    pub(super) static USAGE_IMAGES_REQUEST_QUERY_SIZES_ITEMS: Plan = Plan::new()
+        .allowed_values(
+            &[
+                Literal::String("256x256"),
+                Literal::String("512x512"),
+                Literal::String("1024x1024"),
+                Literal::String("1792x1792"),
+                Literal::String("1024x1792"),
+            ],
+        );
+    pub(super) static USAGE_IMAGES_REQUEST_QUERY_GROUP_BY_ITEMS: Plan = Plan::new()
+        .allowed_values(
+            &[
+                Literal::String("project_id"),
+                Literal::String("user_id"),
+                Literal::String("api_key_id"),
+                Literal::String("model"),
+                Literal::String("size"),
+                Literal::String("source"),
+            ],
+        );
+    pub(super) static USAGE_MODERATIONS_REQUEST_QUERY_GROUP_BY_ITEMS: Plan = Plan::new()
+        .allowed_values(
+            &[
+                Literal::String("project_id"),
+                Literal::String("user_id"),
+                Literal::String("api_key_id"),
+                Literal::String("model"),
+            ],
+        );
+    pub(super) static USAGE_VECTOR_STORES_REQUEST_QUERY_GROUP_BY_ITEMS: Plan = Plan::new()
+        .allowed_values(&[Literal::String("project_id")]);
+    pub(super) static USAGE_WEB_SEARCH_CALLS_REQUEST_QUERY_CONTEXT_LEVELS_ITEMS: Plan = Plan::new()
+        .allowed_values(
+            &[Literal::String("low"), Literal::String("medium"), Literal::String("high")],
+        );
+    pub(super) static USAGE_WEB_SEARCH_CALLS_REQUEST_QUERY_GROUP_BY_ITEMS: Plan = Plan::new()
+        .allowed_values(
+            &[
+                Literal::String("project_id"),
+                Literal::String("user_id"),
+                Literal::String("api_key_id"),
+                Literal::String("model"),
+                Literal::String("context_level"),
+            ],
+        );
+    pub(super) static ACCEPT_REALTIME_CALL_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_57_REALTIME_SESSION_CREATE_REQUEST_GA,
+    );
+    pub(super) static CREATE_REALTIME_SESSION_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_65_REALTIME_SESSION_CREATE_REQUEST,
+    );
+    pub(super) static CREATE_REALTIME_TRANSCRIPTION_SESSION_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_66_REALTIME_TRANSCRIPTION_SESSION_CREATE_REQUEST,
+    );
+    pub(super) static CREATE_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
+        .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
+    pub(super) static GET_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
+        .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
+    pub(super) static DELETE_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
+        .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
+    pub(super) static CANCEL_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
+        .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
+    pub(super) static LIST_INPUT_ITEMS_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
+        .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
+    pub(super) static CREATE_UPLOAD_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_80_CREATE_UPLOAD_REQUEST2,
+    );
+    pub(super) static CREATE_VECTOR_STORE_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_83_CREATE_VECTOR_STORE_REQUEST2,
+    );
+    pub(super) static CREATE_VECTOR_STORE_FILE_BATCH_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_86_CREATE_VECTOR_STORE_FILE_BATCH_REQUEST2,
+    );
+    pub(super) static SEARCH_VECTOR_STORE_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_90_VECTOR_STORE_SEARCH_REQUEST,
+    );
+    pub(super) static UPDATEORGANIZATIONSPENDLIMIT_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_93_UPDATE_ORGANIZATION_SPEND_LIMIT_BODY,
+    );
+    pub(super) static UPDATEPROJECTSPENDLIMIT_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_94_UPDATE_PROJECT_SPEND_LIMIT_BODY,
+    );
+    pub(super) static CREATE_VIDEO_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_96_CREATE_VIDEO_JSON_BODY,
+    );
+    pub(super) static CREATE_VIDEO_CHARACTER_REQUEST_FORM_NAME: Plan = Plan::new()
+        .min_length(1u64)
+        .max_length(80u64);
+    pub(super) static CREATE_VIDEO_EDIT_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_101_CREATE_VIDEO_EDIT_JSON_BODY,
+    );
+    pub(super) static CREATE_VIDEO_EXTEND_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_103_CREATE_VIDEO_EXTEND_JSON_BODY,
+    );
+    pub(super) static CREATE_VIDEO_REMIX_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_104_CREATE_VIDEO_REMIX_BODY,
+    );
+    pub(super) static GETINPUTTOKENCOUNTS_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
+        .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
+    pub(super) static COMPACTCONVERSATION_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
+        .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
+    pub(super) static CREATE_CHAT_SESSION_METHOD_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_113_CREATE_CHAT_SESSION_BODY,
+    );
+    pub(super) static LIST_THREADS_METHOD_REQUEST_QUERY_USER: Plan = Plan::new()
+        .min_length(1u64)
+        .max_length(512u64);
+    pub(super) static COMPONENT_0_CREATE_SPEECH_REQUEST2: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new("input", &Plan::new().max_length(4096u64)),
+                Property::new(
+                    "instructions",
+                    &Plan::new().nullable().max_length(4096u64),
+                ),
+                Property::new(
+                    "response_format",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("mp3"),
+                                Literal::String("opus"),
+                                Literal::String("aac"),
+                                Literal::String("flac"),
+                                Literal::String("wav"),
+                                Literal::String("pcm"),
+                                Literal::Null,
+                            ],
+                        ),
+                ),
+                Property::new(
+                    "speed",
+                    &Plan::new().nullable().minimum("0.25").maximum("4"),
+                ),
+                Property::new(
+                    "stream_format",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("sse"),
+                                Literal::String("audio"),
+                                Literal::Null,
+                            ],
+                        ),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_3_CREATE_BATCH_REQUEST2: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "completion_window",
+                    &Plan::new().allowed_values(&[Literal::String("24h")]),
+                ),
+                Property::new(
+                    "endpoint",
+                    &Plan::new()
+                        .allowed_values(
+                            &[
+                                Literal::String("/v1/responses"),
+                                Literal::String("/v1/chat/completions"),
+                                Literal::String("/v1/embeddings"),
+                                Literal::String("/v1/completions"),
+                                Literal::String("/v1/moderations"),
+                                Literal::String("/v1/images/generations"),
+                                Literal::String("/v1/images/edits"),
+                                Literal::String("/v1/videos"),
+                            ],
+                        ),
+                ),
+                Property::new(
+                    "output_expires_after",
+                    &Plan::reference(
+                            &Plan::reference(&COMPONENT_5_BATCH_FILE_EXPIRATION_AFTER),
+                        )
+                        .nullable(),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_5_BATCH_FILE_EXPIRATION_AFTER: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "anchor",
+                    &Plan::new().allowed_values(&[Literal::String("created_at")]),
+                ),
+                Property::new("seconds", &Plan::new().minimum("3600").maximum("2592000")),
+            ],
+        );
+    pub(super) static COMPONENT_8_CREATE_COMPLETION_REQUEST2: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "best_of",
+                    &Plan::new().nullable().minimum("0").maximum("20"),
+                ),
+                Property::new(
+                    "frequency_penalty",
+                    &Plan::new().nullable().minimum("-2").maximum("2"),
+                ),
+                Property::new(
+                    "logprobs",
+                    &Plan::new().nullable().minimum("0").maximum("5"),
+                ),
+                Property::new("max_tokens", &Plan::new().nullable().minimum("0")),
+                Property::new("n", &Plan::new().nullable().minimum("1").maximum("128")),
+                Property::new(
+                    "presence_penalty",
+                    &Plan::new().nullable().minimum("-2").maximum("2"),
+                ),
+                Property::new(
+                    "temperature",
+                    &Plan::new().nullable().minimum("0").maximum("2"),
+                ),
+                Property::new("top_p", &Plan::new().nullable().minimum("0").maximum("1")),
+            ],
+        );
+    pub(super) static COMPONENT_11_CREATE_CONTAINER_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "memory_limit",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("1g"),
+                                Literal::String("4g"),
+                                Literal::String("16g"),
+                                Literal::String("64g"),
+                                Literal::Null,
+                            ],
+                        ),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_13_CREATE_EMBEDDING_REQUEST2: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new("dimensions", &Plan::new().nullable().minimum("1")),
+                Property::new(
+                    "encoding_format",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("float"),
+                                Literal::String("base64"),
+                                Literal::Null,
+                            ],
+                        ),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_19_CREATE_FINE_TUNING_JOB_REQUEST2: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "method",
+                    &Plan::reference(&Plan::reference(&COMPONENT_20_FINE_TUNE_METHOD))
+                        .nullable(),
+                ),
+                Property::new(
+                    "seed",
+                    &Plan::new().nullable().minimum("0").maximum("2147483647"),
+                ),
+                Property::new(
+                    "suffix",
+                    &Plan::new().nullable().min_length(1u64).max_length(64u64),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_20_FINE_TUNE_METHOD: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "reinforcement",
+                    &Plan::reference(
+                            &Plan::reference(
+                                &COMPONENT_23_FINE_TUNE_REINFORCEMENT_METHOD,
+                            ),
+                        )
+                        .nullable(),
+                ),
+                Property::new(
+                    "type",
+                    &Plan::new()
+                        .allowed_values(
+                            &[
+                                Literal::String("supervised"),
+                                Literal::String("dpo"),
+                                Literal::String("reinforcement"),
+                            ],
+                        ),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_23_FINE_TUNE_REINFORCEMENT_METHOD: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "hyperparameters",
+                    &Plan::reference(
+                            &Plan::reference(
+                                &COMPONENT_24_FINE_TUNE_REINFORCEMENT_HYPERPARAMETERS,
+                            ),
+                        )
+                        .nullable(),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_24_FINE_TUNE_REINFORCEMENT_HYPERPARAMETERS: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "reasoning_effort",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("default"),
+                                Literal::String("low"),
+                                Literal::String("medium"),
+                                Literal::String("high"),
+                                Literal::Null,
+                            ],
+                        ),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_27_EDIT_IMAGE_BODY_JSON_PARAM: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "images",
+                    &Plan::new()
+                        .min_items(1u64)
+                        .max_items(16u64)
+                        .items(&Plan::reference(&COMPONENT_28_IMAGE_REF_PARAM)),
+                ),
+                Property::new(
+                    "mask",
+                    &Plan::reference(&Plan::reference(&COMPONENT_28_IMAGE_REF_PARAM))
+                        .nullable(),
+                ),
+                Property::new(
+                    "prompt",
+                    &Plan::new().min_length(1u64).max_length(32000u64),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_28_IMAGE_REF_PARAM: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "image_url",
+                    &Plan::new().nullable().max_length(20971520u64),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_30_CREATE_IMAGE_REQUEST2: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "background",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("transparent"),
+                                Literal::String("opaque"),
+                                Literal::String("auto"),
+                                Literal::Null,
+                            ],
+                        ),
+                ),
+                Property::new(
+                    "moderation",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("low"),
+                                Literal::String("auto"),
+                                Literal::Null,
+                            ],
+                        ),
+                ),
+                Property::new("n", &Plan::new().nullable().minimum("1").maximum("10")),
+                Property::new(
+                    "output_format",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("png"),
+                                Literal::String("jpeg"),
+                                Literal::String("webp"),
+                                Literal::Null,
+                            ],
+                        ),
+                ),
+                Property::new(
+                    "quality",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("standard"),
+                                Literal::String("hd"),
+                                Literal::String("low"),
+                                Literal::String("medium"),
+                                Literal::String("high"),
+                                Literal::String("auto"),
+                                Literal::Null,
+                            ],
+                        ),
+                ),
+                Property::new(
+                    "response_format",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("url"),
+                                Literal::String("b64_json"),
+                                Literal::Null,
+                            ],
+                        ),
+                ),
+                Property::new(
+                    "style",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("vivid"),
+                                Literal::String("natural"),
+                                Literal::Null,
+                            ],
+                        ),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_33_TOGGLE_CERTIFICATES_REQUEST: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "certificate_ids",
+                    &Plan::new().min_items(1u64).max_items(10u64),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_35_UPDATE_ORGANIZATION_DATA_RETENTION_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "retention_type",
+                    &Plan::new()
+                        .allowed_values(
+                            &[
+                                Literal::String("zero_data_retention"),
+                                Literal::String("modified_abuse_monitoring"),
+                                Literal::String("enhanced_zero_data_retention"),
+                                Literal::String("enhanced_modified_abuse_monitoring"),
+                            ],
+                        ),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_36_CREATE_GROUP_BODY: Plan = Plan::new()
+        .properties(
+            &[Property::new("name", &Plan::new().min_length(1u64).max_length(255u64))],
+        );
+    pub(super) static COMPONENT_37_UPDATE_GROUP_BODY: Plan = Plan::new()
+        .properties(
+            &[Property::new("name", &Plan::new().min_length(1u64).max_length(255u64))],
+        );
+    pub(super) static COMPONENT_40_INVITE_REQUEST: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "role",
+                    &Plan::new()
+                        .allowed_values(
+                            &[Literal::String("reader"), Literal::String("owner")],
+                        ),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_43_UPDATE_PROJECT_DATA_RETENTION_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "retention_type",
+                    &Plan::new()
+                        .allowed_values(
+                            &[
+                                Literal::String("organization_default"),
+                                Literal::String("none"),
+                                Literal::String("zero_data_retention"),
+                                Literal::String("modified_abuse_monitoring"),
+                                Literal::String("enhanced_zero_data_retention"),
+                                Literal::String("enhanced_modified_abuse_monitoring"),
+                            ],
+                        ),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_46_PROJECT_MODEL_PERMISSIONS_UPDATE_REQUEST: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "mode",
+                    &Plan::new()
+                        .allowed_values(
+                            &[
+                                Literal::String("allow_list"),
+                                Literal::String("deny_list"),
+                            ],
+                        ),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_49_UPDATE_PROJECT_SERVICE_ACCOUNT_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "role",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("member"),
+                                Literal::String("owner"),
+                                Literal::Null,
+                            ],
+                        ),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_50_CREATE_SPEND_ALERT_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "currency",
+                    &Plan::new().allowed_values(&[Literal::String("USD")]),
+                ),
+                Property::new(
+                    "interval",
+                    &Plan::new().allowed_values(&[Literal::String("month")]),
+                ),
+                Property::new(
+                    "notification_channel",
+                    &Plan::reference(&COMPONENT_51_SPEND_ALERT_NOTIFICATION_CHANNEL),
+                ),
+                Property::new("threshold_amount", &Plan::new().minimum("0")),
+            ],
+        );
+    pub(super) static COMPONENT_51_SPEND_ALERT_NOTIFICATION_CHANNEL: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "type",
+                    &Plan::new().allowed_values(&[Literal::String("email")]),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_57_REALTIME_SESSION_CREATE_REQUEST_GA: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "include",
+                    &Plan::new()
+                        .nullable()
+                        .items(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[
+                                        Literal::String("item.input_audio_transcription.logprobs"),
+                                    ],
+                                ),
+                        ),
+                ),
+                Property::new(
+                    "output_modalities",
+                    &Plan::new()
+                        .nullable()
+                        .items(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[Literal::String("text"), Literal::String("audio")],
+                                ),
+                        ),
+                ),
+                Property::new(
+                    "type",
+                    &Plan::new().allowed_values(&[Literal::String("realtime")]),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_65_REALTIME_SESSION_CREATE_REQUEST: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "speed",
+                    &Plan::new().nullable().minimum("0.25").maximum("1.5"),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_66_REALTIME_TRANSCRIPTION_SESSION_CREATE_REQUEST: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "include",
+                    &Plan::new()
+                        .nullable()
+                        .items(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[
+                                        Literal::String("item.input_audio_transcription.logprobs"),
+                                    ],
+                                ),
+                        ),
+                ),
+                Property::new(
+                    "input_audio_format",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("pcm16"),
+                                Literal::String("g711_ulaw"),
+                                Literal::String("g711_alaw"),
+                                Literal::Null,
+                            ],
+                        ),
+                ),
+                Property::new(
+                    "input_audio_transcription",
+                    &Plan::reference(&Plan::reference(&COMPONENT_67_AUDIO_TRANSCRIPTION))
+                        .nullable(),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_67_AUDIO_TRANSCRIPTION: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "delay",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("minimal"),
+                                Literal::String("low"),
+                                Literal::String("medium"),
+                                Literal::String("high"),
+                                Literal::String("xhigh"),
+                                Literal::Null,
+                            ],
+                        ),
+                ),
+                Property::new("languages", &Plan::new().nullable().min_items(1u64)),
+            ],
+        );
+    pub(super) static COMPONENT_80_CREATE_UPLOAD_REQUEST2: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "expires_after",
+                    &Plan::reference(
+                            &Plan::reference(&COMPONENT_81_FILE_EXPIRATION_AFTER),
+                        )
+                        .nullable(),
+                ),
+                Property::new(
+                    "purpose",
+                    &Plan::new()
+                        .allowed_values(
+                            &[
+                                Literal::String("assistants"),
+                                Literal::String("batch"),
+                                Literal::String("fine-tune"),
+                                Literal::String("vision"),
+                            ],
+                        ),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_81_FILE_EXPIRATION_AFTER: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "anchor",
+                    &Plan::new().allowed_values(&[Literal::String("created_at")]),
+                ),
+                Property::new("seconds", &Plan::new().minimum("3600").maximum("2592000")),
+            ],
+        );
+    pub(super) static COMPONENT_83_CREATE_VECTOR_STORE_REQUEST2: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "expires_after",
+                    &Plan::reference(
+                            &Plan::reference(&COMPONENT_84_VECTOR_STORE_EXPIRATION_AFTER),
+                        )
+                        .nullable(),
+                ),
+                Property::new("file_ids", &Plan::new().nullable().max_items(500u64)),
+            ],
+        );
+    pub(super) static COMPONENT_84_VECTOR_STORE_EXPIRATION_AFTER: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "anchor",
+                    &Plan::new().allowed_values(&[Literal::String("last_active_at")]),
+                ),
+                Property::new("days", &Plan::new().minimum("1").maximum("365")),
+            ],
+        );
+    pub(super) static COMPONENT_86_CREATE_VECTOR_STORE_FILE_BATCH_REQUEST2: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "file_ids",
+                    &Plan::new().nullable().min_items(1u64).max_items(2000u64),
+                ),
+                Property::new(
+                    "files",
+                    &Plan::new().nullable().min_items(1u64).max_items(2000u64),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_90_VECTOR_STORE_SEARCH_REQUEST: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "max_num_results",
+                    &Plan::new().nullable().minimum("1").maximum("50"),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_93_UPDATE_ORGANIZATION_SPEND_LIMIT_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "currency",
+                    &Plan::new().allowed_values(&[Literal::String("USD")]),
+                ),
+                Property::new(
+                    "interval",
+                    &Plan::new().allowed_values(&[Literal::String("month")]),
+                ),
+                Property::new("threshold_amount", &Plan::new().minimum("1")),
+            ],
+        );
+    pub(super) static COMPONENT_94_UPDATE_PROJECT_SPEND_LIMIT_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "currency",
+                    &Plan::new().allowed_values(&[Literal::String("USD")]),
+                ),
+                Property::new(
+                    "interval",
+                    &Plan::new().allowed_values(&[Literal::String("month")]),
+                ),
+                Property::new("threshold_amount", &Plan::new().minimum("1")),
+            ],
+        );
+    pub(super) static COMPONENT_96_CREATE_VIDEO_JSON_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "input_reference",
+                    &Plan::reference(&Plan::reference(&COMPONENT_97_IMAGE_REF_PARAM2))
+                        .nullable(),
+                ),
+                Property::new(
+                    "prompt",
+                    &Plan::new().min_length(1u64).max_length(32000u64),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_97_IMAGE_REF_PARAM2: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "image_url",
+                    &Plan::new().nullable().max_length(20971520u64),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_101_CREATE_VIDEO_EDIT_JSON_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "prompt",
+                    &Plan::new().min_length(1u64).max_length(32000u64),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_103_CREATE_VIDEO_EXTEND_JSON_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "prompt",
+                    &Plan::new().min_length(1u64).max_length(32000u64),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_104_CREATE_VIDEO_REMIX_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "prompt",
+                    &Plan::new().min_length(1u64).max_length(32000u64),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_113_CREATE_CHAT_SESSION_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "chatkit_configuration",
+                    &Plan::reference(
+                            &Plan::reference(&COMPONENT_114_CHATKIT_CONFIGURATION_PARAM),
+                        )
+                        .nullable(),
+                ),
+                Property::new(
+                    "expires_after",
+                    &Plan::reference(
+                            &Plan::reference(&COMPONENT_118_EXPIRES_AFTER_PARAM),
+                        )
+                        .nullable(),
+                ),
+                Property::new(
+                    "rate_limits",
+                    &Plan::reference(&Plan::reference(&COMPONENT_119_RATE_LIMITS_PARAM))
+                        .nullable(),
+                ),
+                Property::new("user", &Plan::new().min_length(1u64)),
+            ],
+        );
+    pub(super) static COMPONENT_114_CHATKIT_CONFIGURATION_PARAM: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "file_upload",
+                    &Plan::reference(&Plan::reference(&COMPONENT_116_FILE_UPLOAD_PARAM))
+                        .nullable(),
+                ),
+                Property::new(
+                    "history",
+                    &Plan::reference(&Plan::reference(&COMPONENT_117_HISTORY_PARAM))
+                        .nullable(),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_116_FILE_UPLOAD_PARAM: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "max_file_size",
+                    &Plan::new().nullable().minimum("1").maximum("512"),
+                ),
+                Property::new("max_files", &Plan::new().nullable().minimum("1")),
+            ],
+        );
+    pub(super) static COMPONENT_117_HISTORY_PARAM: Plan = Plan::new()
+        .properties(
+            &[Property::new("recent_threads", &Plan::new().nullable().minimum("1"))],
+        );
+    pub(super) static COMPONENT_118_EXPIRES_AFTER_PARAM: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "anchor",
+                    &Plan::new().allowed_values(&[Literal::String("created_at")]),
+                ),
+                Property::new("seconds", &Plan::new().minimum("1").maximum("600")),
+            ],
+        );
+    pub(super) static COMPONENT_119_RATE_LIMITS_PARAM: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "max_requests_per_1_minute",
+                    &Plan::new().nullable().minimum("1"),
+                ),
+            ],
+        );
 }
 impl schematic_runtime::pager::Paginated for ListVoiceConsentsRequest {
     type Item = VoiceConsentResource;

@@ -58,5 +58,4 @@ pub use builder::{
 };
 pub use diagnostics::{DiagnosticSeverity, OpenApiDiagnostic};
 pub use mappings::{ResponseClassification, classify_responses};
-pub use normalize::clamp_numeric_bounds;
 pub use resolver::RefResolver;

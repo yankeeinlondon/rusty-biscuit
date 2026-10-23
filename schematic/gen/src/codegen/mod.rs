@@ -19,6 +19,9 @@
 //! - [`pagination`] - Generates the `schematic_runtime::pager::Paginated`
 //!   and capability marker impls of paginated list endpoints
 //! - [`shared`] - Generates the request-side helpers of `shared.rs`
+//! - `value_rules` - Compiles each request's value rules into the
+//!   `schematic_runtime::validate` plans its `validate()` and `into_parts`
+//!   check
 //!
 //! ## Code Generation Flow
 //!
@@ -47,6 +50,7 @@ pub mod pagination;
 pub mod request_structs;
 pub(crate) mod responses;
 pub mod shared;
+pub(crate) mod value_rules;
 
 pub use api_struct::generate_api_struct;
 pub use endpoint_methods::generate_endpoint_methods;
@@ -56,6 +60,6 @@ pub use request_structs::{
     PLACEHOLDER_API_MARKER, generate_request_struct, generate_request_struct_with_options,
     generate_request_struct_with_suffix,
 };
-pub(crate) use request_structs::generate_request_struct_with_defaults;
+pub(crate) use request_structs::generate_request_struct_with_rules;
 pub use shared::generate_request_helpers;
 pub use pagination::generate_pagination_impls;

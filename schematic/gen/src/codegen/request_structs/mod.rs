@@ -24,6 +24,7 @@ use quote::{format_ident, quote};
 use schematic_define::{Endpoint, RestApi};
 
 use crate::codegen::pagination::OrdinaryDefault;
+use crate::codegen::value_rules::{ApiValueRules, Finding, RequestRules};
 use crate::parser::extract_path_params;
 
 use named_params::ParamLocation;
@@ -65,6 +66,11 @@ pub const PLACEHOLDER_API_MARKER: &str = "Api";
 /// - a `schematic_runtime::EndpointSpec` implementation naming its API
 ///   marker, success type, codec, and endpoint id, whose `into_parts`
 ///   assembles the request
+/// - when the request declares value rules (on parameters, form fields, the
+///   body root, or the components a JSON body reaches): a `validate()`
+///   method, the same checks in `into_parts` before anything is encoded,
+///   and a private plans module for the API (see
+///   [`crate::codegen::value_rules`])
 ///
 /// This form names the API marker [`PLACEHOLDER_API_MARKER`]; generated
 /// modules use [`generate_request_struct_with_options`] with the API's own
@@ -141,6 +147,10 @@ pub fn generate_request_struct_with_options(
 /// [`generate_request_struct_with_options`] for an endpoint seen through its
 /// pager view, whose `into_parts` also sends `defaults`, the required
 /// parameters its pagination strategy adopted.
+///
+/// The request's value-rule plans are emitted after it, in a plans module
+/// of their own; a module of several requests shares one through
+/// [`generate_request_struct_with_rules`].
 pub(crate) fn generate_request_struct_with_defaults(
     api: &RestApi,
     endpoint: &Endpoint,
@@ -148,6 +158,25 @@ pub(crate) fn generate_request_struct_with_defaults(
     module_path: Option<&str>,
     api_marker: &str,
     defaults: &[OrdinaryDefault],
+) -> TokenStream {
+    let mut rules = ApiValueRules::new(api);
+    let mut tokens =
+        generate_request_struct_with_rules(api, endpoint, suffix, module_path, api_marker, defaults, &mut rules);
+    tokens.extend(rules.into_tokens());
+    tokens
+}
+
+/// [`generate_request_struct_with_defaults`] with the request's value-rule
+/// plans added to `rules`, which the caller emits once for every request of
+/// the API.
+pub(crate) fn generate_request_struct_with_rules(
+    api: &RestApi,
+    endpoint: &Endpoint,
+    suffix: &str,
+    module_path: Option<&str>,
+    api_marker: &str,
+    defaults: &[OrdinaryDefault],
+    rules: &mut ApiValueRules,
 ) -> TokenStream {
     let struct_name = format_ident!("{}{}", endpoint.id, suffix);
     let struct_name_str = format!("{}{}", endpoint.id, suffix);
@@ -157,6 +186,8 @@ pub(crate) fn generate_request_struct_with_defaults(
     let cookie_params = extract_cookie_params(&endpoint.params);
     let typed_paths = path_params::typed_path_fields(endpoint, &struct_name_str);
     let typed_paths = typed_paths.as_deref();
+    let request_rules =
+        rules.request(endpoint, &struct_name_str, typed_paths, &query_params, &header_params, &cookie_params);
     // Required query parameters are `new()` arguments, after the path
     // parameters and before the body.
     let required_query: Vec<QueryParamInfo> =
@@ -245,6 +276,7 @@ pub(crate) fn generate_request_struct_with_defaults(
         typed_paths,
         &query_params,
         defaults,
+        &request_rules,
     );
     let endpoint_spec_impl =
         endpoint_spec::generate_endpoint_spec_impl(api, &struct_name, api_marker, endpoint, into_parts_body);
@@ -267,6 +299,7 @@ pub(crate) fn generate_request_struct_with_defaults(
             .iter()
             .map(|line| endpoint_docs::doc_line(line)),
     );
+    doc_lines.extend(value_rules_doc(&request_rules));
     doc_lines.extend(generate_doc_example(
         &struct_name_str,
         &example,
@@ -295,8 +328,28 @@ pub(crate) fn generate_request_struct_with_defaults(
 
     let form_struct = form::generate_form_struct(api, endpoint);
 
+    let validate_method = if request_rules.enforces() {
+        let body = into_parts::generate_validate_body(&request_rules);
+        quote! {
+            /// Checks the request's declared value rules, as every send does
+            /// before any network work, and returns every violation.
+            ///
+            /// A violation names the value's location, the rule's keyword, and
+            /// a reason; it never holds the submitted value. A send reports
+            /// the same violations as one `InvalidArgument`. A JSON value is
+            /// checked as it serializes; one that cannot be serialized is not
+            /// reported here, and sending it fails instead.
+            pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+                #body
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     let inherent_methods = quote! {
         #new_method
+        #validate_method
         #query_builder_methods
         #header_builder_methods
         #cookie_builder_methods
@@ -334,6 +387,34 @@ pub(crate) fn generate_request_struct_with_defaults(
 
         #endpoint_spec_impl
     }
+}
+
+/// The `## Value rules` section of a request's docs, starting with the
+/// blank line that separates it; empty for a request without rules.
+fn value_rules_doc(rules: &RequestRules) -> Vec<String> {
+    if !rules.enforces() && rules.findings.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![String::new(), " ## Value rules".to_string(), String::new()];
+    if rules.enforces() {
+        lines.push(
+            " Every send checks this request's declared value rules first and refuses a violating request \
+             before any network work, with every violation in one `InvalidArgument`; \
+             `validate()` reports the same violations early."
+                .to_string(),
+        );
+    } else {
+        lines.push(" This request declares value rules that the client does not check.".to_string());
+    }
+    if !rules.findings.is_empty() {
+        lines.extend([String::new(), " Not checked:".to_string(), String::new()]);
+        lines.extend(rules.findings.iter().map(finding_doc_line));
+    }
+    lines
+}
+
+fn finding_doc_line(finding: &Finding) -> String {
+    format!(" - {} `{}`: {}", finding.place, finding.keyword, finding.reason.replace('\n', " "))
 }
 
 /// The type of the request's `body` field, or `None` when it sends no body:
