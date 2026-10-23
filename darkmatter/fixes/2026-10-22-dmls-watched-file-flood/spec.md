@@ -1,6 +1,6 @@
 ---
 area: darkmatter
-status: draft-spec
+status: implemented
 $schema:
     status: |-
         enum(
@@ -23,6 +23,8 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 reviewed: false
 review_iterations: 0
+implemented: true
+implemented_by: claude/opus
 clarified: false
 created: 2026-10-22
 owner: Ken Snyder <ken@ken.net>
