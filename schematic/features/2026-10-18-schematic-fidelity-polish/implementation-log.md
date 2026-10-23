@@ -16,6 +16,7 @@ packages:
     - schematic-gen
     - schematic-definitions
     - schematic-define
+    - schematic-schema
 human_review: false
 source_files_during_phase_2:
     - schematic/define/src/openapi/export/conversion.rs
@@ -173,15 +174,66 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/schematic-define/schematic/definitions.md
     - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_6:
+    - schematic/definitions/src/naming.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/tests/api_inventory.rs
+    - schematic/definitions/tests/pagination_coverage/main.rs
+    - schematic/define/src/types.rs
+    - schematic/gen/src/inference.rs
+    - schematic/gen/src/export/naming.rs
+    - schematic/gen/src/export/mod.rs
+    - schematic/gen/src/export/openapi.rs
+    - schematic/gen/src/export/postman/mod.rs
+    - schematic/gen/src/export/postman/tests.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/src/lib.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/helpers.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/mod.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/pipeline.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/definition_bundles.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/module_naming.rs
+docs_updated_during_phase_6:
+    - schematic/docs/generation/generated-clients.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/schematic-define/schematic/definitions.md
+source_files_during_phase_7:
+    - schematic/gen/src/cargo_gen.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/module_features.rs
+    - schematic/schema/Cargo.toml
+    - schematic/schema/src/lib.rs
+    - schematic/schema/src/prelude.rs
+docs_updated_during_phase_7:
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/partial-generation.md
+    - schematic/docs/generation/validation.md
+    - schematic/schema/README.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/schematic-define/schematic/gen.md
 message_to_agent: |-
-  Phase 5 (single API registration inventory) is complete; read "## Phase 5" in implementation-log.md.
+  Phase 7 (module feature flags) is complete; read "## Phase 7" in implementation-log.md.
 
-  - Every shipped API is one entry in schematic/definitions/src/registry/inventory.rs (`registrations()`): ApiRegistration { name, module, definitions_path, protocol: Rest{key, group, member} | WebSocket{define, constructor, summary} }. all_apis(), apis_by_module(), registry_key_for, --api help/resolution, WS module packaging, lib.rs/prelude.rs WS entries, reserved module names, and definitions_module_path all derive from it.
-  - `module` on each entry is the generated module / export stem. A test (definitions/tests/api_inventory.rs) asserts it equals api.module_path or the lowercased name. Phase 6 (resolver unification) should treat the registration's `module` as the authority, or update that invariant test when the resolver changes.
-  - Phase 7 (module feature flags): enumerate modules from registrations() (REST modules + WebSocket modules); do not add a new list.
-  - Fixture seams: resolve_api_in, available_apis_in, RustOutputRequest::registrations, validate_rust_client_in, generate_ws_definition_modules(regs), validate_ws_definition_modules(regs). generate_batch still takes REST APIs and packages the shipped WebSocket entries.
-  - The strict gate's skip list is STRICT_GATE_SKIPS in gen/tests/l1/openapi_strict_completeness.rs (empty).
-  - Gate notes unchanged: `just test` and `just lint` from schematic/; clippy redundant_closure is enforced in tests.
+  - schematic-schema now has one Cargo feature per module group (named for the module, default = all). lib.rs gates each `pub mod` and its doc-table row, prelude.rs each re-export and doc line, with `#[cfg(feature = "<module>")]`; ws_shared compiles under any WS feature. futures-util, thiserror, tokio-tungstenite are optional and enabled only by WS features.
+  - The manifest comes from `cargo_gen::ModuleFeatures::new(registry, registrations)`; generate_cargo_toml / generate_cargo_toml_with_paths / write_cargo_toml take `&ModuleFeatures`.
+  - Phase 8 (compiled docs): the crate-level Quick Start and the prelude example are still `text` fences naming one API (Anthropic / OpenAI). When they become no_run doctests they compile only with that module's feature; doctests run with default features, but a selected-feature doc check needs the example gated (e.g. `#![cfg_attr(feature = "...", doc = ...)]`, as the table rows are) or written against a module the check enables.
+  - Phase 6 changes are still uncommitted in this worktree alongside Phase 7.
 ---
 
 # Implementation Log for 2026-10-18-schematic-fidelity-polish (13 phases)
@@ -1568,3 +1620,261 @@ Phase 5 status: checkpoint met. One fixture entry reaches every consumer
 strict gate); the gate's covered set is checked against `apis_by_module()`
 with one reasoned skip list (empty); unchanged registrations yield unchanged
 artifacts and Rust output; the common phase checks pass.
+
+## Phase 6
+
+Unify module and artifact names (R36, R37). Implemented directly by the
+orchestrator without subagents: the change moves one function and rewires
+its call sites across two crates, so its write set is not divisible. The
+`os` skill was loaded first (relevant fact: case-insensitive default file
+systems on macOS and Windows).
+
+### Wave 13: one resolver (R36)
+
+- New `schematic/definitions/src/naming.rs` owns the policy:
+  `resolve_module_name(&RestApi)` and `module_name(name, explicit)` (the form
+  for callers holding no `RestApi`, such as later AsyncAPI naming), plus the
+  suffix rule `infer_module_path` and its unit tests, moved unchanged from
+  `gen/src/inference.rs`. Order: explicit `module_path`, else drop a
+  Native/Client/Service/Hub/Api/Sdk suffix, else lowercase.
+- Removed (exact locations): `gen/src/inference.rs` (whole file; and
+  `pub mod inference` / `pub use inference::infer_module_path` in
+  `gen/src/lib.rs`); `gen/src/export/naming.rs` (the lowercase-only
+  `resolve_module_name`, and its `pub mod`/`pub use` in `export/mod.rs`);
+  `get_module_path` in `gen/src/output/assemble/helpers.rs` (and its
+  re-exports in `assemble/mod.rs` and `output/mod.rs`).
+- Call sites now on the one resolver: Rust assembler (`assemble/api.rs`,
+  `lib_rs.rs`, `prelude.rs`, `output/mod.rs` grouping, selection, and file
+  names), validation (`validation.rs` group check, module-path check, export
+  filename check), OpenAPI writer (`export/openapi.rs`), Postman writer
+  (`export/postman/mod.rs`), export grouping (`pipeline.rs::export_batch`,
+  `export_groups`), and the import pipeline's definitions module name
+  (`import_pipeline.rs`, previously a third lowercase-only fallback: an
+  imported `PagerDutyApi` wrote `define_pagerdutyapi_api` /
+  `::schematic_definitions::pagerdutyapi` while generation filed it as
+  `pagerduty`).
+- Registration grouping: `apis_by_module` groups by the registration's
+  `module`; the inventory invariant test now asserts that equals
+  `resolve_module_name` of the built API (was `module_path` or lowercase).
+- New validation (cross-platform trap in the spec's risks): module names that
+  differ only by letter case are an `invalid-output-filename` error in Rust,
+  OpenAPI, and Postman validation; a Rust module name equal to a reserved
+  file (`lib`, `shared`, `prelude`, `ws_shared`) or a WebSocket module in
+  another case is refused like the exact match already was.
+- adopted default: the unified resolver adopts the Rust assembler's suffix
+  heuristic; OpenAPI and Postman stems follow it (source: spec P10-f).
+- adopted default: the resolver lives in a new `schematic_definitions::naming`
+  module rather than `registry` (source: spec ownership table, "Proposed:
+  location"); `registry` holds the inventory, naming is a separate policy.
+- Docs-comment drift fixed: `RestApi::module_path` doc in
+  `define/src/types.rs` said "defaults to `api.name.to_lowercase()`", which
+  was only the export writers' rule; it now names the resolver.
+
+### R37: renamed artifacts
+
+None. Before the change, every shipped API resolved identically under both
+policies: the three APIs without an explicit `module_path` (Anthropic,
+ElevenLabs, LmStudio) carry no variant suffix, and every other API sets one.
+So no committed OpenAPI, Postman, or Rust file was renamed or removed, and no
+regeneration was needed (`artifact_drift::generated_{rust,openapi,postman}_artifacts_are_up_to_date`
+pass). Old-name consumer search: `grep` for `get_module_path`,
+`infer_module_path`, `export::resolve_module_name`, `export::naming`, and
+`schematic_gen::inference` across the repository (outside `schematic/` and
+`features/` history) found nothing; no package outside `schematic/` depends
+on `schematic-gen`. The only name change is for non-shipped inputs whose name
+ends in a suffix: two in-crate Postman unit tests used a `TestApi` fixture and
+expected `testapi.postman_collection.json`, the very divergence R36 removes;
+they (and the `write_postman` doc example) now expect
+`test.postman_collection.json`, matching the Rust module `test.rs`.
+
+### Requirement → test mapping
+
+| Behavior | Test |
+| --- | --- |
+| resolution order: explicit wins, suffix inferred, fallback lowercased | `definitions` unit `naming::tests::{module_name_prefers_an_explicit_path_over_inference, module_name_infers_a_variant_suffix, module_name_falls_back_to_the_lowercased_name}` plus the moved `infer_module_path_*`/`split_camel_case_*` tests and 3 doctests |
+| R36 `PagerDutyApi`-style names: Rust, OpenAPI, Postman use one stem; shared group (`PagerDutyApi` + `PagerDutyClient`, no explicit path) is one module in all three; fallback and explicit in the same batch; no `pagerdutyapi*` file | `gen l1 module_naming::every_writer_files_an_api_under_the_one_resolved_stem` (F2: real `generate_batch` publishing to a temp dir, exact file sets) |
+| import names the definitions module with the resolver (inferred and explicit) | `module_naming::import_names_the_definitions_module_with_the_shared_resolver` (F2: `run_import` writing a real `mod.rs`) |
+| case-insensitive stem uniqueness, every writer; nothing published; control | `module_naming::module_names_differing_only_by_case_are_refused_by_every_writer` |
+| reserved/WS file names in another case | `module_naming::a_module_name_cannot_take_a_generated_file_in_another_case` |
+| R36 real APIs: committed file names unchanged (OpenAPI, Postman, Rust `schema/src` entries) and each is a resolved stem | `module_naming::every_shipped_artifact_is_named_by_the_resolver` (reads `manifest_dir!().join("../openapi" / "../postman" / "../schema/src")` inline) |
+| registered modules equal the resolver; unique ignoring case; portable `[a-z0-9_]` | `definitions/tests/api_inventory.rs::{every_shipped_registration_agrees_with_the_api_it_builds, shipped_module_names_are_unique_ignoring_case_and_portable}` |
+| R37 / generated Rust unchanged | `artifact_drift::generated_{rust,openapi,postman}_artifacts_are_up_to_date` |
+
+Regression proof: before this change, the import test would see
+`define_pagerdutyapi_api`, the case test would see no diagnostic (no check
+existed), and the two Postman unit tests failed in the first gate run on the
+old expectation (`testapi.…`), confirming the writer now follows the Rust
+stem. Input robustness matrix: not applicable (no file-format or
+configuration reader added or changed; naming is a pure function of the
+definition). New tests are L1, declared in `gen/tests/l1/main.rs`
+(`mod module_naming`) and the existing `definitions` test targets; no
+tier marker in any name.
+
+### Gates (Phase 6)
+
+- `just lint` (schematic): clean.
+- `just test` (schematic): first run stopped at the 2 Postman unit tests
+  above (expectation updated); rerun 2868 passed (4 slow: the pre-existing
+  `schematic-runtime` TLS builder tests), 20 skipped; fresh-output 14 passed;
+  compile-fail 1 passed.
+- Doctests: `cargo test --doc -p schematic-definitions naming` 3 passed;
+  `cargo test --doc -p schematic-gen export::postman` 4 passed.
+- `just check-tier-coverage schematic`: 0 stranded.
+- Dependents: generated Rust is byte-identical (drift tests), so the
+  `schematic-schema` consumers see no change. No package outside
+  `schematic/` depends on `schematic-gen`. `schematic-definitions` only
+  gained a module; `cargo check -p model-citizen` clean.
+- Scope calculator not used to skip gates; both gates ran.
+- Cross-OS check: not run. The only path-adjacent change is a pure string
+  comparison (case folding of module names); no filesystem, process, or
+  `#[cfg]` code changed, and the new tests write only under `tempfile` dirs.
+
+Phase 6 status: checkpoint met. Every writer resolves the same module/stem
+through one definitions-owned function; no real filename changed (listed
+above as none); no stale artifact survives; generated Rust is unchanged; the
+drift and common phase checks pass.
+
+## Phase 7
+
+Generate module feature flags (R29–R32). Implemented directly by the
+orchestrator without subagents: the write set (manifest generator, `lib.rs`
+and prelude assemblers, the regenerated crate, and the tests) is one
+integrated change, and dependent builds were serialized. The `os` skill was
+not needed: no path, process, or `#[cfg(target_os)]` code changed.
+
+### Wave 14: Feature generation (R29, R32)
+
+- `gen/src/cargo_gen.rs`: new `ModuleFeatures::new(registry, registrations)`
+  holds the resolved REST module groups of the registry and the WebSocket
+  modules of the registrations, which are the same sets `lib.rs` declares.
+  The manifest gains a `[features]` table: `default` lists every module,
+  sorted; each module is a feature named for it; REST features enable
+  nothing; each WebSocket feature enables
+  `dep:futures-util`, `dep:thiserror`, `dep:tokio-tungstenite`
+  (`WEBSOCKET_DEPENDENCIES`), which are now `optional = true`. With no
+  WebSocket module those three dependencies are left out. A feature name TOML
+  cannot leave bare is quoted. `generate_cargo_toml`,
+  `generate_cargo_toml_with_paths`, and `write_cargo_toml` take
+  `&ModuleFeatures`.
+- `output/mod.rs`: `prepare_rust_output` builds the manifest from
+  `request.registry` (the whole registry, never the selection), so a partial
+  run writes the same manifest as a full run (R32).
+- `assemble/lib_rs.rs`: each `pub mod` is `#[cfg(feature = "<module>")]`;
+  `ws_shared` is `#[cfg(any(<every WS feature>))]` and carries
+  `#[cfg_attr(not(all(<every WS feature>)), allow(dead_code))]`. Finding:
+  without that allow, a one-WebSocket build (`elevenlabs_ws`) warned about 5
+  correlation helpers (`request_id`, `PendingGuard`, …) that only some WS
+  modules use; the default build still checks dead code fully. Each REST and
+  WS doc-table row is `#![cfg_attr(feature = "<module>", doc = "…")]`, and a
+  short "Features" section was added to the generated crate docs.
+- `assemble/prelude.rs`: each re-export and its doc-list line are gated on
+  the module's feature.
+- `validation.rs`: a module path `default` is an `invalid-module-path` error
+  (it would name the generated crate's `default` feature). Cargo was checked
+  to accept a feature sharing a name with a non-optional dependency, so no
+  other name needed refusing.
+- The standalone import output (`assemble_lib_rs_with_options`,
+  `generate_and_write_standalone`) is left ungated: it writes no manifest,
+  so gating it would make every imported module disappear.
+- Regenerated with `just generate`: `schema/Cargo.toml`, `schema/src/lib.rs`,
+  `schema/src/prelude.rs` changed; OpenAPI and Postman are unchanged. rustdoc
+  of a two-feature build (`cargo doc --no-deps --no-default-features
+  --features anthropic,elevenlabs_ws`) is warning-free and its tables hold
+  only the enabled rows.
+- adopted default: one feature per resolved module group, named for the
+  module, default = all, no `all-apis` umbrella (source: spec P10-d).
+- adopted default: WebSocket-only dependencies are `futures-util`,
+  `thiserror`, `tokio-tungstenite` (each is used only by `ws_shared.rs` or WS
+  modules in the generated source). `schematic-define` is also used only by
+  WS modules but stays non-optional: `schematic-runtime` and
+  `schematic-definitions` depend on it anyway, so making it optional changes
+  nothing (source: R30 "Dependencies still needed by the shared runtime may
+  remain enabled").
+- adopted default: feature modules come from the registry passed to the run
+  (production: `rest_apis(registrations())`) plus the registrations' WS
+  entries, not from `registrations()` REST `module` fields alone. They are
+  equal for shipped data (Phase 6 invariant), and fixture registries
+  (fresh-output and partial-generation tests) need their own modules
+  declared (source: spec P10-d "generated from the full inventory").
+- Observation for review, not changed: `tokio-stream` is declared in the
+  generated manifest but no generated file uses it.
+- Observation for Phase 8: the crate docs' Quick Start example and prelude
+  example are `text` fences naming one API; when Phase 8 makes them compile,
+  they need the named module's feature (or a gate).
+
+### Wave 15: Feature and dependent evidence (R30, R31)
+
+- R30, `module_features::slow_feature_selections_compile_only_their_module_groups`
+  (F3, fresh-output mechanism: real 18 REST + 5 WS APIs generated outside the
+  checkout, offline and locked). For each of no features, `anthropic` (one
+  REST), `elevenlabs_ws` (one WS), `ollama` (shared group), and
+  `anthropic,elevenlabs_ws` (pair): `cargo check --lib` succeeds with no
+  `schematic-schema` warning; a `present` probe of the enabled items
+  (module paths and prelude re-exports, `ws_shared::WsError` for WS)
+  compiles; one probe per disabled item fails with
+  `unresolved import schematic_schema::<path>`; `cargo tree -e normal` holds
+  `tokio-tungstenite` exactly when a WS module is selected. 16 s warm.
+  `FreshCrate::cargo_offline` was added for feature arguments and
+  `cargo tree` (which takes no `--target-dir`).
+- Manual cross-check on the committed crate before the test existed: the
+  same selections built clean, and the REST-only tree had no tungstenite.
+- `just lint-schema`: clean. `just test-schema`: 152 passed.
+- R31 dependents: none of the seven `schematic-schema` dependents sets
+  `default-features = false` (grep of their manifests); `model-citizen`
+  depends only on `schematic-definitions`. No dependent source or manifest
+  was changed.
+  - `cargo build -p sniff -p biscuit-speaks -p model-citizen -p homelab -p eversolo-integration -p arcam-amp-integration -p sony-receiver-integration -p unfolded-integration-helper --all-targets`: success, no warnings.
+  - `just test model-citizen homelab eversolo-integration arcam-amp-integration sony-receiver-integration unfolded-integration-helper`: 422 passed, 8 skipped (the selectors take whole areas, so the homelab CLI and server ran too).
+  - sniff (2141 tests) and biscuit-speaks (441) exceed the 200-test threshold, so only the tests over the code that uses `schematic_schema` ran: `cargo nextest run -p sniff -E 'test(/remote/)'` 75 passed (the `remote::{github,gitlab,gitea,bitbucket,envelope}` users); `cargo nextest run -p biscuit-speaks -E 'test(/elevenlabs/)'` 48 passed.
+  - With default features every `cfg` is true, so the code dependents compile is the same as before; the WS-only dependencies resolve to the same versions and features.
+
+### Requirement → test mapping
+
+| Behavior | Test |
+| --- | --- |
+| R29 one feature per module group, default = all, sorted; shared group is one feature | `cargo_gen::tests::every_shipped_module_group_is_one_default_feature`; `a_manifest_without_websocket_modules_declares_no_websocket_dependency` (PagerDutyApi + PagerDutyClient → one `pagerduty`) |
+| R29 WS features enable exactly the WS-only deps; REST features enable nothing | `cargo_gen::tests::websocket_features_enable_exactly_the_websocket_only_dependencies` |
+| R29 only WS-only deps are optional | `cargo_gen::tests::only_websocket_dependencies_are_optional` |
+| no WS module → no WS deps; empty inventory → `default = []`; non-bare name quoted | `cargo_gen::tests::{a_manifest_without_websocket_modules_declares_no_websocket_dependency, an_empty_inventory_has_an_empty_default_feature, a_feature_name_toml_cannot_leave_bare_is_quoted}` |
+| committed manifest is the generator's | `cargo_gen::tests::default_manifest_matches_the_committed_schema_manifest`; `artifact_drift::generated_rust_artifacts_are_up_to_date` (lib.rs, prelude.rs) |
+| every cfg in lib.rs/prelude.rs names a declared feature and every module is gated; doc rows and re-exports gated | `module_features::every_feature_the_generated_code_names_is_a_declared_module_feature` (F2, real `prepare_rust_output` publish) |
+| R32 partial run writes the full-inventory manifest; unselected siblings and WS keep features; lib.rs unchanged | `module_features::a_partial_run_writes_the_manifest_of_the_whole_registry` (stale owned manifest overwritten by a one-API partial run, compared byte-for-byte with the full run) |
+| R30 selections compile, disabled items absent, transport gated | `module_features::slow_feature_selections_compile_only_their_module_groups` |
+| module path `default` refused | `validation::tests` table case "module path naming the default feature" |
+| R31 dependents unchanged | commands above |
+
+Regression proof: before this change the manifest had no `[features]`
+table (every new `cargo_gen` and `module_features` fast test fails on the
+missing table), and every absent-item probe would have compiled. The first
+slow run failed on my own probe check (an unused-import warning summary
+matched the failure pattern); the check now matches only
+`could not compile … (test "present")`. Input robustness matrix: not
+applicable (no reader of a file format or configuration was added or
+changed; the manifest is written, not read). New tests are L1: the fast
+ones in `gen/tests/l1/module_features.rs` (declared `mod module_features` in
+`main.rs`) and `cargo_gen` unit tests; the `slow_` test runs in
+`just test-fresh-output` (part of `just test`) in the
+`schematic-fresh-output` group.
+
+### Gates (Phase 7)
+
+- `just lint` (schematic): clean.
+- `just test` (schematic): 2876 passed (4 slow, the existing
+  `schematic-runtime` TLS tests), 21 skipped; fresh-output 15 passed
+  (including the new slow test); compile-fail 1 passed. No failures, no
+  reruns.
+- `cargo test --doc -p schematic-gen cargo_gen`: 3 passed.
+- `just check-tier-coverage schematic`: 0 stranded.
+- `just lint-schema`, `just test-schema`: clean, 152 passed.
+- Scope calculator not used to skip gates; both gates ran.
+- Cross-OS check: not run. The change is manifest text, `#[cfg(feature)]`
+  attributes, and string tests; no filesystem path, process, or OS-specific
+  code changed. The new slow test reuses the existing fresh-output mechanism,
+  whose OS handling is unchanged.
+- Note: Phase 6's changes are still uncommitted in this worktree, so the
+  working tree holds both phases; the frontmatter lists only Phase 7 files.
+
+Phase 7 status: checkpoint met. Selected builds expose exactly their groups,
+features are additive, the WebSocket transport is gated, full and partial
+generation write the same manifest, all eight dependents build and pass
+unchanged, and the common phase checks pass.

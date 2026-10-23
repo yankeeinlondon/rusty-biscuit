@@ -17,6 +17,7 @@ packages:
     - schematic-gen
     - schematic-definitions
     - schematic-define
+    - schematic-schema
 source_files_during_phase_2:
     - schematic/define/src/openapi/export/conversion.rs
     - schematic/define/src/openapi/export/components.rs
@@ -172,6 +173,59 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/schematic-define/schematic/definitions.md
+    - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_6:
+    - schematic/definitions/src/naming.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/tests/api_inventory.rs
+    - schematic/definitions/tests/pagination_coverage/main.rs
+    - schematic/define/src/types.rs
+    - schematic/gen/src/inference.rs
+    - schematic/gen/src/export/naming.rs
+    - schematic/gen/src/export/mod.rs
+    - schematic/gen/src/export/openapi.rs
+    - schematic/gen/src/export/postman/mod.rs
+    - schematic/gen/src/export/postman/tests.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/src/lib.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/helpers.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/mod.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/pipeline.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/definition_bundles.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/module_naming.rs
+docs_updated_during_phase_6:
+    - schematic/docs/generation/generated-clients.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/schematic-define/schematic/definitions.md
+source_files_during_phase_7:
+    - schematic/gen/src/cargo_gen.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/module_features.rs
+    - schematic/schema/Cargo.toml
+    - schematic/schema/src/lib.rs
+    - schematic/schema/src/prelude.rs
+docs_updated_during_phase_7:
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/partial-generation.md
+    - schematic/docs/generation/validation.md
+    - schematic/schema/README.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
     - .claude/skills/schematic-define/schematic/gen.md
 ---
 
@@ -592,7 +646,7 @@ and Rust output; common phase checks pass.
 
 ### Wave 13: Resolver migration
 
-- [ ] **Unify resolver**
+- [x] **Unify resolver**
   - R36, R37: load the os skill, move the existing Rust inference policy to one
     definitions-owned resolver, and remove the divergent implementation. Rust,
     OpenAPI, Postman, registration grouping, and later AsyncAPI naming use it.
@@ -611,7 +665,7 @@ and drift/common phase checks pass. This follows Phase 5 and precedes features.
 
 ### Wave 14: Feature generation
 
-- [ ] **Gate modules**
+- [x] **Gate modules**
   - R29, R32: generate one feature per full-inventory module, default all;
     optional WebSocket-only dependencies enabled by their module features.
     Gate module declarations, prelude exports, shared WebSocket helpers, and
@@ -621,7 +675,7 @@ and drift/common phase checks pass. This follows Phase 5 and precedes features.
 
 ### Wave 15: Feature and dependent evidence
 
-- [ ] **Compile selections**
+- [x] **Compile selections**
   - R30: use the upstream isolated-crate mechanism via recipes for no features,
     one REST module, one WebSocket module, a shared group, and a REST/WS pair.
     Positive probes verify enabled APIs; compile-fail/item-absence probes verify
@@ -629,7 +683,7 @@ and drift/common phase checks pass. This follows Phase 5 and precedes features.
   - Ownership: isolated feature tests and graph checks; integrator owns manifest
     and generated output. Regenerate clients; run test-schema/lint-schema.
 
-- [ ] **Verify dependents**
+- [x] **Verify dependents**
   - R31: build/test all eight recorded package IDs via repository recipes, with
     unchanged manifests and sources. Divide independent packages among subagents
     only if build/output isolation is available; otherwise serialize builds.
