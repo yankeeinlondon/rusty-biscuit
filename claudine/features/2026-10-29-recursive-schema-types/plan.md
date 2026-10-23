@@ -4,6 +4,21 @@ created: 2026-10-12
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1:
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/recursive_schema_validator_probe.rs
+    - darkmatter/lib/tests/l1/recursive_schema_golden.rs
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/manifest.yaml
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/inputs/
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+    - claudine/features/2026-10-29-recursive-schema-types/inventory/contracts.md
+    - claudine/features/2026-10-29-recursive-schema-types/inventory/consumers.md
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/README.md
+skills_files_updated_during_phase_1: []
+packages:
+    - darkmatter
 ---
 
 # Recursive Schema Types Implementation Plan
@@ -34,17 +49,17 @@ Wave numbers are unique across the plan. Each wave is a dependency step; finish 
 
 ### Wave 1 — Starting Evidence (Sequential)
 
-- [ ] **Verify Prerequisites**
+- [x] **Verify Prerequisites**
   - Check implementation evidence for all prerequisite contracts and run focused existing public-behavior checks through the area's nextest-backed recipes. The delivered translators and cutoffs are named in the spec (Design 9): `schemas/json_shape.rs` (`CYCLE_EXPANSIONS` 4, `MAX_REFERENCE_DEPTH` 32, `REFERENCE_BUDGET` 4,096) and `compose/expression/call_binding/translate.rs` (`TooDeep` at 32); confirm those values in code and record them as the old cutoffs.
   - Inventory `TypeExpr` matches, definition storage, lowering calls, merges, synthetic validators, typed/JSON walkers, DMLS diagnostics/navigation, and public downstream consumers. Record file ownership and test targets in an implementation log alongside this plan.
   - Confirm the completed tree's supported formats and loader outcomes against the matrix below. Resolve the raw duplicate-member compatibility ruling before raw merge work. If a prerequisite is missing, stop dependent implementation with the exact missing contract recorded.
-- [ ] **Probe Validator Correctness**
+- [x] **Probe Validator Correctness**
   - With pinned `jsonschema` 0.55 and Draft 2020-12, compile a self-recursive schema and accept a finite valid depth-8 instance while rejecting a bad value at depth 8. Include mutual recursion and a `$ref` sibling constraint that visibly rejects a value.
   - Keep this as a small L1 correctness regression. Run it once as the prerequisite probe; later ordinary suite execution is regression coverage, not another spike. Do not upgrade dependencies or benchmark the validator.
-- [ ] **Freeze Compatibility Corpus**
+- [x] **Freeze Compatibility Corpus**
   - Capture byte-for-byte serialized JSON, including key order, after prerequisites and before recursion edits. Use an explicit manifest covering shipped schema/trigger artifacts, non-kinded pure `$schema` documents, the embedded baseline, resolver fixtures, inline roots, and root-union references.
   - Register fixture reads in the repository-read forms in the `rust-testing` skill; avoid indiscriminate discovery under package areas. Commit-worthy golden artifacts are implementation deliverables; this task does not authorize a Git commit.
-- [ ] **Specify Reference APIs**
+- [x] **Specify Reference APIs**
   - Record `DefKey`, definition bodies/origins, table ownership, namespace allocation, identity/key mapping, effective-use metadata, phase context, and scope-aware lookup contracts. Identify every synthetic validator that must receive its original root context.
   - Agree on typed cycle/missing-target/conflict errors and diagnostic projection. Publish these interfaces before parallel consumer tasks; exhaustive matches must have deliberate handling, not wildcard suppression.
 
