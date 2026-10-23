@@ -130,6 +130,31 @@ async fn refuses_and_redirects_and_counts_each_connection() {
 }
 
 #[tokio::test]
+async fn refuses_with_scripted_response_headers_in_order() {
+    let server = MockWsServer::start(vec![Script::RefuseWith {
+        status: 401,
+        headers: vec![
+            ("Set-Cookie".to_string(), "a=1".to_string()),
+            ("Set-Cookie".to_string(), "b=2".to_string()),
+            ("X-Reason".to_string(), "expired".to_string()),
+        ],
+    }])
+    .await;
+
+    match connect(&server.ws_origin()).await {
+        Err(Error::Http(response)) => {
+            assert_eq!(response.status().as_u16(), 401);
+            let cookies: Vec<_> = response.headers().get_all("set-cookie").iter().collect();
+            assert_eq!(cookies, ["a=1", "b=2"]);
+            assert_eq!(response.headers().get("x-reason").unwrap(), "expired");
+        }
+        other => panic!("expected a 401 rejection, got {:?}", other.map(|_| ())),
+    }
+    server.wait_for_requests(1, WAIT).await;
+    assert_eq!(server.connections(), 1);
+}
+
+#[tokio::test]
 async fn a_dropped_tcp_connection_fails_the_handshake() {
     let server = MockWsServer::start(vec![Script::DropTcp]).await;
     let result = connect(&server.ws_origin()).await;

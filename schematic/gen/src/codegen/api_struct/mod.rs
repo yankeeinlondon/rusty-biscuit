@@ -32,7 +32,7 @@
 //! client the struct wraps, so that surface is written once, in the runtime.
 //! Generation emits only what is specific to the API.
 
-mod auth;
+pub(crate) mod auth;
 mod helpers;
 #[cfg(test)]
 mod tests;

@@ -6,9 +6,9 @@ kind: canonical-documentation
 
 A `WebSocketApi` describes a WebSocket API the way a `RestApi` describes an
 HTTP one: a base URL, authentication, and endpoints. `schematic-gen` turns it
-into a module of `schematic-schema` with a client per endpoint and, where the
-endpoint asks for it, a host (server). This page covers authoring the
-definition in `schematic-define`.
+into a module of `schematic-schema` with typed messages, a client per
+endpoint and, where the endpoint asks for it, a host (server). This page
+covers authoring the definition in `schematic-define` and what it generates.
 
 Everything a handshake shares with an HTTP request uses the REST vocabulary:
 `AuthStrategy`, `AuthPolicy`, `EnvMapping`, constant headers, and
@@ -114,32 +114,111 @@ let response = MessageSchema::new("Response", MessageDirection::Server, Schema::
 A direction with a single inbound message needs no selector. Selector values
 are JSON strings; no nested field path is supported.
 
-**Planned:** the generated client decodes each frame as the message its
-selectors choose, and generation rejects a direction with more than one
-fallback, conflicting selectors, or a non-fallback message without a selector
-when the direction has several messages. Today the selectors are carried
-through generation unchanged and the generated client still delivers
-`serde_json::Value` events.
+The frame selects the message whose selectors all hold. Two messages may
+both match one frame only when one's selectors are a strict subset of the
+other's; the frame then selects the more specific message. Above, a frame
+`{"kind":"resp","msg":"pong"}` is `Pong`, and `{"kind":"resp","msg":"other"}`
+reaches the `Response` fallback. Declaration order never decides.
+
+```mermaid
+flowchart TD
+    F[Inbound frame] --> J{JSON?}
+    J -- no --> E[Decode error, frame kept]
+    J -- yes --> S{Most specific message<br/>whose selectors all hold?}
+    S -- found --> D{Payload decodes?}
+    S -- none --> B{Fallback, or a sole<br/>unselected message?}
+    B -- yes --> D
+    B -- no --> E
+    D -- yes --> V[Message variant]
+    D -- no --> E
+```
+
+Generation checks every direction an endpoint receives (`Server` messages for
+a client, `Client` messages for a host, `Bidirectional` messages in both) and
+reports an error for:
+
+- more than one fallback
+- a fallback that also declares selectors
+- a message without selectors when the direction has more than one message
+- two messages with the same selectors, or with selectors that can match
+  one frame without one being a strict subset of the other
+  (`{kind=resp, a=1}` and `{kind=resp, b=2}`)
+- a selector field declared twice on one message
+
+Selectors of a direction the endpoint never receives are not checked: a
+client-only endpoint may send two client messages that share a wire value.
+
+`schematic-gen import-asyncapi` writes selectors for you: each imported
+message gets one per top-level payload property whose schema is a string
+`const` (for example `kind: {const: resp}`), following `$ref` and merging
+`allOf` parts.
 
 ## Linking a request to its response
 
 `responds_with` on a request message names the message, in the same
-endpoint, that answers it. Nothing is inferred from message names.
+endpoint, that answers it. Nothing is inferred from message names: an
+endpoint correlates only when it declares `CorrelationHints` **and** at least
+one message links its response.
 
 ```rust
-use schematic_define::websocket::{MessageDirection, MessageSchema};
+use schematic_define::websocket::{CorrelationHints, MessageDirection, MessageSchema, WebSocketEndpointHints};
 use schematic_define::Schema;
 
 let ping = MessageSchema::new("Ping", MessageDirection::Client, Schema::new("PingMessage"))
     .responds_with("Pong");
+let hints = WebSocketEndpointHints {
+    correlation: Some(CorrelationHints {
+        request_id_field: "id".to_string(),   // written into each request
+        response_id_field: "req_id".to_string(), // read from each answer
+        default_timeout_secs: 30,
+    }),
+    ..WebSocketEndpointHints::default()
+};
 ```
 
-A link needs the endpoint's `CorrelationHints`, which name the request id
-field and the response field that echoes it.
+Each link becomes one typed client method, `request_{request}` in snake
+case, from the request payload to the response payload; `request_value`
+takes and returns JSON for anything else:
 
-**Planned:** the generator pairs requests and responses only through these
-links and hints; today it still infers correlation from messages named
-`RequestEnvelope`/`ResponseEnvelope` when an endpoint declares no hints.
+```rust,ignore
+let pong: PongMessage = live.request_ping(PingMessage::default()).await?;
+let answer: serde_json::Value = live.request_value(serde_json::json!({"op": "stats"})).await?;
+```
+
+How one request is answered:
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Client as Generated client
+    participant Server
+    Caller->>Client: request_ping(payload)
+    Client->>Client: id = next id (never reset by a redial)<br/>write it into request_id_field
+    Client->>Server: {"msg":"ping","id":7,...}
+    Server-->>Client: {"msg":"result","req_id":7}
+    Note over Client: same id, but not a Pong:<br/>an ordinary event for next_event
+    Server-->>Client: {"msg":"pong","req_id":7}
+    Client-->>Caller: Ok(Pong payload)
+```
+
+- The client allocates every id and writes it over any id the payload
+  carries. The API's `WebSocketRuntimeHints.request_id_type` decides its JSON
+  type: `u64` (the default) sends numbers, `string` sends strings (`"7"`),
+  and an answer matches only when its `response_id_field` has the same type
+  and value.
+- A typed request completes only on a frame that selects its declared
+  response message (see [selection](#selecting-an-inbound-message));
+  `request_value` completes on the first frame carrying its id.
+- A request that fails to send, times out (`RequestTimeout`), is cancelled
+  (its future dropped), or loses its connection (`Disconnected`) gives up its
+  slot among `max_pending_requests`. A request is never re-sent on a
+  replacement connection, and commands still queued when a connection is lost
+  are dropped rather than written to the next one.
+
+Generation rejects a link set on a server message, one naming no message of
+the endpoint or a client message, a link on an endpoint without hints, and a
+linked request named `Value`; hints or a `string` id type that nothing
+consumes warn (see [validation](generation/validation.md#websocket-definitions)).
 
 ## Handshake parameters
 
@@ -174,6 +253,65 @@ they mean on a `RestApi`. `effective_auth_policy()` and
 `default_env_mapping()` return the explicit value when one is set and the
 REST derivation otherwise. Shipped definitions set `env_mapping` explicitly.
 
+### The handshake credential
+
+A generated client translates the effective policy exactly as a REST client
+does (its `auth_config()`), and each `connect_*` call selects **one**
+credential before dialing:
+
+```mermaid
+flowchart LR
+    A["options.credential<br/>(this connect)"] -->|none| B["api.credentials(..)<br/>or api.api_key(..)"]
+    B -->|none| C["first non-empty variable<br/>of the env mapping"]
+    C -->|none| D["anonymous"]
+```
+
+```rust,ignore
+use schematic_runtime::Credential;
+
+let api = UnfoldedCircleCoreWs::new().api_key("client-key");
+let core = api.connect_core_ws(WsClientOptions::default()).await?; // client-key
+let other = api
+    .connect_core_ws(WsClientOptions::builder().credential(Credential::api_key("once")).build())
+    .await?; // once
+assert_eq!(core.auth_method(), &schematic_runtime::AuthMethod::ClientLevel);
+```
+
+- **Placement** follows the strategy: a bearer token or API key in its
+  header, an `ApiKeyParam` key as its query parameter or as a cookie merged
+  into the request's `Cookie` header, Basic as `Authorization: Basic`. A
+  policy of `AuthStrategy::None` sends no credential, even when an
+  environment variable is set.
+- **Anonymous** when nothing resolves: the upgrade carries no credential and
+  `auth_method()` reports `AuthMethod::Anonymous`; a server that needs one
+  answers with a rejection.
+- **Once per connect.** Reconnects reuse the selected credential; a changed
+  environment takes effect on the next explicit connect. `auth_method()`
+  names the source, not proof the server accepted it.
+- **No second source.** A credential of a kind the API does not accept, or a
+  header, query value, or cookie the request already sets where the
+  credential goes, is `WsError::InvalidCredential`; a caller header named
+  like the credential header, or one the upgrade manages (`Host`,
+  `Connection`, `Upgrade`, `Sec-WebSocket-Key`, `Sec-WebSocket-Version`,
+  `Sec-WebSocket-Accept`, `Sec-WebSocket-Extensions`), is
+  `WsError::InvalidHeader`. Nothing is sent.
+- **Rejections are final.** Any non-101 answer is
+  `WsError::HandshakeRejected { status, headers }`, with secret header
+  values (including `Set-Cookie` and secrets inside `Location`) redacted. A
+  redirect is never followed, so no request reaches another origin. A 401,
+  403, or redirect on a reconnect closes the client without another attempt;
+  other failures use the reconnect policy.
+- **Nothing leaks.** Error text, `WsClientOptions`' `Debug`, and the stored
+  handshake's `Debug` show `[redacted]` for credential values, including a
+  query credential in a refused or stalled dial. The URL and headers needed
+  for reconnecting are kept privately.
+- **TLS:** `wss://` uses the platform's trusted roots. There is no option to
+  accept an invalid certificate; the REST runtime's
+  `danger_accept_invalid_certificates` configures its HTTP client only.
+
+`header(name, value)` adds a header to every handshake, replacing a constant
+header of the same name.
+
 A challenge exchange after the upgrade (an `auth_required` message the
 client must answer) is declared as `AuthFlowHints` on the endpoint, never
 only in prose:
@@ -207,6 +345,87 @@ rustdoc states each declared heartbeat so the caller knows to:
 ```
 
 A declared heartbeat produces no generation warning.
+
+## The generated messages, client, and host
+
+Each endpoint `Live` gets two enums, `LiveServerMessage` (what the server
+sends) and `LiveClientMessage` (what the client sends). A variant is named
+after its message and holds the payload type its `Schema` names; a
+`Bidirectional` message is a variant of both. Lifecycle messages are not
+variants: they keep their own `send_*` helpers. A direction with no messages
+is an empty enum and still compiles.
+
+An enum serializes as its payload alone, with no variant tag, and only
+derives `Debug`. It implements `Serialize` where the endpoint sends that
+direction and has `decode` where it receives it, so a server payload of a
+client-only endpoint needs only `Deserialize`, and no payload needs `Clone`
+or `PartialEq`.
+
+The `frame_format` decides the frame kind: `json_text` (the default) or
+`json_binary`. `raw_binary` and `mixed` are generation errors: the message
+enums encode and decode JSON.
+
+**Client** (`Client` and `Both` roles):
+
+```rust,ignore
+let mut live = api.connect_live(WsClientOptions::default()).await?;
+
+live.send(LiveClientMessage::Subscribe(Subscribe { room: "lobby".into() })).await?;
+live.send_value(serde_json::json!({"op": "debug"})).await?; // any JSON
+
+match live.next_event().await {
+    Some(Ok(LiveServerMessage::Update(update))) => println!("{update:?}"),
+    Some(Ok(other)) => println!("{other:?}"),
+    // Not JSON, matched nothing, or did not decode: the frame is kept and
+    // the connection stays open.
+    Some(Err(WsError::Decode { frame, reason })) => eprintln!("{} frame: {reason}", frame.kind()),
+    Some(Err(error)) => eprintln!("{error}"),
+    None => {} // closed
+}
+```
+
+`next_value_event` returns the next message as a `serde_json::Value`
+instead. Both read **one** bounded queue: each inbound message is delivered
+once, to whichever call takes it. `events()` and `value_events()` turn the
+client into a stream of the same items; the stream keeps the connection open
+until it is dropped.
+
+**Host** (`Host` and `Both` roles): the module has `{Api}WsHost`, a
+`{Api}EventHub` connection registry, and a `WsHandler` trait. Host input is
+the client enum and output the server enum:
+
+```rust,ignore
+struct Chat;
+
+impl WsHandler for Chat {
+    async fn handle_message(&self, message: LiveClientMessage, context: WsConnectionContext) -> Option<LiveServerMessage> {
+        match message {
+            LiveClientMessage::Subscribe(_) => { context.mark_subscribed().await; None }
+            _ => None,
+        }
+    }
+
+    // Optional: written once per connection, after the upgrade (and its
+    // credential, if the host checks one) is accepted and before any message
+    // is read. The default sends nothing.
+    async fn on_authenticated(&self, _context: WsConnectionContext) -> Option<LiveServerMessage> {
+        Some(LiveServerMessage::Welcome(Welcome::default()))
+    }
+}
+```
+
+- A host with several host endpoints routes a connection by its request path
+  (`{name}` matches one segment; any other path gets `404`) and names the
+  methods per endpoint: `handle_live_message`, `on_live_authenticated`.
+- `on_error` (default: ignore) receives a frame that did not decode, after
+  which the connection stays open, and a failed `on_authenticated` write,
+  after which the connection is closed.
+- `WsConnectionContext::credential_verified()` tells whether the upgrade
+  presented a credential the host checked; it is `false` when the host has
+  no credential configured.
+- The hub's typed `send_to_connection`, `broadcast`, and
+  `broadcast_to_subscribers` reach only connections of the message's
+  endpoint; the `_value` variants send JSON to any connection.
 
 ## The JSON form
 

@@ -3,9 +3,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
-/// Dock WebSocket envelope discriminator (`type` field).
+/// Dock WebSocket message discriminator (`type` field).
+///
+/// The UCD2 AsyncAPI gives the authentication messages their own `type`
+/// values (`auth_required`, `auth`) beside the `req`/`resp`/`event` envelopes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum DockWsEnvelopeType {
     /// Request envelope (`type=req`).
     Req,
@@ -13,6 +16,10 @@ pub enum DockWsEnvelopeType {
     Resp,
     /// Event envelope (`type=event`).
     Event,
+    /// The dock's authentication challenge (`type=auth_required`).
+    AuthRequired,
+    /// An authentication request or its result (`type=auth`).
+    Auth,
 }
 
 /// Known Dock message identifiers.
@@ -95,36 +102,46 @@ pub struct DockWsEventEnvelope {
     pub msg_data: Option<Box<RawValue>>,
 }
 
-/// Dock auth message for post-connect authentication.
+/// Dock auth request (`{"type": "auth", "token": …}`) for post-connect
+/// authentication.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DockWsAuthMessage {
-    /// Envelope type discriminator.
+    /// Message type discriminator (`auth`).
     #[serde(rename = "type")]
     pub type_name: DockWsEnvelopeType,
-    /// Message id/name (`auth`).
-    pub msg: DockWsKnownMessage,
     /// Auth token.
     pub token: String,
 }
 
-/// Dock auth-required event (`msg=auth_required`).
+/// Dock authentication challenge (`type=auth_required`), sent right after
+/// the connection opens.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DockWsAuthRequired {
-    /// Envelope type discriminator.
+    /// Message type discriminator (`auth_required`).
     #[serde(rename = "type")]
     pub type_name: DockWsEnvelopeType,
-    /// Message id/name (`auth_required`).
-    pub msg: DockWsKnownMessage,
+    /// Dock model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Dock hardware revision.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
+    /// Dock firmware version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
-/// Dock authentication result (`msg=authentication`).
+/// Dock authentication result (`type=auth`, `msg=authentication`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DockWsAuthenticationMessage {
-    /// Envelope type discriminator.
+    /// Message type discriminator (`auth`).
     #[serde(rename = "type")]
     pub type_name: DockWsEnvelopeType,
     /// Message id/name (`authentication`).
     pub msg: DockWsKnownMessage,
+    /// Result: `200` authenticated; `401` rejected, and the dock closes the
+    /// connection.
+    pub code: i32,
     /// Optional auth status payload.
     pub msg_data: Option<Box<RawValue>>,
 }
@@ -209,6 +226,14 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&DockWsEnvelopeType::Event).unwrap(),
             "\"event\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DockWsEnvelopeType::AuthRequired).unwrap(),
+            "\"auth_required\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DockWsEnvelopeType::Auth).unwrap(),
+            "\"auth\""
         );
     }
 
@@ -312,8 +337,7 @@ mod tests {
     #[test]
     fn auth_message_serializes_with_type_field() {
         let env = DockWsAuthMessage {
-            type_name: DockWsEnvelopeType::Req,
-            msg: DockWsKnownMessage::Auth,
+            type_name: DockWsEnvelopeType::Auth,
             token: "test-token".to_string(),
         };
         let serialized = serde_json::to_string(&env).unwrap();
@@ -324,8 +348,10 @@ mod tests {
     #[test]
     fn auth_required_serializes_with_type_field() {
         let env = DockWsAuthRequired {
-            type_name: DockWsEnvelopeType::Event,
-            msg: DockWsKnownMessage::AuthRequired,
+            type_name: DockWsEnvelopeType::AuthRequired,
+            model: None,
+            revision: None,
+            version: None,
         };
         let serialized = serde_json::to_string(&env).unwrap();
         assert!(serialized.contains("\"type\":"));
@@ -335,8 +361,9 @@ mod tests {
     #[test]
     fn authentication_message_serializes_with_type_field() {
         let env = DockWsAuthenticationMessage {
-            type_name: DockWsEnvelopeType::Resp,
+            type_name: DockWsEnvelopeType::Auth,
             msg: DockWsKnownMessage::Authentication,
+            code: 200,
             msg_data: None,
         };
         let serialized = serde_json::to_string(&env).unwrap();
@@ -360,12 +387,32 @@ mod tests {
         assert_eq!(roundtrip.msg, env.msg);
     }
 
+    /// The three authentication frames as the UCD2 AsyncAPI documents them.
+    #[test]
+    fn documented_authentication_frames_decode() {
+        let challenge: DockWsAuthRequired = serde_json::from_str(
+            r#"{"type":"auth_required","model":"UCD2","revision":"5.4","version":"0.6.0"}"#,
+        )
+        .unwrap();
+        assert_eq!(challenge.type_name, DockWsEnvelopeType::AuthRequired);
+        assert_eq!(challenge.model.as_deref(), Some("UCD2"));
+
+        let request: DockWsAuthMessage =
+            serde_json::from_str(r#"{"type":"auth","token":"1234"}"#).unwrap();
+        assert_eq!(request.type_name, DockWsEnvelopeType::Auth);
+
+        let result: DockWsAuthenticationMessage =
+            serde_json::from_str(r#"{"type":"auth","msg":"authentication","code":401}"#).unwrap();
+        assert_eq!(result.msg, DockWsKnownMessage::Authentication);
+        assert_eq!(result.code, 401);
+    }
+
     #[test]
     fn auth_message_roundtrip() {
-        let json = r#"{"type":"req","msg":"auth","token":"my-secret"}"#;
+        let json = r#"{"type":"auth","token":"my-secret"}"#;
         let env: DockWsAuthMessage = serde_json::from_str(json).unwrap();
         assert_eq!(env.token, "my-secret");
-        assert_eq!(env.msg, DockWsKnownMessage::Auth);
+        assert_eq!(env.type_name, DockWsEnvelopeType::Auth);
 
         let reserialized = serde_json::to_string(&env).unwrap();
         let roundtrip: DockWsAuthMessage = serde_json::from_str(&reserialized).unwrap();

@@ -28,6 +28,9 @@
 //!   client's settings and sends as inherent methods;
 //! - programmatic [`Credential`]s and the API's [`AuthConfig`], per-call
 //!   [`CallOptions`] for [`Client::send_raw`], and the shared [`Deadline`];
+//! - [`AuthConfig::select_handshake`] and its [`HandshakeCredential`], the
+//!   same precedence and placement for a handshake another transport sends
+//!   (generated WebSocket clients);
 //! - the [`OriginPolicy`] that governs redirects and followed links;
 //! - [`Client::send_raw`] and its [`RawResponse`], for a reply without
 //!   decoding;
@@ -85,7 +88,7 @@ pub use codec::{
     Binary, BodyReadError, DEFAULT_MAX_FRAME_BYTES, Decode, DecodeFailure, DecodeFailureKind, Empty, Json, LiveBody,
     Text,
 };
-pub use credentials::{AuthConfig, Credential, CredentialKind, CredentialPlacement, EnvFallback};
+pub use credentials::{AuthConfig, Credential, CredentialKind, CredentialPlacement, EnvFallback, HandshakeCredential};
 pub use deadline::Deadline;
 pub use endpoint::{
     Address, Api, EndpointSpec, ErrorBody, ErrorRoute, FormPart, QueryDelimiter, QueryValue, RequestBody, RequestParts,

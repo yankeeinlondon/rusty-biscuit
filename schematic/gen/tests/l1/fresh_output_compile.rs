@@ -3372,7 +3372,9 @@ const BEARER_WS_HOST_TEST: &str = r##"
 use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
-use schematic_schema::ws_bearer_fixture::{BearerFixtureWsHost, WsConnectionContext, WsHandler};
+use schematic_schema::ws_bearer_fixture::{
+    BearerFixtureWsHost, StreamClientMessage, StreamServerMessage, WsConnectionContext, WsHandler,
+};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::{Error, Message};
 
@@ -3381,10 +3383,11 @@ struct Echo;
 impl WsHandler for Echo {
     fn handle_message(
         &self,
-        message: serde_json::Value,
+        message: StreamClientMessage,
         _context: WsConnectionContext,
-    ) -> impl std::future::Future<Output = Option<serde_json::Value>> + Send {
-        async move { Some(message) }
+    ) -> impl std::future::Future<Output = Option<StreamServerMessage>> + Send {
+        let StreamClientMessage::Frame(value) = message;
+        async move { Some(StreamServerMessage::Frame(value)) }
     }
 }
 
@@ -3572,6 +3575,1443 @@ fn slow_bearer_ws_host_compiles_and_checks_tokens() {
         "bearer_host_rejects_a_wrong_token_with_401",
         "bearer_host_upgrades_a_matching_token",
     ] {
+        assert!(report.contains(test), "the child run did not report {test}:\n{report}");
+    }
+}
+
+/// Payload types the typed WebSocket fixtures name, added to the fresh crate
+/// as `src/ws_payloads.rs` and named from the generated modules as
+/// `crate::ws_payloads::…`. Each derives only the serde trait its direction
+/// uses and none derives `Clone`, so the generated enums must ask for no
+/// more than that.
+const WS_PAYLOADS: &str = r#"
+#[derive(Debug, serde::Deserialize)]
+pub struct Envelope {
+    pub kind: String,
+    #[serde(default)]
+    pub msg: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct Pong {
+    pub msg: String,
+    pub seq: u64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct Special {
+    pub detail: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct Ping {
+    pub seq: u64,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct Say {
+    pub text: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct Join {
+    pub name: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct Chat {
+    pub text: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct Welcome {
+    pub greeting: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct Said {
+    pub from: String,
+    pub text: String,
+}
+
+/// Never serializes, so a host write of it fails.
+#[derive(Debug)]
+pub struct Unwritable;
+
+impl serde::Serialize for Unwritable {
+    fn serialize<S: serde::Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
+        Err(serde::ser::Error::custom("unwritable fixture payload"))
+    }
+}
+"#;
+
+fn ws_fixture_endpoint(
+    id: &str,
+    path: &str,
+    role: schematic_define::websocket::EndpointRole,
+    messages: Vec<schematic_define::websocket::MessageSchema>,
+) -> schematic_define::websocket::WebSocketEndpoint {
+    schematic_define::websocket::WebSocketEndpoint {
+        id: id.to_string(),
+        path: path.to_string(),
+        description: format!("{id} fixture endpoint"),
+        role,
+        messages,
+        ..schematic_define::websocket::WebSocketEndpoint::default()
+    }
+}
+
+fn ws_fixture_api(
+    name: &str,
+    auth: AuthStrategy,
+    env_auth: &[&str],
+    endpoints: Vec<schematic_define::websocket::WebSocketEndpoint>,
+) -> schematic_define::WebSocketApi {
+    schematic_define::WebSocketApi {
+        name: name.to_string(),
+        description: format!("{name} fixture"),
+        base_url: "ws://127.0.0.1".to_string(),
+        docs_url: None,
+        auth,
+        auth_policy: None,
+        env_auth: env_auth.iter().map(|name| name.to_string()).collect(),
+        env_mapping: None,
+        headers: vec![],
+        version: None,
+        endpoints,
+        runtime: None,
+    }
+}
+
+/// A client API whose `Feed` server direction overlaps by strict subsets
+/// (`kind=resp` fallback, `kind=event`, `kind=event,msg=special`,
+/// `kind=resp,msg=pong`) and whose `Strict` server direction has no
+/// fallback. `Listen` sends nothing and `Shout` receives nothing, so each
+/// has one uninhabited enum.
+fn typed_ws_fixture() -> schematic_define::WebSocketApi {
+    use schematic_define::Schema;
+    use schematic_define::websocket::{EndpointRole, MessageDirection, MessageSchema};
+    let payload = |name: &str| Schema::with_path(name, "crate::ws_payloads");
+    let value = || Schema::new("serde_json::Value");
+    let server = |name: &str, schema| MessageSchema::new(name, MessageDirection::Server, schema);
+    let client = |name: &str, schema| MessageSchema::new(name, MessageDirection::Client, schema);
+
+    ws_fixture_api(
+        "TypedFixtureWs",
+        AuthStrategy::None,
+        &[],
+        vec![
+            ws_fixture_endpoint("Feed", "/feed", EndpointRole::Client, vec![
+                server("Response", payload("Envelope")).fallback(),
+                server("Event", payload("Envelope")).matches("kind", "event"),
+                server("Pong", payload("Pong")).matches("kind", "resp").matches("msg", "pong"),
+                server("Special", payload("Special")).matches("kind", "event").matches("msg", "special"),
+                client("Ping", payload("Ping")),
+                client("Say", payload("Say")),
+            ]),
+            ws_fixture_endpoint("Strict", "/strict", EndpointRole::Client, vec![
+                server("Hello", value()).matches("type", "hello"),
+                server("Bye", value()).matches("type", "bye"),
+                client("Note", value()),
+            ]),
+            ws_fixture_endpoint("Listen", "/listen", EndpointRole::Client, vec![server("Tick", value())]),
+            ws_fixture_endpoint("Shout", "/shout", EndpointRole::Client, vec![client("Line", value())]),
+        ],
+    )
+}
+
+/// A client API framed as JSON in binary frames.
+fn binary_ws_fixture() -> schematic_define::WebSocketApi {
+    use schematic_define::Schema;
+    use schematic_define::websocket::{
+        EndpointRole, FrameFormat, MessageDirection, MessageSchema, WebSocketRuntimeHints,
+    };
+    let mut api = ws_fixture_api("BinaryFixtureWs", AuthStrategy::None, &[], vec![ws_fixture_endpoint(
+        "Blob",
+        "/blob",
+        EndpointRole::Client,
+        vec![
+            MessageSchema::new("Got", MessageDirection::Server, Schema::new("serde_json::Value")),
+            MessageSchema::new("Put", MessageDirection::Client, Schema::new("serde_json::Value")),
+        ],
+    )]);
+    api.runtime = Some(WebSocketRuntimeHints {
+        frame_format: FrameFormat::JsonBinary,
+        ..WebSocketRuntimeHints::default()
+    });
+    api
+}
+
+/// A multi-endpoint host that is not Unfolded Circle's: `Room` (host only,
+/// a path value) and `Lobby` (both roles), behind an API key header.
+fn chat_ws_fixture() -> schematic_define::WebSocketApi {
+    use schematic_define::Schema;
+    use schematic_define::websocket::{EndpointRole, MessageDirection, MessageSchema};
+    let payload = |name: &str| Schema::with_path(name, "crate::ws_payloads");
+    let value = || Schema::new("serde_json::Value");
+    let server = |name: &str, schema| MessageSchema::new(name, MessageDirection::Server, schema);
+    let client = |name: &str, schema| MessageSchema::new(name, MessageDirection::Client, schema);
+
+    let mut room = ws_fixture_endpoint("Room", "/rooms/{room}", EndpointRole::Host, vec![
+        client("Join", payload("Join")).matches("op", "join"),
+        client("Chat", payload("Chat")).matches("op", "chat"),
+        server("Welcome", payload("Welcome")),
+        server("Said", payload("Said")),
+        server("Unwritable", payload("Unwritable")),
+    ]);
+    room.params = EndpointParams {
+        path: vec![ParamDef::path("room", QueryParamType::String)],
+        ..EndpointParams::default()
+    };
+    ws_fixture_api(
+        "ChatFixtureWs",
+        AuthStrategy::ApiKey { header: "x-fixture-key".to_string(), value_prefix: None },
+        &["CHAT_FIXTURE_WS_KEY"],
+        vec![
+            room,
+            ws_fixture_endpoint("Lobby", "/lobby", EndpointRole::Both, vec![
+                client("Hello", value()),
+                server("Notice", value()),
+            ]),
+        ],
+    )
+}
+
+/// Imports of every typed-send misuse file and its control.
+const WS_MISUSE_PRELUDE: &str = "#![allow(dead_code, unused_imports, unreachable_code)]
+use schematic_schema::ws_payloads::{Ping, Say};
+use schematic_schema::ws_typed_fixture::{
+    FeedClient, FeedClientMessage, FeedServerMessage, ListenClientMessage, ShoutServerMessage,
+    StrictClient, StrictClientMessage,
+};
+";
+
+/// Correct typed sends with the misuse imports, and a match over each
+/// uninhabited enum: it must compile, so each misuse fails for its own reason.
+const WS_SEND_CONTROL: &str = "async fn used(feed: FeedClient, strict: StrictClient) {
+    let _ = feed.send(FeedClientMessage::Ping(Ping { seq: 1 })).await;
+    let _ = feed.send(FeedClientMessage::Say(Say { text: String::new() })).await;
+    let _ = strict.send(StrictClientMessage::Note(serde_json::Value::Null)).await;
+    let _ = feed.send_value(serde_json::json!({})).await;
+}
+
+fn nothing_to_send(message: ListenClientMessage) -> ! {
+    match message {}
+}
+
+fn nothing_to_receive(message: ShoutServerMessage) -> ! {
+    match message {}
+}
+";
+
+/// R10: sending a value of the wrong type does not compile. Same shape as
+/// [`MISUSES`]; entry `i` becomes `tests/ws_misuse_<i>.rs`.
+const WS_MISUSES: &[(&str, &str, &str, &str)] = &[
+    (
+        "a server message is not a client message",
+        "async fn misuse(client: FeedClient, message: FeedServerMessage) { let _ = client.send(message).await; }",
+        "E0308",
+        "FeedServerMessage",
+    ),
+    (
+        "a bare payload is not a message",
+        "async fn misuse(client: FeedClient) { let _ = client.send(Ping { seq: 1 }).await; }",
+        "E0308",
+        "found `Ping`",
+    ),
+    (
+        "another endpoint's message is not this endpoint's",
+        "async fn misuse(client: StrictClient) { let _ = client.send(FeedClientMessage::Say(Say { text: String::new() })).await; }",
+        "E0308",
+        "StrictClientMessage",
+    ),
+];
+
+/// Child tests of the generated typed clients against a loopback
+/// tokio-tungstenite server on port 0.
+const TYPED_WS_CLIENT_TEST: &str = r##"
+use std::time::Duration;
+
+use futures_util::{SinkExt, StreamExt};
+use schematic_schema::ws_binary_fixture::{BinaryFixtureWs, BlobClientMessage, BlobServerMessage};
+use schematic_schema::ws_payloads::{Ping, Say};
+use schematic_schema::ws_shared::{WsClientOptions, WsError, WsRawFrame};
+use schematic_schema::ws_typed_fixture::{
+    FeedClient, FeedClientMessage, FeedServerMessage, StrictServerMessage, TypedFixtureWs,
+};
+use serde_json::json;
+use tokio::net::TcpStream;
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
+
+type Peer = WebSocketStream<TcpStream>;
+
+/// A bound on a hang, never a synchronization.
+const WAIT: Duration = Duration::from_secs(5);
+
+async fn within<F: std::future::Future>(future: F) -> F::Output {
+    tokio::time::timeout(WAIT, future).await.expect("timed out")
+}
+
+/// A loopback base URL and the server side of the one connection it accepts.
+async fn loopback() -> (String, tokio::task::JoinHandle<Peer>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        tokio_tungstenite::accept_async(stream).await.unwrap()
+    });
+    (format!("ws://{addr}"), server)
+}
+
+async fn connect_feed() -> (FeedClient, Peer) {
+    let (url, server) = loopback().await;
+    let client = within(TypedFixtureWs::with_base_url(url).connect_feed(WsClientOptions::default()))
+        .await
+        .unwrap();
+    (client, within(server).await.unwrap())
+}
+
+async fn send_text(peer: &mut Peer, frame: &str) {
+    peer.send(Message::Text(frame.to_string().into())).await.unwrap();
+}
+
+async fn next_feed(client: &mut FeedClient) -> FeedServerMessage {
+    within(client.next_event()).await.expect("the connection is open").expect("the frame decodes")
+}
+
+/// The next data frame the peer receives.
+async fn received(peer: &mut Peer) -> Message {
+    loop {
+        match within(peer.next()).await.expect("the connection is open").unwrap() {
+            frame @ (Message::Text(_) | Message::Binary(_)) => return frame,
+            _ => continue,
+        }
+    }
+}
+
+async fn received_text(peer: &mut Peer) -> String {
+    match received(peer).await {
+        Message::Text(text) => text.as_str().to_string(),
+        other => panic!("expected a text frame, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn every_server_message_is_selected_from_its_frame() {
+    let (mut client, mut peer) = connect_feed().await;
+    for frame in [
+        r#"{"kind":"resp","msg":"pong","seq":7}"#,
+        r#"{"kind":"resp","msg":"other"}"#,
+        r#"{"kind":"event","msg":"special","detail":"d1"}"#,
+        r#"{"kind":"event","msg":"tick"}"#,
+        r#"{"kind":"resp"}"#,
+    ] {
+        send_text(&mut peer, frame).await;
+    }
+
+    // Also matches the generic `kind=resp`: the strict superset wins.
+    match next_feed(&mut client).await {
+        FeedServerMessage::Pong(pong) => assert_eq!((pong.msg.as_str(), pong.seq), ("pong", 7)),
+        other => panic!("expected Pong, got {other:?}"),
+    }
+    match next_feed(&mut client).await {
+        FeedServerMessage::Response(envelope) => assert_eq!(envelope.msg.as_deref(), Some("other")),
+        other => panic!("expected the Response fallback, got {other:?}"),
+    }
+    // Also matches the generic `kind=event`.
+    match next_feed(&mut client).await {
+        FeedServerMessage::Special(special) => assert_eq!(special.detail, "d1"),
+        other => panic!("expected Special, got {other:?}"),
+    }
+    match next_feed(&mut client).await {
+        FeedServerMessage::Event(envelope) => {
+            assert_eq!((envelope.kind.as_str(), envelope.msg.as_deref()), ("event", Some("tick")));
+        }
+        other => panic!("expected Event, got {other:?}"),
+    }
+    match next_feed(&mut client).await {
+        FeedServerMessage::Response(envelope) => {
+            assert_eq!((envelope.kind.as_str(), envelope.msg.as_deref()), ("resp", None));
+        }
+        other => panic!("expected the Response fallback, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_unmatched_frame_without_a_fallback_is_a_decode_error_and_the_connection_stays_usable() {
+    let (url, server) = loopback().await;
+    let mut client = within(TypedFixtureWs::with_base_url(url).connect_strict(WsClientOptions::default()))
+        .await
+        .unwrap();
+    let mut peer = within(server).await.unwrap();
+    let unmatched = r#"{ "type": "unknown",  "n": 1 }"#;
+    send_text(&mut peer, unmatched).await;
+    send_text(&mut peer, r#"{"type":"bye","n":2}"#).await;
+
+    match within(client.next_event()).await.expect("the connection is open") {
+        Err(WsError::Decode { frame: WsRawFrame::Text(text), reason }) => {
+            assert_eq!(text, unmatched, "the frame is kept exactly as received");
+            assert!(reason.contains("matches no declared message"), "{reason}");
+        }
+        other => panic!("expected a text Decode error, got {other:?}"),
+    }
+    match within(client.next_event()).await.expect("the connection is open") {
+        Ok(StrictServerMessage::Bye(value)) => assert_eq!(value, json!({"type": "bye", "n": 2})),
+        other => panic!("expected Bye, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn malformed_text_and_binary_frames_are_decode_errors_that_keep_the_frame() {
+    let (mut client, mut peer) = connect_feed().await;
+    let broken_text = r#"{"kind": "event", "#;
+    let broken_bytes = vec![0xff, 0x00, b'{'];
+    send_text(&mut peer, broken_text).await;
+    peer.send(Message::Binary(broken_bytes.clone().into())).await.unwrap();
+    send_text(&mut peer, r#"{"kind":"event","msg":"after"}"#).await;
+
+    match within(client.next_event()).await.expect("the connection is open") {
+        Err(WsError::Decode { frame: WsRawFrame::Text(text), reason }) => {
+            assert_eq!(text, broken_text);
+            assert!(reason.starts_with("not JSON"), "{reason}");
+        }
+        other => panic!("expected a text Decode error, got {other:?}"),
+    }
+    match within(client.next_event()).await.expect("the connection is open") {
+        Err(WsError::Decode { frame: WsRawFrame::Binary(bytes), .. }) => assert_eq!(bytes, broken_bytes),
+        other => panic!("expected a binary Decode error, got {other:?}"),
+    }
+    match next_feed(&mut client).await {
+        FeedServerMessage::Event(envelope) => assert_eq!(envelope.msg.as_deref(), Some("after")),
+        other => panic!("expected Event, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn send_writes_the_payload_alone_and_send_value_writes_the_value_verbatim() {
+    let (client, mut peer) = connect_feed().await;
+    client.send(FeedClientMessage::Ping(Ping { seq: 3 })).await.unwrap();
+    client.send(FeedClientMessage::Say(Say { text: "hi".to_string() })).await.unwrap();
+    let value = json!({"kind": "free", "raw": [1, 2]});
+    client.send_value(value.clone()).await.unwrap();
+
+    assert_eq!(received_text(&mut peer).await, r#"{"seq":3}"#);
+    assert_eq!(received_text(&mut peer).await, r#"{"text":"hi"}"#);
+    let sent: serde_json::Value = serde_json::from_str(&received_text(&mut peer).await).unwrap();
+    assert_eq!(sent, value);
+}
+
+#[tokio::test]
+async fn typed_and_value_receives_share_one_queue_and_the_event_stream_keeps_the_connection_open() {
+    let (mut client, mut peer) = connect_feed().await;
+    send_text(&mut peer, r#"{"kind":"event","msg":"first"}"#).await;
+    send_text(&mut peer, r#"{"kind":"resp","msg":"pong","seq":2}"#).await;
+    send_text(&mut peer, r#"{"kind":"event","msg":"third"}"#).await;
+
+    let first = within(client.next_value_event()).await.expect("the connection is open").unwrap();
+    assert_eq!(first, json!({"kind": "event", "msg": "first"}));
+    match next_feed(&mut client).await {
+        FeedServerMessage::Pong(pong) => assert_eq!(pong.seq, 2),
+        other => panic!("expected the second frame as Pong, got {other:?}"),
+    }
+
+    let mut events = client.events();
+    match within(events.next()).await.expect("the stream is open").unwrap() {
+        FeedServerMessage::Event(envelope) => assert_eq!(envelope.msg.as_deref(), Some("third")),
+        other => panic!("expected the third frame as Event, got {other:?}"),
+    }
+    // Sent after the client was consumed: the stream holds the connection.
+    send_text(&mut peer, r#"{"kind":"event","msg":"special","detail":"late"}"#).await;
+    match within(events.next()).await.expect("the stream is open").unwrap() {
+        FeedServerMessage::Special(special) => assert_eq!(special.detail, "late"),
+        other => panic!("expected Special, got {other:?}"),
+    }
+
+    drop(events);
+    loop {
+        match within(peer.next()).await {
+            None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
+            Some(Ok(Message::Text(_) | Message::Binary(_))) => panic!("no data after the stream is dropped"),
+            Some(Ok(_)) => continue,
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_json_binary_api_sends_and_receives_binary_frames() {
+    let (url, server) = loopback().await;
+    let mut client = within(BinaryFixtureWs::with_base_url(url).connect_blob(WsClientOptions::default()))
+        .await
+        .unwrap();
+    let mut peer = within(server).await.unwrap();
+    client.send(BlobClientMessage::Put(json!({"id": 1}))).await.unwrap();
+    client.send_value(json!({"id": 2})).await.unwrap();
+
+    for expected in [json!({"id": 1}), json!({"id": 2})] {
+        match received(&mut peer).await {
+            Message::Binary(bytes) => {
+                assert_eq!(serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(), expected);
+            }
+            other => panic!("expected a binary frame, got {other:?}"),
+        }
+    }
+    peer.send(Message::Binary(serde_json::to_vec(&json!({"id": 3})).unwrap().into())).await.unwrap();
+    match within(client.next_event()).await.expect("the connection is open") {
+        Ok(BlobServerMessage::Got(value)) => assert_eq!(value, json!({"id": 3})),
+        other => panic!("expected Got, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_endpoint_without_server_messages_reports_every_frame_as_undecodable() {
+    let (url, server) = loopback().await;
+    let mut client = within(TypedFixtureWs::with_base_url(url).connect_shout(WsClientOptions::default()))
+        .await
+        .unwrap();
+    let mut peer = within(server).await.unwrap();
+    send_text(&mut peer, r#"{"any":1}"#).await;
+    match within(client.next_event()).await.expect("the connection is open") {
+        Err(WsError::Decode { frame: WsRawFrame::Text(text), .. }) => assert_eq!(text, r#"{"any":1}"#),
+        other => panic!("expected a Decode error, got {other:?}"),
+    }
+}
+"##;
+
+/// The child tests [`TYPED_WS_CLIENT_TEST`] must report.
+const TYPED_WS_CLIENT_TESTS: &[&str] = &[
+    "every_server_message_is_selected_from_its_frame",
+    "an_unmatched_frame_without_a_fallback_is_a_decode_error_and_the_connection_stays_usable",
+    "malformed_text_and_binary_frames_are_decode_errors_that_keep_the_frame",
+    "send_writes_the_payload_alone_and_send_value_writes_the_value_verbatim",
+    "typed_and_value_receives_share_one_queue_and_the_event_stream_keeps_the_connection_open",
+    "a_json_binary_api_sends_and_receives_binary_frames",
+    "an_endpoint_without_server_messages_reports_every_frame_as_undecodable",
+];
+
+/// Child tests of the generated multi-endpoint host serving on port 0. The
+/// child process gets `CHAT_FIXTURE_WS_KEY=chat-key`.
+const CHAT_WS_HOST_TEST: &str = r##"
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use futures_util::{SinkExt, StreamExt};
+use schematic_schema::ws_chat_fixture::{
+    ChatFixtureEventHub, ChatFixtureWs, ChatFixtureWsHost, LobbyClientMessage, LobbyServerMessage,
+    RoomClientMessage, RoomServerMessage, WsConnectionContext, WsHandler,
+};
+use schematic_schema::ws_payloads::{Said, Unwritable, Welcome};
+use schematic_schema::ws_shared::{WsClientOptions, WsError, WsRawFrame};
+use serde_json::{Value, json};
+use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::{Error, Message};
+
+type Peer = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+/// The key the child environment configures for the host.
+const KEY: &str = "chat-key";
+
+/// A bound on a hang, never a synchronization.
+const WAIT: Duration = Duration::from_secs(5);
+
+async fn within<F: std::future::Future>(future: F) -> F::Output {
+    tokio::time::timeout(WAIT, future).await.expect("timed out")
+}
+
+#[derive(Clone, Copy)]
+enum Greeting {
+    Welcome,
+    Nothing,
+    Unwritable,
+}
+
+struct Chat {
+    greeting: Greeting,
+    room_hooks: AtomicUsize,
+    handled: Mutex<Vec<String>>,
+    errors: mpsc::UnboundedSender<String>,
+}
+
+impl Chat {
+    fn new(greeting: Greeting) -> (Arc<Self>, mpsc::UnboundedReceiver<String>) {
+        let (errors, reported) = mpsc::unbounded_channel();
+        let chat = Self { greeting, room_hooks: AtomicUsize::new(0), handled: Mutex::new(Vec::new()), errors };
+        (Arc::new(chat), reported)
+    }
+
+    fn handled(&self) -> Vec<String> {
+        self.handled.lock().unwrap().clone()
+    }
+
+    fn hooks(&self) -> usize {
+        self.room_hooks.load(Ordering::SeqCst)
+    }
+}
+
+impl WsHandler for Chat {
+    fn handle_room_message(
+        &self,
+        message: RoomClientMessage,
+        _context: WsConnectionContext,
+    ) -> impl std::future::Future<Output = Option<RoomServerMessage>> + Send {
+        let (entry, reply) = match message {
+            RoomClientMessage::Join(join) => (
+                format!("room join {}", join.name),
+                Said { from: "host".to_string(), text: format!("welcome {}", join.name) },
+            ),
+            RoomClientMessage::Chat(chat) => (
+                format!("room chat {}", chat.text),
+                Said { from: "room".to_string(), text: chat.text },
+            ),
+        };
+        self.handled.lock().unwrap().push(entry);
+        async move { Some(RoomServerMessage::Said(reply)) }
+    }
+
+    fn on_room_authenticated(
+        &self,
+        context: WsConnectionContext,
+    ) -> impl std::future::Future<Output = Option<RoomServerMessage>> + Send {
+        self.room_hooks.fetch_add(1, Ordering::SeqCst);
+        let greeting = match self.greeting {
+            Greeting::Welcome => Some(RoomServerMessage::Welcome(Welcome {
+                greeting: format!("verified={}", context.credential_verified()),
+            })),
+            Greeting::Nothing => None,
+            Greeting::Unwritable => Some(RoomServerMessage::Unwritable(Unwritable)),
+        };
+        async move { greeting }
+    }
+
+    fn handle_lobby_message(
+        &self,
+        message: LobbyClientMessage,
+        _context: WsConnectionContext,
+    ) -> impl std::future::Future<Output = Option<LobbyServerMessage>> + Send {
+        let LobbyClientMessage::Hello(value) = message;
+        self.handled.lock().unwrap().push(format!("lobby hello {value}"));
+        async move { Some(LobbyServerMessage::Notice(json!({"lobby": value}))) }
+    }
+
+    fn on_error(
+        &self,
+        error: WsError,
+        _context: WsConnectionContext,
+    ) -> impl std::future::Future<Output = ()> + Send {
+        let report = match &error {
+            WsError::Decode { frame: WsRawFrame::Text(text), .. } => format!("decode {text}"),
+            WsError::Serde(serde) => format!("serde {serde}"),
+            other => format!("other {other:?}"),
+        };
+        let _ = self.errors.send(report);
+        async {}
+    }
+}
+
+async fn start(handler: Arc<Chat>) -> (std::net::SocketAddr, ChatFixtureEventHub) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hub = ChatFixtureWsHost::new_event_hub();
+    tokio::spawn(ChatFixtureWsHost::serve_with_hub(listener, handler, hub.clone()));
+    (addr, hub)
+}
+
+/// An upgraded connection, or the HTTP status that refused it.
+async fn dial(addr: std::net::SocketAddr, path: &str, key: Option<&str>) -> Result<Peer, u16> {
+    let mut request = format!("ws://{addr}{path}").into_client_request().unwrap();
+    if let Some(key) = key {
+        request.headers_mut().insert("x-fixture-key", key.parse().unwrap());
+    }
+    match within(tokio_tungstenite::connect_async(request)).await {
+        Ok((peer, _)) => Ok(peer),
+        Err(Error::Http(response)) => Err(response.status().as_u16()),
+        Err(other) => panic!("unexpected handshake failure: {other}"),
+    }
+}
+
+async fn send_json(peer: &mut Peer, value: Value) {
+    peer.send(Message::Text(value.to_string().into())).await.unwrap();
+}
+
+async fn send_text(peer: &mut Peer, text: &str) {
+    peer.send(Message::Text(text.to_string().into())).await.unwrap();
+}
+
+/// The next data frame, as JSON.
+async fn next_json(peer: &mut Peer) -> Value {
+    loop {
+        match within(peer.next()).await.expect("the connection is open").unwrap() {
+            Message::Text(text) => return serde_json::from_str(text.as_str()).unwrap(),
+            Message::Binary(bytes) => panic!("expected a text frame, got {bytes:?}"),
+            Message::Close(close) => panic!("the connection closed: {close:?}"),
+            _ => continue,
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_room_hook_message_is_the_first_frame_and_runs_once_per_connection() {
+    let (chat, _errors) = Chat::new(Greeting::Welcome);
+    let (addr, _hub) = start(chat.clone()).await;
+    let mut peer = dial(addr, "/rooms/abc", Some(KEY)).await.unwrap();
+    // Sent before anything is read: the hook's message still comes first.
+    send_json(&mut peer, json!({"op": "join", "name": "alice"})).await;
+
+    assert_eq!(next_json(&mut peer).await, json!({"greeting": "verified=true"}));
+    assert_eq!(next_json(&mut peer).await, json!({"from": "host", "text": "welcome alice"}));
+    assert_eq!(chat.hooks(), 1);
+}
+
+#[tokio::test]
+async fn a_hook_returning_none_sends_nothing_before_the_reply() {
+    let (chat, _errors) = Chat::new(Greeting::Nothing);
+    let (addr, _hub) = start(chat.clone()).await;
+    let mut peer = dial(addr, "/rooms/abc", Some(KEY)).await.unwrap();
+    send_json(&mut peer, json!({"op": "chat", "text": "hi"})).await;
+
+    assert_eq!(next_json(&mut peer).await, json!({"from": "room", "text": "hi"}));
+    assert_eq!(chat.hooks(), 1, "the hook ran and sent nothing");
+}
+
+#[tokio::test]
+async fn a_rejected_key_never_runs_the_hook() {
+    let (chat, _errors) = Chat::new(Greeting::Welcome);
+    let (addr, _hub) = start(chat.clone()).await;
+    assert_eq!(dial(addr, "/rooms/abc", Some("wrong-key")).await.err(), Some(401));
+    assert_eq!(dial(addr, "/rooms/abc", None).await.err(), Some(401));
+
+    let mut peer = dial(addr, "/rooms/abc", Some(KEY)).await.unwrap();
+    assert_eq!(next_json(&mut peer).await, json!({"greeting": "verified=true"}));
+    assert_eq!(chat.hooks(), 1, "only the accepted upgrade ran the hook");
+}
+
+#[tokio::test]
+async fn a_hook_message_that_fails_to_write_closes_the_connection_and_reaches_on_error() {
+    let (chat, mut errors) = Chat::new(Greeting::Unwritable);
+    let (addr, _hub) = start(chat.clone()).await;
+    let mut peer = dial(addr, "/rooms/abc", Some(KEY)).await.unwrap();
+
+    loop {
+        match within(peer.next()).await {
+            None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
+            Some(Ok(Message::Text(_) | Message::Binary(_))) => panic!("no data frame after a failed hook write"),
+            Some(Ok(_)) => continue,
+        }
+    }
+    let report = within(errors.recv()).await.expect("on_error ran");
+    assert!(report.starts_with("serde ") && report.contains("unwritable fixture payload"), "{report}");
+    assert_eq!(chat.hooks(), 1);
+    assert!(chat.handled().is_empty());
+}
+
+#[tokio::test]
+async fn room_messages_arrive_typed_and_an_undecodable_frame_reaches_on_error_without_closing() {
+    let (chat, mut errors) = Chat::new(Greeting::Nothing);
+    let (addr, _hub) = start(chat.clone()).await;
+    let mut peer = dial(addr, "/rooms/abc", Some(KEY)).await.unwrap();
+
+    send_json(&mut peer, json!({"op": "join", "name": "bob"})).await;
+    assert_eq!(next_json(&mut peer).await, json!({"from": "host", "text": "welcome bob"}));
+    send_text(&mut peer, r#"{"op":"dance"}"#).await;
+    send_text(&mut peer, "not json").await;
+    send_json(&mut peer, json!({"op": "chat", "text": "still here"})).await;
+    // The undecodable frames got no reply: the next frame answers the chat.
+    assert_eq!(next_json(&mut peer).await, json!({"from": "room", "text": "still here"}));
+
+    assert_eq!(within(errors.recv()).await.unwrap(), r#"decode {"op":"dance"}"#);
+    assert_eq!(within(errors.recv()).await.unwrap(), "decode not json");
+    assert_eq!(chat.handled(), ["room join bob", "room chat still here"]);
+}
+
+#[tokio::test]
+async fn connections_route_by_path_and_unknown_paths_are_rejected_with_404() {
+    let (chat, _errors) = Chat::new(Greeting::Nothing);
+    let (addr, _hub) = start(chat.clone()).await;
+
+    let mut room = dial(addr, "/rooms/abc", Some(KEY)).await.unwrap();
+    send_json(&mut room, json!({"op": "chat", "text": "r"})).await;
+    assert_eq!(next_json(&mut room).await, json!({"from": "room", "text": "r"}));
+
+    // The generated Lobby client reads its key from the definition's env
+    // mapping (`CHAT_FIXTURE_WS_KEY`, set for the child run) on connect.
+    let api = ChatFixtureWs::with_base_url(format!("ws://{addr}"));
+    let mut lobby = within(api.connect_lobby(WsClientOptions::default())).await.unwrap();
+    lobby.send(LobbyClientMessage::Hello(json!("l"))).await.unwrap();
+    match within(lobby.next_event()).await.expect("the connection is open") {
+        Ok(LobbyServerMessage::Notice(value)) => assert_eq!(value, json!({"lobby": "l"})),
+        other => panic!("expected Notice, got {other:?}"),
+    }
+    assert_eq!(chat.handled(), ["room chat r", r#"lobby hello "l""#]);
+
+    for path in ["/nowhere", "/rooms", "/rooms/", "/rooms/abc/extra"] {
+        assert_eq!(dial(addr, path, Some(KEY)).await.err(), Some(404), "{path}");
+    }
+}
+
+#[tokio::test]
+async fn typed_broadcasts_reach_their_endpoint_only_and_value_broadcasts_reach_every_connection() {
+    let (chat, _errors) = Chat::new(Greeting::Nothing);
+    let (addr, hub) = start(chat.clone()).await;
+    // A round trip on each proves both connections are registered.
+    let mut room = dial(addr, "/rooms/abc", Some(KEY)).await.unwrap();
+    send_json(&mut room, json!({"op": "chat", "text": "ready"})).await;
+    assert_eq!(next_json(&mut room).await, json!({"from": "room", "text": "ready"}));
+    let mut lobby = dial(addr, "/lobby", Some(KEY)).await.unwrap();
+    send_json(&mut lobby, json!("ready")).await;
+    assert_eq!(next_json(&mut lobby).await, json!({"lobby": "ready"}));
+
+    let rooms_only = RoomServerMessage::Said(Said { from: "hub".to_string(), text: "rooms only".to_string() });
+    assert_eq!(hub.broadcast(rooms_only).await.unwrap(), 1);
+    assert_eq!(hub.broadcast_value(json!({"all": 1})).await, 2);
+    assert_eq!(hub.broadcast(LobbyServerMessage::Notice(json!("lobby only"))).await.unwrap(), 1);
+    assert_eq!(hub.broadcast_value(json!({"all": 2})).await, 2);
+
+    // Each connection's queue is ordered, so a typed broadcast it missed
+    // would have arrived before the value that follows it.
+    assert_eq!(next_json(&mut room).await, json!({"from": "hub", "text": "rooms only"}));
+    assert_eq!(next_json(&mut room).await, json!({"all": 1}));
+    assert_eq!(next_json(&mut room).await, json!({"all": 2}));
+    assert_eq!(next_json(&mut lobby).await, json!({"all": 1}));
+    assert_eq!(next_json(&mut lobby).await, json!("lobby only"));
+    assert_eq!(next_json(&mut lobby).await, json!({"all": 2}));
+}
+"##;
+
+/// The child tests [`CHAT_WS_HOST_TEST`] must report.
+const CHAT_WS_HOST_TESTS: &[&str] = &[
+    "the_room_hook_message_is_the_first_frame_and_runs_once_per_connection",
+    "a_hook_returning_none_sends_nothing_before_the_reply",
+    "a_rejected_key_never_runs_the_hook",
+    "a_hook_message_that_fails_to_write_closes_the_connection_and_reaches_on_error",
+    "room_messages_arrive_typed_and_an_undecodable_frame_reaches_on_error_without_closing",
+    "connections_route_by_path_and_unknown_paths_are_rejected_with_404",
+    "typed_broadcasts_reach_their_endpoint_only_and_value_broadcasts_reach_every_connection",
+];
+
+/// The `#[tokio::test]` functions a child test source declares, in order.
+fn child_tests(source: &str) -> Vec<&str> {
+    source
+        .split("#[tokio::test]")
+        .skip(1)
+        .filter_map(|rest| rest.trim_start().strip_prefix("async fn "))
+        .filter_map(|rest| rest.split('(').next())
+        .collect()
+}
+
+#[test]
+fn ws_child_test_lists_name_every_child_test() {
+    assert_eq!(child_tests(TYPED_WS_CLIENT_TEST), TYPED_WS_CLIENT_TESTS);
+    assert_eq!(child_tests(CHAT_WS_HOST_TEST), CHAT_WS_HOST_TESTS);
+    assert_eq!(child_tests(CREDENTIAL_WS_CLIENT_TEST), CREDENTIAL_WS_CLIENT_TESTS);
+}
+
+/// R10 and R14 in one fresh crate: typed clients (selection, decode errors,
+/// typed and value sends, one receive queue, binary framing, uninhabited
+/// directions), sends of the wrong type failing to compile, and a
+/// multi-endpoint host that is not Unfolded Circle's.
+#[test]
+fn slow_typed_ws_clients_and_a_multi_endpoint_host_compile_and_run() {
+    let lockfile = biscuit_test_harness::manifest_dir!().join("../schema/Cargo.lock");
+    let render = |api: schematic_define::WebSocketApi| {
+        schematic_gen::output::ws_modules::render_ws_api_module(&api)
+            .unwrap_or_else(|error| panic!("{} lowers: {error}", api.name))
+    };
+    let typed = render(typed_ws_fixture());
+    let binary = render(binary_ws_fixture());
+    let chat = render(chat_ws_fixture());
+
+    // R14: the host is protocol-neutral and named for its API.
+    assert!(!chat.contains("UnfoldedCircle"), "{chat}");
+    assert!(chat.contains("pub struct ChatFixtureEventHub"), "{chat}");
+    assert!(chat.contains("fn on_room_authenticated"), "{chat}");
+    assert!(chat.contains("fn on_lobby_authenticated"), "{chat}");
+    assert!(!chat.contains("authentication_success_response"), "{chat}");
+
+    let fresh = FreshCrate::generate(&[], Definitions::Checkout, &lockfile);
+    fresh.add_module("ws_payloads", WS_PAYLOADS);
+    fresh.add_module("ws_typed_fixture", &typed);
+    fresh.add_module("ws_binary_fixture", &binary);
+    fresh.add_module("ws_chat_fixture", &chat);
+    fresh.cargo_check().assert_success();
+
+    fresh.add_test_file("ws_send_control", &format!("{WS_MISUSE_PRELUDE}{WS_SEND_CONTROL}"));
+    fresh.add_test_file("typed_ws_client", TYPED_WS_CLIENT_TEST);
+    fresh.add_test_file("chat_ws_host", CHAT_WS_HOST_TEST);
+    for (index, (_, snippet, _, _)) in WS_MISUSES.iter().enumerate() {
+        fresh.add_test_file(&format!("ws_misuse_{index}"), &format!("{WS_MISUSE_PRELUDE}{snippet}\n"));
+    }
+    let check = fresh.cargo_check_tests();
+    assert!(!check.success, "the misuse targets must fail to compile");
+    let hint = offline_cache_hint(&check.stderr).map(|hint| format!(" ({hint})")).unwrap_or_default();
+    let diagnostics: Vec<&str> = check.stderr.split("\nerror").collect();
+    // rustc prints the location with the host's separator.
+    let located = |file: &str| -> Vec<&str> {
+        let (unix, windows) = (format!("tests/{file}.rs:"), format!("tests\\{file}.rs:"));
+        diagnostics
+            .iter()
+            .copied()
+            .filter(|diagnostic| diagnostic.contains(&unix) || diagnostic.contains(&windows))
+            .collect()
+    };
+    for control in ["ws_send_control", "typed_ws_client", "chat_ws_host"] {
+        assert!(located(control).is_empty(), "{control} must compile{hint}:\n{}", check.stderr);
+    }
+    for (index, (misuse, snippet, code, named)) in WS_MISUSES.iter().enumerate() {
+        let found = located(&format!("ws_misuse_{index}"));
+        assert!(
+            found.iter().any(|diagnostic| diagnostic.starts_with(&format!("[{code}]")) && diagnostic.contains(named)),
+            "{misuse} did not fail with {code} naming `{named}`{hint}:\n{snippet}\n\n{}",
+            check.stderr
+        );
+        std::fs::remove_file(fresh.crate_dir.join(format!("tests/ws_misuse_{index}.rs"))).unwrap();
+    }
+
+    let run = fresh.nextest_run(&[("CHAT_FIXTURE_WS_KEY", "chat-key")]);
+    run.assert_success();
+    let report = format!("{}{}", run.stdout, run.stderr);
+    for test in TYPED_WS_CLIENT_TESTS.iter().chain(CHAT_WS_HOST_TESTS) {
+        assert!(report.contains(test), "the child run did not report {test}:\n{report}");
+    }
+}
+
+/// Payloads of the correlated `HeaderKeyFixtureWs` endpoint, added to the
+/// fresh crate as `src/ws_credential_payloads.rs`.
+const WS_CREDENTIAL_PAYLOADS: &str = r#"
+#[derive(Debug, serde::Serialize)]
+pub struct Ask {
+    pub question: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct Count {
+    pub n: u64,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+pub struct Answer {
+    pub text: String,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+pub struct Total {
+    pub sum: u64,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+pub struct Notice {
+    pub text: String,
+}
+"#;
+
+/// A client API with one `Feed` endpoint receiving JSON values.
+fn feed_ws_fixture(name: &str, auth: AuthStrategy, env_auth: &[&str]) -> schematic_define::WebSocketApi {
+    use schematic_define::Schema;
+    use schematic_define::websocket::{EndpointRole, MessageDirection, MessageSchema};
+    ws_fixture_api(name, auth, env_auth, vec![ws_fixture_endpoint("Feed", "/feed", EndpointRole::Client, vec![
+        MessageSchema::new("Frame", MessageDirection::Server, Schema::new("serde_json::Value")),
+    ])])
+}
+
+/// An API key header behind two env variables (the child sets the first
+/// to empty), a constant header, and a correlated `Rpc` endpoint with
+/// string ids: `Ask` answered by `Answer`, `Count` by `Total`, and a
+/// `Notice` that answers nothing.
+fn header_key_ws_fixture() -> schematic_define::WebSocketApi {
+    use schematic_define::Schema;
+    use schematic_define::websocket::{
+        CorrelationHints, EndpointRole, MessageDirection, MessageSchema, RequestIdType,
+        WebSocketEndpointHints, WebSocketRuntimeHints,
+    };
+    let payload = |name: &str| Schema::with_path(name, "crate::ws_credential_payloads");
+    let server = |name: &str| MessageSchema::new(name, MessageDirection::Server, payload(name));
+    let client = |name: &str| MessageSchema::new(name, MessageDirection::Client, payload(name));
+
+    let mut rpc = ws_fixture_endpoint("Rpc", "/rpc", EndpointRole::Client, vec![
+        client("Ask").responds_with("Answer"),
+        client("Count").responds_with("Total"),
+        server("Answer").matches("kind", "answer"),
+        server("Total").matches("kind", "total"),
+        server("Notice").matches("kind", "notice"),
+    ]);
+    rpc.runtime = Some(WebSocketEndpointHints {
+        correlation: Some(CorrelationHints {
+            request_id_field: "id".to_string(),
+            response_id_field: "re".to_string(),
+            default_timeout_secs: 5,
+        }),
+        ..WebSocketEndpointHints::default()
+    });
+    let mut api = ws_fixture_api(
+        "HeaderKeyFixtureWs",
+        AuthStrategy::ApiKey { header: "X-Fixture-Key".to_string(), value_prefix: None },
+        &["HEADER_KEY_FIXTURE_WS_EMPTY", "HEADER_KEY_FIXTURE_WS_KEY"],
+        vec![rpc],
+    );
+    api.headers = vec![("X-Client".to_string(), "fixture".to_string())];
+    api.runtime = Some(WebSocketRuntimeHints {
+        request_id_type: RequestIdType::String,
+        ..WebSocketRuntimeHints::default()
+    });
+    api
+}
+
+/// The child environment of [`CREDENTIAL_WS_CLIENT_TEST`]. Only
+/// fixture-specific names; `BEARER_FIXTURE_CLIENT_WS_TOKEN` and
+/// `COOKIE_KEY_FIXTURE_WS_SESSION` stay unset.
+const CREDENTIAL_WS_ENV: &[(&str, &str)] = &[
+    ("HEADER_KEY_FIXTURE_WS_EMPTY", ""),
+    ("HEADER_KEY_FIXTURE_WS_KEY", "env-key"),
+    ("QUERY_KEY_FIXTURE_WS_KEY", "query-env-key"),
+    ("BASIC_FIXTURE_WS_USER", "env-user"),
+    ("BASIC_FIXTURE_WS_PASS", "env-pass"),
+];
+
+/// Child tests of generated client handshakes and correlated requests
+/// against loopback tokio-tungstenite servers on port 0.
+const CREDENTIAL_WS_CLIENT_TEST: &str = r##"
+use std::time::Duration;
+
+use futures_util::{SinkExt, StreamExt};
+use schematic_schema::schematic_runtime::{AuthMethod, Credential};
+use schematic_schema::ws_basic_fixture::BasicFixtureWs;
+use schematic_schema::ws_bearer_client_fixture::BearerFixtureClientWs;
+use schematic_schema::ws_cookie_key_fixture::CookieKeyFixtureWs;
+use schematic_schema::ws_credential_payloads::{Answer, Ask, Count, Notice, Total};
+use schematic_schema::ws_header_key_fixture::{HeaderKeyFixtureWs, RpcClient, RpcServerMessage};
+use schematic_schema::ws_query_key_fixture::QueryKeyFixtureWs;
+use schematic_schema::ws_shared::{ReconnectPolicy, WsClientOptions, WsError};
+use serde_json::{Value, json};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
+use tokio_tungstenite::tungstenite::http;
+
+type Peer = WebSocketStream<TcpStream>;
+
+/// A bound on a hang, never a synchronization.
+const WAIT: Duration = Duration::from_secs(2);
+
+/// How long a listener stays unconnected to show that nothing dialed it.
+const QUIET: Duration = Duration::from_millis(300);
+
+async fn within<F: std::future::Future>(future: F) -> F::Output {
+    tokio::time::timeout(WAIT, future).await.expect("timed out")
+}
+
+/// One upgrade request as the server saw it.
+struct Seen {
+    target: String,
+    headers: http::HeaderMap,
+}
+
+impl Seen {
+    fn values(&self, name: &str) -> Vec<&str> {
+        self.headers.get_all(name).iter().map(|value| value.to_str().unwrap()).collect()
+    }
+
+    /// Every place a credential could travel: each Authorization,
+    /// X-Fixture-Key, and Cookie header, and the query string.
+    fn carriers(&self) -> Vec<String> {
+        let mut found: Vec<String> = ["authorization", "x-fixture-key", "cookie"]
+            .iter()
+            .flat_map(|name| self.values(name).into_iter().map(move |value| format!("{name}: {value}")))
+            .collect();
+        if let Some((_, query)) = self.target.split_once('?') {
+            found.push(format!("query: {query}"));
+        }
+        found
+    }
+}
+
+async fn accept_one(listener: TcpListener) -> (Seen, Peer) {
+    let (stream, _) = listener.accept().await.unwrap();
+    let mut seen = None;
+    let peer = tokio_tungstenite::accept_hdr_async(stream, |request: &Request, response: Response| {
+        seen = Some(Seen { target: request.uri().to_string(), headers: request.headers().clone() });
+        Ok(response)
+    })
+    .await
+    .unwrap();
+    (seen.unwrap(), peer)
+}
+
+/// A loopback base URL and the server side of the one upgrade it accepts.
+async fn listen() -> (String, tokio::task::JoinHandle<(Seen, Peer)>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    (url, tokio::spawn(accept_one(listener)))
+}
+
+/// Answers every upgrade with `status` and `headers`; resolves to how many
+/// upgrades arrived once none has for [`QUIET`].
+async fn reject_all(listener: TcpListener, status: u16, headers: Vec<(&'static str, String)>) -> usize {
+    let mut upgrades = 0;
+    let mut wait = WAIT;
+    while let Ok(accepted) = tokio::time::timeout(wait, listener.accept()).await {
+        wait = QUIET;
+        upgrades += 1;
+        let (stream, _) = accepted.unwrap();
+        let headers = headers.clone();
+        let _ = tokio_tungstenite::accept_hdr_async(stream, move |_: &Request, _: Response| {
+            let mut answer = http::Response::builder().status(status);
+            for (name, value) in &headers {
+                answer = answer.header(*name, value.as_str());
+            }
+            Err::<Response, ErrorResponse>(answer.body(None).unwrap())
+        })
+        .await;
+    }
+    upgrades
+}
+
+#[tokio::test]
+async fn a_per_call_credential_wins_over_the_client_and_the_environment() {
+    let (url, server) = listen().await;
+    let options = WsClientOptions::builder().credential(Credential::api_key("call-key")).build();
+    let api = HeaderKeyFixtureWs::with_base_url(url).api_key("client-key");
+    let client = within(api.connect_rpc(options)).await.unwrap();
+    let (seen, _peer) = within(server).await.unwrap();
+    assert_eq!(seen.carriers(), ["x-fixture-key: call-key"]);
+    assert_eq!(seen.values("x-client"), ["fixture"]);
+    assert_eq!(client.auth_method(), &AuthMethod::PerCall);
+}
+
+#[tokio::test]
+async fn a_client_credential_wins_over_the_environment() {
+    let (url, server) = listen().await;
+    let api = HeaderKeyFixtureWs::with_base_url(url).api_key("client-key");
+    let client = within(api.connect_rpc(WsClientOptions::default())).await.unwrap();
+    let (seen, _peer) = within(server).await.unwrap();
+    assert_eq!(seen.carriers(), ["x-fixture-key: client-key"]);
+    assert_eq!(client.auth_method(), &AuthMethod::ClientLevel);
+}
+
+#[tokio::test]
+async fn the_first_non_empty_env_variable_supplies_the_header_key() {
+    let (url, server) = listen().await;
+    let client = within(HeaderKeyFixtureWs::with_base_url(url).connect_rpc(WsClientOptions::default())).await.unwrap();
+    let (seen, _peer) = within(server).await.unwrap();
+    // HEADER_KEY_FIXTURE_WS_EMPTY comes first and is set to "".
+    assert_eq!(seen.carriers(), ["x-fixture-key: env-key"]);
+    assert_eq!(seen.values("x-client"), ["fixture"]);
+    assert_eq!(client.auth_method(), &AuthMethod::EnvVar("HEADER_KEY_FIXTURE_WS_KEY".to_string()));
+}
+
+#[tokio::test]
+async fn an_env_query_key_is_one_query_pair_and_nothing_else() {
+    let (url, server) = listen().await;
+    let client = within(QueryKeyFixtureWs::with_base_url(url).connect_feed(WsClientOptions::default())).await.unwrap();
+    let (seen, _peer) = within(server).await.unwrap();
+    assert_eq!(seen.target, "/feed?access_key=query-env-key");
+    assert_eq!(seen.carriers(), ["query: access_key=query-env-key"]);
+    assert_eq!(client.auth_method(), &AuthMethod::EnvVar("QUERY_KEY_FIXTURE_WS_KEY".to_string()));
+}
+
+#[tokio::test]
+async fn a_cookie_key_merges_into_an_existing_cookie_header_and_never_duplicates_its_name() {
+    let (url, server) = listen().await;
+    let api = CookieKeyFixtureWs::with_base_url(url.clone()).api_key("cookie-key").header("Cookie", "theme=dark");
+    let client = within(api.connect_feed(WsClientOptions::default())).await.unwrap();
+    let (seen, _peer) = within(server).await.unwrap();
+    assert_eq!(seen.carriers(), ["cookie: theme=dark; session=cookie-key"]);
+    assert_eq!(client.auth_method(), &AuthMethod::ClientLevel);
+
+    let taken = CookieKeyFixtureWs::with_base_url(url).api_key("cookie-key").header("Cookie", "session=mine");
+    match within(taken.connect_feed(WsClientOptions::default())).await.err() {
+        Some(WsError::InvalidCredential(reason)) => assert!(!reason.contains("cookie-key"), "{reason}"),
+        other => panic!("expected InvalidCredential, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn basic_credentials_from_the_env_lists_are_one_authorization_header() {
+    let (url, server) = listen().await;
+    let client = within(BasicFixtureWs::with_base_url(url).connect_feed(WsClientOptions::default())).await.unwrap();
+    let (seen, _peer) = within(server).await.unwrap();
+    // base64("env-user:env-pass")
+    assert_eq!(seen.carriers(), ["authorization: Basic ZW52LXVzZXI6ZW52LXBhc3M="]);
+    assert!(matches!(client.auth_method(), AuthMethod::EnvVar(_)), "{:?}", client.auth_method());
+}
+
+#[tokio::test]
+async fn a_client_basic_credential_wins_over_the_env_lists() {
+    let (url, server) = listen().await;
+    let api = BasicFixtureWs::with_base_url(url).credentials(Credential::basic("client-user", "client-pass"));
+    let client = within(api.connect_feed(WsClientOptions::default())).await.unwrap();
+    let (seen, _peer) = within(server).await.unwrap();
+    // base64("client-user:client-pass")
+    assert_eq!(seen.carriers(), ["authorization: Basic Y2xpZW50LXVzZXI6Y2xpZW50LXBhc3M="]);
+    assert_eq!(client.auth_method(), &AuthMethod::ClientLevel);
+}
+
+#[tokio::test]
+async fn a_bearer_key_is_sent_as_an_access_token() {
+    let (url, server) = listen().await;
+    let api = BearerFixtureClientWs::with_base_url(url).api_key("bearer-token");
+    let client = within(api.connect_feed(WsClientOptions::default())).await.unwrap();
+    let (seen, _peer) = within(server).await.unwrap();
+    assert_eq!(seen.carriers(), ["authorization: Bearer bearer-token"]);
+    assert_eq!(client.auth_method(), &AuthMethod::ClientLevel);
+}
+
+#[tokio::test]
+async fn nothing_resolved_connects_anonymously_and_reports_it() {
+    let (url, server) = listen().await;
+    let client = within(BearerFixtureClientWs::with_base_url(url).connect_feed(WsClientOptions::default())).await.unwrap();
+    let (seen, _peer) = within(server).await.unwrap();
+    assert_eq!(seen.target, "/feed");
+    assert_eq!(seen.carriers(), Vec::<String>::new());
+    assert_eq!(client.auth_method(), &AuthMethod::Anonymous);
+}
+
+#[tokio::test]
+async fn a_401_upgrade_is_rejected_once_and_never_retried() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(reject_all(listener, 401, vec![("WWW-Authenticate", "Bearer".to_string())]));
+    let options = WsClientOptions::builder()
+        .credential(Credential::access_token("rejected-token"))
+        .reconnect(Some(ReconnectPolicy {
+            initial_backoff: Duration::from_millis(10),
+            max_backoff: Duration::from_millis(20),
+            ..ReconnectPolicy::default()
+        }))
+        .build();
+    let error = within(BearerFixtureClientWs::with_base_url(url).connect_feed(options)).await.err().expect("rejected");
+    assert!(matches!(error, WsError::HandshakeRejected { status: 401, .. }), "{error:?}");
+    assert!(error.is_terminal_handshake_rejection());
+    let rendered = format!("{error} {error:?}");
+    assert!(!rendered.contains("rejected-token"), "{rendered}");
+    assert_eq!(within(server).await.unwrap(), 1, "the server received a second upgrade");
+}
+
+#[tokio::test]
+async fn a_302_upgrade_is_not_followed_and_its_location_is_redacted() {
+    let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let target_addr = target.local_addr().unwrap().to_string();
+    let redirecting = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", redirecting.local_addr().unwrap());
+    let location = format!("ws://{target_addr}/feed?access_key=leaked-key");
+    let server = tokio::spawn(reject_all(redirecting, 302, vec![("Location", location)]));
+    let options = WsClientOptions::builder().credential(Credential::api_key("call-key")).build();
+
+    let error = within(QueryKeyFixtureWs::with_base_url(url).connect_feed(options)).await.err().expect("redirected");
+    assert!(matches!(error, WsError::HandshakeRejected { status: 302, .. }), "{error:?}");
+    let shown = error.location().expect("the redacted Location is kept");
+    assert!(shown.contains(&target_addr), "{shown}");
+    assert!(!shown.contains("leaked-key"), "{shown}");
+    let rendered = format!("{error} {error:?}");
+    assert!(!rendered.contains("leaked-key") && !rendered.contains("call-key"), "{rendered}");
+    assert_eq!(within(server).await.unwrap(), 1, "the redirecting server received a second upgrade");
+    assert!(tokio::time::timeout(QUIET, target.accept()).await.is_err(), "the redirect target was dialed");
+}
+
+async fn connect_rpc(options: WsClientOptions) -> (RpcClient, Peer) {
+    let (url, server) = listen().await;
+    let client = within(HeaderKeyFixtureWs::with_base_url(url).connect_rpc(options)).await.unwrap();
+    let (_, peer) = within(server).await.unwrap();
+    (client, peer)
+}
+
+/// The next text frame the peer receives, as JSON.
+async fn received(peer: &mut Peer) -> Value {
+    loop {
+        match within(peer.next()).await.expect("the connection is open").unwrap() {
+            Message::Text(text) => return serde_json::from_str(text.as_str()).unwrap(),
+            _ => continue,
+        }
+    }
+}
+
+async fn reply(peer: &mut Peer, frame: Value) {
+    peer.send(Message::Text(frame.to_string().into())).await.unwrap();
+}
+
+async fn next_rpc(client: &mut RpcClient) -> RpcServerMessage {
+    within(client.next_event()).await.expect("the connection is open").expect("the frame decodes")
+}
+
+#[tokio::test]
+async fn string_request_ids_go_out_as_json_strings_and_return_the_declared_response() {
+    let (mut client, mut peer) = connect_rpc(WsClientOptions::default()).await;
+    let server = async {
+        assert_eq!(received(&mut peer).await, json!({"question": "life", "id": "1"}));
+        // The number 1 is not the string id "1".
+        reply(&mut peer, json!({"kind": "answer", "re": 1, "text": "number id"})).await;
+        reply(&mut peer, json!({"kind": "answer", "re": "1", "text": "forty-two"})).await;
+        assert_eq!(received(&mut peer).await, json!({"n": 3, "id": "2"}));
+        reply(&mut peer, json!({"kind": "total", "re": "2", "sum": 6})).await;
+    };
+    let requests = async {
+        let answer = client.request_ask(Ask { question: "life".to_string() }).await.unwrap();
+        let total = client.request_count(Count { n: 3 }).await.unwrap();
+        (answer, total)
+    };
+    let ((answer, total), ()) = within(async { tokio::join!(requests, server) }).await;
+    assert_eq!(answer, Answer { text: "forty-two".to_string() });
+    assert_eq!(total, Total { sum: 6 });
+    match next_rpc(&mut client).await {
+        RpcServerMessage::Answer(answer) => assert_eq!(answer, Answer { text: "number id".to_string() }),
+        other => panic!("expected the number-id Answer as an event, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_same_id_frame_of_another_message_is_an_event_not_the_answer() {
+    let (mut client, mut peer) = connect_rpc(WsClientOptions::default()).await;
+    let server = async {
+        assert_eq!(received(&mut peer).await["id"], json!("1"));
+        reply(&mut peer, json!({"kind": "notice", "re": "1", "text": "not the answer"})).await;
+        reply(&mut peer, json!({"kind": "total", "re": "1", "sum": 7})).await;
+        reply(&mut peer, json!({"kind": "answer", "re": "1", "text": "the answer"})).await;
+    };
+    let (answer, ()) = within(async { tokio::join!(client.request_ask(Ask { question: "q".to_string() }), server) }).await;
+    assert_eq!(answer.unwrap(), Answer { text: "the answer".to_string() });
+    match next_rpc(&mut client).await {
+        RpcServerMessage::Notice(notice) => assert_eq!(notice, Notice { text: "not the answer".to_string() }),
+        other => panic!("expected Notice, got {other:?}"),
+    }
+    match next_rpc(&mut client).await {
+        RpcServerMessage::Total(total) => assert_eq!(total, Total { sum: 7 }),
+        other => panic!("expected Total, got {other:?}"),
+    }
+}
+
+/// Answers the next request the peer receives, echoing its id.
+async fn answer_next(peer: &mut Peer, text: &str) {
+    let request = received(peer).await;
+    reply(peer, json!({"kind": "answer", "re": request["id"], "text": text})).await;
+}
+
+#[tokio::test]
+async fn a_timed_out_request_frees_its_pending_slot() {
+    let options = WsClientOptions::builder()
+        .max_pending_requests(1)
+        .request_timeout(Duration::from_millis(200))
+        .build();
+    let (client, mut peer) = connect_rpc(options).await;
+    let mut first = Box::pin(client.request_ask(Ask { question: "unanswered".to_string() }));
+    tokio::select! {
+        result = &mut first => panic!("answered without a reply: {result:?}"),
+        request = received(&mut peer) => assert_eq!(request["question"], json!("unanswered")),
+    }
+    match within(client.request_count(Count { n: 1 })).await {
+        Err(WsError::BackpressureFull(1)) => {}
+        other => panic!("expected BackpressureFull(1), got {other:?}"),
+    }
+    assert!(matches!(within(first).await, Err(WsError::RequestTimeout(_))));
+    // A request that is not a JSON object is refused before it is sent.
+    assert!(matches!(within(client.request_value(json!(5))).await, Err(WsError::Protocol(_))));
+
+    let (answer, ()) = within(async {
+        tokio::join!(client.request_ask(Ask { question: "again".to_string() }), answer_next(&mut peer, "freed"))
+    })
+    .await;
+    assert_eq!(answer.unwrap(), Answer { text: "freed".to_string() });
+}
+
+#[tokio::test]
+async fn a_cancelled_request_frees_its_pending_slot() {
+    let options = WsClientOptions::builder()
+        .max_pending_requests(1)
+        .request_timeout(Duration::from_secs(30))
+        .build();
+    let (client, mut peer) = connect_rpc(options).await;
+    let mut first = Box::pin(client.request_ask(Ask { question: "cancelled".to_string() }));
+    tokio::select! {
+        result = &mut first => panic!("answered without a reply: {result:?}"),
+        request = received(&mut peer) => assert_eq!(request["question"], json!("cancelled")),
+    }
+    match within(client.request_count(Count { n: 1 })).await {
+        Err(WsError::BackpressureFull(1)) => {}
+        other => panic!("expected BackpressureFull(1), got {other:?}"),
+    }
+    drop(first);
+
+    let (answer, ()) = within(async {
+        tokio::join!(client.request_ask(Ask { question: "again".to_string() }), answer_next(&mut peer, "freed"))
+    })
+    .await;
+    assert_eq!(answer.unwrap(), Answer { text: "freed".to_string() });
+}
+"##;
+
+/// The child tests [`CREDENTIAL_WS_CLIENT_TEST`] must report.
+const CREDENTIAL_WS_CLIENT_TESTS: &[&str] = &[
+    "a_per_call_credential_wins_over_the_client_and_the_environment",
+    "a_client_credential_wins_over_the_environment",
+    "the_first_non_empty_env_variable_supplies_the_header_key",
+    "an_env_query_key_is_one_query_pair_and_nothing_else",
+    "a_cookie_key_merges_into_an_existing_cookie_header_and_never_duplicates_its_name",
+    "basic_credentials_from_the_env_lists_are_one_authorization_header",
+    "a_client_basic_credential_wins_over_the_env_lists",
+    "a_bearer_key_is_sent_as_an_access_token",
+    "nothing_resolved_connects_anonymously_and_reports_it",
+    "a_401_upgrade_is_rejected_once_and_never_retried",
+    "a_302_upgrade_is_not_followed_and_its_location_is_redacted",
+    "string_request_ids_go_out_as_json_strings_and_return_the_declared_response",
+    "a_same_id_frame_of_another_message_is_an_event_not_the_answer",
+    "a_timed_out_request_frees_its_pending_slot",
+    "a_cancelled_request_frees_its_pending_slot",
+];
+
+/// R5, R6, R7, and R11 in one fresh crate: handshake credential placement
+/// for each strategy and its precedence, anonymous connects, rejected and
+/// redirected upgrades, and typed correlated requests.
+#[test]
+fn slow_ws_handshake_credentials_and_correlated_requests_run() {
+    let lockfile = biscuit_test_harness::manifest_dir!().join("../schema/Cargo.lock");
+    let render = |api: schematic_define::WebSocketApi| {
+        schematic_gen::output::ws_modules::render_ws_api_module(&api)
+            .unwrap_or_else(|error| panic!("{} lowers: {error}", api.name))
+    };
+    let header_key = render(header_key_ws_fixture());
+    let query_key = render(feed_ws_fixture(
+        "QueryKeyFixtureWs",
+        AuthStrategy::ApiKeyParam { name: "access_key".to_string(), location: ApiKeyLocation::Query },
+        &["QUERY_KEY_FIXTURE_WS_KEY"],
+    ));
+    let cookie_key = render(feed_ws_fixture(
+        "CookieKeyFixtureWs",
+        AuthStrategy::ApiKeyParam { name: "session".to_string(), location: ApiKeyLocation::Cookie },
+        &["COOKIE_KEY_FIXTURE_WS_SESSION"],
+    ));
+    let basic = render(feed_ws_fixture(
+        "BasicFixtureWs",
+        AuthStrategy::Basic {
+            username_env: EnvList::single("BASIC_FIXTURE_WS_USER"),
+            password_env: EnvList::single("BASIC_FIXTURE_WS_PASS"),
+        },
+        &[],
+    ));
+    let bearer = render(feed_ws_fixture(
+        "BearerFixtureClientWs",
+        AuthStrategy::BearerToken { header: None },
+        &["BEARER_FIXTURE_CLIENT_WS_TOKEN"],
+    ));
+    for (name, module) in [("header key", &header_key), ("query key", &query_key), ("cookie key", &cookie_key), ("bearer", &bearer)] {
+        assert!(module.contains("pub fn api_key("), "the {name} client takes a single-secret key:\n{module}");
+    }
+    assert!(!basic.contains("pub fn api_key("), "a Basic-only client has no single-secret key:\n{basic}");
+    assert!(header_key.contains("pub async fn request_ask("), "{header_key}");
+    assert!(header_key.contains("pub async fn request_count("), "{header_key}");
+
+    let fresh = FreshCrate::generate(&[], Definitions::Checkout, &lockfile);
+    fresh.add_module("ws_credential_payloads", WS_CREDENTIAL_PAYLOADS);
+    fresh.add_module("ws_header_key_fixture", &header_key);
+    fresh.add_module("ws_query_key_fixture", &query_key);
+    fresh.add_module("ws_cookie_key_fixture", &cookie_key);
+    fresh.add_module("ws_basic_fixture", &basic);
+    fresh.add_module("ws_bearer_client_fixture", &bearer);
+    fresh.add_test_file("credential_ws_client", CREDENTIAL_WS_CLIENT_TEST);
+
+    let run = fresh.nextest_run(CREDENTIAL_WS_ENV);
+    run.assert_success();
+    let report = format!("{}{}", run.stdout, run.stderr);
+    for test in CREDENTIAL_WS_CLIENT_TESTS {
         assert!(report.contains(test), "the child run did not report {test}:\n{report}");
     }
 }

@@ -18,9 +18,13 @@
 
 use std::fmt;
 
+use http::HeaderMap;
+use url::Url;
+
 use crate::error::InvalidArgument;
 use crate::meta::AuthMethod;
 use crate::options::CallAuth;
+use crate::redact::SecretNames;
 
 /// A credential supplied by the caller.
 #[derive(Clone, PartialEq, Eq)]
@@ -374,12 +378,89 @@ impl AuthConfig {
     }
 }
 
+impl AuthConfig {
+    /// Selects the one credential of a handshake the runtime does not send
+    /// itself, such as a WebSocket upgrade: `per_call`, else `client`, else
+    /// the first non-empty variable of the environment fallback, else none.
+    ///
+    /// The selection is made once; a caller that redials reuses it, so a
+    /// later change to the environment needs a new selection.
+    ///
+    /// ## Errors
+    ///
+    /// [`InvalidArgument`] when `per_call` or `client` is a kind of
+    /// credential this API does not accept; nothing is reinterpreted, and
+    /// the environment is not read.
+    pub fn select_handshake(
+        &self,
+        per_call: Option<&Credential>,
+        client: Option<&Credential>,
+    ) -> Result<HandshakeCredential, InvalidArgument> {
+        let (credential, auth, level) = match (per_call, client) {
+            (Some(credential), _) => (credential, AuthMethod::PerCall, "per-call"),
+            (None, Some(credential)) => (credential, AuthMethod::ClientLevel, "client"),
+            (None, None) => return Ok(HandshakeCredential(self.resolve_env().unwrap_or_else(Resolved::anonymous))),
+        };
+        let placement = self.placement_for(credential.kind()).ok_or_else(|| {
+            InvalidArgument::new(format!("the API does not accept a {level} {} credential", credential.kind()))
+        })?;
+        Ok(HandshakeCredential(Resolved::sent(placement, credential.wire_value(placement), auth)))
+    }
+
+    /// The names whose values redaction hides for this API: the built-in
+    /// names and the header, query parameter, or cookie of each placement.
+    pub fn secret_names(&self) -> SecretNames {
+        SecretNames::builtin().with_names(self.placements().map(CredentialPlacement::secret_name))
+    }
+}
+
+/// The credential selected for one handshake by
+/// [`AuthConfig::select_handshake`]: a placement and its wire value, or
+/// none. `Debug` shows the placement and source, never the value.
+#[derive(Clone)]
+pub struct HandshakeCredential(Resolved);
+
+impl HandshakeCredential {
+    /// Where the credential came from; [`AuthMethod::Anonymous`] when none
+    /// was selected.
+    pub fn auth_method(&self) -> &AuthMethod {
+        &self.0.auth
+    }
+
+    /// Writes the credential where its placement sends it: a header, a
+    /// query parameter of `url`, or a cookie merged into `headers`' `Cookie`
+    /// header. An anonymous selection writes nothing.
+    ///
+    /// ## Errors
+    ///
+    /// [`InvalidArgument`] when `url` or `headers` already sets the header,
+    /// query parameter, or cookie that carries the credential (two explicit
+    /// sources are refused, never both sent), or the value is not a valid
+    /// header value.
+    pub fn apply(&self, url: &mut Url, headers: &mut HeaderMap) -> Result<(), InvalidArgument> {
+        match &self.0.sent {
+            Some((placement, value)) => crate::client::place_credential(url, headers, placement, value),
+            None => Ok(()),
+        }
+    }
+}
+
+impl fmt::Debug for HandshakeCredential {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HandshakeCredential")
+            .field("placement", &self.0.sent.as_ref().map(|(placement, _)| placement))
+            .field("auth", &self.0.auth)
+            .finish()
+    }
+}
+
 fn first_non_empty(vars: &[String]) -> Option<(String, String)> {
     vars.iter()
         .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()).map(|value| (name.clone(), value)))
 }
 
 /// The credential chosen for one send.
+#[derive(Clone)]
 pub(crate) struct Resolved {
     /// The placement and the value to send with it; `None` when anonymous.
     pub(crate) sent: Option<(CredentialPlacement, String)>,

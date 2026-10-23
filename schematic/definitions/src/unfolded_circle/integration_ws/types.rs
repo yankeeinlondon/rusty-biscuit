@@ -122,19 +122,24 @@ pub struct IntegrationWsEventEnvelope {
     pub kind: IntegrationWsEnvelopeKind,
     /// Event id/name.
     pub msg: IntegrationWsMessageName,
-    /// Optional category.
+    /// Optional category; omitted from the wire when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cat: Option<String>,
-    /// Optional event timestamp (ISO 8601 format).
+    /// Optional event timestamp (ISO 8601 format); omitted from the wire
+    /// when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ts: Option<String>,
     /// Event payload (raw JSON). Deserialize by inspecting `msg`.
     pub msg_data: Box<RawValue>,
 }
 
-/// Integration auth message (`msg=auth`).
+/// Integration auth request (`kind=req`, `msg=auth`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IntegrationWsAuthMessage {
     /// Envelope kind discriminator.
     pub kind: IntegrationWsEnvelopeKind,
+    /// Client-generated correlation id, echoed as the result's `req_id`.
+    pub id: u64,
     /// Message id/name (`auth`).
     pub msg: IntegrationWsKnownMessage,
     /// Authentication payload.
@@ -150,11 +155,16 @@ pub struct IntegrationWsAuthRequired {
     pub msg: IntegrationWsKnownMessage,
 }
 
-/// Integration authentication result (`msg=authentication`).
+/// Integration authentication result (`kind=resp`, `msg=authentication`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IntegrationWsAuthenticationMessage {
     /// Envelope kind discriminator.
     pub kind: IntegrationWsEnvelopeKind,
+    /// The `auth` request's `id`; `0` when sent unprompted after the
+    /// connection opens.
+    pub req_id: u64,
+    /// Result: `200` authenticated, `401` rejected.
+    pub code: i32,
     /// Message id/name (`authentication`).
     pub msg: IntegrationWsKnownMessage,
     /// Optional auth status payload.
@@ -234,6 +244,34 @@ impl IntegrationWsAuthMessage {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The authentication frames as the Integration AsyncAPI documents them
+    /// (`authRequestMsg` is a `commonReq`, `authMsg` a `commonResp`).
+    #[test]
+    fn documented_authentication_frames_keep_their_ids_and_code() {
+        let request: IntegrationWsAuthMessage = serde_json::from_str(
+            r#"{"kind":"req","id":3,"msg":"auth","msg_data":{"token":"t"}}"#,
+        )
+        .unwrap();
+        assert_eq!(request.id, 3);
+
+        let text = r#"{"kind":"resp","req_id":0,"code":200,"msg":"authentication","msg_data":{}}"#;
+        let result: IntegrationWsAuthenticationMessage = serde_json::from_str(text).unwrap();
+        assert_eq!((result.req_id, result.code), (0, 200));
+        assert_eq!(
+            serde_json::to_value(&result).unwrap(),
+            serde_json::from_str::<serde_json::Value>(text).unwrap()
+        );
+    }
+
+    /// An event without `cat` or `ts` serializes without them, as drivers
+    /// built it before the host was typed.
+    #[test]
+    fn absent_event_category_and_timestamp_stay_off_the_wire() {
+        let text = r#"{"kind":"event","msg":"device_state","msg_data":{"state":"CONNECTED"}}"#;
+        let event: IntegrationWsEventEnvelope = serde_json::from_str(text).unwrap();
+        assert_eq!(serde_json::to_string(&event).unwrap(), text);
+    }
 
     // ── Enum serialization (Priority 1) ──────────────────────────────
 

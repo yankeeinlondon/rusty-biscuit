@@ -246,6 +246,33 @@ when the [origin policy](./origins-and-redirects.md) allows it for that
 request's target. A hop that may not carry the credential is sent with
 every secret header, cookie, and secret query value removed.
 
+## Handshakes another transport sends
+
+A generated WebSocket client does not send through the runtime's HTTP
+client, but it selects and places its upgrade credential with the same
+rules. `AuthConfig::select_handshake(per_call, client)` picks one source —
+the per-connect credential, else the client credential, else the first
+non-empty environment variable, else none — and returns a
+`HandshakeCredential` whose `apply(&mut url, &mut headers)` writes it as a
+header, a query parameter, or a cookie merged into `Cookie`:
+
+```rust
+use schematic_runtime::{AuthConfig, CredentialPlacement, Credential, Url};
+
+let auth = AuthConfig::none().accept(CredentialPlacement::ApiKeyQuery { name: "token".into() });
+let selected = auth.select_handshake(None, Some(&Credential::api_key("k")))?;
+let mut url = Url::parse("wss://tv.local/channel")?;
+let mut headers = http::HeaderMap::new();
+selected.apply(&mut url, &mut headers)?;
+assert_eq!(url.query(), Some("token=k"));
+```
+
+A credential kind the API does not accept, or a request that already sets
+the header, query parameter, or cookie the credential would use, is an
+`InvalidArgument`: two explicit sources are refused, never both sent.
+`AuthConfig::secret_names()` gives the redaction set for the handshake's
+error text. The selection is made once; a caller that reconnects reuses it.
+
 ## OAuth
 
 The runtime does not run OAuth flows. Obtain a token with `schematic-oauth`

@@ -1,6 +1,7 @@
 //! Translation of a definition's authentication policies into the runtime's
 //! `AuthConfig`: the API's effective policy, and each endpoint policy that
-//! replaces it.
+//! replaces it. Generated WebSocket clients translate their handshake policy
+//! with the same functions ([`policy_config`], [`policy_tokens`]).
 //!
 //! The runtime does not depend on `schematic-define`, so the generated
 //! `definition()` spells a policy out in runtime terms: every accepted
@@ -16,7 +17,7 @@ use schematic_define::{
 
 /// A runtime credential placement, as generation-time data.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum Placement {
+pub(crate) enum Placement {
     Bearer { header: Option<String> },
     ApiKeyHeader { header: String, prefix: Option<String> },
     ApiKeyQuery { name: String },
@@ -26,7 +27,7 @@ pub(super) enum Placement {
 
 /// The runtime form of an API's environment fallback.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct EnvFallback {
+pub(crate) struct EnvFallback {
     pub placement: Placement,
     /// The token, key, or Basic password variables, read in order.
     pub vars: Vec<String>,
@@ -36,26 +37,26 @@ pub(super) struct EnvFallback {
 
 /// The runtime form of an API's effective authentication policy.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(super) struct AuthConfig {
+pub(crate) struct AuthConfig {
     pub accepted: Vec<Placement>,
     pub env: Option<EnvFallback>,
 }
 
 /// Translates `api`'s effective policy.
 pub(super) fn auth_config(api: &RestApi) -> AuthConfig {
-    policy_config(api, &api.effective_auth_policy(), &api.default_env_mapping())
+    policy_config(&api.env_auth, &api.effective_auth_policy(), &api.default_env_mapping())
 }
 
 /// Translates `policy`, reading its fallback's variables from `mapping`
-/// (parameter keys from `api`'s `env_auth`, which the mapping has no slot
-/// for).
+/// (parameter keys from the definition's `env_auth`, which the mapping has
+/// no slot for).
 ///
 /// An OAuth2 method is accepted as a bearer access token, which the caller
 /// obtains out of band. A fallback with no variable to read is dropped, as is
 /// a method or location this generator does not know: under the API's
 /// policy the runtime then sends that request anonymously, exactly as when no
 /// variable is set, and under an endpoint replacement it refuses the send.
-pub(super) fn policy_config(api: &RestApi, policy: &AuthPolicy, mapping: &EnvMapping) -> AuthConfig {
+pub(crate) fn policy_config(env_auth: &[String], policy: &AuthPolicy, mapping: &EnvMapping) -> AuthConfig {
     let mut accepted: Vec<Placement> = Vec::new();
     for method in &policy.explicit {
         if let Some(placement) = explicit_placement(method)
@@ -64,7 +65,7 @@ pub(super) fn policy_config(api: &RestApi, policy: &AuthPolicy, mapping: &EnvMap
             accepted.push(placement);
         }
     }
-    let env = policy.env_fallback.as_ref().and_then(|strategy| env_fallback(api, mapping, strategy));
+    let env = policy.env_fallback.as_ref().and_then(|strategy| env_fallback(env_auth, mapping, strategy));
     AuthConfig { accepted, env }
 }
 
@@ -85,7 +86,7 @@ pub(super) fn endpoint_configs(api: &RestApi) -> Vec<(&str, EndpointConfig)> {
             let config = match api.endpoint_auth(endpoint) {
                 ResolvedEndpointAuth::Public => EndpointConfig::Public,
                 ResolvedEndpointAuth::Replaced { policy, env_mapping } => {
-                    EndpointConfig::Replaced(policy_config(api, &policy, &env_mapping))
+                    EndpointConfig::Replaced(policy_config(&api.env_auth, &policy, &env_mapping))
                 }
                 _ => return None,
             };
@@ -127,7 +128,7 @@ fn param_placement(name: &str, location: ApiKeyLocation) -> Option<Placement> {
     }
 }
 
-fn env_fallback(api: &RestApi, mapping: &EnvMapping, strategy: &EnvAuthStrategy) -> Option<EnvFallback> {
+fn env_fallback(env_auth: &[String], mapping: &EnvMapping, strategy: &EnvAuthStrategy) -> Option<EnvFallback> {
     let names = |list: Option<&schematic_define::EnvList>| {
         list.map(|list| list.names().to_vec()).unwrap_or_default()
     };
@@ -148,7 +149,7 @@ fn env_fallback(api: &RestApi, mapping: &EnvMapping, strategy: &EnvAuthStrategy)
         // A parameter key is not a header credential, so the mapping has no
         // entry for it; the definition's `env_auth` names its variables.
         EnvAuthStrategy::ApiKeyParam { name, location } => {
-            (param_placement(name, *location)?, api.env_auth.clone(), Vec::new())
+            (param_placement(name, *location)?, env_auth.to_vec(), Vec::new())
         }
         EnvAuthStrategy::Basic => (
             Placement::Basic,
@@ -175,7 +176,7 @@ pub(super) fn auth_config_tokens(config: &AuthConfig) -> Option<TokenStream> {
 
 /// The `schematic_runtime::AuthConfig` expression for `config`, even when it
 /// accepts no credential.
-pub(super) fn policy_tokens(config: &AuthConfig) -> TokenStream {
+pub(crate) fn policy_tokens(config: &AuthConfig) -> TokenStream {
     let accepted = config.accepted.iter().map(|placement| {
         let placement = placement_tokens(placement);
         quote! { .accept(#placement) }

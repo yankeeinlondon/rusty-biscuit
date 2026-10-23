@@ -471,13 +471,34 @@ The message starts with where in the definition the finding is:
   - empty correlation field paths, an empty `responds_with`, an empty
     selector field, an empty auth-flow name or indicator, and a zero
     correlation timeout, heartbeat interval, or heartbeat timeout
+  - a message name that is not a Rust identifier or is declared twice in
+    one endpoint (names become enum variants)
+  - in a direction the endpoint receives: more than one fallback, a
+    fallback with selectors, a message without selectors beside other
+    messages, a repeated selector field, or two messages whose selectors
+    can match one frame without one being a strict subset of the other
+  - a `raw_binary` or `mixed` frame format (`runtime/frame_format`)
+  - a `responds_with` link set on a server message, naming no message of
+    the endpoint, naming a client message (one the client never
+    receives), or declared on an endpoint without `runtime.correlation`
+    hints; and a linked request named `Value`, whose method would be
+    `request_value`
 
   See [WebSocket definitions](../websocket-definitions.md) for the rules
   behind each one
 - a **warning** (for example the [repeated segment](#repeated-path-segments)
-  above, or an endpoint with no messages) is printed and generation goes on
-- **info** notes, such as a correlation strategy inferred from message
-  names, have no severity in the shared format; they print only in a
+  above, or an endpoint with no messages) is printed and generation goes on.
+  Correlation declarations nothing consumes warn: `runtime.correlation`
+  hints with no `responds_with` link, hints on a `Host`-only endpoint, and an
+  API whose `request_id_type` is declared as `string` while no client
+  endpoint correlates. The default `u64` id type never warns:
+
+  ```text
+  [WARN] severity=warning api=Example endpoint=Live feature=websocket-definition output=rust: endpoints/Live/runtime/correlation: correlation hints are declared, but no message links a response with responds_with
+  ```
+
+- **info** notes, such as the reminder that `receive_timeout` is not yet
+  enforced, have no severity in the shared format; they print only in a
   verbose run (`-v`), labeled `[INFO]` and `severity=info`
 
 From code, `output::ws_modules::validate_ws_apis` returns the diagnostics and

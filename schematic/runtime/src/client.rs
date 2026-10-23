@@ -1144,7 +1144,7 @@ impl Inner {
             if replace {
                 remove_placement(&mut sent, placement);
             }
-            place_credential(&mut sent, placement, value)?;
+            place_credential(&mut sent.url, &mut sent.headers, placement, value)?;
         }
         Ok((sent, resolved.auth.clone()))
     }
@@ -1375,32 +1375,40 @@ fn cookie_pairs(headers: &HeaderMap) -> impl Iterator<Item = (String, String)> +
 
 /// Adds the resolved credential, refusing a request that already carries a
 /// value where the credential goes.
-fn place_credential(assembled: &mut Assembled, placement: &CredentialPlacement, value: &str) -> Result<(), InvalidArgument> {
+/// Writes `value` where `placement` sends it, refusing to replace a value the
+/// request already sets there. Shared with
+/// [`HandshakeCredential::apply`](crate::HandshakeCredential::apply).
+pub(crate) fn place_credential(
+    url: &mut Url,
+    headers: &mut HeaderMap,
+    placement: &CredentialPlacement,
+    value: &str,
+) -> Result<(), InvalidArgument> {
     match placement {
         CredentialPlacement::ApiKeyQuery { name } => {
-            if assembled.url.query_pairs().any(|(pair_name, _)| pair_name == name.as_str()) {
+            if url.query_pairs().any(|(pair_name, _)| pair_name == name.as_str()) {
                 return Err(InvalidArgument::new(format!(
                     "the request already sets the query parameter `{name}` that carries the credential"
                 )));
             }
-            append_query(&mut assembled.url, [(name.as_str(), &QueryValue::from(value))]);
+            append_query(url, [(name.as_str(), &QueryValue::from(value))]);
         }
         CredentialPlacement::ApiKeyCookie { name } => {
-            if cookie_pairs(&assembled.headers).any(|(cookie, _)| &cookie == name) {
+            if cookie_pairs(headers).any(|(cookie, _)| &cookie == name) {
                 return Err(InvalidArgument::new(format!(
                     "the request already sets the cookie `{name}` that carries the credential"
                 )));
             }
-            let mut cookies: Vec<String> = cookie_pairs(&assembled.headers).map(|(cookie, value)| format!("{cookie}={value}")).collect();
+            let mut cookies: Vec<String> = cookie_pairs(headers).map(|(cookie, value)| format!("{cookie}={value}")).collect();
             cookies.push(format!("{name}={}", encode_cookie_value(value)));
             let header = HeaderValue::from_str(&cookies.join("; ")).map_err(|_| InvalidArgument::new("the cookie header is not valid"))?;
-            assembled.headers.insert(COOKIE, header);
+            headers.insert(COOKIE, header);
         }
         other => {
             let name = other.header_name().unwrap_or("Authorization");
             let header_name = HeaderName::from_bytes(name.as_bytes())
                 .map_err(|_| InvalidArgument::new(format!("the credential header `{name}` is not valid")))?;
-            if assembled.headers.contains_key(&header_name) {
+            if headers.contains_key(&header_name) {
                 return Err(InvalidArgument::new(format!(
                     "the request already sets the header `{name}` that carries the credential"
                 )));
@@ -1408,7 +1416,7 @@ fn place_credential(assembled: &mut Assembled, placement: &CredentialPlacement, 
             let mut header = HeaderValue::from_str(value)
                 .map_err(|_| InvalidArgument::new(format!("the credential for `{name}` is not a valid header value")))?;
             header.set_sensitive(true);
-            assembled.headers.insert(header_name, header);
+            headers.insert(header_name, header);
         }
     }
     Ok(())

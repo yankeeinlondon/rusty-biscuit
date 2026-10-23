@@ -3,7 +3,7 @@
 //! Transforms AsyncAPI documents into `WebSocketApi` and `ModelCatalog`
 //! definitions suitable for staged WebSocket code generation.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -11,7 +11,7 @@ use biscuit_file::Yaml;
 use schematic_define::models::{ModelCatalog, ModelDef, PrimitiveType, TypeAlias, TypeRef};
 use schematic_define::openapi::import::{DiagnosticSeverity, OpenApiDiagnostic};
 use schematic_define::websocket::{
-    ConnectionLifecycle, EndpointRole, MessageDirection, MessageSchema, WebSocketApi,
+    ConnectionLifecycle, EndpointRole, MessageDirection, MessageSchema, MessageSelector, WebSocketApi,
     WebSocketEndpoint,
 };
 use schematic_define::{AuthStrategy, EndpointParams, Schema};
@@ -131,7 +131,10 @@ pub fn run_import_asyncapi(
     let mut payload_refs = BTreeSet::new();
     let endpoints = map_channels_to_endpoints(
         &channels,
-        &component_messages,
+        Components {
+            messages: &component_messages,
+            schemas: &component_schemas,
+        },
         &mut payload_refs,
         options.ws_role,
         &mut diagnostics,
@@ -345,9 +348,16 @@ fn infer_auth_strategy(doc: &Value, diagnostics: &mut Vec<OpenApiDiagnostic>) ->
     AuthStrategy::None
 }
 
+/// The `components` maps message mapping reads.
+#[derive(Clone, Copy)]
+struct Components<'a> {
+    messages: &'a Map<String, Value>,
+    schemas: &'a Map<String, Value>,
+}
+
 fn map_channels_to_endpoints(
     channels: &Map<String, Value>,
-    component_messages: &Map<String, Value>,
+    components: Components<'_>,
     payload_refs: &mut BTreeSet<String>,
     role: WsRole,
     diagnostics: &mut Vec<OpenApiDiagnostic>,
@@ -362,7 +372,7 @@ fn map_channels_to_endpoints(
                     op,
                     "publish",
                     path,
-                    component_messages,
+                    components,
                     payload_refs,
                     role,
                     diagnostics,
@@ -374,7 +384,7 @@ fn map_channels_to_endpoints(
                     op,
                     "subscribe",
                     path,
-                    component_messages,
+                    components,
                     payload_refs,
                     role,
                     diagnostics,
@@ -403,7 +413,7 @@ fn resolve_operation_messages(
     operation: &Value,
     operation_name: &str,
     channel_path: &str,
-    component_messages: &Map<String, Value>,
+    components: Components<'_>,
     payload_refs: &mut BTreeSet<String>,
     role: WsRole,
     diagnostics: &mut Vec<OpenApiDiagnostic>,
@@ -426,17 +436,76 @@ fn resolve_operation_messages(
             variant,
             channel_path,
             operation_name,
-            component_messages,
+            components.messages,
             payload_refs,
             diagnostics,
         );
 
         let mut schema = MessageSchema::new(message_name, direction, Schema::new(payload_name));
         schema.description = description;
+        let payload = message_payload(variant, components.messages);
+        let selectors = payload_selectors(payload, components.schemas);
+        if !selectors.is_empty() {
+            schema.selectors = Some(selectors);
+        }
         result.push(schema);
     }
 
     result
+}
+
+/// The payload schema of a message variant: its own `payload`, or that of the
+/// component message it references.
+fn message_payload<'a>(variant: &'a Value, component_messages: &'a Map<String, Value>) -> Option<&'a Value> {
+    match variant.get("$ref").and_then(Value::as_str) {
+        Some(reference) => parse_ref_name(reference)
+            .and_then(|name| component_messages.get(&name))
+            .and_then(|message| message.get("payload")),
+        None => variant.get("payload"),
+    }
+}
+
+/// Selectors for a message: every top-level payload property whose schema is
+/// a string `const` (for example `kind: {const: resp}`), following `$ref`
+/// into `components/schemas` and merging `allOf` parts. A property declared
+/// without `const` in one part keeps a `const` another part gives it.
+fn payload_selectors(payload: Option<&Value>, component_schemas: &Map<String, Value>) -> Vec<MessageSelector> {
+    let mut consts = BTreeMap::new();
+    collect_payload_consts(payload, component_schemas, &mut consts, 0);
+    consts
+        .into_iter()
+        .filter_map(|(field, value)| value.map(|value| MessageSelector::new(field, value)))
+        .collect()
+}
+
+fn collect_payload_consts(
+    schema: Option<&Value>,
+    component_schemas: &Map<String, Value>,
+    consts: &mut BTreeMap<String, Option<String>>,
+    depth: usize,
+) {
+    // A bound on `$ref` chains, so a cyclic reference ends.
+    const MAX_DEPTH: usize = 16;
+    let Some(schema) = schema else { return };
+    if depth > MAX_DEPTH {
+        return;
+    }
+    if let Some(name) = schema.get("$ref").and_then(Value::as_str).and_then(parse_ref_name) {
+        collect_payload_consts(component_schemas.get(&name), component_schemas, consts, depth + 1);
+    }
+    for part in schema.get("allOf").and_then(Value::as_array).into_iter().flatten() {
+        collect_payload_consts(Some(part), component_schemas, consts, depth + 1);
+    }
+    for (field, property) in schema.get("properties").and_then(Value::as_object).into_iter().flatten() {
+        match property.get("const").and_then(Value::as_str) {
+            Some(value) => {
+                consts.insert(field.clone(), Some(value.to_string()));
+            }
+            None => {
+                consts.entry(field.clone()).or_insert(None);
+            }
+        }
+    }
 }
 
 fn expand_message_variants(message: &Value) -> Vec<&Value> {
@@ -785,6 +854,26 @@ fn to_snake_case(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn payload_selectors_keep_string_consts_across_parts_and_end_on_cycles() {
+        let schemas: Map<String, Value> = serde_json::from_value(serde_json::json!({
+            "base": {"properties": {"kind": {"const": "resp"}, "msg": {"type": "string"}}},
+            "loop": {"$ref": "#/components/schemas/loop"},
+        }))
+        .unwrap();
+        let payload = serde_json::json!({"allOf": [
+            {"properties": {"msg": {"const": "pong"}}},
+            {"$ref": "#/components/schemas/base"},
+            {"$ref": "#/components/schemas/loop"},
+            {"properties": {"code": {"const": 200}}},
+        ]});
+        assert_eq!(
+            payload_selectors(Some(&payload), &schemas),
+            [MessageSelector::new("kind", "resp"), MessageSelector::new("msg", "pong")]
+        );
+        assert!(payload_selectors(None, &schemas).is_empty());
+    }
 
     #[test]
     fn imports_minimal_asyncapi_document() {

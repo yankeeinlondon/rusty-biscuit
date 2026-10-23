@@ -36,7 +36,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Notify, watch};
 use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
-use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode};
+use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue, StatusCode};
 use tokio_tungstenite::tungstenite::Message;
 
 /// How one accepted TCP connection is served.
@@ -50,6 +50,9 @@ pub enum Script {
     Refuse(u16),
     /// Reject the upgrade with this 3xx status and a `Location` header.
     Redirect { status: u16, location: String },
+    /// Reject the upgrade with this HTTP status and these response headers,
+    /// appended in order (a name may repeat, e.g. `Set-Cookie`).
+    RefuseWith { status: u16, headers: Vec<(String, String)> },
     /// Hold the TCP connection open without ever answering the upgrade.
     Stall,
     /// Close the TCP connection before reading the upgrade request.
@@ -337,8 +340,11 @@ async fn run_script(stream: TcpStream, index: usize, shared: &Shared, script: Sc
             return;
         }
         Script::Accept(steps) => (steps, None),
-        Script::Refuse(status) => (Vec::new(), Some((status, None))),
-        Script::Redirect { status, location } => (Vec::new(), Some((status, Some(location)))),
+        Script::Refuse(status) => (Vec::new(), Some((status, Vec::new()))),
+        Script::Redirect { status, location } => {
+            (Vec::new(), Some((status, vec![("location".to_string(), location)])))
+        }
+        Script::RefuseWith { status, headers } => (Vec::new(), Some((status, headers))),
     };
 
     let callback = |request: &Request, response: Response| {
@@ -361,7 +367,7 @@ async fn run_script(stream: TcpStream, index: usize, shared: &Shared, script: Sc
         shared.update(|record| record.requests.push(recorded));
         match &rejection {
             None => Ok(response),
-            Some((status, location)) => Err(rejection_response(*status, location.as_deref())),
+            Some((status, headers)) => Err(rejection_response(*status, headers)),
         }
     };
 
@@ -403,13 +409,14 @@ async fn run_script(stream: TcpStream, index: usize, shared: &Shared, script: Sc
     while let Some(Ok(_)) = ws.next().await {}
 }
 
-fn rejection_response(status: u16, location: Option<&str>) -> ErrorResponse {
+fn rejection_response(status: u16, headers: &[(String, String)]) -> ErrorResponse {
     let mut response = ErrorResponse::new(Some(format!("mock rejection {status}")));
     *response.status_mut() = StatusCode::from_u16(status).expect("valid HTTP status");
-    if let Some(location) = location {
-        response
-            .headers_mut()
-            .insert("location", HeaderValue::from_str(location).expect("valid Location"));
+    for (name, value) in headers {
+        response.headers_mut().append(
+            HeaderName::from_bytes(name.as_bytes()).expect("valid header name"),
+            HeaderValue::from_str(value).expect("valid header value"),
+        );
     }
     response
 }

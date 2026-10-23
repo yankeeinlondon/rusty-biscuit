@@ -332,7 +332,7 @@ stream, not a library response.
 
 - [schematic-runtime](../runtime) _v0.1.0_
 
-    _Sends every generated REST request (path dependency, re-exported as `schematic_schema::schematic_runtime`); the crate has no HTTP client of its own._
+    _Sends every generated REST request (path dependency, re-exported as `schematic_schema::schematic_runtime`), and selects and redacts each WebSocket handshake's credential; the crate has no HTTP client of its own._
 
     _Tags: workspace, http_
 
@@ -362,7 +362,7 @@ stream, not a library response.
 
 - [schematic-define](../define) _v0.1.0_
 
-    _Local dependency used only by the WebSocket modules (`Headers`, `ApiKeyEnv`, `EnvMapping`, `EnvList`, and the `websocket` types); the REST modules take their runtime types from `schematic-runtime`._
+    _Local dependency used only by the WebSocket modules, whose `define_api()` returns the `websocket::WebSocketApi` definition; every runtime type, including the WebSocket handshake's credentials, comes from `schematic-runtime`._
 
     _Tags: workspace_
 

@@ -113,7 +113,7 @@ fn every_shipped_module_is_generated() {
     );
     let core = &modules[1].1;
     assert!(
-        core.contains(r#"base_url: "ws://remote.local".to_string()"#),
+        core.contains(r#"Self::with_base_url("ws://remote.local")"#),
         "the generated Core client defaults to the origin"
     );
 }

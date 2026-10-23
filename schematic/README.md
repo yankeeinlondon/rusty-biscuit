@@ -69,14 +69,16 @@ only when no response arrived. See
 use std::time::Duration;
 
 use schematic_schema::elevenlabs_ws::{
-    ElevenLabsTTSWs, TextToSpeechConnectionParams,
+    ElevenLabsTTSWs, TextToSpeechClientMessage, TextToSpeechConnectionParams,
+    TextToSpeechServerMessage, TtsTextMessage,
 };
 use schematic_schema::ws_shared::WsClientOptions;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut api = ElevenLabsTTSWs::new();
-    api.headers = api.headers.clone().use_api_key("my-key", "xi-api-key");
+    // Without `api_key`, connecting reads ELEVEN_LABS_API_KEY (then
+    // ELEVENLABS_API_KEY) from the environment.
+    let api = ElevenLabsTTSWs::new().api_key("my-key");
 
     let params = TextToSpeechConnectionParams {
         model_id: Some("eleven_turbo_v2_5".to_string()),
@@ -88,11 +90,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .disable_nagle(true)
         .build();
 
-    let ws = api
+    let mut ws = api
         .connect_text_to_speech("voice_id_here", params, options)
         .await?;
 
-    ws.send(serde_json::json!({"text": "Hello from Schematic"})).await?;
+    // Messages are typed per endpoint; `send_value` takes raw JSON instead.
+    ws.send(TextToSpeechClientMessage::TextChunk(TtsTextMessage {
+        text: "Hello from Schematic".to_string(),
+        try_trigger_generation: None,
+        flush: Some(true),
+    }))
+    .await?;
+    if let Some(Ok(TextToSpeechServerMessage::AudioChunk(audio))) = ws.next_event().await {
+        println!("audio: {:?}", audio.audio.map(|chunk| chunk.len()));
+    }
     ws.close().await?;
     Ok(())
 }
@@ -107,7 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [Import OpenAPI](docs/io/import-openapi.md), [export OpenAPI](docs/io/export-openapi.md), or [export Postman](docs/io/export-postman.md).
 - [Save a definition as a self-contained bundle](docs/io/definition-bundles.md) and export from the file alone.
 - [Understand generated requests](docs/generation/request-side.md), [validation](docs/generation/validation.md), and [partial generation](docs/generation/partial-generation.md).
-- [Define a WebSocket API](docs/websocket-definitions.md) and [use WebSocket headers](docs/headers/README.md).
+- [Define a WebSocket API](docs/websocket-definitions.md), including [its handshake credential](docs/websocket-definitions.md#the-handshake-credential) and [request/response correlation](docs/websocket-definitions.md#linking-a-request-to-its-response).
 
 ## License
 

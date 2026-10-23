@@ -1,8 +1,10 @@
 //! Shared WS runtime types generator.
 //!
 //! Generates `ws_shared.rs` containing `WsError`, `WsClientOptions`,
-//! `ReconnectPolicy`, `WsConnectionState`, `WsTransportHandle`,
-//! and `WsEncode`/`WsDecode` traits.
+//! `ReconnectPolicy`, `WsConnectionState`, `WsTransportHandle`, the
+//! `WsHandshake` a client dials and redials with, the pending-request table
+//! of correlated requests, the inbound frame types the typed message enums
+//! decode from, and `WsEventStream`.
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -14,8 +16,11 @@ pub fn generate_ws_shared_module() -> TokenStream {
     let reconnect_policy = generate_reconnect_policy();
     let connection_state = generate_ws_connection_state();
     let transport_handle = generate_ws_transport_handle();
-    let codec_traits = generate_codec_traits();
+    let frames = generate_frames();
+    let event_stream = generate_event_stream();
     let writer_command = generate_writer_command();
+    let handshake = generate_handshake();
+    let correlation = generate_correlation();
 
     quote! {
         //! Shared WebSocket runtime types.
@@ -29,10 +34,10 @@ pub fn generate_ws_shared_module() -> TokenStream {
         #![allow(clippy::result_large_err)]
 
         use std::collections::HashMap;
-        use std::sync::Arc;
+        use std::sync::{Arc, Mutex};
         use std::sync::atomic::AtomicU64;
 
-        use tokio::sync::{mpsc, oneshot, watch, Mutex};
+        use tokio::sync::{mpsc, oneshot, watch};
         use tokio::task::JoinHandle;
 
         #error_type
@@ -41,7 +46,10 @@ pub fn generate_ws_shared_module() -> TokenStream {
         #connection_state
         #writer_command
         #transport_handle
-        #codec_traits
+        #handshake
+        #correlation
+        #frames
+        #event_stream
     }
 }
 
@@ -50,9 +58,41 @@ fn generate_ws_error() -> TokenStream {
         /// Errors that can occur during WebSocket operations.
         #[derive(Debug, thiserror::Error)]
         pub enum WsError {
-            /// Transport-level error from tungstenite.
+            /// Transport-level error from tungstenite on an established
+            /// connection. Handshake failures are
+            /// [`WsError::HandshakeRejected`] or [`WsError::Handshake`].
             #[error("WebSocket transport error: {0}")]
             Transport(#[from] tokio_tungstenite::tungstenite::Error),
+
+            /// The server answered the upgrade with another HTTP status:
+            /// 401 or 403 rejects the credential, a 3xx is a redirect, which
+            /// is never followed. Not retried, with this credential or any
+            /// other. `headers` are the response headers with secret values,
+            /// including any in a `Location` URL, redacted.
+            #[error("{}", handshake_rejection_text(*.status, .headers))]
+            HandshakeRejected {
+                /// The HTTP status of the response.
+                status: u16,
+                /// Response headers, names lowercased, secrets redacted.
+                headers: Vec<(String, String)>,
+            },
+
+            /// The upgrade failed without an HTTP response: the connection
+            /// was refused, TLS failed, or the reply was not a WebSocket
+            /// upgrade. The reason never contains the request URL.
+            #[error("WebSocket handshake failed: {0}")]
+            Handshake(String),
+
+            /// The selected credential cannot be sent: the API does not
+            /// accept its kind, or the request already carries the header,
+            /// query parameter, or cookie it would use. Never contains the
+            /// credential's value.
+            #[error("Invalid credential: {0}")]
+            InvalidCredential(String),
+
+            /// The handshake URL is not a valid absolute URL.
+            #[error("Invalid WebSocket URL: {0}")]
+            InvalidUrl(String),
 
             /// JSON serialization/deserialization error.
             #[error("Serialization error: {0}")]
@@ -94,7 +134,20 @@ fn generate_ws_error() -> TokenStream {
             #[error("Correlation error: {0}")]
             Correlation(String),
 
-            /// A connection header could not be represented as an HTTP header.
+            /// An inbound frame is not JSON, matches no declared message, or
+            /// does not decode as the message its selectors name. The
+            /// connection stays open.
+            #[error("Could not decode an inbound {} frame: {reason}", frame.kind())]
+            Decode {
+                /// The frame exactly as received.
+                frame: WsRawFrame,
+                /// Why it was not decoded.
+                reason: String,
+            },
+
+            /// A connection header could not be represented as an HTTP
+            /// header, is managed by the WebSocket upgrade, or would carry
+            /// the API's credential a second time.
             ///
             /// Returned instead of silently dropping the header, so a malformed
             /// auth header surfaces here rather than as an opaque auth rejection.
@@ -105,6 +158,37 @@ fn generate_ws_error() -> TokenStream {
                 /// Why the name or value was rejected.
                 reason: String,
             },
+        }
+
+        impl WsError {
+            /// Whether this is a handshake answer a redial would receive
+            /// again: 401, 403, or a redirect.
+            #[must_use]
+            pub fn is_terminal_handshake_rejection(&self) -> bool {
+                matches!(self, Self::HandshakeRejected { status, .. } if matches!(status, 401 | 403 | 300..=399))
+            }
+
+            /// The redacted `Location` of a rejected handshake, if it sent one.
+            #[must_use]
+            pub fn location(&self) -> Option<&str> {
+                match self {
+                    Self::HandshakeRejected { headers, .. } => headers
+                        .iter()
+                        .find(|(name, _)| name == "location")
+                        .map(|(_, value)| value.as_str()),
+                    _ => None,
+                }
+            }
+        }
+
+        fn handshake_rejection_text(status: u16, headers: &[(String, String)]) -> String {
+            let location = headers.iter().find(|(name, _)| name == "location").map(|(_, value)| value);
+            match location {
+                Some(location) if (300..400).contains(&status) => format!(
+                    "WebSocket handshake redirected with HTTP {status} to {location}; redirects are not followed"
+                ),
+                _ => format!("WebSocket handshake rejected with HTTP {status}"),
+            }
         }
     }
 }
@@ -132,6 +216,9 @@ fn generate_ws_client_options() -> TokenStream {
             pub disable_nagle: bool,
             /// Optional websocket transport configuration.
             pub websocket_config: Option<tokio_tungstenite::tungstenite::protocol::WebSocketConfig>,
+            /// The credential for this connect, ahead of the client's and
+            /// the environment's. `Debug` never shows its value.
+            pub credential: Option<schematic_runtime::Credential>,
         }
 
         impl Default for WsClientOptions {
@@ -146,6 +233,7 @@ fn generate_ws_client_options() -> TokenStream {
                     reconnect: None,
                     disable_nagle: false,
                     websocket_config: None,
+                    credential: None,
                 }
             }
         }
@@ -230,6 +318,13 @@ fn generate_ws_client_options() -> TokenStream {
                 config: Option<tokio_tungstenite::tungstenite::protocol::WebSocketConfig>,
             ) -> Self {
                 self.options.websocket_config = config;
+                self
+            }
+
+            /// Set the credential for this connect.
+            #[must_use]
+            pub fn credential(mut self, credential: schematic_runtime::Credential) -> Self {
+                self.options.credential = Some(credential);
                 self
             }
 
@@ -339,7 +434,7 @@ fn generate_ws_transport_handle() -> TokenStream {
             /// Monotonic request ID generator.
             pub(crate) next_id: Arc<AtomicU64>,
             /// Pending correlated requests awaiting responses.
-            pub(crate) pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
+            pub(crate) pending: PendingRequests,
         }
 
         impl WsTransportHandle {
@@ -384,41 +479,443 @@ fn generate_ws_transport_handle() -> TokenStream {
     }
 }
 
-fn generate_codec_traits() -> TokenStream {
+fn generate_handshake() -> TokenStream {
     quote! {
-        /// Trait for types that can be encoded to a WebSocket frame.
-        pub trait WsEncode {
-            /// Encode this value to a WebSocket text frame payload.
-            fn ws_encode(&self) -> Result<String, WsError>;
+        /// Upgrade headers the WebSocket handshake sets itself; a caller
+        /// header may not replace them.
+        const MANAGED_UPGRADE_HEADERS: [&str; 7] = [
+            "host",
+            "connection",
+            "upgrade",
+            "sec-websocket-key",
+            "sec-websocket-version",
+            "sec-websocket-accept",
+            "sec-websocket-extensions",
+        ];
+
+        /// One explicit connect's handshake: the URL and headers with the
+        /// selected credential already placed, kept privately so redials
+        /// send exactly the same credential. `Debug` shows the URL with
+        /// secret query values redacted and header names only.
+        pub struct WsHandshake {
+            url: String,
+            headers: tokio_tungstenite::tungstenite::http::HeaderMap,
+            auth_method: schematic_runtime::AuthMethod,
+            secrets: schematic_runtime::SecretNames,
         }
 
-        /// Trait for types that can be decoded from a WebSocket frame.
-        pub trait WsDecode: Sized {
-            /// Decode from a WebSocket text frame payload.
-            fn ws_decode(text: &str) -> Result<Self, WsError>;
-        }
+        impl WsHandshake {
+            /// Places `credential` onto `url` and the caller's `headers`.
+            ///
+            /// ## Errors
+            ///
+            /// [`WsError::InvalidUrl`]; [`WsError::InvalidHeader`] for a
+            /// header that is malformed, managed by the upgrade, or named in
+            /// `credential_headers`; [`WsError::InvalidCredential`] when the
+            /// request already carries the credential's query value or
+            /// cookie.
+            pub(crate) fn new(
+                url: &str,
+                headers: &[(String, String)],
+                credential_headers: &[&str],
+                credential: &schematic_runtime::HandshakeCredential,
+                secrets: schematic_runtime::SecretNames,
+            ) -> Result<Self, WsError> {
+                use tokio_tungstenite::tungstenite::http::header::{HeaderName, HeaderValue};
 
-        // Blanket implementation for serde types
-        impl<T: serde::Serialize> WsEncode for T {
-            fn ws_encode(&self) -> Result<String, WsError> {
-                serde_json::to_string(self).map_err(WsError::Serde)
+                let mut url = schematic_runtime::Url::parse(url)
+                    .map_err(|error| WsError::InvalidUrl(error.to_string()))?;
+                let mut map = tokio_tungstenite::tungstenite::http::HeaderMap::new();
+                for (name, value) in headers {
+                    let invalid = |reason: &str| WsError::InvalidHeader {
+                        name: name.clone(),
+                        reason: reason.to_string(),
+                    };
+                    let lower = name.to_ascii_lowercase();
+                    if MANAGED_UPGRADE_HEADERS.contains(&lower.as_str()) {
+                        return Err(invalid("the WebSocket upgrade sets this header"));
+                    }
+                    if credential_headers.iter().any(|header| header.eq_ignore_ascii_case(name)) {
+                        return Err(invalid("this header carries the API's credential; set it with `credentials`"));
+                    }
+                    let header_name = name
+                        .parse::<HeaderName>()
+                        .map_err(|_| invalid("not a valid header name"))?;
+                    let header_value = value
+                        .parse::<HeaderValue>()
+                        .map_err(|_| invalid("not a valid header value"))?;
+                    // A later header of the same name replaces an earlier one.
+                    map.insert(header_name, header_value);
+                }
+                credential
+                    .apply(&mut url, &mut map)
+                    .map_err(|error| WsError::InvalidCredential(error.to_string()))?;
+                Ok(Self {
+                    url: url.as_str().to_string(),
+                    headers: map,
+                    auth_method: credential.auth_method().clone(),
+                    secrets,
+                })
+            }
+
+            /// Where the placed credential came from.
+            pub(crate) fn auth_method(&self) -> &schematic_runtime::AuthMethod {
+                &self.auth_method
+            }
+
+            /// The URL with secret query values redacted.
+            #[must_use]
+            pub fn redacted_url(&self) -> String {
+                self.secrets.redact_url_reference(&self.url).as_str().to_string()
+            }
+
+            /// Performs the upgrade within `options.handshake_timeout`.
+            ///
+            /// ## Errors
+            ///
+            /// [`WsError::HandshakeTimeout`], [`WsError::HandshakeRejected`]
+            /// for any non-101 answer (a redirect is not followed), and
+            /// [`WsError::Handshake`] for every other failure.
+            pub(crate) async fn dial(
+                &self,
+                options: &WsClientOptions,
+            ) -> Result<
+                tokio_tungstenite::WebSocketStream<
+                    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+                >,
+                WsError,
+            > {
+                use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+                let mut request = self
+                    .url
+                    .as_str()
+                    .into_client_request()
+                    .map_err(|error| self.handshake_error(error))?;
+                for (name, value) in &self.headers {
+                    request.headers_mut().append(name.clone(), value.clone());
+                }
+                let connect = tokio_tungstenite::connect_async_with_config(
+                    request,
+                    options.websocket_config,
+                    options.disable_nagle,
+                );
+                match tokio::time::timeout(options.handshake_timeout, connect).await {
+                    Err(_) => Err(WsError::HandshakeTimeout(options.handshake_timeout.as_secs())),
+                    Ok(Err(error)) => Err(self.handshake_error(error)),
+                    Ok(Ok((stream, _))) => Ok(stream),
+                }
+            }
+
+            fn handshake_error(&self, error: tokio_tungstenite::tungstenite::Error) -> WsError {
+                match error {
+                    tokio_tungstenite::tungstenite::Error::Http(response) => {
+                        let headers = self
+                            .secrets
+                            .redact_headers(response.headers())
+                            .iter()
+                            .map(|(name, value)| {
+                                (name.as_str().to_string(), String::from_utf8_lossy(value.as_bytes()).into_owned())
+                            })
+                            .collect();
+                        WsError::HandshakeRejected {
+                            status: response.status().as_u16(),
+                            headers,
+                        }
+                    }
+                    // A transport message may quote the target; it is shown redacted.
+                    other => WsError::Handshake(other.to_string().replace(&self.url, &self.redacted_url())),
+                }
             }
         }
 
-        // Blanket implementation for serde types
-        impl<T: serde::de::DeserializeOwned> WsDecode for T {
-            fn ws_decode(text: &str) -> Result<Self, WsError> {
-                serde_json::from_str(text).map_err(WsError::Serde)
+        impl std::fmt::Debug for WsHandshake {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct("WsHandshake")
+                    .field("url", &self.redacted_url())
+                    .field("headers", &self.headers.keys().map(|name| name.as_str()).collect::<Vec<_>>())
+                    .field("auth_method", &self.auth_method)
+                    .finish()
             }
         }
     }
 }
 
-/// Generates the common host auth helper functions shared by ApiKey and BearerToken strategies.
-///
-/// Produces: `configured_auth_tokens`, `auth_is_required`, `authentication_success_response`,
-/// `auth_error_response`. Callers add their own `validate_upgrade_request` with strategy-specific
-/// token extraction logic.
+fn generate_correlation() -> TokenStream {
+    quote! {
+        /// A correlated request waiting for its answer.
+        pub(crate) struct PendingRequest {
+            /// The message that may answer it; `None` accepts any frame
+            /// carrying the id (`request_value`).
+            response: Option<&'static str>,
+            reply: oneshot::Sender<WsInboundFrame>,
+        }
+
+        /// Pending correlated requests by wire id.
+        pub(crate) type PendingRequests = Arc<Mutex<HashMap<String, PendingRequest>>>;
+
+        fn lock_pending(
+            pending: &PendingRequests,
+        ) -> std::sync::MutexGuard<'_, HashMap<String, PendingRequest>> {
+            pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        }
+
+        /// The map key and the wire value of request id `id`: a JSON string
+        /// when `string_ids`, otherwise a JSON number.
+        pub(crate) fn request_id(id: u64, string_ids: bool) -> (String, serde_json::Value) {
+            let key = id.to_string();
+            let wire = if string_ids {
+                serde_json::Value::String(key.clone())
+            } else {
+                serde_json::Value::from(id)
+            };
+            (key, wire)
+        }
+
+        /// Removes its pending request when dropped, so a request that
+        /// fails to send, times out, or is cancelled frees its slot.
+        pub(crate) struct PendingGuard {
+            pending: PendingRequests,
+            key: String,
+        }
+
+        impl PendingGuard {
+            /// Registers a request under `key`.
+            ///
+            /// ## Errors
+            ///
+            /// [`WsError::BackpressureFull`] when `limit` requests are
+            /// already pending.
+            pub(crate) fn insert(
+                pending: &PendingRequests,
+                key: String,
+                response: Option<&'static str>,
+                reply: oneshot::Sender<WsInboundFrame>,
+                limit: usize,
+            ) -> Result<Self, WsError> {
+                let mut table = lock_pending(pending);
+                if table.len() >= limit {
+                    return Err(WsError::BackpressureFull(limit));
+                }
+                table.insert(key.clone(), PendingRequest { response, reply });
+                Ok(Self { pending: pending.clone(), key })
+            }
+        }
+
+        impl Drop for PendingGuard {
+            fn drop(&mut self) {
+                lock_pending(&self.pending).remove(&self.key);
+            }
+        }
+
+        /// Completes the pending request `frame` answers and returns `None`,
+        /// or returns the frame for the event queue. A frame answers a
+        /// request when its `id_field` holds the request's id with the
+        /// declared JSON type and `selected_message` names the request's
+        /// declared response.
+        pub(crate) fn answer_pending(
+            pending: &PendingRequests,
+            frame: WsInboundFrame,
+            id_field: &str,
+            string_ids: bool,
+            selected_message: fn(&WsInboundFrame) -> Option<&'static str>,
+        ) -> Option<WsInboundFrame> {
+            let id = frame.value().get(id_field);
+            let key = if string_ids {
+                id.and_then(serde_json::Value::as_str).map(str::to_string)
+            } else {
+                id.and_then(serde_json::Value::as_u64).map(|id| id.to_string())
+            };
+            let Some(key) = key else {
+                return Some(frame);
+            };
+            let mut table = lock_pending(pending);
+            let answers = table.get(&key).is_some_and(|request| {
+                request.response.is_none_or(|response| selected_message(&frame) == Some(response))
+            });
+            if !answers {
+                return Some(frame);
+            }
+            if let Some(request) = table.remove(&key) {
+                let _ = request.reply.send(frame);
+            }
+            None
+        }
+
+        /// Drops every pending request, waking each caller with
+        /// [`WsError::Disconnected`].
+        pub(crate) fn fail_pending(pending: &PendingRequests) {
+            lock_pending(pending).clear();
+        }
+
+        /// Drops the commands queued for a lost connection. Returns `true`
+        /// when one of them was a close, or the client is gone.
+        pub(crate) fn discard_queued(writer_rx: &mut mpsc::Receiver<WriterCommand>) -> bool {
+            loop {
+                match writer_rx.try_recv() {
+                    Ok(WriterCommand::Close) | Err(mpsc::error::TryRecvError::Disconnected) => return true,
+                    Ok(_) => {}
+                    Err(mpsc::error::TryRecvError::Empty) => return false,
+                }
+            }
+        }
+    }
+}
+
+fn generate_frames() -> TokenStream {
+    quote! {
+        /// One inbound data frame exactly as received.
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub enum WsRawFrame {
+            /// A text frame.
+            Text(String),
+            /// A binary frame.
+            Binary(Vec<u8>),
+        }
+
+        impl WsRawFrame {
+            /// `"text"` or `"binary"`.
+            #[must_use]
+            pub fn kind(&self) -> &'static str {
+                match self {
+                    Self::Text(_) => "text",
+                    Self::Binary(_) => "binary",
+                }
+            }
+        }
+
+        /// An inbound frame that parsed as JSON: the raw frame and its value.
+        ///
+        /// Message selectors read the value; the payload is decoded from the
+        /// raw frame, so payload types holding borrowed or raw JSON decode as
+        /// they would from the wire.
+        #[derive(Debug, Clone)]
+        pub struct WsInboundFrame {
+            raw: WsRawFrame,
+            value: serde_json::Value,
+        }
+
+        impl WsInboundFrame {
+            /// Parses `raw` as JSON.
+            ///
+            /// ## Errors
+            ///
+            /// [`WsError::Decode`] carrying `raw` when it is not JSON.
+            pub fn parse(raw: WsRawFrame) -> Result<Self, WsError> {
+                let parsed = match &raw {
+                    WsRawFrame::Text(text) => serde_json::from_str(text),
+                    WsRawFrame::Binary(bytes) => serde_json::from_slice(bytes),
+                };
+                match parsed {
+                    Ok(value) => Ok(Self { raw, value }),
+                    Err(error) => Err(WsError::Decode {
+                        frame: raw,
+                        reason: format!("not JSON: {error}"),
+                    }),
+                }
+            }
+
+            /// The frame exactly as received.
+            #[must_use]
+            pub fn raw(&self) -> &WsRawFrame {
+                &self.raw
+            }
+
+            /// The parsed JSON value.
+            #[must_use]
+            pub fn value(&self) -> &serde_json::Value {
+                &self.value
+            }
+
+            /// Consumes the frame, returning its JSON value.
+            #[must_use]
+            pub fn into_value(self) -> serde_json::Value {
+                self.value
+            }
+
+            /// Whether every `(field, value)` selector holds: each top-level
+            /// field is the JSON string `value`.
+            #[must_use]
+            pub fn matches(&self, selectors: &[(&str, &str)]) -> bool {
+                selectors.iter().all(|(field, expected)| {
+                    self.value.get(*field).and_then(serde_json::Value::as_str) == Some(*expected)
+                })
+            }
+
+            /// Decodes the payload of the message named `message`.
+            ///
+            /// ## Errors
+            ///
+            /// [`WsError::Decode`] carrying the raw frame when the payload
+            /// does not decode as `T`.
+            pub fn decode_payload<T: serde::de::DeserializeOwned>(
+                self,
+                message: &str,
+            ) -> Result<T, WsError> {
+                let decoded = match &self.raw {
+                    WsRawFrame::Text(text) => serde_json::from_str(text),
+                    WsRawFrame::Binary(bytes) => serde_json::from_slice(bytes),
+                };
+                decoded.map_err(|error| WsError::Decode {
+                    frame: self.raw,
+                    reason: format!("selected message `{message}` did not decode: {error}"),
+                })
+            }
+
+            /// The error for a frame that matches no declared message.
+            #[must_use]
+            pub fn unmatched(self) -> WsError {
+                WsError::Decode {
+                    frame: self.raw,
+                    reason: "it matches no declared message selector and the direction has no fallback".to_string(),
+                }
+            }
+        }
+    }
+}
+
+fn generate_event_stream() -> TokenStream {
+    quote! {
+        /// A stream of inbound events that keeps its connection open.
+        ///
+        /// Returned by a client's `events` and `value_events`; it reads the
+        /// same queue as `next_event`, so every inbound message is delivered
+        /// once. Dropping the stream closes the connection.
+        pub struct WsEventStream<T> {
+            event_rx: mpsc::Receiver<Result<WsInboundFrame, WsError>>,
+            decode: fn(WsInboundFrame) -> Result<T, WsError>,
+            _transport: WsTransportHandle,
+        }
+
+        impl<T> WsEventStream<T> {
+            pub(crate) fn new(
+                event_rx: mpsc::Receiver<Result<WsInboundFrame, WsError>>,
+                decode: fn(WsInboundFrame) -> Result<T, WsError>,
+                transport: WsTransportHandle,
+            ) -> Self {
+                Self { event_rx, decode, _transport: transport }
+            }
+        }
+
+        impl<T> futures_util::Stream for WsEventStream<T> {
+            type Item = Result<T, WsError>;
+
+            fn poll_next(
+                mut self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<Option<Self::Item>> {
+                let decode = self.decode;
+                self.event_rx
+                    .poll_recv(cx)
+                    .map(|item| item.map(|event| event.and_then(decode)))
+            }
+        }
+    }
+}
+
+/// Generates `configured_auth_tokens`, the credential list a host accepts,
+/// shared by the ApiKey and BearerToken strategies. Callers add their own
+/// `check_upgrade_credential` with strategy-specific token extraction.
 pub fn generate_host_common_auth_helpers(env_names: &[String]) -> TokenStream {
     quote! {
         fn configured_auth_tokens() -> Vec<String> {
@@ -428,49 +925,21 @@ pub fn generate_host_common_auth_helpers(env_names: &[String]) -> TokenStream {
                 .filter(|value| !value.trim().is_empty())
                 .collect()
         }
-
-        fn auth_is_required() -> bool {
-            !Self::configured_auth_tokens().is_empty()
-        }
-
-        fn authentication_success_response() -> serde_json::Value {
-            serde_json::json!({
-                "kind": "resp",
-                "req_id": 0,
-                "msg": "authentication",
-                "code": 200,
-                "msg_data": {}
-            })
-        }
-
-        fn auth_error_response(
-            status: tokio_tungstenite::tungstenite::http::StatusCode,
-            message: &str,
-        ) -> tokio_tungstenite::tungstenite::handshake::server::ErrorResponse {
-            tokio_tungstenite::tungstenite::http::Response::builder()
-                .status(status)
-                .body(Some(message.to_string()))
-                .unwrap_or_else(|_| {
-                    tokio_tungstenite::tungstenite::http::Response::new(Some("Unauthorized".to_string()))
-                })
-        }
     }
 }
 
-/// Generates `validate_upgrade_request` for header-based auth that compares the raw header value.
+/// Generates `check_upgrade_credential` for header-based auth that compares
+/// the raw header value. `Ok(true)` when a configured token matched,
+/// `Ok(false)` when none is configured.
 pub fn generate_host_validate_raw_header(header_name: &str, invalid_msg: &str) -> TokenStream {
     quote! {
-        fn validate_upgrade_request(
+        fn check_upgrade_credential(
             request: &tokio_tungstenite::tungstenite::handshake::server::Request,
-            response: tokio_tungstenite::tungstenite::handshake::server::Response,
-        ) -> Result<
-            tokio_tungstenite::tungstenite::handshake::server::Response,
-            tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
-        > {
+        ) -> Result<bool, tokio_tungstenite::tungstenite::handshake::server::ErrorResponse> {
             let expected_values = Self::configured_auth_tokens();
 
             if expected_values.is_empty() {
-                return Ok(response);
+                return Ok(false);
             }
 
             let Some(received) = request
@@ -478,16 +947,16 @@ pub fn generate_host_validate_raw_header(header_name: &str, invalid_msg: &str) -
                 .get(#header_name)
                 .and_then(|value| value.to_str().ok())
             else {
-                return Err(Self::auth_error_response(
+                return Err(Self::upgrade_error_response(
                     tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
                     "Missing authentication header",
                 ));
             };
 
             if expected_values.iter().any(|expected| expected == received) {
-                Ok(response)
+                Ok(true)
             } else {
-                Err(Self::auth_error_response(
+                Err(Self::upgrade_error_response(
                     tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
                     #invalid_msg,
                 ))
@@ -496,20 +965,18 @@ pub fn generate_host_validate_raw_header(header_name: &str, invalid_msg: &str) -
     }
 }
 
-/// Generates `validate_upgrade_request` for Bearer token auth that strips the "Bearer " prefix.
+/// Generates `check_upgrade_credential` for Bearer token auth that strips the
+/// "Bearer " prefix; its results are those of
+/// [`generate_host_validate_raw_header`].
 pub fn generate_host_validate_bearer_header(header_name: &str) -> TokenStream {
     quote! {
-        fn validate_upgrade_request(
+        fn check_upgrade_credential(
             request: &tokio_tungstenite::tungstenite::handshake::server::Request,
-            response: tokio_tungstenite::tungstenite::handshake::server::Response,
-        ) -> Result<
-            tokio_tungstenite::tungstenite::handshake::server::Response,
-            tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
-        > {
+        ) -> Result<bool, tokio_tungstenite::tungstenite::handshake::server::ErrorResponse> {
             let expected_values = Self::configured_auth_tokens();
 
             if expected_values.is_empty() {
-                return Ok(response);
+                return Ok(false);
             }
 
             let Some(received) = request
@@ -517,7 +984,7 @@ pub fn generate_host_validate_bearer_header(header_name: &str) -> TokenStream {
                 .get(#header_name)
                 .and_then(|value| value.to_str().ok())
             else {
-                return Err(Self::auth_error_response(
+                return Err(Self::upgrade_error_response(
                     tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
                     "Missing authentication header",
                 ));
@@ -525,9 +992,9 @@ pub fn generate_host_validate_bearer_header(header_name: &str) -> TokenStream {
 
             let token = received.strip_prefix("Bearer ").unwrap_or(received);
             if expected_values.iter().any(|expected| expected == token) {
-                Ok(response)
+                Ok(true)
             } else {
-                Err(Self::auth_error_response(
+                Err(Self::upgrade_error_response(
                     tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
                     "Invalid bearer token",
                 ))
@@ -551,8 +1018,8 @@ mod tests {
         assert!(code.contains("WsConnectionState"));
         assert!(code.contains("WsTransportHandle"));
         assert!(code.contains("reconnect_delay"));
-        assert!(code.contains("WsEncode"));
-        assert!(code.contains("WsDecode"));
+        assert!(code.contains("WsInboundFrame"));
+        assert!(code.contains("WsEventStream"));
     }
 
     #[test]
@@ -572,17 +1039,15 @@ mod tests {
         let tokens = generate_host_common_auth_helpers(&env_names);
         let code = tokens.to_string();
         assert!(code.contains("configured_auth_tokens"));
-        assert!(code.contains("auth_is_required"));
-        assert!(code.contains("authentication_success_response"));
-        assert!(code.contains("auth_error_response"));
         assert!(code.contains("API_KEY"));
+        assert!(!code.contains("authentication"), "no protocol envelope: {code}");
     }
 
     #[test]
     fn host_validate_raw_header_produces_tokens() {
         let tokens = generate_host_validate_raw_header("X-API-Key", "Invalid API key");
         let code = tokens.to_string();
-        assert!(code.contains("validate_upgrade_request"));
+        assert!(code.contains("check_upgrade_credential"));
         assert!(code.contains("X-API-Key"));
         assert!(code.contains("Invalid API key"));
     }
@@ -591,7 +1056,7 @@ mod tests {
     fn host_validate_bearer_header_produces_tokens() {
         let tokens = generate_host_validate_bearer_header("Authorization");
         let code = tokens.to_string();
-        assert!(code.contains("validate_upgrade_request"));
+        assert!(code.contains("check_upgrade_credential"));
         assert!(code.contains("Authorization"));
         assert!(code.contains("Bearer"));
     }

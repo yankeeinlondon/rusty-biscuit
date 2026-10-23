@@ -30,49 +30,142 @@ pub use schematic_definitions::unfolded_circle::dock_ws::*;
 pub fn define_api() -> schematic_define::websocket::WebSocketApi {
     schematic_definitions::define_unfolded_circle_dock_ws_api()
 }
+///Messages the DockRoot endpoint's server sends. A value serializes as its payload alone.
+#[derive(Debug)]
+pub enum DockRootServerMessage {
+    ///Server response envelope with `req_id`, status `code`, and optional `reboot`.
+    ResponseEnvelope(DockWsResponseEnvelope),
+    ///Asynchronous dock event envelope. Deserialize `msg_data` based on `msg`.
+    EventEnvelope(DockWsEventEnvelope),
+    ///Post-connect auth challenge (`type=auth_required`).
+    AuthRequired(DockWsAuthRequired),
+    ///Auth outcome (`type=auth`, `msg=authentication`); `code` is the result.
+    Authentication(DockWsAuthenticationMessage),
+}
+impl DockRootServerMessage {
+    /// The name of the message `frame` selects, without decoding
+    /// its payload; `None` when it matches no message and the
+    /// direction has no fallback.
+    #[must_use]
+    pub fn selected_message(
+        frame: &super::ws_shared::WsInboundFrame,
+    ) -> Option<&'static str> {
+        if frame.matches(&[("type", "auth"), ("msg", "authentication")]) {
+            return Some("Authentication");
+        }
+        if frame.matches(&[("type", "event")]) {
+            return Some("EventEnvelope");
+        }
+        if frame.matches(&[("type", "auth_required")]) {
+            return Some("AuthRequired");
+        }
+        Some("ResponseEnvelope")
+    }
+    /// Decodes an inbound frame as the message its declared selectors
+    /// name, or the fallback when none matches.
+    ///
+    /// ## Errors
+    ///
+    /// [`super::ws_shared::WsError::Decode`], carrying the frame as
+    /// received, when no message is selected or the selected
+    /// message's payload does not decode.
+    pub fn decode(
+        frame: super::ws_shared::WsInboundFrame,
+    ) -> Result<Self, super::ws_shared::WsError> {
+        match Self::selected_message(&frame) {
+            Some("ResponseEnvelope") => {
+                frame.decode_payload("ResponseEnvelope").map(Self::ResponseEnvelope)
+            }
+            Some("EventEnvelope") => {
+                frame.decode_payload("EventEnvelope").map(Self::EventEnvelope)
+            }
+            Some("AuthRequired") => {
+                frame.decode_payload("AuthRequired").map(Self::AuthRequired)
+            }
+            Some("Authentication") => {
+                frame.decode_payload("Authentication").map(Self::Authentication)
+            }
+            _ => Err(frame.unmatched()),
+        }
+    }
+}
+///Messages the DockRoot endpoint's client sends. A value serializes as its payload alone.
+#[derive(Debug)]
+pub enum DockRootClientMessage {
+    ///Client request envelope using `type=req`, `id`, `msg`, and deferred `msg_data`.
+    RequestEnvelope(DockWsRequestEnvelope),
+    ///Post-connect auth request (`type=auth`).
+    Auth(DockWsAuthMessage),
+}
+impl serde::Serialize for DockRootClientMessage {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::RequestEnvelope(payload) => {
+                serde::Serialize::serialize(payload, serializer)
+            }
+            Self::Auth(payload) => serde::Serialize::serialize(payload, serializer),
+        }
+    }
+}
 ///Unfolded Circle Dock WebSocket API
+///
+/// Each `connect_*` selects one handshake credential, in this order:
+/// the options' `credential`, the client's [`Self::credentials`], the
+/// first non-empty variable of the definition's environment mapping,
+/// none. Reconnects reuse that selection.
 pub struct UnfoldedCircleDockWs {
     base_url: String,
-    /// Headers builder with environment variable support for credentials.
-    pub headers: schematic_define::Headers,
+    headers: Vec<(String, String)>,
+    credential: Option<schematic_runtime::Credential>,
 }
 impl UnfoldedCircleDockWs {
     /// Create a new client with the default base URL.
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            base_url: "ws://dock.local".to_string(),
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: None,
-                    basic_user: None,
-                    basic_pass: None,
-                    api_key: None,
-                    ..Default::default()
-                }),
-        }
+        Self::with_base_url("ws://dock.local")
     }
     /// Create a new client with a custom base URL.
     #[must_use]
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: None,
-                    basic_user: None,
-                    basic_pass: None,
-                    api_key: None,
-                    ..Default::default()
-                }),
+            headers: vec![],
+            credential: None,
         }
+    }
+    /// How the handshake accepts credentials, translated from the
+    /// definition's authentication policy as for a REST client.
+    #[must_use]
+    pub fn auth_config() -> schematic_runtime::AuthConfig {
+        schematic_runtime::AuthConfig::none()
     }
     /// Returns the configured base URL.
     #[must_use]
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
-    ///Connect to the DockRoot endpoint.
+    /// Sets the client-level credential, used by every connect whose
+    /// options carry none.
+    #[must_use]
+    pub fn credentials(mut self, credential: schematic_runtime::Credential) -> Self {
+        self.credential = Some(credential);
+        self
+    }
+    /// Sends `name: value` with every handshake, replacing a constant
+    /// header of the definition with the same name.
+    ///
+    /// A header the WebSocket upgrade manages, or one that carries
+    /// the API's credential, is refused when connecting.
+    #[must_use]
+    pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.push((name.into(), value.into()));
+        self
+    }
+    /**Connect to the DockRoot endpoint.
+
+## Errors
+
+[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, or cookie of the request already carries it; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed.*/
     pub async fn connect_dock_root(
         &self,
         options: super::ws_shared::WsClientOptions,
@@ -85,13 +178,20 @@ impl UnfoldedCircleDockWs {
                 ),
             );
         }
-        let url = format!("{}{}", self.base_url, path);
-        let header_pairs = self
-            .headers
-            .clone()
-            .build()
-            .map_err(|e| super::ws_shared::WsError::Protocol(e.to_string()))?;
-        DockRootClient::connect(url, options, header_pairs).await
+        let auth = Self::auth_config();
+        let credential = auth
+            .select_handshake(options.credential.as_ref(), self.credential.as_ref())
+            .map_err(|error| super::ws_shared::WsError::InvalidCredential(
+                error.to_string(),
+            ))?;
+        let handshake = super::ws_shared::WsHandshake::new(
+            &format!("{}{}", self.base_url, path),
+            &self.headers,
+            &[],
+            &credential,
+            auth.secret_names(),
+        )?;
+        DockRootClient::connect(handshake, options).await
     }
 }
 impl Default for UnfoldedCircleDockWs {
@@ -103,80 +203,31 @@ impl Default for UnfoldedCircleDockWs {
 pub struct DockRootClient {
     transport: super::ws_shared::WsTransportHandle,
     event_rx: tokio::sync::mpsc::Receiver<
-        Result<serde_json::Value, super::ws_shared::WsError>,
+        Result<super::ws_shared::WsInboundFrame, super::ws_shared::WsError>,
     >,
+    auth_method: schematic_runtime::AuthMethod,
     request_timeout: std::time::Duration,
     max_pending: usize,
 }
 impl DockRootClient {
-    async fn dial(
-        url: &str,
-        options: &super::ws_shared::WsClientOptions,
-        header_pairs: &[(String, String)],
-    ) -> Result<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
-        super::ws_shared::WsError,
-    > {
-        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-        let mut request = url.to_string().into_client_request()?;
-        for (name, value) in header_pairs {
-            let hdr_name = name
-                .parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>()
-                .map_err(|e| super::ws_shared::WsError::InvalidHeader {
-                    name: name.clone(),
-                    reason: e.to_string(),
-                })?;
-            let hdr_value = value
-                .parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>()
-                .map_err(|e| super::ws_shared::WsError::InvalidHeader {
-                    name: name.clone(),
-                    reason: e.to_string(),
-                })?;
-            request.headers_mut().insert(hdr_name, hdr_value);
-        }
-        let connect = tokio_tungstenite::connect_async_with_config(
-            request,
-            options.websocket_config.clone(),
-            options.disable_nagle,
-        );
-        let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
-            .await
-            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
-                options.handshake_timeout.as_secs(),
-            ))??;
-        Ok(ws_stream)
-    }
     /// Connect to the endpoint.
     pub(crate) async fn connect(
-        url: String,
-        _options: super::ws_shared::WsClientOptions,
-        header_pairs: Vec<(String, String)>,
+        handshake: super::ws_shared::WsHandshake,
+        options: super::ws_shared::WsClientOptions,
     ) -> Result<Self, super::ws_shared::WsError> {
-        let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
-        let _receive_timeout = _options.receive_timeout;
+        let ws_stream = handshake.dial(&options).await?;
+        let auth_method = handshake.auth_method().clone();
+        let _receive_timeout = options.receive_timeout;
         let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
-            _options.outbound_capacity,
+            options.outbound_capacity,
         );
-        let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
+        let (event_tx, event_rx) = tokio::sync::mpsc::channel(options.inbound_capacity);
         let (state_tx, state_rx) = tokio::sync::watch::channel(
             super::ws_shared::WsConnectionState::Connecting,
         );
         let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
-        let pending: std::sync::Arc<
-            tokio::sync::Mutex<
-                std::collections::HashMap<
-                    u64,
-                    tokio::sync::oneshot::Sender<serde_json::Value>,
-                >,
-            >,
-        > = std::sync::Arc::new(
-            tokio::sync::Mutex::new(std::collections::HashMap::new()),
-        );
-        let url_for_supervisor = url.clone();
-        let header_pairs_for_supervisor = header_pairs.clone();
-        let options_for_supervisor = _options.clone();
+        let pending = super::ws_shared::PendingRequests::default();
+        let options_for_supervisor = options.clone();
         let pending_for_supervisor = pending.clone();
         let supervisor_handle = tokio::spawn(async move {
             use futures_util::{SinkExt, StreamExt};
@@ -209,19 +260,19 @@ impl DockRootClient {
                         reconnect_attempt,
                     );
                     tokio::time::sleep(delay).await;
-                    match DockRootClient::dial(
-                            &url_for_supervisor,
-                            &options_for_supervisor,
-                            &header_pairs_for_supervisor,
-                        )
-                        .await
-                    {
+                    match handshake.dial(&options_for_supervisor).await {
                         Ok(stream) => {
                             reconnect_attempt = reconnect_attempt.saturating_add(1);
                             stream
                         }
                         Err(err) => {
+                            let terminal = err.is_terminal_handshake_rejection();
                             let _ = event_tx.send(Err(err)).await;
+                            if terminal {
+                                let _ = state_tx
+                                    .send(super::ws_shared::WsConnectionState::Closed);
+                                break;
+                            }
                             reconnect_attempt = reconnect_attempt.saturating_add(1);
                             continue;
                         }
@@ -243,33 +294,29 @@ impl DockRootClient {
                         _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
                         let _ = write.close(). await; break; } } } msg_result = read
                         .next() => { match msg_result { Some(Ok(Message::Text(text))) =>
-                        { match serde_json::from_str:: < serde_json::Value > (text
-                        .as_ref()) { Ok(value) => { let mut handled = false; if let
-                        Some(req_id) = value.get("req_id").and_then(| v | v.as_u64()) {
-                        let mut pending = pending_for_supervisor.lock(). await; if let
-                        Some(tx) = pending.remove(& req_id) { let _ = tx.send(value
-                        .clone()); handled = true; } } if ! handled { let _ = event_tx
-                        .send(Ok(value)). await; } } Err(e) => { let _ = event_tx
-                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
-                        Some(Ok(Message::Binary(data))) => { match
-                        serde_json::from_slice:: < serde_json::Value > (data.as_ref()) {
-                        Ok(value) => { let mut handled = false; if let Some(req_id) =
-                        value.get("req_id").and_then(| v | v.as_u64()) { let mut pending
-                        = pending_for_supervisor.lock(). await; if let Some(tx) = pending
-                        .remove(& req_id) { let _ = tx.send(value.clone()); handled =
-                        true; } } if ! handled { let _ = event_tx.send(Ok(value)). await;
-                        } } Err(e) => { let _ = event_tx
-                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
-                        Some(Ok(Message::Close(_))) => break, Some(Ok(Message::Ping(_)))
-                        | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
-                        Some(Err(e)) => { let _ = event_tx
-                        .send(Err(super::ws_shared::WsError::Transport(e))). await;
-                        break; } None => break, } }
+                        { let raw = super::ws_shared::WsRawFrame::Text(text.to_string());
+                        match super::ws_shared::WsInboundFrame::parse(raw) { Ok(frame) =>
+                        { if let Some(frame) = super::ws_shared::answer_pending(&
+                        pending_for_supervisor, frame, "req_id", false,
+                        DockRootServerMessage::selected_message,) { let _ = event_tx
+                        .send(Ok(frame)). await; } } Err(e) => { let _ = event_tx
+                        .send(Err(e)). await; } } } Some(Ok(Message::Binary(data))) => {
+                        let raw = super::ws_shared::WsRawFrame::Binary(data.to_vec());
+                        match super::ws_shared::WsInboundFrame::parse(raw) { Ok(frame) =>
+                        { if let Some(frame) = super::ws_shared::answer_pending(&
+                        pending_for_supervisor, frame, "req_id", false,
+                        DockRootServerMessage::selected_message,) { let _ = event_tx
+                        .send(Ok(frame)). await; } } Err(e) => { let _ = event_tx
+                        .send(Err(e)). await; } } } Some(Ok(Message::Close(_))) => break,
+                        Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) |
+                        Some(Ok(Message::Frame(_))) => {} Some(Err(e)) => { let _ =
+                        event_tx.send(Err(super::ws_shared::WsError::Transport(e))).
+                        await; break; } None => break, } }
                     }
                 }
-                let mut pending = pending_for_supervisor.lock().await;
-                for (_, tx) in pending.drain() {
-                    drop(tx);
+                super::ws_shared::fail_pending(&pending_for_supervisor);
+                if !manual_close {
+                    manual_close = super::ws_shared::discard_queued(&mut writer_rx);
                 }
                 if manual_close {
                     let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
@@ -289,42 +336,84 @@ impl DockRootClient {
         Ok(Self {
             transport,
             event_rx,
-            request_timeout: _options.request_timeout,
-            max_pending: _options.max_pending_requests,
+            auth_method,
+            request_timeout: options.request_timeout,
+            max_pending: options.max_pending_requests,
         })
     }
-    /// Send a fire-and-forget message.
+    /// Where the handshake credential came from. It names the source
+    /// selected when connecting, not proof that the server accepted it.
+    pub fn auth_method(&self) -> &schematic_runtime::AuthMethod {
+        &self.auth_method
+    }
+    /// Sends one message; it is written as its payload alone.
     pub async fn send(
+        &self,
+        message: DockRootClientMessage,
+    ) -> Result<(), super::ws_shared::WsError> {
+        self.send_payload(&message).await
+    }
+    /// Sends an arbitrary JSON value, bypassing the declared messages.
+    pub async fn send_value(
         &self,
         message: serde_json::Value,
     ) -> Result<(), super::ws_shared::WsError> {
-        self.send_typed(&message).await
+        self.send_payload(&message).await
     }
-    /// Send a strongly-typed message payload.
-    pub async fn send_typed<M: super::ws_shared::WsEncode + ?Sized>(
+    async fn send_payload<M: serde::Serialize + ?Sized>(
         &self,
         message: &M,
     ) -> Result<(), super::ws_shared::WsError> {
-        let text = super::ws_shared::WsEncode::ws_encode(message)?;
+        let command = super::ws_shared::WriterCommand::SendText(
+            serde_json::to_string(message)?,
+        );
         self.transport
             .writer_tx
-            .send(super::ws_shared::WriterCommand::SendText(text))
+            .send(command)
             .await
             .map_err(|_| super::ws_shared::WsError::Disconnected)
     }
-    /// Receive the next inbound event.
+    /// Receives the next inbound message, decoded as the message its
+    /// selectors name.
+    ///
+    /// A frame that is not JSON, matches no message, or does not
+    /// decode yields [`super::ws_shared::WsError::Decode`] carrying
+    /// the frame; the connection stays open. Shares one queue with
+    /// [`Self::next_value_event`]: each message is delivered once.
     pub async fn next_event(
         &mut self,
-    ) -> Option<Result<serde_json::Value, super::ws_shared::WsError>> {
-        self.event_rx.recv().await
+    ) -> Option<Result<DockRootServerMessage, super::ws_shared::WsError>> {
+        self.event_rx
+            .recv()
+            .await
+            .map(|event| event.and_then(DockRootServerMessage::decode))
     }
-    /// Returns a stream of inbound events.
-    pub fn events(
-        self,
-    ) -> tokio_stream::wrappers::ReceiverStream<
-        Result<serde_json::Value, super::ws_shared::WsError>,
-    > {
-        tokio_stream::wrappers::ReceiverStream::new(self.event_rx)
+    /// Receives the next inbound message as a JSON value, without
+    /// selecting a declared message.
+    pub async fn next_value_event(
+        &mut self,
+    ) -> Option<Result<serde_json::Value, super::ws_shared::WsError>> {
+        self.event_rx
+            .recv()
+            .await
+            .map(|event| event.map(super::ws_shared::WsInboundFrame::into_value))
+    }
+    /// A stream of the messages [`Self::next_event`] would return. It
+    /// keeps the connection open until it is dropped.
+    pub fn events(self) -> super::ws_shared::WsEventStream<DockRootServerMessage> {
+        super::ws_shared::WsEventStream::new(
+            self.event_rx,
+            DockRootServerMessage::decode,
+            self.transport,
+        )
+    }
+    /// A stream of the values [`Self::next_value_event`] would return.
+    pub fn value_events(self) -> super::ws_shared::WsEventStream<serde_json::Value> {
+        super::ws_shared::WsEventStream::new(
+            self.event_rx,
+            |frame| Ok(frame.into_value()),
+            self.transport,
+        )
     }
     /// Initiate a graceful close.
     pub async fn close(&self) -> Result<(), super::ws_shared::WsError> {
@@ -338,41 +427,88 @@ impl DockRootClient {
     pub fn state(&self) -> super::ws_shared::WsConnectionState {
         self.transport.state()
     }
-    /// Send a correlated request and wait for the response.
-    pub async fn request(
+    /**Sends `RequestEnvelope` and returns the payload of the `ResponseEnvelope` that answers it.
+
+The request id is allocated by the client and written over any id the payload carries. Only a frame selected as `ResponseEnvelope` with the same id completes the request; another message carrying that id stays an ordinary event.
+
+## Errors
+
+[`super::ws_shared::WsError::RequestTimeout`] when no answer arrives in the request timeout, [`super::ws_shared::WsError::Disconnected`] when the connection is lost first (the request is never re-sent), [`super::ws_shared::WsError::BackpressureFull`] at the pending-request limit, and [`super::ws_shared::WsError::Decode`] when the answer does not decode.*/
+    pub async fn request_request_envelope(
+        &self,
+        message: DockWsRequestEnvelope,
+    ) -> Result<DockWsResponseEnvelope, super::ws_shared::WsError> {
+        self.correlate(&message, Some("ResponseEnvelope"))
+            .await?
+            .decode_payload("ResponseEnvelope")
+    }
+    /**Sends `Auth` and returns the payload of the `Authentication` that answers it.
+
+The request id is allocated by the client and written over any id the payload carries. Only a frame selected as `Authentication` with the same id completes the request; another message carrying that id stays an ordinary event.
+
+## Errors
+
+[`super::ws_shared::WsError::RequestTimeout`] when no answer arrives in the request timeout, [`super::ws_shared::WsError::Disconnected`] when the connection is lost first (the request is never re-sent), [`super::ws_shared::WsError::BackpressureFull`] at the pending-request limit, and [`super::ws_shared::WsError::Decode`] when the answer does not decode.*/
+    pub async fn request_auth(
+        &self,
+        message: DockWsAuthMessage,
+    ) -> Result<DockWsAuthenticationMessage, super::ws_shared::WsError> {
+        self.correlate(&message, Some("Authentication"))
+            .await?
+            .decode_payload("Authentication")
+    }
+    /// Sends `message` with a client-allocated request id and returns
+    /// the first inbound frame carrying that id, as a JSON value,
+    /// whatever message it is.
+    ///
+    /// ## Errors
+    ///
+    /// As the typed request methods; also
+    /// [`super::ws_shared::WsError::Protocol`] when `message` is not a
+    /// JSON object.
+    pub async fn request_value(
         &self,
         message: serde_json::Value,
     ) -> Result<serde_json::Value, super::ws_shared::WsError> {
-        use std::sync::atomic::Ordering;
-        let id = self.transport.next_id.fetch_add(1, Ordering::Relaxed);
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        {
-            let mut pending = self.transport.pending.lock().await;
-            if pending.len() >= self.max_pending {
-                return Err(
-                    super::ws_shared::WsError::BackpressureFull(self.max_pending),
-                );
-            }
-            pending.insert(id, tx);
-        }
-        let mut msg = message;
-        if let serde_json::Value::Object(ref mut map) = msg {
-            map.insert("id".to_string(), serde_json::Value::Number(id.into()));
-        }
-        let text = serde_json::to_string(&msg)?;
-        self.transport
-            .writer_tx
-            .send(super::ws_shared::WriterCommand::SendText(text))
+        self.correlate(&message, None)
             .await
-            .map_err(|_| super::ws_shared::WsError::Disconnected)?;
+            .map(super::ws_shared::WsInboundFrame::into_value)
+    }
+    /// Sends `message` with the next request id and waits for the frame
+    /// that answers it: one selected as `response`, or any frame with
+    /// the id when `response` is `None`. The pending entry is removed on
+    /// every exit, including cancellation.
+    async fn correlate<M: serde::Serialize + ?Sized>(
+        &self,
+        message: &M,
+        response: Option<&'static str>,
+    ) -> Result<super::ws_shared::WsInboundFrame, super::ws_shared::WsError> {
+        use std::sync::atomic::Ordering;
+        let mut value = serde_json::to_value(message)?;
+        let Some(object) = value.as_object_mut() else {
+            return Err(
+                super::ws_shared::WsError::Protocol(
+                    "a correlated request must serialize as a JSON object".to_string(),
+                ),
+            );
+        };
+        let id = self.transport.next_id.fetch_add(1, Ordering::Relaxed);
+        let (key, wire_id) = super::ws_shared::request_id(id, false);
+        object.insert("id".to_string(), wire_id);
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        let _pending = super::ws_shared::PendingGuard::insert(
+            &self.transport.pending,
+            key,
+            response,
+            reply,
+            self.max_pending,
+        )?;
+        self.send_payload(&value).await?;
         let timeout = self.request_timeout;
-        match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(response)) => Ok(response),
+        match tokio::time::timeout(timeout, answer).await {
+            Ok(Ok(frame)) => Ok(frame),
             Ok(Err(_)) => Err(super::ws_shared::WsError::Disconnected),
-            Err(_) => {
-                self.transport.pending.lock().await.remove(&id);
-                Err(super::ws_shared::WsError::RequestTimeout(timeout.as_secs()))
-            }
+            Err(_) => Err(super::ws_shared::WsError::RequestTimeout(timeout.as_secs())),
         }
     }
 }

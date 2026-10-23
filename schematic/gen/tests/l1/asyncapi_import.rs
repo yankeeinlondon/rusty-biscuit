@@ -33,7 +33,13 @@ fn assert_imported_shape(api: &WebSocketApi, role: EndpointRole) {
     assert_eq!(endpoint.role, role);
     assert_eq!(endpoint.params, EndpointParams::default());
     assert!(!endpoint.messages.is_empty());
-    assert!(endpoint.messages.iter().all(|m| m.responds_with.is_none() && m.selectors.is_none() && !m.fallback));
+    assert!(endpoint.messages.iter().all(|m| m.responds_with.is_none() && !m.fallback));
+    // Every UC message payload names its `kind` and `msg` as string consts.
+    assert!(
+        endpoint.messages.iter().all(|m| m.selectors.as_ref().is_some_and(|s| s.iter().any(|s| s.field == "kind"))),
+        "{:?}",
+        endpoint.messages.iter().filter(|m| m.selectors.is_none()).map(|m| &m.name).collect::<Vec<_>>()
+    );
     assert_eq!(api.env_mapping, Some(RestApi::legacy_env_mapping_for(&api.auth, &api.env_auth)));
     assert!(api.headers.is_empty() && api.auth_policy.is_none());
 }
@@ -52,6 +58,27 @@ fn yaml_and_json_forms_import_the_same_definition_for_every_cli_role() {
         assert_eq!(from_yaml, from_json, "{cli_role:?}");
         assert_imported_shape(&from_yaml, role);
     }
+}
+
+/// Selectors come from the payload's top-level string `const`s through
+/// `$ref` and `allOf`: `driverVersionMsg` is `allOf [commonResp (kind const
+/// resp, msg free), {msg const driver_version}]`.
+#[test]
+fn selectors_are_read_from_the_payloads_string_consts() {
+    use schematic_define::websocket::MessageSelector;
+    let json = biscuit_test_harness::manifest_dir!().join("tests/fixtures/asyncapi/UCR-integration-asyncapi.json");
+    let api = import(&json, WsRole::Client);
+    let selectors = |name: &str| {
+        api.endpoints[0].messages.iter().find(|m| m.name == name).unwrap_or_else(|| panic!("{name}")).selectors.clone()
+    };
+    assert_eq!(
+        selectors("DriverVersion"),
+        Some(vec![MessageSelector::new("kind", "resp"), MessageSelector::new("msg", "driver_version")])
+    );
+    assert_eq!(
+        selectors("AuthRequired"),
+        Some(vec![MessageSelector::new("kind", "event"), MessageSelector::new("msg", "auth_required")])
+    );
 }
 
 #[test]
