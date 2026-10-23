@@ -68,9 +68,10 @@ These rules bind every later phase.
    categories, coercion engine, `expressions.strict`, minimal projection) and
    on `2026-10-27-darkmatter-lifecycle-ownership` (global/host catalog files)
    and `2026-10-29-recursive-schema-types`. At planning time all three spec
-   files read `finalized-spec` and no plan exists for the first; a quick
-   search found no argument-category or projection function in
-   `darkmatter/lib/src`. Task "Dependency audit" below records which landed.
+   files read `finalized-spec`. Phase B has since been implemented (as of
+   2026-10-23, through its Phase 5; its documentation phase was in progress):
+   its seams are named in spec.md section 10 and in the Dependency audit task.
+   Task "Dependency audit" below records which landed.
    **If a dependency is not implemented, stop and report to the author**:
    this plan does not absorb Phase B work. The plan below assumes the
    dependencies are in place and names each seam it extends.
@@ -116,6 +117,13 @@ These rules bind every later phase.
     - *Where `report-json` types for `source.file` come from.* Default: the
       authored file path as given on the command line, as the spec says null
       only when no named origin exists.
+    - *Reconciliation with the implemented Phase B (2026-10-23).* spec.md
+      section 10 records the decisions: `is_file_type` and the test host
+      predicate declare `unknown | null`; `file_exists` keeps Phase B's
+      inspecting `unknown | null` binding (`file_exists(42)` is `false`);
+      Phase C extends the declaration-only `DeclaredTypes` layer; "the
+      compatibility API" is `call_check`; host catalogs use the strict catalog
+      loader. Phase 4 and the Dependency audit below were updated to match.
 
 ### Input Robustness Matrix
 
@@ -173,10 +181,22 @@ A spike runs once, before the work it informs.
 ### Wave 1 — Inventory and Baselines
 
 - [ ] **Dependency audit**
-  - Confirm, by reading code, that Phase B seams exist: catalog `returns`,
-    argument-type categories 1–5, passive literal classification,
-    `expressions.strict` in DMLS config, the projection function, the
-    compatibility API, narrowing-fact registration slots, and
+  - Confirm, by reading code, that Phase B seams exist: catalog `returns`
+    (`darkmatter/schemas/partials/functions.yaml`, loaded by
+    `compose/expression/catalog/mod.rs`, `expression_function_catalog()`),
+    argument-type categories 1–5 and the compatibility API
+    (`compose/expression/call_check.rs`: `ArgumentCategory`, `ArgumentType`,
+    `classify_argument`, `check_call`, `check_expression_calls`,
+    `check_prepared_calls`), passive literal classification (`check_call`
+    binds all-literal calls through `FunctionRegistration::bind_call`),
+    composition rejection (`compose/call_precheck.rs`,
+    `MarkdownError::rejected_call()`), `[expressions] strict` /
+    `dmls.expressions.strict` in DMLS config and its codes
+    (`dmls/src/diagnostics/call_check.rs`, `codes.rs`), the projection
+    function (`DeclaredTypes::top_level_types()` in
+    `compose/expression/scope/projection.rs`), registration facts
+    (`call_binding/registration.rs`: `EvaluationMode`, `reject_sources`,
+    `numeric_recovery`), narrowing-fact registration slots, and
     `BindingView`/global catalog loading. Record file paths and signatures
     in `implementation-log.md`. Apply Rule 2 if any is missing.
 - [ ] **Surface inventory** — parallelizable with Dependency audit
@@ -184,8 +204,9 @@ A spike runs once, before the work it informs.
     (traceability table in `implementation-log.md`).
   - Inventory every consumer of expression analysis: Darkmatter
     `expression/{absence,binding,semantics,lint,prepared,path_projection}.rs`,
+    `expression/{call_check.rs,scope/projection.rs}`, `call_precheck.rs`,
     `interpolation/evaluator.rs`, `directive_targets.rs`, DMLS
-    `diagnostics/` and `config/`, Claudine
+    `diagnostics/` (including `call_check.rs`) and `config/`, Claudine
     `composition/looping/config.rs` and `composition/lifecycle/validate.rs`.
     Mark each read-only scan that must move to a library API.
   - Inventory every legacy flag spelling (`--allow-*`, `--no-baseline-schema`,
@@ -260,7 +281,9 @@ normalization; no competing edits.
     overload the argument count can select (no type-directed overload
     selection). `x || y` = `x` minus `null` ∪ `y`. `c ? a : b` = union of
     branch types (each under Phase D narrowing once Phase 3 lands; until then
-    incoming types). Other operators `unknown`.
+    incoming types). Other operators `unknown`. These types reach the call
+    check through `ArgumentType::of`, which today types every call and
+    operator argument `unknown`.
   - Never evaluate a function or suppress an inner-call diagnostic.
   - Tests: criterion 6 (`min(length(count), 5)` and `min(maybe || 0, 5)`
     category 1 via the compatibility API and silent in DMLS under both
@@ -374,14 +397,21 @@ task waits for Wave 5.
 
 - [ ] **`is_file_type`**
   - New pure-dispatch function (display category `Filesystem`, works through
-    the context-free expression API). Declaration, handler, and true-implies
-    "suitable for `file`" fact registered together. True for file values and
+    the context-free expression API), declared in
+    `darkmatter/schemas/partials/functions.yaml` as
+    `is_file_type(value: unknown | null): boolean` with `category(Filesystem)`
+    and inline examples. Declaration, handler, and true-implies
+    "suitable for `file`" fact registered together. Add `is_file_type` to the
+    expression-function verb lists in `darkmatter/schemas/partials/{lifecycle,md-lifecycle}.yaml`
+    and `claudine/schemas/{action,lifecycle}.yaml`, which the lifecycle parity
+    tests derive from the function catalog. True for file values and
     structurally valid strings (`42`, `hello world` true as strings; numeric
     `42` false); never mutates, resolves, or accesses anything. No
     `is_file` alias.
   - Tests: criteria 13, 35 (no resolution context; validator corpus).
 - [ ] **`file_exists` / `fileexists`**
-  - Keep Phase B binding (`file_exists(42)` binds `"42"`; `null` is `false`).
+  - Keep Phase B binding (`file_exists(value: unknown | null)` inspects its
+    argument: `file_exists(42)` and `file_exists(null)` are `false`).
     Validate the bound reference before path resolution or remote fetch;
     malformed returns `false` with no access. Valid references keep existing
     outcomes (local failure `false`; HTTP(S) without a remote runtime errors;
@@ -446,7 +476,7 @@ task waits for Wave 5.
     remove them; Claudine keeps no definition of variable visibility or types.
     Run Claudine's L1 suite (`just test` in `claudine/`) for regressions.
 - [ ] **Host predicate end-to-end**
-  - Test-registered `is_project_file(value: unknown): boolean` with a
+  - Test-registered `is_project_file(value: unknown | null): boolean` with a
     true-implies `file` fact: category 1 in `is_project_file(source) &&
     frontmatter(source, 'title')` in composition and DMLS; a counter proves the
     host function is never invoked during analysis. Test: criteria 17, 37.
@@ -460,7 +490,10 @@ task waits for Wave 5.
 
 - [ ] **Shared diagnostic record**
   - Library owns code, severity, message, authored source range, expected and
-    actual type. Composition, CLI, and DMLS adapt, never re-derive. Preserve
+    actual type. Composition, CLI, and DMLS adapt, never re-derive. Move
+    Phase B's `dm.expression.incompatible_call` and
+    `dm.expression.uncertain_call` from `dmls/src/diagnostics/codes.rs` into
+    the library unchanged; they are the shared call codes. Preserve
     authored origin across frontmatter interpolation, transclusion, and
     lifecycle subtree composition; one-based positions in the library/JSON,
     adapters translate to editor coordinates. Blocking policy changes

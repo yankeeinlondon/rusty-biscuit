@@ -66,12 +66,12 @@ Phase B's rules are inputs to this spec and are not restated: the argument-type 
 
 ### 1. Phase C — the variable-type projection becomes complete
 
-Phase B built one Darkmatter library function that maps each top-level variable to a design-time type, covering only single-shape SimplifiedSchema declarations and typing everything else `unknown`. That function is the declared-type layer of `TypeScope` (`2026-10-16-type-narrowing`). Phase C **extends that same function**; it never builds a second projection, and no consumer (DMLS, Claudine, the CLI) walks schema syntax itself.
+Phase B built one Darkmatter library function that maps each top-level variable to a design-time type, covering only SimplifiedSchema declarations it can project to a single type and typing everything else `unknown`: `DeclaredTypes::top_level_types()` in `darkmatter/lib/src/markdown/compose/expression/scope/projection.rs`, built from the schema alone (`DeclaredTypes::new(schema)`, no static frontmatter values) and read by the design-time call check (`check_call`, `check_expression_calls`, `check_prepared_calls` in `compose/expression/call_check.rs`). That function is the declared-type layer of `TypeScope` (`2026-10-16-type-narrowing`). Phase C **extends that same function**; it never builds a second projection, and no consumer (DMLS, Claudine, the CLI) walks schema syntax itself.
 
 | Source of a variable | Phase B | After this spec |
 |---|---|---|
 | Single-shape top-level property `A` / `A(required)` | `A \| null` / `A` | unchanged |
-| Root-union document schema | `unknown` | per the annex's root-union rule: each arm contributes its projected type, an arm that does not declare the property contributes `unknown`, and the results fold with the annex's union normalization |
+| Root-union document schema | the property's definition when every inline arm that declares it declares it identically; otherwise `unknown` | per the annex's root-union rule: each arm contributes its projected type, an arm that does not declare the property contributes `unknown`, and the results fold with the annex's union normalization |
 | Imported named types, baseline, trigger, and document layers | partially (whatever `EffectiveSchema.simplified` held) | every layer of the final `EffectiveSchema`, after resolution and merging, including layers that `EffectiveSchema.simplified` does not represent |
 | Raw JSON Schema | `unknown` | the annex's conservative raw JSON Schema projection (enumerable literal properties become visible; anything indeterminate is `unknown`) |
 | A path into a typed object (`meta.count`) | `unknown` | the declared type of that nested property, with `\| null` when it or any object on the path is optional |
@@ -113,13 +113,13 @@ Runtime and editor analysis agree on every narrowing: the same library code comp
 
 ### 3. File predicates
 
-**`is_file_type(value: unknown): boolean`** is a new expression function (category `Filesystem`). It returns `true` when the value is a file value or a string that is structurally a supported `biscuit-file` reference: local relative and absolute paths, Windows paths, project-relative references, vault references, recursive references, and HTTP(S) references, accepted identically on every host OS. It returns `false` for an empty string, malformed reference syntax (including `https://`), and any non-string, non-file value (numeric `42` is `false`; the string `"42"` and the string `"hello world"` are `true`). It never resolves a reference, inspects the current directory, reads the environment or configuration, searches directories, touches the filesystem, or uses the network, and it never mutates its input. `true` guarantees neither existence nor readability. There is no `is_file` alias.
+**`is_file_type(value: unknown | null): boolean`** is a new expression function (category `Filesystem`). It returns `true` when the value is a file value or a string that is structurally a supported `biscuit-file` reference: local relative and absolute paths, Windows paths, project-relative references, vault references, recursive references, and HTTP(S) references, accepted identically on every host OS. It returns `false` for an empty string, malformed reference syntax (including `https://`), and any non-string, non-file value (numeric `42` is `false`; the string `"42"` and the string `"hello world"` are `true`). It never resolves a reference, inspects the current directory, reads the environment or configuration, searches directories, touches the filesystem, or uses the network, and it never mutates its input. `true` guarantees neither existence nor readability. There is no `is_file` alias.
 
 `biscuit-file` owns the passive structural rules. Merely constructing a `FileReference` is not enough (`https://` must fail even though the constructor classifies it as a URL); any missing structural check is added to `biscuit-file`, never as a second grammar in Darkmatter.
 
 The display category `Filesystem` does not make `is_file_type` context-dependent: it uses pure dispatch and works through the context-free expression API. Register its declaration, handler, and narrowing fact together. Structural validation covers all supported reference kinds, including `&` repository-root, `^` repository-scoped, `~` home, and environment-template forms. A well-formed template is valid without reading its variables; an unset variable may still fail during resolution. Reserved malformed forms, unsupported schemes, NUL-containing paths, and malformed templates are false rather than implicit local paths. Host-independent acceptance describes syntax only; a Windows reference accepted on macOS need not resolve there. No new reference spelling or glob grammar is introduced.
 
-**`file_exists(value: string | file | null): boolean`** keeps Phase B's binding (no special case: `file_exists(42)` binds `"42"`; `null` returns `false`). This spec adds:
+**`file_exists(value: unknown | null): boolean`** keeps Phase B's binding: it inspects its argument without converting it, so a `string` or `file` value is checked as a reference and every other value (null, a number, a boolean, an array, an object) returns `false` (`file_exists(42)` is `false`; Phase B decision 82). This spec adds:
 
 - A structurally malformed string (`""`, `"https://"`) returns `false` **before** any filesystem or network access, using the same `biscuit-file` rules as `is_file_type`. This replaces today's fallback in which a malformed URL-like string could be tried as a local path.
 - Valid references keep their existing outcomes and normalizations (including `file://` where it is supported today): a local resolution failure is `false`; a valid HTTP(S) reference with no remote runtime is still an error; with a remote runtime, a denied host or failed fetch is `false` and a successful fetch is `true`.
@@ -129,7 +129,7 @@ Validate the bound reference before path resolution or remote fetching. Preserve
 
 The always-false warning comes from the shared library analysis and is reported by composition as well as DMLS. It is enabled by default and can block under `--deny all`; analysis never calls `file_exists` to determine the answer. The warning is limited to authored literal arguments and uses the same passive binding and structural validation as runtime.
 
-The charter's advisory warning for arguments of a known unsupported type and its opt-in DMLS "unknown input" warning for `file_exists` do not exist: Phase B retired the first in its section **`file_exists` Has No Exception**, and `expressions.strict` already warns for an `unknown` argument (category 4), so no `file_exists`-specific setting is added.
+The charter's advisory warning for arguments of a known unsupported type and its opt-in DMLS "unknown input" warning for `file_exists` do not exist: Phase B retired both in its section **`file_exists` Has No Exception**. Because the parameter is `unknown | null`, every argument, including an `unknown` one, is category 1, so `expressions.strict` adds no warning for `file_exists` either, and no `file_exists`-specific setting is added.
 
 ### 4. Guarded file arguments
 
@@ -166,13 +166,13 @@ Function catalogs declare signatures; global catalogs declare variable shapes. R
 - DMLS reads the artifact as inert data and never executes host code. Rust registration remains the single authority; no behavior syntax is added to the catalog grammar.
 - A missing, unreadable, or version-mismatched artifact, or one lacking metadata for a registered function, makes DMLS report incomplete analysis for the affected host functions. It never claims a category or narrowing result known only to the runtime.
 
-Example: a host predicate `is_project_file(value: unknown): boolean` that registers a true-implies fact "suitable for `file`" makes `is_project_file(source) && frontmatter(source, 'title')` category 1, with no `is_project_file` built-in added to Darkmatter.
+Example: a host predicate `is_project_file(value: unknown | null): boolean` that registers a true-implies fact "suitable for `file`" makes `is_project_file(source) && frontmatter(source, 'title')` category 1, with no `is_project_file` built-in added to Darkmatter.
 
 Claudine's remaining read-only scans of parsed expressions in [loop configuration](../../lib/src/composition/looping/config.rs) and [lifecycle validation](../../lib/src/composition/lifecycle/validate.rs) either move onto Darkmatter library APIs or are removed; Claudine keeps no independent definition of variable visibility or types.
 
 ### 6. Phase E — diagnostics
 
-- **Shared diagnostics.** The Darkmatter library owns each diagnostic's code, severity, message, source position, and (where relevant) expected and actual types. Composition, the CLI, and DMLS report identical fields for the same problem.
+- **Shared diagnostics.** The Darkmatter library owns each diagnostic's code, severity, message, source position, and (where relevant) expected and actual types. Composition, the CLI, and DMLS report identical fields for the same problem. Phase B's call codes, `dm.expression.incompatible_call` (category 5, wrong argument count, ambiguous overload) and `dm.expression.uncertain_call` (category 3, plus 2 and 4 under `expressions.strict`), are defined today in DMLS (`darkmatter/dmls/src/diagnostics/codes.rs`); they move to the library unchanged and become the shared call codes. Composition currently reports only category 5, as a rejection (`MarkdownError::rejected_call()`); the category 3 warning below is new.
 - **CLI severities.** A composing command reports category 5 calls as errors (and rejects the document, per Phase B) and category 3 calls as warnings, matching DMLS's default. Categories 2 and 4 are reported only by DMLS under `expressions.strict`.
 - **Retiring the interim absence-predicate suppression.** Today a direct bare-variable argument to `is_null`/`is_empty` (or an alias) suppresses the advisory `dm.expression.undeclared_property` warning for that variable. That catalog-name rule is replaced by a type rule: a direct bare-variable argument to a parameter whose declared type explicitly includes `| null` suppresses the warning; an `unknown` (`any`) parameter does not. "Direct" keeps its current meaning (`is_empty(trim(x))` still warns for `x`), and DMLS applies the same rule in its static walk. The function-name list in `AbsenceScope` is removed.
 - **Privacy.** Diagnostics never gain evaluated argument values, environment values, or file contents, and producing a diagnostic never triggers extra evaluation or I/O. Authored source and existing messages may already contain sensitive text; no redaction subsystem or debug-value option is added.
@@ -236,7 +236,7 @@ The report is one JSON object with a fixed schema. Every field is always present
   "outcome": "failure",
   "diagnostics": [
     {
-      "code": "dm.expression.argument_type",
+      "code": "dm.expression.incompatible_call",
       "severity": "error",
       "message": "min: argument `a` expects number; received boolean",
       "source": { "file": "notes.md", "line": 4, "column": 18 },
@@ -249,7 +249,7 @@ The report is one JSON object with a fixed schema. Every field is always present
 ```
 
 - `outcome` is `"success"` or `"failure"`. On success `document` holds the composed document as a string; on failure `document` is present and `null`, and the command exits non-zero. A failure report on standard output does not violate the no-document-on-failure rule.
-- Each diagnostic always has `code`, `severity` (`"error"`, `"warning"`, or `"info"`), and `message`; `source`, `expected_type`, and `actual_type` are present and `null` when unavailable. The diagnostic code shown above is illustrative; codes come from the shared library diagnostics.
+- Each diagnostic always has `code`, `severity` (`"error"`, `"warning"`, or `"info"`), and `message`; `source`, `expected_type`, and `actual_type` are present and `null` when unavailable. The code shown above is Phase B's category 5 call code; the message is illustrative. Codes come from the shared library diagnostics.
 - `source`, when present, has `file`, `line`, and `column`; `file` is null for input without a named origin. Coordinates point to the start of the authored range. Expected/actual types use the same canonical spelling as editor messages.
 - A successfully parsed report-mode invocation emits exactly one object, including input-read, schema-load, parse, binding, and runtime failures. Earlier diagnostics remain in a failure report; failures without a source or types use null fields and an existing typed diagnostic code. CLI usage errors occur before report mode is established and retain ordinary stderr/exit behavior. A broken stdout cannot guarantee a complete report and remains an output error.
 - Standard output contains only that object: progress, performance output, and other status messages go to stderr. Do not duplicate report diagnostics in a human-error footer. Diagnostic order follows source order for passive checks and discovery order for runtime diagnostics; concurrent child results are collected in authored directive order. Report creation never evaluates or renders the document again.
@@ -258,6 +258,62 @@ The report is one JSON object with a fixed schema. Every field is always present
 ### 9. Performance evidence
 
 A quick before/after sample on one host using an existing representative repository document is recorded in the implementation log for composition and DMLS analysis, separating checking cost from unrelated I/O where practical. Record the host, input, and observations, and explain a visible regression for review. No synthetic growth workload, additional host, repetition requirement, statistical threshold, or CI job is required. Existing expression depth and resource bounds are preserved; bounded analysis that cannot prove a fact remains conservative and never falsely proves a call valid or invalid.
+
+### 10. Reconciliation with the implemented Phase B
+
+_Added 2026-10-23._ `2026-10-28-schema-enhancements` is implemented. This
+section records the corrections its delivered code forced here; sections 1, 3,
+6, and 8 now name the delivered symbols and codes. No outcome of this spec
+changed.
+
+- **`is_file_type` declares `unknown | null`.** *Decision:* the signature is
+  `is_file_type(value: unknown | null): boolean`, like every inspecting
+  predicate in Phase B's catalog (`is_null`, `is_number`, `file_exists`).
+  *Alternatives:* keep `value: unknown`. *Why:* Phase B's binder admits `null`
+  only through an explicit `| null` arm, so with `unknown` alone
+  `is_file_type(null)` would be a type error, contradicting this spec's
+  "`false` for any non-string, non-file value". Phase B also classifies an
+  `unknown` argument to a plain `unknown` parameter as category 4, so under
+  `expressions.strict` the guard `is_file_type(source)` would itself warn,
+  contradicting criterion 16 ("only the unguarded call warns"); to
+  `unknown | null` it is category 1. The test host predicate
+  `is_project_file` takes the same signature so it receives the same
+  checking (criterion 17). *Downsides:* under section 6's
+  type rule, `is_file_type(x)` with an undeclared `x` now suppresses
+  `dm.expression.undeclared_property`, like the other predicates.
+- **`file_exists`'s delivered signature replaces this spec's assumption.**
+  *Decision:* section 3 uses `file_exists(value: unknown | null)` with Phase B's
+  inspecting binding. *Alternatives:* none; this is the delivered,
+  owner-decided contract (Phase B decision 82, revising its decision 63, which
+  this spec had copied). *Why:* section 3 assumed `file_exists(42)` binds
+  `"42"`, which Phase B reversed before implementing. *Downsides:* none; the
+  structural rejection and always-false warning added here are unchanged.
+- **Phase C extends the declaration-only layer.** *Decision:* the projection
+  extensions of section 1 extend `DeclaredTypes` as the call check builds it,
+  from declarations only. A static frontmatter value never narrows a declared
+  type. (`DeclaredTypes::with_static_frontmatter` stays the presence checks'
+  layer.) *Alternatives:* let a set optional value remove `null`. *Why:*
+  Phase B decided this (its Phase 5 decision 1): a frontmatter value is a
+  runtime value that setters, caller inputs, and interpolation can replace.
+  *Downsides:* a document that sets an optional property still gets the
+  strict-mode category 2 warning.
+- **The compatibility API is `call_check`.** *Decision:* "the compatibility
+  API" in this spec and its plan means Phase B's `ArgumentCategory`,
+  `classify_argument`, `check_call`/`CallCheck`, and the expression-level walk
+  `check_expression_calls`/`check_prepared_calls`. Composition reaches it
+  through `compose/call_precheck.rs` and DMLS through
+  `dmls/src/diagnostics/call_check.rs`. Section 1's call-return and operator
+  typing feeds `ArgumentType::of`, which today types every call and operator
+  argument `unknown`. *Alternatives:* a second classification entry point.
+  *Why:* rule "one projection, one narrowing engine, one diagnostics model".
+  *Downsides:* none found.
+- **Host catalogs use Phase B's strict catalog loader.** *Decision:* a host
+  function catalog is a tagged `kind: schema` file with a `categories:` list.
+  Every function names exactly one declared `category(...)`; non-function
+  `types:` entries are helper types. *Alternatives:* a looser host loader.
+  *Why:* one catalog grammar and one loader. Phase B's loader rejects a
+  function without a category (its Phase 4 decision 8). *Downsides:* a host
+  must declare categories even for one function.
 
 ## Out of scope
 
