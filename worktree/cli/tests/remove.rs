@@ -3817,11 +3817,11 @@ fn a_branch_that_moves_after_its_worktree_is_removed_is_kept() {
 
 /// `--force-worktree` approves discarding the files the report listed. A
 /// version staged after the report (here, as soon as the files were
-/// fingerprinted) was never shown, and `git worktree remove --force` would
-/// discard it, so removal refuses.
+/// fingerprinted) was never shown; the user agreed to the removal, so it
+/// goes ahead and a warning says the files changed after they agreed.
 #[cfg(unix)]
 #[test]
-fn a_change_staged_after_the_report_is_not_covered_by_force_worktree() {
+fn a_change_staged_after_the_report_is_reported() {
     let fixture = Fixture::new();
     let wt = fixture.add_worktree("feat/x", "feat-x");
     fs::write(wt.join("notes.txt"), "reported\n").unwrap();
@@ -3839,15 +3839,9 @@ fn a_change_staged_after_the_report_is_not_covered_by_force_worktree() {
         .unwrap();
 
     let stderr = stderr_of(&output);
-    assert_eq!(output.status.code(), Some(3), "{stderr}");
-    assert!(stderr.contains("changed after they were checked"), "{stderr}");
-    assert!(!stderr.contains("Removed worktree"), "{stderr}");
-    assert_eq!(git(&wt, &["diff", "--cached", "--name-only"]), "README.md", "the staged change survives");
-    assert!(wt.join("notes.txt").exists());
-    assert!(fixture.branch_exists("feat/x"));
-
-    // Unchanged since its report, the same removal goes ahead.
-    fixture.wt(&fixture.repo()).args(["remove", "feat-x", "--force-worktree"]).assert().code(0);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains("files or staged changes changed after you agreed"), "{stderr}");
+    assert!(stderr.contains("Removed worktree"), "{stderr}");
     assert!(!wt.exists());
 }
 

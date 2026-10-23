@@ -210,6 +210,39 @@ pub fn stopped_markup(finished: &Finished, display_name: &str, name: &str, branc
     lines.join("\n")
 }
 
+/// The warning for a removal that finished although things changed after
+/// the user agreed, or watching stopped: what happened (at most
+/// [`ACTIVITY_LIMIT`] changes, then a count) and the saved report. `None`
+/// when nothing did.
+pub fn agreed_changes_markup(finished: &Finished) -> Option<String> {
+    let report = &finished.report;
+    let total = report.activity.len() as u64 + report.truncation.activity_omitted;
+    if total == 0 {
+        return None;
+    }
+    let mut lines = vec![format!(
+        "<yellow>Warning:</yellow> {total} {} after you agreed; <i>wt</i> removed the worktree anyway.",
+        if total == 1 { "change happened" } else { "changes happened" }
+    )];
+    for observed in report.activity.iter().take(ACTIVITY_LIMIT) {
+        lines.push(match (observed.kind, report.observation.as_ref().and_then(|observation| observation.loss.as_ref())) {
+            (ActivityKind::CoverageLost, Some(loss)) => {
+                format!("  watching for changes stopped: {}", loss_reason(&loss.reason, Some(report)))
+            }
+            (ActivityKind::CoverageLost, None) => "  watching for changes stopped".to_string(),
+            (kind, _) if observed.location == ActivityLocation::Original => {
+                format!("  {} {} <dim>(outside the worktree; not touched)</dim>", native(&observed.path), activity_verb(kind))
+            }
+            (kind, _) => format!("  {} {}", native(&observed.path), activity_verb(kind)),
+        });
+    }
+    if total > ACTIVITY_LIMIT as u64 {
+        lines.push(format!("  <dim>…and {} more, listed in the saved report</dim>", total - ACTIVITY_LIMIT as u64));
+    }
+    lines.push(format!("Full report: {}", visible(&finished.report_path.display().to_string())));
+    Some(lines.join("\n"))
+}
+
 /// Why watching stopped and where, and for a delay what it means, the
 /// macOS remedy, and how long confirmed checks took before it.
 fn loss_lines(observation: &ObservationDiagnostics, report: &OperationReport) -> Vec<String> {

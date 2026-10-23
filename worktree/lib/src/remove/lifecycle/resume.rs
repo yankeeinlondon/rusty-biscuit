@@ -450,7 +450,7 @@ impl<'r, 'a> Resumed<'r, 'a> {
         let Some(targets) = Targets::new(self.original(), quarantine, self.admin()) else {
             return refuse(Refusal::Ineligible(MoveRefusal::Unsupported("its quarantine is not a sibling".into())));
         };
-        let mut observation = match (self.env.observe)(targets, true, self.env.interrupted) {
+        let mut observation = match (self.env.observe)(targets.clone(), true, self.env.interrupted) {
             Ok(observation) => observation,
             Err(ObservationError::Interrupted) => return refuse(Refusal::Interrupted),
             Err(error) => return refuse(Refusal::Observation(error)),
@@ -470,12 +470,15 @@ impl<'r, 'a> Resumed<'r, 'a> {
         // Under the operation lock: no other attempt can add a deletion
         // result between this and the deletion it approves.
         let current = || resume_consent_in(self.store, self.record, &self.expected, base).map(|consent| (consent.inventory, consent.fingerprint));
-        if let Err(refusal) = recheck(base, &entry, approval, current) {
-            return refuse(refusal);
-        }
-        if let Err(refusal) = confirm_unchanged(&inventory, &checked_drain(&mut observation, self.env.interrupted), quarantine, Tree::AtQuarantine, true) {
-            return refuse(refusal);
-        }
+        let mut early_warnings = match recheck(base, &entry, approval, current) {
+            Ok(warnings) => warnings,
+            Err(refusal) => return refuse(refusal),
+        };
+        let drain = checked_drain(&mut observation, self.env.interrupted);
+        let mut early_activity = match confirm_unchanged(&inventory, &drain, quarantine, Tree::AtQuarantine, &targets, true) {
+            Ok(activity) => activity,
+            Err(refusal) => return refuse(refusal),
+        };
         let binding = match bind_index(base, &AdminEntry { dir: self.admin().to_path_buf() }, approval.tip.clone()) {
             Ok(binding) => binding,
             Err(refusal) => return refuse(Refusal::Index(refusal)),
@@ -504,9 +507,15 @@ impl<'r, 'a> Resumed<'r, 'a> {
         }
         // The last look before deleting; this attempt has changed nothing
         // yet, and the operation stays pending as it was.
-        if let Err(refusal) = confirm_unchanged(&inventory, &checked_drain(&mut observation, self.env.interrupted), quarantine, Tree::AtQuarantine, false) {
-            return refuse(refusal);
+        let drain = checked_drain(&mut observation, self.env.interrupted);
+        match confirm_unchanged(&inventory, &drain, quarantine, Tree::AtQuarantine, &targets, false) {
+            Ok(activity) => early_activity.extend(activity),
+            Err(refusal) => return refuse(refusal),
         }
+        for observed in early_activity {
+            attempt.report.push_activity(observed);
+        }
+        attempt.warnings.append(&mut early_warnings);
         attempt.delete(observation, &binding, hook)
     }
 
@@ -537,10 +546,16 @@ impl<'r, 'a> Resumed<'r, 'a> {
         if hook(Boundary::Begun) {
             return Err(Crashed);
         }
-        // `remove_missing_record` checks the quarantine's path; the original
-        // is checked here, since a recreation there is never cleaned up.
+        // `remove_missing_record` checks the quarantine's path. Something at
+        // the original is outside what the user agreed to: never touched,
+        // and reported.
         if presence(self.original(), &self.record.checkout_identity) != Presence::Absent {
-            return refuse(Refusal::Changed("something now exists at the worktree's original path".into()));
+            attempt.report.push_activity(crate::remove::outcome::ObservedActivity {
+                location: crate::remove::outcome::ActivityLocation::Original,
+                path: self.record.original.clone(),
+                kind: crate::remove::outcome::ActivityKind::Created,
+                received_at_ms: now_ms(),
+            });
         }
         match remove_missing_record(self.request.base, &entry, &approval.inspected) {
             Ok(warning) => attempt.warnings.extend(warning.map(|warning| format!("could not delete the copy record: {warning}"))),

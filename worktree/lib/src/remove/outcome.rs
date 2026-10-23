@@ -385,7 +385,12 @@ impl OperationReport {
 
     /// Records `activity`, counting it as omitted past
     /// [`MAX_REPORTED_ACTIVITY`].
+    /// Records `activity`. Lost watching is recorded once: every later
+    /// drain of a lost observer reports the same loss.
     pub fn push_activity(&mut self, activity: ObservedActivity) {
+        if activity.kind == ActivityKind::CoverageLost && self.activity.iter().any(|seen| seen.kind == ActivityKind::CoverageLost) {
+            return;
+        }
         if self.activity.len() < MAX_REPORTED_ACTIVITY {
             self.activity.push(activity);
         } else {

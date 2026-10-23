@@ -68,7 +68,7 @@ use super::outcome::{
 use super::quarantine::association::{MoveError, MoveErrorClass, MovePlan, MoveRefusal, move_to_quarantine, plan_move};
 use super::quarantine::association::CheckoutLocation;
 use super::quarantine::rename;
-use super::quarantine::unregister::{UnregisterError, unregister_quarantine};
+use super::quarantine::unregister::{Unregistered, unregister_quarantine};
 use super::recovery::OperationId;
 use super::recovery::journal::{EntryState, summarize};
 use super::recovery::lock::LockError;
@@ -403,7 +403,7 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
         return refuse(Refusal::Ineligible(MoveRefusal::Unsupported("its quarantine is not a sibling".into())));
     };
     let mut timeline = Vec::new();
-    let mut observation = match (env.observe)(targets, false, env.interrupted) {
+    let mut observation = match (env.observe)(targets.clone(), false, env.interrupted) {
         Ok(observation) => observation,
         Err(ObservationError::Interrupted) => return refuse(Refusal::Interrupted),
         Err(error) => return refuse(Refusal::Observation(error)),
@@ -429,14 +429,17 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
     // After discovery and observation setup: the approval must still
     // describe the checkout.
     let current = || consent_state(base, &entry.path, entry.branch.as_deref()).map_err(Refusal::Git);
-    if let Err(refusal) = recheck(base, entry, approval, current) {
-        return refuse(refusal);
-    }
+    let mut early_warnings = match recheck(base, entry, approval, current) {
+        Ok(warnings) => warnings,
+        Err(refusal) => return refuse(refusal),
+    };
     // Rechecking ran `git status`, which may rewrite the index; the binding
-    // is taken after it, so admin events up to here are not refused.
-    if let Err(refusal) = confirm_unchanged(&inventory, &observation.drain(env.interrupted), &plan.original, Tree::AtOriginal, true) {
-        return refuse(refusal);
-    }
+    // is taken after it, so admin events up to here are its own.
+    let mut early_activity =
+        match confirm_unchanged(&inventory, &observation.drain(env.interrupted), &plan.original, Tree::AtOriginal, &targets, true) {
+            Ok(activity) => activity,
+            Err(refusal) => return refuse(refusal),
+        };
     let binding = match bind_index(base, &plan.admin, approval.tip.clone()) {
         Ok(binding) => binding,
         Err(refusal) => return refuse(Refusal::Index(refusal)),
@@ -463,9 +466,10 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
     if (env.interrupted)() {
         return Ok(discard(operation, Refusal::Interrupted));
     }
-    // The last look before the move; anything since the binding refuses.
-    if let Err(refusal) = confirm_unchanged(&inventory, &observation.drain(env.interrupted), &plan.original, Tree::AtOriginal, false) {
-        return Ok(discard(operation, refusal));
+    // The last look before the move; anything since the binding is reported.
+    match confirm_unchanged(&inventory, &observation.drain(env.interrupted), &plan.original, Tree::AtOriginal, &targets, false) {
+        Ok(activity) => early_activity.extend(activity),
+        Err(refusal) => return Ok(discard(operation, refusal)),
     }
     let moved = {
         let observation = RefCell::new(&mut observation);
@@ -477,6 +481,10 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
     report.discovery.extend(preflight_runs(discovered_at, NativeString::from(plan.original.as_path()), clearance));
     let mut attempt = Attempt::new(base, env, operation, report, branches, &plan.original, &plan.quarantine, plan.identity, &plan.admin.dir);
     attempt.observed_by(&observation);
+    for observed in early_activity {
+        attempt.report.push_activity(observed);
+    }
+    attempt.warnings.append(&mut early_warnings);
     match moved {
         Ok(()) => {}
         Err(error) if error.nothing_changed() => return Ok(discard(attempt.operation, Refusal::Move(error))),
@@ -510,16 +518,13 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
         return Err(Crashed);
     }
     // The move's own events: explained here, since the deletion engine
-    // treats every admin event as activity.
+    // treats every admin event as activity. The rest is reported.
     let own = observation.drain(env.interrupted);
-    if let Some((outcome, activity, why)) = unexplained_move_events(&plan, &own) {
-        for observed in activity {
-            attempt.report.push_activity(observed);
-        }
-        return Ok(attempt.stop(outcome, why));
-    }
     if own.interrupted {
         return Ok(attempt.stop(Stop::Interrupted.outcome(), Stop::Interrupted));
+    }
+    for observed in unexplained_move_events(&plan, &own) {
+        attempt.report.push_activity(observed);
     }
     attempt.delete(observation, &binding, hook)
 }
@@ -558,22 +563,25 @@ fn no_pending(store: &RecoveryStore, admin_dir: &Path) -> Result<(), StoreError>
 
 /// The approval's bindings read fresh: the branch tip, and the consented
 /// inventory and fingerprint `current` collects ([`consent_state`] of the
-/// original, or [`resume_consent`] on resume).
+/// original, or [`resume_consent`] on resume). The user agreed to the
+/// removal, so a difference is a warning, not a refusal; an approved branch
+/// deletion still compares the approved tip and fails safely if it moved.
 fn recheck(
     base: &Path,
     entry: &WorktreeEntry,
     approval: &Approval,
     current: impl FnOnce() -> Result<(Inventory, String), Refusal>,
-) -> Result<(), Refusal> {
+) -> Result<Vec<String>, Refusal> {
+    let mut warnings = Vec::new();
     let tip = recorded_head(base, entry).map_err(Refusal::Git)?;
     if tip != approval.tip {
-        return Err(Refusal::Changed(format!("the worktree's HEAD moved from {} to {tip} after it was checked", approval.tip)));
+        warnings.push(format!("the worktree's HEAD moved from {} to {tip} after you agreed", approval.tip));
     }
     let (inventory, fingerprint) = current()?;
     if inventory.dirty != approval.inventory.dirty || fingerprint != approval.fingerprint {
-        return Err(Refusal::Changed("the worktree's files or staged changes changed after they were checked".into()));
+        warnings.push("the worktree's files or staged changes changed after you agreed".into());
     }
-    Ok(())
+    Ok(warnings)
 }
 
 /// Where the observed tree is.
@@ -583,42 +591,72 @@ enum Tree {
     AtQuarantine,
 }
 
-/// The finishing consistency check before a mutation: every tree path
-/// `drain` names must still match `inventory` (the tree is at `root`),
-/// nothing may appear at the other location, and admin events refuse unless
-/// `admin_allowed`. A drain the interrupt ended refuses as an interrupt.
-fn confirm_unchanged(inventory: &DeletionInventory, drain: &Drain, root: &Path, tree: Tree, admin_allowed: bool) -> Result<(), Refusal> {
-    if let Some(lost) = &drain.lost {
-        return Err(Refusal::Inventory(InventoryRefusal::Coverage(lost.clone())));
-    }
+/// The consistency check before a mutation, as warnings: every tree path
+/// `drain` names is compared with `inventory` (the tree is at `root`), and
+/// anything at the other location, an admin event (unless `admin_allowed`:
+/// the recheck's own `git status`), and lost watching are reported. The
+/// user agreed to the removal, so none of them refuses; the deletion engine
+/// deletes what changed as it is. Only an interrupt, and a tree root that is
+/// no longer the checkout (the move would move another directory), refuse.
+fn confirm_unchanged(
+    inventory: &DeletionInventory,
+    drain: &Drain,
+    root: &Path,
+    tree: Tree,
+    targets: &Targets,
+    admin_allowed: bool,
+) -> Result<Vec<ObservedActivity>, Refusal> {
     if drain.interrupted {
         return Err(Refusal::Interrupted);
     }
+    let mut warnings = Vec::new();
+    if drain.lost.is_some() {
+        warnings.push(observed(ActivityLocation::Quarantine, root, ActivityKind::CoverageLost, None));
+    }
     let mut tree_events = Vec::new();
-    for observed in &drain.events {
-        match (&observed.scope, tree) {
+    for event in &drain.events {
+        let at = Some(event.received);
+        match (&event.scope, tree) {
             (Scope::Admin(name), _) if !admin_allowed => {
-                return Err(Refusal::Changed(format!(
-                    "Git's record of the worktree changed ({}) after it was checked",
-                    name.to_string_lossy()
-                )));
+                warnings.push(observed(ActivityLocation::Admin, &targets.admin().join(name), ActivityKind::Modified, at));
             }
             (Scope::Admin(_), _) => {}
-            (Scope::Tree(_), _) | (Scope::Original(_), Tree::AtOriginal) => tree_events.push(observed.clone()),
+            (Scope::Tree(_), _) | (Scope::Original(_), Tree::AtOriginal) => tree_events.push(event.clone()),
             (Scope::Quarantine(relative), Tree::AtQuarantine) => {
-                let mut observed = observed.clone();
-                observed.scope = Scope::Tree(relative.clone());
-                tree_events.push(observed);
+                let mut event = event.clone();
+                event.scope = Scope::Tree(relative.clone());
+                tree_events.push(event);
             }
-            (Scope::Quarantine(_), Tree::AtOriginal) => {
-                return Err(Refusal::Changed("something appeared at the quarantine path before the move".into()));
+            (Scope::Quarantine(relative), Tree::AtOriginal) => {
+                warnings.push(observed(ActivityLocation::Quarantine, &targets.quarantine().join(relative), activity_kind(event.kind), at));
             }
-            (Scope::Original(_), Tree::AtQuarantine) => {
-                return Err(Refusal::Changed("something appeared at the worktree's original path".into()));
+            (Scope::Original(relative), Tree::AtQuarantine) => {
+                warnings.push(observed(ActivityLocation::Original, &targets.original().join(relative), activity_kind(event.kind), at));
             }
         }
     }
-    inventory.confirm(root, &Drain { events: tree_events, lost: None, interrupted: false }).map_err(Refusal::Inventory)
+    let location = if tree == Tree::AtOriginal { ActivityLocation::Original } else { ActivityLocation::Quarantine };
+    match inventory.confirm(root, &Drain { events: tree_events, lost: None, interrupted: false }) {
+        Ok(()) => {}
+        Err(InventoryRefusal::Changed { path, .. } | InventoryRefusal::Uninspectable { path, .. }) if path == root => {
+            return Err(Refusal::Changed(format!("{} is no longer the checkout that was approved", root.display())));
+        }
+        Err(InventoryRefusal::Changed { path, change }) => {
+            use crate::remove::observation::inventory::Change;
+            let kind = match change {
+                Change::Appeared => ActivityKind::Created,
+                Change::Vanished => ActivityKind::Vanished,
+                Change::Replaced => ActivityKind::Replaced,
+                Change::Modified => ActivityKind::Modified,
+            };
+            warnings.push(observed(location, &path, kind, None));
+        }
+        Err(InventoryRefusal::Uninspectable { path, .. } | InventoryRefusal::Ineligible { path, .. }) => {
+            warnings.push(observed(location, &path, ActivityKind::Modified, None));
+        }
+        Err(InventoryRefusal::Coverage(_)) => {}
+    }
+    Ok(warnings)
 }
 
 /// Called by a move whose association failed, before it undoes the rename:
@@ -637,11 +675,10 @@ fn unexpected_before_rollback(observation: &mut Observation, interrupted: &dyn F
 /// The move's own events checked against what is there now: the original
 /// moved away and absent, the quarantine (or the tree's root) moved in and
 /// the checkout, and the admin `gitdir` holding the rewritten record.
-/// Anything else is activity; lost coverage is unverified state.
-fn unexplained_move_events(plan: &MovePlan, drain: &Drain) -> Option<(RemovalOutcome, Vec<ObservedActivity>, String)> {
-    if let Some(lost) = &drain.lost {
-        let activity = observed(ActivityLocation::Quarantine, &plan.quarantine, ActivityKind::CoverageLost, None);
-        return Some((RemovalOutcome::StateUnverified, vec![activity], format!("activity observation was lost: {lost}")));
+/// Anything else is activity, and lost coverage is reported as such.
+fn unexplained_move_events(plan: &MovePlan, drain: &Drain) -> Vec<ObservedActivity> {
+    if drain.lost.is_some() {
+        return vec![observed(ActivityLocation::Quarantine, &plan.quarantine, ActivityKind::CoverageLost, None)];
     }
     let cumulative = DeletionOptions::default().cumulative_kinds;
     let original_kinds: Vec<EventKind> = drain
@@ -664,8 +701,7 @@ fn unexplained_move_events(plan: &MovePlan, drain: &Drain) -> Option<(RemovalOut
         };
         activity.push(observed(location, &path, activity_kind(event.kind), Some(event.received)));
     }
-    (!activity.is_empty())
-        .then(|| (RemovalOutcome::ActivityDetected, activity, "activity was observed while the worktree was moved aside".to_string()))
+    activity
 }
 
 fn activity_kind(kind: EventKind) -> ActivityKind {
@@ -818,9 +854,6 @@ impl<'a> Attempt<'a> {
         self.report.record_deletion(&self.quarantine, &deletion);
         self.step(Step::DeletionBatch, StepResult::Succeeded, Some(format!("{} entries deleted", deletion.deleted.len())));
         if let Some(stop) = deletion.stop {
-            if let super::observation::deletion::Stop::CoverageLost(_) = &stop {
-                self.report.push_activity(observed(ActivityLocation::Quarantine, &self.quarantine, ActivityKind::CoverageLost, None));
-            }
             return Ok(self.stop(stop.outcome(), stop));
         }
         self.step(Step::ContentRemoved, StepResult::Succeeded, None);
@@ -831,15 +864,17 @@ impl<'a> Attempt<'a> {
             return Err(Crashed);
         }
         match unregister_quarantine(self.base, &mut observation, binding, self.env.interrupted) {
-            Ok(warning) => self.warnings.extend(warning.map(|warning| format!("could not delete the copy record: {warning}"))),
-            Err(error) => {
-                if let UnregisterError::Activity(activity) = &error {
-                    for observed in activity {
-                        self.report.push_activity(observed.clone());
+            Ok(Unregistered { copy_warning, activity }) => {
+                self.warnings.extend(copy_warning.map(|warning| format!("could not delete the copy record: {warning}")));
+                let lost_before = self.report.activity.iter().any(|observed| observed.kind == ActivityKind::CoverageLost);
+                for observed in activity {
+                    // Watching is lost once; the deletion may have said so.
+                    if !(lost_before && observed.kind == ActivityKind::CoverageLost) {
+                        self.report.push_activity(observed);
                     }
                 }
-                return Ok(self.stop(error.outcome(), error));
             }
+            Err(error) => return Ok(self.stop(error.outcome(), error)),
         }
         drop(observation);
         self.unregistered(hook)

@@ -3,16 +3,21 @@
 //!
 //! [`unregister_quarantine`] runs after
 //! [`delete_content`](crate::remove::observation::deletion::delete_content)
-//! returned without a stop. It drains the observer one last time, confirms
-//! that neither the quarantine nor anything at the original path exists,
-//! re-lists the worktree once, stops watching the admin directory, then
-//! requires the worktree's index (its bytes, and Git's reading of every
-//! entry, split index included) and HEAD to still be the state approved
-//! before the move, and removes exactly this registration as
+//! returned without a stop. It drains the observer one last time, re-lists
+//! the worktree once, stops watching the admin directory, compares the
+//! worktree's index (its bytes, and Git's reading of every entry, split
+//! index included) and HEAD with the state approved before the move, and
+//! removes exactly this registration as
 //! [`remove_missing_record`](crate::remove::missing::remove_missing_record)
 //! does: plain `git worktree remove`, never `--force`, never `prune` or
-//! `repair`. An interrupt that ends either wait for delivery keeps the
-//! registration.
+//! `repair`.
+//!
+//! The user agreed to the removal, so what the last drain shows, lost
+//! watching, something at the original path (never touched), and a changed
+//! index or HEAD are returned as warnings ([`Unregistered::activity`]), not
+//! refusals. Something at the quarantine path is not the moved checkout and
+//! keeps the registration, since `git worktree remove` would delete it. An
+//! interrupt that ends either wait for delivery keeps the registration.
 
 use std::io;
 use std::path::Path;
@@ -23,23 +28,15 @@ use sniff::filesystem::query::NativeString;
 use crate::remove::admin_entry::same_location;
 use crate::availability::{self, Availability};
 use crate::remove::admin_entry::AdminEntry;
-use crate::remove::missing::{IndexBinding, MissingRefusal, remove_listed_record};
+use crate::remove::missing::{Changes, IndexBinding, MissingRefusal, remove_listed_record};
 use crate::remove::observation::deletion::{DeletionOptions, own_move};
-use crate::remove::observation::{CoverageLost, EventKind, Observation, ObservationStage, Scope};
+use crate::remove::observation::{EventKind, Observation, ObservationStage, Scope};
 use crate::remove::outcome::{ActivityKind, ActivityLocation, ObservedActivity, RemovalOutcome};
 use crate::worktree::parse_worktree_list;
 
 /// Why the registration was kept. The checkout's content is already deleted.
 #[derive(Debug, thiserror::Error)]
 pub enum UnregisterError {
-    #[error("activity was observed at the checkout's locations or its Git record")]
-    Activity(Vec<ObservedActivity>),
-    #[error("activity observation was lost: {0}")]
-    CoverageLost(CoverageLost),
-    /// The worktree's index or HEAD is not the approved one: new staged work
-    /// that no consent covered.
-    #[error("the worktree's index or HEAD changed after it was approved")]
-    IndexChanged,
     /// Git no longer lists the worktree at the quarantine exactly once.
     #[error("Git's worktree list {0}")]
     Registration(String),
@@ -54,21 +51,26 @@ impl UnregisterError {
     /// The typed outcome of an operation that stopped here.
     pub fn outcome(&self) -> RemovalOutcome {
         match self {
-            Self::Activity(_) | Self::IndexChanged => RemovalOutcome::ActivityDetected,
-            Self::CoverageLost(_) => RemovalOutcome::StateUnverified,
             Self::Registration(_) | Self::Refused(_) | Self::Interrupted => RemovalOutcome::CleanupFailed,
         }
     }
 }
 
+/// The registration is gone.
+#[derive(Debug, Default)]
+pub struct Unregistered {
+    /// Set when the copy record could not be deleted.
+    pub copy_warning: Option<String>,
+    /// What changed after the user agreed: the last drain's events, lost
+    /// watching, something at the original path, and a changed index or
+    /// HEAD (as a change to the admin directory's `index` or `HEAD`).
+    pub activity: Vec<ObservedActivity>,
+}
+
 /// Unregisters the worktree whose quarantine `observation` watched, from the
-/// base checkout `base`, if its index and HEAD still match `approved`.
-/// `interrupted` is polled by the observer's waits.
-///
-/// ## Returns
-///
-/// A warning when the copy record could not be deleted; the registration is
-/// gone either way.
+/// base checkout `base`. `approved` is the index and HEAD the user agreed
+/// to; a difference is reported, not refused. `interrupted` is polled by the
+/// observer's waits.
 ///
 /// ## Errors
 ///
@@ -79,20 +81,25 @@ pub fn unregister_quarantine(
     observation: &mut Observation,
     approved: &IndexBinding,
     interrupted: &dyn Fn() -> bool,
-) -> Result<Option<String>, UnregisterError> {
+) -> Result<Unregistered, UnregisterError> {
     let targets = observation.targets().clone();
     observation.enter_stage(ObservationStage::Unregistration);
     let drain = observation.drain(interrupted);
-    if let Some(lost) = drain.lost {
-        return Err(UnregisterError::CoverageLost(lost));
-    }
     if drain.interrupted {
         return Err(UnregisterError::Interrupted);
+    }
+    let mut activities = Vec::new();
+    if drain.lost.is_some() {
+        activities.push(ObservedActivity {
+            location: ActivityLocation::Quarantine,
+            path: NativeString::from(targets.quarantine()),
+            kind: ActivityKind::CoverageLost,
+            received_at_ms: ms(SystemTime::now()),
+        });
     }
     let original_kinds: Vec<EventKind> =
         drain.events.iter().filter(|event| event.scope == Scope::Original(Default::default())).map(|event| event.kind).collect();
     let moved_away = own_move(&original_kinds, DeletionOptions::default().cumulative_kinds) && absent(targets.original());
-    let mut activities = Vec::new();
     for event in &drain.events {
         let (location, path) = match &event.scope {
             Scope::Admin(name) => (ActivityLocation::Admin, targets.admin().join(name)),
@@ -105,13 +112,9 @@ pub fn unregister_quarantine(
         };
         activities.push(activity(location, &path, event.received));
     }
-    for (location, path) in [(ActivityLocation::Quarantine, targets.quarantine()), (ActivityLocation::Original, targets.original())] {
-        if !absent(path) {
-            activities.push(activity(location, path, SystemTime::now()));
-        }
-    }
-    if !activities.is_empty() {
-        return Err(UnregisterError::Activity(activities));
+    // Outside what the user agreed to; never touched.
+    if !absent(targets.original()) {
+        activities.push(activity(ActivityLocation::Original, targets.original(), SystemTime::now()));
     }
 
     let listing = crate::git::worktree_list_from(base, base)
@@ -132,10 +135,16 @@ pub fn unregister_quarantine(
     // between changes its bytes, so it still refuses.
     observation.release_admin(interrupted).map_err(|_| UnregisterError::Interrupted)?;
     let admin = AdminEntry { dir: targets.admin().to_path_buf() };
-    remove_listed_record(base, entry, entry, &admin, approved).map_err(|refusal| match refusal {
-        MissingRefusal::IndexChanged(_) | MissingRefusal::HeadChanged { .. } => UnregisterError::IndexChanged,
-        refusal => UnregisterError::Refused(refusal),
-    })
+    let (copy_warning, changed) =
+        remove_listed_record(base, entry, entry, &admin, approved, Changes::Allow).map_err(UnregisterError::Refused)?;
+    if changed {
+        activities.push(activity(ActivityLocation::Admin, &targets.admin().join("index"), SystemTime::now()));
+    }
+    Ok(Unregistered { copy_warning, activity: activities })
+}
+
+fn ms(at: SystemTime) -> u64 {
+    at.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64)
 }
 
 fn absent(path: &Path) -> bool {

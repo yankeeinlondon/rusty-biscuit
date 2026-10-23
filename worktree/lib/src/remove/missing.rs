@@ -261,7 +261,7 @@ pub fn remove_missing_record(
         index_digest: inspected.index_digest,
         entries_digest: inspected.entries_digest,
     };
-    remove_listed_record(base, entry, listed, &inspected.admin, &approved)
+    remove_listed_record(base, entry, listed, &inspected.admin, &approved, Changes::Refuse).map(|(warning, _)| warning)
 }
 
 /// The rest of [`remove_missing_record`] once a fresh listing has shown
@@ -272,13 +272,27 @@ pub fn remove_missing_record(
 /// The final unregister of a checked removal calls this directly with the
 /// binding taken before the move and its own listing, so nothing it checks
 /// is read twice.
+/// What [`remove_listed_record`] does when the index or HEAD is not the
+/// approved one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Changes {
+    /// Refuse: the approval was given for exactly that state.
+    Refuse,
+    /// Remove the record anyway and say so: the user already agreed to
+    /// removing the worktree, and its content is gone.
+    Allow,
+}
+
+/// Returns the copy record's warning, and whether the index or HEAD had
+/// changed (only ever `true` with [`Changes::Allow`]).
 pub(crate) fn remove_listed_record(
     base: &Path,
     entry: &WorktreeEntry,
     listed: &WorktreeEntry,
     admin: &AdminEntry,
     approved: &IndexBinding,
-) -> Result<Option<String>, MissingRefusal> {
+    changes: Changes,
+) -> Result<(Option<String>, bool), MissingRefusal> {
     let associated = admin_entry_for(base, &entry.path).map_err(MissingRefusal::Association)?;
     // `admin` may come from a recovery record written by another run, so
     // compare locations rather than spellings.
@@ -286,8 +300,12 @@ pub(crate) fn remove_listed_record(
         return Err(MissingRefusal::Changed(format!("now associates this path with another record, {}", associated.dir.display())));
     }
     let head = recorded_head(base, listed).map_err(MissingRefusal::Head)?;
+    let mut changed = false;
     if head != approved.head {
-        return Err(MissingRefusal::HeadChanged { was: approved.head.clone(), now: head });
+        if changes == Changes::Refuse {
+            return Err(MissingRefusal::HeadChanged { was: approved.head.clone(), now: head });
+        }
+        changed = true;
     }
     match availability::inspect(&entry.path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -298,7 +316,10 @@ pub(crate) fn remove_listed_record(
     if biscuit_hash::blake3_hash_bytes(&index_bytes(&index)?) != approved.index_digest
         || entries_digest(base, &index)? != approved.entries_digest
     {
-        return Err(MissingRefusal::IndexChanged(index));
+        if changes == Changes::Refuse {
+            return Err(MissingRefusal::IndexChanged(index));
+        }
+        changed = true;
     }
 
     let output = git_from_output(base, base, &[OsStr::new("worktree"), OsStr::new("remove"), entry.path.as_os_str()])
@@ -307,7 +328,7 @@ pub(crate) fn remove_listed_record(
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(MissingRefusal::RecordRemoval(WorktreeError::GitCommand(stderr)));
     }
-    Ok(copy_record::delete_for(base, &entry.path))
+    Ok((copy_record::delete_for(base, &entry.path), changed))
 }
 
 #[cfg(test)]

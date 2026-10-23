@@ -895,6 +895,9 @@ fn report_finished(terminal: &Terminal, facts: &Facts, actions: &Actions, finish
         removed.push(format!("branch {branch}"));
     }
     branch_messages(terminal, facts, actions);
+    if let Some(changes) = recovery::agreed_changes_markup(finished) {
+        print(terminal, changes);
+    }
     if actions.delete_remote {
         delete_on_origin(terminal, facts, &removed, true)?;
     }

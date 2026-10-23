@@ -239,11 +239,10 @@ fn staged_and_recreated_paths_keep_consent() {
     assert_eq!(excluded(&consent()), sorted(&[README]), "restored");
 }
 
-/// The approval binds the state reported: a path recreated, or a change
-/// staged, after the report refuses the retry under the lock with nothing
-/// deleted; the unchanged state then goes ahead on the same approval.
+/// A path recreated after the retry's report is deleted with the rest, and
+/// the difference from what the user agreed to is reported.
 #[test]
-fn a_change_between_the_report_and_the_retry_refuses() {
+fn a_change_between_the_report_and_the_retry_is_reported() {
     let fixture = fixture();
     let id = first_stopped_when_gone(&fixture, &[README]);
     let quarantine = fixture.quarantine_of(&id);
@@ -251,24 +250,11 @@ fn a_change_between_the_report_and_the_retry_refuses() {
     assert!(!approval.inventory.needs_consent(), "{:?}", approval.inventory.dirty);
     let base = fixture.base();
     let request = ResumeRequest { base: &base, id: &id, approval: Some(&approval), record: None, branches: &BranchActions::default() };
-    let retry = || with_env(&Usage::clear(), &Observers::default(), &|| false, |env| resume(&request, env));
-    let left = || DeletionInventory::capture(&quarantine, &[]).unwrap().entries().len();
-    let before = left();
 
     fs::write(quarantine.join(README), "new work\n").unwrap();
-    let refusal = refused(retry());
-    assert!(matches!(&refusal, Refusal::Changed(_)), "{refusal:?}");
-    assert_eq!(fs::read_to_string(quarantine.join(README)).unwrap(), "new work\n");
-    fs::remove_file(quarantine.join(README)).unwrap();
-
-    fixture.repo.git_in(&quarantine, &["rm", "-q", "--cached", README]);
-    let refusal = refused(retry());
-    assert!(matches!(&refusal, Refusal::Changed(_)), "{refusal:?}");
-    fixture.repo.git_in(&quarantine, &["reset", "-q", "--", README]);
-    assert_eq!((left(), fixture.pending()), (before, id.clone()), "nothing was deleted");
-
-    let resumed = finished(retry());
+    let resumed = finished(with_env(&Usage::clear(), &Observers::default(), &|| false, |env| resume(&request, env)));
     assert_removed(&fixture, &resumed);
+    assert!(resumed.warnings.iter().any(|warning| warning.contains("files")), "{:?}", resumed.warnings);
 }
 
 fn dirty(status: &str, path: &str) -> DirtyEntry {

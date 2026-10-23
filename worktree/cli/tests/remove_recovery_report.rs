@@ -680,3 +680,35 @@ fn a_refusal_for_a_write_while_preparing_says_to_let_it_finish() {
     assert!(rendered[1].contains("Fix what is named above"), "{}", rendered[1]);
     insta::assert_snapshot!(rendered.join("\n---\n"));
 }
+
+/// A removal that finished although things changed after the user agreed
+/// says so, names at most three changes and the lost watch, marks the
+/// original path as untouched, and names the saved report.
+#[test]
+fn a_finished_removal_names_what_changed_after_you_agreed() {
+    use worktree_cli::commands::remove::recovery::agreed_changes_markup;
+
+    let mut report = moved(RemovalOutcome::Removed, 0);
+    report.observation = Some(ObservationDiagnostics {
+        backend: ObservationBackend::FsEvents,
+        startup_ms: Some(12),
+        last_round_trip_ms: Some(10),
+        longest_round_trip_ms: Some(1007),
+        loss: Some(ObservationLoss {
+            stage: ObservationStage::Deletion,
+            reason: CoverageLost::FsEventsDropped { raw: 3, flags: vec![FsEventsLossFlag::UserDropped, FsEventsLossFlag::MustScanSubDirs] },
+            entries_since_drain: Some(2053),
+        }),
+    });
+    for (location, path, kind) in [
+        (ActivityLocation::Quarantine, format!("{QUARANTINE}/notes.txt"), ActivityKind::Created),
+        (ActivityLocation::Quarantine, QUARANTINE.to_string(), ActivityKind::CoverageLost),
+        (ActivityLocation::Original, ORIGINAL.to_string(), ActivityKind::Created),
+        (ActivityLocation::Admin, "/repo/.git/worktrees/fix-path-spelling/index".to_string(), ActivityKind::Modified),
+    ] {
+        report.push_activity(ObservedActivity { location, path: native(&path), kind, received_at_ms: AT_MS });
+    }
+
+    insta::assert_snapshot!(render(&agreed_changes_markup(&finished(report)).expect("changes")));
+    assert_eq!(agreed_changes_markup(&finished(moved(RemovalOutcome::Removed, 0))), None, "nothing changed, nothing said");
+}

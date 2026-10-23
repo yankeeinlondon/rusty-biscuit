@@ -8,7 +8,10 @@
 //! permission bits; a link's target). Only the consent-sensitive paths (dirty
 //! entries and protected included files) get a content hash; ignored build
 //! output is never read. A FIFO, socket, device, nested mount, or unsupported
-//! reparse point refuses before anything is moved, and is never opened.
+//! reparse point refuses before anything is moved, and is never opened. An
+//! entry that vanishes while the list is taken is left out, and a folder
+//! replaced meanwhile is listed but not walked: the user already agreed to
+//! the removal, and deletion removes whatever is there when it gets to it.
 //!
 //! Directories are compared by identity and permission bits only: the
 //! operation's own deletions change a directory's modification time and entry
@@ -229,6 +232,11 @@ impl DeletionInventory {
         self.index.get(path).map(|&at| &self.entries[at])
     }
 
+    /// Where `path` is in [`entries`](Self::entries).
+    pub fn position(&self, path: &Path) -> Option<usize> {
+        self.index.get(path).copied()
+    }
+
     /// The finishing consistency check: `drain` holds what the observer saw
     /// from its start until now, and every path it names under the checkout
     /// at `root` must still match this inventory.
@@ -401,7 +409,9 @@ impl Walk<'_> {
             let hash = self.is_sensitive(&child);
             let snapshot = match look(dir, &name, &full, hash) {
                 Ok(Some(snapshot)) => snapshot,
-                Ok(None) => return Err(InventoryRefusal::Changed { path: full, change: Change::Vanished }),
+                // Gone while the list was taken (a build cleaning up, say):
+                // nothing to approve, and the user agreed to the removal.
+                Ok(None) => continue,
                 Err(LookError::Ineligible(reason)) => return Err(InventoryRefusal::Ineligible { path: full, reason }),
                 Err(LookError::Io(source)) => return Err(InventoryRefusal::Uninspectable { path: full, source }),
             };
@@ -412,9 +422,15 @@ impl Walk<'_> {
             let identity = snapshot.identity;
             self.entries.push(InventoryEntry { path: NativeString::from(child.as_path()), identity: snapshot.identity, shape: snapshot.shape });
             if is_directory {
-                let opened = dir.open_dir(&name).map_err(uninspectable(full.clone()))?;
+                let opened = match dir.open_dir(&name) {
+                    Ok(opened) => opened,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(source) => return Err(InventoryRefusal::Uninspectable { path: full, source }),
+                };
+                // Replaced while the list was taken: its recorded entry no
+                // longer matches, so deletion removes what is there then.
                 if dir_identity(&opened, &full).map_err(uninspectable(full.clone()))? != identity {
-                    return Err(InventoryRefusal::Changed { path: full, change: Change::Replaced });
+                    continue;
                 }
                 self.directory(&opened, &child)?;
             }
@@ -529,7 +545,7 @@ pub(crate) fn dir_identity(dir: &Dir, full: &Path) -> io::Result<FileIdentity> {
     platform::dir_identity(dir, full)
 }
 
-fn device(identity: &FileIdentity) -> Option<u64> {
+pub(crate) fn device(identity: &FileIdentity) -> Option<u64> {
     match identity {
         FileIdentity::Unix { device, .. } => Some(*device),
         FileIdentity::Windows { .. } => None,

@@ -1,0 +1,10 @@
+---
+source: worktree/cli/tests/remove_recovery_report.rs
+expression: "render(&agreed_changes_markup(&finished(report)).expect(\"changes\"))"
+---
+Warning: 4 changes happened after you agreed; wt removed the worktree anyway.
+  /work/.wt-remove-fix-path-spelling-a91c/notes.txt was created
+  watching for changes stopped: macOS could not report every change (UserDropped, MustScanSubDirs; flags 0x3)
+  /work/fix-path-spelling was created (outside the worktree; not touched)
+  …and 1 more, listed in the saved report
+Full report: /repo/.git/wt-removal/a91c0000000000000000000000000000/report.json
