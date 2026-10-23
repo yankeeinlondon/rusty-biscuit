@@ -96,17 +96,30 @@ is accepted (array versus object), while two struct shapes with no tags fail
 with `... share media type `application/json` for statuses no shape declares
 and no JSON tag separates them`.
 
-### What is stored today
+### What is stored
 
-`Endpoint::response` still holds one `ApiResponse`. Build stores a lone JSON,
-text, binary, or empty shape with no modifiers there. Anything else (several
-shapes, streams, or a content type, status, tag, or note) passes the rules
-above and is then refused with `... are stored once Endpoint::response holds
-response model v2 shapes`. Storing those shapes is **planned**.
-`Endpoint::success_shapes()` returns the stored response as a one-shape list,
-and the generator and exporters read every endpoint through it, so they
-already handle several shapes and streams (see
+Build stores the validated shapes, in declaration order, in
+`Endpoint::response: Vec<SuccessShape>`; `Endpoint::success_shapes()` returns
+them. A hand-built endpoint (a test fixture, a deserialized definition) uses
+the thin constructors `SuccessShape::json_type("Item")`, `::text()`,
+`::binary()`, and `::empty()`; API build and bundle load check it by the same
+rules. A lone shape without facts (`SuccessShape::plain()`) is what every
+endpoint stored before success shapes existed, and its generated type,
+OpenAPI response, and `x-schematic` output are unchanged. The generator and
+exporters read every endpoint through `success_shapes()` (see
 [Generated success and failure types](#generated-success-and-failure-types)).
+
+```rust
+let endpoint = Endpoint::post("CreateMessage", "/messages").describes("Create a message")
+    .returns_json::<Message>(&mut ctx)
+    .returns(Success::sse(ctx.register::<MessageStreamEvent>()?).ends_at_event("message_stop"))
+    .build()?;
+assert_eq!(endpoint.response.len(), 2);
+```
+
+An endpoint with several shapes is never an inferred list for pagination,
+and an authored collection on one is rejected with `the response is not a
+single JSON shape`.
 
 The runtime already applies these rules to a reply: the stream codecs and
 the multi-shape `Shapes` codec are described in

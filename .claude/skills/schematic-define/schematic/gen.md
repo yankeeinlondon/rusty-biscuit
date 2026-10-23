@@ -164,7 +164,7 @@ impl schematic_runtime::EndpointSpec for GetUserRequest {
     type Api = MyApi;
     type Success = User;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<User>; // Text / Binary / Empty per ApiResponse
+    type Decoder = schematic_runtime::Json<User>; // Text / Binary / Empty per success shape
 
     const ENDPOINT_ID: &'static str = "GetUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;

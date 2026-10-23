@@ -100,10 +100,10 @@ Response key `abc` is not `default`, a status 100-599, or a class 1XX-5XX
 
 ### Several success shapes and declared errors
 
-`openapi::classify_responses(api, endpoint, &operation.responses, &resolver)`
-maps one operation's responses to success shapes and endpoint error entries.
-`build()` does not use it yet, since an endpoint stores one response today;
-switching the import to it is **planned**.
+Every operation's responses are mapped to success shapes and endpoint error
+entries by `openapi::classify_responses(api, endpoint, &operation.responses,
+&resolver)`, which `build()` runs for each operation and which is public for
+callers that classify one operation themselves.
 
 | Response | Imports as |
 | --- | --- |
@@ -135,7 +135,10 @@ lost, rather than being guessed:
 - an error status whose media types need different shapes (the first is
   kept).
 
-An operation with no representable success is an import error.
+An operation with no representable success is an import error for that
+operation: it is left out with an `error` diagnostic naming the API and
+operation (the import fails under `--strict`), and the other operations
+still import.
 
 ## Importing into `schematic-definitions`
 
@@ -164,7 +167,12 @@ schematic-gen import ... --definitions-out definitions/src/openai \
 ```
 
 The overlay is a `fn(RestApi) -> RestApi` anywhere the module can reach by
-that path. The importer never reads or writes it; it only emits the call, so
+that path. Besides adding facts, an overlay can narrow what the import
+declares: the OpenAI overlay keeps every success shape and error entry only
+for the endpoints it lists, and gives every other endpoint the one shape the
+importer chose before it read several (the first JSON shape, else the first)
+and no errors, so re-importing never changes an unmigrated endpoint's
+generated types. The importer never reads or writes it; it only emits the call, so
 the factory every client and exporter uses returns the augmented definition:
 
 ```rust

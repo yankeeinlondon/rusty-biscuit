@@ -45,7 +45,7 @@ let endpoint = Endpoint::get("ListItems", "/items")
     .describes("List items")
     .returns_json::<Vec<Item>>(&mut ctx) // registers Item
     .build()?;
-assert_eq!(endpoint.response, ApiResponse::json_vec_type("Item")); // Array(Named("Item"))
+assert_eq!(endpoint.response, [SuccessShape::json_vec_type("Item")]); // Array(Named("Item"))
 
 let api = RestApi::builder(&ctx, "Items", "https://example.com")
     .describes("Item service").no_auth().endpoints([endpoint]).build()?;
@@ -86,7 +86,7 @@ API `request_id_header("X-Request-ID")` and `secret_header("X-Pin")` normalize n
 
 `pager_managed()` records an adoption requirement, preserved in serialized definitions. API build resolves the strategy and requires a matching location and wire name with an exposed caller control. A marker alone cannot hide an input. Required managed inputs additionally need a pagination-authored sent default that is valid for the declared type (an `Integer` parses as `i64`, a `Number` as a finite `f64`, a `Boolean` is `true` or `false`, an `Enum` value is one of its values, anything else is nonempty); `pager-managed-required-without-default` reports a missing default and `pager-managed-default-invalid` an invalid one, each naming the strategy kind and parameter. `default_pagination(strategy)` authors an API strategy; `.pagination(Collection)` assigns an endpoint collection, opt-out, or strategy override. Pagination exception tables and legacy parameter pagination fields are removed.
 
-New optional fields are omitted when unused, preserving historical definition JSON. Absent/null origin overrides and Rust aliases mean no override/alias; absent marker flags mean false, while null/wrong-type flags are Serde errors. These are definition transfer fields rather than a new configuration format. The later response vocabulary remains **planned**.
+New optional fields are omitted when unused, preserving historical definition JSON. Absent/null origin overrides and Rust aliases mean no override/alias; absent marker flags mean false, while null/wrong-type flags are Serde errors. These are definition transfer fields rather than a new configuration format. Success shapes, declared errors, and GraphQL operations are described in [Responses and errors](responses-and-errors.md) and [GraphQL operations](graphql.md).
 
 ## Paths, deprecation, rate limits, and endpoint authentication
 
@@ -285,16 +285,15 @@ An explicit environment mapping may leave credential fields unset. An empty mapp
 
 | Method | Accepted now |
 | --- | --- |
-| `returns(Success)` | Repeatable. JSON, text, binary, empty, SSE, NDJSON, or byte-stream shapes with `content_type`, `status`, `tagged`, `json_array`/`json_object`, `fallback`, `note`, `variant`, `ends_*`, and `keep_end` modifiers. Build validates the set, then stores only a lone shape without modifiers. |
+| `returns(Success)` | Repeatable. JSON, text, binary, empty, SSE, NDJSON, or byte-stream shapes with `content_type`, `status`, `tagged`, `json_array`/`json_object`, `fallback`, `note`, `variant`, `ends_*`, and `keep_end` modifiers. Build validates the set and stores it in `Endpoint::response`. |
 | `returns_json::<T>(&mut context)` | Typed JSON shorthand; registers T in the supplied context. |
 | `returns_text()`, `returns_binary()`, `returns_empty()` | Shorthands with String, bytes, or unit success. |
 | `errors(ErrorSet)` | Entries overlaying the API defaults (`ErrorSet::new().on(match, shape)`), or `ErrorSet::none()` to opt out of every declared error. |
 | API `default_errors(ErrorSet)` | Entries every endpoint and operation inherits; `ErrorSet::none()` adds nothing. |
 | API `graphql(rules)`, `operations(ops)` | A GraphQL surface; see [GraphQL operations](graphql.md). |
 
-`Success`, `ErrorShape`, and `ErrorSet` are non-exhaustive. Storing several
-successes, streams, and success modifiers is **planned**; declared errors and
-GraphQL operations already generate client code (see
+`Success`, `ErrorShape`, and `ErrorSet` are non-exhaustive. Success shapes,
+declared errors, and GraphQL operations all generate client code (see
 [Generated success and failure types](responses-and-errors.md#generated-success-and-failure-types)
 and [GraphQL operations](graphql.md#generated-operation-requests)). Request content-type setters
 already work; they do not add success content negotiation. There is no route

@@ -45,6 +45,12 @@ x-schematic:
 | `rate_limit` | `object?` | The API's rate-limit headers. Absent when undeclared. See [Rate-Limit and Retry Metadata](#rate-limit-and-retry-metadata). |
 | `retry_guidance` | `object?` | The API's retry guidance. Absent when undeclared. See [Rate-Limit and Retry Metadata](#rate-limit-and-retry-metadata). |
 | `errors` | `array?` | The API's default error entries, as declared. Absent when there are none. See [Success Shapes and Error Entries](#success-shapes-and-error-entries). |
+| `cross_origin` | `string \| object?` | The API's policy for redirects and next-page links that leave the base origin: `"AllowWithoutCredentials"`, `"DangerAllowAny"`, `"Deny"`, or `{"AllowOrigins": ["https://…"]}`. Absent for the default, `SameOrigin`. |
+| `request_id_header` | `string?` | The response header that carries the provider's request id, for example GitHub's `x-github-request-id`. Absent when the provider is not known to send one. |
+
+Deprecation and an endpoint's own authentication are not repeated here: they
+are exported as the standard OpenAPI `deprecated` flag and `security` /
+`securitySchemes` members.
 
 ### Env Mapping
 
@@ -91,13 +97,14 @@ paths:
 | Field | Type | Description |
 |-------|------|-------------|
 | `request` | `object?` | Request body specification. See [Request Types](#request-types). |
-| `response` | `object \| string` | Response specification. See [Response Types](#response-types). |
+| `response` | `object \| string` | The first success shape's kind, in the form below. See [Response Types](#response-types). |
 | `headers` | `array<[string, string]>` | Endpoint-specific headers. |
 | `rate_limit` | `object?` | The endpoint's own rate-limit headers, which replace the API's whole. Absent when the endpoint inherits the document's value. |
 | `retry_guidance` | `object?` | The endpoint's own retry guidance, which replaces the API's whole. Absent when the endpoint inherits the document's value. |
 | `success` | `array?` | Every success shape, present only when `response` cannot say it all: several shapes, a stream, or any content type, status, tag, fallback, note, or variant name. See [Success Shapes and Error Entries](#success-shapes-and-error-entries). |
 | `errors` | `array?` | The endpoint's own error entries, which overlay the document's `errors`. Absent when there are none. |
 | `no_declared_errors` | `bool?` | `true` when the endpoint opts out of the document's error entries. Absent when false. |
+| `cross_origin` | `string \| object?` | The endpoint's own cross-origin policy, in the document-level form, which replaces the API's. Absent when the endpoint inherits it. |
 
 ### Rate-Limit and Retry Metadata
 

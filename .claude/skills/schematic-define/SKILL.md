@@ -14,7 +14,7 @@ Use this skill when working in `schematic/define` or when updating docs/tests th
 - `RestApi`, `Endpoint`, `RestMethod`
 - `AuthStrategy`, `ApiKeyLocation`, `UpdateStrategy`, `OAuth2Config` (one variant per grant)
 - `EndpointAuth`, `RateLimit`, `RetryGuidance`, `DefinitionBundle`
-- `ApiRequest`, `ApiResponse`, `FormField`, `Schema`
+- `ApiRequest`, `SuccessShape`/`ResponseShape`, `FormField`, `Schema`
 - `Headers` (credential headers of generated WebSocket clients; REST clients use runtime `Credential`s), `EnvMapping`, `EnvList`, `SensitiveString`
 - OpenAPI vendor extension models (`x-schematic`)
 
@@ -24,9 +24,9 @@ Code generation lives in `schematic-gen`, request execution in the hand-written 
 
 ### 1) Response Type Selection Is Runtime-Critical
 
-Pick the right `ApiResponse`, because the generated `EndpointSpec` impl takes its success type and codec from it:
+Pick the right success shapes (`Endpoint::response: Vec<SuccessShape>`, one `ResponseShape` each), because the generated `EndpointSpec` impl takes its success type and codec from them. A lone plain shape:
 
-| `ApiResponse` | `type Decoder` | `type Success` |
+| `ResponseShape` | `type Decoder` | `type Success` |
 |---|---|---|
 | `Json(TypeRef)` | `schematic_runtime::Json<T>` | `T` |
 | `Binary` | `schematic_runtime::Binary` | `bytes::Bytes` |
@@ -35,16 +35,24 @@ Pick the right `ApiResponse`, because the generated `EndpointSpec` impl takes it
 
 If an endpoint returns bytes/text but is modeled as JSON, callers get the wrong success type at compile time, and at runtime the `Json` codec reports a `MalformedSuccess` error in the response envelope (body kept).
 
-There is no streaming variant in stored definitions yet. SSE and NDJSON
-endpoints are modeled as `Binary` and framed by the caller — see
-`definitions/src/ollama/mod.rs:316`. The generator already emits the v2
-codecs from `Endpoint::success_shapes()`: `Sse<T, End>`/`Ndjson<T, End>`
-(`ItemStream<T>`), `ByteStream`, `Shapes<{Id}Response>` for several shapes,
-the `EndpointSpec::ERRORS` table with `ErrorBody<{Api}Api>` failure types, and
-GraphQL operation requests (`GraphQl<D>`, `GraphQlOperationError<D, H>`); see
+Streams and several shapes are stored: the generator emits
+`Sse<T, End>`/`Ndjson<T, End>` (`ItemStream<T>`), `ByteStream`,
+`Shapes<{Id}Response>` for several shapes, the `EndpointSpec::ERRORS` table
+with `ErrorBody<{Api}Api>` failure types, and GraphQL operation requests
+(`GraphQl<D>`, `GraphQlOperationError<D, H>`); see
 `schematic/docs/responses-and-errors.md#generated-success-and-failure-types`.
-Until `Endpoint::response` stores shapes, tests reach those paths through the
-hidden `Endpoint::shapes_preview` seam (never serialized, set by no builder).
+Model a streaming endpoint as a stream shape (Ollama, LM Studio, Anthropic,
+ElevenLabs are the shipped examples), never as `Binary` framed by the caller.
+Hand-built fixtures use `SuccessShape::{json_type, json_vec_type, text, binary,
+empty}`; `SuccessShape::plain()` is a lone fact-free non-stream shape, whose
+output matches what pre-v2 endpoints generated. Pagination reads only a
+sole JSON shape. Mind the D-15 enum name `{Id}Response`: a registered type of
+that name collides (Ollama's buffered replies had to be renamed).
+The OpenAI definition is importer output: its overlay
+(`definitions/src/openai_pagination.rs`) narrows every imported endpoint to the
+one shape the pre-v2 importer chose, with no errors, and authors migrated
+endpoints' shapes (`GetResponse`); migrate an OpenAI endpoint there, never by
+editing `openai/mod.rs`.
 
 ### 1a) Request Bodies Reach the Client (all variants)
 
@@ -102,7 +110,7 @@ credential.
 
 Match statements must include a wildcard arm for forward compatibility.
 
-Key enums: `AuthStrategy`, `ApiKeyLocation`, `UpdateStrategy`, `ApiRequest`, `FormFieldKind`, `ApiResponse`, `RestMethod`.
+Key enums: `AuthStrategy`, `ApiKeyLocation`, `UpdateStrategy`, `ApiRequest`, `FormFieldKind`, `ResponseShape`, `StreamFraming`, `StreamEnd`, `RestMethod`.
 
 Exception: `CrossOrigin` is exhaustive on purpose, so the generator's translation of a security policy cannot fall through a wildcard arm.
 
@@ -269,8 +277,8 @@ Schematic defines three extension structs, but exporter emission is currently:
 - emitted: operation-level `x-schematic`
 - defined but not emitted: schema-level `x-schematic` (`SchematicSchemaExtension`)
 
-Document-level extension carries API-wide config (`module_path`, `request_suffix`, `env_mapping`, `headers`, `rate_limit`, `retry_guidance`).
-Operation-level extension carries endpoint config (`request`, `response`, `headers`, and the endpoint's own `rate_limit`/`retry_guidance`, absent when it inherits the document's).
+Document-level extension carries API-wide config (`module_path`, `request_suffix`, `env_mapping`, `headers`, `rate_limit`, `retry_guidance`, `errors`, `request_id_header`, and `cross_origin` only when it is not the `SameOrigin` default).
+Operation-level extension carries endpoint config (`request`, `response`, `headers`, `success`, `errors`, `no_declared_errors`, and the endpoint's own `rate_limit`/`retry_guidance`/`cross_origin`, absent when it inherits the document's). Deprecation and endpoint auth overrides go to standard OpenAPI `deprecated`/`security`, not the extension.
 
 Serialized response shape uses enum tagging. A JSON response holds the stored
 `TypeRef` (component names plus wrappers), never a Rust path:
@@ -445,10 +453,10 @@ choices fail; explicit env mappings must agree independent of setter order.
 `.returns(Success)` may repeat (JSON/text/binary/empty plus `sse`, `ndjson`,
 `bytes`, and modifiers `content_type`, `status`, `tagged`, `json_array`/`json_object`,
 `fallback`, `note`, `variant`, `ends_*`, `keep_end`). Build runs `response::validate_success_shapes`
-(R1/R3/R3a–c/R23 selection rules), then stores only a lone modifier-free shape in
-`Endpoint::response: ApiResponse` and refuses the rest ("are stored once
-Endpoint::response holds response model v2 shapes"); `Endpoint::success_shapes()` is
-the reader seam. Declared errors are stored now: `ErrorSet::new().on(StatusMatch, ErrorShape)`
+(R1/R3/R3a–c/R23 selection rules), then stores the shapes in order in
+`Endpoint::response: Vec<SuccessShape>` (`Endpoint::success_shapes()` reads them;
+`json_references()` includes SSE/NDJSON item types, so a dangling item fails
+API build and bundle load). Declared errors are stored now: `ErrorSet::new().on(StatusMatch, ErrorShape)`
 fills `Endpoint::errors`/`RestApi::errors`, `ErrorSet::none()` sets
 `Endpoint::no_declared_errors`, and `RestApi::effective_errors(&ep)` gives the
 `ErrorTable` (exact, then narrowest range). GraphQL: `GraphQlOperation::query/mutation`
@@ -547,5 +555,4 @@ README is an overview; its detailed reference lives in
 teaches the same fallible context assembly. Keep these entry points aligned.
 The L1 `authoring_guidance` corpus rejects obsolete REST constructor examples.
 Success shapes, declared errors, and GraphQL operations are authored as above,
-and the generator emits clients for all of them; storing several shapes and
-streams in `Endpoint::response` is planned. No selector API is planned here.
+and the generator emits clients for all of them. No selector API is planned here.

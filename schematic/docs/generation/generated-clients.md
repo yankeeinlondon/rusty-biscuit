@@ -1485,7 +1485,7 @@ runtime crate's own suite (`runtime/tests/`).
 
 | Scenario | What Goes Wrong | How to Catch It |
 |----------|-----------------|-----------------|
-| Wrong `ApiResponse` in a definition (e.g. `Json` for an audio endpoint) | The `Json` codec reports a `MalformedSuccess` error in the envelope, with the body kept | Check the endpoint's `type Decoder` in the generated `requests.rs` (or module file) |
+| Wrong success shape in a definition (e.g. `Json` for an audio endpoint) | The `Json` codec reports a `MalformedSuccess` error in the envelope, with the body kept | Check the endpoint's `type Decoder` in the generated `requests.rs` (or module file) |
 | Module path mismatch | Compile failure: unresolved import | `just test-fresh-output` |
 | Shared module missing `request_suffix` | Compile failure: duplicate struct names | `just test-fresh-output` |
 | Generated crate built against another runtime | Compile failure naming both ABIs and `just generate` | Regenerate with the matching `schematic-gen` |

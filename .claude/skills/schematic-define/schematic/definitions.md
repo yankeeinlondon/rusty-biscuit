@@ -132,7 +132,7 @@ definitions/src/
 
 1. Create module directory with `mod.rs` and `types.rs`
 2. Define `define_myapi_api() -> RestApi` function
-3. Choose correct `ApiResponse` for each endpoint
+3. Choose correct success shapes (`returns_*`/`returns(Success::…)`) for each endpoint
 4. Set `module_path` if API name differs from module name
 5. Add types with `#[derive(Debug, Clone, Default, Serialize, Deserialize)]`
 6. Export from `lib.rs` and `prelude.rs`

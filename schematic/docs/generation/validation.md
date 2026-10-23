@@ -191,7 +191,7 @@ Rust syntax still produces a valid OpenAPI document and Postman collection:
 
 ```rust
 // Fails the Rust client only (`invalid-type-syntax`); OpenAPI and Postman are still written.
-response: ApiResponse::json_type("Model"),
+response: vec![SuccessShape::json_type("Model")],
 // ...where the API's `schemas` holds:
 SchemaComponent { name: "Model".into(), rust_path: Some("Vec<Model".into()), schema: json!({}) },
 ```

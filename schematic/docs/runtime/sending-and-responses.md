@@ -230,12 +230,12 @@ or 304) is not followed and is reported as a final reply.
 
 ## Codecs judge the body, not the `Content-Type`
 
-Each request type names its codec, chosen from the definition's
-`ApiResponse`:
+Each request type names its codec, chosen from the definition's success
+shape (`ResponseShape`) when the endpoint declares one:
 
-| `ApiResponse` | Codec | Success type | Accepts |
+| Shape | Codec | Success type | Accepts |
 | --- | --- | --- | --- |
-| `Json(schema)` | `Json<T>` | `T` | any body that parses as `T` |
+| `Json(reference)` | `Json<T>` | `T` | any body that parses as `T` |
 | `Text` | `Text` | `String` | any body; invalid UTF-8 is replaced |
 | `Binary` | `Binary` | `bytes::Bytes` | any body |
 | `Empty` | `Empty` | `()` | any body; it is read to the end and dropped |

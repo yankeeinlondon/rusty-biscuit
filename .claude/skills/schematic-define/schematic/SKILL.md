@@ -11,7 +11,7 @@ Type-safe REST and WebSocket API client code generation for Rust. Define APIs de
 
 | Package | Purpose |
 |---------|---------|
-| `schematic-define` | Primitives: `RestApi`, `Endpoint`, `AuthStrategy`, `CrossOrigin`, `Headers` (WebSocket clients), `ApiRequest`, `ApiResponse` |
+| `schematic-define` | Primitives: `RestApi`, `Endpoint`, `AuthStrategy`, `CrossOrigin`, `Headers` (WebSocket clients), `ApiRequest`, `SuccessShape` |
 | `schematic-definitions` | Pre-built APIs: Anthropic, OpenAI, ElevenLabs, HuggingFace, LM Studio, Ollama, EMQX, GitHub, GitLab, Gitea |
 | `schematic-gen` | Code generator CLI with `generate`, `validate`, and `import` commands |
 | `schematic-runtime` | Hand-written runtime every generated REST client wraps a `Client<Tag>` of: infallible `Client::new` with chained settings validated by `build()?` or on the first call (`TransportErrorKind::InvalidClient`), `api_client!` forwarding them onto each API struct, `SharedTransport`, tighten-only `OriginPolicy`, awaitable `Call` (`.await` → `Result<T, CallError<E>>`, `.full()` → `Response` envelope that is `Ok` iff a response head arrived, else `TransportError`), `send_raw(request, &CallOptions)` → `RawResponse`, credentials (per call → client → env → anonymous), redirects hop by hop (`MAX_REDIRECTS`, `check_link`), shared `Deadline`, codecs `Json`/`Text`/`Binary`/`Empty`, JSON hooks, redacted metadata. Never retries; call futures are boxed. Docs: `schematic/docs/runtime/` |
@@ -136,7 +136,8 @@ README is an overview; its detailed reference lives in
 `schematic/docs/generation/generated-clients.md`. The create-schematic-api command
 teaches the same fallible context assembly. Keep these entry points aligned.
 The L1 `authoring_guidance` corpus rejects obsolete REST constructor examples.
-Only four Success forms and ErrorSet::none exist; response extensions are
-planned. The definition vocabulary (`path_param`, `public`, `auth`,
+`Success` covers JSON, text, binary, empty, SSE, NDJSON, and byte streams with
+selection modifiers; `ErrorSet::new().on(..)`/`ErrorSet::none()` declare errors.
+The definition vocabulary (`path_param`, `public`, `auth`,
 `deprecated`, `rate_limit`, `retry_guidance`, `one_of`) exists; see the parent
-skill. Reserve success stream/content-type names. No selector API is planned here.
+skill. No selector API is planned here.

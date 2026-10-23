@@ -89,12 +89,12 @@ How a request struct's fields become a URL, headers, and body is covered by
    resolution, the origin policy, timeouts, and redaction apply to every
    request.
 
-## Planned
+## Shipped definitions
 
-- **Streams and several shapes in shipped definitions.** The generator emits
-  the stream, multi-shape, and GraphQL codecs (see
-  [Codecs and decoding](./codecs.md#what-generated-code-emits)), but a
-  definition cannot store several success shapes or a stream yet, so a
-  streaming endpoint is still declared binary and framed by the caller.
-  Generated error tables work today; no shipped definition declares errors
-  yet, so their error replies still arrive as `ErrorKind::Undeclared`.
+Streaming endpoints of the Ollama, LM Studio, Anthropic, and ElevenLabs
+definitions, Bitbucket's source endpoint, and OpenAI's `GetResponse` declare
+streams or several shapes, so their generated clients decode with the stream
+and multi-shape codecs (see
+[Codecs and decoding](./codecs.md#what-generated-code-emits)). No shipped
+definition declares error entries yet, so error replies still arrive as
+`ErrorKind::Undeclared`.

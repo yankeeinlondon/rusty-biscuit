@@ -57,10 +57,9 @@ described in [OpenAPI extensions](openapi-extensions.md).
 ## Responses
 
 Each operation's `responses` map holds the endpoint's success shapes and its
-resolved error table, one response object per status. Today an endpoint
-stores one shape (several shapes and streams are **planned** for storage; see
-[Responses and errors](../responses-and-errors.md#what-is-stored-today)), and
-the rules below already apply to every shape it declares.
+resolved error table, one response object per status (see
+[Responses and errors](../responses-and-errors.md#what-is-stored)); the rules
+below apply to every shape it declares.
 
 **Success statuses.** A shape exports under the statuses it declares, else
 `204` when it is empty and `200` otherwise. Every shape under one status

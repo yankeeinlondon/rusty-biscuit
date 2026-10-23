@@ -18,14 +18,14 @@ For which built-in codec each endpoint uses and what it accepts, see
 
 ## The endpoint fixes the result type
 
-An API definition describes a reply with a value, the `ApiResponse` enum
-from `schematic-define` (`Json(Schema)`, `Text`, `Binary`, or `Empty`). The
-generator turns that value into a **type**: each request struct's
+An API definition describes a reply with values, the success shapes of
+`Endpoint::response` in `schematic-define` (`Json(reference)`, `Text`,
+`Binary`, `Empty`, or a stream). The generator turns them into a **type**: each request struct's
 `EndpointSpec` names a codec as `Decoder` and the codec's output as
 `Success`.
 
 ```rust
-// Definition: response: ApiResponse::json_vec_type("PullRequestSummary")
+// Definition: .returns_json::<Vec<PullRequestSummary>>(ctx)
 // Generated:
 impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
     type Api = GitHubApi;

@@ -126,6 +126,18 @@ Each rule, with the error it produces:
   component "Parent": reference "#/components/schemas/Child" names no component
   in the bundle`.
 
+Each endpoint's `response` is a nonempty array of success shapes, for example
+`[{"shape": {"Json": {"Named": "Reply"}}, "note": "when stream is false"},
+{"shape": {"Stream": {"framing": {"Sse": {"Named": "Event"}}, "end":
+{"EventNamed": "done"}}}}]`. A stream's `end` is required, and its item
+reference must name a component like any JSON reference. A shape's
+`statuses` absent or `[]` declares none; `fallback` and a stream's `keep`
+absent are `false`; `content_type`, `json_tag`, `note`, and `variant` absent
+mean none; an empty `note`, an empty `DataLineEquals` terminator, and an empty
+string tag or terminator value are kept as data. The shape set is checked by
+the endpoint rules (`Fixture endpoint Submit: success shape 3 (byte stream):
+media type `` is not a concrete ...`).
+
 Absent optional vocabulary keeps its definition meaning: an endpoint without
 `rate_limit`, `retry_guidance`, or `auth` inherits the API's; `deprecated`
 absent is `false`; `params.path` absent or `[]` keeps untyped legacy path
