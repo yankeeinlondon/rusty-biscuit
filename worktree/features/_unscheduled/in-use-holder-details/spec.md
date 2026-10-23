@@ -38,6 +38,14 @@ report (exit 3, "Removal paused"), so the merge of `main` into that branch
 kept the new report and dropped this message. This spec carries the ideas
 forward.
 
+## Open question (2026-10-23)
+
+`2026-10-23-remove-deletes-what-was-agreed` set the rule that once the user
+agrees, `wt remove` deletes and warns instead of stopping. The usage check
+was left as it is, a pause with exit 3, pending a separate decision. If it
+becomes a warning too, this spec's facts belong in that warning rather than
+in a paused-removal report; decide that before scheduling this.
+
 ## Scope
 
 - carry the same four facts into the holder lines of the paused-removal report

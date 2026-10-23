@@ -133,6 +133,10 @@ flowchart LR
   gets `entries.jsonl.gz`: one JSON line per journal entry, in the same
   form `journal_entries` has today (`attempt`, `batch`, `path`, `kind`,
   `state`), gzip-compressed.
+- Content `wt` deleted without approval (new files swept after the user
+  agreed; see `2026-10-23-remove-deletes-what-was-agreed`) is not in the
+  journal and so not in the entries file. The report's `activity` names it,
+  capped as today, and stays in `report.json`.
 - `report.json` keeps everything else: the `journal` counts, the first 200
   `deleted` paths with `truncation.deleted_omitted`, timeline, discovery,
   activity, branches, errors, earlier attempts. It names its entries file
@@ -167,7 +171,8 @@ Expected effect on `c1dfc920…`: `report.json` falls from 144 MB to under
 - The kind is not written: the inventory's entry has it. The checks that
   version 2 makes on each batch still hold: every position is in the
   inventory, one directory per batch, at most `MAX_BATCH_ENTRIES` entries,
-  no entry twice in one batch or across batches.
+  no entry twice in one batch or across batches (the writer enforces the
+  last since `2026-10-23-remove-stopped-by-list`).
 - `journal::limit_for` is recomputed for the new line shapes.
 - `wt` writes version 3 and reads versions 2 and 3, each journal file by its
   own header. A pending operation started by an older `wt`, including its
