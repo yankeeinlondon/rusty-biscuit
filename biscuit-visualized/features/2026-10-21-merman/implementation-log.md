@@ -2095,3 +2095,79 @@ documentation`, because this phase's code had already been committed
 (`0630606c4`, `96e554b61`, `8f081510e`, `bf8e0665c`) and only this log was
 uncommitted. The gates were run regardless (above); over the phase's own
 files the selected package is `biscuit-visualized`.
+
+## Phase 7
+
+Orchestrated by one agent: R-D1 (`docs/merman.md`) and R-D3 done directly;
+R-D2, R-D5, the R-D4 audit of the other touched documents, and the
+comment-drift / clean-room / matrix-smell checks by parallel subagents; the
+final gates run once, by the orchestrator, after all subagents finished.
+
+### R-D1: `biscuit-visualized/docs/merman.md` (AC-D1)
+
+- [x] Merman overview: new "What Merman is" section (pure-Rust Mermaid,
+  models Mermaid.js 12.2.0, pre-1.0, pinned git dependency) with a
+  "Diagram types" table.
+- [x] Merman-only family list (D16, AC-C5): agentflow, cynefin,
+  eventmodeling, info, ishikawa, railroad (+ `railroadAbnf`, `railroadEbnf`,
+  `railroadPeg`), swimlane, treeView, usecase, venn, wardley; `error` and
+  ZenUML listed as in the registry but not rendered. The split comes from
+  spike S1's corpus script (`MERMAN_ONLY`), cross-checked against the 33
+  fixtures in `src/src/tests/fixtures/merman/families/` (= the registry guard
+  `the_smoke_list_is_mermans_family_registry`).
+- [x] Pipeline as a Mermaid diagram with steps and owners (already present;
+  owner table kept, symbols now linked).
+- [x] Worked example from Mermaid text to a terminal image (new section,
+  class diagram through every step, Tokyo Night terminal).
+- [x] Design decisions with reasons (new "Design decisions" table): real-font
+  measurement, font chain and `MERMAID_FONT`, bundled Inter, Linux-only Noto
+  Emoji, gradient divider fix, `\n` rewrite, `commitSpacing` and the fork,
+  cache key with resolved faces, Darkmatter static SVG, drop-shadow limits,
+  speed limits, feature set with `math` off.
+- [x] Rejected approaches with reasons (new table): `overflow:visible`,
+  native measurement, greedy wrap, `parity` for HTML, text as paths.
+- [x] Future considerations: upstream issues and pull request with when each
+  workaround goes, return to stock Merman, font embedding in HTML, text-art
+  fallback, region-aware contrast, speed, Merman churn and rev bumps.
+- Added a "Golden tests" section (the Phase 6 handoff said one existed; it
+  did not).
+- Linked the important symbols to their source files (`MermaidDiagram`,
+  `DEFAULT_TIME_BUDGET`, `MermaidError`, `MermaidTheme`, `Palette`,
+  `TerminalColors::detect`, `fonts::measure`, `MERMAID_BACKEND`, `raster`,
+  `RenderRequest`, `natural_size`, `TerminalImage` docs).
+
+### R-D3: `docs/mermaid-gitgraph.md` (AC-D3)
+
+**Decision: kept, not deleted.** It is not redundant: it is the only
+description of the tag-spacing rules (which pairs count, the one-em gap, the
+smallest spacing formula, author override, vertical graphs unspaced, cost and
+cache identity, the geometry test API), which apply to every gitGraph caller
+(`MermaidDiagram`, the `GitGraph` component, `bt git-graph`, Darkmatter).
+`merman.md` keeps a one-paragraph summary that links to it, and
+`components/git_graph.md` covers the component's own emission and fitting.
+Folding it into `merman.md` would make that page longer without removing a
+concept. Its merge section already says a merge of a branch with no commit of
+its own renders (no "Mermaid.js refuses" claim); the only error it names is a
+merge *into* a branch with no commit, which Mermaid.js also rejects. So no
+link needed repointing.
+
+### Upstream drafts check (AC-U1, AC-C2a)
+
+- `upstream-issues/` holds the six issue drafts
+  (`01-default-measurement-clips-labels.md` … `06-er-attribute-comment-br-clips.md`)
+  and the pull request draft `pr-01-gitgraph-commit-spacing.md`.
+- No issue or pull request URL has been reported by Ken in this run; none is
+  recorded. No agent posted anything (this phase made no GitHub call other
+  than the read-only `git ls-remote` below).
+- `git ls-remote https://github.com/yankeeinlondon/merman.git
+  refs/heads/gitgraph-commit-spacing` →
+  `6e6b1e6554e8e75d468c1f991652c1c53a85bace`, equal to the pin in
+  `biscuit-visualized/src/Cargo.toml` and every Merman crate's `source` in
+  `Cargo.lock` (exact rev on the fork).
+
+### Dependency graph (AC-C2, AC-M5)
+
+- `cargo tree -i mermaid-rs-renderer --workspace --all-features` →
+  `package ID specification mermaid-rs-renderer did not match any packages`.
+- `cargo tree -d --workspace --all-features` lists no `usvg`/`resvg`
+  duplicate; `Cargo.lock` has one `usvg` (0.47.0) and one `resvg` (0.47.0).

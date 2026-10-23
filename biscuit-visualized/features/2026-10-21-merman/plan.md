@@ -1173,7 +1173,7 @@ phases have already written their behavior into these pages (marked
 
 **Wave 16 — parallel (one task per R-D requirement).**
 
-- [ ] **R-D1: `biscuit-visualized/docs/merman.md` (AC-D1).** Complete the page
+- [x] **R-D1: `biscuit-visualized/docs/merman.md` (AC-D1).** Complete the page
   created in Phase 2: Merman overview (what it is, diagram types, models
   Mermaid.js 12.2.0, pre-1.0); the pipeline as a Mermaid diagram with steps
   and owners; a worked example from Mermaid text to a terminal image; every
@@ -1187,14 +1187,14 @@ phases have already written their behavior into these pages (marked
   request and when each workaround goes; font embedding in HTML and a
   text-art fallback as possible later work; Merman churn and rev bumps).
   Tick each R-D1 item in the log.
-- [ ] **R-D2: component docs (AC-D2).** Bring each of
+- [x] **R-D2: component docs (AC-D2).** Bring each of
   `biscuit-visualized/docs/components/mermaid_diagram.md`,
   `biscuit-visualized/docs/components/git_graph.md`, and
   `biscuit-visualized/docs/components/graph_expression.md` to post-cutover
   behavior: font chain, `MERMAID_FONT`, bundled fonts, palettes, OSC 4 with the
   native Windows case (D46, D71), the time budget, and the Merman-only family list
   (D16) where relevant.
-- [ ] **R-D3: `biscuit-visualized/docs/mermaid-gitgraph.md` (AC-D3).** Compare
+- [x] **R-D3: `biscuit-visualized/docs/mermaid-gitgraph.md` (AC-D3).** Compare
   it with `merman.md` and `components/git_graph.md`. If redundant: delete it
   and repoint every link found by a repository-wide search (as of 2026-10-22:
   `biscuit-visualized/README.md`, `biscuit-visualized/docs/components/git_graph.md`,
@@ -1205,7 +1205,7 @@ phases have already written their behavior into these pages (marked
   are left as snapshots). If not redundant: update it (no claim that
   Mermaid.js refuses an empty-branch merge). Record the decision and reason in
   the log.
-- [ ] **R-D5: dependencies and skills (AC-D5).**
+- [x] **R-D5: dependencies and skills (AC-D5).**
   `biscuit-visualized/docs/dependencies.md` and the root `docs/dependencies.md`
   list Merman (Ken's fork, the pinned rev, and D57's return path), `fontique`,
   `ttf-parser`, `rustybuzz`, resvg/usvg 0.47, Inter (OFL 1.1), and the
@@ -1217,7 +1217,7 @@ phases have already written their behavior into these pages (marked
   `discovery.md` for OSC 4) where they describe Mermaid rendering.
 - [ ] **README (R-C12).** `biscuit-visualized/README.md` stays an overview
   linking into `docs/` (merman.md, components), with no reference content.
-- [ ] **Upstream drafts check (AC-U1, AC-C2a).** The six issue files and the
+- [x] **Upstream drafts check (AC-U1, AC-C2a).** The six issue files and the
   pull request draft exist in `upstream-issues/`; record in the log any issue
   or pull request URL Ken reports; no agent posted anything.
 
