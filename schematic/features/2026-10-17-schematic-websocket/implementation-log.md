@@ -10,32 +10,108 @@ docs_created_during_phase_1:
     - schematic/features/2026-10-17-schematic-websocket/setup-spike/setup_tests.rs.txt
     - schematic/features/2026-10-17-schematic-websocket/setup-spike/Cargo.toml.txt
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+    - schematic-define
+    - schematic-definitions
+    - schematic-gen
+    - schematic-schema
 human_review: false
 message_to_agent: |-
-    Phase 1 changed no source. Read the Phase 1 log sections "Refreshed contracts",
-    "Protocol map", "Findings for review", "Verification map" and "Setup spike"
-    before starting; they supersede several plan assumptions:
-    - The shared diagnostic format (gen/src/diagnostics.rs ValidationDiagnostic) has
-      only Warning/Error and no WebSocket Feature variant. Adopted mapping: add WS
-      Feature variant(s), use Output::Rust, map Warning/Error 1:1, print the single
-      Info (plan.rs:470 receive-timeout TODO) only under the generator's verbose flag.
-    - The fresh-output harness (gen/tests/common/fresh_output.rs) accepts only
-      &[&RestApi]; WS modules come from the fixed WS_DEFINITION_MODULES list. R4's
-      Bearer-host compile test needs a hook that renders a fixture WebSocketApi.
-    - artifact_drift is ordinary L1 and `just check-drift` now uses nextest; use it.
-    - CI never runs schematic/schema tests (ws_runtime.rs, compile_fail.rs); mock-server
-      evidence is local (`just test-schema`, `just cross-check`). Do not change CI.
-    - A peer close does not make the next local write fail on macOS (first write
-      returns Ok): the harness needs an injectable failing writer for R3.
-    - Selector overlap: adopted strict-subset specificity (Findings item 1), not the
-      plan's conservative rule, because the conservative rule rejects Core, Dock and
-      Integration as documented.
-    - Core keeps four endpoints including /events (documented in
-      specs/unfolded-circle/UCR-core-asyncapi.yaml:488). Dock's missing :946 port is
-      logged as new scope, not fixed.
-    - The working tree contains unrelated uncommitted changes (discriminated-union
-      OpenAPI import work); do not touch or revert them.
+    Phase 3 landed R12 and R13 (shared vocabulary, normalized definitions).
+    What Phase 4 builds on:
+    - Every shipped endpoint declares selectors/fallback on documented wire
+      values and an explicit role; EndpointPlan.messages carries the full
+      MessageSchema list (selectors, fallback, responds_with) in declaration
+      order. Directions are client-relative; Integration is role Both with
+      EventEnvelope the only Bidirectional message.
+    - Selector enforcement (fallback count, overlap with the Phase 1
+      strict-subset rule, missing selector) is NOT in validate_ws_api yet;
+      definitions/tests/ws_conformance.rs already checks the shipped five
+      for at most one fallback, non-empty selectors, and no identical sets.
+    - Dock payload types cannot decode the documented auth frames: the
+      official UCD2 AsyncAPI sends {type: auth_required}, {type: auth, token},
+      {type: auth, msg: authentication, code}, but DockWsEnvelopeType only
+      has req/resp/event and DockWsAuth* use `msg: DockWsKnownMessage`. The
+      Dock selectors follow the wire; Phase 4's recorded-frame decode test
+      will need those payload types fixed.
+    - Correlation inference by envelope name and the receive-timeout Info are
+      still present (Phases 5 and 6 remove them). request_id_type is still a
+      plain RequestIdType with a serde default, so "explicitly declared but
+      unconsumed" cannot be told from the default yet; Phase 5 needs
+      presence (e.g. Option<RequestIdType>) for the R11 warning. Samsung now
+      declares no runtime hints at all.
+    - Dock keeps env_auth [UCR_DOCK_TOKEN] with an explicit empty env_mapping
+      (AuthStrategy::None); how the setup callback obtains the Dock token is
+      still Phase 6's decision.
+    - Phase 2 changes are still uncommitted in this tree; the
+      *_during_phase_3 lists name only this phase's files.
+source_files_during_phase_2:
+    - schematic/definitions/src/unfolded_circle/core_ws/mod.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/output/ws_modules.rs
+    - schematic/gen/src/pipeline.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/src/ws_codegen/shared.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/ws_validation.rs
+    - schematic/schema/src/unfolded_circle_core_ws.rs
+    - schematic/schema/tests/ws_mock/mod.rs
+    - schematic/schema/tests/ws_mock_harness.rs
+    - schematic/schema/tests/ws_runtime.rs
+docs_updated_during_phase_2:
+    - schematic/docs/generation/validation.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/workflow.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_3:
+    - schematic/define/src/lib.rs
+    - schematic/define/src/params/param_def.rs
+    - schematic/define/src/prelude.rs
+    - schematic/define/src/serde_presence.rs
+    - schematic/define/src/websocket/hints.rs
+    - schematic/define/src/websocket/lifecycle.rs
+    - schematic/define/src/websocket/mod.rs
+    - schematic/define/src/websocket/params.rs
+    - schematic/define/tests/builders.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/src/samsung_smart_tv/remote_ws/mod.rs
+    - schematic/definitions/src/unfolded_circle/core_ws/mod.rs
+    - schematic/definitions/src/unfolded_circle/dock_ws/mod.rs
+    - schematic/definitions/src/unfolded_circle/integration_ws/mod.rs
+    - schematic/definitions/tests/ws_conformance.rs
+    - schematic/definitions/tests/ws_definition_json.rs
+    - schematic/gen/src/asyncapi_import.rs
+    - schematic/gen/src/ws_codegen/client.rs
+    - schematic/gen/src/ws_codegen/host.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/tests/fixtures/asyncapi/UCR-integration-asyncapi.json
+    - schematic/gen/tests/l1/asyncapi_import.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/gen/tests/l1/ws_validation.rs
+    - schematic/schema/src/elevenlabs_ws.rs
+    - schematic/schema/src/samsung_smart_tv_remote_ws.rs
+    - schematic/schema/src/unfolded_circle_core_ws.rs
+    - schematic/schema/src/unfolded_circle_dock_ws.rs
+    - schematic/schema/src/unfolded_circle_integration_ws.rs
+    - schematic/schema/tests/ws_runtime.rs
+docs_updated_during_phase_3:
+    - schematic/README.md
+    - schematic/docs/definition-builders.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/validation.md
+docs_created_during_phase_3:
+    - schematic/docs/websocket-definitions.md
+skills_files_updated_during_phase_3:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/websocket.md
+    - .claude/skills/unfolded-circle/core-api.md
 ---
 
 # Implementation Log for 2026-10-17-schematic-websocket (7 phases)
@@ -555,3 +631,409 @@ No performance spike was run (plan: correctness risks only).
 Phase 1 checkpoint met: refreshed contracts, readiness/authorization state,
 the endpoint expectation table, the matrix inventory and a feasible setup API
 are recorded; no prerequisite is missing in a way that blocks Phase 2.
+
+## Phase 2
+
+Started 2026-10-22. The working tree was clean at the start (the unrelated
+discriminated-union work noted in Phase 1 had been committed), so the
+uncommitted tree is exactly this phase's changes.
+
+### What changed
+
+- **Diagnostics (R9).** `ws_codegen/plan.rs`: `validate_ws_api` no longer
+  returns at the first structural problem; every finding (empty name,
+  `base_url`, endpoint id, correlation fields, unresolved path placeholder) is
+  pushed as a `WsDiagnostic`. `lower_to_plan` now returns
+  `Result<WsRuntimePlan, WsLoweringError>`; the error carries **every**
+  finding of the run, and a returned plan holds only warnings and info.
+  `WsDiagnostic::to_validation_diagnostic(api)` maps onto the shared
+  `ValidationDiagnostic` (Warning/Error 1:1, `Output::Rust`, new
+  `Feature::WebSocketDefinition` = `websocket-definition`, endpoint taken from
+  an `endpoints/{id}/…` path, message prefixed with the definition path); Info
+  maps to `None`.
+- `output/ws_modules.rs`: the `Err(_) => return None` swallow is gone.
+  `generate_ws_definition_modules` collects every shipped definition's
+  lowering failure and returns `GeneratorError::Validation { output: Rust }`,
+  so `prepare_rust_output` (and `generate_and_write_all`) write nothing, as
+  for any other Rust validation error. New public helpers:
+  `shipped_ws_apis`, `validate_ws_apis` / `validate_ws_definition_modules`
+  (returns `WsValidation { diagnostics, notes }`), and `render_ws_api_module`
+  (renders any definition's module without the re-export/`define_api`, used
+  by the fresh-output compile test).
+- `pipeline.rs`: the Rust output's diagnostics for `generate` and `validate`
+  are the REST batch's plus the shipped WebSocket definitions'
+  (`rust_diagnostics`), so they print and block through the unchanged shared
+  `publish`. Info notes print as `[INFO] severity=info …` only when
+  `verbose > 0`.
+- **URL (R1).** Core `base_url` is now the origin `ws://remote.local`; the four
+  channel paths are unchanged. New Warning in `validate_ws_api`: the last
+  segment of the `base_url` path equal to the endpoint path's first segment
+  (`duplicated_boundary_segment`, whole segments only). Never an Error.
+- **Bearer host (R4).** Removed the trailing `;` after the final `Err(...)` in
+  `generate_host_validate_bearer_header` (`ws_codegen/shared.rs`).
+- **Harness (R16).** `schema/tests/ws_mock/mod.rs`: `MockWsServer` (loopback
+  port 0, scripts `Accept(steps)` / `Refuse` / `Redirect` / `Stall` /
+  `DropTcp`, steps `Send` / `Receive(n)` / `Wait(Barrier)` / `Stall` / `Close`
+  / `Drop`, last script repeats), `RecordedRequest` (path, query, lowercased
+  headers, `target()`), connection count, frame log, event-driven
+  `wait_for_*` (watch channel, no polling), deterministic `shutdown()`
+  (listener closed and all connection tasks joined when it returns; `Drop`
+  aborts), and `FailingStream` + `FailSwitch` (writes fail with `BrokenPipe`
+  once armed; used with `tokio_tungstenite::client_async`).
+- Regenerated with `just generate` once: only
+  `schema/src/unfolded_circle_core_ws.rs` changed (base URL literal and its
+  module doc line). No OpenAPI/Postman change (WS has none).
+
+### Adopted defaults and deviations
+
+- adopted default: one shared feature id, `websocket-definition`, for every
+  lowered-WS finding, with the definition path leading the message (source:
+  Phase 1 "Refreshed contracts" diagnostics row, "add WS Feature
+  variant(s)"). Alternative: a separate id per WS rule; rejected as
+  speculative until a consumer filters on it.
+- adopted default: Info notes are printed by `generate`/`validate` only with
+  `-v` (source: Phase 1 adopted mapping; the shared spec has no verbosity rule
+  for info, and the shared `Severity` gains no `Info`). Besides the
+  receive-timeout TODO there are two other pre-existing infos (inferred
+  correlation, header-based auth with auth messages); they follow the same
+  rule.
+- The WS diagnostics are added to the **Rust output of every run**, including
+  `validate --api <rest-api>`, because every Rust run writes the five WS
+  modules; a WS error therefore fails the Rust output of any run. Shipped
+  definitions currently report no warning or error.
+- R9's example Error ("duplicate message name or unresolved `responds_with`")
+  does not exist until Phase 3/4; the test uses the existing Error for an
+  unresolved path placeholder instead.
+- Test Toolkit not used in `schematic-schema` tests: that crate's manifest is
+  generated by `schematic-gen` and has its own lockfile outside the
+  workspace; adding `test-toolkit` would change the generated manifest and
+  lockfile for one env guard. The area's existing `tests/common::EnvGuard`
+  (restores on drop, `#[serial]`) isolates the two Core credential variables
+  instead. The harness itself reads no environment.
+- The R4 host test runs inside the fresh crate (`nextest_run` of a child test
+  file) rather than in `schematic-schema`, because no shipped definition uses
+  `BearerToken`; the host exists only in the rendered fixture module.
+- R4 compile test is `slow_bearer_ws_host_compiles_and_checks_tokens` in
+  `fresh_output_compile` (author ruling, plan rule 10): it is `slow_` because
+  every test in that module drives Cargo and is selected by
+  `just test-fresh-output`, which `just test` invokes.
+- `FreshCrate::add_module` (test support) writes a rendered module into the
+  fresh crate and declares it in `lib.rs`; `FreshCrate::generate(&[], …)`
+  is used so only the shared runtime and WS modules are built.
+- Dock URL (`ws://dock.local/`, missing the documented `:946`) is asserted as
+  it stands with a comment; still new scope (Phase 1 finding 5).
+
+### Requirement-to-test map
+
+| Requirement | Boundary / rung | Test(s) | Regression proof |
+|---|---|---|---|
+| R1 definition | crate API, F1 | `schematic-definitions` `unfolded_circle::core_ws::tests::core_ws_has_expected_endpoints` (base URL + exact `(id, path)` list) | — |
+| R1 composed URLs, all five | gen public API, F1 | `l1 ws_validation::every_shipped_endpoint_composes_its_documented_url`, `every_shipped_module_is_generated` (generated Core literal) | failed before the definition fix (`ws://remote.local/ws/ws`, …) |
+| R1 Warning / no false positives | gen public API, F1 | `ws_validation::an_exactly_duplicated_boundary_segment_warns_without_blocking`, `a_legitimately_repeated_segment_is_only_a_warning`, `a_substring_or_prefix_overlap_emits_nothing` (`/api`+`/apikeys`, `/apikeys`+`/api`, `/api`+`/v1/api`, no base path); unit `duplicated_boundary_segment_matches_whole_segments_only` | — |
+| R1 shipped clean | gen public API | `ws_validation::shipped_definitions_report_no_warning_or_error` | failed before the fix with the Core `/ws/ws` warning |
+| R1 request target | generated client ↔ loopback server, F3 | `schematic-schema` `ws_runtime::core_endpoints_dial_their_documented_channel_paths` (all four Core endpoints from the default base URL; targets `/ws`, `/intg`, `/profiles`, `/events`; no API-key header with credentials cleared) | fails against the pre-fix generated module (`HEAD` copy) |
+| R4 compile | generated crate, Cargo, F3 | `l1 fresh_output_compile::slow_bearer_ws_host_compiles_and_checks_tokens` (`cargo check` of the rendered Bearer host) | with the `;` restored the child build fails `E0308` (expected `Result`, found `()`) |
+| R4 401 vs upgrade | generated host ↔ tungstenite client over loopback, F3 | child tests `bearer_host_rejects_a_missing_token_with_401`, `…_wrong_token_with_401`, `bearer_host_upgrades_a_matching_token` (101 + echoed frame), asserted present in the child report | same build failure |
+| R9 Error in shared format, writer semantics | gen public API | `ws_validation::a_lowering_error_reaches_the_shared_format_and_blocks_the_rust_output` (exact rendered lines, `has_errors`, `render_ws_api_module` → `Validation { output: Rust }` with all findings) | before, the module was dropped with no diagnostic |
+| R9 Warning does not fail | gen public API | `an_exactly_duplicated_boundary_segment_warns_without_blocking` (render `Ok`) | — |
+| R9 no swallowed `Err` | unit | `plan::tests::lowering_failure_keeps_every_finding_not_only_the_first_error`, `validate_rejects_*` (now assert the exact error path) | previously the first error returned alone |
+| R9 mapping | unit | `plan::tests::diagnostic_maps_onto_the_shared_format`; `diagnostics::tests::display_and_serialized_ids_agree_for_every_variant` (now lists `WebSocketDefinition`, `GraphQlOperation`) | — |
+| R9 info verbosity | CLI wiring (one spawn pair) | `ws_validation::info_notes_stay_out_of_the_shared_diagnostics`, `the_validate_command_prints_info_notes_only_when_verbose` | — |
+| R16 harness | loopback, L1 | `schematic-schema` `ws_mock_harness::*` (10): request record, frames in order, drop after N frames, refuse 403 / redirect 307 with `Location` / last script repeats / connection count, TCP drop, stall, barrier, deterministic shutdown (client sees end, listener closed), 8 concurrent servers on distinct ports with isolated records, armed `FailingStream` fails the next write | — |
+
+Input robustness matrix: not applicable to this phase; no reader of a file
+format or configuration changed (the definition readers change in Phase 3).
+
+Tier placement: every new gen test is in the declared `l1` binary
+(`ws_validation` added to `tests/l1/main.rs`); the Bearer test is `slow_` in
+`fresh_output_compile`, selected by `just test-fresh-output`. The schema tests
+are ordinary per-file test targets of `schematic-schema` (no
+`autotests = false`); `tests/ws_mock/mod.rs` is a module directory, not a
+target. As recorded in Phase 1, CI does not run `schematic-schema` tests;
+their evidence is local.
+
+### Gates and verification (Phase 2 close)
+
+- **Gate-skip check:** `git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` →
+  `packages: [schematic-definitions, schematic-gen, test-toolkit, darkmatter,
+  schematic-define]`, `change_class: package`. Gates were run. Per file: the
+  skill edit selects a `darkmatter` docs test, `generated-clients.md` a
+  `schematic-define` test, and every schematic source the `test-toolkit`
+  `archive-path-guard` lint companion.
+- `just test` (schematic): **pass** — L1 2696 passed, 16 skipped;
+  `test-fresh-output` 10/10 (includes the new
+  `slow_bearer_ws_host_compiles_and_checks_tokens`, 53 s pass total);
+  `test-compile-fail` 1/1. No SLOW L1 test this run.
+- `just lint` and `just lint-schema`: **pass** (after allowing
+  `clippy::result_large_err` in the two new schema test files, as
+  `ws_runtime.rs` already does for tungstenite's large `Error`).
+- `just test-schema`: **pass**, 76/76; the one SLOW (> 60 s) is the
+  pre-existing trybuild `compile_fail::slow_generated_pager_surface_…`.
+- `just check-drift`: **pass**, 9/9 (`artifact_drift::*` +
+  `slow_real_apis_compile_offline`); regeneration left the tree drift-free.
+- `just check-tier-coverage schematic`: 0 stranded.
+- `test-toolkit` `archive_path_guard`: **failed first** on
+  `ws_validation.rs` using `env!("CARGO_BIN_EXE_schematic-gen")`, which an
+  archived CI run cannot resolve; replaced with
+  `biscuit_test_harness::bin_exe!("schematic-gen")`; now 2/2.
+- darkmatter tests that read skills (`shipped_schema_corpus`,
+  `current_root_documentation_contract`, `current_root_migration_guard`):
+  11/11.
+- Dependents: no dependent references a changed symbol (`rg` for `core_ws`,
+  `UnfoldedCircleCoreWs`, `lower_to_plan`, `ws_modules` in `homelab`,
+  `sniff`, `biscuit-speaks`, `model-citizen`: none). The only public change
+  they can see is the Core default base-URL value. `cargo check -p homelab -p
+  unfolded-integration-helper -p sniff -p biscuit-speaks -p model-citizen`:
+  pass. Their test suites were not run (no symbol they use changed).
+- **Cross-OS (native Windows, `build-win-native`, via
+  `scripts/cross-check.sh` native mode):**
+  - `schematic-schema --manifest-path schematic/schema/Cargo.toml --test
+    ws_mock_harness --test ws_runtime`: 15/15 pass.
+    `shutdown_ends_open_connections_and_closes_the_listener` takes 2.1 s
+    there (a refused loopback connect retries for about 2 s on Windows; already
+    recorded in the `os` skill, `windows.md`); under the 5 s budget.
+  - `schematic-gen --test l1 slow_bearer_ws_host`: 1/1 pass (144 s, first
+    child build on that host).
+  - Linux and WSL2 were not run; the harness uses only loopback TCP and
+    tokio, with no Unix-only API.
+- Skills: `.claude/skills/schematic-define/schematic/gen.md` (WS validation on
+  the Rust output, fixture helpers). The `os` skill already held the one OS fact
+  met here.
+- No commits, no CI runs, no device or provider contact, no stale-file
+  deletion.
+
+Phase 2 checkpoint met: R1, R4, R9 and R16 pass through public boundaries
+(definition, gen public API, compiled generated host, generated client against
+the loopback server); every WS module compiles in the fresh-output guard and
+no lowering diagnostic is dropped. The supervisor behavior (R2, R3, R8)
+remains pending for Phase 6.
+
+## Phase 3
+
+Started 2026-10-22. The Phase 2 changes were still uncommitted when this phase
+began, so the working tree holds both phases; the `*_during_phase_3`
+frontmatter lists only files this phase touched (Phase 2's files that this
+phase edited again are listed too). No subagents were used: Waves 5–7 touch
+the same few files in sequence.
+
+### What changed
+
+- **Vocabulary (R12, `schematic-define`).** `websocket/params.rs`
+  (`ConnectionParam`, `ParamType`) is deleted, with its re-exports in
+  `lib.rs`/`prelude.rs`. `WebSocketEndpoint.connection_params` is replaced by
+  `params: EndpointParams` (REST location containers, typed `params.path`)
+  and gains `role: EndpointRole` (`client`/`host`/`both`, default `Client`).
+  `WebSocketApi` gains `auth_policy: Option<AuthPolicy>`,
+  `env_mapping: Option<EnvMapping>`, `headers: Vec<(String, String)>`, plus
+  `effective_auth_policy()` and `default_env_mapping()` (REST derivation via
+  `RestApi::legacy_env_mapping_for`). `MessageSchema` gains
+  `responds_with: Option<String>`, `selectors: Option<Vec<MessageSelector>>`,
+  `fallback: bool`, and the builder `new/describe/matches/fallback/responds_with`.
+  `MessageSelector { field, value }` (string equality on a top-level field).
+- **Presence-aware serde.** Every new or changed optional field uses
+  `serde_presence::non_null` (absent = none, `null` = error). Finding during
+  the matrix: serde's derived structs also accept a JSON array
+  (`"runtime": []` loaded as default hints). New
+  `serde_presence::map_only` / `non_null_map` accept only an object; used for
+  `params`, both `runtime`s, `auth_policy`, `env_mapping`, each hint object,
+  and (through a hand-written `Deserialize`) `MessageSelector`.
+- **Definitions (R13).** All five rewritten onto the builder:
+  - Core: 13 messages with `kind`/`msg` selectors, `ResponseEnvelope`
+    fallback, pairs Auth→Authentication, Ping→Pong, Version→VersionInfo,
+    System→SystemInfo, RequestEnvelope→ResponseEnvelope; explicit
+    `CorrelationHints{id, req_id, 30}` and `AuthFlowHints` (was prose only);
+    explicit `EnvMapping.api_key` (API-KEY). The skill's `get_version`/
+    `get_system` were wrong: the official Core AsyncAPI uses `version`/
+    `system` (skill fixed).
+  - Dock: selectors on the official UCD2 wire values (`type=req|event|
+    auth_required|auth`, `type=auth,msg=authentication`), explicit
+    correlation, `failure_indicator` `authentication_failed` removed (the
+    spec has no such message; failure is a `code` on `authentication`).
+  - Integration: role `Both`; true directions (RequestEnvelope/Auth `Client`,
+    ResponseEnvelope/AuthRequired/Authentication `Server`, EventEnvelope the
+    only `Bidirectional`); explicit correlation, auth flow, env mapping. The
+    contortion test now asserts the true directions.
+  - Samsung: `name`/`token` as query `ParamDef`s (`token` marked secret);
+    ChannelEnvelope `Server` + fallback (was `Bidirectional`); `event`/`method`
+    selectors; API runtime hints removed (no correlation evidence, so the
+    explicit `RequestIdType::String` was unconsumed).
+  - ElevenLabs: typed `params.path` `voice_id` + query `ParamDef`s; explicit
+    `EnvMapping` like its REST sibling. One inbound message per endpoint, so
+    no selectors.
+- **Planning (`schematic-gen`).** `plan::EndpointRole` is now a re-export of
+  the definition's role; `infer_role` is gone. Params lower through
+  `lower_params`: header/cookie params are errors; an empty `params.path`
+  keeps every placeholder a required string (as REST); otherwise names must
+  equal the placeholders and each must be a required `simple` scalar. Query
+  params use the REST `query_shape` style rules (single, exploded,
+  comma/space/pipe-delimited); enum/JSON/unsupported styles and duplicates
+  are errors. `validate_endpoint_path` rejects a path not starting with `/`,
+  with its own origin, or with `?`/`#`. `validate_endpoint_fields` rejects
+  empty `responds_with`/selector field/auth-flow names and indicators and
+  zero durations. `EndpointPlan.messages` keeps the full declared messages.
+- **Client emitter.** Query values are percent-encoded per element and
+  delimiters written in wire form; exploded arrays repeat the name; unset
+  optionals are omitted. Client rustdoc states each declared heartbeat
+  (interval, keepalive message and `send_*` helper, reply timeout).
+- **AsyncAPI import.** Construction only: `params` empty, explicit
+  `env_mapping` (REST derivation), empty `headers`, and the endpoint role from
+  `--ws-role` (`client`→Client, `server`→Host, `both`→Both). Direction
+  mapping and document reading are unchanged.
+- Regenerated once with `just generate`: only the five `*_ws.rs` modules
+  changed (query assembly, auth-flow doc lines, doc spacing).
+
+### Adopted defaults and deviations
+
+- adopted default: an untyped placeholder (empty `params.path`) is a required
+  string, as for REST endpoints (source: spec "Parameters and URL assembly",
+  "reuse the settled REST location containers and typed path parameters").
+  Before, an untyped placeholder was a WS Error; the Phase 2 R9 test now uses
+  an embedded-query path as its Error example.
+- adopted default: `headers` and `params` are required JSON keys (absent →
+  error), as `RestApi.headers` and the old `connection_params` were;
+  explicit `[]`/empty containers are valid (source: matrix "absent must never
+  read as an empty collection").
+- adopted default: selector values are JSON strings only (source: matrix
+  "`selector.value` … against declared scalar contract"; every shipped wire
+  discriminator is a string). A non-string value is a load error.
+- adopted default: AsyncAPI `--ws-role server` → `EndpointRole::Host`
+  (source: spec "set the role explicitly where known"). Before, `server`
+  inverted directions but still generated a client.
+- adopted default: header and cookie handshake params are generation errors
+  rather than generated (source: plan "Reject … unsupported styles"; adding
+  them would be new scope).
+- adopted default: `HeartbeatHints` are declared on no shipped endpoint — no
+  protocol documents an application heartbeat interval (Core `ping` is an
+  ordinary request; Integration keepalive is control frames). The R13
+  heartbeat evidence uses a fixture.
+- adopted default: Dock `env_mapping` is the explicit empty mapping its
+  `AuthStrategy::None` derives; `env_auth [UCR_DOCK_TOKEN]` stays for the
+  setup flow (Phase 1 finding 7; Phase 6 decides the binding).
+- adopted default: client-direction selectors are declared where the wire
+  value is documented and top-level; Samsung `AppLaunchCommand`/
+  `InstalledAppsCommand` share `method=ms.channel.emit` and differ only in
+  nested `params.event`, so they declare none (outbound-only, no host).
+- Deferred to Phase 4 per the plan: selector enforcement in `validate_ws_api`
+  (fallback count, overlap, missing selector, `"selectors": []` when
+  required). The conformance test checks those properties for the shipped
+  five today.
+- Deferred to Phase 5: R11 link/hint Errors and Warnings, removal of
+  envelope-name inference, presence for `request_id_type`.
+- Finding (Phase 4): Dock payload types cannot decode the documented auth
+  frames (`DockWsEnvelopeType` lacks `auth_required`/`auth`; see
+  `message_to_agent`).
+- Serde errors locate a bad field by line/column, not by field path (same as
+  REST definitions); a field-path error would need `serde_path_to_error`, a
+  new crate, which is not authorized.
+- `docs/research/samsung-design.md` still shows `ConnectionParam` code: it is
+  a research snapshot, left as written.
+- Process slip, corrected: one `git rm --cached` briefly staged the deletion
+  of `websocket/params.rs`; it was unstaged immediately (`git restore
+  --staged`). Nothing is staged.
+
+### Requirement-to-test map
+
+| Requirement | Boundary / rung | Test(s) |
+|---|---|---|
+| R12 old names gone | public API, compile-fail doctests | `schematic-define` `websocket` module docs: four `compile_fail` blocks (`websocket::ConnectionParam`, `websocket::ParamType`, root `ConnectionParam`, root `ParamType`) |
+| R12 shared parameter serde | unit | `websocket::tests::shared_parameter_types_are_serializable` (`ParamDef`, `QueryParamType`, `ParamStyle`, `EndpointParams`) |
+| R12 role names / auth & env derivation | unit | `endpoint_role_names_are_stable`, `derived_policy_and_env_mapping_follow_rest`, `explicit_policy_and_env_mapping_replace_the_derived_ones` |
+| R12 round trip | crate API | `ws_definition_json::every_shipped_definition_round_trips_twice_without_loss` (write/read/write/read, byte-identical) |
+| R12 five definitions lower | gen API | `plan::tests::lower_all_known_ws_apis`, `ws_validation::shipped_definitions_report_no_warning_or_error`, `every_shipped_endpoint_composes_its_documented_url` |
+| R13 roles + true directions | crate API | `ws_conformance::roles_and_directions_match_the_expected_table`; `integration_ws::tests::integration_ws_declares_both_roles_and_true_directions` (replaces the all-`Bidirectional` assertion) |
+| R13 selectors / links / flows / env | crate API | `ws_conformance::{every_inbound_direction_can_choose_one_message, every_response_link_resolves_and_is_correlated, challenge_flows_are_declared_as_hints_not_prose, environment_mapping_is_explicit_and_matches_the_handshake_strategy, path_parameters_type_every_placeholder, no_protocol_declares_a_heartbeat_it_does_not_document}` |
+| R13 `Both` keeps host | gen API | `ws_codegen::a_both_role_with_one_way_messages_keeps_its_host_and_client`, `integration_ws_has_both_role` (host module non-empty), `plan::tests::endpoint_role_comes_from_the_definition_not_message_directions` |
+| R13 heartbeat rustdoc, no warning | gen API | `ws_codegen::a_declared_heartbeat_is_documented_on_the_client_without_a_warning`, `plan::tests::heartbeat_hints_lower_without_any_warning` |
+| Plan metadata intact | unit | `plan::tests::lowering_keeps_selectors_fallbacks_and_links` |
+| Param/URL rules | unit | `plan::tests::{lower_types_path_and_query_params_from_endpoint_params, untyped_placeholders_are_required_strings, unsendable_handshake_params_are_errors, a_placeholder_without_its_typed_declaration_is_an_error, endpoint_paths_cannot_carry_a_query_or_an_origin}` |
+| Path `/`, space, `?`; omitted optional; base-path prefix | generated client ↔ loopback mock (shipped ElevenLabs), F3 | `schematic-schema` `ws_runtime::elevenlabs_handshake_encodes_one_path_segment_and_omits_unset_queries` (local evidence only; CI does not run schema tests) |
+| Repeated and delimited query values | compiled fixture client ↔ loopback server, F3, CI-visible | `fresh_output_compile::slow_ws_handshake_parameters_reach_the_server_in_their_declared_form` (child tests `path_value_is_one_encoded_segment_and_unset_options_are_omitted`, `array_values_follow_their_declared_style`) |
+| Field-level ERR cells (empty strings, zero BOUND) | gen validator | `plan::tests::declared_names_indicators_and_durations_are_checked` (all nine paths + a minimum-value control) |
+| AsyncAPI JSON/YAML construction | gen API on the official Integration AsyncAPI and its JSON conversion | `asyncapi_import::{yaml_and_json_forms_import_the_same_definition_for_every_cli_role, cli_role_keeps_its_direction_mapping, imported_definitions_lower_with_their_declared_role}` |
+| Struct fields reject arrays | unit | `serde_presence::tests::map_fields_accept_only_objects` |
+| Doc examples compile | doctest | `WebSocketDefinitionsDoc` (`cfg(doctest)` include of `docs/websocket-definitions.md`, 5 blocks) |
+
+### Input robustness matrix (definition JSON)
+
+One loader (serde_json over the derived `WebSocketApi`), tested once in
+`schematic-definitions/tests/ws_definition_json.rs` from the shipped Dock
+definition plus an added heartbeat and API runtime hints, one edit per cell:
+
+- control: `control_loads_with_every_decision_bearing_field`
+- absent: `absent_optional_fields_take_their_documented_meaning` (role →
+  Client, responds_with/selectors/hints/runtime/env_mapping → none, fallback
+  → false, default_timeout → 30, indicator/timeout → none, runtime leaves →
+  defaults) and `required_fields_cannot_be_omitted` (params, selector
+  field/value, correlation fields, auth-flow names, interval, headers,
+  env_auth)
+- explicit null: `explicit_null_is_rejected_and_never_read_as_absent`
+  (27 cells)
+- wrong type, one/every malformed element, `{}`/`[]` for objects:
+  `wrong_types_and_malformed_elements_are_rejected` (51 cells)
+- empty: `explicit_empty_values_are_kept_as_declared` (`selectors: []`,
+  `runtime: {}`, `env_mapping: {}`, `headers: []` kept; empty strings and a
+  zero interval load and are rejected by the validator test above)
+- exact values: `declared_values_are_read_exactly`
+- duplicate keys (10 fields) and trailing/truncated documents:
+  `duplicate_keys_and_trailing_content_are_rejected`
+
+Nested `EnvMapping`, `AuthPolicy`, and `EndpointParams` leaves keep their
+upstream readers and tests (`define/tests/definition_serde.rs::
+parameter_collections_reject_malformed_json_matrix` for `EndpointParams`);
+this phase adds only their WS-level absent/null/wrong-type/empty cells.
+Smell grep over the changed readers: no `#[serde(default)]` remains on a
+load-bearing `Option` without `non_null`/`non_null_map`; the remaining
+`#[serde(default)]`s are `role` (documented default), `fallback`, and the
+pre-existing `WebSocketRuntimeHints` leaves whose null is still rejected by
+their own types; no `filter_map`/`unwrap_or_default`/`.ok()` on a load path.
+The AsyncAPI reader is unchanged; its regression runs on a real document in
+both formats.
+
+### Gates and verification (Phase 3 close)
+
+- Gate-skip check: `git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` →
+  `packages: [schematic-define, schematic-definitions, schematic-gen,
+  test-toolkit, darkmatter]`, `change_class: package`. Gates were run.
+- `just lint`: pass (after factoring two type aliases in
+  `ws_conformance.rs` for `clippy::type_complexity`). `just lint-schema`:
+  pass.
+- `just test`: pass — L1 2721 passed, 17 skipped; `test-fresh-output` 11/11
+  (includes the new `slow_ws_handshake_parameters_…`, 118 s for the pass);
+  `test-compile-fail` 1/1.
+- `just test-schema`: pass, 77/77. The one LEAK
+  (`artificial_analysis_client::list_image_editing_models_…`, wiremock) and
+  the SLOW trybuild `compile_fail::slow_generated_pager_surface_…` are
+  pre-existing and unrelated.
+- `just check-drift`: pass, 9/9. `just check-tier-coverage schematic`: 0
+  stranded.
+- Doctests: `schematic-define` 191 after fixing the stale `prelude.rs`
+  WebSocket example (it failed first: missing new fields);
+  `schematic-definitions` 44 passed.
+- `test-toolkit` `archive_path_guard`: 1/1. darkmatter skill/doc corpus
+  tests (`shipped_schema_corpus`, `current_root_documentation_contract`,
+  `current_root_migration_guard`): 12/12.
+- Dependents: no non-schematic crate names a changed definition type.
+  `cargo check -p homelab -p unfolded-integration-helper -p
+  arcam-amp-integration -p eversolo-integration -p sony-receiver-integration
+  -p sniff -p biscuit-speaks -p model-citizen -p schematic-oauth`: pass.
+  `homelab` Samsung tests (the only consumer of a regenerated symbol,
+  `RemoteControlConnectionParams`): 12/12.
+- Cross-OS: not run. The phase adds no path, process, or OS-specific code;
+  the new runtime tests use loopback TCP like the Phase 2 harness that
+  passed on native Windows, and file reads use `manifest_dir!()` joins.
+- Docs: new `docs/websocket-definitions.md` (compiled through
+  `cfg(doctest)`), `validation.md` WebSocket error list, `generated-clients.md`
+  fresh-output list, `definition-builders.md` Default rationale for
+  `EndpointRole`, README link. Skills: new `schematic-define/schematic/
+  websocket.md` (+ table row), `gen.md` pointer, `unfolded-circle/core-api.md`
+  request names.
+- No commits, no CI runs, no device or provider contact, no stale-file
+  deletion.
+
+Phase 3 checkpoint met: R12–R13 pass through public boundaries; the
+Integration host is still generated (role `Both`); the five definitions
+survive JSON write/read/write/read without losing roles, selectors,
+fallbacks, links, or hints. R10 typed selection and R11 link execution remain
+pending for Phases 4 and 5.

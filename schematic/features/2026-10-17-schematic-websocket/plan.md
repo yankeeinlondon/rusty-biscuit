@@ -11,7 +11,78 @@ docs_created_during_phase_1:
     - schematic/features/2026-10-17-schematic-websocket/setup-spike/setup_tests.rs.txt
     - schematic/features/2026-10-17-schematic-websocket/setup-spike/Cargo.toml.txt
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+    - schematic-define
+    - schematic-definitions
+    - schematic-gen
+    - schematic-schema
+source_files_during_phase_2:
+    - schematic/definitions/src/unfolded_circle/core_ws/mod.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/output/ws_modules.rs
+    - schematic/gen/src/pipeline.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/src/ws_codegen/shared.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/ws_validation.rs
+    - schematic/schema/src/unfolded_circle_core_ws.rs
+    - schematic/schema/tests/ws_mock/mod.rs
+    - schematic/schema/tests/ws_mock_harness.rs
+    - schematic/schema/tests/ws_runtime.rs
+docs_updated_during_phase_2:
+    - schematic/docs/generation/validation.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/workflow.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_3:
+    - schematic/define/src/lib.rs
+    - schematic/define/src/params/param_def.rs
+    - schematic/define/src/prelude.rs
+    - schematic/define/src/serde_presence.rs
+    - schematic/define/src/websocket/hints.rs
+    - schematic/define/src/websocket/lifecycle.rs
+    - schematic/define/src/websocket/mod.rs
+    - schematic/define/src/websocket/params.rs
+    - schematic/define/tests/builders.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/src/samsung_smart_tv/remote_ws/mod.rs
+    - schematic/definitions/src/unfolded_circle/core_ws/mod.rs
+    - schematic/definitions/src/unfolded_circle/dock_ws/mod.rs
+    - schematic/definitions/src/unfolded_circle/integration_ws/mod.rs
+    - schematic/definitions/tests/ws_conformance.rs
+    - schematic/definitions/tests/ws_definition_json.rs
+    - schematic/gen/src/asyncapi_import.rs
+    - schematic/gen/src/ws_codegen/client.rs
+    - schematic/gen/src/ws_codegen/host.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/tests/fixtures/asyncapi/UCR-integration-asyncapi.json
+    - schematic/gen/tests/l1/asyncapi_import.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/gen/tests/l1/ws_validation.rs
+    - schematic/schema/src/elevenlabs_ws.rs
+    - schematic/schema/src/samsung_smart_tv_remote_ws.rs
+    - schematic/schema/src/unfolded_circle_core_ws.rs
+    - schematic/schema/src/unfolded_circle_dock_ws.rs
+    - schematic/schema/src/unfolded_circle_integration_ws.rs
+    - schematic/schema/tests/ws_runtime.rs
+docs_updated_during_phase_3:
+    - schematic/README.md
+    - schematic/docs/definition-builders.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/validation.md
+docs_created_during_phase_3:
+    - schematic/docs/websocket-definitions.md
+skills_files_updated_during_phase_3:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/websocket.md
+    - .claude/skills/unfolded-circle/core-api.md
 ---
 
 # Schematic WebSocket Implementation Plan
@@ -150,22 +221,22 @@ The existing AsyncAPI reader supports JSON and YAML. Its parsing/field interpret
 
 ### Wave 3 — Independent Foundations (parallel)
 
-- [ ] **Build Harness**
+- [x] **Build Harness**
   - Add reusable test support under `schematic/schema/tests` using TCP `127.0.0.1:0` and tungstenite; source-include test-only support in generator tests only where useful, without a generated-crate dependency cycle.
   - Record path/query/headers and connection counts; script accept, rejection, redirect, stall, frame exchange, and drop. Provide barriers, deterministic shutdown, and an injectable failing writer for reliable opening-write failure.
   - Use Test Toolkit tracing/environment restoration, isolate every candidate credential variable, and register modules in existing nextest targets. Prove request capture, scripted drop, concurrent ephemeral-port safety, and teardown.
-- [ ] **Surface Diagnostics**
+- [x] **Surface Diagnostics**
   - Change `ws_codegen/plan.rs` and `output/ws_modules.rs` to preserve all lowering diagnostics and failures, mapping API/path/severity/message into the inherited diagnostic mechanism.
   - Reuse shared per-output validation and writer behavior. Prove Warning permits output, Error has inherited write semantics, verbosity governs Info, and lowering errors cannot disappear.
   - Keep the receive-timeout-not-enforced diagnostic until Phase 6 implements the behavior.
 
 ### Wave 4 — Known Defects (sequential integration)
 
-- [ ] **Repair Templates**
+- [x] **Repair Templates**
   - Set Core's base URL to its origin and keep each documented channel path. Add exact path-segment overlap Warning; cover legitimate repeated segments and `/api` versus `/apikeys` without substring false positives.
   - Remove the Bearer host's erroneous semicolon in `ws_codegen/shared.rs`; generate its fixture into an isolated fresh-output compile check.
   - Assert all five definitions' composed URLs and actual mock request targets. Run missing/wrong/matching Bearer tests against the compiled generated host, verifying 401 versus successful upgrade.
-- [ ] **Integrate Foundations**
+- [x] **Integrate Foundations**
   - Regenerate once after the wave; record actual compile-test execution, update affected URL/auth docs, and run focused harness, diagnostic, URL, Bearer, schema, and drift checks.
 
 **Checkpoint:** R1, R4, R9, and R16 pass through public boundaries; generated modules compile and no diagnostic is silently dropped. Existing supervisor behavior remains explicitly pending.
@@ -174,25 +245,25 @@ The existing AsyncAPI reader supports JSON and YAML. Its parsing/field interpret
 
 ### Wave 5 — Definition Contracts (sequential)
 
-- [ ] **Replace Vocabulary**
+- [x] **Replace Vocabulary**
   - Update `define/src/websocket/{mod,lifecycle,hints,params}.rs` to use settled REST auth policy, env mapping, headers, and location-aware parameters. Map old Float to shared Number and preserve typed path parameters, defaults, and styles.
   - Add serializable endpoint roles, selectors/fallbacks, and `responds_with`; make role selection explicit before correcting message directions. Remove public `ConnectionParam`/`ParamType` and migrate every source user in this phase.
   - Add serde/presence and public matrix tests, role/metadata round trips, shared parameter serde assertions, and compile-fail checks for removed names using the existing compile-fail pattern. Do not add predecessor-owned serde derives.
 
 ### Wave 6 — Definition Adoption (parallel after Wave 5)
 
-- [ ] **Normalize Protocols**
+- [x] **Normalize Protocols**
   - Migrate all five definitions using the Phase 1 endpoint table: honest directions, required roles, wire selectors/fallbacks, explicit links/hints, env mappings, headers, auth flows, and heartbeat metadata.
   - Keep ElevenLabs payload structs as ordinary Serde types resolved through the shared schema mechanism. Set Samsung correlation only with documented pair evidence; remove an unconsumed explicit ID declaration otherwise.
   - Add mechanical conformance coverage for every endpoint, including a `Both` fixture with one-way directions and retained host output.
-- [ ] **Adapt Planning**
+- [x] **Adapt Planning**
   - Migrate lowering and URL generation to the new containers and role contracts; adapt AsyncAPI import construction while preserving both JSON/YAML fixture behavior and its existing CLI role selection.
   - Reject missing placeholders, embedded endpoint query strings, origin-changing endpoints, and unsupported styles. Preserve base-path prefixes; encode `/`, spaces, and `?` inside one path segment, optional query omission, and repeated query style.
   - Keep new metadata intact in plans. Update client rustdoc generation with each declared heartbeat interval/message and no heartbeat warning.
 
 ### Wave 7 — Vocabulary Integration (sequential)
 
-- [ ] **Integrate Vocabulary**
+- [x] **Integrate Vocabulary**
   - Resolve shared fixtures/module registration, regenerate, migrate consumers of removed definition symbols, and update definition README/topic pages and skill contracts.
   - Run all-five lowering/conformance, importer JSON/YAML, serialization, parameter, role, compile-fail, schema, and drift checks.
 
