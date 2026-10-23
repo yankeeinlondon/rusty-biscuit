@@ -123,7 +123,17 @@ pub(crate) fn rasterize_svg_for_request(
     svg_data: &str,
     request: &RenderRequest,
 ) -> Result<Vec<u8>, RasterError> {
-    let tree = parse_svg_tree(svg_data)?;
+    rasterize_svg_for_request_with(svg_data, request, default_chain())
+}
+
+/// [`rasterize_svg_for_request`], drawing text with `chain`'s faces (the
+/// chain the SVG's labels were measured with).
+pub(crate) fn rasterize_svg_for_request_with(
+    svg_data: &str,
+    request: &RenderRequest,
+    chain: &Arc<FontChain>,
+) -> Result<Vec<u8>, RasterError> {
+    let tree = parse_svg_tree_with(svg_data, chain)?;
     let scale = match request.target_width {
         Some(width) => scale_for_width(&tree, width)?,
         None => request.scale.max(1) as f32,

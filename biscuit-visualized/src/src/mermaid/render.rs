@@ -45,7 +45,7 @@ use crate::artifact::{Background, OutputFormat, RenderRequest, RenderedArtifact}
 use crate::cache::file_cache::MERMAID_BACKEND;
 use crate::cache::{FileCache, VisualizationKind};
 use crate::fonts::{FontChain, FontQuery, LabelMeasurer, default_chain};
-use crate::raster::png::rasterize_svg_for_request;
+use crate::raster::png::rasterize_svg_for_request_with;
 
 use super::accents::apply_accents;
 use super::config::{MermaidConfig, MermaidTheme};
@@ -326,7 +326,17 @@ impl MermaidDiagram {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn render(&self, request: &RenderRequest) -> Result<RenderedArtifact, MermaidError> {
-        let chain = default_chain();
+        self.render_in(default_chain(), request)
+    }
+
+    /// [`render`](Self::render) with `chain` measuring and drawing every
+    /// label. The golden tests pass a chain of the bundled faces only, so no
+    /// installed font reaches their output.
+    pub(crate) fn render_in(
+        &self,
+        chain: &Arc<FontChain>,
+        request: &RenderRequest,
+    ) -> Result<RenderedArtifact, MermaidError> {
         let prepared = self.prepare(chain)?;
         let cache_key = self.cache_key_for(&prepared, chain, request);
 
@@ -351,7 +361,7 @@ impl MermaidDiagram {
             )?,
             OutputFormat::Png => {
                 record_rasterized_svg(&svg);
-                let png_data = rasterize_svg_for_request(&svg, request)?;
+                let png_data = rasterize_svg_for_request_with(&svg, request, chain)?;
                 cache.store(
                     VisualizationKind::Mermaid,
                     &cache_key,

@@ -282,7 +282,9 @@ D67 amends D44 in place. D70–D72 record Ken's rulings of 2026-10-22 after
 Phase 2 (font identity in the cache key, the OSC 4 query on native Windows,
 and bounded implementer autonomy); D70 amends D41 and D63, and D71 amends
 D46, in place. D73 records Ken's ruling of 2026-10-23 after Phase 4 (findings
-that need a ruling do not stop the run); it amends D72 in place.
+that need a ruling do not stop the run); it amends D72 in place. D74 records
+Ken's ruling of 2026-10-23 after Phase 5 (no human stop anywhere inside the
+implementation); it amends D9, D72, and D73 in place.
 
 ### D1. Decision rule: Ken decided from a scorecard, Merman favored *(amended 2026-10-21 by D30)*
 
@@ -454,7 +456,12 @@ fallback keeps results usable where queries are not sent or not answered.
 *Rationale:* detected colors make diagrams match the terminal; fixed palettes
 keep non-terminal output and tests deterministic.
 
-### D9. Theme acceptance: gallery review, then golden tests
+### D9. Theme acceptance: gallery review, then golden tests *(amended 2026-10-23 by D74)*
+
+> **Amended by D74:** the sign-off no longer comes before the goldens. The
+> implementation generates the goldens from its own look, and Ken signs off
+> on the gallery in the review after implementation; a change he asks for
+> regenerates the goldens in the review cycle.
 
 1. Re-run the HTML gallery with the new themes alongside Zed screenshots of
    the same diagrams (captured by Ken), for Ken's sign-off.
@@ -1454,12 +1461,12 @@ evidence.
 - A terminal that does not answer gets background-derived accents (R-P4),
   as on any terminal.
 
-### D72. Bounded implementer autonomy *(pre-authorization; item 12 of [Pre-authorized preparatory work](#pre-authorized-preparatory-work); amended 2026-10-23 by D73)*
+### D72. Bounded implementer autonomy *(pre-authorization; item 12 of [Pre-authorized preparatory work](#pre-authorized-preparatory-work); amended 2026-10-23 by D73 and D74)*
 
-> **Amended by D73:** "stops" in the last paragraph below is narrowed. A
-> finding that needs Ken's ruling is flagged and the run continues with
-> every task that does not depend on the answer; the implementer stops only
-> under D73's stop conditions.
+> **Amended by D73, then D74:** the last paragraph below no longer applies.
+> When no option meets all three conditions, the implementer picks the best
+> option anyway, builds on it, and lists it for the review (D74). It never
+> stops for a ruling and never sets `human_review`.
 
 Ken ruled on 2026-10-22. When implementation evidence invalidates a
 decision's premise, the implementer may proceed with an option that meets
@@ -1481,7 +1488,13 @@ If no option meets all three conditions, or the options trade off things
 Ken would weigh, the implementer stops and sets `human_review` in the
 implementation log, as before.
 
-### D73. Findings that need a ruling do not stop the run *(amends D72; pre-authorization; item 13 of [Pre-authorized preparatory work](#pre-authorized-preparatory-work))*
+### D73. Findings that need a ruling do not stop the run *(amends D72; pre-authorization; item 13 of [Pre-authorized preparatory work](#pre-authorized-preparatory-work); amended 2026-10-23 by D74)*
+
+> **Amended by D74:** rule 2 records findings in the log's
+> `decisions_for_review`, not `human_review`. Rule 3 is replaced: nothing a
+> human decides is a stop, a later task builds on the implementer's choice,
+> and the gallery sign-off is no longer a planned stop. Open items no longer
+> keep Phase 7 from setting `implemented: true`.
 
 Ken ruled on 2026-10-23, after the Phase 4 run stopped at its checkpoint for
 a ruling (Merman's serde_json `preserve_order` breaking 45 Darkmatter tests)
@@ -1515,6 +1528,30 @@ under rule 3: goldens generated before it would be thrown away. Open items do
 not stop the run, but they do keep it from finishing: Phase 7's final
 verification cannot report "implementation complete, ready for review" while
 any checkpoint item is still open. It reports the open items instead.
+
+### D74. No human stop inside the implementation *(amends D9, D72, and D73; pre-authorization)*
+
+Ken ruled on 2026-10-23, after the run stopped at the end of Phase 5 for the
+gallery sign-off and two styling rulings. The implementation runs every phase
+without a human; human judgment happens in the review cycle after the final
+phase.
+
+- **Decide, build, list.** A finding that needs a ruling is decided by the
+  implementer: it picks the best option, implements it, and appends it to the
+  implementation log's `decisions_for_review` list with the alternatives and
+  what would need redoing. Later tasks build on that choice even when they
+  depend on it; redoing them after the review costs less than a stalled run.
+- **No planned stops.** The gallery sign-off (AC-T5) moves to the first
+  review. Phase 6 generates the goldens from the implemented look; if Ken
+  asks for changes, the review cycle changes the styling and regenerates the
+  goldens.
+- **Phase 7 always closes.** Open items are listed in the log and in
+  `decisions_for_review`. They never keep the final phase from setting
+  `implemented: true`, which is what starts the review cycle.
+- **Still forbidden, without stopping:** outward-facing actions (pushing,
+  posting, filing) remain the author's (D52, D56), and the implementer simply
+  does not take them. A phase fails, rather than pausing, only when it cannot
+  be completed at all.
 
 ## Rendering pipeline
 
@@ -1651,14 +1688,25 @@ Ken approved the following on 2026-10-23, after Phase 4:
     mark the affected checkpoint item open, and continue. Stop only when a
     later task depends on the answer, the next step is irreversible or
     outward-facing, or data, security, or a contract on `main` is at risk;
-    stop at the first dependent task and name it.
+    stop at the first dependent task and name it. *(Superseded by item 14.)*
+
+Ken approved the following on 2026-10-23, after Phase 5:
+
+14. **No human stop inside the implementation (D74).** Decide every finding
+    that needs a ruling, build on the decision, and append it to the log's
+    `decisions_for_review`; never set `human_review` and never stop for a
+    sign-off. The gallery sign-off (AC-T5) happens in the first review;
+    Phase 6 generates goldens from the implemented look. Phase 7 sets
+    `implemented: true` with open items listed. Outward-facing actions stay
+    the author's and are simply not taken.
 
 ## Phases
 
 The order follows the original draft. Which Merman-path steps can run in
 parallel is a planning question. As of 2026-10-22, S0–S3 and the Windows leg
 are done, Ken has chosen Merman (D30), and the rulings of 2026-10-22
-(D40–D72) are recorded; D73 (2026-10-23) narrows when the implementer stops. The gitGraph cutover starts with the `commitSpacing`
+(D40–D72) are recorded; D73 (2026-10-23) narrowed when the implementer stops,
+and D74 (2026-10-23) removes every human stop from the implementation. The gitGraph cutover starts with the `commitSpacing`
 patch on Ken's fork (D56).
 
 ```mermaid
@@ -2080,7 +2128,7 @@ of them.
 | AC-T2 | Two diagrams rendered into one HTML document keep their own styles | Test asserting every injected selector is prefixed by its diagram's id |
 | AC-T3 | Un-styled nodes in flowchart, class, sequence, and mindmap receive accent colors, and `classDef`/`style` nodes keep the author's colors; the accent post-process rewrites no paint our palette did not emit (R-T6) | Golden snapshots plus targeted assertions on the SVG's paint attributes |
 | AC-T4 | Every text element in the golden corpus, the derived-palette goldens included, meets 4.5:1 against the fill behind it, whatever its size | Automated contrast test (D18, D45) |
-| AC-T5 | Ken signs off on the themed gallery beside Zed screenshots | Recorded sign-off in the implementation log (human check, not automatable) |
+| AC-T5 | Ken signs off on the themed gallery beside Zed screenshots | Recorded sign-off in the first review after implementation (human check, not automatable; D74) |
 | AC-T6 | Each family's compiled theme has the expected evidence status and no `unsupported-*` diagnostic other than the circles' known-false `unsupported-paint`, which is allow-listed per family with a comment (D62) | Per-family test (R-V4); review that the allow-list names only that diagnostic |
 | AC-T7 | The precedence surprises are pinned by guard tests | Guard tests (R-V5) |
 | AC-T8 | A theme key the author sets in `%%{init}%%` wins over our compiled theme in the rendered SVG | Test rendering a diagram with an `%%{init}%%` theme variable and asserting the author's value appears (D54) |

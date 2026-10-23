@@ -3,6 +3,7 @@ total_phases: 7
 created: 2026-10-21
 updated: 2026-10-22
 phase: 1
+start_phase: 6
 agent: claude/sonnet
 yolo: true
 rulings_decided_on: 2026-10-22
@@ -295,7 +296,8 @@ correctly. Eight strands, in dependency order:
    `biscuit-terminal` (runs early, in parallel; enabled on native Windows in
    Phase 5); palette type, per-family
    compiled `ThemeDesignV1`, accent post-process, 4.5:1 text everywhere (D6,
-   D17, D45), then Ken's gallery sign-off.
+   D17, D45), and the themed gallery for Ken's review after implementation
+   (D74).
 7. **Verification.** Golden SVG/PNG corpus with Inter on every CI environment
    (D40, D42), six derived-palette goldens (D47), guard tests, promotion of
    `biscuit-visualized` to CI gating (D42), local benchmark on the Linux build
@@ -309,7 +311,7 @@ correctly. Eight strands, in dependency order:
 - Every AC in the spec holds: AC-C1–C13, AC-C2a, AC-C6a, AC-C8a, AC-C8b,
   AC-C15, AC-M1–M11, AC-T1–T9, AC-P1–P6, AC-V1–V4, AC-U1, AC-D1–D7, and the
   cutover confirmations AC-S6 and AC-S8. AC-S4 is recorded (D30); AC-T5 is
-  Ken's sign-off.
+  Ken's sign-off, given in the first review after implementation (D74).
 - `cargo tree -i mermaid-rs-renderer` is empty; one usvg (0.47) in
   `Cargo.lock`; Merman pinned to an exact `rev` on Ken's fork carrying
   `commitSpacing`, D58 feature set, no ELK (AC-C2, AC-M5).
@@ -353,28 +355,20 @@ correctly. Eight strands, in dependency order:
 - An implementation log lives at `implementation-log.md` beside the spec;
   rulings, departures from the spec, each D43 rewrite, measured sizes, and
   sign-offs are recorded there.
-- **Findings that need a ruling do not stop the run** (the spec's D73,
-  pre-authorized item 13; amends D72's "otherwise stop"). Handle each one in
-  exactly one of three ways:
+- **No human stop inside the implementation** (the spec's D74,
+  pre-authorized item 14; supersedes D73's rules 2 and 3). Every phase runs
+  into the next. Handle each finding that needs a ruling in one of two ways:
     1. **Proceed.** The option meets D72's three conditions (pre-authorized
        item 12): amend the spec, log it under "Decided during
        implementation", and flag it for review.
-    2. **Flag and continue (the default).** It needs Ken's ruling, but the
-       remaining work does not depend on the answer: add it to the log's
-       `human_review_items`, set `human_review: true`, mark the affected
-       checkpoint item **open** with a pointer to the finding, and carry on
-       with every task and phase that does not depend on it. Re-run the open
-       item once Ken rules. A red checkpoint item is not by itself a reason
-       to stop.
-    3. **Stop.** Only when continuing would be wasted or harmful: a later
-       task's design or output depends on the answer; the next step is
-       irreversible or outward-facing; or data, security, or a shipped
-       contract on `main` is at risk. Stop at the first dependent task, not
-       before, and say in `message_to_agent` exactly which task is blocked
-       and by what.
-- **Planned human gates are real stops.** Ken's gallery sign-off (AC-T5)
-  before Phase 6 goldens is a stop under rule 3 above, because goldens
-  generated before it would be thrown away.
+    2. **Decide and list (everything else).** Pick the best option, implement
+       it, and append it to the log's `decisions_for_review` list with the
+       alternatives and what would need redoing. Later tasks build on the
+       choice even when they depend on it. Never set `human_review`, never
+       stop for a ruling or sign-off, and never make a red item green by
+       accepting snapshots, changing hashes, or loosening a test.
+  Outward-facing actions (pushing, posting, filing) are simply not taken. A
+  phase fails, rather than pausing, only when it cannot be completed at all.
 
 ### Input robustness (scope note)
 
@@ -1010,12 +1004,10 @@ Depends on Phase 3 (render path) and Phase 2 (OSC 4).
   (static node fill beats palettes; unsupported rule erases a supported one;
   variables override ordinal palette and downgrade sequence evidence from
   `Verified`).
-- [ ] **Themed gallery for Ken (D9, AC-T5).** *(Galleries generated on macOS
-  and Linux, 2026-10-23; awaiting Ken's Zed screenshots and sign-off.)*
-  Re-run the HTML gallery with the
-  new themes (macOS and Linux). Ken captures Zed screenshots and signs off;
-  record sign-off in the log. **Human gate: Phase 6 goldens are generated only
-  after this sign-off.**
+- [x] **Themed gallery for Ken (D9, AC-T5).** *(Galleries generated on macOS
+  and Linux, 2026-10-23.)* Re-run the HTML gallery with the new themes (macOS
+  and Linux). Ken compares it with Zed screenshots and signs off in the first
+  review after implementation (D74); Phase 6 does not wait for it.
 - [x] **Docs (shipped).** Write palettes, OSC 4 use (native Windows included,
   D46, D71), accents, contrast, and scoped CSS into
   `biscuit-visualized/docs/merman.md` and
@@ -1028,11 +1020,11 @@ Depends on Phase 3 (render path) and Phase 2 (OSC 4).
   `biscuit-terminal`.
 - [x] AC-T1, AC-T2, AC-T3, AC-T6, AC-T7, AC-T8, AC-P3, AC-P4, AC-P6, AC-C15
   verified; AC-P6 on the Windows test host.
-- [ ] Ken's gallery sign-off (AC-T5) recorded. **Open (2026-10-23):** the
-  galleries are generated (`gallery/themed-gallery-macos.html`,
-  `gallery/themed-gallery-linux.html`); the sign-off and the styling
-  departures in the log's "## Phase 5" / "Needs Ken's ruling" wait on Ken.
-  Phase 6 goldens wait on this item (planned stop).
+- [x] Galleries generated for Ken's review (`gallery/themed-gallery-macos.html`,
+  `gallery/themed-gallery-linux.html`). The sign-off (AC-T5) and the four
+  styling departures from the log's "## Phase 5" are in the log's
+  `decisions_for_review` for the first review (D74); Phase 6 builds on the
+  implemented look.
 
 ---
 
@@ -1045,7 +1037,7 @@ promote the package to gating, and add the local speed guard.
 
 **Wave 13 — parallel.**
 
-- [ ] **Fixtures (D13, D49).** Copy one representative input per family from
+- [x] **Fixtures (D13, D49).** Copy one representative input per family from
   Merman's fixtures to `biscuit-visualized/src/tests/fixtures/merman/` with
   `LICENSE-MIT`, `LICENSE-APACHE`, `THIRD_PARTY_LICENSES/mermaid`; exclude
   Merman's fonts; keep the size under the ~20 MB cap; Mermaid.js 12.2.0
@@ -1070,7 +1062,7 @@ promote the package to gating, and add the local speed guard.
 
 **Wave 14 — after Wave 13 and checkpoint 5.**
 
-- [ ] **Golden SVGs (D13, D27, D47, R-V1, R-V11, AC-V1, AC-V3, AC-C5).**
+- [x] **Golden SVGs (D13, D27, D47, R-V1, R-V11, AC-V1, AC-V3, AC-C5).**
   `insta`, `MERMAID_FONT=Inter`: every family × `Dark`/`Default`/`Forest`/
   `Neutral`, Merman-only families included; plus the **six** derived-palette
   goldens (flowchart, sequence, gitGraph × full ANSI, background only). Every
@@ -1083,7 +1075,7 @@ promote the package to gating, and add the local speed guard.
 - [ ] **Cross-OS re-measure with Inter (R-C14, AC-S8).** Record AE share and
   RMSE per host pair (macOS, Linux, Windows) with `MERMAID_FONT=Inter` in the
   log.
-- [ ] **Merman-only family smoke tests (D16, AC-C5).** Confirm the family list
+- [x] **Merman-only family smoke tests (D16, AC-C5).** Confirm the family list
   from Merman's registry at the pinned rev (the research list has 15 entries,
   counting railroad dialects); one smoke test each.
 - [ ] **Corpus contrast test (R-V3, D45, AC-T4).** Every text element in every
@@ -1108,7 +1100,7 @@ promote the package to gating, and add the local speed guard.
   is missing. Run `just ci-local --plan` and record in the log that the
   package's L1 cells are planned on each environment. The promotion task
   below starts only after this record exists.
-- [ ] **Promote `biscuit-visualized` to CI gating (D42, R-V12, AC-V4).** In
+- [x] **Promote `biscuit-visualized` to CI gating (D42, R-V12, AC-V4).** In
   `biscuit-visualized/src/Cargo.toml`: `gates = true`; remove
   `exclusion-class`, `owner`, `reason`, `expiry`. Add
   `biscuit-visualized/src/tests/fixtures/merman/` to `[package.metadata.ci.tests]
@@ -1237,12 +1229,15 @@ phases have already written their behavior into these pages (marked
 ### Validation checkpoint 7 (final)
 
 - [ ] Every acceptance criterion in the spec is verified with evidence in the
-  log, or listed with its gate: AC-T5 (Ken's sign-off), or release (Windows
-  detection prerequisite, D7).
+  log, or listed with its gate: AC-T5 (Ken's sign-off in the first review,
+  D74), or release (Windows detection prerequisite, D7). Open items are
+  listed in `decisions_for_review` and never block the next item.
 - [ ] Every R-D requirement has its task ticked and its AC verified
   (R-D1/AC-D1, R-D2/AC-D2, R-D3/AC-D3, R-D4/AC-D4 and AC-D7, R-D5/AC-D5,
   R-D6/AC-D6).
-- [ ] State: **implementation complete, ready for review.**
+- [ ] Set `implemented: true` on the plan, log, and spec even with items in
+  `decisions_for_review` (D74), and state: **implementation complete, ready
+  for review.**
 
 ---
 

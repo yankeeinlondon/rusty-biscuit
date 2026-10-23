@@ -11,6 +11,8 @@ mod gitgraph_layout_tests;
 #[cfg(feature = "image")]
 mod gitgraph_tests;
 #[cfg(feature = "image")]
+mod golden_tests;
+#[cfg(feature = "image")]
 mod graph_tests;
 #[cfg(feature = "image")]
 mod html_static_tests;

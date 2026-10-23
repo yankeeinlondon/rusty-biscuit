@@ -73,6 +73,9 @@ macro_rules! family_smoke_tests {
         /// The registry ids the smoke tests cover.
         const SMOKE_FAMILIES: &[&str] = &[$($family),+];
 
+        /// The fixture each smoke test renders.
+        pub(super) const SMOKE_FIXTURES: &[&str] = &[$($fixture),+];
+
         $(
             mod $test {
                 use super::*;
