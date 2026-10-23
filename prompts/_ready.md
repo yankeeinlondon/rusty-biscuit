@@ -1,5 +1,5 @@
 - set `ready` to whether you think this feature is **ready for production** (boolean)
-    - `ready` is `false` exactly when the review has at least one **high** finding (see "What blocks readiness"); medium and low findings and observations never make it `false`
+    - `ready` is `false` exactly when the review has at least one finding of any priority, high, medium, or low (see "What blocks readiness")
     - things that contribute to **readiness** include:
         - incomplete implementation of the contract that the spec file (or design file when you have one) had asked for
         - defect in the implementation that will cause problems due to flakiness or incorrect results for input a real caller produces
@@ -8,19 +8,17 @@
             - a poorly constructed test that will not adequately test what it intends to
             - a test that will become unstable over time (e.g., using source code in the repo to test versus creating a static fixture to run the test on, etc.)
             - testing gaps for functionality derived from new or changed code from the specification
-                - Note: you do not need to validate tests which were external to the changes imposed by the spec; anything glaring you notice there is an **observation**, not a finding
+                - Note: you do not need to validate tests which were external to the changes imposed by the spec; anything glaring you notice there is still a finding
     - things that should NOT contribute to **readiness** include:
         - Evidence/Proof of cross-os results (this will be done as part of CI/CD)
         - Need for a Human Review
             - this may indeed be a gate on this functionality before it can be released, but
             - we will treat human based reviews as being an external process to this review that will happen _after_ we've completed the review/fix cycle
-        - defects in code this spec did not add or change, unless this spec's change made them reachable
-        - a guarantee stronger than the spec states, including one an earlier repair cycle wrote into a `docs/` page; when such a page overpromises, the observation is to narrow the page
+        - a guarantee stronger than the spec states, including one an earlier repair cycle wrote into a `docs/` page; when such a page overpromises, the finding is to narrow the page
         - inputs only a contrived or adversarial test can produce
 - set the `findings` frontmatter property to every finding in the review, high, medium, and low, whether or not `ready` is `true`:
     - write each entry as `<ID> (<priority>): <title>`, for example `R2-F3 (medium): absent cap reads as zero`; no details
-    - the repair step reads this list: it fixes high findings first, and fixes medium and low findings even when the review is ready, so a finding missing from it is a finding nobody repairs
-- set the `observations` frontmatter property to a list of the titles of the review's `## Observations` (an empty list when there are none)
+    - the repair step reads this list: it fixes high findings first, then medium and low ones, and the cycle continues until the list is empty, so a finding missing from it is a finding nobody repairs
 - set `human_review` to a boolean value to indicate whether human review is required prior to this specification being fully complete
     - the goal of this flag is to allow agents to do as much work as possible (aka, until the `ready` flag has been set to true) before they need to involve the human in review
     - you should not assume that _every_ specification requires human review; rather only those which require important design decisions, or involve activities and tests that only the human can do (versus an agent) 
