@@ -666,6 +666,11 @@ An input is a query parameter by default; `InputParam::header(..)` and
 `InputParam::body("pit.id")` place it elsewhere. Follow-ups re-send every
 ordinary input by default, except a followed link, which carries nothing.
 
+A GraphQL operation pages a Relay connection with the
+`Relay::forward(root)` and `Relay::backward(root)` presets, which build a
+cursor strategy writing into `variables` and reading under the reply's `data`;
+see [GraphQL operations](graphql.md#pagination).
+
 A hypothetical point-in-time search with four partitions:
 
 ```rust

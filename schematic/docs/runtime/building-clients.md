@@ -64,6 +64,7 @@ validates again on its next use, and clones made earlier keep theirs.
 | `graphql_url(url)` | send GraphQL operations to `url` instead of the address the API's rules derive from the base URL; see [GraphQL](../graphql.md#how-a-client-resolves-the-address) |
 | `timeout(duration)` | the per-request timeout (default `DEFAULT_TIMEOUT`, 30 s); see [Deadlines and timeouts](./deadlines-and-timeouts.md) |
 | `connect_timeout(duration)` | bound on establishing a connection |
+| `max_frame_bytes(limit)` | the largest SSE event or NDJSON line a [stream](./codecs.md#streams-sse-ndjson-and-bytestream) accepts (default `DEFAULT_MAX_FRAME_BYTES`, 16 MiB); a larger one ends the stream with `StreamError::FrameLimitExceeded`. Byte streams ignore it |
 | `proxy(url)` | send every request through this proxy |
 | `add_root_certificate(pem_or_der)` | trust an extra root certificate, in addition to the platform's |
 | `danger_accept_invalid_certificates()` | accept any server certificate, including self-signed and expired ones; only for devices that cannot present a valid one |
@@ -171,6 +172,8 @@ carried by `TransportErrorKind::InvalidClient` when the first call finds it:
 | `InvalidProxy` | the proxy URL is not valid |
 | `InvalidCertificate` | a root certificate could not be parsed |
 | `Transport` | the HTTP client could not be initialized |
+| `InvalidMaxFrameBytes` | `max_frame_bytes(0)`: the frame limit must be at least one byte |
+| `InvalidGraphQlUrl { reason }` | the `graphql_url` override is not an HTTP(S) URL with a host, or carries user information or a fragment; or the API's address rules cannot derive an address from the base URL. The reason never quotes the URL |
 
 Neither a `BuildError` nor an `InvalidClient` transport error displays a
 credential or a header value.

@@ -63,6 +63,14 @@ and EMQX Basic keep their username and password variable lists inside
 `style`/`explode` flags in these definitions shape the generated constructors
 and wire form; see [request inputs](../docs/generation/request-side.md).
 
+Several endpoints declare more than one [success shape](../docs/responses-and-errors.md).
+Anthropic's `CreateMessage` and Ollama's `Generate` and `Chat` return JSON or
+a stream, chosen by the reply's `Content-Type`; Ollama's pull, push, and create
+endpoints, LM Studio's `Chat`, and ElevenLabs' `StreamSpeech` and
+`StreamSpeechWithTimestamps` stream; and Bitbucket's `GetSource` returns a
+JSON directory listing or the file's bytes. A provider's error event inside a
+stream is a variant of the stream's item type.
+
 OpenAI's 258 endpoints are [imported](../docs/io/import-openapi.md) from the
 vendored document. Reimport with `just -f schematic/justfile import-openai`;
 its handwritten pagination overlay is preserved. Generate client and export

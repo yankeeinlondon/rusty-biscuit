@@ -101,6 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Documentation
 
 - [Author a definition](docs/definition-builders.md) and [register model types](docs/typed-registration.md).
+- [Declare success shapes, streams, and error bodies](docs/responses-and-errors.md), and [add GraphQL operations](docs/graphql.md).
 - [Generate artifacts and verify changes](docs/generation/workflow.md), including the current provider catalog and shared-module settings.
 - [Call an API](docs/runtime/calling-an-api.md), [read responses](docs/runtime/README.md), and [page through lists](docs/pagination.md).
 - [Import OpenAPI](docs/io/import-openapi.md), [export OpenAPI](docs/io/export-openapi.md), or [export Postman](docs/io/export-postman.md).

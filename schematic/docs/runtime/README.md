@@ -65,7 +65,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | [Origins and redirects](./origins-and-redirects.md) | the cross-origin policies, how a redirect is followed hop by hop, and `check_link` |
 | [Deadlines and timeouts](./deadlines-and-timeouts.md) | the per-request timeout, a `Deadline` shared across sends, and stream bounds |
 | [Response hooks](./hooks.md) | `pre_response_json` and `mutate_response` |
-| [Codecs and decoding](./codecs.md) | how an endpoint fixes its result type, the `Decode` and `ErrorBody` traits, `LiveBody`, and what a codec that runs hooks must do |
+| [Codecs and decoding](./codecs.md) | how an endpoint fixes its result type, the `Decode` and `ErrorBody` traits, `LiveBody`, the stream and multi-shape codecs, and what a codec that runs hooks must do |
+| [GraphQL operations](../graphql.md) | the GraphQL address, how a reply's `errors` and `data` are classified, and paging an operation |
 | [Metadata and redaction](./metadata-and-redaction.md) | `RequestMeta`, `ResponseMeta`, request ids, and which values are redacted |
 | [Pagination](../pagination.md) | `collect_all`, `pages()`, `fetch_page()`, the pager's controls, `Incomplete` and `PagerError`, sessions, and partitions |
 
@@ -95,6 +96,7 @@ Streaming endpoints of the Ollama, LM Studio, Anthropic, and ElevenLabs
 definitions, Bitbucket's source endpoint, and OpenAI's `GetResponse` declare
 streams or several shapes, so their generated clients decode with the stream
 and multi-shape codecs (see
-[Codecs and decoding](./codecs.md#what-generated-code-emits)). No shipped
-definition declares error entries yet, so error replies still arrive as
-`ErrorKind::Undeclared`.
+[Codecs and decoding](./codecs.md#what-generated-code-emits)). The imported
+OpenAI definition declares per-endpoint error bodies, which arrive as
+`ErrorKind::Declared`; every other shipped definition declares none, so its
+error replies arrive as `ErrorKind::Undeclared`.

@@ -26,7 +26,11 @@ and tested once instead of being regenerated into every API module:
 - redirect following under a per-API cross-origin policy, with the
   credential attached only where the policy allows
 - a per-request timeout and a `Deadline` shared across many sends
-- the built-in codecs `Json`, `Text`, `Binary`, and `Empty`
+- the built-in codecs: `Json`, `Text`, `Binary`, and `Empty` for buffered
+  bodies; `Sse`, `Ndjson`, and `ByteStream` for bodies read item by item;
+  `Shapes` for an endpoint with several success shapes; and `GraphQl` for a
+  GraphQL reply
+- declared error bodies, chosen by status from each endpoint's error table
 - JSON response hooks
 - metadata that is redacted when it is captured, so it is always safe to log
 
@@ -108,7 +112,8 @@ explain each behavior with examples:
 | cross-origin policies, redirects, `check_link` | [Origins and redirects](../docs/runtime/origins-and-redirects.md) |
 | timeouts and shared deadlines | [Deadlines and timeouts](../docs/runtime/deadlines-and-timeouts.md) |
 | `pre_response_json` and `mutate_response` | [Response hooks](../docs/runtime/hooks.md) |
-| the `Decode` and `ErrorBody` traits, `LiveBody`, writing a codec | [Codecs and decoding](../docs/runtime/codecs.md) |
+| the `Decode` and `ErrorBody` traits, `LiveBody`, streams, several shapes, writing a codec | [Codecs and decoding](../docs/runtime/codecs.md) |
+| GraphQL addresses, reply classification, and paging an operation | [GraphQL operations](../docs/graphql.md) |
 | `RequestMeta`, `ResponseMeta`, request ids, redaction | [Metadata and redaction](../docs/runtime/metadata-and-redaction.md) |
 | pagers, explicit retry, `collect_all`, `Incomplete`, `PagerError`, sessions, partitions | [Pagination](../docs/pagination.md) |
 
@@ -124,8 +129,11 @@ every type.
 | `response` | `Response`, `Outcome`, `ApiError`, `ErrorKind`, `RedirectRefusal`, `FailureCategory`, `NoDeclaredError` |
 | `error` | `TransportError`, `TransportErrorKind`, `InvalidArgument`, `BuildError` |
 | `raw` | `RawResponse`, `RawCompletion`, `RawJsonError` |
-| `codec` | the `Decode` trait, `LiveBody`, and the `Json`, `Text`, `Binary`, `Empty` codecs |
-| `endpoint` | the `Api` and `EndpointSpec` contracts, `RequestParts`, `RequestBody`, `FormPart`, `ErrorBody` |
+| `codec` | the `Decode` trait, `LiveBody`, `BodyReadError`, `DecodeFailure`, `DEFAULT_MAX_FRAME_BYTES`, and the `Json`, `Text`, `Binary`, `Empty` codecs |
+| `stream` | the `Sse`, `Ndjson`, and `ByteStream` codecs, `ItemStream`, `StreamError`, `StreamEnd`, `EndCondition`, `UntilClose` |
+| `shapes` | the `Shapes` codec, `Alternatives`, `JsonAlternatives`, `Route`, `ShapeKind`, `JsonTag` |
+| `graphql` | the `GraphQl` codec, `GraphQlError`, `GraphQlFailure`, `GraphQlOperationError`, `AddressRule`, `derive_address`, `request_body`, `page_data` |
+| `endpoint` | the `Api` and `EndpointSpec` contracts, `Address`, `RequestParts`, `RequestBody`, `FormPart`, `ErrorBody`, `ErrorRoute`, `StatusMatch` |
 | `credentials` | `Credential`, `AuthConfig`, `CredentialPlacement`, `EnvFallback` |
 | `options` | `CallOptions`, the per-call settings for `send_raw` |
 | `deadline` | `Deadline` |
@@ -134,7 +142,7 @@ every type.
 | `meta` | `RequestMeta`, `ResponseMeta`, `AuthMethod` |
 | `redact` | `SecretNames`, `RedactedUrl`, `REDACTED` |
 | `transport` | `SharedTransport`, `SharedTransportBuilder` |
-| `pager` | `Paginated` and its capability traits, `Pager`, `Pages`, `Items`, `Page`, `PagerError`, `Incomplete`, `IncompleteReason`, `SessionScope`, `SessionError`, `DEFAULT_PAGE_LIMIT`, `DEFAULT_CLOSE_GRACE` |
+| `pager` | `Paginated` and its capability traits, `PageRootError`, `Pager`, `Pages`, `Items`, `Page`, `PagerError`, `Incomplete`, `IncompleteReason`, `SessionScope`, `SessionError`, `DEFAULT_PAGE_LIMIT`, `DEFAULT_CLOSE_GRACE` |
 
 The runtime does not depend on `schematic-define`; generated code translates
 definition data into runtime configuration.

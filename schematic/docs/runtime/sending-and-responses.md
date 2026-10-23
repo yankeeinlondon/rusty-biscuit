@@ -121,7 +121,7 @@ flowchart TD
     R -->|"head arrives"| H
     H -->|no| I{"2xx?"}
     I -->|yes| J["Codec and hooks"]
-    J --> OK1["Ok: Success, or MalformedSuccess /<br/>BodyInterrupted / Hook"]
+    J --> OK1["Ok: Success, or MalformedSuccess /<br/>UnexpectedContentType / BodyInterrupted /<br/>Hook / Declared (GraphQL errors)"]
     I -->|no| OK2["Ok: Declared / MalformedError /<br/>Undeclared / BodyInterrupted"]
 ```
 
@@ -204,7 +204,7 @@ received (the whole body, or the bytes that arrived before an interruption).
 
 | `ErrorKind` | Status | Meaning | Helper |
 | --- | --- | --- | --- |
-| `Declared(E)` | declared error status | the body decoded into the endpoint's declared error type | `ApiError::declared()` |
+| `Declared(E)` | declared error status, or a 2xx [GraphQL](../graphql.md#decoding-a-reply) reply with `errors` | the body decoded into the endpoint's declared error type | `ApiError::declared()` |
 | `MalformedError` | declared error status | the endpoint declares an error body, and this one did not decode | |
 | `Undeclared` | other non-2xx, or 3xx not followed | the endpoint declares no body for this status | |
 | `MalformedSuccess` | 2xx | the body did not decode with the endpoint's codec | `is_decode_failure()` |
@@ -222,8 +222,8 @@ the narrowest range (see
 The runtime decodes the body before returning, so the caller never runs a
 decode step; a status no entry matches is `Undeclared`. The generator
 emits that table from the definition's effective errors; an endpoint with no
-declared errors (every shipped endpoint today) uses `NoDeclaredError`, which
-has no values, so its error replies are `Undeclared`.
+declared errors (most shipped endpoints) uses `NoDeclaredError`, which has no
+values, so its error replies are `Undeclared`.
 
 A redirect status other than 301, 302, 303, 307, and 308 (for example 300
 or 304) is not followed and is reported as a final reply.

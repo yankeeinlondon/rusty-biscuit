@@ -272,6 +272,10 @@ Awaiting the call directly still sends one ordinary request and returns the
 endpoint's own response type. Iteration, completeness, and every pager
 control are described in [Pagination](../pagination.md).
 
+A paginated GraphQL operation has no endpoint method; its request value gets
+the same pager through `client.send(request).pager()`, reading every page
+from the reply's `data` (see [GraphQL operations](../graphql.md#paging-a-generated-operation)).
+
 ## When to use request objects instead
 
 Behind every endpoint method is a request type with the same name and a

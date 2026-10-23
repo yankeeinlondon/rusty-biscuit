@@ -101,9 +101,12 @@ contracts, not the current behavior of every remote service.
 
 When changing a response, check the endpoint's success type and codec:
 `.returns_json::<T>(ctx)`, `.returns_text()`, `.returns_binary()`, and
-`.returns_empty()` produce `Json<T>`, `Text`, `Binary`, and `Empty`, respectively.
+`.returns_empty()` produce `Json<T>`, `Text`, `Binary`, and `Empty`, respectively;
+a stream produces `Sse<T, End>`, `Ndjson<T, End>`, or `ByteStream`, and several
+shapes produce `Shapes<{Id}Response>`.
 Choosing JSON for binary audio would produce the wrong success type and a
-malformed-success error at runtime. See [definition builders](../definition-builders.md).
+malformed-success error at runtime. See [definition builders](../definition-builders.md)
+and [success shapes](../responses-and-errors.md#generated-success-and-failure-types).
 
 On Windows, the generator reserves an 8 MiB main-thread stack through its build
 script for catalog assembly. Keep that build script when packaging the CLI;

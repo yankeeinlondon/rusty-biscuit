@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Awaiting an endpoint call returns the data or a `CallError`; `.full()` returns the `Response { meta, outcome }` envelope for every reply that arrived, whatever its status. Text endpoints decode to `String`, binary endpoints to `bytes::Bytes`, and empty ones to `()`. When no credential is supplied and the API has no environment fallback, the request is sent anonymously rather than failing.
+Awaiting an endpoint call returns the data or a `CallError`; `.full()` returns the `Response { meta, outcome }` envelope for every reply that arrived, whatever its status. Text endpoints decode to `String`, binary endpoints to `bytes::Bytes`, and empty ones to `()`; a streaming endpoint returns an `ItemStream<T>` or `ByteStream` read item by item, and an endpoint with several success shapes returns its `{Id}Response` enum (see [success shapes](../docs/responses-and-errors.md#generated-success-and-failure-types)). When no credential is supplied and the API has no environment fallback, the request is sent anonymously rather than failing.
 
 See [Calling an API](../docs/runtime/calling-an-api.md) for endpoint methods, setters, per-call overrides, and `CallError`, and the [`schematic-runtime` README](../runtime/README.md) and the [runtime topic pages](../docs/runtime/README.md) for credentials, timeouts, redirects, and `send_raw`.
 

@@ -56,7 +56,12 @@ Modifiers on a `Success`:
 | `.keep_end()` | Delivers the terminator as the last item instead of consuming it. |
 
 A stream with no `ends_*` modifier ends when the server closes the connection.
-Byte streams can only end that way, and `keep_end` needs a terminator.
+Byte streams can only end that way, and `keep_end` needs a terminator. The
+client returns a stream as soon as the response head arrives and reads it
+item by item; how items, provider error events, and stream errors arrive is
+in [Streams](runtime/codecs.md#streams-sse-ndjson-and-bytestream), and how the
+per-request timeout becomes an idle bound between items is in
+[Streamed bodies](runtime/deadlines-and-timeouts.md#streamed-bodies).
 
 ### How a client tells shapes apart
 
@@ -166,6 +171,20 @@ assert!(matches!(table.lookup(422).unwrap().shape, ResponseShape::Json(_))); // 
 - **Opting out.** `errors(ErrorSet::none())` on an endpoint empties its table,
   API defaults included. On the API, `default_errors(ErrorSet::none())` simply
   declares no defaults; an empty API table is not an endpoint opt-out.
+
+How a non-2xx status resolves to an error shape:
+
+```mermaid
+flowchart TD
+    S[non-2xx status] --> O{endpoint opted out<br/>with ErrorSet::none?}
+    O -->|yes| U[undeclared: no body type]
+    O -->|no| T["effective table: API defaults,<br/>overlaid by endpoint entries<br/>(an identical match replaces)"]
+    T --> X{an exact entry<br/>for the status?}
+    X -->|yes| H[that entry's shape]
+    X -->|no| N{ranges containing<br/>the status?}
+    N -->|yes| W[the narrowest range's shape]
+    N -->|no| U
+```
 
 An endpoint that declares nothing inherits the API defaults. Each error
 entry's JSON type must be registered in the API's context; an unregistered one

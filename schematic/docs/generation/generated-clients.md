@@ -1293,6 +1293,13 @@ while let Some(page) = pages.next().await? {
 - Alternate strategies are validated but add no caller controls. Parameters
   cannot carry pagination metadata; collections belong to endpoints.
 
+A paginated GraphQL operation gets the same `Paginated` impl beside its
+request struct, with `PATH = ""` and a `page_root` that calls
+`schematic_runtime::graphql::page_data`, so every path reads under the reply's
+`data` and a page carrying GraphQL errors ends paging. It has no endpoint
+method; page it with `client.send(IssuesRequest::new(vars)).pager()` (see
+[Paging a generated operation](../graphql.md#paging-a-generated-operation)).
+
 How resolution, adoption, completeness, sessions, and partitions behave for
 callers is described in [Pagination](../pagination.md).
 
@@ -1463,9 +1470,9 @@ The current test suite verifies:
 4. **Auth translation** - Every authentication pattern produces the expected runtime `AuthConfig` in `definition()`
 5. **Runtime ABI** - A unit test keeps `RUNTIME_ABI` equal to `schematic_runtime::ABI`, and partial-generation tests cover matching, different, missing, and malformed `lib.rs` markers
 6. **Fresh-output guard** - The `slow_*` tests in `tests/l1/fresh_output_compile.rs` (`just test-fresh-output`, part of `just test`) generate fresh crates into temporary directories and:
-    - compile the fixture APIs and run 19 wiremock tests that send through the runtime and assert the bytes each request puts on the wire, credential sourcing and refusal, codec selection, hooks, and definition settings (request-id header, secret names, cross-origin policy)
+    - compile the fixture APIs and run wiremock tests that send through the runtime and assert the bytes each request puts on the wire, credential sourcing and refusal, codec selection, hooks, and definition settings (request-id header, secret names, cross-origin policy); the `FixtureShapes` API covers several success shapes, SSE, NDJSON, and byte streams, and declared error tables, and the `FixtureGraphQl` API covers GraphQL addresses, reply classification, and a Relay pager
     - compile all 18 real APIs, including their WebSocket modules, with `cargo check --offline --locked`
-    - check, in one `cargo check --tests --keep-going` run, that 15 misuses fail to compile: a wrong success type, a request impl missing its codec, a non-request type, another API's request passed to `send`, `send_raw`, `check_link`, or `mutate_response`, a mutator on a text endpoint, an endpoint setter after `.full()`, the data instead of the envelope expected from `.full()`, and the removed client alias, per-API builder, `request` method, request enum, and `with_client_and_base_url` constructor
+    - check, in one `cargo check --tests --keep-going` run, that every listed misuse fails to compile, among them: a wrong success type, a request impl missing its codec, a non-request type, another API's request passed to `send`, `send_raw`, `check_link`, or `mutate_response`, a mutator on a text, binary, or stream endpoint or on several shapes that are not all JSON, GraphQL variables of another type, a pager knob a GraphQL operation does not author, an endpoint setter after `.full()`, the data instead of the envelope expected from `.full()`, and the removed client alias, per-API builder, `request` method, request enum, and `with_client_and_base_url` constructor
     - build against a doctored runtime copy with another ABI and assert the build fails with the readable assertion message
     - compare the query request lines with a recorded baseline
 
@@ -1500,7 +1507,8 @@ cargo run -p schematic-gen -- generate --api elevenlabs --output schematic/schem
 
 # 2. Verify the codec chosen for non-JSON endpoints
 grep -n "type Decoder" schematic/schema/src/elevenlabs/requests.rs
-# Should see Json<T>, Text, Binary, or Empty as the definition declares
+# Should see Json<T>, Binary, ByteStream, and Ndjson<T, End> as the
+# definition declares (Text, Empty, Sse<T, End>, and Shapes<..> elsewhere)
 
 # 3. Check it compiles (schematic-schema is excluded from the workspace)
 cargo check --manifest-path schematic/schema/Cargo.toml

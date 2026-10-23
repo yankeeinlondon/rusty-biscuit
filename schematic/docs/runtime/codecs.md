@@ -43,7 +43,7 @@ caller never names a response type or runs a decode step.
 
 ```mermaid
 flowchart LR
-    A["ApiResponse::Json(Schema)<br/>(definition value)"] -->|generator| B["type Decoder = Json&lt;T&gt;<br/>type Success = T"]
+    A["ResponseShape::Json(reference)<br/>(definition value)"] -->|generator| B["type Decoder = Json&lt;T&gt;<br/>type Success = T"]
     B -->|send| C["Json::&lt;T&gt;::decode_hooked(body, hooks)"]
     C --> D["Response&lt;T, E&gt;"]
 ```
@@ -231,6 +231,26 @@ while let Some(chunk) = chunks.next().await {
 }
 ```
 
+Each poll of an SSE or NDJSON stream assembles one frame and turns it into
+at most one item:
+
+```mermaid
+flowchart TD
+    P["poll next()"] --> R{"a complete event or line<br/>within the frame limit?"}
+    R -->|"body ended cleanly"| EE["Err(EndedEarly), or None<br/>for a connection-close end"]
+    R -->|"connection broke"| IN["Err(Interrupted { pending })"]
+    R -->|"idle bound or deadline passed"| TO["Err(IdleTimeout) /<br/>Err(DeadlineExceeded)"]
+    R -->|"grew past the limit"| FL["Err(FrameLimitExceeded)"]
+    R -->|yes| T{"matches the<br/>end condition?"}
+    T -->|"yes, consumed"| N["None: the stream ends"]
+    T -->|"yes, kept"| K["the terminator as the last item<br/>(Ok, or Err(Malformed)), then None"]
+    T -->|no| D{"decodes as T?"}
+    D -->|yes| OK["Ok(item)"]
+    D -->|no| M["Err(Malformed { raw });<br/>the stream continues"]
+```
+
+Every `Err` other than `Malformed` is terminal: the next poll returns `None`.
+
 The end condition is a marker type implementing `StreamEnd`:
 `DataLineEquals(text)` and `EventNamed(name)` (SSE only),
 `FieldEquals { path, value }` (SSE or NDJSON; `path` is object keys, and a
@@ -252,7 +272,31 @@ item, which is how Ollama's final `done: true` line keeps its statistics.
 A provider's error event inside a 200 stream, such as Anthropic's
 `event: error`, is not a `StreamError`: it is `Ok(item)` when the item type
 has a variant for it. An `Ok` item means the item decoded, not that the
-provider's operation succeeded.
+provider's operation succeeded. The definition models such an event as a
+variant of the stream's item type, and the stream continues after it:
+
+```rust
+// Ollama sends {"error": "..."} as a line of a 200 NDJSON stream.
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum GenerateStreamItem {
+    Error(StreamErrorLine), // tried first: a chunk never carries `error`
+    Chunk(GenerateStreamChunk),
+}
+
+while let Some(item) = stream.next().await {
+    match item {
+        Ok(GenerateStreamItem::Chunk(chunk)) => print!("{}", chunk.response.unwrap_or_default()),
+        Ok(GenerateStreamItem::Error(line)) => eprintln!("provider error: {}", line.error),
+        Err(error) => { eprintln!("{error}"); if error.is_terminal() { break } }
+    }
+}
+```
+
+Anthropic's `MessageStreamEvent::Error`, LM Studio's `ChatStreamEvent::Error`,
+and Ollama's other native NDJSON item types follow the same pattern. An event
+the item type has no variant for is `StreamError::Malformed`, and the stream
+continues.
 
 Framing does not depend on how the body was chunked. SSE follows the
 [event-stream rules](https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation):
@@ -399,6 +443,8 @@ table, the `ErrorBody<{Api}Api>` impls, and GraphQL operation requests (see
 An endpoint that declares one plain shape and no errors keeps a buffering
 codec, the default error table, and `NoDeclaredError`.
 
-Storing several success shapes and streams in a definition is **planned**, so
-today every shipped endpoint is in that last case; a streaming endpoint is
-still declared binary and framed by the caller until its definition migrates.
+Among the shipped definitions, Anthropic, Ollama, LM Studio, OpenAI, and
+ElevenLabs declare streams (Ollama's `Generate` is NDJSON or JSON, chosen by
+the reply's `Content-Type`), Bitbucket's `GetSource` is a JSON listing or a
+file fallback, and the imported OpenAI definition declares per-endpoint error
+bodies. Every other endpoint is in the plain case.

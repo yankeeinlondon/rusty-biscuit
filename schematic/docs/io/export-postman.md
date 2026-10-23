@@ -174,6 +174,15 @@ Rate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`
 
 An endpoint that declares none of these keeps its description alone.
 
+## What a Collection Leaves Out
+
+A collection describes requests, not replies, and has no saved example
+responses. Of an endpoint's response model it keeps only the first success
+shape's content-type line above. Its other success shapes, their statuses,
+tags, fallback, notes, and variant names, a stream's end condition, and the
+declared error table appear nowhere in it; the
+[OpenAPI export](export-openapi.md#responses) carries them.
+
 ## Schema Composition
 
 A Postman collection cannot declare `oneOf`, `anyOf`, or `allOf`. An
@@ -184,7 +193,7 @@ keeps its existing example, and no example payload is invented.
 
 ## GraphQL Operations
 
-A collection does not carry an API's GraphQL operations yet. Each one is
+A collection does not carry an API's GraphQL operations. Each one is
 reported as the warning
 `<API> operation <id>: GraphQL operation skipped in Postman output`, and the
 collection is still written without it.

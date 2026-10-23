@@ -1,6 +1,6 @@
 # OpenAPI Vendor Extensions (x-schematic)
 
-This document specifies the vendor extensions used by Schematic when exporting API definitions to OpenAPI 3.0.3 format. These extensions preserve Schematic-specific metadata that enables round-trip fidelity when importing and re-exporting API definitions.
+This document specifies the vendor extensions used by Schematic when exporting API definitions to OpenAPI 3.0.3 format. These extensions record Schematic-specific metadata that standard OpenAPI fields cannot hold, so an exported document states the whole definition. The importer does not read them back (see [Reading extensions back](#reading-extensions-back)).
 
 ## Overview
 
@@ -13,7 +13,7 @@ Schematic currently emits two `x-schematic` extension types in exported OpenAPI 
 
 The library also defines a schema-level extension type (`SchematicSchemaExtension`) for Rust type metadata, but the current exporter does not emit schema-level `x-schematic` fields.
 
-All extensions are optional. Documents without `x-schematic` extensions can still be imported, but some Schematic-specific features may require manual configuration.
+All extensions are optional. A document imports the same way with or without them.
 
 ## Document-Level Extension
 
@@ -253,8 +253,8 @@ response: Empty
 The standard `responses` map carries each shape's status, media type, and
 schema (see [Exporting OpenAPI](export-openapi.md#responses)). What it cannot
 carry, such as a stream's end condition or the JSON tag that tells two shapes
-apart, is written here in the definition's own serialized form, so nothing is
-lost. An endpoint with a single plain shape writes no `success` member, which
+apart, is written here in the definition's own serialized form, so the
+document records every fact of the definition. An endpoint with a single plain shape writes no `success` member, which
 keeps existing documents unchanged.
 
 ```yaml
@@ -284,8 +284,17 @@ x-schematic:
 
 The error entries are the declared levels (document defaults, then the
 endpoint's overlay or opt-out), not the resolved table: the `responses` map
-already shows the resolved table. Reading these members back is not
-supported yet.
+already shows the resolved table.
+
+### Reading extensions back
+
+[OpenAPI import](import-openapi.md) builds a definition from the standard
+fields only. Of the `x-schematic` members it reads just the
+`x-schematic-query-rust-names` member it writes itself while normalizing
+query expressions in paths; the members on this page are ignored. A stream's
+end condition, variant names, notes, and the document-level error defaults
+are therefore lost on import, as
+[that page lists](import-openapi.md#several-success-shapes-and-declared-errors).
 
 ## Schema-Level Extension (Reserved)
 

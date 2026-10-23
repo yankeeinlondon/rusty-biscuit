@@ -115,6 +115,24 @@ key. GraphQL operations are not exported: each is reported as the warning
 `<API> operation <id>: GraphQL operation skipped in OpenAPI output` and the
 document is still written.
 
+**What standard OpenAPI cannot say.** A reader that ignores `x-schematic`
+sees an approximation of the definition:
+
+- a shape that declares no status is written under `200` (or `204`), though
+  the client accepts it for any 2xx status;
+- a byte stream looks like a binary body, and an SSE or NDJSON stream shows
+  its item schema but not its end condition or `keep_end`;
+- an array-versus-object JSON pair is a `oneOf` without a `discriminator`;
+- a variant name appears nowhere, and a note only in the description;
+- a range that is not a whole class, or a class an exact entry supersedes in
+  part, becomes one key per status (a `4XX` default beside an exact `404`
+  writes 100 keys);
+- GraphQL operations are absent.
+
+[Importing](import-openapi.md#several-success-shapes-and-declared-errors)
+the document back restores what the `responses` map holds and nothing from
+`x-schematic`.
+
 ## Path parameters, deprecation, and composition
 
 A path parameter declared with `path_param` exports with its type, its

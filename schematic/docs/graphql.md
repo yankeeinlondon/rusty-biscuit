@@ -205,28 +205,86 @@ value.
 
 ## Pagination
 
-A connection pages through the existing [pagination model](pagination.md),
-with every pager input written into the request body under `variables` and
-every response path read relative to the decoded `data`:
+A Relay connection pages through the existing [pagination model](pagination.md).
+`Relay` builds the cursor strategy and the item collection for you:
 
 ```rust
+use schematic_define::pagination::Relay;
+
 let issues = GraphQlOperation::query("Issues", ISSUES_DOCUMENT)
     .describes("Open issues")
     .variables::<IssuesVariables>(&mut ctx)
     .data::<IssuesData>(&mut ctx)
-    .pagination(Collection::at("repository.issues.nodes").item_type("Issue").paginate(
-        Strategy::cursor(InputParam::body("variables.after"), CursorSource::body("repository.issues.pageInfo.endCursor"))
-            .more_when(MoreSignal::has_more("repository.issues.pageInfo.hasNextPage"))
-            .page_size(PageSize::new(InputParam::body("variables.first")).max(100))))
+    .pagination(Relay::forward("repository.issues").max_page_size(100).collection("Issue"))
     .build()?;
 ```
 
-Operation build rejects pagination that cannot work this way: a strategy that
-is not declared explicitly (an operation inherits no REST default), a next-link
+Every response path is relative to the reply's decoded `data`, and every pager
+input is a request-body path under `variables`:
+
+| | `Relay::forward(root)` | `Relay::backward(root)` |
+| --- | --- | --- |
+| cursor written to | `variables.after` | `variables.before` |
+| page size written to | `variables.first` | `variables.last` |
+| cursor read from | `{root}.pageInfo.endCursor` | `{root}.pageInfo.startCursor` |
+| more pages while | `{root}.pageInfo.hasNextPage` | `{root}.pageInfo.hasPreviousPage` |
+| items | `{root}.nodes` | `{root}.nodes` |
+
+- `.with_edges()` reads items from `{root}.edges[*].node` instead.
+- `.cursor_variable(name)` and `.size_variable(name)` rename the variables.
+- `.max_page_size(n)` refuses a larger `.page_size(..)` before sending;
+  `.sent_page_size(n)` is sent when the caller sets none.
+- `.resumable()` lets the caller start from a kept cursor with `.after(..)`.
+- A pager pages one direction. The pagination model has one page-size input
+  and one end signal per strategy, so reading a connection both ways takes two
+  operations.
+
+A hand-written `Strategy` works too; `Relay` only fills in the paths. Operation
+build rejects pagination that cannot work this way: a strategy that is not
+declared explicitly (an operation inherits no REST default), a next-link
 strategy, a follow-up or session request, alternates, a missing item type, a
 pager input that is not a body path under `variables` (`pager input `after`
-must be a request-body path under `variables``), and no typed variables. The
-generated pager is **planned**.
+must be a request-body path under `variables``), no typed variables, and a
+pager-managed variable the variables type requires (`pager-managed variable
+`first` must be optional in the variables type`).
+
+### Paging a generated operation
+
+A paginated operation's generated request implements the runtime's
+`Paginated`, so `send(request).pager()` gives the same pager a REST list has,
+with only the knobs the strategy authors:
+
+```rust
+let vars = IssuesVariables { owner: "acme".into(), first: None, after: None };
+let issues = github.send(IssuesRequest::new(vars)).pager().page_size(50).collect_all().await?;
+```
+
+```mermaid
+sequenceDiagram
+    participant C as Caller
+    participant P as Pager
+    participant S as GraphQL server
+    C->>P: send(IssuesRequest::new(vars)).pager()
+    P->>S: POST {query, variables: vars + {first: 50}}
+    S-->>P: {data: {repository: {issues: {nodes, pageInfo}}}}
+    P->>P: read nodes, endCursor, hasNextPage under data
+    P->>S: POST {query, variables: vars + {first: 50, after: endCursor}}
+    S-->>P: {errors: [...], data: {...}}
+    P-->>C: Incomplete { items from page 1, error: GraphQL failure }
+```
+
+- The pager serializes the caller's variables, then writes its cursor and page
+  size over them. Pager-managed fields must therefore be optional; a `null` or
+  omitted first cursor is sent as the variables type serializes it.
+- A page whose reply carries GraphQL errors stops paging. It is reported as a
+  declared `GraphQlOperationError::GraphQl` failure with the body as received;
+  its partial data stays in that error and never joins the collected items.
+- A reply without data, or with data that does not decode as the operation's
+  data type, is a malformed page.
+- Page limits, repeated-cursor detection, missing or invalid continuations,
+  and the shared deadline behave as for a REST pager. Calling a knob the
+  strategy does not author, such as `.after(..)` on a pager that is not
+  resumable, does not compile.
 
 ## Stored form
 

@@ -58,6 +58,15 @@ let endpoint = Endpoint::get("GetIssue", "/repos/{owner}/{repo}/issues/{number}"
   **`retry_guidance`** are metadata only; nothing retries.
 - **Basic** keeps its username and password variable lists inside
   `AuthStrategy::Basic`. **OAuth2** is one `OAuth2Config` variant per grant.
+- **Several success shapes and streams**: `.returns(..)` may repeat, as in
+  `.returns(Success::json(message)).returns(Success::sse(event).ends_at_event("message_stop"))`;
+  the client picks one by status, `Content-Type`, or JSON tag.
+  `Success::ndjson` and `Success::bytes` declare the other streams.
+- **Declared errors**: `.errors(ErrorSet::new().on(StatusMatch::exact(404), ErrorShape::text()))`
+  on an endpoint overlays the API's `default_errors(..)`; `ErrorSet::none()`
+  opts out.
+- **GraphQL operations**: `.graphql(AddressRule::github()).operations([..])` on
+  the API adds typed queries and mutations, which can page a Relay connection.
 - **Composed bodies**: `context.one_of::<T>([..])`, `any_of`, and `all_of` bind
   a hand-written type to an OpenAPI composition.
 - **`DefinitionBundle`** serializes an API with its schemas. It loads without
@@ -67,6 +76,8 @@ Read the current behavior and examples in:
 
 - [Definition builders](../docs/definition-builders.md): required facts, auth coherence, parameter locations, route identity, and validation.
 - [Typed registration](../docs/typed-registration.md): nominal types, aliases, containers, ordered module groups, and destination validation.
+- [Success shapes and declared errors](../docs/responses-and-errors.md): several shapes at one address, streams, error tables, and the generated success and failure types.
+- [GraphQL operations](../docs/graphql.md): address rules, reply classification, and Relay pagination.
 - [Pagination](../docs/pagination.md): API defaults, endpoint collections, caller controls, and parameter adoption.
 - [Definition snapshots](../docs/definition-snapshots.md) and [definition bundles](../docs/io/definition-bundles.md): serialized transfer contracts.
 - [Request inputs](../docs/generation/request-side.md) and [credentials](../docs/runtime/credentials.md#endpoint-authentication): query fidelity and endpoint authentication on the wire.

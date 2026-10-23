@@ -34,6 +34,10 @@ schematic-gen import --input api.yaml --output src --dry-run
 | `--output` | Output directory for generated code |
 | `--dry-run` | Preview generated code without writing files |
 | `--strict` | Fail on any warning-level diagnostic |
+| `--definitions-out` | Write a definitions-crate module (`mod.rs` with `define_{api}_api()` and the fallible `module_group()`, plus `types.rs`) instead of a standalone client |
+| `--overlay <RUST_PATH>` | With `--definitions-out`: a hand-written `fn(RestApi) -> RestApi` the factory applies, so additions survive a re-import (OpenAI: `crate::openai_pagination::apply`) |
+| `--exclude-path <PREFIX>` | Drop endpoints by path prefix (repeatable) |
+| `--request-id-header <HEADER>` | Set `RestApi::request_id_header` (OpenAPI declares none; `just import-openai` passes `x-request-id`) |
 
 ### Library API
 
@@ -47,6 +51,10 @@ let options = ImportOptions {
     api_name: Some("MyApi".to_string()),
     module_path: None,
     output: "generated/src".to_string(),
+    definitions_out: None,
+    overlay: None,
+    exclude_paths: vec![],
+    request_id_header: None,
     dry_run: false,
     strict: false,
     verbose: true,
@@ -70,6 +78,32 @@ println!("Generated {} endpoints, {} models",
 `validate_references()`; an operation whose JSON body or response names an
 undefined schema fails the import with `OpenApiError::Definition`. See
 `schematic/docs/io/import-openapi.md`.
+
+### Responses
+
+Every 2xx response becomes a success shape (`text/event-stream` an SSE
+stream, `application/x-ndjson`/`application/jsonl` an NDJSON stream of the
+schema's component) and every exact `400`-`599`, `4XX`, or `5XX` response an
+endpoint error entry (never hoisted to the API). Stream end conditions cannot
+be read from OpenAPI, so imported streams end at connection close unless the
+document carries `x-schematic`. Bodies and responses with no named schema
+become `serde_json::Value` (`TypeRef::Primitive(Json)`); render that type path
+with `syn` parsing, never `format_ident!`.
+
+### Imported builder assemblies
+
+`--definitions-out` emits fallible `Endpoint`/`RestApi` builder code and a
+public `module_group() -> Result<Vec<RestApi>, DefinitionError>` over one
+ordered `DefinitionContext`; catalog factories unwrap it. Nominal generated
+models implement `Registration`; the emitter bounds stack use with small
+endpoint helpers and batched registrations. The importer normalizes
+query-bearing paths (OpenAI's seven beta operations share their ordinary ids
+with an optional `beta` query input), rejects GET bodies, duplicate keys, and
+malformed input, and clamps out-of-`i64` schema bounds with a warning.
+OpenAI is regenerated through `just -f schematic/justfile import-openai`,
+never edited by hand;
+`import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition`
+fails when the committed module and a fresh import differ.
 
 ### Type Mappings
 
@@ -156,11 +190,28 @@ x-schematic:
 
 # Operation level
 x-schematic:
-  request: "CreateUserBody"
-  response: "User"
+  request:
+    Json: { Named: CreateUserBody }
+  response:
+    Json: { Named: User }        # first success shape; Text/Binary/Empty are scalars
+  success: [...]                 # every shape, only when `response` cannot carry them
+  errors: [...]                  # the endpoint's own error entries
   headers:
     - ["X-Request-ID", "12345"]
 ```
+
+Emitted: document-level and operation-level `x-schematic`; the schema-level
+`SchematicSchemaExtension` is defined but not emitted. The document level
+carries `module_path`, `request_suffix`, `env_mapping`, `headers`,
+`rate_limit`, `retry_guidance`, `errors` (API defaults), `request_id_header`,
+and `cross_origin` (only when not `SameOrigin`). The operation level carries
+`request`, `response`, `headers`, `success` (several shapes, a stream, or any
+selection fact, variant, or note), `errors`, `no_declared_errors`, and the
+endpoint's own `rate_limit`/`retry_guidance`/`cross_origin`. Deprecation and
+endpoint auth overrides use standard `deprecated`/`security`. JSON shapes hold
+the stored `TypeRef` (component names plus wrappers), never a Rust path.
+GraphQL operations are not exported (`graphql-operation` warning). See
+`schematic/docs/io/openapi-extensions.md`.
 
 ## Feature Configuration
 

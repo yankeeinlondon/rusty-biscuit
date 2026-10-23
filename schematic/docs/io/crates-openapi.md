@@ -2,7 +2,7 @@
 
 ## Schematic refresher (from repo READMEs)
 
-- schematic-define: data-driven REST/WebSocket API definition types (RestApi, Endpoint, AuthStrategy, ApiRequest/ApiResponse, Schema).
+- schematic-define: data-driven REST/WebSocket API definition types (RestApi, Endpoint, AuthStrategy, ApiRequest, SuccessShape, Schema).
 - schematic-definitions: concrete API definitions that use schematic-define primitives.
 - schematic-gen: generator CLI/library that transforms definitions into Rust client code; validates collisions and formats output.
 - schematic-schema: generated client crate consumed by external libs.
@@ -255,7 +255,7 @@ Why
 How it would fit
 
 - Parse spec to `openapiv3::OpenAPI`.
-- Convert paths/operations to RestApi + Endpoint, map parameters/body/response to ApiRequest and ApiResponse.
+- Convert paths/operations to RestApi + Endpoint, map parameters/body/responses to ApiRequest, success shapes, and error entries.
 - Generate schema types either via custom schema extraction (staying in Schematic) or via openapi-model-generator for DTOs, then reference those types in the generated Schema values.
 
 Fallback option

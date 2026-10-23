@@ -65,8 +65,9 @@ API Definition (RestApi)
         ▼
 ┌──────────────────┐
 │ Phase 1: Codegen │  generate_api_struct(), generate_request_struct(),
-│                  │  generate_request_helpers(), generate_paginated_trait(),
-│                  │  generate_endpoint_methods(), ModuleDocBuilder
+│                  │  generate_request_helpers(), pagination impls,
+│                  │  GraphQL operation requests, generate_endpoint_methods(),
+│                  │  ModuleDocBuilder
 └────────┬─────────┘
          │
          ▼
@@ -97,7 +98,7 @@ API Definition (RestApi)
 schema/src/
 ├── lib.rs           # Module declarations, SCHEMATIC_RUNTIME_ABI + compile-time check, `pub use schematic_runtime`
 ├── prelude.rs       # Each API's client struct, plus runtime Call, CallError, CallOptions, Credential, Response, ...
-├── shared.rs        # encode_cookie_value, combine_cookie_headers, FormFile, Paginated
+├── shared.rs        # encode_cookie_value, combine_cookie_headers, FormFile
 ├── ws_shared.rs     # WebSocket support shared by the *_ws modules
 ├── anthropic.rs     # A module under 2000 lines stays one file
 ├── lmstudio.rs
@@ -126,7 +127,7 @@ Generated REST code only describes requests; the hand-written
 
 ```rust
 // lib.rs: the runtime ABI this crate was generated for, checked at compile time
-pub const SCHEMATIC_RUNTIME_ABI: u32 = 3;
+pub const SCHEMATIC_RUNTIME_ABI: u32 = 7;
 const _: () = assert!(schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI, "...; regenerate the crate ...");
 pub use schematic_runtime;
 
@@ -135,8 +136,10 @@ pub fn encode_cookie_value(value: &str) -> String;      // RFC 6265 %XX encoding
 pub fn combine_cookie_headers(headers: &mut Vec<(String, String)>, cookies: &[(String, String)])
     -> Result<(), schematic_runtime::InvalidArgument>;   // folds cookies into one `Cookie` header
 pub struct FormFile { .. }                               // multipart file part
-pub trait Paginated {}                                   // marker for paginated endpoints
 ```
+
+A paginated endpoint implements the runtime's `schematic_runtime::pager::Paginated`
+directly; the shared module defines no pagination trait.
 
 Generated code defines no error type: an awaited call reports
 `schematic_runtime::CallError<E>` (`.full()`: a `Response` envelope or
@@ -163,8 +166,8 @@ impl GetUserRequest {
 impl schematic_runtime::EndpointSpec for GetUserRequest {
     type Api = MyApi;
     type Success = User;
-    type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<User>; // Text / Binary / Empty per success shape
+    type Failure = schematic_runtime::NoDeclaredError; // from the effective error table
+    type Decoder = schematic_runtime::Json<User>;      // per success shape(s); see responses.md
 
     const ENDPOINT_ID: &'static str = "GetUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
@@ -296,7 +299,9 @@ $ schematic-gen validate --api example
 | `codegen/api_struct/` | `generate_api_struct()` | API client struct, `{Api}Api` tag and its `Api` impl, the `api_client!` invocation, constants, `definition()`, `new()`, `basic_auth()` for Basic APIs; `auth.rs` translates the effective auth policy into `AuthConfig`, `helpers.rs` builds the rest of `definition()` |
 | `codegen/request_structs/` | `generate_request_struct()` | Per-endpoint structs; `endpoint_spec.rs` emits the `EndpointSpec` impl, `into_parts.rs` its `into_parts` body, `named_params.rs` header/cookie parameter fields, `form.rs` form structs |
 | `codegen/shared.rs` | `generate_request_helpers()` | Request helpers of the generated `shared.rs`: `encode_cookie_value`, `combine_cookie_headers`, `FormFile` |
-| `codegen/traits.rs` | `generate_paginated_trait()`, `generate_paginated_impl()` | `Paginated` marker trait and its impls |
+| `codegen/pagination/` | `paginated_impl()`, `operation_paginated_impl()` | `impl schematic_runtime::pager::Paginated` and capability markers for endpoints and GraphQL operations |
+| `codegen/responses.rs` | `success_code()`, `failure_code()`, `api_error_body_impls()` | `Success`/`Decoder`/`Failure`, `{Id}Response`/`{Id}Error` enums, stream end markers, `ERRORS` |
+| `codegen/graphql.rs` | `generate_operation_request()` | One request struct per GraphQL operation |
 | `codegen/module_docs.rs` | `ModuleDocBuilder` | Module documentation |
 | `import_pipeline.rs` | `run_import()` | OpenAPI import orchestration |
 | `model_gen.rs` | `generate_models()` | Generate types.rs from ModelCatalog |
@@ -308,7 +313,10 @@ $ schematic-gen validate --api example
 error type per API module (the trait takes the API marker because registered
 types live in `schematic-definitions`, outside the orphan rule's reach).
 `codegen/graphql.rs` emits one request struct per GraphQL operation
-(`ADDRESS = Address::GraphQl`) and the definition's `.graphql(&[..])` rules.
+(`ADDRESS = Address::GraphQl`, a `Paginated` impl with
+`page_root = graphql::page_data` when it declares pagination) and the
+definition's `.graphql(&[..])` rules. The success, failure, and GraphQL
+shapes are summarized in [`responses.md`](./responses.md).
 
 `api_struct/{constructors,fields,request_method,variant}.rs` are still on disk
 but no `mod` declares them, so they are not compiled; edits there change
@@ -397,6 +405,7 @@ crates outside the checkout and compiles them offline:
 |---------------------------------|--------|
 | `slow_fixture_apis_compile_and_send_offline` | fixture APIs send through the runtime: wire bytes, credentials, codecs, hooks, definition settings |
 | `slow_generated_types_reject_misuse_at_compile_time` | wrong success type, another API's request, mutator on a text endpoint, removed APIs fail to compile |
+| `check_status_parity_preserves_every_sniff_fixture` | the GraphQL fixture operation reproduces every sniff check-status fixture (R43); `the_parity_document_is_sniffs_check_status_query` (fast) guards its document |
 | `slow_a_runtime_of_another_abi_fails_the_build_with_a_readable_message` | the `lib.rs` ABI assert fires with its message |
 | `slow_real_apis_compile_offline` | all 18 real APIs compile |
 | `slow_query_wire_matches_pre_split_baseline` | query request lines match `tests/fixtures/wire_baseline/query_request_lines.txt` |
@@ -422,6 +431,8 @@ grep -rn "type Decoder" schematic/schema/src/
 | Scenario | Failure Mode | Detection |
 |----------|--------------|-----------|
 | Binary endpoint modeled as JSON | `MalformedSuccess` in the envelope (body kept); callers see the wrong success type | `grep "type Decoder"` |
+| Streaming endpoint modeled as `Binary` | Caller gets one buffered body instead of `ItemStream<T>` | `grep "type Decoder"` (expect `Sse`/`Ndjson`) |
+| Registered type named `{Id}Response` / `{Id}Error` | `generated-name-collision` | `schematic-gen validate` |
 | Module path mismatch | Compile error: unresolved import | `just test-fresh-output` |
 | Shared module missing `request_suffix` | Compile error: duplicate struct names | `just test-fresh-output` |
 | Generated crate built against another runtime ABI | Compile error naming both ABIs | Regenerate with the matching `schematic-gen` |

@@ -1,47 +1,119 @@
 # Definition authoring reference
 
-Use `schematic-define`'s typed builders for REST authoring. The current reference
-is `schematic/docs/definition-builders.md`; type registration and ordered module
-assembly are in `schematic/docs/typed-registration.md`. Read those pages before
-changing definition factories, schema components, or imported module emitters.
+Use `schematic-define`'s typed builders for REST authoring. Current behavior:
+`schematic/docs/definition-builders.md` (accepted forms, the `Default`
+allow-list, optional vocabulary); type registration and ordered module
+assembly: `schematic/docs/typed-registration.md`. Responses, errors, streams,
+and GraphQL: [`responses.md`](./responses.md). Pagination:
+[`pagination.md`](./pagination.md).
 
-- Create one `DefinitionContext` per module group, then explicitly register
-  nominal models in component order. Shared API variants use the same context.
-- Implement `Registration` beside nominal models with `definition_type!`, or
-  the existing nominal registration macro used in the model module. There is
-  no blanket `JsonSchema` registration. Register aliases before canonical uses
-  with `register_as::<T>(rust_path!(PublicAlias).schema_name("Component"))`.
-- Containers recursively register their leaves; primitives and free-form JSON
-  remain inline. API build stores the context's components in
-  `RestApi::schemas` and checks that every reference resolves there.
-- Build endpoints with description and one success shape. JSON requests and
-  successes take types and the mutable context. GET request bodies fail.
-- Build APIs with description and one explicit authentication choice. Environment
-  declarations must agree with explicit mappings regardless of setter order.
-  Explicit `auth_policy` remains the effective multi-method policy.
-- `Endpoint` and `RestApi` are non-exhaustive with no default. External callers
-  cannot use literals. `EndpointParams::new()` is a valid empty parameter set.
-- Query/header/cookie locations use `ParamDef`. Route identity is method/path;
-  `?` in paths fails shared validation and build. Use optional query inputs to
-  combine same-route variants. `rust_name` changes only Rust spelling.
-- Pagination is API default plus endpoint `Collection`. Keep strategy helpers
-  provider-local; validate parameter adoption and caller controls. The retired
-  pagination enums, API exception tables, and parameter pagination fields are gone.
-- REST JSON bodies store a `TypeRef` naming components plus wrapper shape, with
-  no Rust path or inline schema copy. `RestApi::rust_type` spells it through
-  `RestApi::schemas`; `RestApi::validate_references` rejects dangling names
-  (`DefinitionError::UnresolvedReference`) and malformed or duplicate components,
-  for built and deserialized APIs alike. `Schema` is WebSocket-only.
-- The unused endpoint OAuth scopes field is removed. OAuth authentication policy
-  and WebSocket definition constructors retain their established behavior.
+## Required-fact builders
 
-`assemble_module_group` returns `Result<Vec<RestApi>, DefinitionError>` and gives
-every member the finished context's components, so group members carry identical
-`schemas`. Components preserve explicit registration order, with nested-only
-types flattened in (`rust_path: None`, not referenceable). Keep unused explicit
-components unless a documented container normalization removes them. Generator
-and exporter entry points read `api.schemas`; there is no separate registry.
+- `Endpoint::{get,post,put,patch,delete,head,options}(id, path)` or
+  `Endpoint::new(id, method, path)`, then `describes` and at least one
+  success declaration before fallible `build`. JSON methods take
+  `&mut DefinitionContext`; build endpoints before borrowing that context with
+  `RestApi::builder(&ctx, name, base_url)`.
+- An API needs a description and exactly one explicit auth choice
+  (`no_auth`, `bearer_env([..])`, `basic_env(user, [..])`, or
+  `authentication(strategy, env)`). Repeated auth choices fail; explicit env
+  mappings must agree regardless of setter order. Explicit `auth_policy`
+  remains the effective multi-method policy.
+- `Endpoint` and `RestApi` are `#[non_exhaustive]` with no `Default`;
+  external literals do not compile. `EndpointParams::new()` is a valid empty
+  set. GET request bodies fail. Paths cannot contain `?` (endpoint/API build,
+  shared validators, and import reject it with API, endpoint, and path
+  context); route identity is method + path, so query/header/cookie/body
+  inputs never distinguish two endpoints.
+- New defaulted (`skip_serializing_if`) members must join `OMITTED_DEFAULTS`
+  in `define/src/bundle.rs`.
 
-See `schematic/docs/definition-snapshots.md` for transfer contracts,
-`schematic/docs/headers/README.md` for WebSocket header helpers, and
-`schematic/docs/io/openapi-extensions.md` for OpenAPI wire extensions.
+## Typed registration
+
+- One `DefinitionContext` per module group; explicitly register nominal
+  models in component order. Shared API variants use the same context.
+- Implement `Registration` beside nominal models with `definition_type!` (or
+  the model module's nominal registration macro); there is no blanket
+  `JsonSchema` dispatcher. Register aliases first with
+  `register_as::<T>(rust_path!(PublicAlias).schema_name("Component"))`; the
+  first canonical registration fixes name/path/order.
+- Containers recurse into leaves; primitives and free-form JSON stay inline.
+  Nominal generic registrations keep concrete public type arguments (never
+  stringify a generic `T` into a Rust path).
+- REST JSON bodies and shapes store a `TypeRef` (`Named`, `Array`,
+  `Optional`, `Map`, `KeyedMap { key, value }`, `Primitive(..)` incl.
+  `Primitive(Json)`), never a Rust path. API build stores the context's
+  components in `RestApi::schemas` (`SchemaComponent { name, rust_path,
+  schema }`, nested `$defs` flattened with `rust_path: None`) and runs
+  `validate_references` (`DefinitionError::UnresolvedReference`). A name
+  reached with a different wire schema fails as `ComponentConflict`.
+  `api.rust_type(&reference)` spells the Rust type. `Schema { type_name,
+  module_path }` is WebSocket-only.
+- Polymorphic bodies: `ctx.one_of::<T>([..])` / `any_of` / `all_of`.
+- `schematic_definitions::registry::assemble_module_group` returns
+  `Result<Vec<RestApi>, DefinitionError>`; every member carries identical
+  `schemas`. `just doctest` runs the registration compile-fail examples.
+
+## Auth and environment
+
+`AuthStrategy` (`#[non_exhaustive]`): `BearerToken { header }`, `ApiKey {
+header }`, `ApiKeyParam { location: ApiKeyLocation::{Query, Cookie}, name }`,
+`Basic { username_env, password_env }`, `OAuth2(OAuth2Config)` (one variant
+per grant: `AuthorizationCodePkce`, `ClientCredentials`, `DeviceCode`; API
+build runs `OAuth2Config::validate`), `None`.
+
+- `EnvMapping` fields: `bearer_token`, `basic_user`, `basic_pass`, `api_key`.
+  No legacy `basic_auth` object.
+- Basic reads every name in `username_env`/`password_env` in order (or the
+  mapping's `basic_user`/`basic_pass`); `env_auth` is never a Basic source.
+  `env_username(name)` fills or must equal Basic's `username_env`.
+- Generated `definition()` translates the policy into runtime `AuthConfig`.
+  The runtime resolves one credential per send: call `.credential(..)` →
+  client (`api_key`, `basic_auth`, `credentials`) → env (`env_order([..])`
+  replaces the order) → anonymous. `api_key(secret)` on a Basic-only or
+  no-auth API is `BuildError::IncompatibleCredential`. A credential never
+  overrides a same-named request query/cookie/header value.
+- Endpoint overrides (at most one): `.public()`, `.auth(policy)`,
+  `.auth_with_env_mapping(policy, mapping)`; resolve with
+  `RestApi::endpoint_auth`.
+
+## API-level policy and optional vocabulary
+
+- `cross_origin: CrossOrigin` (exhaustive on purpose): `same_origin()`
+  (default), `allow_origins([..])`, `allow_without_credentials()`,
+  `danger_allow_any()`, `deny()`; callers may only tighten it.
+- `request_id_header(name)` and `secret_header(name)`;
+  `definitions/tests/api_policy.rs` pins all three policies for every
+  shipped API, so a new definition adds its row there.
+- `.path_param(ParamDef::path(name, type))`: once any is declared, names
+  must equal the placeholders (`{+x}` counts as `x`).
+- `.deprecated()` (endpoint and `ParamDef`), `.rate_limit(..)`,
+  `.retry_guidance(..)` (endpoint value replaces the API's whole; read with
+  `effective_rate_limit`/`effective_retry_guidance`). Descriptive only: the
+  runtime never reads rate-limit/retry metadata and no `#[deprecated]` is
+  generated.
+- Query fidelity: a required non-adopted query parameter is a `T` field and a
+  `new()`/endpoint-method argument after the path parameters; enums become
+  `{Request}{FieldPascal}`; arrays follow `style`/`explode`. `ParamDef::new`
+  is form with `explode: false`. An unsendable query shape is a
+  `query-parameter` warning (optional) or error (required).
+
+## Snapshots and bundles
+
+- REST definitions derive plain Serde. Call `validate_references` on a
+  deserialized API before use. `just -f schematic/justfile migration-check`
+  compares historical JSON; see `schematic/docs/definition-snapshots.md`.
+- `DefinitionBundle::new(api)` (optionally `.with_models(catalog)?`): `to_json()`
+  writes canonical JSON, `from_json` loads strictly (duplicate keys, trailing
+  content, stray `null`, dropped members rejected) and reruns builder
+  validation and reference checks, including error-entry, stream-item, and
+  operation references. CLI: `schematic-gen bundle --api NAME --out FILE`,
+  `schematic-gen export-bundle --input FILE --openapi-out DIR --postman-out
+  DIR`. See `schematic/docs/io/definition-bundles.md`.
+
+## Authoring guidance maintenance
+
+`schematic/docs/authoring-examples.md` holds the compiling example included in
+schematic-define rustdoc; the `create-schematic-api` command teaches the same
+assembly. The L1 `authoring_guidance` corpus rejects obsolete REST
+constructor examples.

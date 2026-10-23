@@ -11,10 +11,10 @@ Type-safe REST and WebSocket API client code generation for Rust. Define APIs de
 
 | Package | Purpose |
 |---------|---------|
-| `schematic-define` | Primitives: `RestApi`, `Endpoint`, `AuthStrategy`, `CrossOrigin`, `Headers` (WebSocket clients), `ApiRequest`, `SuccessShape` |
-| `schematic-definitions` | Pre-built APIs: Anthropic, OpenAI, ElevenLabs, HuggingFace, LM Studio, Ollama, EMQX, GitHub, GitLab, Gitea |
+| `schematic-define` | Primitives: `RestApi`, `Endpoint`, `AuthStrategy`, `CrossOrigin`, `Headers` (WebSocket clients), `ApiRequest`, `SuccessShape`/`Success`, `ErrorSet`/`StatusMatch`, `GraphQlOperation`/`AddressRule`, `pagination::Relay` |
+| `schematic-definitions` | Pre-built APIs: Anthropic, OpenAI, ElevenLabs, HuggingFace, LM Studio, Ollama, EMQX, GitHub, GitLab, Gitea, Bitbucket, Eversolo, Samsung Smart TV, Unfolded Circle, Artificial Analysis |
 | `schematic-gen` | Code generator CLI with `generate`, `validate`, and `import` commands |
-| `schematic-runtime` | Hand-written runtime every generated REST client wraps a `Client<Tag>` of: infallible `Client::new` with chained settings validated by `build()?` or on the first call (`TransportErrorKind::InvalidClient`), `api_client!` forwarding them onto each API struct, `SharedTransport`, tighten-only `OriginPolicy`, awaitable `Call` (`.await` → `Result<T, CallError<E>>`, `.full()` → `Response` envelope that is `Ok` iff a response head arrived, else `TransportError`), `send_raw(request, &CallOptions)` → `RawResponse`, credentials (per call → client → env → anonymous), redirects hop by hop (`MAX_REDIRECTS`, `check_link`), shared `Deadline`, codecs `Json`/`Text`/`Binary`/`Empty`, JSON hooks, redacted metadata. Never retries; call futures are boxed. Docs: `schematic/docs/runtime/` |
+| `schematic-runtime` | Hand-written runtime every generated REST client wraps a `Client<Tag>` of: infallible `Client::new` with chained settings validated by `build()?` or on the first call (`TransportErrorKind::InvalidClient`), `api_client!` forwarding them onto each API struct, `SharedTransport`, tighten-only `OriginPolicy`, awaitable `Call` (`.await` → `Result<T, CallError<E>>`, `.full()` → `Response` envelope that is `Ok` iff a response head arrived, else `TransportError`), `send_raw(request, &CallOptions)` → `RawResponse`, credentials (per call → client → env → anonymous), redirects hop by hop (`MAX_REDIRECTS`, `check_link`), shared `Deadline`, codecs `Json`/`Text`/`Binary`/`Empty`, streams `Sse`/`Ndjson`/`ByteStream` (`ItemStream`, `StreamError`), multi-shape `Shapes`, `GraphQl<D>`, the `ERRORS` table, the `pager`, JSON hooks, redacted metadata. Never retries; call futures are boxed. Docs: `schematic/docs/runtime/` |
 | `schematic-schema` | Generated clients (auto-generated, do not edit): per API one client struct `{Api}` and its tag `{Api}Api`, and per endpoint a request struct implementing `EndpointSpec`, an endpoint method on `{Api}`, and a `{Endpoint}Call` type |
 
 ## CLI Commands
@@ -40,7 +40,8 @@ schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
 ## REST authoring
 
 Use the parent `schematic-define/SKILL.md` for detailed runtime and generation
-contracts. Current behavior lives in `schematic/docs/definition-builders.md`,
+contracts, and [`define.md`](./define.md), [`responses.md`](./responses.md),
+and [`pagination.md`](./pagination.md) for authoring detail. Current behavior lives in `schematic/docs/definition-builders.md`,
 `schematic/docs/typed-registration.md`, and `schematic/docs/pagination.md`.
 
 Every shipped REST provider uses a fallible `module_group()` assembly with one
@@ -107,9 +108,11 @@ registrations in source order. Supported source query expressions normalize
 before building; malformed, conflicting, or GET-body inputs fail.
 
 Generated Rust, OpenAPI, and Postman artifacts are never hand-edited. Use the
-area's generate recipes and review complete file sets. Preserve JSON/text/binary/
-empty response codec choice; streaming SSE/NDJSON endpoints use binary responses
-and caller framing. See `schematic/docs/generation/` and `schematic/docs/runtime/`.
+area's generate recipes and review complete file sets. Preserve each
+endpoint's declared success shapes and error table; streaming SSE/NDJSON
+endpoints declare stream shapes and generate `Sse`/`Ndjson` codecs yielding
+`ItemStream<T>`, never `Binary` with caller framing. See
+`schematic/docs/generation/` and `schematic/docs/runtime/`.
 
 ## Verification
 
@@ -137,7 +140,9 @@ README is an overview; its detailed reference lives in
 teaches the same fallible context assembly. Keep these entry points aligned.
 The L1 `authoring_guidance` corpus rejects obsolete REST constructor examples.
 `Success` covers JSON, text, binary, empty, SSE, NDJSON, and byte streams with
-selection modifiers; `ErrorSet::new().on(..)`/`ErrorSet::none()` declare errors.
+selection modifiers; `ErrorSet::new().on(..)`/`ErrorSet::none()` declare errors
+(endpoint `.errors`, API `.default_errors`); `GraphQlOperation` and `Relay`
+declare GraphQL operations and their paging.
 The definition vocabulary (`path_param`, `public`, `auth`,
 `deprecated`, `rate_limit`, `retry_guidance`, `one_of`) exists; see the parent
 skill. No selector API is planned here.

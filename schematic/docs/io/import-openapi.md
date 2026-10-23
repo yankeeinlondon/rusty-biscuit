@@ -67,7 +67,7 @@ assert_eq!(pet.rust_path.as_deref(), Some("items::Pet")); // `Pet` without modul
 | JSON body | Typed model or free-form JSON |
 | multipart / URL-encoded body | Form fields, with file constraints where supported |
 | text / binary body | Raw body with content type |
-| responses | One selected success; other responses remain diagnostic information (see [Several success shapes and declared errors](#several-success-shapes-and-declared-errors)) |
+| responses | Every 2xx response becomes a success shape and every 400-599 response an endpoint error entry (see [Several success shapes and declared errors](#several-success-shapes-and-declared-errors)) |
 | component / inline schemas | Named models or synthesized model names |
 | oneOf / anyOf | Untagged enum; unnamed members may remain free-form JSON |
 | allOf | Merged schema/model according to import support |
@@ -116,6 +116,7 @@ callers that classify one operation themselves.
 | several media types under one status | one shape each |
 | JSON `oneOf` with a `discriminator`, or of one array and one object | one tagged JSON shape per member |
 | 204 or no `content` | empty shape |
+| `2XX` | shapes that declare no status, used for every 2xx status no exact key names |
 | exact `400`-`599`, `4XX`, `5XX` | the endpoint's own error entries (never hoisted to the API) |
 
 Media types are compared normalized (`Text/Event-Stream; charset=utf-8` is an
@@ -133,7 +134,25 @@ lost, rather than being guessed:
   `serde_json::Value` JSON shape);
 - a JSON body or stream without a named schema (`serde_json::Value`);
 - an error status whose media types need different shapes (the first is
-  kept).
+  kept);
+- an error body under `*/*` (not imported: an error entry needs a concrete
+  media type).
+
+Import reads only the standard `responses` map; it never reads
+`x-schematic` back. A document that Schematic exported therefore imports with
+these facts lost or approximated:
+
+| Exported fact | After import |
+| --- | --- |
+| an SSE or NDJSON end condition (`[DONE]`, an event, a field) and `keep_end` | the stream ends at connection close, and nothing is kept |
+| a byte stream | a binary shape |
+| a shape's `variant` name | none; the generator names the variant by kind |
+| a shape's `note` | none; it survives only in the exported description |
+| an API's default errors | one exact or class entry per exported status on each endpoint, never on the API |
+| a class expanded because an exact entry supersedes part of it | one exact entry per status |
+
+Keys, media types, and schemas survive, so exporting the imported definition
+again gives the same `content` for every response.
 
 An operation with no representable success is an import error for that
 operation: it is left out with an `error` diagnostic naming the API and
