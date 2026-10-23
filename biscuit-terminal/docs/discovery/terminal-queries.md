@@ -45,9 +45,10 @@ terminal that answers DA1:   ESC]10;?  ESC]11;?  ESC[c   -> ESC[?62;22c   (no wa
 
 ## The startup exchange
 
-`Terminal::new()` makes one live exchange per process. It always held the
-OSC 10/11 color queries, and on macOS, Linux, and WSL2 it also asks for the
-ANSI palette (see [The ANSI palette](#the-ansi-palette-osc-4)); when the [graphics route](./graphics-routes.md)
+[`Terminal::new()`](../../lib/src/terminal.rs) makes one live exchange per process
+([`startup_exchange.rs`](../../lib/src/discovery/startup_exchange.rs)). It holds the
+OSC 10/11 color queries and, on every platform, the ANSI palette queries
+(see [The ANSI palette](#the-ansi-palette-osc-4)); when the [graphics route](./graphics-routes.md)
 cannot be decided from the environment (an unidentified terminal, an SSH
 session without forwarded hints, Zellij, and the other cases listed in
 [When the probe runs](./graphics-routes.md#when-the-probe-runs)), the Kitty
@@ -67,7 +68,8 @@ moment at which the library reads input.
 
 Whenever a tmux or GNU screen is in the path or likely (`TMUX` or `STY`
 set, or a `TERM` suggesting a hidden tmux), the graphics part is the DA1
-request alone, with no Kitty query (`ProbePlan::direct_da1_only`). tmux
+request alone, with no Kitty query
+([`ProbePlan::direct_da1_only`](../../lib/src/discovery/detection/probe.rs)). tmux
 treats an unwrapped APC (`ESC _ … ESC \`) as a pane-title change, so a Kitty
 query written as-is would retitle the pane `Gi=…` instead of reaching a
 terminal; GNU screen takes it as a hardstatus change. Inside a visible tmux
@@ -83,7 +85,7 @@ On native Windows the exchange also asks for the cell size, because Windows
 has no system call that reports it (see [Cell size](#cell-size)):
 
 ```text
-ESC]10;?  ESC]11;?  ESC[16t  ESC[c   -> ... ESC[6;20;10t ESC[?61;4;...c
+ESC]10;?  ESC]11;?  ESC]4;0;? … ESC]4;15;?  ESC[16t  ESC[c   -> ... ESC[6;20;10t ESC[?61;4;...c
 ```
 
 Whichever caller needs the exchange first, the color lookup, the palette
@@ -92,7 +94,7 @@ every part the process needs, and the answers are cached together. Each part kee
 
 | Part | Sent when |
 |------|-----------|
-| OSC 10/11 colors | Stdout is a terminal, not CI, probing is not turned off, the terminal is on the color list (below), and no multiplexer (tmux, Zellij, GNU Screen) is in the way |
+| OSC 10/11 colors | Stdout or stderr is a terminal, not CI, probing is not turned off, the terminal is on the color list (below), and no multiplexer (tmux, Zellij, GNU Screen) is in the way |
 | OSC 4 palette, slots 0–15 | Exactly when the colors are, on every platform (native Windows included) |
 | Kitty graphics query | The graphics route asks for a probe and no input is waiting, except to a visible tmux asked about its own Sixel (DA1 only) |
 | Cell size (`CSI 16 t`) | Native Windows only, whenever the exchange is sent there; a cell-size lookup before any exchange sends one when the color gate passes |
@@ -148,10 +150,12 @@ unknown.
 The palette shares the startup exchange's per-process cache: a terminal that
 does not answer is not asked again in that process, and a silent one costs
 the usual single bounded wait. It is not public API; `biscuit-visualized`
-reads it through the hidden `osc_queries::ansi_palette()` to build a
+reads it through the hidden (left out of the API docs)
+[`osc_queries::ansi_palette()`](../../lib/src/discovery/osc_queries/mod.rs) to build a
 diagram's palette in the terminal: ANSI 1–6 become the diagram's accent
 colors, and where the palette is unknown the accents are derived from the
-detected background instead.
+detected background instead (see
+[Terminal palettes](../../../biscuit-visualized/docs/merman.md#terminal-palettes)).
 
 **Native Windows sends the OSC 4 query too**, through the same console query
 backend as the OSC 10/11 colors (no Windows-specific query code), so a
@@ -227,7 +231,8 @@ building its `Terminal` at startup.
   before the graphics probe existed.
 - **A program with its own input loop** (a TUI) must not let the library
   query while it reads. It has three ways out:
-  - build with `Terminal::builder().probe(ProbeMode::Off).build()`: nothing is
+  - build with `Terminal::builder().probe(ProbeMode::Off).build()`
+    ([`ProbeMode`](../../lib/src/discovery/detection/route.rs)): nothing is
     written to the terminal during construction; the colors come from the
     environment fallbacks (`COLORFGBG`, per-terminal defaults, the system
     appearance), and the graphics route from the environment alone ("not
@@ -261,7 +266,7 @@ and its reason lists the accepted values (see
 
 ## When queries are skipped entirely
 
-No query is written when stdout is not a TTY, when running in CI, or when
+No query is written when neither stdout nor stderr is a TTY, when running in CI, or when
 probing is turned off (`ProbeMode::Off` or `BISCUIT_TERMINAL_PROBE`). Colors
 and cursor position are also not queried inside tmux, Zellij, or GNU Screen.
 
@@ -272,7 +277,7 @@ to `COLORFGBG` and per-terminal defaults.
 
 Only a reply is a measurement. `bg_color_with_source()`,
 `text_color_with_source()`, and `cursor_color_with_source()` return the color
-with its `ColorSource`: `Measured` when the terminal answered the live query,
+with its [`ColorSource`](../../lib/src/discovery/osc_queries/types.rs): `Measured` when the terminal answered the live query,
 `Estimated` when it came from `COLORFGBG` or a per-terminal default.
 `Terminal::background_source` carries the same for `Terminal::background_color`.
 Under tmux, for example, nothing is queried, so WezTerm's background reads as
@@ -293,7 +298,7 @@ only the way the terminal is reached differs.
 | Platform | How the terminal is reached | Queries |
 |----------|-----------------------------|---------|
 | macOS, Linux, WSL2 | `/dev/tty` in raw mode, read through `select(2)`; the terminal modes are restored afterwards | All of them |
-| Native Windows | The console input and output handles (`CONIN$` / `CONOUT$`), with the console modes restored afterwards | Colors, the cell size, and the graphics probe; not the ANSI palette, cursor position, or window pixels |
+| Native Windows | The console input and output handles (`CONIN$` / `CONOUT$`), with the console modes restored afterwards | Colors, the ANSI palette, the cell size, and the graphics probe; not cursor position or window pixels |
 
 The request goes to the controlling terminal rather than stdout, so it reaches
 the terminal even when stdout is captured.
@@ -322,9 +327,10 @@ Two Windows environments are never queried:
 ## Cell size
 
 Images and pixel-drawn rules are sized from the pixel size of one character
-cell. `Terminal::cell_size()` (and `discovery::fonts::cell_size()`) returns
+cell. `Terminal::cell_size()` (and
+[`discovery::fonts::cell_size()`](../../lib/src/discovery/fonts/window_size.rs)) returns
 the measured size, or `None`, in which case the drawing code uses
-`CellSize::FALLBACK` (8 px wide, 16 px tall).
+[`CellSize::FALLBACK`](../../lib/src/discovery/fonts/types.rs) (8 px wide, 16 px tall).
 
 | Platform | Where the size comes from | When it is read |
 |----------|---------------------------|-----------------|

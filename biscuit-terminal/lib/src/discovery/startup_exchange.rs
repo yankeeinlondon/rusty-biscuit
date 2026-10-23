@@ -1,6 +1,6 @@
 //! The once-per-process exchange `Terminal::new()` makes: the OSC 10/11
-//! color queries, on Unix the OSC 4 queries for ANSI palette slots 0–15, on
-//! native Windows the cell-size query (`CSI 16 t`), and,
+//! color queries, the OSC 4 queries for ANSI palette slots 0–15, on native
+//! Windows the cell-size query (`CSI 16 t`), and,
 //! when the environment cannot decide the graphics route, the Kitty graphics
 //! query, written together and ended by one DA1 sentinel.
 //! Inside a visible tmux the graphics part is the DA1 reply alone: tmux

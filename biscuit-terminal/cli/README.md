@@ -320,21 +320,25 @@ bt flowchart --json "A --> B"                      # Output as JSON
 ```
 
 **Features:**
-- **Color mode detection**: Automatically uses light or dark theme based on terminal background
+- **Terminal colors**: Drawn in the terminal's own background, text, and ANSI colors where it reports them, otherwise a fixed light or dark palette for its color mode ([Terminal palettes](../../biscuit-visualized/docs/merman.md#terminal-palettes))
 - **Transparent background**: Blends seamlessly with terminal (default)
-- **Inverse mode**: Solid background with contrasting colors (`--inverse`)
-- **High resolution**: 2x scale for sharp rendering on modern displays
+- **Inverse mode**: Solid background in the opposite fixed palette, light on a dark terminal and dark on a light one (`--inverse`)
+- **Sharp at any size**: The PNG is rendered at exactly the pixel width of the columns it fills, so it is never scaled up or down
 - **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill`. Without it, diagrams are sized so their body text is one terminal line tall, capped at the terminal width
 - **Aspect ratio preservation**: Images always keep their proportions
 
 **Rendering backend:**
-- Pure Rust rendering via `biscuit-visualized` and Merman
-- No Node.js, npm, Chromium, or `mmdc` dependency is required
+- Pure Rust rendering via `biscuit-visualized` and [Merman](../../biscuit-visualized/docs/merman.md), a Rust reimplementation of Mermaid.js
+- No Node.js, npm, Chromium, or Mermaid CLI (`mmdc`) is required
 - Use `--json` to inspect generated Mermaid instructions when image rendering is not available
 
 **Error handling:**
-- Syntax errors show the location and expected tokens
-- Returns non-zero exit code on errors
+- A terminal that cannot show images gets the diagram's source as a fenced `mermaid` code block on stdout, and the exit code is 0
+- A diagram that cannot be drawn (it does not parse, or takes longer than its [time budget](../../biscuit-visualized/docs/merman.md#time-budget)) prints the error and the diagram's source to stderr and exits non-zero
+
+```bash
+bt flowchart "A -->"    # does not parse: the error and the source go to stderr, exit code 1
+```
 
 ### Quadrant Chart Rendering
 
@@ -423,10 +427,16 @@ bt git-graph --json "commit" "branch feature"   # Output as JSON
 - `merge <name>` - Merge a branch into the current branch
 - `cherry-pick id: "abc123"` - Cherry-pick a commit
 
+Tags never overlap: when two tags on neighboring commits would collide, the commits are spaced just far enough apart to leave a gap of one em (the diagram's font size, 16 px by default) between them ([Mermaid gitGraph tag spacing](../../biscuit-visualized/docs/mermaid-gitgraph.md)).
+
+```bash
+bt git-graph 'commit id: "d1"' 'commit id: "d2" tag: "main"' 'commit id: "d3" tag: "origin/main"'
+```
+
 **Features:**
-- **Color mode detection**: Automatically uses light or dark theme based on terminal background
+- **Terminal colors**: Drawn in the terminal's own background, text, and ANSI colors where it reports them, otherwise a fixed light or dark palette for its color mode ([Terminal palettes](../../biscuit-visualized/docs/merman.md#terminal-palettes))
 - **Transparent background**: Blends seamlessly with terminal (default)
-- **Inverse mode**: Solid background with contrasting colors (`--inverse`)
+- **Inverse mode**: Solid background in the opposite fixed palette, light on a dark terminal and dark on a light one (`--inverse`)
 - **Title support**: Add a title above the diagram (`-t`/`--title`)
 - **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill`. Without it, diagrams are sized so their body text is one terminal line tall, capped at the terminal width
 - **Aspect ratio preservation**: Images always keep their proportions

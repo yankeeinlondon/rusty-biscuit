@@ -7,7 +7,8 @@
 //!
 //! Color detection uses a cascading fallback chain:
 //!
-//! 1. **Actual OSC query** (Unix only, supported terminals) - Most accurate.
+//! 1. **Actual OSC query** (supported terminals; on native Windows through the
+//!    console query backend) - Most accurate.
 //!    The query is followed by a DA1 sentinel and bounded by a silence budget;
 //!    see `docs/discovery/terminal-queries.md` for the cost contract
 //! 2. **`COLORFGBG` environment variable** - Set by some terminals with
@@ -40,7 +41,8 @@
 //! live color queries. The result is crate-internal (exposed to sibling
 //! crates only through the hidden [`ansi_palette`]): an unanswered, partial,
 //! or malformed reply leaves the affected slots unknown, never an error. Native
-//! Windows sends no OSC 4 query, so its palette is always unknown.
+//! Windows sends the OSC 4 queries too, through the same console query backend
+//! as OSC 10/11.
 //!
 //! ## Submodules
 //!

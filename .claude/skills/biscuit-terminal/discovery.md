@@ -353,7 +353,8 @@ the direct graphics probe share one cached request
 (`discovery::startup_exchange`); the wrapped exchange is cached separately.
 Remote sessions (`SSH_CLIENT`, Mosh) get the full timeout;
 `BISCUIT_TERMINAL_QUERY_SILENCE_MS` overrides the budget. On native Windows
-only colors (color-list terminals plus Windows Terminal), the cell size
+only colors and the OSC 4 palette (color-list terminals plus Windows
+Terminal, one gate for both), the cell size
 (`CSI 16 t`, riding in the startup exchange and cached per process, because
 Windows has no pixel ioctl), and the graphics probe are queried, never in a
 Windows SSH server session (there the 8×16 `CellSize::FALLBACK` applies);

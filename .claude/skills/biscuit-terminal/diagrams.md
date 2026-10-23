@@ -37,12 +37,32 @@ this crate never decodes or re-encodes a diagram for Kitty or iTerm2. `bt` has n
 it installs none. The library's own tests use fakes
 (`lib/tests/l1/render_tree_diagram_hook.rs`).
 
+## Diagram colors (the OSC 4 palette)
+
+The only diagram-specific thing this crate provides is color discovery.
+`biscuit-visualized`'s `TerminalColors::detect()` (used by
+`components::mermaid::MermaidDiagram::new`) reads
+`discovery::osc_queries::{bg_color, text_color, ansi_palette}`; ANSI slots
+1–6 become the diagram's six accents. `ansi_palette()` is `#[doc(hidden)]`,
+not public API, and reads the once-per-process startup exchange: sixteen
+`ESC ] 4 ; N ; ? BEL` queries ride with OSC 10/11 behind the same gate
+(`palette_query_wanted()` = `color_query_wanted()`: TTY, not CI, no
+multiplexer, probing on, not the Windows SSH server, a terminal known to
+answer). **Native Windows sends them too**, through the same console query
+backend (`tty_query/windows.rs`) as OSC 10/11, so Windows Terminal gives
+diagrams its own accents. An unanswered slot is `None` (never an error);
+`biscuit-visualized` then derives that accent from the background. See
+[Discovery](./discovery.md).
+
 ## `bt` diagram commands
 
 The CLI depends on `biscuit-visualized` (`clap`, `terminal`) for these
-commands; the library does not. Rendering is pure Rust (Merman
-and `layout-rs`); no Node.js or `mmdc` is involved. `bt` does not auto-fallback
-to code blocks on render errors; it reports the error and exits non-zero.
+commands; the library does not. Rendering is pure Rust (Merman, a
+Mermaid.js 12.2.0 reimplementation, and `layout-rs`); no Node.js or `mmdc` is
+involved. Diagrams use the terminal-derived palette above; `--inverse` swaps
+in the opposite fixed theme (`MermaidDiagram::inverted`) on a solid
+background. `bt` does not auto-fallback to code blocks on render errors; it
+reports the error and exits non-zero.
 
 ### Shared options
 
