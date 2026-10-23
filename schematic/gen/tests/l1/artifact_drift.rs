@@ -1,11 +1,11 @@
 //! Artifact drift detection tests.
 //!
-//! These tests verify that committed Rust, OpenAPI, and Postman artifacts
-//! (collections and environments) match
-//! what the generator would produce. They iterate every module reported by
-//! [`apis_by_module`] and compare the in-memory regeneration against the
-//! files committed under `schematic/schema/`, `schematic/openapi/`, and
-//! `schematic/postman/`, and
+//! These tests verify that committed Rust, OpenAPI, Postman (collections and
+//! environments), and AsyncAPI artifacts match what the generator would
+//! produce. They iterate every module reported by [`apis_by_module`] (and
+//! every registered WebSocket API for AsyncAPI) and compare the in-memory
+//! regeneration against the files committed under `schematic/schema/`,
+//! `schematic/openapi/`, `schematic/postman/`, and `schematic/asyncapi/`, and
 //! scan the committed OpenAPI corpus for `operationId` integrity.
 //!
 //! Run with:
@@ -152,6 +152,38 @@ fn generated_postman_artifacts_are_up_to_date() {
         committed.keys().collect::<Vec<_>>(),
         "Postman artifact file-set drift; run `just -f schematic/justfile generate`",
     );
+}
+
+/// Every registered WebSocket API has its committed AsyncAPI document, byte
+/// for byte, and `schematic/asyncapi/` holds nothing else. Each committed
+/// document's local references all resolve.
+#[test]
+fn generated_asyncapi_artifacts_are_up_to_date() {
+    use schematic_gen::export::asyncapi::{asyncapi_documents, dangling_refs, render_asyncapi};
+
+    let committed_dir = schematic_root().join("asyncapi");
+    let documents = asyncapi_documents(schematic_definitions::registry::registrations());
+    let mut expected = BTreeMap::new();
+    for document in &documents {
+        let rendered = render_asyncapi(&document.api)
+            .unwrap_or_else(|e| panic!("AsyncAPI export of {} failed: {e}", document.api.name));
+        expected.insert(PathBuf::from(&document.file_name), rendered.into_bytes());
+    }
+    let committed = source_files(&committed_dir);
+    assert_eq!(
+        committed.keys().collect::<Vec<_>>(),
+        expected.keys().collect::<Vec<_>>(),
+        "AsyncAPI artifact file-set drift; run `just -f schematic/justfile generate-asyncapi`",
+    );
+    for (name, bytes) in &expected {
+        assert!(
+            &committed[name] == bytes,
+            "AsyncAPI artifact drift in {}; run `just -f schematic/justfile generate-asyncapi`",
+            name.display(),
+        );
+        let document: serde_json::Value = serde_json::from_slice(&committed[name]).unwrap();
+        assert!(dangling_refs(&document).is_empty(), "{}: {:?}", name.display(), dangling_refs(&document));
+    }
 }
 
 /// Regression guard: the seven legacy per-API OpenAPI filenames produced by

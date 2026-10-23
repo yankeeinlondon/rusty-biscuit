@@ -20,8 +20,10 @@
 - **Selectors.** `.matches(field, value)` = top-level string equality, all must
   hold; `.fallback()` = the direction's catch-all (no selectors). Declare
   them on the documented wire values (Core/Integration `kind`+`msg`, Dock
-  `type`[+`msg`], Samsung `event`/`method`). `import-asyncapi` derives them from
-  payload top-level string `const`s (through `$ref`/`allOf`).
+  `type`[+`msg`], Samsung `event`/`method`). `import-asyncapi` reads
+  `x-schematic-selectors` when present, else derives them from payload
+  top-level string `const`s (through `$ref`/`allOf`). AsyncAPI round trip:
+  see `gen.md` § AsyncAPI.
 - **Response link.** `.responds_with("Name")` on a request; pair it with the
   endpoint's `CorrelationHints` (no API-level fallback). Correlation exists
   only with both; message names are never inspected. API

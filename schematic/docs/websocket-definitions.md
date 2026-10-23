@@ -148,10 +148,12 @@ reports an error for:
 Selectors of a direction the endpoint never receives are not checked: a
 client-only endpoint may send two client messages that share a wire value.
 
-`schematic-gen import-asyncapi` writes selectors for you: each imported
-message gets one per top-level payload property whose schema is a string
-`const` (for example `kind: {const: resp}`), following `$ref` and merging
-`allOf` parts.
+`schematic-gen import-asyncapi` writes selectors for you. A message that
+carries `x-schematic-selectors` (as every exported document does) keeps
+exactly those; any other message gets one selector per top-level payload
+property whose schema is a string `const` (for example `kind: {const: resp}`),
+following `$ref` and merging `allOf` parts. See
+[AsyncAPI export and import](io/asyncapi.md).
 
 ## Linking a request to its response
 

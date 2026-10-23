@@ -89,6 +89,7 @@ just -f schematic/justfile generate
 just -f schematic/justfile generate-one gitea
 just -f schematic/justfile generate-openapi
 just -f schematic/justfile generate-postman
+just -f schematic/justfile generate-asyncapi
 just -f schematic/justfile check-drift
 ```
 
@@ -101,17 +102,23 @@ containing `mod.rs`, `requests.rs`, and `responses.rs` when it exceeds the split
 threshold. See [partial generation](partial-generation.md) for publication,
 ownership, and cleanup rules.
 
+WebSocket APIs are exported separately, one AsyncAPI 3.0 document each, to
+`schematic/asyncapi` by `schematic-gen export-asyncapi`; `generate` and
+`generate-asyncapi` run it.
+
 ```sh
 schematic-gen validate --api openai
 schematic-gen generate --api openai --output generated/src
 schematic-gen generate --api openai --output generated/src --openapi-out specs/ --openapi-format yaml
 schematic-gen import --input petstore.yaml --output generated/src --strict
+schematic-gen export-asyncapi --output schematic/asyncapi
+schematic-gen import-asyncapi --input stream.asyncapi.yaml --output imported/
 schematic-gen bundle --api github --out github.bundle.json
 schematic-gen export-bundle --input github.bundle.json --openapi-out specs/ --postman-out collections/
 ```
 
 [OpenAPI import](../io/import-openapi.md), [OpenAPI export](../io/export-openapi.md),
-and [Postman export](../io/export-postman.md) describe the complete options,
+[Postman export](../io/export-postman.md), and [AsyncAPI](../io/asyncapi.md) describe the complete options,
 version selection, and format behavior. [Definition bundles](../io/definition-bundles.md)
 describes the `bundle` file and the checks `export-bundle` applies before it
 exports without the Rust registry.

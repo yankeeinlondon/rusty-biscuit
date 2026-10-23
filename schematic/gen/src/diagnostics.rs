@@ -73,6 +73,9 @@ pub enum Output {
     OpenApi,
     /// Postman collections.
     Postman,
+    /// AsyncAPI documents of WebSocket APIs.
+    #[serde(rename = "asyncapi")]
+    AsyncApi,
 }
 
 impl Output {
@@ -82,6 +85,7 @@ impl Output {
             Self::Rust => "rust",
             Self::OpenApi => "openapi",
             Self::Postman => "postman",
+            Self::AsyncApi => "asyncapi",
         }
     }
 }
@@ -404,7 +408,7 @@ mod tests {
                 "{feature:?}"
             );
         }
-        for output in [Output::Rust, Output::OpenApi, Output::Postman] {
+        for output in [Output::Rust, Output::OpenApi, Output::Postman, Output::AsyncApi] {
             assert_eq!(serde_json::to_value(output).unwrap(), output.to_string());
         }
         for severity in [Severity::Warning, Severity::Error] {

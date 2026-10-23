@@ -476,5 +476,4 @@ When the output path ends with `schema/src`, OpenAPI specs are generated automat
 
 ## Open Questions / Future Enhancements
 
-- Consider an AsyncAPI export path for WebSocket definitions.
 - Provide a `--bundle` flag to emit a single combined spec for `--api all`.

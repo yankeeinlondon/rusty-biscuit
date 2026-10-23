@@ -316,6 +316,33 @@ Topic page: `schematic/docs/io/export-postman.md`. Non-obvious facts:
   without the flag a complete run neither writes nor deletes them.
 - Golden fixtures: `BLESS_POSTMAN_GOLDEN=1` with the `postman_golden` filter.
 
+## AsyncAPI export and import
+
+Topic page: `schematic/docs/io/asyncapi.md`. Non-obvious facts:
+- `export-asyncapi` (not `generate`; `just generate`/`generate-asyncapi` run
+  it) writes one 3.0 document per WebSocket registration to
+  `schematic/asyncapi/{module}.json` (`{module}.{snake_api}.json` when a
+  module is shared); `export::asyncapi::asyncapi_documents` is the naming
+  rule. Diagnostics use `Output::AsyncApi` + `Feature::WebSocketDefinition`.
+- Documents are always client-perspective (`send` = client message); the
+  role rides in `x-schematic-role` and never flips a direction. Other
+  extensions: `x-schematic-{selectors,fallback,heartbeat,param,value-prefix,
+  bearer-header}` (names are `export::asyncapi::X_*`).
+- Not exported (asserted per API by `asyncapi_round_trip`): env metadata,
+  lifecycle roles, correlation and auth-flow hints, API runtime hints. The
+  three Unfolded Circle APIs re-import without correlation and then fail
+  `lower_to_plan` (`responds_with needs ... correlation`). Payload schemas
+  are unconstrained `{}` (no WS `JsonSchema` derives).
+- The importer is `asyncapi_import` (+ `reader`, `extensions`, `v3`):
+  version-dispatched; any malformed standard field is a located ERROR that
+  fails the import with nothing written (`import_asyncapi_text` writes
+  nothing; `run_import_asyncapi` persists `{module}.definition.json`,
+  `.models.json`, and the report through `prepare_export_output`). Auth is
+  the *applied* server security only. Imported endpoints/messages come back
+  in key order: compare with `common::asyncapi::canonical`.
+- Exports are validated offline against the vendored
+  `gen/tests/fixtures/asyncapi/spec-json-schemas/3.0.0.json` (Draft 7).
+
 ## Validation
 
 `generate` validates the whole batch once per output (Rust, OpenAPI, Postman)

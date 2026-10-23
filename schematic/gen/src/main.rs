@@ -158,7 +158,21 @@ enum Commands {
         strict: bool,
     },
 
-    /// Import an AsyncAPI specification and emit websocket import artifacts
+    /// Export one AsyncAPI 3.0 document per registered WebSocket API
+    ExportAsyncapi {
+        /// Directory the documents are written to
+        #[arg(short, long, value_name = "DIR")]
+        output: String,
+
+        /// One WebSocket API by name (for example `ElevenLabsTTS`); all when omitted
+        #[arg(long, value_name = "NAME")]
+        api: Option<String>,
+
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Import an AsyncAPI 2.x or 3.0 document and persist its WebSocket definition and models
     ImportAsyncapi {
         #[arg(short, long)]
         input: String,
@@ -262,6 +276,9 @@ fn main() -> ExitCode {
             },
             cli.verbose,
         ),
+        Some(Commands::ExportAsyncapi { output, api, dry_run }) => {
+            schematic_gen::commands::run_export_asyncapi_command(&output, api.as_deref(), dry_run, cli.verbose)
+        }
         Some(Commands::ImportAsyncapi {
             input,
             api_name,

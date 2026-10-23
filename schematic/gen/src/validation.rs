@@ -7,7 +7,8 @@
 //! Rust-only rules (identifiers, type syntax, generated-name collisions) are
 //! not applied to the exports, which carry those names as data. The Rust
 //! client and OpenAPI validators both resolve every JSON body reference in
-//! the API's own [`RestApi::schemas`]; Postman never reads a schema.
+//! the API's own [`RestApi::schemas`]; Postman reads a schema only to build
+//! an example body, and one it cannot resolve is a warning.
 //!
 //! The behavior is described for users in
 //! `schematic/docs/generation/validation.md`.
@@ -25,7 +26,7 @@
 //! let mut api = RestApi::builder(&ctx, "TestApi", "https://api.test.com")
 //!     .describes("Test API").no_auth().endpoints([endpoint]).build().unwrap();
 //! // A reference to a component the API does not carry blocks the Rust
-//! // client, not the Postman export.
+//! // client; the Postman export only loses that example body.
 //! api.endpoints[0].response = vec![SuccessShape::json_type("Item")];
 //!
 //! let rust = validate_rust_client(&[&api]);
@@ -34,7 +35,9 @@
 //! assert_eq!(rust[0].feature, Feature::InvalidSchemaReference);
 //! assert_eq!(rust[0].endpoint.as_deref(), Some("ListItems"));
 //!
-//! assert!(validate_postman(&[&api]).is_empty());
+//! let postman = validate_postman(&[&api]);
+//! assert!(postman.iter().all(|diagnostic| diagnostic.severity == Severity::Warning));
+//! assert_eq!(postman[0].feature, Feature::ExampleValue);
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};

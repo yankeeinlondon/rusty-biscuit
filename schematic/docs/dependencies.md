@@ -79,7 +79,8 @@
     Postman exporter's example engine (`export::examples`) validates every
     example against the API's registered schemas (Draft 2020-12, offline,
     local references only) before emitting it; the L1 tests also validate
-    collections against the published Postman schema. A normal dependency
+    collections against the published Postman schema and exported AsyncAPI
+    documents against a vendored AsyncAPI 3.0.0 schema. A normal dependency
     since examples are checked at generation time, not only in tests._
 
     _Tags: json-schema, validation_

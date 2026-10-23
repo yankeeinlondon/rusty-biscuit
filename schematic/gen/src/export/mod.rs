@@ -1,7 +1,9 @@
 //! Shared export helpers for API artifact generation.
 //!
-//! Provides normalized representations that both OpenAPI and Postman writers consume.
+//! Provides normalized representations that both OpenAPI and Postman writers
+//! consume, and the AsyncAPI export of WebSocket APIs.
 
+pub mod asyncapi;
 pub mod auth;
 pub mod body;
 pub mod examples;

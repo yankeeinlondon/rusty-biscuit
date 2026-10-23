@@ -120,6 +120,11 @@
 
 #![doc = include_str!("../../docs/authoring-examples.md")]
 
+/// Compiles the examples of `schematic/define/README.md`.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoc;
+
 pub mod auth;
 pub mod bundle;
 pub mod components;

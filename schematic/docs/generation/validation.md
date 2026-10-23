@@ -96,7 +96,11 @@ severity=error api=Feed,FeedCompat endpoint=<none> feature=generated-name-collis
 - `api` names every API involved; a module-group problem lists each member,
   separated by commas.
 - `endpoint` is `<none>` when the problem belongs to the API or the group.
-- `output` is `rust`, `openapi`, or `postman`.
+- `output` is `rust`, `openapi`, `postman`, or `asyncapi`. The `asyncapi`
+  output is written by `export-asyncapi`, not by `generate`; it reports
+  `websocket-definition` findings: an error for a definition that cannot
+  become a valid document, a warning for what the
+  [supported subset](../io/asyncapi.md#what-the-export-leaves-out) cannot carry.
 
 The same fields are available to code as
 `schematic_gen::diagnostics::ValidationDiagnostic`, which also implements

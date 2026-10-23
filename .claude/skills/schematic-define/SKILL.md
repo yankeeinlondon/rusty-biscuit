@@ -145,6 +145,9 @@ let _models = client.list_models().await?; // ListModelsResponse, or a CallError
    errors, auth, env mapping, or pagination.
 3. Update `schematic/docs/` topic pages (canonical), the READMEs (overview
    only), `schematic/docs/io/openapi-extensions.md`, and this skill.
+   `define/README.md`'s Rust examples are doctests (`ReadmeDoc` in
+   `define/src/lib.rs`), so a builder rename fails `just doctest` until the
+   README follows.
 4. After a generator change that alters signatures, build dependents with
    `--all-features --all-targets` (sniff's remote providers are feature-gated)
    and run `just test-schema` (no other gate compiles

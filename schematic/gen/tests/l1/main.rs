@@ -11,7 +11,11 @@ mod common;
 
 mod api_inventory;
 mod artifact_drift;
+mod asyncapi_export;
 mod asyncapi_import;
+mod asyncapi_import_matrix;
+mod asyncapi_persist;
+mod asyncapi_round_trip;
 mod definition_baseline;
 mod definition_bundles;
 mod discriminated_unions;

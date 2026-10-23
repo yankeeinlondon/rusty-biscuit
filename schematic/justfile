@@ -240,6 +240,7 @@ generate:
     @echo ""
     @cargo run -p schematic-gen -- generate --api all --output schema/src \
         --openapi-out openapi --postman-out postman --postman-environment -v
+    @cargo run -p schematic-gen -- export-asyncapi --output asyncapi -v
     @just _notify "The Schematic definitions in schematic-definitions were generated to schematic-schema" "Schematic"
 
 # regenerate one API's module group in schema/, openapi/, and postman/, keeping every other module
@@ -268,6 +269,14 @@ generate-postman:
     @echo ""
     @cargo run -p schematic-gen -- generate --api all --output schema/src \
         --postman-out postman --postman-environment --no-openapi -v
+
+# generate only the AsyncAPI 3.0 documents of the WebSocket APIs (schematic/asyncapi)
+generate-asyncapi:
+    @echo ""
+    @echo "Generating AsyncAPI Documents"
+    @echo "-----------------------------"
+    @echo ""
+    @cargo run -p schematic-gen -- export-asyncapi --output asyncapi -v
 
 # build, install CLI, generate schemas, and verify
 install *args="":
