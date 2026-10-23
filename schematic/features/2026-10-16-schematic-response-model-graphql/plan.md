@@ -15,6 +15,8 @@ packages:
   - schematic-gen
   - schematic-runtime
   - schematic-schema
+  - schematic-definitions
+  - sniff
 source_files_during_phase_2:
   - schematic/define/src/builders.rs
   - schematic/define/src/bundle.rs
@@ -171,6 +173,152 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
   - .claude/skills/schematic-define/SKILL.md
   - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_5:
+  - Cargo.lock
+  - schematic/define/src/builders.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/responses.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/classify.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/mappings/responses.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/response.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/bundle_support/mod.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/definition_bundles.rs
+  - schematic/define/tests/fixtures/bundles/fixture.json
+  - schematic/define/tests/openapi_tests.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/define/tests/response_import_matrix.rs
+  - schematic/define/tests/response_openapi.rs
+  - schematic/define/tests/response_vocabulary.rs
+  - schematic/definitions/Cargo.toml
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/anthropic/types/mod.rs
+  - schematic/definitions/src/anthropic/types/streaming.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/mod.rs
+  - schematic/definitions/src/elevenlabs/types.rs
+  - schematic/definitions/src/elevenlabs/types/common.rs
+  - schematic/definitions/src/elevenlabs/types/speech.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/mod.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/lmstudio/types.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/ollama/types/completion.rs
+  - schematic/definitions/src/ollama/types/models.rs
+  - schematic/definitions/src/ollama/types/openai.rs
+  - schematic/definitions/src/openai_pagination.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/registry/typed.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/definitions/tests/authoring_surface.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/module_docs.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/codegen/responses.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/item.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/export/vocabulary.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/common/components.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/gen/tests/l1/response_adapters.rs
+  - schematic/gen/tests/l1/vocabulary_exports.rs
+  - schematic/openapi/anthropic.json
+  - schematic/openapi/bitbucket.json
+  - schematic/openapi/elevenlabs.json
+  - schematic/openapi/lmstudio.json
+  - schematic/openapi/ollama.json
+  - schematic/openapi/openai.json
+  - schematic/postman/elevenlabs.postman_collection.json
+  - schematic/postman/lmstudio.postman_collection.json
+  - schematic/postman/ollama.postman_collection.json
+  - schematic/postman/openai.postman_collection.json
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama.rs
+  - schematic/schema/src/ollama/mod.rs
+  - schematic/schema/src/ollama/requests.rs
+  - schematic/schema/src/ollama/responses.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/schema/tests/non_json_endpoints.rs
+  - sniff/lib/src/remote/bitbucket.rs
+  - sniff/lib/src/remote/envelope.rs
+  - sniff/lib/tests/l1/remote_providers.rs
+docs_updated_during_phase_5:
+  - schematic/docs/definition-builders.md
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/io/definition-bundles.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/responses-and-errors.md
+  - schematic/docs/runtime/codecs.md
+  - schematic/docs/runtime/README.md
+  - schematic/docs/runtime/sending-and-responses.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/schematic-define/schematic/definitions.md
+  - .claude/skills/schematic-define/schematic/gen.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_6:
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/tests/response_openapi.rs
+  - schematic/gen/tests/l1/response_adapters.rs
+  - schematic/schema/tests/streaming_providers.rs
+  - schematic/openapi/github.json
+  - schematic/openapi/openai.json
+docs_updated_during_phase_6:
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/schematic-define/SKILL.md
 ---
 
 # Schematic response model v2 and GraphQL implementation plan
@@ -373,25 +521,25 @@ Address-rule tag and required `suffix`, replacement, and append-path payloads, p
 
 ### Wave 9 — Storage switch (sequential coordinator)
 
-- [ ] **Response switch**
+- [x] **Response switch**
   - Change `Endpoint::response` and API error/GraphQL fields to the finalized model; widen builder lowering in place and preserve explicit none versus omitted/inherit behavior. Activate Phase 4 generator, validator, importer, exporter, and extension adapters; remove the temporary legacy path after all consumers switch.
   - Update self-contained bundle loading, feature exports, and serde comparisons. Preserve original snapshots and narrowly enumerate response/error/GraphQL field differences. Reject dangling registrations and audit the matrix before accepting a baseline update.
 
 ### Wave 10 — Provider definitions (parallel by disjoint provider directory)
 
-- [ ] **Ollama migration**
+- [x] **Ollama migration**
   - Apply the Phase 1 endpoint inventory: native NDJSON and appropriate retained terminators, generate/chat as single endpoints with NDJSON and JSON shapes chosen by `Content-Type` (`stream` stays an optional field), and OpenAI-compatible SSE `[DONE]`. Register reachable stream types and account for every reported stranded type. Keep documented provider-error events typed and observable.
-- [ ] **LM Studio migration**
+- [x] **LM Studio migration**
   - Replace both streaming binary declarations with registered SSE events and evidence-supported end conditions; use connection close where appropriate. Include or explicitly record unsupported documented error events.
-- [ ] **Anthropic migration**
+- [x] **Anthropic migration**
   - Give the single CreateMessage endpoint a JSON shape and an SSE shape with registered Messages event variants, consuming message_stop by default; `stream` stays an optional field. Cover provider error events and both reply variants.
   - Bitbucket source endpoint (R32a): `Directory` JSON listing plus `File` fallback; record the `.json`-file finding. OpenAI `GetResponse` (R32b): add the SSE `ResponseStreamEvent` shape beside `Response`, with the documented end condition and its source.
-- [ ] **ElevenLabs migration**
+- [x] **ElevenLabs migration**
   - Make StreamSpeech an incremental byte stream; select timestamp-stream framing from evidence. Correct documented binary/audio/archive media types without removing output-format query controls. Record research/provider discrepancies, defaults, and any removed hooks.
 
 ### Wave 11 — Regeneration and dependents (sequential)
 
-- [ ] **Artifact integration**
+- [x] **Artifact integration**
   - Regenerate `schematic-schema`, OpenAPI, and Postman from definitions. Never edit generated Rust/manifests by hand. Compare untouched definition source and public types against Phase 1 captures; update the explicit migration list for deliberate changes only.
   - Fix only forced dependent call sites found by the inventory; log every location and type change. Do not rewrite sniff's hand-written GraphQL client or adjacent dependent behavior.
   - Run definition/source-scan/round-trip and affected-package L1 checks, generated schema compile/L1/lint, and all actual dependent builds/tests. Ensure the runtime is included even if the area's recipe has not yet incorporated it.
@@ -402,18 +550,18 @@ Address-rule tag and required `suffix`, replacement, and append-path payloads, p
 
 ### Wave 12 — Export/import checks (parallel by test ownership)
 
-- [ ] **OpenAPI coverage**
+- [x] **OpenAPI coverage**
   - Assert merged response media/status maps, all success/error shape kinds, preserved class ranges and expanded winning statuses, stream metadata, `oneOf` with `discriminator` for tagged JSON groups, `*/*` for the fallback, and shape notes in response descriptions. Parse exported documents with `openapiv3`.
   - Assert real ElevenLabs content types and query-controlled defaults. Test `x-schematic` contains every new field plus rate-limit, deprecated, auth override, cross_origin, and request-id inherited from prerequisites.
-- [ ] **Import coverage**
+- [x] **Import coverage**
   - Exercise normalized JSON/+json, SSE, NDJSON/jsonl, text, and binary mapping; deduplicate identical successes and preserve distinct same-media schemas with exact statuses. Test Value/connection-close fallback diagnostics, 204 empty, endpoint-level errors, default/1xx/3xx/multiple-error-media diagnostics, and no-success rejection.
   - Run JSON and YAML matrix walkers from real exported fixtures through public import/export. Verify multi-shape endpoints (including tagged `oneOf` groups and the fallback) round-trip, content types survive, and common HTTP errors are not hoisted.
-- [ ] **Postman coverage**
+- [x] **Postman coverage**
   - Update scoped golden expectations for first success media type and v2 storage. Assert contextual nonfatal GraphQL skip diagnostics in both exporters; do not implement future runnable GraphQL Postman requests.
 
 ### Wave 13 — Shipped runtime checks (sequential)
 
-- [ ] **Provider verification**
+- [x] **Provider verification**
   - Through regenerated clients, prove one Ollama NDJSON and one SSE stream deliver incrementally, Anthropic returns each variant by `Content-Type` with the caller's `stream` sent unchanged, Bitbucket selects `Directory` and `File`, OpenAI `GetResponse` returns each variant, and ElevenLabs yields its first audio chunk before completion. Assert final Ollama statistics and typed provider-error events.
   - Run definition tests for every migrated endpoint from the inventory, confirming LM Studio framing/end evidence and ElevenLabs timestamp/media decisions. Complete provider evidence and hook-removal entries as findings occur.
 

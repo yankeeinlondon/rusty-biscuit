@@ -14,6 +14,8 @@ packages:
   - schematic-gen
   - schematic-runtime
   - schematic-schema
+  - schematic-definitions
+  - sniff
 human_review: false
 source_files_during_phase_2:
   - schematic/define/src/builders.rs
@@ -91,15 +93,6 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/schematic-define/SKILL.md
-message_to_agent: |-
-  Phase 4 is complete; read "## Phase 4" in this log ("Decisions taken before the waves", "What landed", "Adopted defaults and decisions").
-  What Phase 5's storage switch must do with Phase 4's work:
-  - The generator, OpenAPI exporter, x-schematic writer, Postman exporter, and definition_gen already read `Endpoint::success_shapes()` and `RestApi::effective_errors`; once `Endpoint::response` stores `Vec<SuccessShape>`, they need no change. Production OpenAPI import still uses the legacy mapping: switch `mappings::map_operation` to `openapi::classify_responses` and extend `OpenApiImport::remap_reference_names` to shapes and error entries (the log lists the behavior differences that switch causes).
-  - Delete the hidden test seam `Endpoint::shapes_preview` (define/src/types.rs) and make `success_shapes()` return the stored list. Tests that set it: gen `codegen::responses::tests`, gen `tests/l1/fresh_output_compile.rs` (`shapes_fixture`), `tests/l1/response_adapters.rs`, `tests/common/components.rs` (`shape_reference`), define `tests/response_openapi.rs`, and the definition_gen unit test; assign `response` instead. Fold stream item types into `Endpoint::json_references()`.
-  - Still reading `endpoint.response` directly: define `pagination/{resolve,validate}.rs`, gen `check_pagination`, and the Postman composition warning in `gen/src/export/vocabulary.rs`.
-  - `SuccessShape::variant` / `Success::variant(name)` is new (D-15 author names): use it for Bitbucket `Directory`/`File`, and for any two shapes of one kind whose content types do not separate their names (validation asks for it).
-  - `ErrorBody` is now `ErrorBody<A>` (A = the generated API marker) so generated code can implement it for registered types from schematic-definitions; runtime `ABI` and gen `RUNTIME_ABI` are 6 and `schematic-schema` is regenerated for 6. Regenerate with `just generate` after migrating definitions.
-  - The D-15 collision with Ollama's unregistered `GenerateResponse`/`ChatResponse` (Phase 1 contract freeze) is still to be resolved by renaming those types when they are registered.
 source_files_during_phase_4:
   - schematic/define/src/builders.rs
   - schematic/define/src/openapi/export/mod.rs
@@ -180,6 +173,159 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
   - .claude/skills/schematic-define/SKILL.md
   - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_5:
+  - Cargo.lock
+  - schematic/define/src/builders.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/responses.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/classify.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/mappings/responses.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/response.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/bundle_support/mod.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/definition_bundles.rs
+  - schematic/define/tests/fixtures/bundles/fixture.json
+  - schematic/define/tests/openapi_tests.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/define/tests/response_import_matrix.rs
+  - schematic/define/tests/response_openapi.rs
+  - schematic/define/tests/response_vocabulary.rs
+  - schematic/definitions/Cargo.toml
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/anthropic/types/mod.rs
+  - schematic/definitions/src/anthropic/types/streaming.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/mod.rs
+  - schematic/definitions/src/elevenlabs/types.rs
+  - schematic/definitions/src/elevenlabs/types/common.rs
+  - schematic/definitions/src/elevenlabs/types/speech.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/mod.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/lmstudio/types.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/ollama/types/completion.rs
+  - schematic/definitions/src/ollama/types/models.rs
+  - schematic/definitions/src/ollama/types/openai.rs
+  - schematic/definitions/src/openai_pagination.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/registry/typed.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/definitions/tests/authoring_surface.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/module_docs.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/codegen/responses.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/item.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/export/vocabulary.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/common/components.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/gen/tests/l1/response_adapters.rs
+  - schematic/gen/tests/l1/vocabulary_exports.rs
+  - schematic/openapi/anthropic.json
+  - schematic/openapi/bitbucket.json
+  - schematic/openapi/elevenlabs.json
+  - schematic/openapi/lmstudio.json
+  - schematic/openapi/ollama.json
+  - schematic/openapi/openai.json
+  - schematic/postman/elevenlabs.postman_collection.json
+  - schematic/postman/lmstudio.postman_collection.json
+  - schematic/postman/ollama.postman_collection.json
+  - schematic/postman/openai.postman_collection.json
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama.rs
+  - schematic/schema/src/ollama/mod.rs
+  - schematic/schema/src/ollama/requests.rs
+  - schematic/schema/src/ollama/responses.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/schema/tests/non_json_endpoints.rs
+  - sniff/lib/src/remote/bitbucket.rs
+  - sniff/lib/src/remote/envelope.rs
+  - sniff/lib/tests/l1/remote_providers.rs
+docs_updated_during_phase_5:
+  - schematic/docs/definition-builders.md
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/io/definition-bundles.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/responses-and-errors.md
+  - schematic/docs/runtime/codecs.md
+  - schematic/docs/runtime/README.md
+  - schematic/docs/runtime/sending-and-responses.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/schematic-define/schematic/definitions.md
+  - .claude/skills/schematic-define/schematic/gen.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_6:
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/tests/response_openapi.rs
+  - schematic/gen/tests/l1/response_adapters.rs
+  - schematic/schema/tests/streaming_providers.rs
+  - schematic/openapi/github.json
+  - schematic/openapi/openai.json
+docs_updated_during_phase_6:
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/schematic-define/SKILL.md
+message_to_agent: |-
+  Phase 6 is complete; read "## Phase 6" in this log (findings and review agenda).
+  - Phase 5 was NOT committed before Phase 6 ran, so the working tree holds both phases; the scope calculator sees both.
+  - `x-schematic` now carries document `cross_origin` (only when not `SameOrigin`), `request_id_header`, and operation `cross_origin` (endpoint override). Struct literals of `SchematicDocExtension`/`SchematicOpExtension` need these members.
+  - Mock-server tests through the regenerated clients live in `schematic/schema/tests/streaming_providers.rs`; its `HeldServer` (raw TCP, holds the body until the test saw the first item) is reusable for any incremental-delivery check. These run via `just test-schema` only (CI does not run the schema crate).
+  - OpenAI `BetaResponseStreamEvent` (importer output, untagged) decodes most events as the audio variants; logged, not fixed. Do not build GraphQL/pagination tests that depend on OpenAI stream event variants.
+  - Shipped-definition export tests are in `gen/tests/l1/response_adapters.rs` (`shipped_*`); building the full OpenAI API costs ~1.2 s, so trim to the endpoints you need.
 ---
 
 # Implementation Log for 2026-10-16-schematic-response-model-graphql (8 phases)
@@ -1821,3 +1967,852 @@ operations), `runtime/codecs.md` ("What generated code emits" replaces
 and `generation/validation.md`. The `schematic-define` skill (`SKILL.md`,
 `schematic/gen.md`) now describes the generated v2 codecs, the test seam,
 `variant`, and the removed dead files.
+
+## Phase 5
+
+Run of 2026-10-22. Tree: HEAD `4aba5e94c` (Phase 4 committed), clean.
+Implementer: `claude/opus` as coordinator. Wave 9 (the storage switch) ran in
+the main session because every consumer shares `schematic-define`'s core
+files; Wave 10's four provider migrations ran as parallel foreground
+subagents on disjoint provider directories; Wave 11 ran in the main session.
+
+### Wave 9 — Storage switch (main session)
+
+- `Endpoint::response` is now `Vec<SuccessShape>`, serialized as an array under
+  the historical member name (frozen form). `ApiResponse` is **removed**
+  (contract freeze: "survives only until Phase 5 … then is removed"; the
+  spec's "Proposed: yes, as builder sugar only" is answered by `Success`,
+  which already is the sugar). Thin constructors `SuccessShape::{json,
+  json_type, json_vec_type, text, binary, empty}` replace `ApiResponse`'s for
+  hand-built test literals; `SuccessShape::plain()` replaces
+  `legacy_response()` (the lone non-stream shape without facts: what every
+  pre-v2 endpoint stored).
+- Builder lowering stores the validated shape list (`EndpointBuilder::build`);
+  the "stored once `Endpoint::response` holds response model v2 shapes"
+  refusal is gone. Explicit `ErrorSet::none()` versus an omitted policy is
+  unchanged (`no_declared_errors`).
+- `Endpoint::success_shapes()` returns `&[SuccessShape]` (the stored list);
+  the hidden `Endpoint::shapes_preview` seam is deleted and every test that
+  set it assigns `response`. `Endpoint::json_references()` now includes SSE
+  and NDJSON item types, so API build and bundle load reject a dangling
+  stream item reference (R23 "missing registered item type").
+- Pagination (`define/src/pagination/{resolve,validate}.rs`,
+  `gen` `check_pagination`) reads the endpoint's **sole** JSON shape; an
+  endpoint with several shapes is never an inferred list, and an authored
+  collection on one reports `the response is not a single JSON shape` (was
+  `the response is not JSON`).
+- Postman's composition warning (`gen/src/export/vocabulary.rs`) reads the
+  first success shape, the one Postman describes (R29).
+- `x-schematic`: `SchematicOpExtension::response` is now a `ResponseShape`
+  (the first shape). Its serialized form for JSON/Text/Binary/Empty equals the
+  removed `ApiResponse`'s, so committed OpenAPI artifacts are byte-identical
+  for every untouched endpoint; `success` still lists every shape when
+  `response` cannot say everything.
+- **OpenAPI import now runs `classify_responses` in production**
+  (`mappings::map_operation` takes the API name; the legacy `map_responses`,
+  `map_response_ref`, and `ResponseContentClass` are deleted). An operation
+  without a representable success is an import error for that operation
+  (R28), reported as the existing "Failed to map operation" diagnostic.
+  `OpenApiImport::remap_reference_names` now renames JSON success, stream
+  item, request, and JSON error references.
+- `definition_gen` emits the plain `returns_*` call for a lone plain shape and
+  `Success::…` builder chains otherwise (unchanged behavior, now off the
+  stored list).
+
+#### Finding and decision: the OpenAI definition is importer output
+
+`definitions/src/openai/mod.rs` is written by `just import-openai`, and
+`gen/tests/l1/import_overlay.rs::reimporting_the_vendored_openai_document_reproduces_the_committed_definition`
+requires a re-import to reproduce it byte for byte. The spec does not
+anticipate this. Switching production import to `classify_responses` (plan
+Wave 9; Phase 4's message) makes a re-import declare:
+
+- JSON or binary + SSE on six streaming endpoints (`CreateSpeech`,
+  `CreateTranscription`, `CreateChatCompletion`, `CreateImageEdit`,
+  `CreateImage`, `CreateResponse`), which D-19 leaves unmigrated, and whose
+  D-15 enum `CreateChatCompletionResponse` collides with the registered type
+  of that name, so generation would fail;
+- endpoint error entries (400/404 `Error`, `ErrorResponse`, `BetaError`) on
+  14 endpoints, changing their failure types against R24 ("only a migration
+  that deliberately opts into declared errors changes that endpoint's failure
+  type");
+- binary-first shape lists on `RetrieveVideoContent`, `GetSkillContent`, and
+  `GetSkillVersionContent` (binary + JSON), where the old importer chose JSON;
+- binary `application/sdp` on `CreateRealtimeCall`, which the old importer did
+  not recognize and declared `Empty` with a "no suitable response" warning.
+
+**Correction made during the phase:** the multi-shape endpoint the import
+produces is `CreateResponse` (POST `/responses`), not `GetResponse`. The
+vendored `specs/openai/openapi.yaml` lists only `application/json` for
+`getResponse`; OpenAI's current published document (Phase 1 evidence) lists
+both. So R32b's stream cannot come from the import.
+
+**Decision (R24 and D-19 are decided; R28 and the plan's import switch are
+decided; the import invariant is a repository rule):** commit the re-imported
+`openai/mod.rs` (`types.rs` is unchanged) and scope it in the hand-written
+overlay `definitions/src/openai_pagination.rs`, which the importer never
+writes: every imported endpoint keeps one shape, the one the old importer
+chose (the first JSON shape, else the first), and no errors; then
+`stream_get_response` authors R32b: `GetResponse` keeps its JSON
+`BetaResponse` and gains the SSE `BetaResponseStreamEvent` shape, each with a
+note (the `stream` query parameter selects the reply, R13a). Migrating
+another OpenAI endpoint later is a function in the same overlay.
+
+Alternatives rejected:
+
+- accept the whole re-import: changes 20 unmigrated endpoints' generated types
+  (R24, D-19) and fails generation on the D-15 collision;
+- keep the legacy importer for OpenAI: a second import path, which the plan
+  forbids ("do not introduce a persistent second public response system"),
+  and R28 requires the v2 mapping;
+- hand-edit `openai/mod.rs`: the next `just import-openai` would undo it, and
+  the import-invariant test fails.
+
+The one unmigrated endpoint whose type still changes is `CreateRealtimeCall`
+(`()` → `Bytes`): reproducing the old `Empty` would mean re-creating an
+importer defect (the SDP answer was discarded). It is listed as a migration
+with its reason. **Review agenda:** confirm the overlay narrowing, and
+whether the OpenAI streaming endpoints should be migrated in a follow-up (each
+needs an author-chosen enum or variant name for D-15).
+
+`GetResponse` (R32b): JSON `BetaResponse` + SSE `BetaResponseStreamEvent`,
+ending at connection close (no Responses terminator is documented; source:
+<https://github.com/openai/openai-openapi/blob/main/openapi.json>, whose
+`GET /responses/{id}` 200 lists `application/json` and `text/event-stream`
+and documents terminal `response.completed`/`failed`/`incomplete` events,
+which are items). Test:
+`openai_pagination::tests::get_response_returns_json_or_server_sent_events_and_every_other_endpoint_keeps_one_shape`
+(GetResponse's two shapes and notes; `CreateChatCompletion`,
+`CreateResponse`, `CreateSpeech`, and `RetrieveVideoContent` keep the old
+importer's shape; every other endpoint has one shape and no errors).
+
+#### Definition baselines (R22)
+
+`gen/tests/l1/definition_baseline.rs` implements the Phase 1 allow-list:
+
+- `lower_single_responses` rewrites every historical single `response` into
+  `[{"shape": …}]` and recomputes that endpoint's fingerprint as `snapshot`
+  does, so unchanged endpoints compare equal; a list is left in place.
+- `RESPONSE_MIGRATIONS` names one `(api, endpoint, reason)` per deliberate
+  migration; only that endpoint's `response`/`errors` and fingerprint may
+  differ, and an entry that allows no difference fails as stale.
+- `MIGRATED_COMPONENTS` names one `(api, component, reason)` per component a
+  migration registers or corrects; those registry rows are compared nowhere
+  else, and an entry naming no current component fails as stale.
+- Tests: `a_historical_single_response_is_lowered_and_a_changed_one_is_still_reported`
+  (a historical `Text` mutated to `Binary` is still reported at
+  `…/response/0/shape` and the fingerprint) and the extended
+  `historical_normalization_lowers_basic_and_unused_usernames_only` (the
+  lowering touches only `response` and fingerprints, and equals
+  `[{"shape": raw}]`). `changed_description_is_detected_at_its_exact_field`
+  still passes, so an unrelated description mutation is still detected.
+
+#### Bundle matrix (success-shape columns, deferred from Phase 2)
+
+`define/tests/bundle_support/mod.rs` gains `Converse` (JSON with note and
+variant `Whole`, SSE `Event` ending at event `done` kept, binary fallback
+`Attachment`), `Submit` (two JSON shapes tagged `kind`, a byte stream
+`audio/mpeg`, an empty shape at 204), and `Follow` (NDJSON ending at field
+`kind = "end"`, status 200); the committed fixture was regenerated by the
+bundle-tool path (only those additions and the `response` array form
+differ; literals reviewed, no secrets). `bundle_json_matrix()` gains 87
+cells over the frozen success and stream columns. Default outcome: a located
+error, nothing loaded. Exceptions that load: `statuses` absent or `[]`;
+`fallback` and `keep` absent or `false`; `content_type`, `note`, `variant`
+absent; `note: ""`; `DataLineEquals("")`; tag and terminator value `""`.
+Covered per column: control, absent, null, wrong type, one/every invalid
+element (collections), empty, nested required members, semantic rules
+(wildcard and shared media, empty-shape and fallback content types, status
+domain and duplicates, 204 on a body, missing/repeated/non-scalar tags, tag
+on a stream, fallback on JSON, variant identifier/uniqueness/single shape,
+dangling SSE and NDJSON item references, terminator/framing compatibility,
+`keep` at connection close), and a duplicate key. Five existing cells changed
+only their expected line numbers. Smell grep over the changed readers: no new
+`#[serde(default)]`, `unwrap_or_default()`, `.ok()`, or
+`filter_map(.. as_str())` on a load-bearing member.
+
+#### Import remap test
+
+`define/tests/openapi_tests.rs::a_component_that_yields_its_name_is_renamed_in_success_stream_and_error_references`:
+Petstore's `CreatePetRequest` yields its name to the `CreatePet` request
+struct; an SSE alternative and a 400 error naming it now import as
+`CreatePetRequest2` and the imported API's references resolve (without the
+remap extension the stream item would dangle).
+
+### Wave 10 — Bitbucket `GetSource` (R32a, main session)
+
+`GetSource` declares `Directory` (JSON `PaginatedResponse<SourceEntry>`) and
+`File` (binary fallback), each with a note. **R32a finding:** no header tells
+a file from a directory (Phase 1: only `Content-Disposition: attachment`,
+not a spec wire tag), and worse than the spec anticipates: every member of
+`PaginatedResponse<T>` defaults, so a committed JSON *object* file (for
+example `package.json`, served as `application/json`) decodes **successfully
+as an empty `Directory`**, not as `MalformedSuccess`; only a non-object JSON
+file fails to decode. The `Directory` note records the limitation. Shape set
+kept as the spec directs. Test: `bitbucket::tests` (`GetSource` shapes,
+variant names, fallback, the note's limitation text).
+
+**Forced dependent edits (R34), sniff** (`sniff/lib/src/remote/bitbucket.rs`,
+`sniff/lib/src/remote/envelope.rs`):
+
+- directory walk (`collect_directory_entries`): matches
+  `GetSourceResponse::Directory(listing)`; a `File` reply is a `RemoteApi`
+  error naming the path (the tree then degrades to unavailable, as an
+  undecodable listing did before). Type change at this call site:
+  `bytes::Bytes` → `GetSourceResponse`. The hand decoder
+  `decode_directory_listing` and its two unit tests are removed: the runtime
+  decodes the listing now.
+- file read (`get_file_content`): reads through the generated client's
+  `send_raw` with the same `GetSourceRequest`, classified by the new
+  `Replies::raw` (error status as for a call; cut-off body or unfollowed
+  redirect without a status), so a file's bytes arrive whatever media type
+  Bitbucket sends. This keeps sniff's behavior and is not exposed to the R32a
+  limitation above.
+- New sniff L1 tests in `sniff/lib/tests/l1/remote_providers.rs`:
+  `a_committed_json_file_is_read_as_its_raw_text` (an `application/json`
+  `package.json` arrives whole) and
+  `a_json_reply_that_is_not_a_listing_leaves_the_tree_unavailable` (a JSON
+  array → `MalformedSuccess` → tree unavailable). The existing
+  `a_malformed_directory_listing_leaves_the_tree_unavailable_not_empty`
+  (`text/plain` body) now exercises the `File` branch.
+
+### Wave 10 — Provider definitions (parallel subagents)
+
+Each subagent owned one provider directory, verified with scoped commands
+only (its module's `definitions` tests, `schematic-gen validate --api <key>`,
+clippy, and its `definition_baseline` case, expected to fail until the
+coordinator added the allow-list entries). Provider evidence is the Phase 1
+"Provider inventory and evidence" (read 2026-10-22; no provider was called).
+
+**Anthropic** (`definitions/src/anthropic/`; new `types/streaming.rs`):
+
+- `CreateMessage`: JSON `MessageResponse` (note "returned when `stream` is
+  false or omitted") + SSE `MessageStreamEvent` (note "returned when `stream`
+  is true"), `EventNamed("message_stop")` consumed. `stream` stays an ordinary
+  request field. Generated enum `CreateMessageResponse` (no collision).
+- `MessageStreamEvent` (`#[serde(tag = "type")]`): `MessageStart`,
+  `ContentBlockStart`, `ContentBlockDelta` (`TextDelta`, `InputJsonDelta`,
+  `ThinkingDelta`, `SignatureDelta`), `ContentBlockStop`, `MessageDelta`,
+  `MessageStop`, `Ping`, `Error { error: StreamErrorDetail }` (R11c). New
+  public types: `MessageStreamEvent`, `ContentBlockDelta`, `StreamMessage`
+  (the `message_start` payload, whose `stop_reason` is null, so
+  `MessageResponse` could not be reused), `MessageDelta`, `MessageDeltaUsage`,
+  `StreamErrorDetail`.
+- Recorded as unsupported (decode as `Malformed` items, stream continues,
+  R10): unknown future event types; content blocks `ContentBlock` does not
+  model (`server_tool_use`, `web_search_tool_result`, `redacted_thinking`,
+  the server `fallback` block; the JSON reply has the same limitation);
+  `citations_delta` (a real delta not on the streaming page). Not modeled:
+  beta `input_transformations`.
+- Tests: `anthropic::tests::create_message_returns_json_or_message_stream`;
+  `anthropic::types::streaming::tests::{message_start_decodes_with_null_stop_reason,
+  message_start_decodes_without_usage, content_block_start_decodes_text_tool_use_and_thinking,
+  content_block_delta_decodes_every_delta_kind, content_block_stop_decodes,
+  message_delta_decodes_with_and_without_usage, message_stop_and_ping_decode_as_unit_variants,
+  error_event_decodes_as_typed_variant, unknown_event_type_fails_to_decode}`.
+
+**LM Studio** (`definitions/src/lmstudio/`):
+
+- `Chat`: JSON `ChatResult` (note "returned when `stream` is false or
+  omitted"; named to avoid the D-15 enum `ChatResponse`) + SSE
+  `ChatStreamEvent` (note "returned when `stream` is true"),
+  `EventNamed("chat.end")` **kept** (adopted default, Phase 1 agenda item 2:
+  the terminator carries the aggregated result).
+- `ChatStreamEvent` (`#[serde(tag = "type")]`): all 19 documented events by
+  name (`chat.start`, `model_load.{start,progress,end}`,
+  `prompt_processing.{start,progress,end}`, `reasoning.{start,delta,end}`,
+  `tool_call.{start,arguments,success,failure}`, `message.{start,delta,end}`,
+  `error`, `chat.end`); `error` is a typed variant and not a terminator (the
+  docs say `chat.end` still follows). Unknown events → `Malformed` items.
+- `DownloadModel`: one JSON `DownloadModelResponse` — **deviation from R31's
+  premise** (Phase 1 agenda item 1; the provider documents a JSON job object
+  polled through `GetDownloadStatus`). `DownloadModelResponse` is now
+  registered and its fields match the docs (`job_id` optional, `status`
+  required, new optional `total_size_bytes`, `started_at`, `completed_at`);
+  nothing else used it. Its description drops the false "with SSE progress"
+  (explained baseline leaf). Doc comments fixed: `ChatBody.stream` defaults
+  to **false** (was documented as true); `ChatBody`/`DownloadModelBody` no
+  longer claim SSE.
+- **Public types removed:** `lmstudio::ChatStreamChunk`, `lmstudio::ChatUsage`
+  (unregistered, unused, and describing a chunk format LM Studio does not
+  send; superseded by `ChatStreamEvent`). New: `ChatResult`, `ChatStreamEvent`,
+  `ChatOutputItem`, `ChatStats`, `InvalidToolCallMetadata`,
+  `ToolProviderInfo`, `ChatStreamErrorDetail`. `model-citizen`'s
+  `ListModelsResponse`/`ModelInfo` unchanged. Not added (request scope):
+  `DownloadModelBody.quantization`.
+- Tests: `lmstudio::tests::{chat_returns_json_result_or_sse_events_ending_at_kept_chat_end,
+  download_model_returns_one_json_job_object, chat_result_decodes_non_streaming_reply,
+  chat_stream_event_decodes_progress_and_delta_events, chat_stream_event_decodes_tool_call_events,
+  chat_stream_event_decodes_error_into_typed_variant, chat_stream_event_decodes_chat_end_aggregated_result,
+  chat_stream_event_rejects_unknown_event_type, download_model_response_decodes_job_and_already_downloaded}`.
+
+**ElevenLabs** (`definitions/src/elevenlabs/`):
+
+- `StreamSpeech`: one byte stream (`Success::bytes()`), no content type (R5:
+  no audio media type is documented), connection close.
+- `StreamSpeechWithTimestamps`: one NDJSON stream of
+  `SpeechWithTimestampsResponse`, connection close (line framing rests on the
+  official Python SDK's `iter_lines()` + `json.loads`; the docs say only "a
+  stream of JSONs").
+- **Definition defect fixed:** `SpeechWithTimestampsResponse` and
+  `HttpAlignment` used camelCase wire names; the provider sends snake_case
+  (`audio_base64`, `normalized_alignment`, `character_start_times_seconds`,
+  …). Rust field names are unchanged; the non-streaming
+  `CreateSpeechWithTimestamps`, which shares the type, decodes the provider's
+  replies correctly now. `WebSocketAlignment` (the WebSocket API's camelCase
+  type) is untouched. `biscuit-speaks` uses none of these.
+- Unchanged (R5 evidence absent): CreateSpeech, CreateSoundEffect,
+  GetHistoryItemAudio, DownloadHistoryItems, GetVoiceSampleAudio (one binary
+  shape, no content type; default `output_format` `mp3_44100_128`).
+  `output_format` query parameters are declared on no TTS endpoint; adding
+  them is new scope (logged, not done). The 422 `{"detail": …}` error shape is
+  not declared (D-19).
+- Discrepancy recorded: `schematic/docs/research/elevenlabs-api.md` labels
+  audio streaming `text/event-stream` (not evidence of SSE, R33) and uses
+  camelCase field names; the research page was not edited.
+- Tests: `elevenlabs::tests::{audio_endpoints_store_one_binary_shape_without_content_type,
+  stream_speech_stores_one_byte_stream_without_content_type,
+  stream_speech_with_timestamps_stores_one_ndjson_stream_ending_at_close}`;
+  `elevenlabs::types::tests::{speech_with_timestamps_decodes_snake_case_line,
+  speech_with_timestamps_rejects_camel_case_spelling}` (camelCase
+  `audioBase64` fails: the field is required; a camelCase
+  `normalizedAlignment` is ignored and leaves the field `None`, recorded as
+  observed behavior).
+
+**Ollama** (`definitions/src/ollama/`):
+
+- Native `Generate`/`Chat`: NDJSON `GenerateStreamItem`/`ChatStreamItem`
+  (note "returned when `stream` is true or omitted"),
+  `FieldEquals { done = true }` **kept**, plus JSON `GenerateCompletion`/
+  `ChatCompletion` (note "returned when `stream` is false"); selected by
+  `Content-Type` (`application/x-ndjson` vs `application/json`, unverified on
+  the wire, as R30 says). `stream` stays an ordinary request field.
+- Native `PullModel`/`PushModel`/`CreateModel`: NDJSON `PullModelStreamItem`
+  (pull and push; `PushModelProgress` stays an alias) /
+  `CreateModelStreamItem`, `FieldEquals { status = "success" }` **kept**
+  (adopted default, Phase 1 agenda item 4: these lines have no `done`), plus
+  JSON `StatusResponse` for `stream: false`.
+- OpenAI-compatible `ChatCompletions`/`Completions`: JSON
+  `OpenAIChatCompletionResponse`/`OpenAICompletionResponse` (note "returned
+  when `stream` is false or omitted") + SSE `OpenAIChatStreamChunk`/new
+  `OpenAICompletionStreamChunk` (note "returned when `stream` is true"),
+  `DataLineEquals("[DONE]")` consumed — **unverified provider behavior**
+  (R30 rules it; no Ollama doc confirms `[DONE]`).
+- R11c: each native item type is an untagged enum whose `Error(StreamErrorLine
+  { error })` variant is tried first; every chunk/progress type has required
+  fields, so no chunk swallows an error line, and an error line never matches
+  the terminator. The OpenAI-compatible SSE documents no error event:
+  recorded as unsupported. If Ollama closes right after an error line, the
+  stream reports `EndedEarly` after the error item (reasoned, not tested).
+- D-15 collision resolved as the contract freeze directs: **public types
+  renamed** `ollama::GenerateResponse` → `GenerateCompletion`,
+  `ollama::ChatResponse` → `ChatCompletion` (no Rust use outside the module).
+  Variant names stay derived (`Stream`, `Json`). All 13 stranded structs are
+  now registered and reachable from shapes; the `PushModelProgress` alias is
+  not registered separately. New: `StreamErrorLine`, the four `*StreamItem`
+  enums, `StatusResponse`, `OpenAICompletionStreamChunk`. New registrations
+  are appended after `OpenAIModel`, so no existing registry index moved.
+- Not done (narrow change): the chunk types still omit `load_duration`,
+  `prompt_eval_duration`, `eval_duration`, and `done_reason`, which serde
+  ignores, so they are not delivered on the kept final line. Logged as a
+  follow-up candidate.
+- Tests: `ollama::tests::{native_generate_endpoint, native_chat_endpoint,
+  native_pull_model_endpoint, native_push_model_endpoint, native_create_model_endpoint,
+  openai_chat_completions_endpoint, openai_completions_endpoint,
+  module_group_preserves_endpoint_and_registry_inventory}` (full stored shapes);
+  serde: `generate_stream_item_decodes_a_text_chunk`,
+  `generate_stream_item_decodes_the_final_line_with_statistics`,
+  `generate_stream_item_decodes_an_error_line_as_the_error_variant`,
+  `chat_stream_item_decodes_chunk_final_and_error_lines`,
+  `pull_model_stream_item_decodes_progress_success_and_error_lines`,
+  `create_model_stream_item_decodes_progress_and_error_lines`,
+  `status_response_decodes_the_buffered_reply`,
+  `openai_completion_stream_chunk_decodes_an_sse_data_payload`,
+  `openai_chat_stream_chunk_decodes_an_sse_data_payload`.
+
+Baseline allow-list entries for every migration above (endpoints and
+components, each with its reason) are in `definition_baseline.rs`; the one
+explained leaf is LM Studio `DownloadModel`'s description.
+
+### Wave 11 — Regeneration and dependents (main session)
+
+**Regeneration** (pre-authorized; `cargo run -p schematic-gen -- generate
+--api all --output schema/src --openapi-out openapi --postman-out postman`,
+the `just generate` command without its desktop notification). Changed:
+`schema/src/{anthropic.rs, bitbucket/requests.rs, elevenlabs/requests.rs,
+lmstudio.rs, openai/requests.rs}`, and `schema/src/ollama.rs` replaced by the
+generator's split `schema/src/ollama/` directory; `openapi/{anthropic,
+bitbucket, elevenlabs, lmstudio, ollama, openai}.json`; `postman/{elevenlabs,
+lmstudio, ollama, openai}.postman_collection.json`. Every other API's
+artifacts are byte-identical. A second generation run produced no further
+change.
+
+**Generator change found by `just lint-schema`:** a generated success enum
+holding a large reply (`GetResponseResponse::Json(BetaResponse)`) trips
+`clippy::large_enum_variant`. The generator now emits
+`#[allow(clippy::large_enum_variant)]` on its success and failure enums
+(`gen/src/codegen/responses.rs`, with the reason at the attribute): a variant
+holds a whole reply built once per call, and boxing would only make the
+caller's type worse.
+
+**Changed public types (R24), the migration list.** Compared per endpoint
+(`type Success`/`type Failure` of every `EndpointSpec` impl) between `HEAD`
+and the regenerated `schema/src`; no `Failure` type changed anywhere:
+
+| API | Endpoint | Success before → after |
+| --- | --- | --- |
+| Ollama native | `Generate` | `Bytes` → `GenerateResponse` (NDJSON `GenerateStreamItem` stream or JSON `GenerateCompletion`) |
+| Ollama native | `Chat` | `Bytes` → `ChatResponse` |
+| Ollama native | `PullModel` | `Bytes` → `PullModelResponse` |
+| Ollama native | `PushModel` | `Bytes` → `PushModelResponse` |
+| Ollama native | `CreateModel` | `Bytes` → `CreateModelResponse` |
+| Ollama OpenAI | `ChatCompletions` | `Bytes` → `ChatCompletionsResponse` |
+| Ollama OpenAI | `Completions` | `Bytes` → `CompletionsResponse` |
+| LM Studio | `Chat` | `Bytes` → `ChatResponse` (JSON `ChatResult` or SSE `ChatStreamEvent`) |
+| LM Studio | `DownloadModel` | `Bytes` → `DownloadModelResponse` |
+| Anthropic | `CreateMessage` | `MessageResponse` → `CreateMessageResponse` |
+| ElevenLabs | `StreamSpeech` | `Bytes` → `ByteStream` |
+| ElevenLabs | `StreamSpeechWithTimestamps` | `SpeechWithTimestampsResponse` → `ItemStream<SpeechWithTimestampsResponse>` |
+| Bitbucket | `GetSource` | `Bytes` → `GetSourceResponse { Directory, File }` |
+| OpenAI | `GetResponse` | `BetaResponse` → `GetResponseResponse` |
+| OpenAI | `CreateRealtimeCall` | `()` → `Bytes` (importer correction, see above) |
+
+Public definition types re-exported by the schema crate also changed:
+renamed `ollama::GenerateResponse` → `GenerateCompletion` and
+`ollama::ChatResponse` → `ChatCompletion` (the generated enums now take those
+names); removed `lmstudio::ChatStreamChunk` and `lmstudio::ChatUsage`;
+`lmstudio::DownloadModelResponse` fields corrected; ElevenLabs
+`SpeechWithTimestampsResponse`/`HttpAlignment` wire names corrected (Rust
+names unchanged); new stream event and item types per provider above.
+
+**Hand-written schema test updated:** `schema/tests/non_json_endpoints.rs::binary_endpoint_decodes_into_bytes`
+now matches `GetSourceResponse::File(body)` (an `image/png` reply selects the
+binary fallback); the bytes assertion is unchanged.
+
+**Generator tests updated for the new truth:**
+`gen/tests/l1/e2e_generation.rs::elevenlabs_binary_endpoints_generate_correctly`
+asserts `StreamSpeech` as `ByteStream` and `StreamSpeechWithTimestamps` as
+`Ndjson<SpeechWithTimestampsResponse, UntilClose>`; its shared
+`assert_endpoint_methods` allows the one async fn generated code may define,
+a success enum's `Alternatives::decode_alternative`, while still refusing
+any send method.
+
+**Forced dependent edits found** (R34): only sniff (see Wave 10 Bitbucket
+above). `biscuit-speaks` (ElevenLabs `create_speech`, `create_sound_effect`,
+`list_voices`: types unchanged), `model-citizen` (Ollama
+`ShowModelBody`/`ShowModelResponse`, LM Studio `ListModelsResponse`/`ModelInfo`:
+unchanged), and the homelab crates (EverSolo, Samsung, UC: unchanged) needed
+no edit.
+
+**Pre-existing guard fixed in passing** (this phase edits both files): the
+`test-toolkit::archive_path_guard::no_archive_executed_target_bakes_in_a_producer_path`
+failure recorded since Phase 2 named `env!("CARGO_MANIFEST_DIR")` in
+`schematic/definitions/tests/authoring_surface.rs` and
+`schematic/gen/tests/l1/definition_baseline.rs`. Both now use
+`biscuit_test_harness::manifest_dir!()`; `schematic-definitions` gains
+`biscuit-test-harness` as a dev-dependency (pre-authorized test dependency
+and lockfile change; `Cargo.lock` gains only that edge).
+`schematic/docs/dependencies.md` has no `schematic-definitions` section at
+all, so none was added for one dev-dependency. The source-scan guard's
+forbidden list now names `SuccessShape::` (a hand-built shape bypasses the
+builders) instead of the removed `ApiResponse::json`.
+
+**Second fresh-output fix:** `fresh_output_compile::slow_real_apis_compile_offline`
+hard-coded `ollama.rs`; Ollama's generated module group is now large enough
+that the generator writes it as `ollama/` (`mod.rs`, `requests.rs`,
+`responses.rs`), so the test edits `ollama/mod.rs`.
+
+### Adopted defaults and decisions (Phase 5)
+
+- **decision: `ApiResponse` removed** (contract freeze), thin
+  `SuccessShape` constructors added for hand-built fixtures; `plain()`
+  replaces `legacy_response()`.
+- **decision: `SchematicOpExtension::response` is a `ResponseShape`** (the
+  first shape), keeping committed OpenAPI `x-schematic` output byte-identical.
+- **decision: pagination reads a sole JSON shape** (a multi-shape endpoint is
+  never a list; authored collections on one are rejected).
+- **decision: OpenAI overlay narrows the v2 import** and authors R32b (see the
+  finding above). Review agenda.
+- **decision: `CreateRealtimeCall` `()` → `Bytes` accepted** as an importer
+  correction, not re-created. Review agenda.
+- **decision: sniff reads Bitbucket files through `send_raw`** rather than the
+  typed enum, so the R32a `.json` limitation does not reach sniff.
+- **decision: generated success/failure enums allow
+  `clippy::large_enum_variant`.**
+- **adopted default: LM Studio `chat.end` kept; Ollama pull/push/create end at
+  `status = "success"` kept; LM Studio `DownloadModel` is JSON** (Phase 1
+  agenda items 1, 2, 4).
+- **adopted default: ElevenLabs declares no audio content type** (R5: none
+  documented); with-timestamps is NDJSON on SDK evidence (R33).
+- **adopted default: Ollama buffered types renamed** `GenerateCompletion`,
+  `ChatCompletion` (contract freeze resolution of the D-15 collision).
+- D-26: no hooks existed to remove (Phase 1 inventory); none removed.
+
+### Requirement-to-test mapping (Phase 5 scope)
+
+Tiers: all L1 (no tier marker in any new name), compiled by declared
+targets: define `tests/*.rs` (autotests; `all-features` in CI metadata),
+gen `tests/l1/` (declared in `main.rs`; no new file), `schematic-definitions`
+lib unit tests, sniff `tests/l1/remote_providers.rs` behind the `remote`
+feature (in sniff's `[package.metadata.ci.tests] features`), and the
+generated crate's `schema/tests/`. Boundaries: the define crate's public API
+(F1); the definitions crate's built APIs (F1); the real generator over the
+real definitions with `syn`-checked output and the fresh-output compile
+(F2); sniff's provider through wiremock (F2).
+
+| Req | Behavior | Test |
+| --- | --- | --- |
+| R1, R22 (storage) | builder stores every shape with its facts, in order; repeated success adds a shape; inseparable repeats rejected | `define/tests/response_vocabulary.rs::{builder_stores_every_success_shape_with_its_facts, several_shapes_are_validated_at_build_with_inferred_json_tags}`; `define/tests/builders.rs::repeated_success_and_invalid_required_facts_report_errors` |
+| R22 (serialized form) | `response` is a list; the pre-v2 form is rejected; dangling/composition/empty-key references in the new form | `define/tests/builders.rs::{deserialized_definitions_are_checked_by_the_same_resolution, transferred_components_and_references_input_matrix}` |
+| R22 (baselines) | historical single responses lowered; named migrations only; unrelated mutations still reported | `gen/tests/l1/definition_baseline.rs` (18 API cases, `a_historical_single_response_is_lowered_and_a_changed_one_is_still_reported`, `historical_normalization_lowers_basic_and_unused_usernames_only`, `changed_description_is_detected_at_its_exact_field`) |
+| R23 | stream item references checked at API build and bundle load | bundle cells `sse item dangling`, `ndjson item dangling` |
+| R24 | untouched endpoints keep types; changed public types equal the migration list; single plain shape output unchanged | `artifact_drift::*`, `fresh_output_compile::slow_real_apis_compile_offline`, the per-endpoint comparison in Wave 11, `just test-schema`, `just lint-schema` |
+| R25 | regenerated, idempotent, compiles, lints | generation run twice (no change), `just test-schema` 55/55, `just lint-schema` clean |
+| R28 (production) | import runs `classify_responses`; remap reaches stream items and errors | `define/tests/openapi_tests.rs::a_component_that_yields_its_name_is_renamed_in_success_stream_and_error_references`; `define/src/openapi/import/builder.rs` tests; `response_import_matrix::*` now through production; `import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition` |
+| R29 | Postman composition warning reads the first shape | `gen/tests/l1/postman_*`, `vocabulary_exports` (unchanged expectations, green) |
+| R30, R11c | Ollama shapes, ends, keep, notes; error lines typed | `ollama::tests::*` and the `ollama::types` serde tests listed above |
+| R31, R11c | LM Studio shapes; 19 events; error typed; DownloadModel JSON | `lmstudio::tests::*` listed above |
+| R32, R11c | Anthropic JSON + SSE; every event; ping/error typed; unknown → malformed | `anthropic::tests::create_message_returns_json_or_message_stream`, `anthropic::types::streaming::tests::*` |
+| R32a | Bitbucket `Directory`/`File`; limitation recorded; sniff reads files raw and walks listings | `bitbucket::tests` (GetSource); `schema/tests/non_json_endpoints.rs::binary_endpoint_decodes_into_bytes`; sniff `remote_providers::bitbucket_tests::{a_committed_json_file_is_read_as_its_raw_text, a_json_reply_that_is_not_a_listing_leaves_the_tree_unavailable, a_malformed_directory_listing_leaves_the_tree_unavailable_not_empty, get_file_content_returns_the_raw_bytes_as_text}` |
+| R32b | GetResponse JSON + SSE with notes; OpenAI scope narrowing | `openai_pagination::tests::get_response_returns_json_or_server_sent_events_and_every_other_endpoint_keeps_one_shape` |
+| R33 | ElevenLabs byte stream and NDJSON; snake_case | `elevenlabs::tests::*`, `elevenlabs::types::tests::*`; `e2e_generation::elevenlabs_binary_endpoints_generate_correctly` |
+| R34 | dependents compile and pass | see gates below |
+| R44 | bundle round trip with success shapes; matrix | `define/tests/definition_bundles.rs::{committed_fixture_is_the_bundle_tool_output, committed_fixture_loads_and_exports_like_the_built_definition, bundle_files_round_trip_byte_equal_through_repeated_writes_and_reads, bundle_json_matrix}`; `gen/tests/l1/definition_bundles.rs` over the shipped (migrated) definitions |
+
+**Deferred to the phase that owns the boundary (plan):** mock-server tests
+through the regenerated provider clients (Ollama NDJSON/SSE incremental
+delivery and final statistics, Anthropic variants by `Content-Type`,
+Bitbucket `Directory`/`File` selection with a JSON listing and a
+`text/x-rust` body, OpenAI `GetResponse` variants, ElevenLabs first audio
+chunk before completion) are Phase 6 Wave 13; OpenAPI/Postman export
+assertions over the migrated APIs are Phase 6 Wave 12.
+
+### Review agenda entries raised in Phase 5
+
+1. **OpenAI overlay narrowing** of the v2 import (and whether to migrate the
+   OpenAI streaming endpoints later; each needs author-chosen D-15 names).
+2. **`CreateRealtimeCall` `()` → `Bytes`**, an importer correction outside the
+   named migration list.
+3. **R32a is worse than the spec says:** a JSON *object* file decodes as an
+   empty `Directory` (all `PaginatedResponse` members default); options for
+   later: make `values` required (changes every Bitbucket list type's
+   decoding), or a Bitbucket-specific tag such as `pagelen`.
+4. **LM Studio public types removed** (`ChatStreamChunk`, `ChatUsage`) and
+   `DownloadModelResponse` fields corrected.
+5. **Ollama chunk statistics:** `load_duration`, `prompt_eval_duration`,
+   `eval_duration`, `done_reason` are not modeled, so the kept final line
+   drops them.
+6. **Earlier phases' sniff evidence:** the "sniff remote tests 75/75" of
+   Phases 3 and 4 ran without sniff's `remote` feature, which gates
+   `remote_providers` and the generated-client call sites; with
+   `--features remote` the same filter runs 297 tests (all passing now).
+
+### Phase 5 gates
+
+Run once, after every subagent had finished, from `schematic/` unless noted:
+
+- `just lint`: clean (after fixing clippy findings in this phase's code:
+  `useless_vec`, `needless_borrow`, `into_iter` on a slice).
+- `just test`: **2630 passed, 15 skipped** (the same environment-gated
+  skips; Phase 4: 2599), fresh-output **9/9**, compile-fail **1/1**, exit 0.
+  The first run failed only `fresh_output_compile::slow_real_apis_compile_offline`
+  (hard-coded `ollama.rs`, fixed above); the rerun passed in full. That rerun
+  overlapped a cold compile and marked 16 tests slow; rerun alone, eight at
+  once, the slowest (`artifact_drift::generated_rust_artifacts_are_up_to_date`,
+  `import_overlay::…`, `shipped_openai_query_schema_gate_and_reimports`,
+  `generated_rest_code_references_the_runtime_and_defines_none_of_it`, TLS
+  builder tests) all finish in 1.7–3.9 s: load-sensitive, as Phase 1 recorded.
+- `just check-tier-coverage schematic`: 0 stranded.
+- `just test-schema`: **55/55** (the pre-existing trybuild pager guard is
+  slow by design); `just lint-schema`: clean.
+- define doctests (`cargo test --doc -p schematic-define --all-features`):
+  167 + 14 passed (not part of `just test`; run because doc examples changed).
+- Dependents, serially: `cargo check --tests --all-features` clean for
+  `biscuit-speaks`, `model-citizen`, `homelab`, `eversolo-integration`,
+  `arcam-amp-integration`, `sony-receiver-integration`,
+  `unfolded-integration-helper`; `cargo clippy -p sniff --features remote
+  --tests -D warnings` clean. Tests: **sniff `--features remote`** remote,
+  Bitbucket, and envelope tests **297/297**; `model-citizen` 153/153 (all);
+  `biscuit-speaks` ElevenLabs 48/48; `homelab` 49/49.
+- Scope-calculator extras: `darkmatter` skill-reading tests
+  (`shipped_schema_corpus`, `schema_roots`, `schema_phase_validation`,
+  `current_root*`) 55/55; `test-toolkit::archive_path_guard` 2/2 (green for
+  the first time since Phase 2, see above).
+- Cross-OS check: not run. No path-handling, process, console, or `#[cfg]`
+  production code changed; the test path edits use `manifest_dir!()` joins
+  and a `/`-separated relative join that `Path::join` accepts on Windows.
+- Nothing was staged or committed; `cargo fmt` was not run.
+
+Scope calculator, run from the repository root after every edit (including
+this log, the plan, and their frontmatter):
+
+```sh
+git status --porcelain --untracked-files=all | awk '{print $NF}' \
+  | xargs python3 scripts/ci/affected_scope.py
+```
+
+Result: `packages: [schematic-define, schematic-definitions, schematic-gen,
+sniff, test-toolkit, darkmatter]`, `change_class: package`. So both gates ran
+(above); `just lint` was re-run on the final tree after the archive-guard
+fix: clean.
+
+## Phase 6
+
+Run of 2026-10-22. Tree: HEAD `4aba5e94c` plus the **uncommitted Phase 5
+work** (Phase 5 was not committed before this run, so the working tree and
+the scope calculator below see both phases' files). Implementer:
+`claude/opus` as coordinator. The R26 extension change and regeneration ran
+in the main session. Wave 12 (define tests; gen tests over the shipped
+definitions) and Wave 13 (provider mock tests) ran as three subagents on
+disjoint files.
+
+**Deviation from the plan's ordering:** Wave 13 ran concurrently with Wave
+12 instead of after it. It depends only on Phase 5's regenerated clients, not
+on Wave 12's tests, and the files are disjoint. The subagents also ran in the
+background rather than the foreground, because of a coordinator dispatch
+slip. The coordinator waited for all three and read every result before it
+continued, so no work was abandoned.
+
+### R26 gap closed: `cross_origin` and request-id in `x-schematic`
+
+R26 requires the extension to carry endpoint `cross_origin` and request-id.
+Neither was serialized (the Phase 4 wiring carried the response vocabulary,
+the error levels, and the 4b rate-limit and retry members only). Added:
+
+- `SchematicDocExtension::cross_origin: CrossOrigin`, written only when it is
+  not the `SameOrigin` default (absent reads back as the default), and
+  `SchematicDocExtension::request_id_header: Option<String>`.
+- `SchematicOpExtension::cross_origin: Option<CrossOrigin>` holds the
+  endpoint override and is absent when the endpoint inherits.
+- Filled from `RestApi`/`Endpoint` in `openapi/export/{mod,paths}.rs`.
+- Deprecation and the endpoint auth override stay in standard OpenAPI
+  (`deprecated`, `security`, `securitySchemes`), as the spec's 2026-10-22
+  refresh of R26 adopts.
+
+**adopted default: omit the default policy** (source: R26 names the members
+but not their form). Writing `SameOrigin` on every document would change
+all 18 committed OpenAPI artifacts for no information; absent and default
+are equivalent on read. Regenerated with the pre-authorized
+`cargo run -p schematic-gen -- generate --api all --output schema/src
+--openapi-out openapi --postman-out postman`. The **only new artifact
+diffs** are one `"request_id_header"` line each in `openapi/github.json`
+(`x-github-request-id`) and `openapi/openai.json` (`x-request-id`). No
+shipped API sets a non-default policy or an endpoint override. `schema/src`
+and Postman are unchanged. Docs: `docs/io/openapi-extensions.md` (both field
+tables, plus the note that deprecation and auth are standard members).
+Skill: `.claude/skills/schematic-define/SKILL.md` (extension member lists).
+
+### Wave 12 — Export/import checks
+
+**OpenAPI coverage** (`define/tests/response_openapi.rs`; gen
+`tests/l1/response_adapters.rs` over the shipped definitions):
+
+- Every success and error kind exports its media key and schema: JSON,
+  text with and without a type (`text/plain` default), binary with and
+  without a type (`application/octet-stream` default), empty at 204, SSE,
+  NDJSON, and byte stream as a binary string, with framing and end in
+  `x-schematic.success`. Error entries cover exact empty, binary, text, and
+  JSON, plus class defaults. A class is expanded where an exact entry
+  supersedes part of it and kept elsewhere. Success and error keys are
+  disjoint (R21). The document parses back through `openapiv3` from JSON and
+  YAML.
+- The R26 integration test exports a built API and asserts doc and op
+  `cross_origin`, `request_id_header`, `rate_limit`, and `retry_guidance`;
+  standard `deprecated`, `security` (`[]` for a public endpoint, absent when
+  inheriting) and `securitySchemes`; and nothing of these inside
+  `x-schematic`. A default-policy API writes neither member.
+- Shipped APIs: ElevenLabs audio endpoints and `StreamSpeech` export one 200
+  under `application/octet-stream` as a binary string, `StreamSpeech` with a
+  `Bytes` stream in `x-schematic`. `StreamSpeechWithTimestamps` exports
+  `application/x-ndjson` with the item `$ref`, and every declared query
+  parameter survives export (R5). Anthropic `CreateMessage` has JSON + SSE
+  with both notes; Bitbucket `GetSource` has JSON + `*/*` (binary); Ollama
+  `Generate`/`Chat` have NDJSON + JSON and `ChatCompletions` has JSON + SSE;
+  OpenAI `GetResponse` has JSON + SSE. Each document is re-parsed through
+  `openapiv3` from JSON and YAML.
+
+**Finding (R5):** no ElevenLabs TTS or audio endpoint declares a query
+parameter (`output_format` is not modeled; Phase 5 logged adding it as new
+scope). The R5 parameter assertion compares declared with exported names, so
+today it compares two empty lists. It will catch a dropped parameter once one
+is declared.
+
+**Import coverage** (`define/tests/response_openapi.rs`):
+
+- A full public `OpenApiImport` round trip runs from the exported document as
+  JSON and as YAML. It covers JSON + SSE + `*/*` fallback, a tagged JSON
+  group exported as `oneOf` + `discriminator` (`$ref` members, so names and
+  tag values survive), binary `audio/mpeg`, and text `text/markdown`.
+  Imported shapes equal the originals. The imported API's `errors` is empty,
+  and every status from 400 to 599 looks up the same endpoint-level shape
+  and content type (D-20, no hoisting). Re-export gives the same responses
+  map.
+- Import reads only the responses map, by design: a non-close SSE end comes
+  back as `ConnectionClose`, a byte stream comes back as `Binary`, and variant
+  names are not restored, because reading `x-schematic` back is out of scope
+  (R26). The test asserts this, and that the re-exported `content` is
+  identical.
+- Already covered by Phase 4 and confirmed: the `default`, 1xx, 3xx, and
+  multiple-error-media diagnostics, 204 → empty, no-success rejection,
+  deduplication across 200/201, inline `oneOf` → `serde_json::Value`, and the
+  JSON and YAML matrices (`response_import_matrix.rs`, whose fixture already
+  is the real exporter's document; unchanged).
+
+**Finding (round trip):** where an exact error supersedes part of a class,
+export expands the class into exact keys described `Declared error
+400-499`. Import makes each an exact entry, so a second export describes
+them `Declared error 418`. Keys, content, and schemas are identical, and the
+test asserts the difference. **Review agenda:** decide whether this matters.
+
+**Postman coverage** (`gen/tests/l1/response_adapters.rs`): over the
+shipped collections, Ollama `Generate` (NDJSON first) records `Response
+content type: application/x-ndjson`, while JSON-first `ChatCompletions` and
+Anthropic `CreateMessage` record nothing (R29). `postman_golden.rs` needed
+no change: its fixtures are hand-built and still green. R42's GraphQL skip
+was already asserted by `both_exporters_skip_graphql_operations_with_a_warning`
+for API, operation, feature, target, warning severity, and an output that
+still builds; it was confirmed rather than extended.
+
+### Wave 13 — Shipped runtime checks
+
+**Provider verification** (`schema/tests/streaming_providers.rs`, new, 10
+tests through the regenerated `schematic-schema` clients). Incremental
+delivery is proven with `HeldServer`, a raw TCP server on port 0. It sends
+the head and the first body part, then waits on a `oneshot` that the test
+fires only after it has received the first item; an `AtomicBool` confirms
+the rest was unsent at that point. A buffering client would fail on the 5 s
+bound instead of hanging. In hold mode the connection stays open after the
+terminator, which proves the stream ended at the terminator and not at
+close. Each test takes about 0.05 s and every call is `.anonymous()`.
+
+| Test | Proves |
+| --- | --- |
+| `ollama_generate_ndjson_is_delivered_incrementally_and_keeps_its_final_line` | R30, R8, R11: incremental NDJSON; the kept `done:true` line is last, with `eval_count`, `prompt_eval_count`, `total_duration`; ends while the connection is open; R13a `"stream":true` sent |
+| `ollama_generate_mid_stream_error_line_is_a_typed_item` | R11c: `{"error":…}` is `GenerateStreamItem::Error`, and the stream continues; R13a omitted `stream` is absent from the body |
+| `ollama_generate_json_reply_selects_json_variant` | R30: `application/json` gives `GenerateResponse::Json`; `stream:false` sent as set |
+| `ollama_chat_completions_sse_is_delivered_incrementally_and_done_is_consumed` | R30, R8: incremental SSE; `[DONE]` ends the stream and is not yielded |
+| `anthropic_json_reply_selects_json_variant_and_sends_stream_as_set` | R32, R13a: JSON variant for `stream:false` and for omitted; bodies sent as set |
+| `anthropic_sse_reply_delivers_events_in_order_and_consumes_message_stop` | R32, R11c, R8: ordered events including `ping` and a typed `error`; `message_stop` consumed and nothing after it yielded |
+| `bitbucket_get_source_selects_directory_or_file_by_media_type` | R32a: JSON listing gives `Directory` with decoded entries; `text/x-rust` gives `File` with exact bytes |
+| `openai_get_response_json_reply_selects_json_variant` | R32b: JSON variant |
+| `openai_get_response_sse_ends_cleanly_at_connection_close` | R32b: SSE events yielded and a clean end at close; `?stream=true` sent |
+| `elevenlabs_stream_speech_yields_audio_before_the_body_completes` | R33: the first audio chunk is observed before the server sends the second; the bytes concatenate exactly |
+
+The definition tests for every migrated endpoint (Phase 5's
+`ollama::tests`, `lmstudio::tests`, `anthropic::tests`, `elevenlabs::tests`,
+`bitbucket::tests`, `openai_pagination::tests`, and the serde tests for the
+LM Studio framing and end, and the ElevenLabs timestamps and media) ran
+inside `just test` and pass. No hook-removal or provider-evidence entry
+changed (D-26: no hooks existed).
+
+**Finding: OpenAI `BetaResponseStreamEvent` decodes most events as the wrong
+variant.** The importer generates it (`definitions/src/openai/types.rs`) as a
+`#[serde(untagged)]` enum whose variants take `type_: String` and accept
+unknown fields, so serde picks the first variant whose required fields are
+present:
+
+- `{"type":"response.output_text.delta","item_id":"i","output_index":0,
+  "content_index":0,"delta":"hi","sequence_number":3,"logprobs":[]}` decodes
+  as `BetaResponseAudioDeltaEvent`;
+- `{"type":"response.completed","sequence_number":4,"response":{…}}` decodes
+  as `BetaResponseAudioDoneEvent`, and the `response` payload is lost.
+
+R32b's shape (JSON or SSE by `Content-Type`) works, and the test uses
+`response.audio.delta` and `response.audio.done`, which decode correctly; a
+code comment there says why. The defect is in how the importer generates
+every OpenAI `oneOf` without a discriminator, not in this spec's response
+model. Fixing it (a `type` literal check, or internal tagging, in the import
+type generator) changes the whole imported OpenAI type file, which is new
+scope; it is logged and left undone. **Review agenda.**
+
+**Test-placement observation:** `schematic/schema` is outside the Cargo
+workspace, and CI never runs `just test-schema` (only the fresh-output guard
+fetches its lockfile). These tests therefore run locally only, like the
+existing `non_json_endpoints.rs`, `github_client.rs`, and `pagination.rs`
+beside them. The plan says "through regenerated clients", which is the
+committed `schema` crate; the CI-run alternative (child tests in
+`fresh_output_compile`'s 18-API crate) would add a full test-profile build of
+every API to the CI build job. **Review agenda:** whether CI should run
+`test-schema`.
+
+### Requirement-to-test mapping (Phase 6 scope)
+
+Tiers: all L1, and no new name carries a tier marker. Each test is compiled
+by a declared target: define `tests/response_openapi.rs` (autotests,
+`openapi` feature, which CI enables through `all-features`), gen
+`tests/l1/response_adapters.rs` (already declared in `l1/main.rs`), define
+unit tests in `extensions.rs`, and `schema/tests/streaming_providers.rs`
+(the generated crate's autotests, run by `just test-schema`; see the
+observation above). Boundaries: the define public exporter and importer
+(F1, in-process, with an `openapiv3` re-parse); the real definitions through
+the gen exporters (F2); the real regenerated clients against loopback mocks
+(F2).
+
+| Req | Test |
+| --- | --- |
+| R5, R33 (export) | `response_adapters::shipped_elevenlabs_audio_exports_octet_stream_and_keeps_query_parameters` |
+| R21, R27 | `response_openapi::every_success_and_error_kind_exports_its_media_key_and_schema`; `response_adapters::{shipped_anthropic_create_message_exports_json_and_sse_with_both_notes, shipped_bitbucket_get_source_exports_json_and_a_fallback, shipped_ollama_streams_export_beside_their_json_shapes, shipped_openai_get_response_exports_json_and_sse}` |
+| R26 | `extensions::tests::cross_origin_and_request_id_are_written_only_when_declared`; `response_openapi::x_schematic_carries_cross_origin_request_id_and_guidance_while_deprecation_and_auth_stay_standard`; `artifact_drift::*` (the two regenerated lines) |
+| R28 | `response_openapi::{public_import_of_the_exported_json_and_yaml_keeps_shapes_content_types_and_endpoint_errors, import_reads_only_the_responses_map_so_stream_ends_and_byte_streams_come_back_plain}`, plus the Phase 4 tests listed under Import coverage |
+| R29 | `response_adapters::shipped_postman_collections_record_the_first_success_content_type` |
+| R42 | `response_adapters::both_exporters_skip_graphql_operations_with_a_warning` (Phase 4, confirmed) |
+| R30, R8, R11, R11c, R13a | the five Ollama tests in `streaming_providers.rs` |
+| R32, R13a, R11c | the two Anthropic tests |
+| R32a | `bitbucket_get_source_selects_directory_or_file_by_media_type` |
+| R32b | the two OpenAI tests |
+| R33 (runtime) | `elevenlabs_stream_speech_yields_audio_before_the_body_completes` |
+
+**Input robustness:** no reader changed in this phase. The two new
+`x-schematic` members are write-only, because import does not read the
+extension (R26), so the matrix does not apply. The OpenAPI JSON and YAML
+response matrices from Phase 4 still pass through production import. Smell
+grep over the change: the one new `#[serde(default)]` pairs with a
+skip-when-default serializer on a write-only member, and adds no
+`unwrap_or_default()`, `.ok()`, or `filter_map(.. as_str())`.
+
+### Review agenda entries raised in Phase 6
+
+1. The OpenAI `BetaResponseStreamEvent` mis-decoding, which comes from the
+   importer's untagged `oneOf` generation (finding above).
+2. CI does not run `schematic/schema` tests, so the Wave 13 provider tests
+   are local-only.
+3. Error descriptions change on an export, import, export round trip after
+   D-25 expansion (keys and schemas are identical).
+4. The adopted default that `x-schematic` omits a `SameOrigin` API policy.
+
+### Phase 6 gates
+
+Run once, after every subagent had finished, from `schematic/` unless noted:
+
+- `just lint`: clean.
+- `just test`: **2641 passed, 15 skipped** (the same environment-gated
+  skips; Phase 5: 2630), fresh-output **9/9**, compile-fail **1/1**, exit 0.
+  The 13 tests marked slow are the load-sensitive set Phase 5 recorded
+  (`artifact_drift`, `import_overlay`, `e2e_generation`, the split-output
+  tests, `shipped_openai_query_schema_gate_and_reimports`, the TLS builder
+  test). The host load average was 36–85, partly from other sessions. No new
+  test is among them.
+- `just check-tier-coverage schematic` (repository root): 0 stranded.
+- `just test-schema`: **65/65** (55 + 10 new); `just lint-schema`: clean.
+- Subagents' scoped runs (before the gates): define `response_openapi`,
+  `response_import_matrix`, `openapi_tests`, and `cross_origin_policy` 51/51;
+  define `extensions::` 30/30; gen `response_adapters`, `postman_golden`, and
+  `artifact_drift` 23/23; define and gen clippy `-D warnings` clean.
+- Dependents: no Rust type a dependent uses changed. `schema/src` is
+  byte-identical, and every `SchematicDocExtension`/`SchematicOpExtension`
+  user is inside `schematic/define`. sniff, biscuit-speaks, model-citizen,
+  and the homelab crates were therefore not re-run; Phase 5's runs stand.
+- Cross-OS check: not run. No path, process, console, or `#[cfg]`
+  production code changed. The new schema tests use loopback TCP only, and CI
+  does not run them.
+- Nothing was staged or committed; `cargo fmt` was not run.
+
+Scope calculator, run from the repository root after every edit (including
+this log, the plan, and their frontmatter):
+`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs
+python3 scripts/ci/affected_scope.py`. Result: `packages: [schematic-define,
+schematic-definitions, schematic-gen, sniff, test-toolkit, darkmatter]`,
+`change_class: package`. That is identical to Phase 5's result, because the
+uncommitted Phase 5 files dominate it. Both gates were required and ran
+(above). The sniff, test-toolkit, and darkmatter cells come from Phase 5
+files; Phase 6 changed nothing those packages read.
