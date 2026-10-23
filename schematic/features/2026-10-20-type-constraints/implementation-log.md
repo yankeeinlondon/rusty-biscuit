@@ -18,23 +18,24 @@ packages:
     - schematic-definitions
 human_review: false
 message_to_agent: |-
-  Phase 5 made generated requests enforce their value rules; read
-  "## Phase 5" in this log. Facts Phase 6 relies on:
-  - The generator's compiler is gen/src/codegen/value_rules/. Pager-adopted
-    parameters are not request fields (requests come from the pager view),
-    so no generated validate() or into_parts checks them. The pager engine
-    must keep its own page-size check, now through schematic_runtime's
-    validate helpers (check_number with a Plan of the strategy's bounds).
-  - Keep the engine's problem text, or update the tests that match it:
-    "the page size is above the declared maximum, {max}". Retry resizing
-    clears problems starting "the page size ".
-  - ABI stays 8. Phase 2 made the feature's one increment; do not bump it
-    again unless generated code starts needing a new runtime item.
-  - Only schema/src/openai/requests.rs changed on regeneration. After any
-    runtime or generator change, rerun `just generate` and keep
-    artifact_drift green. `just test-schema` now has 153 tests.
-  - The host was heavily loaded (load average about 71) during this
-    phase's gates; generation-heavy L1 tests were marked SLOW but passed.
+  Phase 7 regenerated and audited; read "## Phase 7" in this log. Facts
+  Phase 8 relies on:
+  - `just import-openai` + `just generate` reproduce every committed
+    artifact (after restoring the two pre-existing import_overlay pins in
+    definitions/src/openai/mod.rs with `git checkout`). If Phase 8 changes
+    no code, generation needs no rerun.
+  - Phase 7 changed tests only: schema/tests/value_rules.rs gained
+    a_reply_outside_its_declared_value_rules_still_decodes (the "responses
+    are not validated" evidence, usable as the docs' example: GetVectorStore
+    decodes days 4000 although VectorStoreExpirationAfter declares 1-365,
+    while CreateVectorStore refuses the same value), and
+    define/tests/value_constraints.rs gained a `format wrong type` cell.
+  - Two review-agenda items for the docs to describe honestly: rules inside
+    oneOf alternatives the importer collapses to serde_json::Value are not
+    preserved (generic composition is out of scope), and the Unfolded
+    Circle Core REST definition is handwritten and declares no value rules.
+  - Exact violation wording for a single-member enum is "must equal the one
+    allowed value" (not "must be one of the allowed values").
 source_files_during_phase_2:
     - Cargo.lock
     - schematic/gen/src/lib.rs
@@ -206,6 +207,25 @@ skills_files_updated_during_phase_5:
     - .claude/skills/schematic-define/SKILL.md
     - .claude/skills/schematic-define/schematic/SKILL.md
     - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_6:
+    - schematic/runtime/src/pager/engine.rs
+    - schematic/runtime/src/validate/eval.rs
+    - schematic/runtime/src/validate/mod.rs
+    - schematic/runtime/tests/l1/pager_rules.rs
+    - schematic/runtime/tests/l1/pager_support.rs
+    - schematic/schema/tests/pagination.rs
+docs_updated_during_phase_6:
+    - schematic/docs/pagination.md
+    - schematic/docs/runtime/validation.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_7:
+    - schematic/define/tests/value_constraints.rs
+    - schematic/schema/tests/value_rules.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
 ---
 
 # Implementation Log for 2026-10-20-type-constraints (8 phases)
@@ -1690,3 +1710,287 @@ and checks have already validated. Smell grep over the new code
   neighbors. Windows, Linux, and WSL2 were not exercised for this phase.
 - Spec frontmatter: this phase's prompt asked for no spec properties, so
   the spec is unchanged.
+
+## Phase 6
+
+Pager integration (Wave 15). Implementation complete, ready for review.
+
+### What landed
+
+- **One bound comparison for both sites.** `validate::check_range(value,
+  minimum, maximum, path, out)` (`runtime/src/validate/eval.rs`) checks a
+  number against inclusive bounds known only at run time. It runs through the
+  same `Walker::bound_at` that a plan's `minimum`/`maximum` use, so the
+  comparison (exact `Decimal`) and the violation keywords are shared; `bound`
+  now parses the plan's text and delegates to `bound_at`. It is `pub(crate)`
+  and re-exported only inside the crate (`validate/mod.rs`).
+- **Engine.** `plan_managed` (`runtime/src/pager/engine.rs`) calls a new
+  `size_problem(size, PageSize)` at the same place as before: after each
+  effective-size selection (caller knob, `sent_default`, mid-traversal
+  `set_page_size`), and only when the request is not a followed link or the
+  caller adjusted the size. `size_problem` maps the `Minimum`/`Maximum`
+  violation back to the existing problem text, so `InvalidArgument` reasons,
+  `collect_all`'s `IncompleteReason::InvalidArgument`, and the retry path's
+  "the page size " prefix clearing are unchanged.
+- No generated code, generator code, or `ABI` change; no regeneration.
+
+### Design decisions
+
+- **Why not `check_number` with a `Plan`, as the Phase 5 note suggested.**
+  `Plan`'s bounds are `&'static str`, while a strategy's `PageSize` holds
+  `min: u32`/`max: Option<u32>` in generated struct literals. Building a plan
+  at run time would need leaked strings; adding a `&'static Plan` to
+  `PageSize` would change every generated pager spec and require another
+  `ABI` bump, which Phase 2's single increment rules out. A crate-internal
+  entry over the same evaluator reuses the implementation (the spec's
+  "reuse the checking implementation, not a single checking location")
+  without public API or ABI growth.
+- **Problem text kept**, per the Phase 5 handoff, by mapping keywords back to
+  the old wording instead of using the violation's `Display`.
+
+### Requirement-to-test mapping
+
+| Requirement (plan Wave 15 / spec "Pager regression") | Test |
+| --- | --- |
+| Initial invalid size refused, zero sends (both bounds, `collect_all`) | `pager_rules::a_size_outside_the_declared_bounds_is_refused_naming_the_bound_with_zero_requests` (existing), `pager_collect::invalid_argument_is_refused_before_the_request_that_would_carry_it` (existing) |
+| Bounds themselves accepted and sent | `pager_rules::the_declared_bounds_themselves_are_sent` (**new**) |
+| Invalid size changed during traversal | `pager_rules::an_adjusted_size_applies_from_the_next_request_and_is_validated` (existing) |
+| Adopted sent default checked; caller override replaces it | `pager_rules::an_adopted_sent_default_outside_the_bounds_is_refused_unless_the_caller_overrides_it` (**new**, fixture `SentDefaultAboveMax`) |
+| Followed next link keeps the provider's size unchecked unless the caller changes it; a changed invalid size is refused with nothing sent | `pager_rules::a_followed_link_keeps_its_own_size_until_the_caller_changes_it_to_an_invalid_one` (**new**, fixture `AdjustableLinkCursor`) |
+| Conflicting parameter/strategy bounds (definition time) | `schematic-define` `pagination_constraints::*` (Phase 3; ran in `just test`) |
+| GitHub max stays 100; `.page_size(500)` refused with zero sends; 1 and 100 sent | `schematic-schema` `pagination::github_page_size_outside_the_authored_bounds_is_refused_before_sending` (**extended**: now asserts the exact reason for 0, 101, and 500) |
+| GitHub controls remain | the rest of `schema/tests/pagination.rs` (in `just test-schema`) |
+
+Fidelity: F2 in-process against wiremock through the public pager API, L1.
+Load-bearing checks: removing the engine check fails the sent-default test;
+checking followed links fails the followed-link test (its link carries
+`limit=500` over a max of 10).
+
+The Input Robustness Matrix does not apply: no loader or parser changed.
+
+### Docs and skills
+
+- `docs/pagination.md` "Bounds are checked before sending": which sizes are
+  checked, followed-link behavior, the exact refusal text, and why the check
+  stays in the pager (adopted parameters are not request fields).
+- `docs/runtime/validation.md`: removed the **Planned** marker for the pager.
+- `.claude/skills/schematic-define/schematic/gen.md`: its call-type example
+  taught `list_releases(..).per_page(10)`, which does not compile now that
+  the pager adopts `per_page` (the plan forbids teaching it). Replaced with
+  `get_git_tree(..).recursive(true)` and a note that adopted parameters have
+  no setter. A sweep of `*.md` and `///`/`//!` comments found no other
+  `.per_page(` teaching outside historical specs; `docs/pagination.md` keeps
+  its migration "before" snippet and its "does not compile" sentence, which
+  teach the opposite.
+
+### Gates
+
+- `just test` (schematic): 3119 passed (14 slow), 23 skipped; fresh-output
+  17 passed; compile-fail 1 passed.
+- `just lint`: clean. `just lint-schema`: clean.
+- `just test-schema`: 153 passed (1 leaky).
+- Targeted first: `cargo nextest run -p schematic-runtime --test l1 -E
+  'test(/pager_/)'` → 167 passed.
+- Dependents: `sniff` (the only pager consumer outside `schematic/`):
+  `cargo nextest run -p sniff --features remote -E
+  'test(/github|remote_providers|focused_provider/)'` → 157 passed.
+- Narrowed test-input readers (the skill edit): `darkmatter` skill readers
+  (same six groups as earlier phases) → 65 passed; `test-toolkit`
+  `archive_path_guard` + `the_ci_documentation_states_the_implemented_behavior`
+  → 2 passed.
+- Scope calculator, from the repository root after all code and doc edits:
+  `packages: ["schematic-runtime", "test-toolkit", "darkmatter"]`,
+  `change_class: package`; gates required and run.
+- `just doctest` not run: no public doc comment changed (`check_range` and
+  `size_problem` are crate-private).
+- Cross-OS: not run. The change is integer comparison logic and test
+  fixtures on 127.0.0.1 wiremock; no paths, `cfg`, or OS crates.
+- No skipped or pre-existing failures. Host load average was about 27–58
+  during the gates; nothing timed out.
+- Spec frontmatter: this phase's prompt asked for no spec properties, so the
+  spec is unchanged.
+
+## Phase 7
+
+Regeneration and end-to-end evidence (Waves 16–17). I did the work myself,
+with no subagents. Wave 16 is integrator-only, and Wave 17's three tasks
+were each a few commands or one test. Implementation complete, ready for
+review.
+
+### Wave 16: regeneration
+
+- `just import-openai`: the re-import differs from the committed
+  `definitions/src/openai/mod.rs` only by the two pre-existing
+  `import_overlay` pins (`_ctx` on `endpoint_183` with the realtime
+  `session` text part, and no `.version("2.3.0")`). I restored them with
+  `git checkout`, as Phases 3–4 did. `types.rs` and `openai_pagination.rs`
+  did not change.
+- `just generate` (Rust clients, OpenAPI, Postman, and AsyncAPI): **no
+  diff**, as the Phase 6 handoff predicted. No generated file was edited
+  by hand.
+- **The cumulative diff since the Phase 1 baseline** (`git diff 9342dfa18`
+  over `schema/src`, `openapi`, `postman`, `asyncapi`, and
+  `definitions/src`), explained:
+  - `schema/src/lib.rs`: `SCHEMATIC_RUNTIME_ABI` 7 → 8 and its assert
+    message (the Phase 2 increment).
+  - `schema/src/openai/requests.rs` (+3,801/−38): 62 requests gain
+    `validate()` and a checked `into_parts`, plus the private
+    `open_ai_value_rules` plan module (Phase 5).
+  - `definitions/src/openai/{mod,types}.rs` (Phase 4): parameter, form, and
+    body-root constraint builder calls, and the Schemars `extend`
+    attributes that rebuild model rules.
+  - `definitions/src/openai_pagination.rs`: `align_page_size_bounds`
+    (Phase 4).
+  - `openapi/{bitbucket,gitea,github,gitlab}.json`: every adopted page-size
+    parameter now exports `minimum`/`maximum` (GitHub `per_page` 1–100);
+    nothing else changed.
+  - `openapi/openai.json` (constraint keywords, baseline → now): `enum`
+    405 → 1485, `minimum` 0 → 123, `maximum` 0 → 69, `minLength` 0 → 57,
+    `maxLength` 0 → 80, `minItems` 0 → 13, `maxItems` 0 → 22, `pattern`
+    2 → 6; `format` stays 703.
+  - `postman/openai.postman_collection.json`: example bodies now use each
+    declared `enum`/`const` value (`"object": "list"`,
+    `"completion_window": "24h"`) instead of `"string"`.
+  - `asyncapi/` and every other API's artifacts: unchanged.
+- **Two differences from the Phase 1 forecast**, and why:
+  - `openapi/unfolded_circle_core_rest.json` did not change. The Unfolded
+    Circle Core REST definition is handwritten (`definitions/src/unfolded_circle/core_rest/`),
+    not imported from `specs/unfolded-circle/UCR-core-openapi.yaml`. It
+    declares no value rules, so the vendored document's 42 `minLength` etc.
+    never reach it. Adding them would be new scope.
+  - The OpenAI export holds fewer rules than the vendored source (for
+    example `minItems` 13 of 46, `exclusiveMinimum` 0 of 7, `const` 0 of 2).
+    The `/assistants` and `/threads` exclusions drop some of them. The
+    rest sit inside `oneOf` alternatives that the importer already collapses
+    to `serde_json::Value` (for example
+    `FineTuneSupervisedHyperparameters.learning_rate_multiplier`, `"auto" |
+    number > 0`). The Phase 1 baseline export had the same collapsed shape.
+    Generic composition is outside the spec's scope, so the rules there
+    are not preserved. This is on the review agenda.
+- `just check-drift`: 10 passed. `artifact_drift::generated_rust_artifacts_are_up_to_date`
+  took 2.2 s at a load average of about 24, which answers Phase 5's
+  question about that test and the 5 s budget.
+- `just test-schema`: 153 passed (1 slow: the pre-existing
+  `compile_fail::slow_generated_pager_surface_reports_the_intended_diagnostics`,
+  82 s; 1 leaky), before the new test was added. With it: see Gates.
+
+### Wave 17: cross-cutting acceptance
+
+- **No response enforcement.** New test
+  `schema/tests/value_rules.rs::a_reply_outside_its_declared_value_rules_still_decodes`
+  (F2, L1: the committed OpenAI client against wiremock on 127.0.0.1):
+  - Request side, control for the rule's presence: `CreateVectorStore` with
+    `expires_after { anchor: "created_at", days: 4000 }` is refused by
+    `validate()` with the exact two violations (`anchor` enum,
+    `days` maximum 365), and nothing is sent.
+  - Response side: `get_vector_store("vs_1")` decodes a reply that breaks
+    the same `VectorStoreExpirationAfter` rules, plus the declared enums on
+    `object` and `status`. The decoded fields keep the server's values, the
+    re-serialized value equals the reply (nothing dropped or clamped), and
+    exactly one request was sent.
+  - The module doc now says replies are decoded without the rules.
+- **Cross-OS review** (with the `os` skill loaded):
+  - A scan of the feature's added lines in `runtime/src`, `define/src`, and
+    `gen/src` (61 files changed since the baseline) found no `cfg(windows|unix|target_os)`,
+    no `Path`/`std::fs` use, no environment reads, and no locale-dependent
+    calls. The `\\` hits are regex-syntax text in `constraints/pattern.rs`.
+    The two `to_lowercase()` calls lowercase ASCII HTTP method names, and
+    Rust's lowercasing is locale-free.
+  - Patterns use the pure-Rust `regex` and `regex-syntax`, and exact
+    numbers use pure-Rust code. Fixtures read through `include_str!` are
+    LF in every checkout (`.gitattributes` `eol=lf`).
+  - Compile evidence: `cargo check --target x86_64-pc-windows-gnu -p
+    schematic-runtime -p schematic-define -p schematic-gen --lib` passed.
+    This is compile evidence only, not behavioral evidence.
+  - Behavioral evidence is macOS (this host) only. Linux, native Windows,
+    and WSL2 were not run; CI's PR legs (Linux, macOS) and the nightly
+    (Windows, WSL2) cover them. I did not run `just cross-check`, because
+    the review found no OS-level risk.
+- **Matrix audit.**
+  - Smell grep over the feature's added lines in `define/src/constraints/`,
+    the import mappings and `normalize.rs`, the export `conversion.rs`,
+    `runtime/src/validate/`, and `gen/src/codegen/value_rules/`. Every hit
+    matches an entry already triaged in Phases 2–5:
+    - the `#[serde(default)]` members of `Constraints` all carry
+      `serde_presence::non_null`/`non_null_map`, except the two Booleans
+      (`unique_items`, `pattern_unenforced`), whose absent form means
+      `false`;
+    - `.ok()` in `percent_decode`, `json_number`, and the runtime
+      evaluator's limit text, regex compilation, and `Decimal::from_json`;
+    - `unwrap_or_default()` on `typed_paths` and `prune`.
+
+    No new smell.
+  - Field-shape coverage per validator
+    (`define value_constraints::serialized_field_shapes_per_validator`):
+    - count/length, numeric limit, pattern, `uniqueItems`, `items`, `enum`,
+      and `const` each have a control and their invalid shapes;
+    - every other field has a wired cell.
+
+    **One gap found and filled:** the `format` validator had no
+    wrong-type cell. I added `("format wrong type", {"format": 5}) →
+    invalid type`, so there are now 48 cells.
+  - Loader coverage: the bundle JSON loader and the OpenAPI loader
+    (control, duplicate keyword, Boolean exclusives, out-of-range bound,
+    explicit null, CLI wiring) are the Phase 3 and Phase 4 rows above;
+    nothing changed in them in this phase.
+  - Exceptions to the default outcome remain as the plan lists them, with
+    tests: `pattern: ""`, an unknown `format`, `null` as `enum`/`const`
+    data, and `uniqueItems: false` ≡ absent.
+
+### Requirement-to-test mapping
+
+| Requirement (plan Waves 16–17) | Evidence |
+| --- | --- |
+| Artifacts regenerated through recipes, diff explained | `just import-openai` + `just generate` (no diff); cumulative diff explained above |
+| Committed clients current | `just check-drift` (10 passed) |
+| Committed client behavior | `just test-schema` (see Gates) |
+| A decodable reply outside a declared bound still decodes (enum, numeric maximum, nested `$ref` component), while the same rule is enforced on the request | `schematic-schema value_rules::a_reply_outside_its_declared_value_rules_still_decodes` (**new**) |
+| Matrix: every validator has a control and invalid shapes | `schematic-define value_constraints::serialized_field_shapes_per_validator` (+1 cell: `format wrong type`) |
+| Cross-OS | review above; `x86_64-pc-windows-gnu` compile check |
+
+### Review agenda (Phase 7 additions)
+
+1. Rules inside `oneOf` alternatives that the importer collapses to
+   `serde_json::Value` are lost on import (for example OpenAI's fine-tuning
+   `learning_rate_multiplier`, `"auto" | number > 0`). This is outside the
+   spec's scope, which excludes generic composition, and it predates this
+   feature. Preserving them would need the importer to keep the union.
+2. The Unfolded Circle Core REST definition is handwritten and carries none
+   of the vendored document's value rules. Porting them is separate work.
+
+### Gates (all on macOS, this host, with no subagent running)
+
+- `just lint`: exit 0. `just lint-schema`: exit 0.
+- `just test` (from `schematic/`): exit 0. Main L1: 3119 passed (6 slow),
+  23 skipped; `test-fresh-output`: 17 passed; `test-compile-fail`: 1 passed.
+  No failures, retries, or timeouts.
+- `just doctest`: exit 0 (including the generated crate's 577).
+- `just test-schema`: 154 passed (153 plus the new test).
+- `just check-drift`: 10 passed.
+- `just check-tier-coverage schematic` (from the repository root): 0
+  stranded. The new tests are in the auto-discovered `define`
+  `value_constraints` binary and the `schema` `value_rules` binary. Both
+  were already run by `just test` and `just test-schema`, and neither name
+  carries a tier marker.
+- Targeted first: `cargo nextest run --manifest-path schema/Cargo.toml
+  --test value_rules` → 2 passed (the first run failed only on my expected
+  enum wording, "must equal the one allowed value", which I corrected);
+  `cargo nextest run -p schematic-define --test value_constraints -E
+  'test(serialized_field_shapes_per_validator)'` → 1 passed.
+- `just test-l2`: not run. The area's L2 tests cover the generator's
+  terminal status styling, which neither this phase nor this feature
+  touched.
+- Dependents: not run. Phase 7 changed only two integration-test files,
+  which no other package compiles.
+- Scope calculator, from the repository root after all edits:
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' |
+  xargs python3 scripts/ci/affected_scope.py` → `packages:
+  ["schematic-define", "schematic-runtime", "test-toolkit", "darkmatter"]`,
+  `change_class: package`. So the gates were required, and they ran (above).
+  - `test-toolkit` and `darkmatter` are listed because of Phase 6's
+    uncommitted `gen.md` skill edit. Phase 6 already ran those narrowed
+    readers (65 + 2 passed), and their input has not changed since, so I
+    did not rerun them.
+- Spec frontmatter: this phase's prompt asked for no spec properties, so
+  the spec is unchanged. `os_failing` was not set, because no cross-check
+  ran and nothing failed.

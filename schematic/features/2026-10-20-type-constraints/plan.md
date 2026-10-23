@@ -188,6 +188,25 @@ skills_files_updated_during_phase_5:
     - .claude/skills/schematic-define/SKILL.md
     - .claude/skills/schematic-define/schematic/SKILL.md
     - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_6:
+    - schematic/runtime/src/pager/engine.rs
+    - schematic/runtime/src/validate/eval.rs
+    - schematic/runtime/src/validate/mod.rs
+    - schematic/runtime/tests/l1/pager_rules.rs
+    - schematic/runtime/tests/l1/pager_support.rs
+    - schematic/schema/tests/pagination.rs
+docs_updated_during_phase_6:
+    - schematic/docs/pagination.md
+    - schematic/docs/runtime/validation.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_7:
+    - schematic/define/tests/value_constraints.rs
+    - schematic/schema/tests/value_rules.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
 ---
 
 # Type constraints implementation plan
@@ -622,7 +641,7 @@ explained exclusive-bound/`const` spelling changes, which are listed in the log.
 
 ### Wave 15: Engine reuse
 
-- [ ] **Shared helper in engine**
+- [x] **Shared helper in engine**
   - In `runtime/src/pager/engine.rs` keep the page-size checks after each effective
     size selection (initial knobs, sent defaults, mid-traversal changes) but
     route them through the shared `validate` helpers so one implementation
@@ -630,7 +649,7 @@ explained exclusive-bound/`const` spelling changes, which are listed in the log.
     caller overrides it. Keep the error shape for pager planning problems.
   - Do not teach `.per_page(..)` on endpoints where the pager adopted that
     parameter in any docs.
-- [ ] **Pager tests**
+- [x] **Pager tests**
   - Initial invalid size; invalid size changed during traversal; adopted sent
     defaults; conflicting parameter/strategy bounds (definition-time, from Phase
     3); GitHub max remains 100 and its controls remain; the `.page_size(500)`
@@ -643,7 +662,7 @@ docs (`docs/pagination.md`) updated.
 
 ### Wave 16: Regenerate (sequential; integrator only)
 
-- [ ] **Regenerate artifacts**
+- [x] **Regenerate artifacts**
   - Through the existing recipes only (`just generate`, `generate-openapi`,
     `generate-postman` as applicable, plus `import-*` for imported definitions):
     regenerate affected definitions, clients, OpenAPI documents, and any
@@ -654,15 +673,15 @@ docs (`docs/pagination.md`) updated.
 
 ### Wave 17: Cross-cutting acceptance (parallel; read-only checks and test files)
 
-- [ ] **No response enforcement**
+- [x] **No response enforcement**
   - Test: a structurally decodable reply outside a declared value bound still
     decodes as before.
-- [ ] **Cross-OS review**
+- [x] **Cross-OS review**
   - Load the `os` skill. Review new code for path/regex/locale assumptions;
     confirm the pure-Rust paths compile on macOS, Linux, native Windows, and
     WSL2. Evidence is the pushing host's local run; do not claim other
     environments passed without evidence, and record what was unexercised.
-- [ ] **Matrix audit**
+- [x] **Matrix audit**
   - Run the smell grep and confirm every validator row/column has a control and
     an invalid-shape cell; list any exception in the log.
 
