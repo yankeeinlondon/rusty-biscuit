@@ -22,40 +22,6 @@ packages:
     - sony-receiver-integration
     - schematic-runtime
 human_review: false
-message_to_agent: |-
-    Phase 5 landed R5/R6/R7 (handshake credential) and R11 (typed
-    correlation). What Phase 6 builds on:
-    - Each explicit `connect_*` builds one `ws_shared::WsHandshake` (URL and
-      headers with the selected credential already placed, redacted Debug)
-      and calls `handshake.dial(&options)`; the supervisor redials with the
-      same handshake. Dial errors are `HandshakeRejected{status, headers}`
-      (redacted), `Handshake(String)` (URL redacted) or `HandshakeTimeout`.
-      `err.is_terminal_handshake_rejection()` (401/403/3xx) closes the
-      supervisor on a redial; keep that when you rework the loop.
-    - The supervisor loop itself is otherwise Phase 4's: the reconnect
-      counter still increments on a successful redial and resets when a
-      stream is taken (R2 is yours), there is no opening write/setup callback
-      (R3), no receive timeout (R8; the Info diagnostic in `lower_to_plan`
-      and the `_receive_timeout` TODO in `client.rs` are still there), and
-      `Ready` is sent right after the split. `handshake_timeout` alone bounds
-      a dial; the shared deadline (plan rule 7) is not implemented.
-    - On connection loss the supervisor now calls `fail_pending` (wakes
-      requests with Disconnected) and `discard_queued(&mut writer_rx)`
-      (drops queued commands; returns true on Close/closed channel). A send
-      while disconnected still queues and returns Ok; making it return
-      `Disconnected` is Phase 6.
-    - The ElevenLabs opening payload's `xi-api-key` binding (plan rule 6) is
-      not done: the selected credential is placed on the handshake only.
-      `WsHandshake` keeps `auth_method` but not the raw secret; the setup
-      session needs a private accessor (e.g. keep the `HandshakeCredential`,
-      whose Debug is redacted) to fill or check an opening auth field.
-    - No WS TLS opt-in exists (logged open issue); do not add one.
-    - Tests to extend: `schema/tests/ws_handshake.rs`,
-      `schema/tests/ws_correlation.rs` (F3 local) and the fresh-output child
-      list `CREDENTIAL_WS_CLIENT_TESTS` in `gen/tests/l1/fresh_output_compile.rs`
-      (CI-visible). The mock gained `Script::RefuseWith{status, headers}`.
-    - Phase 4 was uncommitted when Phase 5 started; the *_during_phase_5
-      lists name only Phase 5's files (diffed against a snapshot).
 source_files_during_phase_2:
     - schematic/definitions/src/unfolded_circle/core_ws/mod.rs
     - schematic/gen/src/diagnostics.rs
@@ -199,6 +165,146 @@ skills_files_updated_during_phase_5:
     - .claude/skills/schematic-define/SKILL.md
     - .claude/skills/schematic-define/schematic/headers.md
     - .claude/skills/schematic-define/schematic/websocket.md
+source_files_during_phase_6:
+    - schematic/define/src/websocket/lifecycle.rs
+    - schematic/define/src/websocket/mod.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/tests/ws_definition_json.rs
+    - schematic/gen/src/ws_codegen/client.rs
+    - schematic/gen/src/ws_codegen/host.rs
+    - schematic/gen/src/ws_codegen/mod.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/src/ws_codegen/shared.rs
+    - schematic/gen/src/ws_codegen/supervisor.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/gen/tests/l1/ws_validation.rs
+    - schematic/runtime/src/credentials.rs
+    - schematic/runtime/tests/l1/handshake_credentials.rs
+    - schematic/schema/src/elevenlabs_ws.rs
+    - schematic/schema/src/samsung_smart_tv_remote_ws.rs
+    - schematic/schema/src/unfolded_circle_core_ws.rs
+    - schematic/schema/src/unfolded_circle_dock_ws.rs
+    - schematic/schema/src/unfolded_circle_integration_ws.rs
+    - schematic/schema/src/ws_shared.rs
+    - schematic/schema/tests/ws_idle.rs
+    - schematic/schema/tests/ws_mock/mod.rs
+    - schematic/schema/tests/ws_mock_harness.rs
+    - schematic/schema/tests/ws_runtime.rs
+    - schematic/schema/tests/ws_session.rs
+docs_updated_during_phase_6:
+    - schematic/README.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/runtime/credentials.md
+    - schematic/docs/websocket-definitions.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/schematic-define/schematic/websocket.md
+source_files_during_phase_7:
+    - schematic/gen/tests/l1/openapi_import_test.rs
+    - schematic/schema/tests/ws_handshake.rs
+docs_updated_during_phase_7:
+    - schematic/docs/websocket-definitions.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/homelab/SKILL.md
+    - .claude/skills/os/SKILL.md
+    - .claude/skills/os/windows.md
+    - .claude/skills/schematic-define/schematic/websocket.md
+    - .claude/skills/unfolded-circle/api-clients.md
+source_code:
+    - homelab/arcam-amp-integration/src/handler.rs
+    - homelab/eversolo-integration/src/handler.rs
+    - homelab/lib/src/samsung_tv.rs
+    - homelab/sony-receiver-integration/src/handler.rs
+    - homelab/unfolded-integration-helper/Cargo.toml
+    - homelab/unfolded-integration-helper/src/envelope.rs
+    - homelab/unfolded-integration-helper/src/lib.rs
+    - homelab/unfolded-integration-helper/src/subscriptions.rs
+    - homelab/unfolded-integration-helper/src/test_fixtures.rs
+    - schematic/define/src/lib.rs
+    - schematic/define/src/params/param_def.rs
+    - schematic/define/src/prelude.rs
+    - schematic/define/src/serde_presence.rs
+    - schematic/define/src/websocket/hints.rs
+    - schematic/define/src/websocket/lifecycle.rs
+    - schematic/define/src/websocket/mod.rs
+    - schematic/define/src/websocket/params.rs
+    - schematic/define/tests/builders.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/src/samsung_smart_tv/remote_ws/mod.rs
+    - schematic/definitions/src/unfolded_circle/core_ws/mod.rs
+    - schematic/definitions/src/unfolded_circle/dock_ws/mod.rs
+    - schematic/definitions/src/unfolded_circle/dock_ws/types.rs
+    - schematic/definitions/src/unfolded_circle/integration_ws/mod.rs
+    - schematic/definitions/src/unfolded_circle/integration_ws/types.rs
+    - schematic/definitions/tests/ws_conformance.rs
+    - schematic/definitions/tests/ws_definition_json.rs
+    - schematic/gen/src/asyncapi_import.rs
+    - schematic/gen/src/codegen/api_struct/auth.rs
+    - schematic/gen/src/codegen/api_struct/mod.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/output/ws_modules.rs
+    - schematic/gen/src/pipeline.rs
+    - schematic/gen/src/ws_codegen/client.rs
+    - schematic/gen/src/ws_codegen/host.rs
+    - schematic/gen/src/ws_codegen/mod.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/src/ws_codegen/shared.rs
+    - schematic/gen/src/ws_codegen/supervisor.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/gen/tests/fixtures/asyncapi/UCR-integration-asyncapi.json
+    - schematic/gen/tests/l1/asyncapi_import.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/openapi_import_test.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/gen/tests/l1/ws_validation.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/credentials.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/tests/l1/handshake_credentials.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/schema/src/elevenlabs_ws.rs
+    - schematic/schema/src/samsung_smart_tv_remote_ws.rs
+    - schematic/schema/src/unfolded_circle_core_ws.rs
+    - schematic/schema/src/unfolded_circle_dock_ws.rs
+    - schematic/schema/src/unfolded_circle_integration_ws.rs
+    - schematic/schema/src/ws_shared.rs
+    - schematic/schema/tests/ws_correlation.rs
+    - schematic/schema/tests/ws_handshake.rs
+    - schematic/schema/tests/ws_idle.rs
+    - schematic/schema/tests/ws_mock/mod.rs
+    - schematic/schema/tests/ws_mock_harness.rs
+    - schematic/schema/tests/ws_runtime.rs
+    - schematic/schema/tests/ws_session.rs
+documentation:
+    - .claude/skills/homelab/SKILL.md
+    - .claude/skills/os/SKILL.md
+    - .claude/skills/os/windows.md
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/headers.md
+    - .claude/skills/schematic-define/schematic/websocket.md
+    - .claude/skills/unfolded-circle/api-clients.md
+    - .claude/skills/unfolded-circle/core-api.md
+    - homelab/eversolo-integration/README.md
+    - homelab/unfolded-integration-helper/README.md
+    - schematic/README.md
+    - schematic/docs/definition-builders.md
+    - schematic/docs/dependencies.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/generation/workflow.md
+    - schematic/docs/headers/README.md
+    - schematic/docs/runtime/credentials.md
+    - schematic/docs/websocket-definitions.md
+    - schematic/features/2026-10-17-schematic-websocket/setup-spike/Cargo.toml.txt
+    - schematic/features/2026-10-17-schematic-websocket/setup-spike/lib.rs.txt
+    - schematic/features/2026-10-17-schematic-websocket/setup-spike/setup_tests.rs.txt
+completed_phase: 7
+implemented: true
 ---
 
 # Implementation Log for 2026-10-17-schematic-websocket (7 phases)
@@ -1586,3 +1692,490 @@ Phase 5 checkpoint met: R5, R6, R7, and R11 pass through mock-observed
 handshakes and typed request results; no transport formatting leaks a
 credential URL; one selected credential is retained for recovery. The old
 receive-timeout Info diagnostic is retained for Phase 6.
+
+## Phase 6
+
+Started 2026-10-23. Phase 5 was committed (`2b81e4a72`), so the working tree
+is exactly this phase's changes. The orchestrator implemented Wave 13
+(runtime accessor, definition field, generator, regeneration, docs). Three
+subagents then wrote tests on disjoint files at the same time, each running
+only its own target: `schema/tests/ws_session.rs` (R2/R3), `schema/tests/
+ws_idle.rs` plus mock additions (R8, backpressure), and the CI-visible
+fresh-output test. The area gates ran once afterwards with no subagent
+running.
+
+### What changed
+
+- **One shared supervisor (`gen/src/ws_codegen/supervisor.rs`, new; emitted
+  into `ws_shared.rs`).** The per-endpoint inline supervisor loop in
+  `client.rs` is gone; every endpoint client calls
+  `ws_shared::connect_session(WsSession, options)`. `WsSession` keeps the
+  `WsHandshake` (now holding the `HandshakeCredential`), the serialized
+  opening `Message`, the setup factory, the correlation config, and the
+  frame kind, and is reused for every redial.
+  - **Attempt** = dial → opening write → setup callback → reclaim, all inside
+    one `tokio::time::timeout(handshake_timeout)`; expiry is
+    `WsError::HandshakeTimeout(Duration)` (was `u64` seconds and covered the
+    dial only). The explicit connect makes one attempt inline (dropping the
+    connect future leaves nothing running); the supervisor is spawned after
+    the first `Ready`. State is `Authenticating` while the opening/setup
+    runs; `Ready` and the budget reset only after setup.
+  - **R2:** `recover` counts consecutive failed redials from zero for each
+    loss, so a redial that completes setup resets the count; `Some(0)` never
+    redials, `None` unlimited. A 401/403/3xx or `SetupRejected` is terminal
+    (`WsError::is_terminal`).
+  - **R3:** `connect_*` takes `opening: {OpenPayload}` for an endpoint with
+    `lifecycle.open`; `opening_message` serializes it once. The open
+    message's `send_*` helper was removed (it could only send a duplicate).
+    Endpoints with `AuthFlowHints` also get
+    `connect_{ep}_with_setup(.., setup: Fn({Ep}Setup) -> Fut)`, with
+    `pub type {Ep}Setup = WsSetupSession<{Ep}ClientMessage,
+    {Ep}ServerMessage>`. The session implements the Phase 1 spike's slot +
+    revocation design (`SetupGuard`, `WsSetupChannel`), with typed
+    `send`/`next_message`, `send_value`/`next_value`, and `credential()`.
+    `WsSetupError::{Rejected, Transient, Closed, Io, Codec, SessionInvalid}`;
+    only `Rejected` is terminal (`WsError::SetupRejected`), the rest are
+    `WsError::Setup`. Opening write failure is `WsError::OpeningWrite`.
+  - **R8:** `serve` races, in a biased `select!`, shutdown, the idle
+    deadline (reset by every inbound frame, ping/pong included, never by
+    writes; starts after setup), delivery of a held event, a cancel-safe
+    `drive_write` (`poll_ready`/`start_send`/`poll_flush`), the writer queue,
+    and reads. A ping sets `flush`, so the queued pong is written at once.
+    Expiry delivers `WsError::ReceiveTimeout(d)` and applies the reconnect
+    policy.
+  - **Backpressure:** events are `try_send`; a full queue holds one event
+    and pauses reading, while close, timer, writes, state and pending
+    wakeups carry on. Error events go through the same path; the terminal
+    one is awaited after `Closed` is published, so it precedes the end of
+    the stream.
+  - **Shutdown:** `close()` sets a `watch` and waits for `Closed`
+    (interrupting backoff, dial or setup; a ready connection gets a Close
+    frame within a 500 ms grace); `WriterCommand::Close` was removed. Drop
+    still aborts the supervisor. On every exit pending requests fail
+    `Disconnected`.
+  - **Send while disconnected:** `WsTransportHandle::send` returns
+    `Disconnected` unless `Ready`. Fix found by the idle tests: a send that
+    was blocked on a full outbound queue at the moment of loss was written to
+    the replacement connection after `discard_queued` freed room (a replay).
+    Queued commands are now tagged with the connection number; `send`
+    re-checks number and state after `reserve()`, the supervisor bumps the
+    number before publishing `Ready` and drops commands of an earlier
+    connection.
+- **Opening credential binding (plan rule 6).** New definition field
+  `ConnectionLifecycle.open_credential_field: Option<String>`
+  (`define/src/websocket/lifecycle.rs`; `default` + `non_null` +
+  `skip_serializing_if`, so absent ≠ null). ElevenLabs `TextToSpeech`
+  declares `xi-api-key`; `MultiContextTextToSpeech` binds nothing. Plan-time
+  Errors: an empty field; a field without `lifecycle.open`.
+  `opening_message` fills an absent/null/empty field from the selected key,
+  keeps an equal value, refuses a different value with `InvalidCredential`
+  before dialing (message names the field only); with no credential
+  selected a caller value is sent as given.
+- **Runtime (pre-authorized minimal transport-neutral extension, logged per
+  plan rule 11).** `HandshakeCredential::expose_secret() -> Option<&str>`:
+  the selected key/token without prefix or `Bearer ` scheme; `None` for
+  anonymous or Basic. `HandshakeCredential` now stores the unplaced secret
+  next to the `Resolved` (private `resolve_env_secret`,
+  `Credential::single_secret`); REST resolution is unchanged.
+- **Planner.** `EndpointPlan` gains `open_credential_field` and `has_setup`
+  (`auth_flow` declared). The "receive_timeout is not yet enforced" Info and
+  the `_receive_timeout` TODO in `client.rs` are removed (the behavior now
+  exists).
+- **Removed `WsError` variants:** `AuthRejected`, `AuthTimeout` (never
+  constructed anywhere; replaced by `SetupRejected` and the attempt
+  timeout). Added: `SetupRejected`, `Setup`, `OpeningWrite`,
+  `ReceiveTimeout`.
+- **Regenerated** with `just generate`: only the five `*_ws.rs` and
+  `ws_shared.rs` changed. Consumers: `schema/tests/ws_runtime.rs` passes the
+  new opening arguments; homelab (Samsung clients, integration hosts) needed
+  no change — no homelab code uses an opening message, a setup callback, or
+  a removed `WsError` variant.
+
+### Adopted defaults and deviations
+
+- adopted default: the opening credential binding is declared in the
+  definition as `ConnectionLifecycle.open_credential_field` (source: plan
+  rule 6 "bind each applicable protocol's field explicitly; never infer";
+  the spec names no carrier). Alternatives: a trait on the payload type
+  (every opening type would have to implement it), or generator special-casing
+  ElevenLabs (rejected: not definition-driven). The field is additive and
+  serialized, so the AsyncAPI exporter can carry it; review item.
+- adopted default: an empty string in the bound field counts as absent and
+  is filled (source: plan rule 6 "fill an absent declared auth field").
+- adopted default: the initial connect makes exactly one attempt (no retry
+  before the first `Ready`), so the "shared pre-Ready deadline" of plan rule
+  7 is that attempt's `handshake_timeout`; no separate connect-deadline
+  option was added, and nothing carries over to redials (source: R2 "the
+  initial dial is separate from the reconnect budget"; Phase 1 spike).
+  `handshake_timeout` keeps its name and now bounds the whole attempt.
+- adopted default: `connect_{ep}_with_setup` is emitted only for endpoints
+  declaring `AuthFlowHints`; the plain `connect_{ep}` stays on those
+  endpoints too (Core also accepts its key in the handshake) (source: spec
+  R3 "an endpoint with a challenge flow takes a typed setup callback").
+- adopted default: `Authenticating` (existing variant) is the state while
+  the opening and setup run (source: spec state diagram "Setup").
+- adopted default: with the event queue full, the idle timer keeps running
+  while reading is paused (time not reading counts as silence), and a
+  transient error raised while an event is already held is dropped (state
+  still shows it) (source: spec "a full inbound event queue must not prevent
+  the supervisor from noticing timeout"; "preserve bounded queues").
+  Documented in `docs/websocket-definitions.md`; review item.
+- adopted default: manual close grace for the Close frame is a fixed 500 ms.
+- adopted default: the setup session's credential accessor is the runtime's
+  `HandshakeCredential` itself (redacted `Debug`, `expose_secret()`), not a
+  WS-only wrapper (source: Phase 5 handoff).
+- observation (not changed): Dock's policy is `AuthStrategy::None`, so its
+  handshake selection is anonymous and its setup session exposes no secret;
+  a Dock setup callback takes its token from its own closure. Reading
+  `UCR_DOCK_TOKEN` for a setup-only credential would need a new
+  runtime selection rule (new scope).
+- observation: the CLI test `the_validate_command_prints_info_notes_only_when_verbose`
+  depended on the retired receive-timeout Info; no shipped WebSocket
+  definition emits an Info now, so it is renamed
+  `the_validate_command_keeps_info_notes_out_of_its_default_output` and
+  checks only the quiet run plus the absence of the retired note. The
+  verbose-printing rule is still covered in-process by
+  `ws_validation::info_notes_stay_out_of_the_shared_diagnostics` (now driven
+  by the auth-messages-without-flow Info). Coverage loss: the spawned CLI no
+  longer proves a verbose run prints an Info.
+- gap: an opening-write failure on a **redial** is not tested; the only
+  deterministic trigger (`max_write_buffer_size` below the frame size) also
+  fails the initial connect, and the options cannot inject a failing
+  transport. The redial runs the same `run_attempt`; a failed attempt using
+  the budget is proven by the refused-redial and transient-setup tests.
+
+### Requirement-to-test map
+
+| Requirement | Boundary / rung | Test(s) |
+|---|---|---|
+| R2 five drop/redial cycles with budget 2 stay alive; two consecutive refused redials close; `Some(0)`; `None` unlimited; reset after setup; no policy | generated client ↔ loopback mock, F3 local | `ws_session::{repeated_losses_with_successful_redials_never_exhaust_the_budget, two_consecutive_refused_redials_exhaust_a_budget_of_two, zero_max_attempts_closes_on_loss_without_redialing, unlimited_max_attempts_survives_consecutive_failures, budget_resets_after_each_successful_redial, no_reconnect_policy_closes_on_loss}` |
+| R2/R3 CI-visible | fresh-output child crate, F3, **CI-visible** | `slow_ws_session_setup_and_recovery_run` children: `the_opening_frame_comes_first_on_the_initial_connection_and_on_a_redial`, `an_opening_key_that_differs_from_the_credential_fails_the_connect_before_dialing`, `setup_runs_with_the_handshake_key_before_ready_on_the_initial_connection_and_on_a_redial`, `a_rejected_setup_fails_the_connect_with_setup_rejected_after_one_connection`, `the_reconnect_budget_counts_consecutive_failed_redials_and_resets_after_each_setup`, `a_silent_server_times_out_the_receive_and_the_client_redials`; guard `ws_child_test_lists_name_every_child_test` |
+| R3 opening first on three connections, before Ready | F3 local | `ws_session::opening_message_is_written_first_on_every_connection` |
+| R3 opening credential binding cells (absent, equal, different, anonymous + caller value, unbound endpoint) | F3 local | `ws_session::{opening_without_a_key_field_is_filled_from_the_credential, opening_with_the_same_key_keeps_one_field, opening_with_a_different_key_is_refused_before_dialing, anonymous_opening_keeps_the_callers_key, multi_context_opening_is_sent_unchanged}` |
+| R3 deterministic opening-write failure | F3 local | `ws_session::opening_write_failure_fails_the_connect_without_redialing` |
+| R3 setup before Ready on every dial; rejection terminal (initial, redial); transient uses budget; stall/cancel drops the stream and invalidates a leaked session | F3 local | `ws_session::{setup_runs_before_ready_on_every_connection, setup_rejection_on_connect_is_returned_without_a_second_attempt, setup_rejection_on_redial_closes_the_client, transient_setup_failures_on_redials_use_the_budget, setup_cancellation_drops_stream_and_invalidates_session}` |
+| Shutdown: manual close/drop never redial; close interrupts backoff and stalled setup; pre-Ready attempt stall = one attempt; no inherited lifetime deadline | F3 local | `ws_session::{manual_close_never_redials, close_during_backoff_returns_promptly, close_during_stalled_redial_setup_returns_promptly, dropping_the_client_during_backoff_never_redials, stalled_initial_upgrade_times_out_after_one_attempt, ready_connection_and_later_redials_have_no_inherited_deadline}` |
+| Disconnected sends fail at once; nothing replayed | F3 local | `ws_session::{send_while_disconnected_fails_immediately, messages_from_a_lost_connection_are_not_replayed}`; `ws_idle::{disconnect_fails_pending_and_discards_queued_commands, a_send_waiting_for_room_at_disconnect_is_not_written_to_the_replacement, a_request_waiting_for_room_at_disconnect_is_not_replayed}` (the last two failed before the connection-tag fix) |
+| R8 silence → `ReceiveTimeout` + redial; `None` unchanged; pings keep alive with pongs observed at the server; outbound does not reset | F3 local | `ws_idle::{silence_after_a_frame_times_out_and_redials, no_receive_timeout_keeps_a_silent_connection, server_pings_keep_the_connection_alive_and_are_ponged, outbound_sends_do_not_reset_the_idle_timer}` |
+| Backpressure: full event queue and stalled writes keep timeout, state, request wakeup and close responsive | F3 local | `ws_idle::{a_full_event_queue_still_times_out_publishes_state_and_closes, stalled_writes_do_not_block_close, stalled_writes_do_not_block_the_idle_timeout_and_pending_request_fails}` |
+| Mock heartbeat step (pings, pongs recorded, reading on/off) | harness | `ws_mock_harness` (two new tests) |
+| R8 Info diagnostic removed | gen plan / output | `plan::tests::no_info_note_reports_an_unenforced_receive_timeout`; `ws_validation::receive_timeout_is_enforced_so_no_shipped_api_has_a_note_about_it`; `ws_codegen::the_receive_timeout_is_enforced_in_the_shared_supervisor` |
+| Generated surface: opening argument + binding, no open helper; setup connect only with a challenge flow | gen output | `ws_codegen::{elevenlabs_connect_takes_the_opening_payload_and_binds_its_credential_field, only_challenge_flow_endpoints_get_a_setup_connect}` |
+| `open_credential_field` validation | gen plan API, F1 | `plan::tests::{an_open_credential_field_binds_a_declared_open_message, only_an_endpoint_with_a_challenge_flow_takes_a_setup_callback}` |
+| `expose_secret` per source (per-call, client, env, prefix/scheme stripped, anonymous, Basic, Basic env) | `schematic-runtime` public API, F1 | `runtime` L1 `handshake_credentials::{the_exposed_secret_is_the_selected_key_or_token_without_its_placement, a_basic_pair_from_the_environment_exposes_no_secret}` |
+
+### Input robustness matrix (`lifecycle.open_credential_field`)
+
+One new load-bearing field on the existing definition loader (serde_json
+over the derived `WebSocketApi`), so only field shapes are added; document
+shapes (duplicate keys, trailing content) are already covered once for this
+loader by `duplicate_keys_and_trailing_content_are_rejected`. Default: an
+invalid shape fails to load. Test:
+`schematic-definitions/tests/ws_definition_json.rs::the_open_credential_field_has_one_outcome_per_shape`
+from a control (Dock document plus an open message and the binding):
+control → read exactly and round-trips; absent → `None`, not written back;
+null, number, bool, `[]`, `{}`, `["…"]` → rejected; `""` → loads as
+declared, rejected by generation (`an_open_credential_field_binds_a_declared_open_message`).
+Smell grep over the new reader: the field uses `default` with `non_null`
+(null is not absent); no `filter_map`/`unwrap_or_default`/`.ok()` on its
+path.
+
+### Gates and verification (Phase 6 close)
+
+- Gate-skip check not applicable: the phase changed source in
+  `schematic-define`, `schematic-definitions`, `schematic-gen`,
+  `schematic-runtime`, and `schematic-schema`; every gate was run, once,
+  after all subagent work was merged and with no subagent running.
+- `just lint` (schematic area): pass (rerun after the connection-tag fix).
+  `just lint-schema`: pass.
+- `just test`: pass — L1 2776 passed, 20 skipped; `test-fresh-output` 14/14
+  (74 s, includes the new `slow_ws_session_setup_and_recovery_run`);
+  `test-compile-fail` 1/1.
+- `just test-schema`: 149/149 (`ws_session` 26 and `ws_idle` 10 new,
+  `ws_mock_harness` +2; the rest unchanged). Subagent runs: `ws_session` 3×
+  green (slowest 0.73 s), `ws_idle` 3× green after the fix (slowest
+  ~1.4 s), fresh-output child crate 6/6. One subagent run reported "1
+  leaky" on a passing `ws_idle` test; not seen in the gate run.
+- `just check-drift`: 9/9. `just check-tier-coverage schematic` (root): 0
+  stranded. `just doctest`: pass (define 173 + 6 ignored — the
+  `rust,ignore` generated-surface examples of `docs/websocket-definitions.md`,
+  two of them new; definitions 18; gen 44 + 2 ignored; oauth 19; runtime
+  3+3).
+- Dependents, serially: `unfolded-integration-helper` 32/32,
+  `arcam-amp-integration` 23 (2 skipped), `eversolo-integration` 33 (3
+  skipped), `sony-receiver-integration` 28 (3 skipped), `homelab` Samsung
+  tests 12/12; clippy `-D warnings --all-targets` over the five homelab
+  packages clean; `cargo check -p sniff -p biscuit-speaks -p model-citizen`
+  pass.
+- Cross-OS: attempted for the generated crate, whose loopback timing tests
+  are the new OS-sensitive surface. `just cross-check schematic-schema --os
+  windows` refuses ("the plan resolves no single windows-latest build for
+  schematic-schema"), and with `--all-features` Windows cargo refuses
+  ("cannot specify features for packages outside of workspace"):
+  `schematic/schema` has its own manifest, so the cross-check tool cannot
+  run it. No test failed; **Windows, Linux and WSL2 are not verified** for
+  the new `ws_session`/`ws_idle` tests. Phase 7 ("Verify Environments",
+  which names schema's separate manifest) owns this evidence; `os_failing`
+  is not set because nothing failed. The generator change itself is
+  OS-neutral tokio/tungstenite code with no path or process handling.
+- Docs: `docs/websocket-definitions.md` (new "Connecting, setup, and
+  recovery" section with a state diagram: opening message and credential
+  binding, setup callbacks, timeouts table, reconnect budget, backpressure;
+  lifecycle-helper sentence corrected), `docs/generation/validation.md`
+  (new Errors; the Info example no longer names the retired note),
+  `docs/generation/generated-clients.md` (fresh-output test list),
+  `docs/runtime/credentials.md` (`expose_secret`), `README.md` (quick start
+  passes the opening payload; link to the new section). Skill:
+  `schematic-define/schematic/websocket.md` (opening binding, supervisor
+  contract, test locations).
+- Comment drift pass over changed symbols: `ws_codegen/mod.rs` listed
+  `codec` and `routing` modules that do not exist (drift; the code is
+  correct) — replaced by the real list including `supervisor`.
+  `WsTransportHandle`, `WsClientOptions.{handshake_timeout,
+  receive_timeout}`, `ReconnectPolicy.max_attempts`, `WsHandshake::dial`,
+  `discard_queued`, `WsConnectionState::Authenticating`, and
+  `ConnectionLifecycle.open` docs were rewritten for the new behavior.
+- No commits, no CI runs, no device or provider contact, no stale-file
+  deletion.
+
+Phase 6 checkpoint met: R2, R3, and R8 pass; the state machine is exercised
+through observable frames, states, events, callback runs, and request
+completion. No accepted connection is reported `Ready` before its opening
+message and setup complete.
+
+## Phase 7
+
+Started 2026-10-23. Phase 6 is not committed, so the working tree holds the
+Phase 6 and Phase 7 changes together; this phase's own edits are listed in
+its frontmatter. No subagents were used: the phase is verification, and the
+remote rigs carried the cross-OS load while the local gates ran.
+
+### Dependents (Wave 16, Verify Dependents)
+
+Run serially on macOS, after the Phase 6 changes and before any Phase 7 fix:
+
+| Package(s) | Command | Result |
+|---|---|---|
+| `homelab`, `homelab-cli`, `homelab-server`, `unfolded-integration-helper`, `arcam-amp-integration`, `eversolo-integration`, `sony-receiver-integration` (all seven, every R15 package plus cli/server builds) | `just test homelab` (root) | 252 passed, 8 skipped (tier-filtered). The root recipe runs the Rust L1 only; the homelab Vue frontend suite (no WebSocket code) was not part of it |
+| `model-citizen` (153 tests listed, under the 200 limit) | `just test model-citizen` (root) | 170 passed |
+| `sniff` (2141 tests) | `cargo nextest run -p sniff -E 'test(/remote\|github\|gitlab\|gitea\|bitbucket\|envelope/)'`; sniff uses only REST modules (`github`, `gitlab`, `gitea`, `bitbucket`) and `schematic_runtime` from `schematic-schema` | 76 passed |
+| `biscuit-speaks` (441 tests) | `cargo nextest run -p biscuit-speaks -E 'test(/elevenlabs/)'`; it uses only the REST `schematic_schema::elevenlabs` module | 48 passed |
+
+All four builds compile against the regenerated `schematic-schema` and the
+changed `schematic-runtime` (`HandshakeCredential` now stores the unplaced
+secret; REST resolution unchanged). No dependent needed an edit.
+
+Removed-name check (R15): `git grep` for `UnfoldedCircleEventHub`,
+`ConnectionParam`, `ParamType`, `AuthRejected`, `AuthTimeout` outside
+`features/`, `reviews/`, `plans/` and the generated `schema/src` finds only
+the negative assertion in `gen/tests/l1/ws_codegen.rs:629`; nothing in
+`schema/src`. The `{Ep}ConnectionParams` structs are the generated parameter
+types, not the removed `ConnectionParam`. Absence is enforced by tests, not
+only by this grep: `ConnectionParam`/`ParamType` no longer exist (four
+`compile_fail` doctests in `schematic-define`), the hub name is asserted by
+`ws_codegen` (line 629), and
+`ws_codegen::every_shipped_client_sends_its_typed_enum_and_values_only_through_send_value`
+asserts that `send` takes only the typed enum and that `Value` goes only
+through `send_value`. Historical research notes (`docs/research/samsung-design.md`)
+still show `ParamType` as a design-time sketch; research notes are not
+behavior docs and were left alone.
+
+### Fixes made this phase (two test defects found by cross-OS runs)
+
+Both are test defects; the production code was correct on every OS.
+
+- **`schema/tests/ws_handshake.rs::query_secret_is_absent_from_every_dial_error`
+  failed on native Windows** (`HandshakeTimeout(2s)` where `Handshake` was
+  expected, `tests\ws_handshake.rs:389`). Case (a) dials a just-freed
+  loopback port to get a refusal. Windows answers a closed port's RST by
+  retrying the SYN and reports the refusal only after about 2 s, so the
+  shared 2 s `handshake_timeout` fired first. The test predates this phase
+  (Phase 5) and had not run on native Windows before. Fix: case (a) uses its
+  own 10 s budget; a refusal still ends it at once on macOS/Linux, and after
+  ~2.26 s on Windows (measured in the rerun). Fix attempt 1 of 3 passed. The
+  trap is recorded in the `os` skill (`windows.md`, "A refused loopback
+  connect takes about 2 seconds", plus a router row in `SKILL.md`).
+- **`gen/tests/l1/openapi_import_test.rs::a_referenced_separable_union_generates_a_multi_shape_success`
+  failed on Linux.** It picked "the API module" as the first `.rs` entry of
+  `read_dir` not named `lib.rs`/`shared.rs`/`prelude.rs`, but
+  `generate_and_write` also writes the shipped WebSocket modules and
+  `ws_shared.rs`; ext4's hash order returned `samsung_smart_tv_remote_ws.rs`
+  first. The `os` skill already documents this `read_dir` trap
+  (`linux.md`), so no skill entry was added. Fix: collect the candidates,
+  exclude `ws_shared.rs` and `*_ws.rs`, and require exactly one. The test
+  came from an earlier REST feature, but its hidden dependence on the
+  WebSocket output makes it this change's to repair; other `read_dir`
+  readers in `gen/tests` use no `.find(` over the directory.
+
+### Documentation and skills audit (Wave 16, Audit Documentation)
+
+Plan checklist against `docs/websocket-definitions.md` and `README.md`:
+typed and value calls ("The generated messages, client, and host"),
+parameters ("Handshake parameters"), auth ("Authentication and
+environment", "The handshake credential"), setup callbacks ("Setup
+callbacks for challenge flows"), correlation ("Linking a request to its
+response"), host hooks (`on_authenticated`, `on_error`, routing), caller
+heartbeats ("Runtime hints and heartbeats"), and lifecycle/state flow
+(Mermaid state diagram in "Connecting, setup, and recovery"); all were
+present from earlier phases. **Missing: cleartext local-device transport.**
+Added to `docs/websocket-definitions.md` (authentication bullets): a
+self-signed `wss://` certificate (Samsung TV :8002) fails the dial as
+`WsError::Handshake` (verified in `ws_shared.rs::handshake_error`: every
+non-HTTP tungstenite error maps there), and a `ws://` base URL (Unfolded
+Circle Core and Dock) is cleartext, sends any credential unencrypted, and
+emits no warning (plan rule 9: no unsolicited warning). This writes down
+the open TLS issue logged in Phase 5; it adds no behavior.
+
+Skills:
+- `.claude/skills/schematic-define/schematic/websocket.md`: the same
+  TLS/cleartext line.
+- `.claude/skills/unfolded-circle/api-clients.md`: drift fixed — the
+  Integration WebSocket link named `unfolded_circle_dock_ws` and pointed at
+  the nonexistent `unfolded_circle_doc_ws.rs`; now
+  `unfolded_circle_integration_ws.rs`.
+- `.claude/skills/homelab/SKILL.md`: drift fixed — the dependency row said
+  `homelab` lib uses only REST clients from `schematic-schema`; it also uses
+  the Samsung remote WebSocket client (`samsung_tv.rs`), and the four
+  integration crates use the typed `unfolded_circle_integration_ws` messages
+  and host.
+- `.claude/skills/os/windows.md`, `.claude/skills/os/SKILL.md`: the Windows
+  refused-connect trap above.
+- `docs/dependencies.md`: no crate was added or removed this phase; no edit.
+
+Checks: `git grep` finds no feature name or `{date}-{name}` in
+`schematic/docs`, `schematic/README.md`, or the touched skills, and no
+**planned** marker in the WebSocket docs (everything described is built).
+Comment drift: a sweep of `gen/src/ws_codegen/*.rs`,
+`runtime/src/credentials.rs`, and `define/src/websocket/*.rs` for retired
+behavior (`TODO`, "not enforced", `AuthRejected`/`AuthTimeout`,
+`WriterCommand::Close`, opening `send_*`, lifetime counters) found nothing
+beyond the drift Phase 6 already fixed; the one hit ("Ids come from one
+counter per connect, never reset by a redial", `client.rs`) is correct.
+Input robustness: this phase adds no loader or field. The matrices for
+every field added by this feature are recorded in Phases 1, 3, 5, and 6
+(`open_credential_field` in Phase 6), each tested at the crate's public API.
+
+### Environments (Wave 16, Verify Environments)
+
+Hosts: `BUILD_LINUX=build-linux`, `BUILD_WIN=build-win-native`,
+`BUILD_WSL=build-win` (all declared and reachable). Every remote run used
+`./scripts/cross-check.sh`, which ships the local tree (uncommitted Phase 6
+and 7 changes included) as a throwaway commit. Phase 6's attempt failed
+because `just cross-check schematic-schema` cannot resolve a crate outside
+the workspace; the `os` skill's documented native form for the generated
+crate (`--all-features --manifest-path schematic/schema/Cargo.toml`) works,
+and that is what ran here. No CI run was triggered.
+
+| Package / scope | macOS (local) | Linux | Native Windows | WSL2 |
+|---|---|---|---|---|
+| `schematic-schema` (own manifest; all 149 incl. `ws_session` 26, `ws_idle` 10, `ws_handshake`, `ws_correlation`, `ws_runtime`, `ws_mock_harness`, compile-fail) | `just test-schema` 149/149 | 149/149 | run 1: 148/149 (`query_secret_is_absent_from_every_dial_error`, fixed above); run 2: 149/149 | 149/149 (with the fix) |
+| `schematic-gen` L1 | in `just test` | 842/842 after the `read_dir` fix (run 1: 841/842) | 840/840 (archive) | 842/842 (archive) |
+| WebSocket fresh-output (`slow_bearer_ws_host…`, `slow_typed_ws_clients…`, `slow_ws_handshake_credentials…`, `slow_ws_handshake_parameters…`, `slow_ws_session_setup_and_recovery_run`) | `just test` fresh-output pass 14/14 | 5/5 (native) | 5/5 (native) | **not verified** (not run: WSL2 follows Linux code paths and Linux passed; the archive mode cannot select `slow_` tests) |
+| `schematic-runtime` L1 | in `just test` | 461/461 | not run | not run |
+| `homelab` lib | `just test homelab` | 49/49 | not run | not run |
+| `unfolded-integration-helper` | `just test homelab` | 32/32 | not run | not run |
+| `arcam-amp-` / `eversolo-` / `sony-receiver-integration`, `homelab-cli`, `homelab-server`, `sniff`, `biscuit-speaks`, `model-citizen` | see Dependents | not run | not run | not run |
+
+**Not verified**, with reason: the dependents other than `homelab` lib and
+`unfolded-integration-helper` on Linux, and every dependent on native
+Windows and WSL2. Their WebSocket-facing code did not change in Phase 6
+(no homelab edit was needed) and they hold no OS-specific code on the
+changed surface. The pull request's CI proves Linux and macOS for each
+changed package; the nightly proves native Windows and WSL2 and fixes
+forward. `schematic-runtime` was not run on Windows/WSL2 here: its change
+(`expose_secret`, storing the unplaced secret) is string handling with no
+OS surface. Determinism: no flaky test was seen on any host; one REST test
+(`github_client::anonymous_call_sends_no_credential_despite_client_and_env`)
+was reported `LEAK` once in the local `test-schema` run and passed (not
+WebSocket code, not seen elsewhere).
+
+### Acceptance matrix (R1–R17)
+
+"Local" means `schematic-schema` tests (own manifest; CI's workspace run does
+not execute them, but `just test-schema` and the cross-checks below did).
+"CI-visible" means a child test of a `fresh_output_compile` `slow_` test that
+`just test` runs in its fresh-output pass. Every row's tests passed in this
+phase's gate runs (macOS) unless stated.
+
+| Req | Evidence (exact tests) | Status |
+|---|---|---|
+| R1 URLs | `schematic-definitions` `core_ws::tests::core_ws_has_expected_endpoints`; gen `ws_validation::{every_shipped_endpoint_composes_its_documented_url, shipped_definitions_report_no_warning_or_error, an_exactly_duplicated_boundary_segment_warns_without_blocking, a_legitimately_repeated_segment_is_only_a_warning, a_substring_or_prefix_overlap_emits_nothing}`; schema `ws_runtime::core_endpoints_dial_their_documented_channel_paths` | pass |
+| R2 consecutive-failure budget | schema `ws_session::{repeated_losses_with_successful_redials_never_exhaust_the_budget, two_consecutive_refused_redials_exhaust_a_budget_of_two, zero_max_attempts_closes_on_loss_without_redialing, unlimited_max_attempts_survives_consecutive_failures, budget_resets_after_each_successful_redial, no_reconnect_policy_closes_on_loss}`; CI-visible child `the_reconnect_budget_counts_consecutive_failed_redials_and_resets_after_each_setup` | pass |
+| R3 opening + setup on every dial | schema `ws_session::{opening_message_is_written_first_on_every_connection, opening_without_a_key_field_is_filled_from_the_credential, opening_with_the_same_key_keeps_one_field, opening_with_a_different_key_is_refused_before_dialing, anonymous_opening_keeps_the_callers_key, multi_context_opening_is_sent_unchanged, opening_write_failure_fails_the_connect_without_redialing, setup_runs_before_ready_on_every_connection, setup_rejection_on_connect_is_returned_without_a_second_attempt, setup_rejection_on_redial_closes_the_client, transient_setup_failures_on_redials_use_the_budget, setup_cancellation_drops_stream_and_invalidates_session}` + shutdown/deadline tests; CI-visible children `the_opening_frame_comes_first_on_the_initial_connection_and_on_a_redial`, `setup_runs_with_the_handshake_key_before_ready_on_the_initial_connection_and_on_a_redial`, `a_rejected_setup_fails_the_connect_with_setup_rejected_after_one_connection`, `an_opening_key_that_differs_from_the_credential_fails_the_connect_before_dialing` | pass; **gap**: opening-write failure on a *redial* untested (no deterministic trigger; see Phase 6) |
+| R4 Bearer host compiles | gen `fresh_output_compile::slow_bearer_ws_host_compiles_and_checks_tokens` (+ children `bearer_host_rejects_a_missing_token_with_401`, `…_wrong_token_with_401`, `bearer_host_upgrades_a_matching_token`) | pass (CI-visible) |
+| R5 credential precedence | runtime L1 `handshake_credentials::*`; schema `ws_handshake::{core_credential_precedence_per_call_then_client_then_env, dock_without_auth_policy_ignores_its_env_token, redial_reuses_the_credential_selected_at_connect, initial_401_and_403_are_returned_without_a_second_attempt, redial_401_is_terminal, redial_403_is_terminal, redial_redirect_is_terminal, invalid_headers_and_credential_kinds_fail_before_dialing}`; CI-visible `slow_ws_handshake_credentials_and_correlated_requests_run` children | pass |
+| R6 anonymous | schema `ws_handshake::core_without_any_credential_connects_anonymously`; child `nothing_resolved_connects_anonymously_and_reports_it`; runtime `an_api_accepting_no_credential_ignores_the_environment` | pass |
+| R7 no leaks, no redirect | schema `ws_handshake::{redirect_is_not_followed_and_its_location_is_redacted, refusal_headers_redact_set_cookie_and_secret_values, query_secret_is_absent_from_every_dial_error}`; child `a_302_upgrade_is_not_followed_and_its_location_is_redacted` | pass (the query-secret test was fixed this phase for native Windows, see below) |
+| R8 receive timeout | schema `ws_idle::{silence_after_a_frame_times_out_and_redials, no_receive_timeout_keeps_a_silent_connection, server_pings_keep_the_connection_alive_and_are_ponged, outbound_sends_do_not_reset_the_idle_timer, a_full_event_queue_still_times_out_publishes_state_and_closes, stalled_writes_do_not_block_close, stalled_writes_do_not_block_the_idle_timeout_and_pending_request_fails}`; child `a_silent_server_times_out_the_receive_and_the_client_redials`; gen `plan::tests::no_info_note_reports_an_unenforced_receive_timeout` | pass |
+| R9 diagnostics | gen `ws_validation::{a_lowering_error_reaches_the_shared_format_and_blocks_the_rust_output, info_notes_stay_out_of_the_shared_diagnostics, the_validate_command_keeps_info_notes_out_of_its_default_output}`; `plan::tests::{lowering_failure_keeps_every_finding_not_only_the_first_error, diagnostic_maps_onto_the_shared_format}`; `diagnostics::tests::display_and_serialized_ids_agree_for_every_variant` | pass; **coverage note**: the spawned CLI no longer proves a verbose run prints an Info (no shipped definition emits one); the rule is covered in-process |
+| R10 typed messages | gen `plan::tests::{more_than_one_fallback_in_a_direction_is_an_error, identical_selectors_are_an_error, incomparable_overlapping_selectors_are_an_error, raw_and_mixed_framing_are_named_errors}`, `ws_codegen::{core_message_enums_name_one_variant_per_declared_message, every_shipped_client_sends_its_typed_enum_and_values_only_through_send_value}`; schema `ws_runtime::{core_ws_decodes_every_server_message_variant, core_ws_selects_the_most_specific_message_before_the_fallback, core_ws_typed_send_writes_the_payload_alone, core_ws_typed_and_value_receivers_share_one_queue}` (and per-API decode tests); CI-visible `slow_typed_ws_clients_and_a_multi_endpoint_host_compile_and_run` (incl. `WS_MISUSES` compile-fail E0308 cases) | pass |
+| R11 `responds_with` | gen `plan::tests::lower_pairs_requests_through_responds_with_and_the_endpoint_hints` and siblings, `ws_codegen::{the_planner_names_no_envelope_message, renaming_the_envelope_messages_changes_no_correlation}`; schema `ws_correlation::*` (7); CI-visible children `string_request_ids_go_out_as_json_strings_and_return_the_declared_response`, `a_same_id_frame_of_another_message_is_an_event_not_the_answer` | pass |
+| R12 shared vocabulary | define `compile_fail` doctests (4) for `ConnectionParam`/`ParamType`; `websocket::tests::{shared_parameter_types_are_serializable, derived_policy_and_env_mapping_follow_rest}`; definitions `ws_definition_json::every_shipped_definition_round_trips_twice_without_loss` | pass |
+| R13 five definitions normalized | definitions `ws_conformance::{roles_and_directions_match_the_expected_table, every_inbound_direction_can_choose_one_message, every_response_link_resolves_and_is_correlated, challenge_flows_are_declared_as_hints_not_prose}`; `integration_ws::tests::integration_ws_declares_both_roles_and_true_directions`; gen `ws_codegen::a_declared_heartbeat_is_documented_on_the_client_without_a_warning`, `plan::tests::heartbeat_hints_lower_without_any_warning` | pass |
+| R14 protocol-neutral host | gen `ws_codegen::the_integration_host_is_named_for_its_api_and_sends_no_protocol_envelope`; CI-visible host children (`the_room_hook_message_is_the_first_frame_and_runs_once_per_connection`, `connections_route_by_path_and_unknown_paths_are_rejected_with_404`, …) | pass |
+| R15 dependents | "Dependents" table above; removed-name absence enforced by tests listed there | pass on macOS; Linux evidence below |
+| R16 mock harness | schema `ws_mock_harness::*` (12) | pass on macOS, Linux, native Windows, WSL2 (below) |
+| R17 generated output/docs/skills | `just lint-schema` pass; `just check-drift` 9/9 (nextest; see note); manual doc/skill pass below | pass |
+
+### Ledger rows (parent D20)
+
+| Row | Defect | Closed by |
+|---|---|---|
+| 3 | Core URL `ws://remote.local/ws/ws` | R1 tests above; `ws_runtime::core_endpoints_dial_their_documented_channel_paths` failed before the definition fix |
+| 9 | reconnect counter never reset; opening never re-sent | R2/R3 `ws_session` tests and CI-visible children above |
+| 10 | dormant `E0308` in the Bearer host | `slow_bearer_ws_host_compiles_and_checks_tokens` (child build fails `E0308` with the `;` restored) |
+| 11 | env auth never applied | `ws_handshake::core_credential_precedence_per_call_then_client_then_env`, `redial_reuses_the_credential_selected_at_connect`; runtime `handshake_credentials` |
+| 12 | diagnostics discarded | `ws_validation::a_lowering_error_reaches_the_shared_format_and_blocks_the_rust_output`, `plan::tests::lowering_failure_keeps_every_finding_not_only_the_first_error` |
+
+All five rows are closed; none is an accepted gap.
+
+### Gates (Wave 17, Record Acceptance)
+
+Run from `schematic/`, after every fix, with no subagent running:
+
+- `just test`: pass — L1 2776 passed, 20 skipped (tier-filtered `slow_`
+  tests, run by the next pass, and three pre-existing `#[ignore]`d
+  `e2e_generation` tests that this feature does not own); fresh-output 14/14
+  (includes all five WebSocket `slow_` tests); compile-fail 1/1. Run twice:
+  before and after the `openapi_import_test` fix.
+- `just test-schema`: 149/149 (before the `ws_handshake` fix; the fixed test
+  was rerun alone on macOS and passed, and the whole crate passed with the
+  fix on Windows and WSL2).
+- `just doctest`: pass (define 173 + 6 ignored `rust,ignore` generated-surface
+  examples; definitions 18; gen 44 + 2 ignored; oauth 19; runtime 3 + 3).
+- `just lint`: pass (after removing a needless borrow in my test fix);
+  `just lint-schema`: pass.
+- Drift: the plan's `cargo nextest run -p schematic-gen --test l1
+  --run-ignored only -E 'test(artifact_drift)'` now selects **0 tests**: the
+  `artifact_drift` tests are no longer `#[ignore]`d, and `just check-drift`
+  now runs them through nextest (`--no-tests=fail`), which removes the
+  plan's reason to avoid it. `just check-drift`: 9/9, clean.
+- `just check-tier-coverage schematic` (root): 0 stranded.
+- Gate-skip calculator (`affected_scope.py` over the working tree):
+  `packages: [schematic-define, schematic-definitions, schematic-gen,
+  schematic-runtime, test-toolkit, darkmatter]`, `change_class: package`,
+  so no gate was skipped. (The tree includes the uncommitted Phase 6 work;
+  `test-toolkit`/`darkmatter` are pulled in by the skill edits.)
+
+### Outstanding items for review
+
+- gap (R3): opening-write failure on a **redial** is untested (no
+  deterministic trigger without a transport seam; Phase 6).
+- coverage note (R9): the spawned CLI no longer proves that a verbose run
+  prints an Info note; covered in-process only (Phase 6).
+- observation: Dock's setup session exposes no secret (policy `None`); a
+  Dock setup callback brings its token from its own closure (Phase 6).
+- open issue (Phase 5, plan rule 11): no WebSocket TLS opt-in; a Samsung TV's
+  self-signed `wss://` certificate is expected to fail the handshake
+  (unverified, no device contacted). Now documented.
+- not verified: dependents on native Windows/WSL2, most dependents on Linux,
+  WSL2 fresh-output (see Environments).
+- adopted defaults from all phases are recorded in each phase's section
+  above; none was changed this phase.
+
+No commit, push, CI run, device or provider contact, stale-file deletion,
+`just complete`, or lifecycle move was made.
+
+Phase 7 checkpoint met: R15 and R17 pass, earlier checkpoints remain green,
+drift is clean, and the requirement/evidence matrix above lists every gap.
+Status: **implementation complete, ready for review**.

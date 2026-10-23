@@ -165,6 +165,146 @@ skills_files_updated_during_phase_5:
     - .claude/skills/schematic-define/SKILL.md
     - .claude/skills/schematic-define/schematic/headers.md
     - .claude/skills/schematic-define/schematic/websocket.md
+source_files_during_phase_6:
+    - schematic/define/src/websocket/lifecycle.rs
+    - schematic/define/src/websocket/mod.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/tests/ws_definition_json.rs
+    - schematic/gen/src/ws_codegen/client.rs
+    - schematic/gen/src/ws_codegen/host.rs
+    - schematic/gen/src/ws_codegen/mod.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/src/ws_codegen/shared.rs
+    - schematic/gen/src/ws_codegen/supervisor.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/gen/tests/l1/ws_validation.rs
+    - schematic/runtime/src/credentials.rs
+    - schematic/runtime/tests/l1/handshake_credentials.rs
+    - schematic/schema/src/elevenlabs_ws.rs
+    - schematic/schema/src/samsung_smart_tv_remote_ws.rs
+    - schematic/schema/src/unfolded_circle_core_ws.rs
+    - schematic/schema/src/unfolded_circle_dock_ws.rs
+    - schematic/schema/src/unfolded_circle_integration_ws.rs
+    - schematic/schema/src/ws_shared.rs
+    - schematic/schema/tests/ws_idle.rs
+    - schematic/schema/tests/ws_mock/mod.rs
+    - schematic/schema/tests/ws_mock_harness.rs
+    - schematic/schema/tests/ws_runtime.rs
+    - schematic/schema/tests/ws_session.rs
+docs_updated_during_phase_6:
+    - schematic/README.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/runtime/credentials.md
+    - schematic/docs/websocket-definitions.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/schematic-define/schematic/websocket.md
+source_files_during_phase_7:
+    - schematic/gen/tests/l1/openapi_import_test.rs
+    - schematic/schema/tests/ws_handshake.rs
+docs_updated_during_phase_7:
+    - schematic/docs/websocket-definitions.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/homelab/SKILL.md
+    - .claude/skills/os/SKILL.md
+    - .claude/skills/os/windows.md
+    - .claude/skills/schematic-define/schematic/websocket.md
+    - .claude/skills/unfolded-circle/api-clients.md
+source_code:
+    - homelab/arcam-amp-integration/src/handler.rs
+    - homelab/eversolo-integration/src/handler.rs
+    - homelab/lib/src/samsung_tv.rs
+    - homelab/sony-receiver-integration/src/handler.rs
+    - homelab/unfolded-integration-helper/Cargo.toml
+    - homelab/unfolded-integration-helper/src/envelope.rs
+    - homelab/unfolded-integration-helper/src/lib.rs
+    - homelab/unfolded-integration-helper/src/subscriptions.rs
+    - homelab/unfolded-integration-helper/src/test_fixtures.rs
+    - schematic/define/src/lib.rs
+    - schematic/define/src/params/param_def.rs
+    - schematic/define/src/prelude.rs
+    - schematic/define/src/serde_presence.rs
+    - schematic/define/src/websocket/hints.rs
+    - schematic/define/src/websocket/lifecycle.rs
+    - schematic/define/src/websocket/mod.rs
+    - schematic/define/src/websocket/params.rs
+    - schematic/define/tests/builders.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/src/samsung_smart_tv/remote_ws/mod.rs
+    - schematic/definitions/src/unfolded_circle/core_ws/mod.rs
+    - schematic/definitions/src/unfolded_circle/dock_ws/mod.rs
+    - schematic/definitions/src/unfolded_circle/dock_ws/types.rs
+    - schematic/definitions/src/unfolded_circle/integration_ws/mod.rs
+    - schematic/definitions/src/unfolded_circle/integration_ws/types.rs
+    - schematic/definitions/tests/ws_conformance.rs
+    - schematic/definitions/tests/ws_definition_json.rs
+    - schematic/gen/src/asyncapi_import.rs
+    - schematic/gen/src/codegen/api_struct/auth.rs
+    - schematic/gen/src/codegen/api_struct/mod.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/output/ws_modules.rs
+    - schematic/gen/src/pipeline.rs
+    - schematic/gen/src/ws_codegen/client.rs
+    - schematic/gen/src/ws_codegen/host.rs
+    - schematic/gen/src/ws_codegen/mod.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/src/ws_codegen/shared.rs
+    - schematic/gen/src/ws_codegen/supervisor.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/gen/tests/fixtures/asyncapi/UCR-integration-asyncapi.json
+    - schematic/gen/tests/l1/asyncapi_import.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/openapi_import_test.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/gen/tests/l1/ws_validation.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/credentials.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/tests/l1/handshake_credentials.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/schema/src/elevenlabs_ws.rs
+    - schematic/schema/src/samsung_smart_tv_remote_ws.rs
+    - schematic/schema/src/unfolded_circle_core_ws.rs
+    - schematic/schema/src/unfolded_circle_dock_ws.rs
+    - schematic/schema/src/unfolded_circle_integration_ws.rs
+    - schematic/schema/src/ws_shared.rs
+    - schematic/schema/tests/ws_correlation.rs
+    - schematic/schema/tests/ws_handshake.rs
+    - schematic/schema/tests/ws_idle.rs
+    - schematic/schema/tests/ws_mock/mod.rs
+    - schematic/schema/tests/ws_mock_harness.rs
+    - schematic/schema/tests/ws_runtime.rs
+    - schematic/schema/tests/ws_session.rs
+documentation:
+    - .claude/skills/homelab/SKILL.md
+    - .claude/skills/os/SKILL.md
+    - .claude/skills/os/windows.md
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/headers.md
+    - .claude/skills/schematic-define/schematic/websocket.md
+    - .claude/skills/unfolded-circle/api-clients.md
+    - .claude/skills/unfolded-circle/core-api.md
+    - homelab/eversolo-integration/README.md
+    - homelab/unfolded-integration-helper/README.md
+    - schematic/README.md
+    - schematic/docs/definition-builders.md
+    - schematic/docs/dependencies.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/generation/workflow.md
+    - schematic/docs/headers/README.md
+    - schematic/docs/runtime/credentials.md
+    - schematic/docs/websocket-definitions.md
+    - schematic/features/2026-10-17-schematic-websocket/setup-spike/Cargo.toml.txt
+    - schematic/features/2026-10-17-schematic-websocket/setup-spike/lib.rs.txt
+    - schematic/features/2026-10-17-schematic-websocket/setup-spike/setup_tests.rs.txt
+completed_phase: 7
+implemented: true
 ---
 
 # Schematic WebSocket Implementation Plan
@@ -406,7 +546,7 @@ The existing AsyncAPI reader supports JSON and YAML. Its parsing/field interpret
 
 ### Wave 13 — Supervisor Implementation (sequential owner)
 
-- [ ] **Complete Recovery**
+- [x] **Complete Recovery**
   - Implement the proven setup contract: typed retained opening payload, credential-field binding/conflict handling, and callback on initial dial and every redial. Publish Ready/reset budget only after setup succeeds; explicit opening helpers do not replace or duplicate the retained opening payload.
   - Implement consecutive-failure counting, terminal setup/handshake rejection, shared attempt timing, and shutdown cancellation during backoff/dial/setup. Discard commands from lost connections; disconnected sends fail immediately and pending requests wake independently of event consumers.
   - Enforce inbound idle timeout after setup, resetting on every frame including ping/pong but never outbound activity. Flush automatic pongs. Bounded queue backpressure/slow writes cannot block timeout or close; terminal events precede eventual stream exhaustion.
@@ -414,18 +554,18 @@ The existing AsyncAPI reader supports JSON and YAML. Its parsing/field interpret
 
 ### Wave 14 — Recovery Proof (parallel disjoint test modules)
 
-- [ ] **Verify Sessions**
+- [x] **Verify Sessions**
   - Prove five successful drop/redial cycles with budget two; exactly two consecutive failed redials close; cover zero/unlimited budgets and reset after successful complete setup.
   - Observe the opening frame first on three connections; force deterministic opening-write failure. Prove callback success/redial runs before Ready, terminal rejection produces one exchange without fallback, and transient/setup-stall failures obey budget and timeout.
   - Prove manual close/drop never redials, close interrupts a stalled recovery, pre-Ready deadline expiry prevents further attempts, and a ready socket has no inherited lifetime deadline.
-- [ ] **Verify Backpressure**
+- [x] **Verify Backpressure**
   - Prove inbound silence yields `ReceiveTimeout` and recovery, None preserves behavior, pings prevent expiry with pongs observed at the server, and outbound activity does not reset silence.
   - Fill the event queue and stall writes; assert state publication, request wakeup, timeout, and manual close remain responsive. Assert disconnect clears pending/queued commands and only opening/setup repeats.
   - Use server barriers and generous bounded timing tolerances; no sleeps used as synchronization, sub-100-ms timing assumptions, unbounded queues, or real devices.
 
 ### Wave 15 — Recovery Integration (sequential)
 
-- [ ] **Integrate Recovery**
+- [x] **Integrate Recovery**
   - Run the complete schema runtime suite plus generator/definition tests and affected consumers. Regenerate if templates changed after Wave 13; run schema lint and drift checks.
   - Update lifecycle, callback, deadline, reconnect, idle, heartbeat, and shutdown rustdoc/topic/skill contracts and inspect changed comments for drift.
 
@@ -435,22 +575,22 @@ The existing AsyncAPI reader supports JSON and YAML. Its parsing/field interpret
 
 ### Wave 16 — Final Evidence (parallel disjoint work)
 
-- [ ] **Verify Dependents**
+- [x] **Verify Dependents**
   - Run root `just test {area}` for `homelab`, `sniff`, `biscuit-speaks`, and `model-citizen`, plus the appropriate nested integration-area recipes identified in Phase 1. Record exact package coverage so every R15 library/integration package is actually exercised.
   - Build each migrated homelab package, including `unfolded-integration-helper`; use minimal repairs only for real breaks. `homelab/cli` and `homelab/server` need no WebSocket migration but remain covered as dependent builds require.
   - Check removed definition/hub names and old primary untyped call patterns in non-generated code; exclude deliberate negative fixtures and historical specs from absence assertions.
-- [ ] **Verify Environments**
+- [x] **Verify Environments**
   - Load `os` and gather scoped macOS, Linux, native Windows, and WSL2 build/test evidence using documented non-interactive methods. Reuse qualifying passing evidence per environment rather than rerunning it without cause.
   - Include schema's separate manifest and the named consumers in evidence coverage; ordinary workspace tests do not cover schema. Use no speculative CI runs or broadened matrix cells.
   - Record unreachable environments as **not verified**, with the reason and outstanding requirements. Full acceptance cannot be described as passing until its required coverage exists. Add any newly learned OS trap to the `os` skill.
-- [ ] **Audit Documentation**
+- [x] **Audit Documentation**
   - Finish README and `schematic/docs` topic pages with compact examples of typed/value calls, parameters, auth, setup callbacks, correlation, host hooks, caller heartbeats, and cleartext local-device transport behavior. Explain lifecycle/state flow with Mermaid where useful.
   - Update affected `schematic-define`, Schematic, `homelab`, and `unfolded-circle` skill entries and dependency pages only for actual changes. Docs never name/link the feature; unbuilt decided behavior remains marked planned.
   - Review every behavior-changed symbol's docs/comments, assuming code is correct when incidental comment drift is found; log files and resolution. Verify the input matrix is complete and tests assert public outcomes.
 
 ### Wave 17 — Acceptance Gate (sequential)
 
-- [ ] **Record Acceptance**
+- [x] **Record Acceptance**
   - From `schematic`, run `just test`, `just test-schema`, `just doctest`, `just lint`, and `just lint-schema`. Use nextest for unit/integration tests; the repository's doctest recipe is the documented exception. Do not run `cargo fmt`.
   - Run ignored drift explicitly through nextest: `cargo nextest run -p schematic-gen --test l1 --run-ignored only -E 'test(artifact_drift)'`. Do not use `just check-drift` while it invokes consolidated `cargo test`. Record fresh-output compile and compile-fail test results and confirm no acceptance test is silently ignored or unregistered.
   - Map R1–R17 to exact tests/manual evidence and each of ledger rows 3, 9, 10, 11, 12 to its closing test or explicitly documented accepted gap. Include every default/deviation, runtime extraction, TLS/Samsung finding, authorization, OS gap, and determinism issue in `implementation-log.md`.

@@ -25,7 +25,7 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
 review_iterations: 0
 clarified: false
-implemented: false
+implemented: true
 human_review: false
 message_to_agent: ''
 parent: ../../reviews/2026-07-31-macro-review/spec.md
@@ -34,6 +34,7 @@ depends_on:
 refresh_required: true
 related: []
 next_spec: 2026-10-18-schematic-fidelity-polish
+implemented_by: "claude/opus"
 ---
 
 # Schematic WebSocket
