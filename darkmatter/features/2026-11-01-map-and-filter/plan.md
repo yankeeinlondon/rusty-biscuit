@@ -83,6 +83,38 @@ behavior. The grammar, runtime, and editor owners agree on the same contracts.
 
 ## Phase 2 — Build Callback Syntax and Passive Scope
 
+### Reconciliation with the implemented prerequisite (2026-10-23)
+
+`2026-10-28-schema-enhancements` is now implemented, so the Phase 1 headline
+("the hard prerequisite is not implemented") no longer holds. Phase 1's
+records stay as written; Phases 2–5 below are updated to the delivered code.
+The spec's Decisions section records the new decisions (callback bodies
+checked with the parameter typed `unknown`, the binder's type error for a
+non-array iterable, no lifecycle verbs for `map`/`filter`).
+
+- The catalog is `darkmatter/schemas/partials/functions.yaml`, loaded by
+  `compose/expression/catalog/mod.rs`. `darkmatter/docs/schemas/expression-functions.yaml`
+  no longer exists, so the log's Option C has nothing to target.
+- Calls bind through `compose/expression/call_binding/`. Handlers receive only
+  a `&BoundCall`. `EvaluationMode` has `Eager` and `Lazy` (`LazyCall`), and an
+  executable function-typed parameter is rejected by
+  `RegistrationError::FunctionValued`. `ExpressionError::ArgType` and `Arity`
+  no longer exist; binding failures are `ExpressionError::Call(CallBindingError)`.
+  The Phase 1 dispatch contract's `ArgType` for a non-array iterable is
+  therefore superseded by the binder's type error.
+- Design-time checking is `compose/expression/call_check.rs`, run by
+  composition (`compose/call_precheck.rs`) and DMLS
+  (`dmls/src/diagnostics/call_check.rs`). DMLS reports arity, ambiguity, and
+  category 5 as `dm.expression.incompatible_call` and category 3 as
+  `dm.expression.uncertain_call` (2 and 4 under `expressions.strict`).
+- The lifecycle verb inventory derives from the catalog
+  (`darkmatter/lib/src/lifecycle/signatures.rs`; Claudine's
+  `claudine/lib/tests/l1/claudine_schemas.rs` `generated_verbs()`).
+- The log's human-review ordering item described a missing prerequisite.
+  The remaining policy items (shadow advisory, diagnostic identities,
+  operational limits) still need the author's answer before Phase 2, as the
+  log says.
+
 ### Wave 3 — Extend shared expression infrastructure
 
 Depends on Phase 1. These tasks are sequential because they change shared AST
@@ -111,7 +143,10 @@ and analysis contracts; delegate them as one owned slice if using subagents.
     and context-requirement discovery to visit callback bodies without
     evaluating them. Locals have unknown type; do not infer item or result
     types. Keep local facts isolated from identically named document paths
-    and enclosing locals.
+    and enclosing locals. This includes `DeclaredTypes::subject` /
+    `TypeScope::type_of_expr` (`compose/expression/scope/`), so that the call
+    check's `ArgumentType::of` sees a local as `unknown` and never as a
+    same-named declared property.
   - Implement the confirmed shadow advisory through normal warning identity
     and deduplication APIs. Never report a local or its member root as an
     undeclared document property; still report genuine missing properties
@@ -119,14 +154,25 @@ and analysis contracts; delegate them as one owned slice if using subagents.
 
 - [ ] **Check callback signatures**
   - Extend the prerequisite's shared checker and executable registration
-    validation to accept inline callback arguments. Enforce exactly two call
-    arguments and exactly one callback parameter for these functions.
+    validation to accept inline callback arguments: amend
+    `RegistrationError::FunctionValued` (and the grammar translator's
+    function-where-value-expected error in `call_binding/translate.rs`) for a
+    callback parameter only, keeping function-valued returns and document
+    schemas rejected. Teach `check_call`/`classify_argument` to accept a
+    callback argument for a `function` parameter and reject it elsewhere, and
+    make `check_expression_calls` walk callback bodies under a scope binding
+    the parameter as `unknown`. Enforce exactly two call arguments and exactly
+    one callback parameter for these functions.
   - Use `unknown[] | null` for the iterable, one `unknown | null` callback
     parameter and `unknown | null` callback return, and `unknown[]` result.
     Validate callback form even when runtime iteration would be empty.
   - Test missing/extra arguments, non-function callbacks, invalid parameter
     counts, misplaced callbacks, forbidden names, and valid nested callbacks
-    through public preparation/validation results. Use counters or failing
+    through public preparation/validation results, including DMLS
+    `dm.expression.incompatible_call`. Test that a category 5 call inside a
+    body (`map([], x => min(true, 5))`) rejects the document at composition,
+    and that `filter(tags, tags => min(tags, 5))` with
+    `tags: boolean(required)` is not category 5. Use counters or failing
     provider fakes to prove validation performs no callback I/O or execution.
 
 Checkpoint: parser and passive-analysis tests pass; every AST consumer handles
@@ -145,11 +191,15 @@ before other owners adopt them. Do not run a full suite per subagent.
 
 - [ ] **Evaluate collection callbacks**
   - Add registered callback dispatch for `map` and `filter`, separate from
-    eager value-argument evaluation. Evaluate the iterable once in the
-    enclosing scope, then evaluate the body once per item in order.
+    eager value-argument evaluation: an `EvaluationMode::Callback` beside the
+    delivered `Eager` and `Lazy`, following the `LazyCall` pattern so the
+    evaluator, not a `&BoundCall` handler, runs the body. Evaluate the iterable
+    once in the enclosing scope and bind it through the shared binder against
+    `unknown[] | null`, then evaluate the body once per item in order.
   - Return `[]` for absent/null and empty arrays without callback execution.
-    Reject string, numeric, boolean, and object iterables with the function
-    name and received type. Preserve null items and null map results; filter
+    Reject string, numeric, boolean, and object iterables with the binder's
+    type error (`ExpressionError::Call`), which names the function and the
+    received type. Preserve null items and null map results; filter
     preserves original items and applies the existing truthiness function.
   - Support nested locals, inner-name reuse, member/index reads, and restoration
     after callback exit or failure. Forward the enclosing lookup's request
@@ -157,7 +207,10 @@ before other owners adopt them. Do not run a full suite per subagent.
     approved effect behavior; never recapture process state.
   - Wrap a body failure with function and zero-based item index, stop before
     later items, and preserve every nested wrapper and underlying typed cause,
-    location, file-resolution failure class, and authoring-fatal status.
+    location, file-resolution failure class, and authoring-fatal status
+    (for `ExpressionError::Call`, only an implementation-contract binding
+    error is authoring-fatal; `ExpressionError::CallCheck` rejections stay
+    fatal).
   - Verify public evaluation results with ordered/counted fakes: one iterable
     evaluation, all filter items visited, no empty/null callback execution,
     first-error stop, nested failures, and state restoration. Use actual
@@ -180,8 +233,15 @@ before other owners adopt them. Do not run a full suite per subagent.
 
 - [ ] **Publish catalog entries**
   - Add both functions to `darkmatter/schemas/partials/functions.yaml` using
-    the prerequisite's agreed catalog wiring, signature grammar, and normal
-    executable-example mechanism. Do not maintain a second catalog copy.
+    the prerequisite's catalog wiring, signature grammar, and inline
+    `example(call => result)` mechanism, with one declared category (for
+    example the existing `Collection`). Do not maintain a second catalog copy.
+  - Exclude callback-taking functions from the catalog-derived lifecycle verb
+    inventory (`darkmatter/lib/src/lifecycle/signatures.rs`) and from
+    Claudine's `generated_verbs()` parity, and leave the verb lists in
+    `darkmatter/schemas/partials/{lifecycle,md-lifecycle}.yaml` and
+    `claudine/schemas/{action,lifecycle}.yaml` unchanged. Test the
+    exclusion.
   - Include ordinary, null/empty, and nested examples. Prove registration and
     catalog signatures agree through the shared parity checks.
   - Add the cross-feature regression for
@@ -262,9 +322,11 @@ editing separate files; final validation follows their integration.
     names, null behavior, truthiness, error chains, and compact examples of
     both functions and nesting. Add a Mermaid scope/evaluation flow where it
     clarifies the lifecycle of an item binding.
-  - Update `darkmatter/docs/topics/expression-engine.md`, DMLS topic pages,
-    and relevant darkmatter skill references for shared callback APIs and
-    passive guarantees. Review the README for a concise public-feature
+  - Update `darkmatter/docs/topics/expression-engine.md`,
+    `darkmatter/docs/inline/call-check.md` (callback bodies are checked with
+    the parameter typed `unknown`), DMLS topic pages including
+    `darkmatter/dmls/docs/diagnostics.md`, and relevant darkmatter skill
+    references for shared callback APIs and passive guarantees. Review the README for a concise public-feature
     mention/link; keep syntax and output references in topic docs.
   - Review docs/comments on changed symbols for drift, especially claims that
     all non-boolean functions evaluate arguments eagerly or that namespaces

@@ -210,13 +210,18 @@ normal semantics. `filter` applies existing truthiness to the callback result.
 
 `darkmatter/schemas/partials/functions.yaml` gains both functions using the shared
 `SimplifiedSchema` function-signature contract defined by
-`2026-10-28-schema-enhancements`. That shared grammar is a prerequisite;
-planning determines implementation order. This feature does not introduce a
-temporary catalog representation or a parallel checking path.
+`2026-10-28-schema-enhancements`. That shared grammar is a prerequisite and is
+now implemented: the catalog is loaded by
+`darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs`, every
+function names one declared `category(...)` (`Collection` already exists),
+and calls bind through `compose/expression/call_binding/`. This feature does
+not introduce a temporary catalog representation or a parallel checking
+path.
 
 The shared registration and checking machinery must accept inline lambda
-arguments for these executable functions. This extends the schema-enhancement
-proposal that rejects executable registrations with function parameters, but
+arguments for these executable functions. This amends the schema-enhancement
+rule that rejects executable registrations with function parameters (delivered
+as `RegistrationError::FunctionValued` in `call_binding/registration.rs`), but
 does not allow first-class function values. Schema checking and DMLS remain
 passive: they validate the callback's form and signature without executing it
 or performing the callback's I/O. No broader catalog or schema rewrite is
@@ -230,8 +235,9 @@ mistaken for the separator:
 example(filter([1, 2, 3], n => n > 1) => [2, 3])
 ```
 
-That spec's parser for examples must honor this rule; this spec adds a test
-for it once both exist.
+The delivered example parser already splits at the first `=>` outside every
+parenthesis (`find_top_level` in `schemas/simplified/grammar.rs`); this spec
+adds the regression test for a lambda inside the call.
 
 ### Surfaces
 
@@ -301,6 +307,49 @@ required by this feature. The editor (DMLS) must:
     callback argument, and callbacks with anything other than one item
     parameter through the shared signature rules. Valid inline callbacks
     are accepted consistently without passive validation executing them.
+
+## Decisions
+
+- **Reconciled with the implemented `2026-10-28-schema-enhancements`
+  (2026-10-23).** That prerequisite is now code. The function-catalog
+  section names its delivered loader, registration rule, and example parser,
+  and the decisions below cover the seams it created. No outcome of this spec
+  changed.
+- **Calls inside a callback body are design-time checked with the parameter
+  typed `unknown`.** *Decision:* the shared call check
+  (`check_expression_calls`, used by composition's call precheck and by DMLS)
+  walks callback bodies under a scope in which the parameter is a local of
+  type `unknown`. It never takes the type of a same-named declared document
+  property. A category 5 call in a body rejects the document at composition,
+  as anywhere else, even when the iterable is empty or `null`. *Alternatives:*
+  skip callback bodies (a known-invalid call would then survive until a
+  non-empty list reaches it); type the parameter from the document
+  (`filter(tags, tags => min(tags, 5))` with `tags: boolean(required)` would
+  be falsely rejected). *Why:* the prerequisite rejects a category 5 call
+  anywhere in a document, including code that does not run. This spec
+  requires passive checking of callbacks on empty input and types the
+  parameter `unknown`. *Downsides:* under `expressions.strict`, a typed call
+  on the parameter (`map(xs, x => min(x, 5))`) gets the category 4 warning
+  until type-aware evaluation types items.
+- **A non-array iterable is a binding type error.** *Decision:* the iterable
+  binds against `unknown[] | null` through the shared binder, so a string,
+  number, boolean, or object is the binder's type error
+  (`ExpressionError::Call` carrying a type-kind `CallBindingError`), naming
+  the function and the received type. *Alternatives:* a callback-specific
+  type error. *Why:* the prerequisite replaced the old per-function
+  `ArgType`/`Arity` errors with one binder error, and handlers no longer check
+  types themselves. *Downsides:* the message follows the binder's wording
+  rather than a `map`-specific one.
+- **`map` and `filter` are not lifecycle verbs.** *Decision:* they are
+  callable in lifecycle expressions (`when:`, interpolated values) but are not
+  added to the expression-function verb lists in
+  `darkmatter/schemas/partials/{lifecycle,md-lifecycle}.yaml` and
+  `claudine/schemas/{action,lifecycle}.yaml`. The lifecycle parity tests,
+  which derive those lists from the function catalog, exclude functions with
+  a callback parameter. *Alternatives:* add them as verbs. *Why:* a verb's
+  operands are YAML values, and a lambda is never a value, so a verb form could
+  not supply the callback. *Downsides:* the parity tests need one documented
+  exclusion class.
 
 ## Open Questions
 
