@@ -147,7 +147,10 @@ registration from the admin `gitdir` (`registration_state`), then:
 - **A retry's report covers the whole operation.** `Resumed::attempt`
   carries the saved `report.json` into `earlier_attempts`
   (`OperationReport::continue_from`), and `Operation::journal_entries` /
-  `recover` replay every `journal-<n>.jsonl` before `journal.jsonl`. An
+  `recover` replay every `journal-<n>.jsonl` before `journal.jsonl`, each
+  parsed by its own header, so an older `wt`'s version 2 archives sit beside
+  this build's version 3 journal (test:
+  `a_removal_stopped_twice_by_an_older_wt_resumes_with_version_3_journals`). An
   archive keeps only `deleted`, `externally_absent`, and `uncertain` entries,
   and decides whether an unconfirmed entry was still present from the **next
   generation's inventory**, never the filesystem now; that is what keeps a

@@ -581,6 +581,60 @@ another removal. Its journals are deleted once `entries.jsonl.gz` holds every
 journal entry; if the entries could not be read, the journals are kept and
 `wt remove` warns.
 
+Over its life, an operation folder goes through these steps:
+
+```mermaid
+flowchart LR
+    J[journal.jsonl grows, one batch at a time] --> S[stop or finish: save entries.jsonl.gz, then report.json]
+    S -->|stopped| J
+    S -->|finished| C[record.json marked completed]
+    C --> R[journals deleted]
+    R --> E[folder deleted 14 days later by a wt remove]
+```
+
+### The journal
+
+`journal.jsonl` is JSON Lines, written only by appending whole lines. It
+starts with a header and the list of every entry the removal is approved to
+delete, then holds two lines for each deletion batch:
+
+```text
+{"header":{"journal_version":3,"operation_id":"0123456789abcdef0123456789abcdef"}}
+{"inventory":{"root":{…},"entries":[{"path":{"display":"target"},…},{"path":{"display":"target/a.o"},…},…]}}
+{"intent":{"batch":1,"entries":[4,5,6]}}
+{"results":{"batch":1,"states":["deleted","deleted","externally_absent"]}}
+```
+
+- The `inventory` line is the approved list: each entry's path, identity, and
+  type. A batch can only delete entries it lists.
+- An `intent` names the entries a batch is about to delete by their position
+  in that list, counting from 0, so `4` is the fifth entry. It is written
+  before anything in the batch is deleted.
+- A `results` line follows with one state per entry, in the intent's order:
+  `deleted`, `externally_absent` (already gone), or `kept`. An intent with no
+  results is the batch a stop interrupted; its missing entries become
+  `uncertain`.
+- A batch holds at most 256 entries of one folder, and no entry appears in
+  two batches. A journal that breaks any of these rules, or has a malformed
+  line, cannot be read: a retry stops with exit 1 before deleting anything,
+  printing `Nothing was removed.` and the problem, for example `deletion
+  journal line 3 is malformed: a batch plans a position the inventory does
+  not have`. Only an unfinished last line, which a crash can leave, is
+  ignored.
+
+Journals written by `wt` before 2026-10-23 have `"journal_version":2` and
+repeat each entry's path in every batch line instead of its position:
+
+```text
+{"intent":{"batch":1,"entries":[{"path":{"display":"target/a.o"},"kind":"file"}]}}
+{"results":{"batch":1,"entries":[{"path":{"display":"target/a.o"},"state":"deleted"}]}}
+```
+
+`wt` reads both versions, each file by its own header. A removal an older
+`wt` stopped keeps its version 2 journals, including any
+`journal-<n>.jsonl` from earlier attempts, and the retry starts a version 3
+journal beside them. The approved list itself is the same in both versions.
+
 ### How long records are kept
 
 A finished removal's folder is deleted once it is more than **14 days** old.

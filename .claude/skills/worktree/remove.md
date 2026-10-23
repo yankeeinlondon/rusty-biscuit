@@ -431,16 +431,30 @@ the ones that cost time.
   `Option` and no `serde(default)`. A detached checkout is the enum value
   `"detached"`, not a null branch. Sniff's internally tagged `FileIdentity`
   refuses an integer `kind` and a repeated inner key (both are matrix cells).
-- **Journal (version 2):** line 2 is the operation-start `DeletionInventory`,
-  written by `begin` in the staging directory, so an operation always has
-  one. A batch may only plan inventory entries, with the same kind; the
-  reader refuses anything else. The size limit counts batch lines only (the
-  inventory is as large as the checkout) and is **derived from the
-  inventory** (`journal::limit_for`): every entry planned once, alone in a
-  batch, with the longest kind and result. The writer refuses an entry an
-  earlier batch of the same journal planned, so the bound holds by
-  construction. A fixed 64 MiB cap (until 2026-10-23) stopped every
-  removal past about 150k entries, which is most of them here.
+- **Journal (writes version 3, reads 2 and 3):** line 2 is the
+  operation-start `DeletionInventory`, written by `begin` in the staging
+  directory, so an operation always has one. Version 3 batch lines name
+  entries by zero-based **inventory position** (`{"intent":{"batch":1,
+  "entries":[4,5]}}`, `{"results":{"batch":1,"states":[…]}}`); version 2
+  repeated each path and kind. The private wire types are `Line<I, R>` with
+  `IntentV2`/`ResultsV2` and `IntentV3`/`ResultsV3`; `parse` reads the
+  header (`HeaderLine`) and dispatches per file, so archived
+  `journal-<n>.jsonl` files of either version mix freely. Both versions
+  normalize to the same `Batch { entries: Vec<PlannedEntry>, .. }` before
+  `check_batch`, so every rule (listed in the inventory with that kind, one
+  directory, at most 256, no entry twice in a batch **or across batches**)
+  is enforced once for both, by writer and reader alike. A position is
+  converted with `usize::try_from` and bounds-checked; never sort or
+  renumber positions. The size limit counts batch lines only (the inventory
+  is as large as the checkout) and is **derived from the inventory**
+  (`journal::limit_for`): the exact version 3 encoding of each position
+  planned alone with batch `u64::MAX` and the longest state
+  (`externally_absent`), summed with saturating arithmetic. A fixed 64 MiB
+  cap (until 2026-10-23) stopped every removal past about 150k entries.
+- **Trap: a test that edits a journal by path no longer works on version 3**
+  lines. Resolve the path through the inventory line's position first
+  (`lifecycle/tests/resume_consent.rs::rewrite_result`), and build version 2
+  fixtures from `json!` literals, never the writer.
 - **Journal:** an intent is refused (`LimitReached`, nothing written) unless the
   worst-case results line for the batch would still fit, so a confirmation is
   never lost to the size limit. An unterminated last line is a torn write and is
