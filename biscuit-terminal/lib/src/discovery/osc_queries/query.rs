@@ -134,16 +134,13 @@ pub(crate) fn color_query_wanted() -> bool {
         && detect_multiplexer().is_none()
 }
 
-/// Whether this platform sends the OSC 4 palette query. Native Windows does
-/// not: its console query path has never been proven with OSC 4, and
-/// carrying it there is a separate decision. Without a reply the palette is
-/// unknown and diagrams use background-derived accents.
-pub(crate) const ASKS_PALETTE: bool = cfg!(unix);
-
-/// Whether the OSC 4 palette query may be sent: the color-query gate
-/// ([`color_query_wanted`]) on a platform that asks for the palette.
+/// Whether the OSC 4 palette query may be sent: exactly when the colors may
+/// be ([`color_query_wanted`]), on every platform. On native Windows it rides
+/// the same console query backend as OSC 10/11; a terminal that does not
+/// answer leaves the palette unknown, and diagrams use background-derived
+/// accents.
 pub(crate) fn palette_query_wanted() -> bool {
-    ASKS_PALETTE && color_query_wanted()
+    color_query_wanted()
 }
 
 /// The fallback chain without a live query, for a terminal constructed with

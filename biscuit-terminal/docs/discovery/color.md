@@ -20,11 +20,13 @@ palette:           slot 0 = (26, 27, 38), slot 1 = (247, 118, 142), slots 2–15
   stderr, not CI, no multiplexer (tmux, Zellij, GNU Screen), probing not
   turned off, and a terminal known to answer color queries. Anywhere else,
   every slot is unknown.
-- **Native Windows sends no OSC 4 query**, so its palette is always unknown,
-  and diagrams there use accents derived from the background color.
+- **Native Windows sends the OSC 4 query too**, through the same console
+  query backend as the colors; a terminal that stays silent leaves the
+  palette unknown, and diagrams there use accents derived from the
+  background color.
 - The palette is not public API. `biscuit-visualized` reads it through the
-  hidden `discovery::osc_queries::ansi_palette()`. **Planned:** no diagram
-  palette consumes it yet.
+  hidden `discovery::osc_queries::ansi_palette()`: ANSI 1–6 become a
+  diagram's accent colors in the terminal.
 
 [Live Terminal Queries](./terminal-queries.md#the-ansi-palette-osc-4)
 describes the reply forms, the cost, and the caching in full.

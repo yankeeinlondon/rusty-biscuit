@@ -27,7 +27,7 @@ use crate::discovery::fonts::window_size::{CELL_SIZE_REQUEST, find_cell_size_rep
 use crate::discovery::osc_queries::RgbValue;
 use crate::discovery::osc_queries::parse::parse_osc4_palette;
 use crate::discovery::osc_queries::query::{
-    ASKS_PALETTE, OSC_QUERY_ATTEMPT_TARGET, color_query_wanted, find_osc_color, palette_query_wanted,
+    OSC_QUERY_ATTEMPT_TARGET, color_query_wanted, find_osc_color, palette_query_wanted,
 };
 use crate::discovery::osc_queries::types::DEFAULT_TIMEOUT;
 use crate::discovery::tty_query::{DA1_REQUEST, ExchangeOptions, TtyQueryError, exchange};
@@ -68,7 +68,7 @@ pub(crate) fn live_fg_bg() -> [Option<RgbValue>; 2] {
     }
     let plan = probe_plan(&RouteInputs::from_process());
     let graphics = (state.graphics.is_none() && plan.direct).then_some(!plan.direct_da1_only);
-    let palette = ASKS_PALETTE && state.palette.is_none();
+    let palette = state.palette.is_none();
     let cell = ASKS_CELL_SIZE && state.cell.is_none();
     run_direct(&mut state, true, palette, graphics, cell);
     state.colors.unwrap_or([None, None])
@@ -77,7 +77,7 @@ pub(crate) fn live_fg_bg() -> [Option<RgbValue>; 2] {
 /// The terminal's ANSI palette, slots 0–15, sending the exchange if no
 /// earlier caller did (the colors and graphics probe ride along). Every slot
 /// is `None` when the palette query gate refuses (no TTY, CI, a multiplexer,
-/// probing off, a terminal not known to answer, native Windows) or the
+/// probing off, a terminal not known to answer) or the
 /// terminal did not answer; a slot is `None` alone when its reply was
 /// missing or malformed.
 ///
@@ -121,7 +121,7 @@ pub(crate) fn live_cell_size() -> Option<CellSize> {
         return None;
     }
     let colors = state.colors.is_none();
-    let palette = ASKS_PALETTE && state.palette.is_none();
+    let palette = state.palette.is_none();
     run_direct(&mut state, colors, palette, None, true);
     state.cell.flatten()
 }

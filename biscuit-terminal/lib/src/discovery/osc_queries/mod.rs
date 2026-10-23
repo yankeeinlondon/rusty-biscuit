@@ -153,7 +153,7 @@ pub fn cursor_color_with_source() -> Option<(RgbValue, ColorSource)> {
 /// same DA1 sentinel), so it never writes to the terminal more than once per
 /// process and never sets a palette entry. Every slot is `None` where no
 /// live query is allowed (no TTY, CI, a multiplexer, probing off, a terminal
-/// not known to answer color queries, native Windows) and when the terminal
+/// not known to answer color queries) and when the terminal
 /// stayed silent.
 #[doc(hidden)]
 pub fn ansi_palette() -> [Option<RgbValue>; 16] {
@@ -194,15 +194,14 @@ mod cache_tests {
         assert_eq!(bg_color(), bg_color(), "cached bg_color must be stable");
     }
 
-    /// Only Unix sends the OSC 4 palette query; native Windows never does, so
-    /// its palette is all unknown whatever the terminal.
+    /// The palette query follows the color-query gate on every platform,
+    /// native Windows included (it rides the same console query backend).
     #[test]
-    fn only_unix_asks_for_the_palette() {
-        use super::query::{ASKS_PALETTE, palette_query_wanted};
+    fn the_palette_query_follows_the_color_gate_on_every_platform() {
+        use super::query::{color_query_wanted, palette_query_wanted};
 
-        assert_eq!(ASKS_PALETTE, cfg!(unix));
-        if !cfg!(unix) {
-            assert!(!palette_query_wanted());
+        assert_eq!(palette_query_wanted(), color_query_wanted());
+        if !color_query_wanted() {
             assert_eq!(super::ansi_palette(), [None; 16]);
         }
     }

@@ -2,7 +2,7 @@
 
 Some facts about a terminal can only be learned by asking it: the background
 and foreground colors (OSC 11 / OSC 10), the cursor color (OSC 12), the 16
-ANSI palette colors (OSC 4, not on native Windows), whether it
+ANSI palette colors (OSC 4), whether it
 renders Kitty graphics or Sixel (the graphics probe), the window size in pixels
 (CSI 14 t), the size of one character cell in pixels (CSI 16 t, native
 Windows), and the cursor position (DSR, `CSI 6 n`). `biscuit-terminal` asks
@@ -93,7 +93,7 @@ every part the process needs, and the answers are cached together. Each part kee
 | Part | Sent when |
 |------|-----------|
 | OSC 10/11 colors | Stdout is a terminal, not CI, probing is not turned off, the terminal is on the color list (below), and no multiplexer (tmux, Zellij, GNU Screen) is in the way |
-| OSC 4 palette, slots 0–15 | Exactly when the colors are, on macOS, Linux, and WSL2; never on native Windows |
+| OSC 4 palette, slots 0–15 | Exactly when the colors are, on every platform (native Windows included) |
 | Kitty graphics query | The graphics route asks for a probe and no input is waiting, except to a visible tmux asked about its own Sixel (DA1 only) |
 | Cell size (`CSI 16 t`) | Native Windows only, whenever the exchange is sent there; a cell-size lookup before any exchange sends one when the color gate passes |
 | DA1 sentinel | Always, as the last part of any exchange that is sent |
@@ -148,15 +148,18 @@ unknown.
 The palette shares the startup exchange's per-process cache: a terminal that
 does not answer is not asked again in that process, and a silent one costs
 the usual single bounded wait. It is not public API; `biscuit-visualized`
-reads it through the hidden `osc_queries::ansi_palette()`. **Planned:** no
-diagram palette consumes it yet. Diagram accents are to come from these
-colors, and from the detected background wherever the palette is unknown.
+reads it through the hidden `osc_queries::ansi_palette()` to build a
+diagram's palette in the terminal: ANSI 1–6 become the diagram's accent
+colors, and where the palette is unknown the accents are derived from the
+detected background instead.
 
-**Native Windows sends no OSC 4 query.** The palette is always unknown there,
-so diagrams use accents derived from the background color. The same holds
-wherever the colors are not queried: no terminal on stdout or stderr, CI,
-tmux, Zellij, GNU Screen, probing turned off, or a terminal not on the color
-list.
+**Native Windows sends the OSC 4 query too**, through the same console query
+backend as the OSC 10/11 colors (no Windows-specific query code), so a
+Windows terminal that answers, such as Windows Terminal, gives diagrams its
+own ANSI accents. One that stays silent leaves the palette unknown, and
+diagrams use background-derived accents. The palette is also unknown wherever
+the colors are not queried: no terminal on stdout or stderr, CI, tmux,
+Zellij, GNU Screen, probing turned off, or a terminal not on the color list.
 
 ### The wrapped exchange
 
@@ -297,7 +300,8 @@ the terminal even when stdout is captured.
 
 On native Windows the console backend writes the request and its DA1
 sentinel, reads with the same deadline and silence budget, and restores the
-console modes when it is done. It serves both parts of the startup exchange,
+console modes when it is done. It serves every part of the startup exchange,
+the OSC 4 palette included,
 so Windows Terminal reports its real foreground and background colors, which
 also decide the light or dark theme there, instead of the per-terminal
 default. Cursor position and CSI 14 t window pixels are still not queried on
