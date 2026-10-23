@@ -23,7 +23,7 @@ pub(super) fn generate_endpoint_spec_impl(
     endpoint: &Endpoint,
     into_parts_body: TokenStream,
 ) -> TokenStream {
-    let success = success_code(api, &endpoint.id, &endpoint.success_shapes());
+    let success = success_code(api, &endpoint.id, endpoint.success_shapes());
     let failure = failure_code(api, &endpoint.id, &api.effective_errors(endpoint), api_marker);
     let api_marker = format_ident!("{}", api_marker);
     let endpoint_id = &endpoint.id;

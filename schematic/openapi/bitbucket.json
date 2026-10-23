@@ -87,9 +87,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful binary response",
+            "description": "Successful response\n\napplication/json: returned for a directory: its paginated listing. Bitbucket serves a file in the media type its name implies, so a committed `.json` file also arrives as `application/json` and selects this shape: a JSON object decodes as an empty listing, other JSON fails to decode. No header tells the two apart; read a file's bytes with `send_raw`\n\n*/*: returned for a file: its raw content, in the media type Bitbucket derives from the file name",
             "content": {
-              "application/octet-stream": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse<SourceEntry>"
+                }
+              },
+              "*/*": {
                 "schema": {
                   "type": "string",
                   "format": "binary"
@@ -99,7 +104,28 @@
           }
         },
         "x-schematic": {
-          "response": "Binary"
+          "response": {
+            "Json": {
+              "Named": "PaginatedResponse<SourceEntry>"
+            }
+          },
+          "success": [
+            {
+              "note": "returned for a directory: its paginated listing. Bitbucket serves a file in the media type its name implies, so a committed `.json` file also arrives as `application/json` and selects this shape: a JSON object decodes as an empty listing, other JSON fails to decode. No header tells the two apart; read a file's bytes with `send_raw`",
+              "shape": {
+                "Json": {
+                  "Named": "PaginatedResponse<SourceEntry>"
+                }
+              },
+              "variant": "Directory"
+            },
+            {
+              "fallback": true,
+              "note": "returned for a file: its raw content, in the media type Bitbucket derives from the file name",
+              "shape": "Binary",
+              "variant": "File"
+            }
+          ]
         }
       },
       "parameters": [

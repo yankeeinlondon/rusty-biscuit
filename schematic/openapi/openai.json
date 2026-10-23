@@ -9501,8 +9501,16 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "No content"
+          "200": {
+            "description": "Successful binary response",
+            "content": {
+              "application/sdp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
           }
         },
         "x-schematic": {
@@ -9524,7 +9532,13 @@
               ]
             }
           },
-          "response": "Empty"
+          "response": "Binary",
+          "success": [
+            {
+              "content_type": "application/sdp",
+              "shape": "Binary"
+            }
+          ]
         }
       }
     },
@@ -9978,11 +9992,16 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful JSON response",
+            "description": "Successful response\n\napplication/json: returned when the `stream` query parameter is false or omitted\n\ntext/event-stream: returned when the `stream` query parameter is true",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BetaResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetaResponseStreamEvent"
                 }
               }
             }
@@ -9993,7 +10012,30 @@
             "Json": {
               "Named": "BetaResponse"
             }
-          }
+          },
+          "success": [
+            {
+              "note": "returned when the `stream` query parameter is false or omitted",
+              "shape": {
+                "Json": {
+                  "Named": "BetaResponse"
+                }
+              }
+            },
+            {
+              "note": "returned when the `stream` query parameter is true",
+              "shape": {
+                "Stream": {
+                  "end": "ConnectionClose",
+                  "framing": {
+                    "Sse": {
+                      "Named": "BetaResponseStreamEvent"
+                    }
+                  }
+                }
+              }
+            }
+          ]
         }
       },
       "delete": {
@@ -46684,7 +46726,8 @@
     }
   ],
   "x-schematic": {
-    "module_path": "openai"
+    "module_path": "openai",
+    "request_id_header": "x-request-id"
   },
   "x-schematic-grouped-from": [
     "OpenAI"

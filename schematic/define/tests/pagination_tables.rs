@@ -13,7 +13,7 @@ use schematic_define::pagination::{
     ParamLocation, Partition, Resolution, ResolutionOrigin, ResolvedList, Session, Strategy, ValueSource, adopted_params,
     caller_knobs, param_adoptions, root_array_item_type, validate_pagination,
 };
-use schematic_define::{ApiResponse, RestMethod};
+use schematic_define::{SuccessShape, RestMethod};
 
 fn page_default() -> Strategy {
     Strategy::page_number("page", MoreSignal::link_rel("next"))
@@ -79,7 +79,7 @@ fn only_get_with_an_explicit_vec_is_recognized() {
         get("ListQualified", "/qualified", "std::vec::Vec<Release>"),
         get("Download", "/download", "Vec<u8>"),
     ];
-    forge.endpoints[6].response = ApiResponse::Binary;
+    forge.endpoints[6].response = vec![SuccessShape::binary()];
     for endpoint in &forge.endpoints {
         assert_eq!(resolution(&forge, &endpoint.id), Resolution::NotAList, "{}", endpoint.id);
     }
@@ -148,11 +148,11 @@ fn root_array_item_type_reads_only_a_root_array_reference() {
     let mut fixture = api("Fixture");
     fixture.endpoints = vec![get("ListIssues", "/issues", "Vec<Issue>"), get("ListModels", "/models", "ListModelsResponse")];
     let fixture = registered(fixture);
-    assert_eq!(root_array_item_type(&fixture, &ApiResponse::json_vec_type("Issue")).as_deref(), Some("Issue"));
-    assert_eq!(root_array_item_type(&fixture, &ApiResponse::Json(reference("Vec<serde_json::Value>"))).as_deref(), Some("::serde_json::Value"));
-    assert_eq!(root_array_item_type(&fixture, &ApiResponse::json_vec_type("Unregistered")), None);
-    assert_eq!(root_array_item_type(&fixture, &ApiResponse::json_type("ListModelsResponse")), None);
-    assert_eq!(root_array_item_type(&fixture, &ApiResponse::Text), None);
+    assert_eq!(root_array_item_type(&fixture, &[SuccessShape::json_vec_type("Issue")]).as_deref(), Some("Issue"));
+    assert_eq!(root_array_item_type(&fixture, &[SuccessShape::json(reference("Vec<serde_json::Value>"))]).as_deref(), Some("::serde_json::Value"));
+    assert_eq!(root_array_item_type(&fixture, &[SuccessShape::json_vec_type("Unregistered")]), None);
+    assert_eq!(root_array_item_type(&fixture, &[SuccessShape::json_type("ListModelsResponse")]), None);
+    assert_eq!(root_array_item_type(&fixture, &[SuccessShape::text()]), None);
 }
 
 #[test]
@@ -183,10 +183,10 @@ fn endpoint_collection_list_shape_rules() {
         [PaginationError::NotAnArrayLocation(_)]
     ));
     let mut binary = get("L", "/l", "Unused");
-    binary.response = ApiResponse::Binary;
+    binary.response = vec![SuccessShape::binary()];
     assert_eq!(
         shape(binary, Collection::root().item_type("u8")),
-        vec![PaginationError::NotAnArrayLocation("the response is not JSON".into())]
+        vec![PaginationError::NotAnArrayLocation("the response is not a single JSON shape".into())]
     );
     // A root on a non-`Vec` response needs an authored item type.
     assert_eq!(shape(get("L", "/l", "Wrapper"), Collection::root()), vec![PaginationError::MissingItemType]);

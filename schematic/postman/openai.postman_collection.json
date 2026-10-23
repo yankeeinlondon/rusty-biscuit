@@ -6682,7 +6682,7 @@
                 }
               ]
             },
-            "description": "Create a new Realtime API call over WebRTC and receive the SDP answer needed\nto complete the peer connection."
+            "description": "Create a new Realtime API call over WebRTC and receive the SDP answer needed\nto complete the peer connection.\n\nResponse content type: `application/sdp`."
           }
         },
         {

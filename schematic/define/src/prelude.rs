@@ -52,7 +52,7 @@ pub use crate::pagination::{
 };
 pub use crate::params::EndpointParams;
 pub use crate::request::{ApiRequest, FormField, FormFieldKind};
-pub use crate::response::ApiResponse;
+pub use crate::response::{ResponseShape, StreamEnd, StreamFraming, SuccessShape};
 pub use crate::schema::{Schema, SchemaObject};
 pub use crate::types::{Endpoint, ResolvedEndpointAuth, RestApi, RestMethod};
 pub use crate::websocket::{

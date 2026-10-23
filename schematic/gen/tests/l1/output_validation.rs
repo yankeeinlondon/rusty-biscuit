@@ -12,7 +12,7 @@ use std::process::Command;
 use biscuit_test_harness::bin_exe;
 use schematic_define::auth::ApiKeyLocation;
 use schematic_define::params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
-use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, SchemaComponent};
+use schematic_define::{SuccessShape, AuthStrategy, Endpoint, RestApi, SchemaComponent};
 use schematic_gen::codegen::endpoint_methods::{endpoint_method_renames, resolve_names};
 use schematic_gen::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use schematic_gen::errors::GeneratorError;
@@ -45,7 +45,7 @@ fn with_thing_component(mut api: RestApi, rust_path: &str) -> RestApi {
         rust_path: Some(rust_path.into()),
         schema: serde_json::json!({"type": "object"}),
     });
-    api.endpoints[0].response = ApiResponse::json_type("Thing");
+    api.endpoints[0].response = vec![SuccessShape::json_type("Thing")];
     api
 }
 
@@ -172,7 +172,7 @@ fn dangling_reference_blocks_rust_and_openapi_but_not_postman() {
     // `catalog` names a component it does not carry, so neither the Rust
     // client nor any OpenAPI document may be written, not even the valid
     // `inventory` ones. Postman never reads a schema.
-    catalog.endpoints[0].response = ApiResponse::json_vec_type("CatalogPage");
+    catalog.endpoints[0].response = vec![SuccessShape::json_vec_type("CatalogPage")];
 
     let report = generate_batch(&[inventory, catalog], &BatchScope::Complete, &roots.opts());
 

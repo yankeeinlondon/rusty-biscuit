@@ -268,6 +268,35 @@ fn every_source_form_imports_petstore_with_resolvable_exportable_components() {
 }
 
 #[test]
+fn a_component_that_yields_its_name_is_renamed_in_success_stream_and_error_references() {
+    let original = "            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+  /pets/{petId}:";
+    let replacement = r"            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/CreatePetRequest'
+        '400':
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatePetRequest'
+  /pets/{petId}:";
+    let api = import(OpenApiSource::yaml(petstore_with(original, replacement))).unwrap().api;
+    let create = api.endpoints.iter().find(|endpoint| endpoint.id == "CreatePet").unwrap();
+    let renamed = schematic_define::TypeRef::Named("CreatePetRequest2".into());
+
+    assert!(matches!(&create.response[1].shape, schematic_define::ResponseShape::Stream {
+        framing: schematic_define::StreamFraming::Sse(item), .. } if *item == renamed), "{:?}", create.response);
+    assert_eq!(create.errors[0].shape, schematic_define::ResponseShape::Json(renamed));
+    api.validate_references().unwrap();
+}
+
+#[test]
 fn an_import_module_path_qualifies_component_rust_paths() {
     let imported = schematic_define::openapi::OpenApiImport::new(OpenApiSource::yaml(PETSTORE))
         .module_path("petstore")

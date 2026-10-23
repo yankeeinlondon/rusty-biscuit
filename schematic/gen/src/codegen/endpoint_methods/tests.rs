@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, ParamDef,
+    ApiRequest, SuccessShape, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, ParamDef,
     ParamStyle, QueryParamType, RestApi, RestMethod,
 };
 
@@ -15,7 +15,7 @@ use crate::output::options::OutputOptions;
 use crate::validation::validate_rust_client;
 
 fn endpoint(id: &str, method: RestMethod, path: &str, description: &str) -> Endpoint {
-    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = description.to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("Widget"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = description.to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("Widget")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 fn param(name: &str, param_type: QueryParamType, description: Option<&str>) -> ParamDef {
@@ -352,7 +352,7 @@ fn renames_are_warnings_and_conflicts_are_errors_of_the_rust_output() {
 #[test]
 fn a_call_type_name_shared_with_a_referenced_type_is_a_collision() {
     let mut list = endpoint("ListWidgets", RestMethod::Get, "/widgets", "");
-    list.response = ApiResponse::json_type("ListWidgetsCall");
+    list.response = vec![SuccessShape::json_type("ListWidgetsCall")];
     let errors: Vec<String> = validate_rust_client(&[&api("Widgets", vec![list])])
         .iter()
         .filter(|diagnostic| diagnostic.feature == Feature::GeneratedNameCollision)

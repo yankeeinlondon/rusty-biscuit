@@ -1,6 +1,6 @@
 //! `CrossOrigin` constructors and the API-level-only policy surface.
 
-use schematic_define::{ApiResponse, CrossOrigin, Endpoint, RestMethod};
+use schematic_define::{SuccessShape, CrossOrigin, Endpoint, RestMethod};
 
 #[test]
 fn default_is_same_origin() {
@@ -60,7 +60,7 @@ fn allow_origins_keeps_order_and_exact_strings() {
 
 #[test]
 fn endpoints_support_cross_origin_override() {
-    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Ping".to_string(); fixture.method = RestMethod::Get; fixture.path = "/ping".to_string(); fixture.description = "Ping".to_string(); fixture.request = None; fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Ping".to_string(); fixture.method = RestMethod::Get; fixture.path = "/ping".to_string(); fixture.description = "Ping".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::empty()]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     // The public transfer fields remain readable after construction.
     let Endpoint {
@@ -81,7 +81,7 @@ fn endpoints_support_cross_origin_override() {
     assert_eq!(path, "/ping");
     assert_eq!(description, "Ping");
     assert!(request.is_none());
-    assert_eq!(response, ApiResponse::Empty);
+    assert_eq!(response, vec![SuccessShape::empty()]);
     assert!(headers.is_empty());
     assert!(params.is_none());
     assert!(cross_origin.is_none());

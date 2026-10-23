@@ -296,7 +296,7 @@ pub(crate) fn lines_to_doc_comments(doc: &str) -> TokenStream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::{ApiResponse, Endpoint};
+    use schematic_define::{SuccessShape, Endpoint};
 
     fn make_test_api() -> RestApi {
         {
@@ -310,7 +310,7 @@ mod tests {
                     .describes("List all items".to_string())
                     .returns_empty()
                     .build().expect("valid endpoint fixture");
-                endpoint.response = ApiResponse::json_type("ListItemsResponse");
+                endpoint.response = vec![SuccessShape::json_type("ListItemsResponse")];
                 endpoint
             }];
             api
@@ -415,7 +415,7 @@ mod tests {
                 .describes("Create a new item".to_string())
                 .returns_empty()
                 .build().expect("valid endpoint fixture");
-            endpoint.response = ApiResponse::json_type("CreateItemResponse");
+            endpoint.response = vec![SuccessShape::json_type("CreateItemResponse")];
             endpoint
         });
         api.endpoints.push({
@@ -423,7 +423,7 @@ mod tests {
                 .describes("Get a specific item".to_string())
                 .returns_empty()
                 .build().expect("valid endpoint fixture");
-            endpoint.response = ApiResponse::json_type("Item");
+            endpoint.response = vec![SuccessShape::json_type("Item")];
             endpoint
         });
 
@@ -456,7 +456,7 @@ mod tests {
                     .describes("Create a new item".to_string())
                     .returns_empty()
                     .build().expect("valid endpoint fixture");
-                endpoint.response = ApiResponse::json_type("CreateItemResponse");
+                endpoint.response = vec![SuccessShape::json_type("CreateItemResponse")];
                 endpoint
             },
         );
@@ -483,7 +483,7 @@ mod tests {
                 .describes("Create a new item".to_string())
                 .returns_empty()
                 .build().expect("valid endpoint fixture");
-            endpoint.response = ApiResponse::json_type("CreateItemResponse");
+            endpoint.response = vec![SuccessShape::json_type("CreateItemResponse")];
             endpoint
         }];
 

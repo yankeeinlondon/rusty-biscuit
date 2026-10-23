@@ -15,7 +15,7 @@
 
 use proc_macro2::TokenStream;
 use schematic_define::{
-    ApiResponse, Endpoint, EndpointParams, ParamDef, ParamStyle, QueryParamType, RestMethod,
+    SuccessShape, Endpoint, EndpointParams, ParamDef, ParamStyle, QueryParamType, RestMethod,
 };
 use schematic_gen::codegen::generate_request_struct;
 
@@ -60,7 +60,7 @@ fn make_endpoint_with_query(
         })
     };
 
-    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = format!("Test endpoint for {}", id); fixture.request = None; fixture.response = ApiResponse::json_type("TestResponse"); fixture.headers = vec![]; fixture.params = params; fixture.cross_origin = None; fixture.pagination = None; fixture }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = format!("Test endpoint for {}", id); fixture.request = None; fixture.response = vec![SuccessShape::json_type("TestResponse")]; fixture.headers = vec![]; fixture.params = params; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 // =============================================================================
@@ -420,7 +420,7 @@ fn path_is_immutable_when_query_params_present() {
 
 #[test]
 fn path_immutable_when_no_query_params() {
-    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetUser".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users/{user_id}".to_string(); fixture.description = "Get a user".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("User"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetUser".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users/{user_id}".to_string(); fixture.description = "Get a user".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("User")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);

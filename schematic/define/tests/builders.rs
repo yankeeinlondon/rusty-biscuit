@@ -1,4 +1,4 @@
-use schematic_define::{ApiKeyEnv, ApiRequest, ApiResponse, AuthMethod, AuthPolicy, AuthStrategy,
+use schematic_define::{ApiKeyEnv, ApiRequest, ResponseShape, SuccessShape, AuthMethod, AuthPolicy, AuthStrategy,
     DefinitionContext, Endpoint, EndpointParams, EnvAuthStrategy, EnvList, EnvMapping, ErrorSet,
     DefinitionError, FormField, FormFieldKind, RestApi, RestMethod, SchemaComponent, Success, TypeRef, definition_type};
 use schemars::JsonSchema;
@@ -26,7 +26,7 @@ fn every_verb_preserves_required_facts_and_empty_parameters() {
         assert_eq!(ep.method, method);
         assert_eq!(ep.path, "/items");
         assert_eq!(ep.description, "An operation");
-        assert_eq!(ep.response, ApiResponse::Empty);
+        assert_eq!(ep.response, vec![SuccessShape::empty()]);
         assert!(ep.request.is_none() && ep.params.is_none() && ep.headers.is_empty());
     }
     assert_eq!(EndpointParams::new(), EndpointParams::default());
@@ -36,9 +36,9 @@ fn every_verb_preserves_required_facts_and_empty_parameters() {
 fn accepted_successes_and_requests_preserve_stored_wire_shapes() {
     let mut ctx = DefinitionContext::types_in("::models");
     let desc = ctx.register::<Model>().unwrap();
-    for (success, expected) in [(Success::json(desc.clone()), ApiResponse::Json(TypeRef::Named("Model".into()))),
-        (Success::text(), ApiResponse::Text), (Success::binary(), ApiResponse::Binary),
-        (Success::empty(), ApiResponse::Empty)] {
+    for (success, expected) in [(Success::json(desc.clone()), vec![SuccessShape::json(TypeRef::Named("Model".into()))]),
+        (Success::text(), vec![SuccessShape::text()]), (Success::binary(), vec![SuccessShape::binary()]),
+        (Success::empty(), vec![SuccessShape::empty()])] {
         let ep = Endpoint::post("Operation", "/items").describes("Operation").returns(success).build().unwrap();
         assert_eq!(ep.response, expected);
         assert_eq!(api(&ctx, ep.clone()).unwrap().endpoints, [ep]);
@@ -46,11 +46,11 @@ fn accepted_successes_and_requests_preserve_stored_wire_shapes() {
     let json = Endpoint::post("Json", "/items").describes("JSON").request_json::<Model>(&mut ctx)
         .returns_json::<Vec<Model>>(&mut ctx).build().unwrap();
     assert_eq!(json.request, Some(ApiRequest::Json(desc.type_ref().clone())));
-    assert_eq!(json.response, ApiResponse::Json(TypeRef::Array(Box::new(desc.type_ref().clone()))));
+    assert_eq!(json.response, vec![SuccessShape::json(TypeRef::Array(Box::new(desc.type_ref().clone())))]);
     assert_eq!(api(&ctx, json.clone()).unwrap().endpoints, [json]);
     for (ep, request, response) in [
-        (Endpoint::post("Text", "/").describes("Text").request_text().returns_text().build().unwrap(), ApiRequest::Text { content_type: "text/plain".into() }, ApiResponse::Text),
-        (Endpoint::post("Binary", "/").describes("Binary").request_binary().returns_binary().build().unwrap(), ApiRequest::Binary { content_type: "application/octet-stream".into() }, ApiResponse::Binary),
+        (Endpoint::post("Text", "/").describes("Text").request_text().returns_text().build().unwrap(), ApiRequest::Text { content_type: "text/plain".into() }, vec![SuccessShape::text()]),
+        (Endpoint::post("Binary", "/").describes("Binary").request_binary().returns_binary().build().unwrap(), ApiRequest::Binary { content_type: "application/octet-stream".into() }, vec![SuccessShape::binary()]),
     ] {
         assert_eq!(ep.request, Some(request));
         assert_eq!(ep.response, response);
@@ -71,15 +71,17 @@ fn accepted_successes_and_requests_preserve_stored_wire_shapes() {
 fn endpoint_builder_equals_legacy_literal_without_normalization() {
     let built = Endpoint::get("Get", "/items").describes("Get items").header("Accept", "text/plain")
         .params(EndpointParams::new()).returns_text().build().unwrap();
-    let literal = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Get".into(); fixture.method = RestMethod::Get; fixture.path = "/items".into(); fixture.description = "Get items".into(); fixture.request = None; fixture.response = ApiResponse::Text; fixture.headers = vec![("Accept".into(), "text/plain".into())]; fixture.params = Some(EndpointParams::default()); fixture.cross_origin = None; fixture.pagination = None; fixture };
+    let literal = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Get".into(); fixture.method = RestMethod::Get; fixture.path = "/items".into(); fixture.description = "Get items".into(); fixture.request = None; fixture.response = vec![SuccessShape::text()]; fixture.headers = vec![("Accept".into(), "text/plain".into())]; fixture.params = Some(EndpointParams::default()); fixture.cross_origin = None; fixture.pagination = None; fixture };
     assert_eq!(built, literal);
     assert_eq!(serde_json::to_value(built).unwrap(), serde_json::to_value(literal).unwrap());
 }
 
 #[test]
 fn repeated_success_and_invalid_required_facts_report_errors() {
-    let error = Endpoint::get("Get", "/").describes("Get").returns_empty().returns_text().build().unwrap_err().to_string();
-    assert!(error.contains("Get") && error.contains("are stored once Endpoint::response holds response model v2 shapes"), "{error}");
+    let several = Endpoint::get("Get", "/").describes("Get").returns_empty().returns_text().build().unwrap();
+    assert_eq!(several.response, vec![SuccessShape::empty(), SuccessShape::text()], "a repeated success adds a shape in order");
+    let error = Endpoint::get("Get", "/").describes("Get").returns_text().returns_text().build().unwrap_err().to_string();
+    assert!(error.contains("<endpoint> endpoint Get: success shape 1 (text), success shape 2 (text) share media type `text/plain`"), "{error}");
     for (id, path, description) in [("", "/", "Get"), ("Get", "items", "Get"), ("Get", "/", "  ")] {
         assert!(Endpoint::get(id, path).describes(description).returns_empty().build().is_err());
     }
@@ -215,7 +217,7 @@ fn deserialized_definitions_are_checked_by_the_same_resolution() {
     let load = |value: &serde_json::Value| serde_json::from_value::<RestApi>(value.clone()).map_err(|e| e.to_string()).and_then(|api| api.validate_references().map_err(|e| e.to_string()));
     load(&value).unwrap();
     let mut dangling = value.clone();
-    dangling["endpoints"][0]["response"] = json!({"Json": {"Array": {"Named": "Missing"}}});
+    dangling["endpoints"][0]["response"] = json!([{"shape": {"Json": {"Array": {"Named": "Missing"}}}}]);
     assert_eq!(load(&dangling).unwrap_err(), "Fixture endpoint Get: unresolved schema reference \"Missing\"");
     let mut nested_only = value.clone();
     nested_only["schemas"][0]["rust_path"] = serde_json::Value::Null;
@@ -225,10 +227,10 @@ fn deserialized_definitions_are_checked_by_the_same_resolution() {
     duplicate["schemas"].as_array_mut().unwrap().push(component);
     assert!(load(&duplicate).unwrap_err().contains("defined more than once"));
     let mut composition = value.clone();
-    composition["endpoints"][0]["response"] = json!({"Json": {"OneOf": [{"Named": "Model"}]}});
+    composition["endpoints"][0]["response"] = json!([{"shape": {"Json": {"OneOf": [{"Named": "Model"}]}}}]);
     assert!(load(&composition).unwrap_err().contains("unsupported schema reference"));
     let mut empty_key = value.clone();
-    empty_key["endpoints"][0]["response"] = json!({"Json": {"KeyedMap": {"key": " ", "value": {"Named": "Model"}}}});
+    empty_key["endpoints"][0]["response"] = json!([{"shape": {"Json": {"KeyedMap": {"key": " ", "value": {"Named": "Model"}}}}}]);
     assert!(load(&empty_key).unwrap_err().contains("unsupported schema reference"));
     let mut unknown_field = value;
     unknown_field["schemas"][0]["extra"] = json!(true);
@@ -461,7 +463,7 @@ fn primitive_and_free_form_json_successes_remain_component_free() {
     let built = RestApi::builder(&ctx, "Fixture", "https://example.com").describes("API").no_auth().endpoints([primitive, free_form]).build().unwrap();
     assert!(ctx.registrations().is_empty() && built.schemas.is_empty());
     for ep in built.endpoints {
-        let ApiResponse::Json(reference) = ep.response else { panic!("JSON shape lost") };
+        let ResponseShape::Json(reference) = &ep.response[0].shape else { panic!("JSON shape lost") };
         let wire = reference.wire_schema();
         assert!(wire.get("$ref").is_none());
         assert!(wire == json!({}) || wire == json!({"type":"string"}));
@@ -529,8 +531,8 @@ fn transferred_components_and_references_input_matrix() {
     assert!(load(&component("name", json!(" "))).unwrap_err().contains("empty name"));
     assert!(load(&component("rust_path", json!(""))).unwrap_err().contains("empty Rust path"));
     assert!(load(&component("schema", json!({}))).is_ok(), "an unconstrained schema is valid");
-    assert!(load(&edit(&|v| v["endpoints"][0]["response"] = json!({"Json": {"Named": ""}}))).unwrap_err().contains("unresolved schema reference \"\""));
-    assert!(load(&edit(&|v| v["endpoints"][0]["response"] = json!({"Json": {}}))).is_err());
+    assert!(load(&edit(&|v| v["endpoints"][0]["response"] = json!([{"shape": {"Json": {"Named": ""}}}]))).unwrap_err().contains("unresolved schema reference \"\""));
+    assert!(load(&edit(&|v| v["endpoints"][0]["response"] = json!([{"shape": {"Json": {}}}]))).is_err());
 
     // Duplicate keys, preserved textually, and trailing content.
     for (field, first) in [("\"name\":", "\"Model\""), ("\"rust_path\":", "\"::models::Model\""), ("\"schema\":", "{}")] {

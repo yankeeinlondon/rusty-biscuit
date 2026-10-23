@@ -18,7 +18,7 @@ use std::path::Path;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::{
-    ApiKeyLocation, ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, ErrorEntry,
+    ApiKeyLocation, ApiRequest, AuthStrategy, CrossOrigin, Endpoint, ErrorEntry,
     FormField, FormFieldKind, JsonTag, OAuth2Config, ParamDef, ParamStyle, PrimitiveType,
     QueryParamType, ResponseShape, RestApi, RestMethod, StatusMatch, StreamEnd, StreamFraming,
     SuccessShape, TypeRef,
@@ -215,18 +215,18 @@ fn endpoint_tokens(endpoint: &Endpoint) -> TokenStream {
     let description = &endpoint.description;
     let mut builder = quote! { Endpoint::new(#id, #method, #path).describes(#description) };
     let shapes = endpoint.success_shapes();
-    builder = match shapes.as_slice() {
-        [only] if only.legacy_response().is_some() => match &endpoint.response {
-            ApiResponse::Json(reference) => {
+    builder = match shapes {
+        [only] if only.plain().is_some() => match &only.shape {
+            ResponseShape::Json(reference) => {
                 let ty = imported_type(reference);
                 quote! { #builder.returns_json::<#ty>(ctx) }
             }
-            ApiResponse::Text => quote! { #builder.returns_text() },
-            ApiResponse::Binary => quote! { #builder.returns_binary() },
+            ResponseShape::Text => quote! { #builder.returns_text() },
+            ResponseShape::Binary => quote! { #builder.returns_binary() },
             _ => quote! { #builder.returns_empty() },
         },
         _ => {
-            for shape in &shapes {
+            for shape in shapes {
                 let success = success_tokens(shape);
                 builder = quote! { #builder.returns(#success) };
             }
@@ -606,7 +606,7 @@ mod tests {
                     .describes("List items".to_string())
                     .returns_empty()
                     .build().expect("valid endpoint fixture");
-                endpoint.response = ApiResponse::json_type("ListItemsResponse");
+                endpoint.response = vec![SuccessShape::json_type("ListItemsResponse")];
                 endpoint
             }];
             api
@@ -634,7 +634,7 @@ mod tests {
         let named = |name: &str| TypeRef::Named(name.into());
         api.errors = vec![ErrorEntry::new(StatusMatch::class(5), ResponseShape::Text)];
         let endpoint = &mut api.endpoints[0];
-        endpoint.shapes_preview = vec![
+        endpoint.response = vec![
             shape(ResponseShape::Json(named("Directory")), &|s| {
                 s.json_tag = Some(JsonTag::Field { name: "type".into(), value: serde_json::json!("dir") });
                 s.variant = Some("Directory".into());
@@ -653,7 +653,7 @@ mod tests {
         ];
         let mut opted_out = api.endpoints[0].clone();
         opted_out.id = "OptedOut".into();
-        opted_out.shapes_preview = vec![];
+        opted_out.response = vec![SuccessShape::json_type("ListItemsResponse")];
         opted_out.errors = vec![];
         opted_out.no_declared_errors = true;
         api.endpoints.push(opted_out);

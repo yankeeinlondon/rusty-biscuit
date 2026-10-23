@@ -10,13 +10,13 @@ use std::path::Path;
 use schematic_define::pagination::{
     Collection, CursorSource, LinkSource, MoreSignal, PageSize, Partition, Session, Strategy, ValueSource,
 };
-use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, QueryParamType, RestApi, RestMethod};
+use schematic_define::{SuccessShape, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, QueryParamType, RestApi, RestMethod};
 use crate::common::components::with_referenced_components;
 use schematic_gen::diagnostics::{Feature, Output, Severity};
 use schematic_gen::pipeline::{BatchScope, GenerateOpts, OpenApiFormat, generate_batch, resolve_all_apis};
 use schematic_gen::validation::{validate_openapi, validate_postman, validate_rust_client};
 
-fn endpoint(id: &str, path: &str, response: ApiResponse) -> Endpoint {
+fn endpoint(id: &str, path: &str, response: Vec<SuccessShape>) -> Endpoint {
     { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = RestMethod::Get; fixture.path = path.to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = response; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
@@ -46,7 +46,7 @@ fn pagination_lines(api: &RestApi) -> Vec<String> {
 
 #[test]
 fn each_rule_group_renders_as_its_feature_on_the_rust_client_only() {
-    let mut forge = api("Forge", vec![endpoint("ListReleases", "/releases", ApiResponse::json_vec_type("Release"))]);
+    let mut forge = api("Forge", vec![endpoint("ListReleases", "/releases", vec![SuccessShape::json_vec_type("Release")])]);
     forge.default_pagination = Some(Strategy::cursor("after", CursorSource::last_item("id")).build());
     { let (id, collection) = ("ListReleases", Collection::at(""));  forge.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
 
@@ -72,7 +72,7 @@ fn each_rule_group_renders_as_its_feature_on_the_rust_client_only() {
     assert_eq!(validate_openapi(&[&forge]), vec![]);
     assert_eq!(validate_postman(&[&forge]), vec![]);
 
-    let mut files = endpoint("ListFiles", "/files", ApiResponse::json_vec_type("File"));
+    let mut files = endpoint("ListFiles", "/files", vec![SuccessShape::json_vec_type("File")]);
     files.params = Some(EndpointParams::default().with_query_param("after", QueryParamType::String, false, None));
     let mut adopting = api("Files", vec![files]);
     adopting.default_pagination = Some(Strategy::cursor("after", CursorSource::body("next")).build());
@@ -90,7 +90,7 @@ fn each_rule_group_renders_as_its_feature_on_the_rust_client_only() {
 
 #[test]
 fn item_type_must_be_rust_type_syntax() {
-    let mut forge = api("Forge", vec![endpoint("ListRuns", "/runs", ApiResponse::json_type("RunsResponse"))]);
+    let mut forge = api("Forge", vec![endpoint("ListRuns", "/runs", vec![SuccessShape::json_type("RunsResponse")])]);
     forge.default_pagination = Some(page_default());
     { let (id, collection) = ("ListRuns", Collection::at("runs").item_type("Vec<Run"));  forge.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
     assert_eq!(
@@ -128,7 +128,7 @@ fn github_runs(collection: Collection) -> RestApi {
         vec![endpoint(
             "ListWorkflowRuns",
             "/repos/{owner}/{repo}/actions/runs",
-            ApiResponse::json_type("WorkflowRunsResponse"),
+            vec![SuccessShape::json_type("WorkflowRunsResponse")],
         )],
     );
     github.schemas = schematic_definitions::github::define_github_api().schemas;
@@ -228,7 +228,7 @@ fn a_pagination_error_blocks_only_the_rust_client() {
 
 #[test]
 fn partitioned_first_page_sessions_report_a_strategy_error() {
-    let mut search = api("Search", vec![endpoint("Search", "/search", ApiResponse::json_vec_type("Hit"))]);
+    let mut search = api("Search", vec![endpoint("Search", "/search", vec![SuccessShape::json_vec_type("Hit")])]);
     search.default_pagination = Some(
         Strategy::cursor("after", CursorSource::body("next"))
             .session(Session::opened_by_first_page()

@@ -15,7 +15,7 @@
 //! ## Examples
 //!
 //! ```
-//! use schematic_define::{ApiResponse, DefinitionContext, Endpoint, RestApi};
+//! use schematic_define::{DefinitionContext, Endpoint, RestApi, SuccessShape};
 //! use schematic_gen::diagnostics::{Feature, Severity};
 //! use schematic_gen::validation::{validate_postman, validate_rust_client};
 //!
@@ -26,7 +26,7 @@
 //!     .describes("Test API").no_auth().endpoints([endpoint]).build().unwrap();
 //! // A reference to a component the API does not carry blocks the Rust
 //! // client, not the Postman export.
-//! api.endpoints[0].response = ApiResponse::json_type("Item");
+//! api.endpoints[0].response = vec![SuccessShape::json_type("Item")];
 //!
 //! let rust = validate_rust_client(&[&api]);
 //! assert_eq!(rust.len(), 1);
@@ -41,7 +41,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use schematic_define::openapi::import::naming::sanitize_rust_field_ident;
 use schematic_define::{
-    ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, DefinitionError, Endpoint,
+    ApiKeyLocation, ApiRequest, AuthMethod, DefinitionError, Endpoint,
     EnvAuthStrategy, ErrorEntry, FormFieldKind, GraphQlOperation, GraphQlVariables, ParamDef,
     QueryParamType, ResponseShape, RestApi, StreamFraming, TypeRef,
 };
@@ -468,7 +468,10 @@ fn check_pagination(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) 
             }
         }
 
-        let ApiResponse::Json(TypeRef::Named(name)) = &endpoint.response else {
+        let [only] = endpoint.response.as_slice() else {
+            continue;
+        };
+        let ResponseShape::Json(TypeRef::Named(name)) = &only.shape else {
             continue;
         };
         if list.items.is_root_array() {
@@ -879,8 +882,7 @@ fn referenced_type_names(api: &RestApi, endpoint: &Endpoint) -> Vec<(&'static st
         }
         _ => {}
     }
-    let shapes = endpoint.success_shapes();
-    for shape in &shapes {
+    for shape in endpoint.success_shapes() {
         match &shape.shape {
             ResponseShape::Json(reference) => references.push(("response", reference)),
             ResponseShape::Stream { framing: StreamFraming::Sse(reference) | StreamFraming::Ndjson(reference), .. } => {
@@ -927,7 +929,7 @@ fn endpoint_enum_names(api: &RestApi, endpoint: &Endpoint) -> Vec<(String, &'sta
     if shapes.len() > 1 {
         names.push((format!("{}Response", endpoint.id), "success enum"));
     }
-    names.extend(end_marker_names(&endpoint.id, &shapes).into_iter().map(|name| (name, "stream end marker")));
+    names.extend(end_marker_names(&endpoint.id, shapes).into_iter().map(|name| (name, "stream end marker")));
     if failure_enum_needed(api, &api.effective_errors(endpoint)) {
         names.push((format!("{}Error", endpoint.id), "failure enum"));
     }
@@ -941,7 +943,7 @@ fn check_success_variants(api: &RestApi, endpoint: &Endpoint, diagnostics: &mut 
     if shapes.len() < 2 {
         return;
     }
-    let names = success_variant_names(&shapes);
+    let names = success_variant_names(shapes);
     for (index, name) in names.iter().enumerate() {
         if names[..index].contains(name) || names[index + 1..].iter().all(|other| other != name) {
             continue;
@@ -1353,7 +1355,7 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
 mod tests {
     use super::*;
     use schematic_define::params::{EndpointParams, ParamStyle, QueryParamType};
-    use schematic_define::{ApiKeyLocation, AuthStrategy, FormField, RestMethod};
+    use schematic_define::{ApiKeyLocation, AuthStrategy, FormField, RestMethod, SuccessShape};
 
     #[test]
     fn rust_parameter_aliases_are_validated_and_collide_by_rust_name_only() {
@@ -1389,7 +1391,7 @@ mod tests {
                 .returns_empty()
                 .build().expect("valid endpoint fixture");
             endpoint.path = path.to_owned();
-            endpoint.response = ApiResponse::json_type("Response");
+            endpoint.response = vec![SuccessShape::json_type("Response")];
             endpoint
         }
     }
@@ -1478,19 +1480,19 @@ mod tests {
                     vec![
                         {
                             let mut endpoint = get("ListModels");
-                            endpoint.response = ApiResponse::json_vec_type("Model");
+                            endpoint.response = vec![SuccessShape::json_vec_type("Model")];
                             endpoint
                         },
                         {
                             let mut endpoint = get("Raw");
-                            endpoint.response = ApiResponse::json(TypeRef::Primitive(schematic_define::PrimitiveType::Json));
+                            endpoint.response = vec![SuccessShape::json(TypeRef::Primitive(schematic_define::PrimitiveType::Json))];
                             endpoint
                         },
                         {
                             let mut endpoint = get("Map");
-                            endpoint.response = ApiResponse::json(TypeRef::Map(Box::new(TypeRef::Array(Box::new(
+                            endpoint.response = vec![SuccessShape::json(TypeRef::Map(Box::new(TypeRef::Array(Box::new(
                                 TypeRef::Named("Model".into()),
-                            )))));
+                            )))))];
                             endpoint
                         },
                         {
@@ -1550,12 +1552,12 @@ mod tests {
                 api_with(vec![
                     {
                         let mut endpoint = get("GetReadme");
-                        endpoint.response = ApiResponse::Text;
+                        endpoint.response = vec![SuccessShape::text()];
                         endpoint
                     },
                     {
                         let mut endpoint = get("GetArchive");
-                        endpoint.response = ApiResponse::Binary;
+                        endpoint.response = vec![SuccessShape::binary()];
                         endpoint
                     },
                 ]),
@@ -1637,7 +1639,7 @@ mod tests {
                 api_spelling(
                     vec![{
                         let mut endpoint = get("ListModels");
-                        endpoint.response = ApiResponse::json_type("Model");
+                        endpoint.response = vec![SuccessShape::json_type("Model")];
                         endpoint
                     }],
                     "Model",
@@ -1781,7 +1783,7 @@ mod tests {
                     },
                     {
                         let mut endpoint = get("Status");
-                        endpoint.response = ApiResponse::json_type("UploadForm");
+                        endpoint.response = vec![SuccessShape::json_type("UploadForm")];
                         endpoint
                     },
                 ]),
@@ -2429,7 +2431,7 @@ mod tests {
 
     fn with_shapes(id: &str, shapes: Vec<schematic_define::SuccessShape>) -> Endpoint {
         let mut endpoint = get(id);
-        endpoint.shapes_preview = shapes;
+        endpoint.response = shapes;
         endpoint
     }
 
@@ -2488,7 +2490,7 @@ mod tests {
     fn a_path_enum_type_shadowing_a_referenced_type_is_a_collision() {
         let kind = ParamDef::path("kind", QueryParamType::Enum(vec!["a".into()]));
         let mut endpoint = typed_path("Get", "/{kind}", vec![kind], vec![]);
-        endpoint.response = ApiResponse::json_type("GetRequestKind");
+        endpoint.response = vec![SuccessShape::json_type("GetRequestKind")];
         let api = api_with(vec![endpoint]);
 
         let diagnostics = rust_only(&[&api]);

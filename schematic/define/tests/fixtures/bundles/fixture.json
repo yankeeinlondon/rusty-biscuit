@@ -104,11 +104,15 @@
           "reset_unit": "epoch_seconds",
           "retry_after_header": "retry-after"
         },
-        "response": {
-          "Json": {
-            "Named": "Node"
+        "response": [
+          {
+            "shape": {
+              "Json": {
+                "Named": "Node"
+              }
+            }
           }
-        }
+        ]
       },
       {
         "deprecated": true,
@@ -136,13 +140,17 @@
           ]
         },
         "path": "/parents",
-        "response": {
-          "Json": {
-            "Array": {
-              "Named": "Parent"
+        "response": [
+          {
+            "shape": {
+              "Json": {
+                "Array": {
+                  "Named": "Parent"
+                }
+              }
             }
           }
-        }
+        ]
       },
       {
         "auth": {
@@ -159,13 +167,17 @@
         "id": "Lookup",
         "method": "GET",
         "path": "/lookup",
-        "response": {
-          "Json": {
-            "Map": {
-              "Named": "Item"
+        "response": [
+          {
+            "shape": {
+              "Json": {
+                "Map": {
+                  "Named": "Item"
+                }
+              }
             }
           }
-        },
+        ],
         "retry_guidance": {
           "backoff": {
             "fixed": {
@@ -189,11 +201,15 @@
         "method": "GET",
         "no_declared_errors": true,
         "path": "/raw",
-        "response": {
-          "Json": {
-            "Primitive": "Json"
+        "response": [
+          {
+            "shape": {
+              "Json": {
+                "Primitive": "Json"
+              }
+            }
           }
-        }
+        ]
       },
       {
         "description": "Create a pet",
@@ -206,13 +222,135 @@
             "Named": "Pet"
           }
         },
-        "response": {
-          "Json": {
-            "Optional": {
-              "Named": "Thing"
+        "response": [
+          {
+            "shape": {
+              "Json": {
+                "Optional": {
+                  "Named": "Thing"
+                }
+              }
             }
           }
-        }
+        ]
+      },
+      {
+        "description": "Reply whole or as events",
+        "headers": [],
+        "id": "Converse",
+        "method": "POST",
+        "path": "/converse",
+        "response": [
+          {
+            "note": "when stream is false",
+            "shape": {
+              "Json": {
+                "Named": "Reply"
+              }
+            },
+            "variant": "Whole"
+          },
+          {
+            "note": "when stream is true",
+            "shape": {
+              "Stream": {
+                "end": {
+                  "EventNamed": "done"
+                },
+                "framing": {
+                  "Sse": {
+                    "Named": "Event"
+                  }
+                },
+                "keep": true
+              }
+            }
+          },
+          {
+            "fallback": true,
+            "shape": "Binary",
+            "variant": "Attachment"
+          }
+        ]
+      },
+      {
+        "description": "Tagged replies, audio, or nothing",
+        "headers": [],
+        "id": "Submit",
+        "method": "POST",
+        "path": "/submit",
+        "response": [
+          {
+            "json_tag": {
+              "Field": {
+                "name": "kind",
+                "value": "reply"
+              }
+            },
+            "shape": {
+              "Json": {
+                "Named": "Reply"
+              }
+            }
+          },
+          {
+            "json_tag": {
+              "Field": {
+                "name": "kind",
+                "value": "event"
+              }
+            },
+            "shape": {
+              "Json": {
+                "Named": "Event"
+              }
+            }
+          },
+          {
+            "content_type": "audio/mpeg",
+            "shape": {
+              "Stream": {
+                "end": "ConnectionClose",
+                "framing": "Bytes"
+              }
+            }
+          },
+          {
+            "shape": "Empty",
+            "statuses": [
+              204
+            ]
+          }
+        ]
+      },
+      {
+        "description": "Events per line",
+        "headers": [],
+        "id": "Follow",
+        "method": "GET",
+        "path": "/follow",
+        "response": [
+          {
+            "shape": {
+              "Stream": {
+                "end": {
+                  "FieldEquals": {
+                    "field": "kind",
+                    "value": "end"
+                  }
+                },
+                "framing": {
+                  "Ndjson": {
+                    "Named": "Event"
+                  }
+                }
+              }
+            },
+            "statuses": [
+              200
+            ]
+          }
+        ]
       }
     ],
     "env_auth": [],
@@ -617,6 +755,42 @@
             "issues"
           ],
           "title": "IssuesData",
+          "type": "object"
+        }
+      },
+      {
+        "name": "Reply",
+        "rust_path": "::fixture::models::Reply",
+        "schema": {
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "title": "Reply",
+          "type": "object"
+        }
+      },
+      {
+        "name": "Event",
+        "rust_path": "::fixture::models::Event",
+        "schema": {
+          "properties": {
+            "kind": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "title": "Event",
           "type": "object"
         }
       }

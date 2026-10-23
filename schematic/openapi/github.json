@@ -2339,7 +2339,8 @@
       "reset_header": "x-ratelimit-reset",
       "reset_unit": "epoch_seconds",
       "retry_after_header": "retry-after"
-    }
+    },
+    "request_id_header": "x-github-request-id"
   },
   "x-schematic-grouped-from": [
     "GitHub"

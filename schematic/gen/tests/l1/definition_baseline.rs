@@ -9,7 +9,10 @@ use definition_snapshot::{canonical, differences, fingerprint, snapshot};
 
 // Historical exceptions name one exact leaf and its cause. Current artifacts
 // always compare without exceptions in artifact_drift.
-const EXPLAINED: &[(&str, &str)] = &[];
+const EXPLAINED: &[(&str, &str)] = &[
+    ("lmstudio/definition/endpoints/4:DownloadModel/description",
+        "R31 review: the endpoint returns one JSON download job, not SSE progress, so the description drops \"with SSE progress\""),
+];
 
 fn unexplained(changed: Vec<String>, explained: &[(&str, &str)]) -> Vec<String> {
     for (path, cause) in explained {
@@ -50,6 +53,92 @@ fn adoptions() -> [(&'static str, &'static str, Value); 1] {
     )]
 }
 
+/// Deliberate response-model migrations made after the snapshots were taken:
+/// one API, one endpoint, and why. Only that endpoint's `response` and
+/// `errors` and its fingerprint may differ; every entry must still differ.
+const RESPONSE_MIGRATIONS: &[(&str, &str, &str)] = &[
+    ("elevenlabs", "StreamSpeech", "R33: an incremental byte stream instead of a buffered binary body"),
+    ("elevenlabs", "StreamSpeechWithTimestamps", "R33: one JSON object per line (NDJSON), read incrementally"),
+    ("ollama-native", "Generate", "R30: NDJSON chunks ending at a kept done=true line, or with `stream` false the JSON completion"),
+    ("ollama-native", "Chat", "R30: NDJSON chunks ending at a kept done=true line, or with `stream` false the JSON completion"),
+    ("ollama-native", "PullModel", "R30: NDJSON progress ending at a kept status=success line, or with `stream` false the JSON status"),
+    ("ollama-native", "PushModel", "R30: NDJSON progress ending at a kept status=success line, or with `stream` false the JSON status"),
+    ("ollama-native", "CreateModel", "R30: NDJSON progress ending at a kept status=success line, or with `stream` false the JSON status"),
+    ("ollama-openai", "ChatCompletions", "R30: the JSON completion, or with `stream` true SSE chunks ending at data [DONE]"),
+    ("ollama-openai", "Completions", "R30: the JSON completion, or with `stream` true SSE chunks ending at data [DONE]"),
+    ("anthropic", "CreateMessage", "R32: the JSON message, or with `stream` true the SSE Messages events ending at message_stop"),
+    ("lmstudio", "Chat", "R31: the JSON chat result, or with `stream` true the SSE chat events ending at a kept chat.end"),
+    ("lmstudio", "DownloadModel", "R31 review: one JSON download job (the provider documents no stream), no longer binary"),
+    ("bitbucket", "GetSource", "R32a: a JSON directory listing (Directory) or the file's bytes as the binary fallback (File)"),
+    ("openai", "GetResponse", "R32b: a JSON reply or, with the stream query parameter, server-sent response events"),
+    ("openai", "CreateRealtimeCall", "R28 import: the application/sdp answer is a binary body; the earlier importer \
+        did not recognize the media type and declared no body"),
+];
+
+/// Components the response-model migrations register or correct: one API, one
+/// component, and why. They are compared nowhere else; every entry must name
+/// a current component.
+const MIGRATED_COMPONENTS: &[(&str, &str, &str)] = &[
+    ("ollama-native", "OpenAIChatCompletionChoice", "R30: a choice of the JSON chat completion"),
+    ("ollama-native", "OpenAIChatCompletionResponse", "R30: the JSON reply of ChatCompletions"),
+    ("ollama-native", "OpenAIDelta", "R30: the delta of a chat stream choice"),
+    ("ollama-native", "OpenAIStreamChoice", "R30: a choice of a chat stream chunk"),
+    ("ollama-native", "OpenAIChatStreamChunk", "R30: the SSE item of ChatCompletions"),
+    ("ollama-native", "OpenAICompletionChoice", "R30: a choice of a completion"),
+    ("ollama-native", "OpenAICompletionResponse", "R30: the JSON reply of Completions"),
+    ("ollama-native", "OpenAICompletionStreamChunk", "R30: the SSE item of Completions"),
+    ("ollama-native", "StreamErrorLine", "R11c: the typed mid-stream error line"),
+    ("ollama-native", "GenerateStreamChunk", "R30: a Generate NDJSON chunk"),
+    ("ollama-native", "GenerateStreamItem", "R30: the Generate NDJSON item: chunk or error line"),
+    ("ollama-native", "GenerateCompletion", "R30: the buffered Generate reply (renamed from GenerateResponse, the D-15 enum name)"),
+    ("ollama-native", "ChatStreamChunk", "R30: a Chat NDJSON chunk"),
+    ("ollama-native", "ChatStreamItem", "R30: the Chat NDJSON item: chunk or error line"),
+    ("ollama-native", "ChatCompletion", "R30: the buffered Chat reply (renamed from ChatResponse, the D-15 enum name)"),
+    ("ollama-native", "PullModelProgress", "R30: a pull or push progress line"),
+    ("ollama-native", "PullModelStreamItem", "R30: the pull/push NDJSON item: progress or error line"),
+    ("ollama-native", "CreateModelProgress", "R30: a create progress line"),
+    ("ollama-native", "CreateModelStreamItem", "R30: the create NDJSON item: progress or error line"),
+    ("ollama-native", "StatusResponse", "R30: the buffered pull/push/create reply"),
+    ("ollama-openai", "OpenAIChatCompletionChoice", "R30: a choice of the JSON chat completion"),
+    ("ollama-openai", "OpenAIChatCompletionResponse", "R30: the JSON reply of ChatCompletions"),
+    ("ollama-openai", "OpenAIDelta", "R30: the delta of a chat stream choice"),
+    ("ollama-openai", "OpenAIStreamChoice", "R30: a choice of a chat stream chunk"),
+    ("ollama-openai", "OpenAIChatStreamChunk", "R30: the SSE item of ChatCompletions"),
+    ("ollama-openai", "OpenAICompletionChoice", "R30: a choice of a completion"),
+    ("ollama-openai", "OpenAICompletionResponse", "R30: the JSON reply of Completions"),
+    ("ollama-openai", "OpenAICompletionStreamChunk", "R30: the SSE item of Completions"),
+    ("ollama-openai", "StreamErrorLine", "R11c: the typed mid-stream error line"),
+    ("ollama-openai", "GenerateStreamChunk", "R30: a Generate NDJSON chunk"),
+    ("ollama-openai", "GenerateStreamItem", "R30: the Generate NDJSON item: chunk or error line"),
+    ("ollama-openai", "GenerateCompletion", "R30: the buffered Generate reply (renamed from GenerateResponse, the D-15 enum name)"),
+    ("ollama-openai", "ChatStreamChunk", "R30: a Chat NDJSON chunk"),
+    ("ollama-openai", "ChatStreamItem", "R30: the Chat NDJSON item: chunk or error line"),
+    ("ollama-openai", "ChatCompletion", "R30: the buffered Chat reply (renamed from ChatResponse, the D-15 enum name)"),
+    ("ollama-openai", "PullModelProgress", "R30: a pull or push progress line"),
+    ("ollama-openai", "PullModelStreamItem", "R30: the pull/push NDJSON item: progress or error line"),
+    ("ollama-openai", "CreateModelProgress", "R30: a create progress line"),
+    ("ollama-openai", "CreateModelStreamItem", "R30: the create NDJSON item: progress or error line"),
+    ("ollama-openai", "StatusResponse", "R30: the buffered pull/push/create reply"),
+    ("anthropic", "MessageStreamEvent", "R32: the SSE item type of CreateMessage"),
+    ("anthropic", "ContentBlockDelta", "R32: a content_block_delta payload"),
+    ("anthropic", "MessageDelta", "R32: a message_delta payload"),
+    ("anthropic", "MessageDeltaUsage", "R32: a message_delta usage payload"),
+    ("anthropic", "StreamErrorDetail", "R11c: the typed error event of CreateMessage"),
+    ("anthropic", "StreamMessage", "R32: the message_start payload, whose stop_reason is null"),
+    ("lmstudio", "ChatBody", "R31: the `stream` doc comment now says it defaults to false, as the provider documents"),
+    ("lmstudio", "DownloadModelBody", "R31 review: the doc comment no longer claims SSE progress"),
+    ("lmstudio", "ChatResult", "R31: the JSON reply of Chat"),
+    ("lmstudio", "ChatOutputItem", "R31: an output item of the chat result"),
+    ("lmstudio", "ChatStats", "R31: the statistics of the chat result"),
+    ("lmstudio", "InvalidToolCallMetadata", "R31: metadata of an invalid tool call"),
+    ("lmstudio", "ToolProviderInfo", "R31: the provider of a tool call"),
+    ("lmstudio", "ChatStreamEvent", "R31: the SSE item type of Chat"),
+    ("lmstudio", "ChatStreamErrorDetail", "R11c: the typed error event of Chat"),
+    ("lmstudio", "DownloadModelResponse", "R31 review: the JSON download job, now registered with the documented fields"),
+    ("elevenlabs", "SpeechWithTimestampsResponse", "R33: the provider sends snake_case members (audio_base64, normalized_alignment)"),
+    ("elevenlabs", "HttpAlignment", "R33: the provider sends snake_case members (character_start_times_seconds, ...)"),
+];
+
 /// Rewrites a historical snapshot from before `RestApi::env_username` was
 /// removed and Basic carried its own lists, and adds the named
 /// [`adoptions`]. Touches only `definition/auth`, `definition/env_auth`,
@@ -57,6 +146,7 @@ fn adoptions() -> [(&'static str, &'static str, Value); 1] {
 /// `fingerprints/api_metadata` exactly as `snapshot` does; anything it does
 /// not recognize is left in place to be reported at its own leaf.
 fn normalize_historical(key: &str, mut historical: Value) -> Value {
+    lower_single_responses(&mut historical);
     let definition = historical["definition"].as_object_mut().unwrap();
     let mut changed = false;
     for (api, field, value) in adoptions() {
@@ -101,6 +191,52 @@ fn normalize_historical(key: &str, mut historical: Value) -> Value {
     historical
 }
 
+/// Rewrites every historical single `response` (`{"Json": …}`, `"Text"`,
+/// `"Binary"`, `"Empty"`) into the one-shape list `[{"shape": …}]` that
+/// stores it now, and recomputes the fingerprint of each endpoint it changes
+/// exactly as `snapshot` does. A response that is already a list is left in
+/// place.
+fn lower_single_responses(historical: &mut Value) {
+    let count = historical["definition"]["endpoints"].as_array().map_or(0, Vec::len);
+    for index in 0..count {
+        let endpoint = &mut historical["definition"]["endpoints"][index];
+        if endpoint["response"].is_array() {
+            continue;
+        }
+        let single = endpoint["response"].take();
+        endpoint["response"] = serde_json::json!([{"shape": single}]);
+        let blake3 = fingerprint(endpoint);
+        historical["fingerprints"]["endpoints"][index]["blake3"] = Value::String(blake3);
+    }
+}
+
+/// Removes the [`MIGRATED_COMPONENTS`] of `key` from a snapshot's registry.
+fn without_migrated_components(key: &str, mut snapshot: Value) -> Value {
+    if let Some(registry) = snapshot["registry"].as_array_mut() {
+        registry.retain(|entry| !MIGRATED_COMPONENTS.iter().any(|(api, name, _)| *api == key && entry["name"] == *name));
+    }
+    snapshot
+}
+
+/// Drops the differences a [`RESPONSE_MIGRATIONS`] entry of `key` allows, and
+/// fails on an entry that allows none.
+fn without_migrated_responses(key: &str, changed: Vec<String>) -> Vec<String> {
+    let migrations: Vec<_> = RESPONSE_MIGRATIONS.iter().filter(|(api, ..)| *api == key).collect();
+    let allowed = |path: &str, id: &str| {
+        let endpoint = |root: &str| path.strip_prefix(&format!("{key}/{root}/")).and_then(|rest| rest.split_once(':'))
+            .and_then(|(index, rest)| index.parse::<usize>().ok().map(|_| rest));
+        endpoint("definition/endpoints").is_some_and(|rest| {
+            rest == format!("{id}/response") || rest.starts_with(&format!("{id}/response/"))
+                || rest == format!("{id}/errors") || rest.starts_with(&format!("{id}/errors/"))
+        }) || endpoint("fingerprints/endpoints").is_some_and(|rest| rest == format!("{id}/blake3"))
+    };
+    for (_, id, reason) in &migrations {
+        assert!(!reason.trim().is_empty(), "missing reason for {key} {id}");
+        assert!(changed.iter().any(|path| allowed(path, id)), "stale response migration: {key} {id}");
+    }
+    changed.into_iter().filter(|path| !migrations.iter().any(|(_, id, _)| allowed(path, id))).collect()
+}
+
 /// Sets `explode` to `true` on every form-style query and cookie parameter
 /// that records `false`, and recomputes the fingerprint of each endpoint it
 /// changes exactly as `snapshot` does.
@@ -128,18 +264,23 @@ fn apply_form_explode_default(historical: &mut Value) {
     }
 }
 
+/// The unexplained-before-[`EXPLAINED`] differences between a historical
+/// snapshot and `api`, after normalization and the migration allow-lists.
 fn historical_differences(key: &str, historical: Value, api: &RestApi) -> Vec<String> {
-    let expected = canonical(normalize_historical(key, historical));
+    let expected = canonical(without_migrated_components(key, normalize_historical(key, historical)));
+    let current = snapshot(api);
+    for (api, name, reason) in MIGRATED_COMPONENTS.iter().filter(|(api, ..)| *api == key) {
+        assert!(!reason.trim().is_empty(), "missing reason for {api} {name}");
+        assert!(current["registry"].as_array().unwrap().iter().any(|entry| entry["name"] == *name), "stale migrated component: {api} {name}");
+    }
+    let actual = canonical(without_migrated_components(key, current));
     let mut changed = Vec::new();
-    differences(&expected, &canonical(snapshot(api)), key, &mut changed);
-    changed
+    differences(&expected, &actual, key, &mut changed);
+    without_migrated_responses(key, changed)
 }
 
 fn assert_baseline(key: &str, text: &str) {
-    let expected = canonical(normalize_historical(key, serde_json::from_str(text).unwrap()));
-    let actual = canonical(snapshot(&resolve_api(key).unwrap()));
-    let mut changed = Vec::new();
-    differences(&expected, &actual, key, &mut changed);
+    let changed = historical_differences(key, serde_json::from_str(text).unwrap(), &resolve_api(key).unwrap());
     let prefix = format!("{key}/");
     let explained: Vec<_> = EXPLAINED.iter().copied().filter(|(path, _)| path.starts_with(&prefix)).collect();
     let changed = unexplained(changed, &explained);
@@ -298,7 +439,7 @@ fn changed_description_is_detected_at_its_exact_field() {
 }
 
 fn historical(file: &str) -> Value {
-    let path = format!("{}/tests/fixtures/definition-baseline/{file}.json", env!("CARGO_MANIFEST_DIR"));
+    let path = biscuit_test_harness::manifest_dir!().join(format!("tests/fixtures/definition-baseline/{file}.json"));
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
@@ -324,15 +465,39 @@ fn historical_normalization_lowers_basic_and_unused_usernames_only() {
         let raw = historical(key);
         let normalized = normalize_historical(key, raw.clone());
         let mut touched = Vec::new();
-        differences(&canonical(raw), &canonical(normalized), key, &mut touched);
+        differences(&canonical(raw.clone()), &canonical(normalized.clone()), key, &mut touched);
         let adopted: Vec<String> = adoptions().into_iter().filter(|(api, ..)| *api == key)
             .map(|(_, field, _)| format!("{key}/definition/{field}")).collect();
+        let endpoint_leaf = |path: &str, root: &str, leaf: &str| path.strip_prefix(&format!("{key}/{root}/"))
+            .and_then(|rest| rest.split_once('/')).is_some_and(|(_, rest)| rest == leaf);
         touched.retain(|path| !path.starts_with(&format!("{key}/definition/auth/"))
             && ![format!("{key}/definition/auth"), format!("{key}/definition/env_auth/0"),
                 format!("{key}/definition/env_username"), format!("{key}/fingerprints/api_metadata")].contains(path)
-            && !adopted.contains(path));
+            && !adopted.contains(path)
+            && !endpoint_leaf(path, "definition/endpoints", "response")
+            && !endpoint_leaf(path, "fingerprints/endpoints", "blake3"));
         assert!(touched.is_empty(), "{key}: normalization touched {touched:?}");
+        for (before, after) in raw["definition"]["endpoints"].as_array().unwrap().iter()
+            .zip(normalized["definition"]["endpoints"].as_array().unwrap()) {
+            assert_eq!(after["response"], serde_json::json!([{"shape": before["response"]}]), "{key} {}", before["id"]);
+        }
     }
+}
+
+#[test]
+fn a_historical_single_response_is_lowered_and_a_changed_one_is_still_reported() {
+    let api = resolve_api("github").unwrap();
+    assert!(historical_differences("github", historical("github"), &api).is_empty());
+    let mut mutated = historical("github");
+    let index = api.endpoints.iter().position(|endpoint| endpoint.response[0].plain() == Some(&schematic_define::ResponseShape::Text)).unwrap();
+    mutated["definition"]["endpoints"][index]["response"] = Value::from("Binary");
+    let id = &api.endpoints[index].id;
+    assert_eq!(historical_differences("github", mutated, &api), [format!("github/definition/endpoints/{index}:{id}/response/0/shape"),
+        format!("github/fingerprints/endpoints/{index}:{id}/blake3")]);
+    let mut listed = historical("github");
+    let lowered = serde_json::json!([{"shape": listed["definition"]["endpoints"][index]["response"].clone()}]);
+    listed["definition"]["endpoints"][index]["response"] = lowered.clone();
+    assert_eq!(normalize_historical("github", listed)["definition"]["endpoints"][index]["response"], lowered, "a list is left in place");
 }
 
 #[test]

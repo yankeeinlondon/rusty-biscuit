@@ -29,12 +29,16 @@
         },
         "responses": {
           "200": {
-            "description": "Successful binary response",
+            "description": "Successful response\n\napplication/json: returned when `stream` is false or omitted\n\ntext/event-stream: returned when `stream` is true",
             "content": {
-              "application/octet-stream": {
+              "application/json": {
                 "schema": {
-                  "type": "string",
-                  "format": "binary"
+                  "$ref": "#/components/schemas/ChatResult"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatStreamEvent"
                 }
               }
             }
@@ -46,7 +50,37 @@
               "Named": "ChatBody"
             }
           },
-          "response": "Binary"
+          "response": {
+            "Json": {
+              "Named": "ChatResult"
+            }
+          },
+          "success": [
+            {
+              "note": "returned when `stream` is false or omitted",
+              "shape": {
+                "Json": {
+                  "Named": "ChatResult"
+                }
+              }
+            },
+            {
+              "note": "returned when `stream` is true",
+              "shape": {
+                "Stream": {
+                  "end": {
+                    "EventNamed": "chat.end"
+                  },
+                  "framing": {
+                    "Sse": {
+                      "Named": "ChatStreamEvent"
+                    }
+                  },
+                  "keep": true
+                }
+              }
+            }
+          ]
         }
       }
     },
@@ -160,8 +194,8 @@
     },
     "/api/v1/models/download": {
       "post": {
-        "summary": "Download a model from HuggingFace with SSE progress",
-        "description": "Download a model from HuggingFace with SSE progress",
+        "summary": "Download a model from HuggingFace",
+        "description": "Download a model from HuggingFace",
         "operationId": "DownloadModel",
         "requestBody": {
           "content": {
@@ -175,12 +209,11 @@
         },
         "responses": {
           "200": {
-            "description": "Successful binary response",
+            "description": "Successful JSON response",
             "content": {
-              "application/octet-stream": {
+              "application/json": {
                 "schema": {
-                  "type": "string",
-                  "format": "binary"
+                  "$ref": "#/components/schemas/DownloadModelResponse"
                 }
               }
             }
@@ -192,7 +225,11 @@
               "Named": "DownloadModelBody"
             }
           },
-          "response": "Binary"
+          "response": {
+            "Json": {
+              "Named": "DownloadModelResponse"
+            }
+          }
         }
       }
     },
@@ -242,7 +279,7 @@
     "schemas": {
       "ChatBody": {
         "title": "ChatBody",
-        "description": "Request body for the `/api/v1/chat` endpoint.\n\nThe chat endpoint supports SSE streaming by default.",
+        "description": "Request body for the `/api/v1/chat` endpoint.\n\nThe reply is a [`ChatResult`] unless `stream` is `true`, in which case it\nis a stream of [`ChatStreamEvent`]s.",
         "type": "object",
         "properties": {
           "context_length": {
@@ -278,7 +315,7 @@
             }
           },
           "stream": {
-            "description": "Whether to stream the response (default: true).",
+            "description": "Whether to stream the response as SSE (default: false).",
             "type": "boolean"
           },
           "temperature": {
@@ -379,7 +416,7 @@
       },
       "DownloadModelBody": {
         "title": "DownloadModelBody",
-        "description": "Request body for the `/api/v1/models/download` endpoint.\n\nThe download endpoint supports SSE streaming for progress updates.",
+        "description": "Request body for the `/api/v1/models/download` endpoint.",
         "type": "object",
         "properties": {
           "model": {
@@ -629,6 +666,170 @@
             "type": "string"
           }
         }
+      },
+      "ChatResult": {
+        "title": "ChatResult",
+        "description": "The reply of `/api/v1/chat` when `stream` is false or omitted, and the\n`result` of the stream's final `chat.end` event.\n\nNot named `ChatResponse`: that name belongs to the generated success enum\nof the `Chat` endpoint.",
+        "type": "object",
+        "properties": {
+          "model_instance_id": {
+            "description": "The loaded model instance that generated the reply.",
+            "type": "string"
+          },
+          "output": {
+            "description": "Output items in generation order.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ChatOutputItem"
+                }
+              ]
+            }
+          },
+          "response_id": {
+            "description": "Response identifier starting with `resp_`; present when `store` is true.",
+            "type": "string"
+          },
+          "stats": {
+            "description": "Token usage and performance."
+          }
+        },
+        "required": [
+          "model_instance_id",
+          "output",
+          "stats"
+        ]
+      },
+      "ChatOutputItem": {
+        "description": "One item of a chat result's `output`."
+      },
+      "ChatStats": {
+        "description": "Token usage and performance of one chat.",
+        "type": "object",
+        "properties": {
+          "input_tokens": {
+            "description": "Input tokens, including formatting, tool definitions, and prior messages.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "model_load_time_seconds": {
+            "description": "Seconds spent loading the model; only when the request loaded it."
+          },
+          "reasoning_output_tokens": {
+            "description": "Output tokens spent on reasoning.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "time_to_first_token_seconds": {
+            "description": "Seconds until the first token.",
+            "type": "number",
+            "format": "double"
+          },
+          "tokens_per_second": {
+            "description": "Generation speed.",
+            "type": "number",
+            "format": "double"
+          },
+          "total_output_tokens": {
+            "description": "Total output tokens generated.",
+            "type": "integer",
+            "format": "uint64"
+          }
+        },
+        "required": [
+          "input_tokens",
+          "total_output_tokens",
+          "reasoning_output_tokens",
+          "tokens_per_second",
+          "time_to_first_token_seconds"
+        ]
+      },
+      "InvalidToolCallMetadata": {
+        "description": "Why a tool call the model attempted was rejected.",
+        "type": "object",
+        "properties": {
+          "arguments": {
+            "description": "The arguments the model passed; only for `invalid_arguments`."
+          },
+          "provider_info": {
+            "description": "The tool provider; only for `invalid_arguments`."
+          },
+          "tool_name": {
+            "description": "The tool name the model used.",
+            "type": "string"
+          },
+          "type": {
+            "description": "`invalid_name` or `invalid_arguments`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "tool_name"
+        ]
+      },
+      "ToolProviderInfo": {
+        "description": "The provider of a tool the model called."
+      },
+      "ChatStreamEvent": {
+        "title": "ChatStreamEvent",
+        "description": "One server-sent event of `/api/v1/chat` when `stream` is true, decoded\nfrom the event's `data`, whose `type` repeats the SSE event name.\n\nThe stream ends with [`ChatStreamEvent::ChatEnd`]. An `error` event does\nnot end it: `chat.end` still follows with whatever was generated."
+      },
+      "ChatStreamErrorDetail": {
+        "description": "The `error` object of a chat stream `error` event.",
+        "type": "object",
+        "properties": {
+          "code": {
+            "description": "A more specific error code, such as `missing_required_parameter`."
+          },
+          "message": {
+            "description": "Human-readable description.",
+            "type": "string"
+          },
+          "param": {
+            "description": "The request parameter the error relates to."
+          },
+          "type": {
+            "description": "The error category, such as `invalid_request` or `model_not_found`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "message"
+        ]
+      },
+      "DownloadModelResponse": {
+        "title": "DownloadModelResponse",
+        "description": "Response from the `/api/v1/models/download` endpoint: the download job,\nreturned as one JSON object (the endpoint does not stream).",
+        "type": "object",
+        "properties": {
+          "completed_at": {
+            "description": "ISO 8601 completion time; present when `status` is `completed`.",
+            "type": "string"
+          },
+          "job_id": {
+            "description": "Download job identifier; absent when `status` is `already_downloaded`.",
+            "type": "string"
+          },
+          "started_at": {
+            "description": "ISO 8601 start time; absent when `status` is `already_downloaded`.",
+            "type": "string"
+          },
+          "status": {
+            "description": "Job status: `downloading`, `paused`, `completed`, `failed`, or\n`already_downloaded`.",
+            "type": "string"
+          },
+          "total_size_bytes": {
+            "description": "Total download size in bytes; absent when `status` is\n`already_downloaded`.",
+            "type": "integer",
+            "format": "uint64"
+          }
+        },
+        "required": [
+          "status"
+        ]
       }
     },
     "securitySchemes": {

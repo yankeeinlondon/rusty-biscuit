@@ -65,6 +65,9 @@ pub(crate) fn success_code(api: &RestApi, id: &str, shapes: &[SuccessShape]) -> 
     let doc = format!(" The success reply of `{id}`: one variant per declared shape, chosen from the reply's status, media type, and JSON tag.");
     items.extend(quote! {
         #[doc = #doc]
+        // A variant holds a whole reply and the enum is built once per call,
+        // so boxing a large variant would only make the caller's type worse.
+        #[allow(clippy::large_enum_variant)]
         #[derive(Debug)]
         pub enum #enum_name {
             #(#variants,)*
@@ -199,6 +202,7 @@ pub(crate) fn failure_code(api: &RestApi, owner_id: &str, table: &ErrorTable, ap
     let items = quote! {
         #[doc = #doc]
         #lone_note
+        #[allow(clippy::large_enum_variant)]
         #[derive(Debug)]
         pub enum #enum_name {
             #(#variants,)*
@@ -564,7 +568,7 @@ fn unsupported(what: &str) -> TokenStream {
 
 #[cfg(test)]
 mod tests {
-    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, ErrorEntry, PrimitiveType, RestMethod, SchemaComponent, TypeRef};
+    use schematic_define::{SuccessShape, AuthStrategy, Endpoint, ErrorEntry, PrimitiveType, RestMethod, SchemaComponent, TypeRef};
     use serde_json::json;
 
     use super::*;
@@ -585,8 +589,7 @@ mod tests {
 
     fn endpoint(id: &str, shapes: Vec<SuccessShape>) -> Endpoint {
         let mut endpoint = make_endpoint(id, RestMethod::Post, "/items", None);
-        endpoint.response = ApiResponse::json_type("Item");
-        endpoint.shapes_preview = shapes;
+        endpoint.response = shapes;
         endpoint
     }
 
@@ -630,10 +633,10 @@ mod tests {
     #[test]
     fn a_single_plain_shape_keeps_its_type_and_codec_and_declares_no_error() {
         let cases = [
-            (ApiResponse::json_type("Item"), "::defs::Item", "schematic_runtime::Json<::defs::Item>"),
-            (ApiResponse::Text, "String", "schematic_runtime::Text"),
-            (ApiResponse::Binary, "bytes::Bytes", "schematic_runtime::Binary"),
-            (ApiResponse::Empty, "()", "schematic_runtime::Empty"),
+            (vec![SuccessShape::json_type("Item")], "::defs::Item", "schematic_runtime::Json<::defs::Item>"),
+            (vec![SuccessShape::text()], "String", "schematic_runtime::Text"),
+            (vec![SuccessShape::binary()], "bytes::Bytes", "schematic_runtime::Binary"),
+            (vec![SuccessShape::empty()], "()", "schematic_runtime::Empty"),
         ];
         for (response, success, decoder) in cases {
             let mut single = endpoint("Get", vec![]);
@@ -682,7 +685,7 @@ mod tests {
         let code = generated(&api, "Watch");
         assert_has(&code, "type Decoder = schematic_runtime::Sse<::defs::Chunk, schematic_runtime::UntilClose>;");
         for id in ["Speak", "Watch"] {
-            assert!(end_marker_names(id, &api.endpoints.iter().find(|e| e.id == id).unwrap().success_shapes()).is_empty());
+            assert!(end_marker_names(id, api.endpoints.iter().find(|e| e.id == id).unwrap().success_shapes()).is_empty());
             assert!(!generated(&api, id).contains("pub struct"), "{id}");
         }
     }

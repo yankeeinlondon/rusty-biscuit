@@ -155,7 +155,7 @@
                 }
               }
             },
-            "description": "Download a model from HuggingFace with SSE progress"
+            "description": "Download a model from HuggingFace"
           }
         },
         {

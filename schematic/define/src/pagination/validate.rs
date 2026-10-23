@@ -11,7 +11,6 @@ use super::strategy::{
     PageStrategy, Session, SessionOpen, SessionStep, Strategy, ValueSource,
 };
 use crate::params::{ParamDef, QueryParamType};
-use crate::response::ApiResponse;
 use crate::types::{Endpoint, RestApi, RestMethod};
 
 /// The group a [`PaginationError`] belongs to.
@@ -362,8 +361,8 @@ fn collection_errors(api: &RestApi, endpoint: &Endpoint, collection: &Collection
     if collection.item_type.as_deref().is_some_and(|ty| ty.trim().is_empty()) {
         errors.push(PaginationError::EmptyValue("item type"));
     }
-    match &endpoint.response {
-        ApiResponse::Json(reference) => {
+    match super::resolve::sole_json(&endpoint.response) {
+        Some(reference) => {
             let is_vec = super::root_array_item_type(api, &endpoint.response).is_some();
             if is_vec && matches!(collection.items.record.first(), Some(Step::Key(_))) {
                 errors.push(PaginationError::NotAnArrayLocation(format!(
@@ -372,8 +371,8 @@ fn collection_errors(api: &RestApi, endpoint: &Endpoint, collection: &Collection
                 )));
             }
         }
-        _ => errors.push(PaginationError::NotAnArrayLocation(
-            "the response is not JSON".to_owned(),
+        None => errors.push(PaginationError::NotAnArrayLocation(
+            "the response is not a single JSON shape".to_owned(),
         )),
     }
 

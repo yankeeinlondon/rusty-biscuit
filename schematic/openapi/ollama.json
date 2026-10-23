@@ -29,12 +29,16 @@
         },
         "responses": {
           "200": {
-            "description": "Successful binary response",
+            "description": "Successful response\n\napplication/x-ndjson: returned when `stream` is true or omitted\n\napplication/json: returned when `stream` is false",
             "content": {
-              "application/octet-stream": {
+              "application/x-ndjson": {
                 "schema": {
-                  "type": "string",
-                  "format": "binary"
+                  "$ref": "#/components/schemas/GenerateStreamItem"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateCompletion"
                 }
               }
             }
@@ -46,7 +50,51 @@
               "Named": "GenerateBody"
             }
           },
-          "response": "Binary"
+          "response": {
+            "Stream": {
+              "end": {
+                "FieldEquals": {
+                  "field": "done",
+                  "value": true
+                }
+              },
+              "framing": {
+                "Ndjson": {
+                  "Named": "GenerateStreamItem"
+                }
+              },
+              "keep": true
+            }
+          },
+          "success": [
+            {
+              "note": "returned when `stream` is true or omitted",
+              "shape": {
+                "Stream": {
+                  "end": {
+                    "FieldEquals": {
+                      "field": "done",
+                      "value": true
+                    }
+                  },
+                  "framing": {
+                    "Ndjson": {
+                      "Named": "GenerateStreamItem"
+                    }
+                  },
+                  "keep": true
+                }
+              }
+            },
+            {
+              "note": "returned when `stream` is false",
+              "shape": {
+                "Json": {
+                  "Named": "GenerateCompletion"
+                }
+              }
+            }
+          ]
         }
       }
     },
@@ -67,12 +115,16 @@
         },
         "responses": {
           "200": {
-            "description": "Successful binary response",
+            "description": "Successful response\n\napplication/x-ndjson: returned when `stream` is true or omitted\n\napplication/json: returned when `stream` is false",
             "content": {
-              "application/octet-stream": {
+              "application/x-ndjson": {
                 "schema": {
-                  "type": "string",
-                  "format": "binary"
+                  "$ref": "#/components/schemas/ChatStreamItem"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatCompletion"
                 }
               }
             }
@@ -84,7 +136,51 @@
               "Named": "ChatBody"
             }
           },
-          "response": "Binary"
+          "response": {
+            "Stream": {
+              "end": {
+                "FieldEquals": {
+                  "field": "done",
+                  "value": true
+                }
+              },
+              "framing": {
+                "Ndjson": {
+                  "Named": "ChatStreamItem"
+                }
+              },
+              "keep": true
+            }
+          },
+          "success": [
+            {
+              "note": "returned when `stream` is true or omitted",
+              "shape": {
+                "Stream": {
+                  "end": {
+                    "FieldEquals": {
+                      "field": "done",
+                      "value": true
+                    }
+                  },
+                  "framing": {
+                    "Ndjson": {
+                      "Named": "ChatStreamItem"
+                    }
+                  },
+                  "keep": true
+                }
+              }
+            },
+            {
+              "note": "returned when `stream` is false",
+              "shape": {
+                "Json": {
+                  "Named": "ChatCompletion"
+                }
+              }
+            }
+          ]
         }
       }
     },
@@ -213,12 +309,16 @@
         },
         "responses": {
           "200": {
-            "description": "Successful binary response",
+            "description": "Successful response\n\napplication/x-ndjson: returned when `stream` is true or omitted\n\napplication/json: returned when `stream` is false",
             "content": {
-              "application/octet-stream": {
+              "application/x-ndjson": {
                 "schema": {
-                  "type": "string",
-                  "format": "binary"
+                  "$ref": "#/components/schemas/PullModelStreamItem"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             }
@@ -230,7 +330,51 @@
               "Named": "PullModelBody"
             }
           },
-          "response": "Binary"
+          "response": {
+            "Stream": {
+              "end": {
+                "FieldEquals": {
+                  "field": "status",
+                  "value": "success"
+                }
+              },
+              "framing": {
+                "Ndjson": {
+                  "Named": "PullModelStreamItem"
+                }
+              },
+              "keep": true
+            }
+          },
+          "success": [
+            {
+              "note": "returned when `stream` is true or omitted",
+              "shape": {
+                "Stream": {
+                  "end": {
+                    "FieldEquals": {
+                      "field": "status",
+                      "value": "success"
+                    }
+                  },
+                  "framing": {
+                    "Ndjson": {
+                      "Named": "PullModelStreamItem"
+                    }
+                  },
+                  "keep": true
+                }
+              }
+            },
+            {
+              "note": "returned when `stream` is false",
+              "shape": {
+                "Json": {
+                  "Named": "StatusResponse"
+                }
+              }
+            }
+          ]
         }
       }
     },
@@ -251,12 +395,16 @@
         },
         "responses": {
           "200": {
-            "description": "Successful binary response",
+            "description": "Successful response\n\napplication/x-ndjson: returned when `stream` is true or omitted\n\napplication/json: returned when `stream` is false",
             "content": {
-              "application/octet-stream": {
+              "application/x-ndjson": {
                 "schema": {
-                  "type": "string",
-                  "format": "binary"
+                  "$ref": "#/components/schemas/PullModelStreamItem"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             }
@@ -268,7 +416,51 @@
               "Named": "PushModelBody"
             }
           },
-          "response": "Binary"
+          "response": {
+            "Stream": {
+              "end": {
+                "FieldEquals": {
+                  "field": "status",
+                  "value": "success"
+                }
+              },
+              "framing": {
+                "Ndjson": {
+                  "Named": "PullModelStreamItem"
+                }
+              },
+              "keep": true
+            }
+          },
+          "success": [
+            {
+              "note": "returned when `stream` is true or omitted",
+              "shape": {
+                "Stream": {
+                  "end": {
+                    "FieldEquals": {
+                      "field": "status",
+                      "value": "success"
+                    }
+                  },
+                  "framing": {
+                    "Ndjson": {
+                      "Named": "PullModelStreamItem"
+                    }
+                  },
+                  "keep": true
+                }
+              }
+            },
+            {
+              "note": "returned when `stream` is false",
+              "shape": {
+                "Json": {
+                  "Named": "StatusResponse"
+                }
+              }
+            }
+          ]
         }
       }
     },
@@ -349,12 +541,16 @@
         },
         "responses": {
           "200": {
-            "description": "Successful binary response",
+            "description": "Successful response\n\napplication/x-ndjson: returned when `stream` is true or omitted\n\napplication/json: returned when `stream` is false",
             "content": {
-              "application/octet-stream": {
+              "application/x-ndjson": {
                 "schema": {
-                  "type": "string",
-                  "format": "binary"
+                  "$ref": "#/components/schemas/CreateModelStreamItem"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             }
@@ -366,7 +562,51 @@
               "Named": "CreateModelBody"
             }
           },
-          "response": "Binary"
+          "response": {
+            "Stream": {
+              "end": {
+                "FieldEquals": {
+                  "field": "status",
+                  "value": "success"
+                }
+              },
+              "framing": {
+                "Ndjson": {
+                  "Named": "CreateModelStreamItem"
+                }
+              },
+              "keep": true
+            }
+          },
+          "success": [
+            {
+              "note": "returned when `stream` is true or omitted",
+              "shape": {
+                "Stream": {
+                  "end": {
+                    "FieldEquals": {
+                      "field": "status",
+                      "value": "success"
+                    }
+                  },
+                  "framing": {
+                    "Ndjson": {
+                      "Named": "CreateModelStreamItem"
+                    }
+                  },
+                  "keep": true
+                }
+              }
+            },
+            {
+              "note": "returned when `stream` is false",
+              "shape": {
+                "Json": {
+                  "Named": "StatusResponse"
+                }
+              }
+            }
+          ]
         }
       }
     },
@@ -413,12 +653,16 @@
         },
         "responses": {
           "200": {
-            "description": "Successful binary response",
+            "description": "Successful response\n\napplication/json: returned when `stream` is false or omitted\n\ntext/event-stream: returned when `stream` is true",
             "content": {
-              "application/octet-stream": {
+              "application/json": {
                 "schema": {
-                  "type": "string",
-                  "format": "binary"
+                  "$ref": "#/components/schemas/OpenAIChatCompletionResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenAIChatStreamChunk"
                 }
               }
             }
@@ -430,7 +674,36 @@
               "Named": "OpenAIChatCompletionRequest"
             }
           },
-          "response": "Binary"
+          "response": {
+            "Json": {
+              "Named": "OpenAIChatCompletionResponse"
+            }
+          },
+          "success": [
+            {
+              "note": "returned when `stream` is false or omitted",
+              "shape": {
+                "Json": {
+                  "Named": "OpenAIChatCompletionResponse"
+                }
+              }
+            },
+            {
+              "note": "returned when `stream` is true",
+              "shape": {
+                "Stream": {
+                  "end": {
+                    "DataLineEquals": "[DONE]"
+                  },
+                  "framing": {
+                    "Sse": {
+                      "Named": "OpenAIChatStreamChunk"
+                    }
+                  }
+                }
+              }
+            }
+          ]
         }
       }
     },
@@ -451,12 +724,16 @@
         },
         "responses": {
           "200": {
-            "description": "Successful binary response",
+            "description": "Successful response\n\napplication/json: returned when `stream` is false or omitted\n\ntext/event-stream: returned when `stream` is true",
             "content": {
-              "application/octet-stream": {
+              "application/json": {
                 "schema": {
-                  "type": "string",
-                  "format": "binary"
+                  "$ref": "#/components/schemas/OpenAICompletionResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenAICompletionStreamChunk"
                 }
               }
             }
@@ -468,7 +745,36 @@
               "Named": "OpenAICompletionRequest"
             }
           },
-          "response": "Binary"
+          "response": {
+            "Json": {
+              "Named": "OpenAICompletionResponse"
+            }
+          },
+          "success": [
+            {
+              "note": "returned when `stream` is false or omitted",
+              "shape": {
+                "Json": {
+                  "Named": "OpenAICompletionResponse"
+                }
+              }
+            },
+            {
+              "note": "returned when `stream` is true",
+              "shape": {
+                "Stream": {
+                  "end": {
+                    "DataLineEquals": "[DONE]"
+                  },
+                  "framing": {
+                    "Sse": {
+                      "Named": "OpenAICompletionStreamChunk"
+                    }
+                  }
+                }
+              }
+            }
+          ]
         }
       }
     },
@@ -1360,6 +1666,569 @@
           "object",
           "created",
           "owned_by"
+        ]
+      },
+      "OpenAIChatCompletionChoice": {
+        "title": "OpenAIChatCompletionChoice",
+        "description": "A choice in the chat completion response.",
+        "type": "object",
+        "properties": {
+          "finish_reason": {
+            "description": "Why the model stopped generating.",
+            "type": "string"
+          },
+          "index": {
+            "description": "Index of this choice.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "message": {
+            "description": "The message generated."
+          }
+        },
+        "required": [
+          "index",
+          "message"
+        ]
+      },
+      "OpenAIChatCompletionResponse": {
+        "title": "OpenAIChatCompletionResponse",
+        "description": "Response from the `/v1/chat/completions` endpoint.",
+        "type": "object",
+        "properties": {
+          "choices": {
+            "description": "List of completion choices.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/OpenAIChatCompletionChoice"
+                }
+              ]
+            }
+          },
+          "created": {
+            "description": "Unix timestamp of creation.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "id": {
+            "description": "Unique identifier for the completion.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Model used for generation.",
+            "type": "string"
+          },
+          "object": {
+            "description": "Object type, always \"chat.completion\".",
+            "type": "string"
+          },
+          "usage": {
+            "description": "Token usage information."
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices"
+        ]
+      },
+      "OpenAIDelta": {
+        "title": "OpenAIDelta",
+        "description": "Delta content in OpenAI streaming format.",
+        "type": "object",
+        "properties": {
+          "content": {
+            "description": "The content chunk.",
+            "type": "string"
+          },
+          "role": {
+            "description": "The role (only in first chunk).",
+            "type": "string"
+          }
+        }
+      },
+      "OpenAIStreamChoice": {
+        "title": "OpenAIStreamChoice",
+        "description": "A choice in the streaming response.",
+        "type": "object",
+        "properties": {
+          "delta": {
+            "description": "The delta content."
+          },
+          "finish_reason": {
+            "description": "Why the model stopped generating (final chunk only).",
+            "type": "string"
+          },
+          "index": {
+            "description": "Index of this choice.",
+            "type": "integer",
+            "format": "uint32"
+          }
+        },
+        "required": [
+          "index",
+          "delta"
+        ]
+      },
+      "OpenAIChatStreamChunk": {
+        "title": "OpenAIChatStreamChunk",
+        "description": "A streaming chunk from the `/v1/chat/completions` endpoint.",
+        "type": "object",
+        "properties": {
+          "choices": {
+            "description": "List of delta choices.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/OpenAIStreamChoice"
+                }
+              ]
+            }
+          },
+          "created": {
+            "description": "Unix timestamp of creation.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "id": {
+            "description": "Unique identifier for the completion.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Model used for generation.",
+            "type": "string"
+          },
+          "object": {
+            "description": "Object type, always \"chat.completion.chunk\".",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices"
+        ]
+      },
+      "OpenAICompletionChoice": {
+        "title": "OpenAICompletionChoice",
+        "description": "A choice in the completion response.",
+        "type": "object",
+        "properties": {
+          "finish_reason": {
+            "description": "Why the model stopped generating.",
+            "type": "string"
+          },
+          "index": {
+            "description": "Index of this choice.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "text": {
+            "description": "The generated text.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "text"
+        ]
+      },
+      "OpenAICompletionResponse": {
+        "title": "OpenAICompletionResponse",
+        "description": "Response from the `/v1/completions` endpoint.",
+        "type": "object",
+        "properties": {
+          "choices": {
+            "description": "List of completion choices.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/OpenAICompletionChoice"
+                }
+              ]
+            }
+          },
+          "created": {
+            "description": "Unix timestamp of creation.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "id": {
+            "description": "Unique identifier for the completion.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Model used for generation.",
+            "type": "string"
+          },
+          "object": {
+            "description": "Object type, always \"text_completion\".",
+            "type": "string"
+          },
+          "usage": {
+            "description": "Token usage information."
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices"
+        ]
+      },
+      "OpenAICompletionStreamChunk": {
+        "title": "OpenAICompletionStreamChunk",
+        "description": "A streaming chunk from the `/v1/completions` endpoint.",
+        "type": "object",
+        "properties": {
+          "choices": {
+            "description": "Text choices; `finish_reason` is set on the final chunk only.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/OpenAICompletionChoice"
+                }
+              ]
+            }
+          },
+          "created": {
+            "description": "Unix timestamp of creation.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "id": {
+            "description": "Unique identifier for the completion.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Model used for generation.",
+            "type": "string"
+          },
+          "object": {
+            "description": "Object type, always \"text_completion\".",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices"
+        ]
+      },
+      "StreamErrorLine": {
+        "title": "StreamErrorLine",
+        "description": "A mid-stream error line, such as `{\"error\": \"model not found\"}`.\n\nOllama can send it inside a stream whose status is still 200, so every\nnative NDJSON item type carries it as a variant.",
+        "type": "object",
+        "properties": {
+          "error": {
+            "description": "The error message.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "GenerateStreamChunk": {
+        "title": "GenerateStreamChunk",
+        "description": "A streaming chunk from the `/api/generate` endpoint.",
+        "type": "object",
+        "properties": {
+          "context": {
+            "description": "Context for continuing generation (final chunk only).",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "created_at": {
+            "description": "Timestamp of chunk creation.",
+            "type": "string"
+          },
+          "done": {
+            "description": "Whether generation is complete.",
+            "type": "boolean"
+          },
+          "eval_count": {
+            "description": "Number of tokens generated (final chunk only).",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "model": {
+            "description": "Model that generated the response.",
+            "type": "string"
+          },
+          "prompt_eval_count": {
+            "description": "Number of tokens in the prompt (final chunk only).",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "response": {
+            "description": "The generated text chunk.",
+            "type": "string"
+          },
+          "total_duration": {
+            "description": "Total time in nanoseconds (final chunk only).",
+            "type": "integer",
+            "format": "uint64"
+          }
+        },
+        "required": [
+          "model",
+          "created_at",
+          "done"
+        ]
+      },
+      "GenerateStreamItem": {
+        "title": "GenerateStreamItem",
+        "description": "One NDJSON line from the streaming `/api/generate` endpoint."
+      },
+      "GenerateCompletion": {
+        "title": "GenerateCompletion",
+        "description": "Buffered reply from the `/api/generate` endpoint, returned when `stream`\nis false.\n\nNot named `GenerateResponse`: that is the generated success enum of the\n`Generate` endpoint.",
+        "type": "object",
+        "properties": {
+          "context": {
+            "description": "Context for continuing the conversation.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "created_at": {
+            "description": "Timestamp of response creation.",
+            "type": "string"
+          },
+          "done": {
+            "description": "Whether generation is complete.",
+            "type": "boolean"
+          },
+          "eval_count": {
+            "description": "Number of tokens generated.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "eval_duration": {
+            "description": "Time spent generating tokens in nanoseconds.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "load_duration": {
+            "description": "Time spent loading the model in nanoseconds.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "model": {
+            "description": "Model that generated the response.",
+            "type": "string"
+          },
+          "prompt_eval_count": {
+            "description": "Number of tokens in the prompt.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "prompt_eval_duration": {
+            "description": "Time spent evaluating the prompt in nanoseconds.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "response": {
+            "description": "The generated text.",
+            "type": "string"
+          },
+          "total_duration": {
+            "description": "Total time in nanoseconds.",
+            "type": "integer",
+            "format": "uint64"
+          }
+        },
+        "required": [
+          "model",
+          "created_at",
+          "response",
+          "done"
+        ]
+      },
+      "ChatStreamChunk": {
+        "title": "ChatStreamChunk",
+        "description": "A streaming chunk from the `/api/chat` endpoint.",
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "description": "Timestamp of chunk creation.",
+            "type": "string"
+          },
+          "done": {
+            "description": "Whether generation is complete.",
+            "type": "boolean"
+          },
+          "eval_count": {
+            "description": "Number of tokens generated (final chunk only).",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "message": {
+            "description": "The message chunk."
+          },
+          "model": {
+            "description": "Model that generated the response.",
+            "type": "string"
+          },
+          "prompt_eval_count": {
+            "description": "Number of tokens in the prompt (final chunk only).",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "total_duration": {
+            "description": "Total time in nanoseconds (final chunk only).",
+            "type": "integer",
+            "format": "uint64"
+          }
+        },
+        "required": [
+          "model",
+          "created_at",
+          "done"
+        ]
+      },
+      "ChatStreamItem": {
+        "title": "ChatStreamItem",
+        "description": "One NDJSON line from the streaming `/api/chat` endpoint."
+      },
+      "ChatCompletion": {
+        "title": "ChatCompletion",
+        "description": "Buffered reply from the `/api/chat` endpoint, returned when `stream` is\nfalse.\n\nNot named `ChatResponse`: that is the generated success enum of the `Chat`\nendpoint.",
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "description": "Timestamp of response creation.",
+            "type": "string"
+          },
+          "done": {
+            "description": "Whether generation is complete.",
+            "type": "boolean"
+          },
+          "eval_count": {
+            "description": "Number of tokens generated.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "eval_duration": {
+            "description": "Time spent generating tokens in nanoseconds.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "load_duration": {
+            "description": "Time spent loading the model in nanoseconds.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "message": {
+            "description": "The assistant's message."
+          },
+          "model": {
+            "description": "Model that generated the response.",
+            "type": "string"
+          },
+          "prompt_eval_count": {
+            "description": "Number of tokens in the prompt.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "prompt_eval_duration": {
+            "description": "Time spent evaluating the prompt in nanoseconds.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "total_duration": {
+            "description": "Total time in nanoseconds.",
+            "type": "integer",
+            "format": "uint64"
+          }
+        },
+        "required": [
+          "model",
+          "created_at",
+          "message",
+          "done"
+        ]
+      },
+      "PullModelProgress": {
+        "title": "PullModelProgress",
+        "description": "Progress line from a streaming model pull or push. The last line is\n`{\"status\": \"success\"}`.",
+        "type": "object",
+        "properties": {
+          "completed": {
+            "description": "Completed bytes.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "digest": {
+            "description": "Digest being downloaded.",
+            "type": "string"
+          },
+          "status": {
+            "description": "Current status message.",
+            "type": "string"
+          },
+          "total": {
+            "description": "Total size in bytes.",
+            "type": "integer",
+            "format": "uint64"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "PullModelStreamItem": {
+        "title": "PullModelStreamItem",
+        "description": "One NDJSON line from a streaming `/api/pull` or `/api/push`."
+      },
+      "CreateModelProgress": {
+        "title": "CreateModelProgress",
+        "description": "Progress line from a streaming model creation. The last line is\n`{\"status\": \"success\"}`.",
+        "type": "object",
+        "properties": {
+          "status": {
+            "description": "Current status message.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "CreateModelStreamItem": {
+        "title": "CreateModelStreamItem",
+        "description": "One NDJSON line from a streaming `/api/create`."
+      },
+      "StatusResponse": {
+        "title": "StatusResponse",
+        "description": "Buffered reply from `/api/pull`, `/api/push`, or `/api/create`, returned\nwhen `stream` is false.",
+        "type": "object",
+        "properties": {
+          "status": {
+            "description": "The final status, `success` when the operation completed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
         ]
       }
     }

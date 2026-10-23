@@ -15,7 +15,7 @@
 //! - [`AuthPolicy`] - Explicit auth methods plus environment fallback policy
 //! - [`CrossOrigin`] - Policy for following redirects and next-page links to other origins
 //! - [`UpdateStrategy`] - Strategy for updating auth in API variants (NoChange, ChangeTo); no generated code reads it
-//! - [`ApiResponse`] - Response type definitions (JSON, Text, Binary, Empty)
+//! - [`SuccessShape`] - Success shapes an endpoint may reply with (JSON, text, binary, empty, streams)
 //! - [`ApiRequest`] - Request body type definitions (JSON, FormData, UrlEncoded, Text, Binary)
 //! - [`FormField`] - Form field definitions for multipart and URL-encoded requests
 //! - [`FormFieldKind`] - Form field type classification (Text, File, Files, Json)
@@ -165,7 +165,7 @@ pub use oauth::{
 };
 pub use params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
 pub use request::{ApiRequest, FormField, FormFieldKind};
-pub use response::{ApiResponse, JsonTag, ResponseShape, StreamEnd, StreamFraming, SuccessShape};
+pub use response::{JsonTag, ResponseShape, StreamEnd, StreamFraming, SuccessShape};
 pub use error_table::{ErrorEntry, ErrorTable, StatusMatch};
 pub use graphql::{AddressRule, GraphQlOperation, GraphQlOperationBuilder, GraphQlSurface, GraphQlVariables, OperationKind};
 pub use schema::{Schema, SchemaObject};

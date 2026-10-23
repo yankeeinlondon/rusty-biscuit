@@ -26,7 +26,7 @@ pub use types::*;
 use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 #[cfg(test)]
-use schematic_define::{ApiResponse, RestMethod};
+use schematic_define::{ResponseShape, RestMethod};
 use schematic_define::{
     Endpoint, EnvMapping, RestApi,
 };
@@ -177,7 +177,7 @@ mod tests {
             .expect("GetDeviceInfo endpoint must exist");
         assert_eq!(ep.method, RestMethod::Get);
         assert_eq!(ep.path, "/api/v2/");
-        assert!(matches!(ep.response, ApiResponse::Json { .. }));
+        assert!(matches!(ep.response[0].shape, ResponseShape::Json { .. }));
     }
 
     #[test]
@@ -190,7 +190,7 @@ mod tests {
             .expect("GetServerLogs endpoint must exist");
         assert_eq!(ep.method, RestMethod::Get);
         assert_eq!(ep.path, "/logs/");
-        assert!(matches!(ep.response, ApiResponse::Text));
+        assert!(matches!(ep.response[0].shape, ResponseShape::Text));
     }
 
     #[test]
@@ -203,7 +203,7 @@ mod tests {
             .expect("LaunchApplicationById endpoint must exist");
         assert_eq!(ep.method, RestMethod::Post);
         assert_eq!(ep.path, "/api/v2/applications/{app_id}");
-        assert!(matches!(ep.response, ApiResponse::Empty));
+        assert!(matches!(ep.response[0].shape, ResponseShape::Empty));
     }
 
     #[test]
@@ -216,7 +216,7 @@ mod tests {
             .expect("LaunchApplicationByName endpoint must exist");
         assert_eq!(ep.method, RestMethod::Post);
         assert_eq!(ep.path, "/ws/apps/{app_name}");
-        assert!(matches!(ep.response, ApiResponse::Empty));
+        assert!(matches!(ep.response[0].shape, ResponseShape::Empty));
     }
 
     #[test]
@@ -229,7 +229,7 @@ mod tests {
             .expect("GetAppStatus endpoint must exist");
         assert_eq!(ep.method, RestMethod::Get);
         assert_eq!(ep.path, "/api/v2/applications/{app_id}");
-        assert!(matches!(ep.response, ApiResponse::Json { .. }));
+        assert!(matches!(ep.response[0].shape, ResponseShape::Json { .. }));
     }
 
     #[test]
@@ -242,7 +242,7 @@ mod tests {
             .expect("CloseApp endpoint must exist");
         assert_eq!(ep.method, RestMethod::Delete);
         assert_eq!(ep.path, "/api/v2/applications/{app_id}");
-        assert!(matches!(ep.response, ApiResponse::Empty));
+        assert!(matches!(ep.response[0].shape, ResponseShape::Empty));
     }
 
     #[test]
@@ -255,7 +255,7 @@ mod tests {
             .expect("InstallApp endpoint must exist");
         assert_eq!(ep.method, RestMethod::Put);
         assert_eq!(ep.path, "/api/v2/applications/{app_id}");
-        assert!(matches!(ep.response, ApiResponse::Empty));
+        assert!(matches!(ep.response[0].shape, ResponseShape::Empty));
     }
 
     #[test]

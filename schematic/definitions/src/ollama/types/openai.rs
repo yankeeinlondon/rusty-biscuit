@@ -64,7 +64,7 @@ impl schematic_define::Registration for OpenAIChatCompletionRequest {
 }
 
 /// A choice in the chat completion response.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIChatCompletionChoice {
     /// Index of this choice.
     pub index: u32,
@@ -75,6 +75,13 @@ pub struct OpenAIChatCompletionChoice {
     /// Why the model stopped generating.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<String>,
+}
+
+impl schematic_define::Registration for OpenAIChatCompletionChoice {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAIChatCompletionChoice");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Token usage information.
@@ -98,7 +105,7 @@ impl schematic_define::Registration for OpenAIUsage {
 }
 
 /// Response from the `/v1/chat/completions` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIChatCompletionResponse {
     /// Unique identifier for the completion.
     pub id: String,
@@ -118,6 +125,13 @@ pub struct OpenAIChatCompletionResponse {
     /// Token usage information.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<OpenAIUsage>,
+}
+
+impl schematic_define::Registration for OpenAIChatCompletionResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAIChatCompletionResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Request body for the `/v1/completions` endpoint.
@@ -162,7 +176,7 @@ impl schematic_define::Registration for OpenAICompletionRequest {
 }
 
 /// A choice in the completion response.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAICompletionChoice {
     /// Index of this choice.
     pub index: u32,
@@ -175,8 +189,15 @@ pub struct OpenAICompletionChoice {
     pub finish_reason: Option<String>,
 }
 
+impl schematic_define::Registration for OpenAICompletionChoice {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAICompletionChoice");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Response from the `/v1/completions` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAICompletionResponse {
     /// Unique identifier for the completion.
     pub id: String,
@@ -196,6 +217,13 @@ pub struct OpenAICompletionResponse {
     /// Token usage information.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<OpenAIUsage>,
+}
+
+impl schematic_define::Registration for OpenAICompletionResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAICompletionResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Request body for the `/v1/embeddings` endpoint.
@@ -300,7 +328,7 @@ impl schematic_define::Registration for OpenAIListModelsResponse {
 }
 
 /// Delta content in OpenAI streaming format.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIDelta {
     /// The role (only in first chunk).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -311,8 +339,15 @@ pub struct OpenAIDelta {
     pub content: Option<String>,
 }
 
+impl schematic_define::Registration for OpenAIDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAIDelta");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// A choice in the streaming response.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIStreamChoice {
     /// Index of this choice.
     pub index: u32,
@@ -325,8 +360,15 @@ pub struct OpenAIStreamChoice {
     pub finish_reason: Option<String>,
 }
 
+impl schematic_define::Registration for OpenAIStreamChoice {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAIStreamChoice");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// A streaming chunk from the `/v1/chat/completions` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIChatStreamChunk {
     /// Unique identifier for the completion.
     pub id: String,
@@ -342,6 +384,39 @@ pub struct OpenAIChatStreamChunk {
 
     /// List of delta choices.
     pub choices: Vec<OpenAIStreamChoice>,
+}
+
+impl schematic_define::Registration for OpenAIChatStreamChunk {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAIChatStreamChunk");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
+/// A streaming chunk from the `/v1/completions` endpoint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct OpenAICompletionStreamChunk {
+    /// Unique identifier for the completion.
+    pub id: String,
+
+    /// Object type, always "text_completion".
+    pub object: String,
+
+    /// Unix timestamp of creation.
+    pub created: i64,
+
+    /// Model used for generation.
+    pub model: String,
+
+    /// Text choices; `finish_reason` is set on the final chunk only.
+    pub choices: Vec<OpenAICompletionChoice>,
+}
+
+impl schematic_define::Registration for OpenAICompletionStreamChunk {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAICompletionStreamChunk");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 #[cfg(test)]
@@ -443,5 +518,25 @@ mod tests {
 
         let chunk: OpenAIChatStreamChunk = serde_json::from_str(json).unwrap();
         assert_eq!(chunk.choices[0].delta.content, Some("Hello".to_string()));
+    }
+
+    #[test]
+    fn openai_completion_stream_chunk_decodes_an_sse_data_payload() {
+        let data = r#"{"id":"cmpl-466","object":"text_completion","created":1729000000,"choices":[{"text":"Hello","index":0,"finish_reason":null}],"model":"llama3.2","system_fingerprint":"fp_ollama"}"#;
+
+        let chunk: OpenAICompletionStreamChunk = serde_json::from_str(data).unwrap();
+
+        assert_eq!(chunk.object, "text_completion");
+        assert_eq!(chunk.choices[0].text, "Hello");
+        assert_eq!(chunk.choices[0].finish_reason, None);
+    }
+
+    #[test]
+    fn openai_chat_stream_chunk_decodes_an_sse_data_payload() {
+        let data = r#"{"id":"chatcmpl-77","object":"chat.completion.chunk","created":1729000000,"model":"llama3.2","system_fingerprint":"fp_ollama","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":null}]}"#;
+
+        let chunk: OpenAIChatStreamChunk = serde_json::from_str(data).unwrap();
+
+        assert_eq!(chunk.choices[0].delta, OpenAIDelta { role: Some("assistant".to_string()), content: Some("Hi".to_string()) });
     }
 }

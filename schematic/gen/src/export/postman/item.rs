@@ -82,7 +82,7 @@ pub(crate) fn build_request_item(
 /// kind: a declared content type or a stream's. A plain JSON, text, binary,
 /// or empty shape records nothing.
 fn first_success_content_type(endpoint: &Endpoint) -> Option<String> {
-    let first = endpoint.success_shapes().into_iter().next()?;
+    let first = endpoint.success_shapes().first()?;
     let telling = first.content_type.is_some() || matches!(first.shape, ResponseShape::Stream { .. });
     if telling { first.media_type() } else { None }
 }

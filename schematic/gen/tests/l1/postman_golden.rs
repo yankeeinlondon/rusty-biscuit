@@ -29,7 +29,7 @@ use jsonschema::Validator;
 use schematic_define::auth::ApiKeyLocation;
 use schematic_define::params::{EndpointParams, QueryParamType};
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, FormField, RestApi, RestMethod,
+    ApiRequest, SuccessShape, AuthStrategy, CrossOrigin, Endpoint, EnvList, FormField, RestApi, RestMethod,
 };
 use schematic_gen::export::postman::{build_postman_collection, build_postman_collection_grouped};
 use serde_json::Value;
@@ -137,7 +137,7 @@ fn endpoint(
     path: &str,
     description: &str,
     request: Option<ApiRequest>,
-    response: ApiResponse,
+    response: Vec<SuccessShape>,
     params: Option<EndpointParams>,
 ) -> Endpoint {
     { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = description.to_string(); fixture.request = request; fixture.response = response; fixture.headers = vec![]; fixture.params = params; fixture.cross_origin = None; fixture.pagination = None; fixture }
@@ -161,7 +161,7 @@ fn build_mixed_auth_emqx() -> Value {
                 "/alarms",
                 "List active alarms (basic auth)",
                 None,
-                ApiResponse::json_type("AlarmList"),
+                vec![SuccessShape::json_type("AlarmList")],
                 None,
             ),
             endpoint(
@@ -170,7 +170,7 @@ fn build_mixed_auth_emqx() -> Value {
                 "/settings",
                 "Read EMQX settings",
                 None,
-                ApiResponse::json_type("Settings"),
+                vec![SuccessShape::json_type("Settings")],
                 None,
             ),
         ],
@@ -188,7 +188,7 @@ fn build_mixed_auth_emqx() -> Value {
                 "/alarms",
                 "List active alarms (bearer auth)",
                 None,
-                ApiResponse::json_type("AlarmList"),
+                vec![SuccessShape::json_type("AlarmList")],
                 None,
             ),
             endpoint(
@@ -197,7 +197,7 @@ fn build_mixed_auth_emqx() -> Value {
                 "/login",
                 "Exchange credentials for a bearer token",
                 Some(ApiRequest::json_type("LoginRequest")),
-                ApiResponse::json_type("LoginResponse"),
+                vec![SuccessShape::json_type("LoginResponse")],
                 None,
             ),
         ],
@@ -221,7 +221,7 @@ fn build_auth_variables_openai() -> Value {
             "/models",
             "List available models",
             None,
-            ApiResponse::json_type("ListModelsResponse"),
+            vec![SuccessShape::json_type("ListModelsResponse")],
             None,
         )],
     );
@@ -253,7 +253,7 @@ fn build_file_upload_elevenlabs() -> Value {
                     .optional()
                     .with_description("Optional sample name"),
             ])),
-            ApiResponse::json_type("UploadSampleResponse"),
+            vec![SuccessShape::json_type("UploadSampleResponse")],
             None,
         )],
     );
@@ -289,7 +289,7 @@ fn build_path_query_params_github() -> Value {
             "/repos/{owner}/{repo}/issues",
             "List issues for a repository",
             None,
-            ApiResponse::json_type("IssueList"),
+            vec![SuccessShape::json_type("IssueList")],
             Some(params),
         )],
     );
@@ -315,7 +315,7 @@ fn build_api_key_query_auth() -> Value {
             "/items",
             "List all items",
             None,
-            ApiResponse::json_type("ItemList"),
+            vec![SuccessShape::json_type("ItemList")],
             None,
         )],
     );
@@ -340,7 +340,7 @@ fn build_grouped_module_ollama() -> Value {
             "/api/tags",
             "List locally installed models",
             None,
-            ApiResponse::json_type("TagsResponse"),
+            vec![SuccessShape::json_type("TagsResponse")],
             None,
         )],
     );
@@ -356,7 +356,7 @@ fn build_grouped_module_ollama() -> Value {
             "/models",
             "OpenAI-compatible model listing",
             None,
-            ApiResponse::json_type("ListModelsResponse"),
+            vec![SuccessShape::json_type("ListModelsResponse")],
             None,
         )],
     );

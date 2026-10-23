@@ -1,12 +1,9 @@
 //! API response type definitions.
 //!
-//! [`ApiResponse`] is the stored single response of an [`crate::Endpoint`].
 //! [`SuccessShape`] and its parts are the response model v2 vocabulary: an
-//! endpoint declares one or more success shapes, and
+//! endpoint stores one or more success shapes in `Endpoint::response`, and
 //! [`validate_success_shapes`] checks that a client can tell them apart from
-//! the reply's status, media type, and JSON tag. Until
-//! `Endpoint::response` holds success shapes, a builder stores a lone plain
-//! shape as an [`ApiResponse`] and rejects the rest; see
+//! the reply's status, media type, and JSON tag; see
 //! `schematic/docs/responses-and-errors.md`.
 //!
 //! These constructors describe stored transfer data.
@@ -17,119 +14,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::TypeRef;
-
-/// Describes the expected response from an API endpoint.
-///
-/// Each variant indicates a different response format, which affects
-/// how the generated client handles the response body.
-///
-/// ## Examples
-///
-/// JSON response (most common):
-///
-/// ```
-/// use schematic_define::ApiResponse;
-///
-/// // Using the convenience method
-/// let response = ApiResponse::json_type("UserResponse");
-/// ```
-///
-/// Text response:
-///
-/// ```
-/// use schematic_define::ApiResponse;
-///
-/// let response = ApiResponse::Text;
-/// ```
-///
-/// Empty response (for DELETE or 204 responses):
-///
-/// ```
-/// use schematic_define::ApiResponse;
-///
-/// let response = ApiResponse::Empty;
-/// ```
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ApiResponse {
-    /// JSON response, referencing the API's schema components.
-    ///
-    /// The response body is deserialized as JSON into the referenced type.
-    /// This is the most common response type for REST APIs.
-    Json(TypeRef),
-
-    /// Plain text response.
-    ///
-    /// The response body is returned as a `String`.
-    Text,
-
-    /// Binary data (bytes).
-    ///
-    /// The response body is returned as `Vec<u8>`. Use for file downloads,
-    /// images, or other binary content.
-    Binary,
-
-    /// No response body expected.
-    ///
-    /// Used for endpoints that return 204 No Content or where the response
-    /// body should be ignored.
-    Empty,
-}
-
-impl ApiResponse {
-    /// Creates a JSON response with the given reference.
-    pub fn json(reference: TypeRef) -> Self {
-        Self::Json(reference)
-    }
-
-    /// Creates a JSON response naming one schema component.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use schematic_define::{ApiResponse, TypeRef};
-    ///
-    /// let response = ApiResponse::json_type("ListModelsResponse");
-    /// assert_eq!(response, ApiResponse::Json(TypeRef::Named("ListModelsResponse".into())));
-    /// ```
-    pub fn json_type(component: impl Into<String>) -> Self {
-        Self::Json(TypeRef::Named(component.into()))
-    }
-
-    /// Creates a JSON response that is an array of one schema component.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use schematic_define::{ApiResponse, TypeRef};
-    ///
-    /// let response = ApiResponse::json_vec_type("ModelInfo");
-    /// assert_eq!(response, ApiResponse::Json(TypeRef::Array(Box::new(TypeRef::Named("ModelInfo".into())))));
-    /// ```
-    pub fn json_vec_type(component: impl Into<String>) -> Self {
-        Self::Json(TypeRef::Array(Box::new(TypeRef::Named(component.into()))))
-    }
-
-    /// Returns true if this is a JSON response.
-    pub fn is_json(&self) -> bool {
-        matches!(self, Self::Json(_))
-    }
-
-    /// Returns true if this is a binary response.
-    pub fn is_binary(&self) -> bool {
-        matches!(self, Self::Binary)
-    }
-
-    /// Returns true if this is a text response.
-    pub fn is_text(&self) -> bool {
-        matches!(self, Self::Text)
-    }
-
-    /// Returns true if this is an empty response.
-    pub fn is_empty(&self) -> bool {
-        matches!(self, Self::Empty)
-    }
-}
 
 /// What one success reply carries (R1).
 ///
@@ -260,6 +144,35 @@ impl SuccessShape {
         Self { shape, content_type: None, statuses: vec![], json_tag: None, fallback: false, note: None, variant: None }
     }
 
+    /// A JSON shape decoded as `reference`.
+    pub fn json(reference: TypeRef) -> Self { Self::new(ResponseShape::Json(reference)) }
+
+    /// A JSON shape naming one schema component.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use schematic_define::{ResponseShape, SuccessShape, TypeRef};
+    ///
+    /// let shape = SuccessShape::json_type("ListModelsResponse");
+    /// assert_eq!(shape.shape, ResponseShape::Json(TypeRef::Named("ListModelsResponse".into())));
+    /// ```
+    pub fn json_type(component: impl Into<String>) -> Self { Self::json(TypeRef::Named(component.into())) }
+
+    /// A JSON shape that is an array of one schema component.
+    pub fn json_vec_type(component: impl Into<String>) -> Self {
+        Self::json(TypeRef::Array(Box::new(TypeRef::Named(component.into()))))
+    }
+
+    /// A text shape.
+    pub fn text() -> Self { Self::new(ResponseShape::Text) }
+
+    /// A binary shape.
+    pub fn binary() -> Self { Self::new(ResponseShape::Binary) }
+
+    /// A shape with no body.
+    pub fn empty() -> Self { Self::new(ResponseShape::Empty) }
+
     /// The normalized media type the shape is selected by: the declared
     /// content type, else the shape's default. `None` for an empty shape and
     /// for the fallback, which no media type selects.
@@ -271,31 +184,16 @@ impl SuccessShape {
         }
     }
 
-    /// The stored single response this shape lowers to while
-    /// `Endpoint::response` is an [`ApiResponse`]: only a non-stream shape
-    /// without selection facts or a note.
-    pub fn legacy_response(&self) -> Option<ApiResponse> {
+    /// The shape alone when it is what every pre-v2 endpoint stored: not a
+    /// stream, and without selection facts, a note, or a variant name. The
+    /// generator, exporters, and `x-schematic` keep a lone plain shape's
+    /// historical output.
+    #[must_use]
+    pub fn plain(&self) -> Option<&ResponseShape> {
         if self.content_type.is_some() || !self.statuses.is_empty() || self.json_tag.is_some() || self.fallback || self.note.is_some() || self.variant.is_some() {
             return None;
         }
-        match &self.shape {
-            ResponseShape::Json(reference) => Some(ApiResponse::Json(reference.clone())),
-            ResponseShape::Text => Some(ApiResponse::Text),
-            ResponseShape::Binary => Some(ApiResponse::Binary),
-            ResponseShape::Empty => Some(ApiResponse::Empty),
-            ResponseShape::Stream { .. } => None,
-        }
-    }
-}
-
-impl From<ApiResponse> for SuccessShape {
-    fn from(response: ApiResponse) -> Self {
-        Self::new(match response {
-            ApiResponse::Json(reference) => ResponseShape::Json(reference),
-            ApiResponse::Text => ResponseShape::Text,
-            ApiResponse::Binary => ResponseShape::Binary,
-            ApiResponse::Empty => ResponseShape::Empty,
-        })
+        (!matches!(self.shape, ResponseShape::Stream { .. })).then_some(&self.shape)
     }
 }
 
@@ -502,38 +400,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn is_json_returns_true_for_json_response() {
-        let response = ApiResponse::json_type("TestResponse");
-        assert!(response.is_json());
-        assert!(!response.is_binary());
-        assert!(!response.is_text());
-        assert!(!response.is_empty());
-    }
-
-    #[test]
-    fn is_binary_returns_true_for_binary_response() {
-        let response = ApiResponse::Binary;
-        assert!(!response.is_json());
-        assert!(response.is_binary());
-        assert!(!response.is_text());
-        assert!(!response.is_empty());
-    }
-
-    #[test]
-    fn is_text_returns_true_for_text_response() {
-        let response = ApiResponse::Text;
-        assert!(!response.is_json());
-        assert!(!response.is_binary());
-        assert!(response.is_text());
-        assert!(!response.is_empty());
-    }
-
-    #[test]
-    fn is_empty_returns_true_for_empty_response() {
-        let response = ApiResponse::Empty;
-        assert!(!response.is_json());
-        assert!(!response.is_binary());
-        assert!(!response.is_text());
-        assert!(response.is_empty());
+    fn only_a_non_stream_shape_without_facts_is_plain() {
+        assert_eq!(SuccessShape::text().plain(), Some(&ResponseShape::Text));
+        assert_eq!(SuccessShape::json_vec_type("Item").plain(), Some(&ResponseShape::Json(TypeRef::Array(Box::new(TypeRef::Named("Item".into()))))));
+        let mut noted = SuccessShape::empty();
+        noted.note = Some("when nothing changed".into());
+        assert_eq!(noted.plain(), None);
+        let stream = SuccessShape::new(ResponseShape::Stream { framing: StreamFraming::Bytes, end: StreamEnd::ConnectionClose, keep: false });
+        assert_eq!(stream.plain(), None);
     }
 }

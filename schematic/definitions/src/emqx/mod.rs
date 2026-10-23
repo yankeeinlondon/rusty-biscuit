@@ -61,7 +61,7 @@ mod types;
 pub use types::*;
 
 #[cfg(test)]
-use schematic_define::ApiResponse;
+use schematic_define::ResponseShape;
 use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 use schematic_define::{
@@ -319,7 +319,7 @@ mod tests {
         let logout = logout.unwrap();
         assert_eq!(logout.method, RestMethod::Post);
         assert_eq!(logout.path, "/logout");
-        assert!(matches!(logout.response, ApiResponse::Empty));
+        assert!(matches!(logout.response[0].shape, ResponseShape::Empty));
     }
 
     #[test]
@@ -400,7 +400,7 @@ mod tests {
 
         assert_eq!(endpoint.method, RestMethod::Delete);
         assert_eq!(endpoint.path, "/clients/{clientid}");
-        assert!(matches!(endpoint.response, ApiResponse::Empty));
+        assert!(matches!(endpoint.response[0].shape, ResponseShape::Empty));
     }
 
     #[test]
@@ -571,7 +571,7 @@ mod tests {
 
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/prometheus/stats");
-        assert!(matches!(endpoint.response, ApiResponse::Text));
+        assert!(matches!(endpoint.response[0].shape, ResponseShape::Text));
     }
 
     // =========================================================================

@@ -111,11 +111,56 @@ impl GetSourceRequest {
         self
     }
 }
+/// The success reply of `GetSource`: one variant per declared shape, chosen from the reply's status, media type, and JSON tag.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub enum GetSourceResponse {
+    /// returned for a directory: its paginated listing. Bitbucket serves a file in the media type its name implies, so a committed `.json` file also arrives as `application/json` and selects this shape: a JSON object decodes as an empty listing, other JSON fails to decode. No header tells the two apart; read a file's bytes with `send_raw`
+    ///
+    /// Chosen by media type `application/json`.
+    Directory(
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::SourceEntry,
+        >,
+    ),
+    /// returned for a file: its raw content, in the media type Bitbucket derives from the file name
+    ///
+    /// Chosen when no other shape matches the reply's media type.
+    File(bytes::Bytes),
+}
+impl schematic_runtime::Alternatives for GetSourceResponse {
+    const ROUTES: &'static [schematic_runtime::Route] = &[
+        schematic_runtime::Route::new(schematic_runtime::ShapeKind::Json)
+            .media("application/json"),
+        schematic_runtime::Route::new(schematic_runtime::ShapeKind::Binary).fallback(),
+    ];
+    async fn decode_alternative(
+        index: usize,
+        body: schematic_runtime::LiveBody,
+    ) -> Result<Self, schematic_runtime::DecodeFailure> {
+        match index {
+            0 => {
+                <schematic_runtime::Json<
+                    schematic_definitions::bitbucket::PaginatedResponse<
+                        schematic_definitions::bitbucket::SourceEntry,
+                    >,
+                > as schematic_runtime::Decode>::decode(body)
+                    .await
+                    .map(Self::Directory)
+            }
+            _ => {
+                <schematic_runtime::Binary as schematic_runtime::Decode>::decode(body)
+                    .await
+                    .map(Self::File)
+            }
+        }
+    }
+}
 impl schematic_runtime::EndpointSpec for GetSourceRequest {
     type Api = BitbucketApi;
-    type Success = bytes::Bytes;
+    type Success = GetSourceResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Binary;
+    type Decoder = schematic_runtime::Shapes<GetSourceResponse>;
     const ENDPOINT_ID: &'static str = "GetSource";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(

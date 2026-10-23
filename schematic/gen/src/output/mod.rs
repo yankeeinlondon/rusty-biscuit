@@ -682,7 +682,7 @@ pub fn generate_and_write_standalone(
 mod tests {
     use super::*;
     use schematic_define::{
-        ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestMethod,
+        ApiRequest, SuccessShape, AuthStrategy, Endpoint, RestMethod,
     };
     use std::fs;
     use tempfile::TempDir;
@@ -698,7 +698,7 @@ mod tests {
                     .describes("List all items".to_string())
                     .returns_empty()
                     .build().expect("valid endpoint fixture");
-                endpoint.response = ApiResponse::json_type("ListItemsResponse");
+                endpoint.response = vec![SuccessShape::json_type("ListItemsResponse")];
                 endpoint
             }];
             crate::test_utils::with_referenced_components(api)
@@ -718,7 +718,7 @@ mod tests {
                         .describes("Lists available models".to_string())
                         .returns_empty()
                         .build().expect("valid endpoint fixture");
-                    endpoint.response = ApiResponse::json_type("ListModelsResponse");
+                    endpoint.response = vec![SuccessShape::json_type("ListModelsResponse")];
                     endpoint
                 },
                 {
@@ -726,7 +726,7 @@ mod tests {
                         .describes("Retrieves a model".to_string())
                         .returns_empty()
                         .build().expect("valid endpoint fixture");
-                    endpoint.response = ApiResponse::json_type("Model");
+                    endpoint.response = vec![SuccessShape::json_type("Model")];
                     endpoint
                 },
                 {
@@ -735,7 +735,7 @@ mod tests {
                         .returns_empty()
                         .build().expect("valid endpoint fixture");
                     endpoint.request = Some(ApiRequest::json_type("CreateCompletionBody"));
-                    endpoint.response = ApiResponse::json_type("Completion");
+                    endpoint.response = vec![SuccessShape::json_type("Completion")];
                     endpoint
                 },
             ];
@@ -1020,7 +1020,7 @@ mod tests {
                         .describes("Test endpoint".to_string())
                         .returns_empty()
                         .build().expect("valid endpoint fixture");
-                    endpoint.response = ApiResponse::json_type("TestResponse");
+                    endpoint.response = vec![SuccessShape::json_type("TestResponse")];
                     endpoint
                 }];
                 crate::test_utils::with_referenced_components(api)
@@ -1052,7 +1052,7 @@ mod tests {
                     .describes(format!("{:?} endpoint", method))
                     .returns_empty()
                     .build().expect("valid endpoint fixture");
-                endpoint.response = ApiResponse::json_type("Response");
+                endpoint.response = vec![SuccessShape::json_type("Response")];
                 endpoint
             })
             .collect();
@@ -1119,7 +1119,7 @@ mod tests {
                     .describes("List items".to_string())
                     .returns_empty()
                     .build().expect("valid endpoint fixture");
-                endpoint.response = ApiResponse::json_type("ListItemsResponse");
+                endpoint.response = vec![SuccessShape::json_type("ListItemsResponse")];
                 endpoint
             }];
             api.module_path = Some("foo".to_string());
@@ -1137,7 +1137,7 @@ mod tests {
                     .describes("List items (compat)".to_string())
                     .returns_empty()
                     .build().expect("valid endpoint fixture");
-                endpoint.response = ApiResponse::json_type("CompatListItemsResponse");
+                endpoint.response = vec![SuccessShape::json_type("CompatListItemsResponse")];
                 endpoint
             }];
             api.module_path = Some("foo".to_string());
@@ -1381,7 +1381,7 @@ mod tests {
                 } else {
                     None
                 };
-                endpoint.response = ApiResponse::json_type("TestResponse");
+                endpoint.response = vec![SuccessShape::json_type("TestResponse")];
                 endpoint
             })
             .collect();

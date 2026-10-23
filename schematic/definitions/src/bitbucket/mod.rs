@@ -58,10 +58,10 @@ pub use types::*;
 use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 #[cfg(test)]
-use schematic_define::{ApiResponse, RestMethod};
+use schematic_define::{ResponseShape, RestMethod};
 use schematic_define::{
     Endpoint, EndpointParams, EnvList, EnvMapping,
-    RestApi,
+    RestApi, Success,
     pagination::{Collection, LinkSource, PageSize, Strategy, ValueSource},
 };
 
@@ -130,7 +130,13 @@ fn build_bitbucket_api(ctx: &mut DefinitionContext) -> Result<RestApi, Definitio
             Endpoint::get("GetSource", "/repositories/{workspace}/{repo_slug}/src/{commit}/{path}")
                 .describes("Get a directory listing (paginated JSON of SourceEntry) or the \
                               raw content of a file at a specific commit")
-                .returns_binary()
+                .returns(Success::json(ctx.register::<PaginatedResponse<SourceEntry>>()?).variant("Directory").note(
+                    "returned for a directory: its paginated listing. Bitbucket serves a file in the media type \
+                     its name implies, so a committed `.json` file also arrives as `application/json` and selects \
+                     this shape: a JSON object decodes as an empty listing, other JSON fails to decode. No header \
+                     tells the two apart; read a file's bytes with `send_raw`"))
+                .returns(Success::binary().fallback().variant("File")
+                    .note("returned for a file: its raw content, in the media type Bitbucket derives from the file name"))
                 .params(bitbucket_pagination())
                 .build()?,
 
@@ -342,7 +348,7 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/repositories/{workspace}/{repo_slug}");
         assert!(endpoint.request.is_none());
-        assert!(matches!(endpoint.response, ApiResponse::Json { .. }));
+        assert!(matches!(endpoint.response[0].shape, ResponseShape::Json { .. }));
     }
 
     #[test]
@@ -359,7 +365,16 @@ mod tests {
             endpoint.path,
             "/repositories/{workspace}/{repo_slug}/src/{commit}/{path}"
         );
-        assert!(matches!(endpoint.response, ApiResponse::Binary));
+        // R32a: a JSON directory listing, or any other media type as the file.
+        let shapes: Vec<_> = endpoint.response.iter()
+            .map(|shape| (&shape.shape, shape.variant.as_deref(), shape.fallback, shape.content_type.as_deref()))
+            .collect();
+        assert_eq!(shapes, [
+            (&ResponseShape::Json(TypeRef::Named("PaginatedResponse<SourceEntry>".into())), Some("Directory"), false, None),
+            (&ResponseShape::Binary, Some("File"), true, None),
+        ]);
+        assert!(endpoint.response[0].note.as_deref().is_some_and(|note| note.contains("`.json` file")), "the listing note records the R32a limitation");
+        assert!(endpoint.response[1].note.is_some());
         // No `Accept` override: it would break the JSON directory listing.
         assert!(endpoint.headers.is_empty());
         // Directory listings page through `page` / `pagelen`.
@@ -477,8 +492,8 @@ mod tests {
             "/repositories/{workspace}/{repo_slug}/refs/branches/{name}"
         );
         assert!(endpoint.request.is_none());
-        match &endpoint.response {
-            ApiResponse::Json(reference) => assert_eq!(reference, &TypeRef::Named("Branch".into())),
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(reference) => assert_eq!(reference, &TypeRef::Named("Branch".into())),
             _ => panic!("Expected JSON response"),
         }
         assert!(matches!(api.auth, AuthStrategy::Basic { .. }));
@@ -512,7 +527,7 @@ mod tests {
             .find(|e| e.id == "GetDownload")
             .expect("GetDownload endpoint missing");
 
-        assert!(matches!(endpoint.response, ApiResponse::Binary));
+        assert!(matches!(endpoint.response[0].shape, ResponseShape::Binary));
     }
 
     #[test]
@@ -577,8 +592,8 @@ mod tests {
                 .find(|e| e.id == id)
                 .unwrap_or_else(|| panic!("Endpoint {} not found", id));
 
-            match &endpoint.response {
-                ApiResponse::Json(reference) => {
+            match &endpoint.response[0].shape {
+                ResponseShape::Json(reference) => {
                     assert!(
                         matches!(reference, TypeRef::Named(name) if name.starts_with("PaginatedResponse<")),
                         "Endpoint {id} should return PaginatedResponse type, got {reference:?}",
@@ -610,7 +625,7 @@ mod tests {
 
             // GetSource and GetDownload return Binary;
             // only assert single-item shape for JSON responses.
-            if let ApiResponse::Json(reference) = &endpoint.response {
+            if let ResponseShape::Json(reference) = &endpoint.response[0].shape {
                 assert!(
                     !matches!(reference, TypeRef::Named(name) if name.starts_with("PaginatedResponse<")),
                     "Endpoint {} should return single item, not PaginatedResponse",
@@ -689,8 +704,8 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/repositories/{workspace}");
 
-        match &endpoint.response {
-            ApiResponse::Json(reference) => {
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(reference) => {
                 assert_eq!(reference, &TypeRef::Named("PaginatedResponse<Repository>".into()));
                 let rust_type: String = api.rust_type(reference).expect("registered component").split_whitespace().collect();
                 assert!(rust_type.contains("bitbucket::PaginatedResponse<") && rust_type.contains("bitbucket::Repository>"), "{rust_type}");

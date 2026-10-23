@@ -1,18 +1,17 @@
 //! Response model v2 through OpenAPI: export of success shapes and the
 //! resolved error table (R21, R27, D-25, D-31), the `x-schematic` writes
 //! (R26, D-24), and import classification (R28, D-20).
-//!
-//! `Endpoint::response` holds one `ApiResponse` until Phase 5, so several
-//! shapes and streams reach the exporter through the hidden
-//! `Endpoint::shapes_preview` seam on a built API.
 
 #![cfg(feature = "openapi")]
 
 use biscuit_file::serde_yaml_ng;
 use openapiv3::{OpenAPI, ReferenceOr};
 use schematic_define::openapi::import::RefResolver;
-use schematic_define::openapi::{DiagnosticSeverity, ExportFormat, ExportOptions, classify_responses, export, serialize};
+use schematic_define::openapi::{
+    DiagnosticSeverity, ExportFormat, ExportOptions, OpenApiImport, OpenApiImportResult, OpenApiSource, classify_responses, export, serialize,
+};
 use schematic_define::{
+    AuthMethod, AuthPolicy, Backoff, CrossOrigin, RateLimit, ResetUnit, RetryGuidance, StatusSelector,
     DefinitionContext, Endpoint, ErrorEntry, ErrorSet, ErrorShape, JsonTag, ResponseShape, RestApi, StatusMatch, StreamEnd,
     StreamFraming, SuccessShape, TypeRef, definition_type,
 };
@@ -39,21 +38,23 @@ fn fallback_binary() -> SuccessShape { shape(ResponseShape::Binary, |s| s.fallba
 /// An API with `Problem` for 4XX and text for 5XX by default, and one
 /// endpoint per entry of `previews`, each `Get{i}` at `/r{i}` carrying the
 /// preview shapes (none keeps the builder's lone JSON `Message`).
-fn fixture(previews: Vec<Vec<SuccessShape>>, endpoint_errors: impl Fn(usize) -> Option<ErrorSet>) -> RestApi {
+/// One endpoint per entry of `shapes`; an empty entry keeps the built
+/// `Message` JSON shape.
+fn fixture(shapes: Vec<Vec<SuccessShape>>, endpoint_errors: impl Fn(usize) -> Option<ErrorSet>) -> RestApi {
     let mut ctx = DefinitionContext::types_in("::models");
     let problem = ctx.register::<Problem>().unwrap();
     for register in [DefinitionContext::register::<Event>, DefinitionContext::register::<Directory>, DefinitionContext::register::<File>] {
         register(&mut ctx).unwrap();
     }
-    let endpoints: Vec<Endpoint> = (0..previews.len()).map(|index| {
+    let endpoints: Vec<Endpoint> = (0..shapes.len()).map(|index| {
         let builder = Endpoint::get(format!("Get{index}"), format!("/r{index}")).describes("Get").returns_json::<Message>(&mut ctx);
         match endpoint_errors(index) { Some(errors) => builder.errors(errors), None => builder }.build().unwrap()
     }).collect();
     let mut api = RestApi::builder(&ctx, "Fixture", "https://api.example.com").describes("Fixture").no_auth()
         .default_errors(ErrorSet::new().on(StatusMatch::class(4), ErrorShape::json(problem)).on(StatusMatch::class(5), ErrorShape::text()))
         .endpoints(endpoints).build().unwrap();
-    for (endpoint, preview) in api.endpoints.iter_mut().zip(previews) {
-        endpoint.shapes_preview = preview;
+    for (endpoint, shapes) in api.endpoints.iter_mut().zip(shapes) {
+        if !shapes.is_empty() { endpoint.response = shapes; }
     }
     api
 }
@@ -388,4 +389,220 @@ fn export_then_import_of_json_sse_fallback_and_errors_yields_the_same_shapes_and
     // The API defaults come back as the endpoint's own entries (D-20).
     assert_eq!(classified.errors, api.effective_errors(&api.endpoints[0]).entries());
     assert!(classified.diagnostics.is_empty(), "{:?}", classified.diagnostics);
+}
+
+// ---------------------------------------------------------------------------
+// Every shape kind, the x-schematic members, and the public import round trip
+// ---------------------------------------------------------------------------
+
+fn stream(framing: StreamFraming, end: StreamEnd) -> ResponseShape { ResponseShape::Stream { framing, end, keep: false } }
+
+#[test]
+fn every_success_and_error_kind_exports_its_media_key_and_schema() {
+    let typed = |shape: ResponseShape, content_type: &str| self::shape(shape, |s| s.content_type = Some(content_type.into()));
+    let shapes = vec![
+        vec![json_shape("Message")],
+        vec![SuccessShape::new(ResponseShape::Text)],
+        vec![typed(ResponseShape::Text, "text/markdown")],
+        vec![SuccessShape::new(ResponseShape::Binary)],
+        vec![typed(ResponseShape::Binary, "audio/mpeg")],
+        vec![SuccessShape::new(ResponseShape::Empty)],
+        vec![SuccessShape::new(stream(StreamFraming::Sse(named("Event")), StreamEnd::DataLineEquals("[DONE]".into())))],
+        vec![SuccessShape::new(stream(StreamFraming::Ndjson(named("Event")), StreamEnd::FieldEquals { field: "done".into(), value: json!(true) }))],
+        vec![SuccessShape::new(stream(StreamFraming::Bytes, StreamEnd::ConnectionClose))],
+    ];
+    let mut api = fixture(shapes, |index| (index == 0).then(|| ErrorSet::new()
+        .on(StatusMatch::exact(404), ErrorShape::empty())
+        .on(StatusMatch::exact(409), ErrorShape::binary().content_type("application/zip"))
+        .on(StatusMatch::exact(410), ErrorShape::text())));
+    api.endpoints[0].errors.push(ErrorEntry::new(StatusMatch::exact(422), ResponseShape::Json(named("Directory"))));
+    let document = export(&api, &ExportOptions::new()).unwrap();
+    let value = serde_json::to_value(&document).unwrap();
+    let ok = |index: usize, status: &str| -> Value { operation(&value, index)["responses"][status].clone() };
+    let string = json!({"type": "string"});
+    let binary = json!({"type": "string", "format": "binary"});
+
+    for (index, media, schema) in [
+        (0, "application/json", reference("Message")),
+        (1, "text/plain", string.clone()),
+        (2, "text/markdown", string.clone()),
+        (3, "application/octet-stream", binary.clone()),
+        (4, "audio/mpeg", binary.clone()),
+        (6, "text/event-stream", reference("Event")),
+        (7, "application/x-ndjson", reference("Event")),
+        (8, "application/octet-stream", binary.clone()),
+    ] {
+        assert_eq!(ok(index, "200")["content"], json!({media: {"schema": schema}}), "endpoint {index}");
+    }
+    assert_eq!(ok(5, "204"), json!({"description": "No content"}));
+    assert!(ok(5, "200").is_null());
+    assert_eq!(operation(&value, 6)["x-schematic"]["success"], json!([{"shape": {"Stream": {"framing": {"Sse": {"Named": "Event"}}, "end": {"DataLineEquals": "[DONE]"}}}}]));
+    assert_eq!(operation(&value, 7)["x-schematic"]["success"][0]["shape"]["Stream"]["end"], json!({"FieldEquals": {"field": "done", "value": true}}));
+    assert_eq!(operation(&value, 8)["x-schematic"]["success"][0]["shape"], json!({"Stream": {"framing": "Bytes", "end": "ConnectionClose"}}));
+
+    // Exact errors expand 4XX; 5XX keeps its class key.
+    assert_eq!(ok(0, "404"), json!({"description": "Declared error 404"}));
+    assert_eq!(ok(0, "409")["content"], json!({"application/zip": {"schema": binary}}));
+    assert_eq!(ok(0, "410")["content"], json!({"text/plain": {"schema": string}}));
+    assert_eq!(ok(0, "422")["content"], json!({"application/json": {"schema": reference("Directory")}}));
+    assert_eq!(ok(0, "400")["content"], json!({"application/json": {"schema": reference("Problem")}}));
+    assert_eq!(ok(0, "5XX")["content"], json!({"text/plain": {"schema": string}}));
+    assert!(ok(0, "4XX").is_null());
+    for index in 1..9 {
+        assert!(ok(index, "4XX")["content"]["application/json"].is_object() && ok(index, "5XX").is_object(), "endpoint {index}");
+    }
+
+    for index in 0..9 {
+        let keys: Vec<&String> = operation(&value, index)["responses"].as_object().unwrap().keys().collect();
+        let (success, error): (Vec<&String>, Vec<&String>) = keys.into_iter().partition(|key| key.starts_with('2'));
+        assert!(!success.is_empty() && !error.is_empty(), "endpoint {index}");
+        assert!(error.iter().all(|key| key.starts_with('4') || key.starts_with('5')), "R21: endpoint {index} {error:?}");
+        assert!(success.iter().all(|key| !error.contains(key)), "R21: endpoint {index}");
+    }
+
+    let json_text = serialize(&document, ExportFormat::Json).unwrap();
+    let yaml_text = serialize(&document, ExportFormat::Yaml).unwrap();
+    for reparsed in [serde_json::from_str::<OpenAPI>(&json_text).unwrap(), serde_yaml_ng::from_str::<OpenAPI>(&yaml_text).unwrap()] {
+        assert_eq!(serde_json::to_value(&reparsed).unwrap(), value);
+    }
+}
+
+#[test]
+fn x_schematic_carries_cross_origin_request_id_and_guidance_while_deprecation_and_auth_stay_standard() {
+    let rate_limit = RateLimit::new("x-limit", "x-remaining", "x-reset", ResetUnit::EpochSeconds).unwrap();
+    let retry = RetryGuidance::new([StatusSelector::Code(429)], true, 3, Backoff::None).unwrap();
+    let get = |id: &str| Endpoint::get(id, format!("/{}", id.to_ascii_lowercase())).describes(id).returns_empty();
+    let ctx = DefinitionContext::types_in("::models");
+    let api = RestApi::builder(&ctx, "Policy", "https://api.example.com").describes("Policy").bearer_env(["POLICY_TOKEN"])
+        .request_id_header("X-Request-Id")
+        .cross_origin(CrossOrigin::allow_origins(["https://app.example.com"]))
+        .rate_limit(rate_limit.clone())
+        .retry_guidance(retry.clone())
+        .endpoints([
+            get("Old").deprecated().cross_origin(CrossOrigin::deny())
+                .auth(AuthPolicy { explicit: vec![AuthMethod::Basic], env_fallback: None }).build().unwrap(),
+            get("Open").public().rate_limit(rate_limit).build().unwrap(),
+            get("Plain").build().unwrap(),
+        ])
+        .build().unwrap();
+    let document = exported(&api);
+    let op = |path: &str| &document["paths"][path]["get"];
+
+    let doc_ext = &document["x-schematic"];
+    assert_eq!(doc_ext["cross_origin"], json!({"AllowOrigins": ["https://app.example.com"]}));
+    assert_eq!(doc_ext["request_id_header"], "x-request-id");
+    assert_eq!(doc_ext["rate_limit"]["limit_header"], "x-limit");
+    assert_eq!(doc_ext["retry_guidance"]["max_attempts"], 3);
+    assert_eq!(op("/old")["x-schematic"]["cross_origin"], "Deny");
+    assert_eq!(op("/open")["x-schematic"]["rate_limit"]["remaining_header"], "x-remaining");
+    for path in ["/open", "/plain"] {
+        assert!(op(path)["x-schematic"].get("cross_origin").is_none(), "{path} inherits");
+        assert!(op(path).get("deprecated").is_none(), "{path}");
+    }
+    assert!(op("/plain")["x-schematic"].get("rate_limit").is_none());
+
+    // R26 refresh: deprecation and the auth override are standard members only.
+    assert_eq!(op("/old")["deprecated"], true);
+    assert_eq!(document["security"], json!([{"bearerAuth": []}]));
+    assert_eq!(op("/old")["security"], json!([{"basicAuth": []}]));
+    assert_eq!(op("/open")["security"], json!([]));
+    assert!(op("/plain").get("security").is_none());
+    let schemes: Vec<&String> = document["components"]["securitySchemes"].as_object().unwrap().keys().collect();
+    assert_eq!(schemes, ["basicAuth", "bearerAuth"]);
+    for extension in [doc_ext, &op("/old")["x-schematic"], &op("/open")["x-schematic"]] {
+        for member in ["deprecated", "auth", "security"] {
+            assert!(extension.get(member).is_none(), "{member} in {extension}");
+        }
+    }
+
+    let default_policy = exported(&fixture(vec![vec![]], |_| None));
+    for member in ["cross_origin", "request_id_header"] {
+        assert!(default_policy["x-schematic"].get(member).is_none(), "{member}");
+    }
+}
+
+/// Imports `document` through the public importer from `format` text.
+fn import_text(document: &OpenAPI, format: ExportFormat) -> OpenApiImportResult {
+    let text = serialize(document, format).unwrap();
+    let source = match format { ExportFormat::Json => OpenApiSource::json(text), ExportFormat::Yaml => OpenApiSource::yaml(text) };
+    OpenApiImport::new(source).build().unwrap()
+}
+
+#[test]
+fn public_import_of_the_exported_json_and_yaml_keeps_shapes_content_types_and_endpoint_errors() {
+    let tagged = |name: &str, value: &str| shape(ResponseShape::Json(named(name)), |s| s.json_tag = Some(JsonTag::Field { name: "type".into(), value: json!(value) }));
+    let typed = |shape: ResponseShape, content_type: &str| self::shape(shape, |s| s.content_type = Some(content_type.into()));
+    let shapes = vec![
+        vec![json_shape("Message"), sse(StreamEnd::ConnectionClose), fallback_binary()],
+        vec![tagged("Directory", "dir"), tagged("File", "file")],
+        vec![typed(ResponseShape::Binary, "audio/mpeg")],
+        vec![typed(ResponseShape::Text, "text/markdown")],
+    ];
+    let api = fixture(shapes.clone(), |index| (index == 0).then(|| ErrorSet::new().on(StatusMatch::exact(404), ErrorShape::empty())));
+    let document = export(&api, &ExportOptions::new()).unwrap();
+    let first = serde_json::to_value(&document).unwrap();
+    // The exporter names `oneOf` members by `$ref`, so import keeps their types.
+    assert_eq!(first["paths"]["/r1"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["oneOf"],
+        json!([reference("Directory"), reference("File")]));
+
+    for format in [ExportFormat::Json, ExportFormat::Yaml] {
+        let imported = import_text(&document, format);
+        assert!(imported.api.errors.is_empty(), "D-20: no hoisted API errors");
+        for (index, expected) in shapes.iter().enumerate() {
+            let path = format!("/r{index}");
+            let endpoint = imported.api.endpoints.iter().find(|endpoint| endpoint.path == path).unwrap();
+            assert_eq!(&endpoint.response, expected, "{path}");
+            // The export is the resolved table, so 4XX superseded by 404
+            // returns as exact entries; every status looks up the same shape.
+            let (original, own) = (api.effective_errors(&api.endpoints[index]), imported.api.effective_errors(endpoint));
+            assert_eq!(own.entries(), endpoint.errors.as_slice(), "{path}: D-20");
+            for status in 400..=599 {
+                let looked_up = |table: &schematic_define::ErrorTable| table.lookup(status).map(|entry| (entry.shape.clone(), entry.content_type.clone()));
+                assert_eq!(looked_up(&own), looked_up(&original), "{path} {status}");
+            }
+        }
+        let first_errors = &imported.api.endpoints.iter().find(|endpoint| endpoint.path == "/r0").unwrap().errors;
+        assert_eq!((first_errors.len(), first_errors.last().map(|entry| entry.status)), (101, Some(StatusMatch::class(5))));
+        let second_errors = &imported.api.endpoints.iter().find(|endpoint| endpoint.path == "/r1").unwrap().errors;
+        assert_eq!(second_errors, api.effective_errors(&api.endpoints[1]).entries());
+
+        let second = serde_json::to_value(export(&imported.api, &ExportOptions::new()).unwrap()).unwrap();
+        for index in 0..shapes.len() {
+            assert_eq!(without_error_descriptions(&operation(&second, index)["responses"]), without_error_descriptions(&operation(&first, index)["responses"]), "/r{index}");
+        }
+        // An error description names its entry's match, which import made exact.
+        assert_eq!(operation(&first, 0)["responses"]["418"]["description"], "Declared error 400-499");
+        assert_eq!(operation(&second, 0)["responses"]["418"]["description"], "Declared error 418");
+        assert_eq!(operation(&second, 1)["responses"]["4XX"]["description"], "Declared error 400-499");
+    }
+}
+
+/// A responses map whose error responses drop their `description`.
+fn without_error_descriptions(responses: &Value) -> Value {
+    let mut responses = responses.clone();
+    for (key, response) in responses.as_object_mut().unwrap() {
+        if !key.starts_with('2') { response.as_object_mut().unwrap().remove("description"); }
+    }
+    responses
+}
+
+#[test]
+fn import_reads_only_the_responses_map_so_stream_ends_and_byte_streams_come_back_plain() {
+    // Reading `x-schematic` back is out of scope (R26); content type alone
+    // never proves a terminator (R28).
+    let shapes = vec![
+        vec![sse(StreamEnd::EventNamed("message_stop".into()))],
+        vec![SuccessShape::new(stream(StreamFraming::Bytes, StreamEnd::ConnectionClose))],
+    ];
+    let document = export(&fixture(shapes, |_| None), &ExportOptions::new()).unwrap();
+    let first = serde_json::to_value(&document).unwrap();
+    let imported = import_text(&document, ExportFormat::Json);
+    let response = |path: &str| &imported.api.endpoints.iter().find(|endpoint| endpoint.path == path).unwrap().response;
+
+    assert_eq!(response("/r0"), &vec![sse(StreamEnd::ConnectionClose)]);
+    assert_eq!(response("/r1"), &vec![SuccessShape::new(ResponseShape::Binary)]);
+    let second = serde_json::to_value(export(&imported.api, &ExportOptions::new()).unwrap()).unwrap();
+    for index in 0..2 {
+        assert_eq!(operation(&second, index)["responses"]["200"]["content"], operation(&first, index)["responses"]["200"]["content"]);
+    }
 }

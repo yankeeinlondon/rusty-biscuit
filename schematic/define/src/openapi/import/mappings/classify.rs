@@ -1,9 +1,5 @@
 //! Response model v2 classification of one operation's responses (R28,
-//! Default D-20).
-//!
-//! The production importer still stores one `ApiResponse` per endpoint
-//! through [`super::map_responses`]; this classification is what it switches
-//! to once `Endpoint::response` holds success shapes.
+//! Default D-20): the importer's success shapes and endpoint error entries.
 
 use indexmap::IndexMap;
 use openapiv3::{MediaType, ReferenceOr, Response, Responses, Schema, SchemaKind, StatusCode};

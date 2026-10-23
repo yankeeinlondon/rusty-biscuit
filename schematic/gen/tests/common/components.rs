@@ -9,7 +9,7 @@ pub fn with_referenced_components(mut api: RestApi) -> RestApi {
     let mut references: Vec<schematic_define::TypeRef> = Vec::new();
     for endpoint in &api.endpoints {
         references.extend(endpoint.json_references().into_iter().cloned());
-        references.extend(endpoint.success_shapes().into_iter().filter_map(|shape| shape_reference(shape.shape)));
+        references.extend(endpoint.success_shapes().iter().filter_map(|shape| shape_reference(shape.shape.clone())));
     }
     references.extend(api.errors.iter().filter_map(|entry| shape_reference(entry.shape.clone())));
     for operation in api.graphql.iter().flat_map(|surface| &surface.operations) {

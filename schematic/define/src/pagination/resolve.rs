@@ -10,7 +10,7 @@ use super::collection::{Alternate, Pagination};
 use super::selector::ItemSelector;
 use super::strategy::{IndexBase, InputParam, MoreSignal, PageStrategy, SessionOpen, Strategy};
 use crate::params::ParamDef;
-use crate::response::ApiResponse;
+use crate::response::{ResponseShape, SuccessShape};
 use crate::types::{Endpoint, RestApi, RestMethod};
 use crate::TypeRef;
 
@@ -150,16 +150,25 @@ pub fn resolve(api: &RestApi, endpoint: &Endpoint) -> Resolution {
     }
 }
 
-/// The Rust path of `T` when `response` is a JSON array of `T`.
+/// The Rust path of `T` when `response` is one JSON shape, an array of `T`.
 ///
 /// Only a root array reference qualifies; a nominal component that is itself
-/// a list (an alias or wrapper type) still needs an authored collection.
+/// a list (an alias or wrapper type) still needs an authored collection, and
+/// an endpoint with several success shapes is never a list.
 /// `None` also when the item does not resolve through `api`'s components.
-pub fn root_array_item_type(api: &RestApi, response: &ApiResponse) -> Option<String> {
-    let ApiResponse::Json(TypeRef::Array(item)) = response else {
+pub fn root_array_item_type(api: &RestApi, response: &[SuccessShape]) -> Option<String> {
+    let Some(TypeRef::Array(item)) = sole_json(response) else {
         return None;
     };
     api.rust_type(item)
+}
+
+/// The reference of an endpoint's only success shape when it is JSON.
+pub(crate) fn sole_json(response: &[SuccessShape]) -> Option<&TypeRef> {
+    match response {
+        [only] => match &only.shape { ResponseShape::Json(reference) => Some(reference), _ => None },
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{ApiRequest, ApiResponse, DefinitionError, Endpoint, ErrorEntry, FormFieldKind, ResponseShape, RestApi, TypeRef};
+use crate::{ApiRequest, DefinitionError, Endpoint, ErrorEntry, FormFieldKind, ResponseShape, RestApi, StreamFraming, TypeRef};
 
 /// One named schema component.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,11 +165,16 @@ fn strip(schema: &Value, root_name: &str) -> Value {
 }
 
 impl Endpoint {
-    /// The JSON body references of this endpoint: response, request, JSON
-    /// form fields, then declared error entries, in that order.
+    /// The JSON body references of this endpoint: success shapes (JSON
+    /// bodies and SSE/NDJSON stream items, in declaration order), request,
+    /// JSON form fields, then declared error entries, in that order.
     pub fn json_references(&self) -> Vec<&TypeRef> {
         let mut references = Vec::new();
-        if let ApiResponse::Json(reference) = &self.response { references.push(reference); }
+        references.extend(self.response.iter().filter_map(|success| match &success.shape {
+            ResponseShape::Json(reference)
+            | ResponseShape::Stream { framing: StreamFraming::Sse(reference) | StreamFraming::Ndjson(reference), .. } => Some(reference),
+            _ => None,
+        }));
         match &self.request {
             Some(ApiRequest::Json(reference)) => references.push(reference),
             Some(ApiRequest::FormData { fields } | ApiRequest::UrlEncoded { fields }) => references.extend(

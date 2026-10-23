@@ -334,12 +334,12 @@ mod tests {
     #[test]
     fn a_json_failure_type_shared_by_endpoints_gets_one_error_body_impl_per_api() {
         use schematic_define::response::ResponseShape;
-        use schematic_define::{ApiResponse, ErrorEntry, RestMethod, SchemaComponent, StatusMatch, TypeRef};
+        use schematic_define::{SuccessShape, ErrorEntry, RestMethod, SchemaComponent, StatusMatch, TypeRef};
 
         let problem = || ResponseShape::Json(TypeRef::Named("Problem".into()));
         let endpoint = |id: &str, path: &str| {
             let mut endpoint = crate::test_utils::make_endpoint(id, RestMethod::Get, path, None);
-            endpoint.response = ApiResponse::Empty;
+            endpoint.response = vec![SuccessShape::empty()];
             endpoint
         };
         let mut overlaid = endpoint("Delete", "/items/delete");

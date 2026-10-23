@@ -477,7 +477,7 @@
                 }
               }
             },
-            "description": "Streams audio as it's generated"
+            "description": "Streams audio as it's generated\n\nResponse content type: `application/octet-stream`."
           }
         },
         {
@@ -546,7 +546,7 @@
                 }
               }
             },
-            "description": "Streams audio chunks with timing information"
+            "description": "Streams audio chunks with timing information\n\nResponse content type: `application/x-ndjson`."
           }
         }
       ]

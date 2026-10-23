@@ -14136,9 +14136,9 @@ impl From<CreateRealtimeCallForm> for CreateRealtimeCallRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateRealtimeCallRequest {
     type Api = OpenAIApi;
-    type Success = ();
+    type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Empty;
+    type Decoder = schematic_runtime::Binary;
     const ENDPOINT_ID: &'static str = "CreateRealtimeCall";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -14847,13 +14847,58 @@ impl From<String> for GetResponseRequest {
         }
     }
 }
+/// The success reply of `GetResponse`: one variant per declared shape, chosen from the reply's status, media type, and JSON tag.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub enum GetResponseResponse {
+    /// returned when the `stream` query parameter is false or omitted
+    ///
+    /// Chosen by media type `application/json`.
+    Json(::schematic_definitions::openai::BetaResponse),
+    /// returned when the `stream` query parameter is true
+    ///
+    /// Chosen by media type `text/event-stream`.
+    Stream(
+        schematic_runtime::ItemStream<
+            ::schematic_definitions::openai::BetaResponseStreamEvent,
+        >,
+    ),
+}
+impl schematic_runtime::Alternatives for GetResponseResponse {
+    const ROUTES: &'static [schematic_runtime::Route] = &[
+        schematic_runtime::Route::new(schematic_runtime::ShapeKind::Json)
+            .media("application/json"),
+        schematic_runtime::Route::new(schematic_runtime::ShapeKind::Stream)
+            .media("text/event-stream"),
+    ];
+    async fn decode_alternative(
+        index: usize,
+        body: schematic_runtime::LiveBody,
+    ) -> Result<Self, schematic_runtime::DecodeFailure> {
+        match index {
+            0 => {
+                <schematic_runtime::Json<
+                    ::schematic_definitions::openai::BetaResponse,
+                > as schematic_runtime::Decode>::decode(body)
+                    .await
+                    .map(Self::Json)
+            }
+            _ => {
+                <schematic_runtime::Sse<
+                    ::schematic_definitions::openai::BetaResponseStreamEvent,
+                    schematic_runtime::UntilClose,
+                > as schematic_runtime::Decode>::decode(body)
+                    .await
+                    .map(Self::Stream)
+            }
+        }
+    }
+}
 impl schematic_runtime::EndpointSpec for GetResponseRequest {
     type Api = OpenAIApi;
-    type Success = ::schematic_definitions::openai::BetaResponse;
+    type Success = GetResponseResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<
-        ::schematic_definitions::openai::BetaResponse,
-    >;
+    type Decoder = schematic_runtime::Shapes<GetResponseResponse>;
     const ENDPOINT_ID: &'static str = "GetResponse";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(

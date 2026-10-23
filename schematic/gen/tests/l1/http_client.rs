@@ -14,7 +14,7 @@
 
 use proc_macro2::TokenStream;
 use schematic_define::{
-    ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, AuthorizationCodeGrant, Endpoint,
+    SuccessShape, AuthMethod, AuthPolicy, AuthStrategy, AuthorizationCodeGrant, Endpoint,
     EnvAuthStrategy, OAuth2ClientAuthMethod, OAuth2Config, PkceRequirement, RestApi, RestMethod,
 };
 use schematic_gen::output::assemble::assemble_shared_module;
@@ -68,7 +68,7 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
                     .describes("Get items".to_string())
                     .returns_empty()
                     .build().expect("valid endpoint fixture");
-                endpoint.response = ApiResponse::json_type("ItemsResponse");
+                endpoint.response = vec![SuccessShape::json_type("ItemsResponse")];
                 endpoint
             },
             {
@@ -76,7 +76,7 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
                     .describes("Get a single item".to_string())
                     .returns_empty()
                     .build().expect("valid endpoint fixture");
-                endpoint.response = ApiResponse::json_type("Item");
+                endpoint.response = vec![SuccessShape::json_type("Item")];
                 endpoint
             },
         ];
@@ -96,7 +96,7 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
                 .describes("Get items".to_string())
                 .returns_empty()
                 .build().expect("valid endpoint fixture");
-            endpoint.response = ApiResponse::json_type("ItemsResponse");
+            endpoint.response = vec![SuccessShape::json_type("ItemsResponse")];
             endpoint
         }];
         api
@@ -139,7 +139,7 @@ fn make_dual_auth_api() -> RestApi {
                 .describes("Get items".to_string())
                 .returns_empty()
                 .build().expect("valid endpoint fixture");
-            endpoint.response = ApiResponse::json_type("ItemsResponse");
+            endpoint.response = vec![SuccessShape::json_type("ItemsResponse")];
             endpoint
         }];
         api
@@ -234,7 +234,7 @@ fn each_http_method_becomes_the_request_method_constant() {
                 .describes(format!("{name} items"))
                 .returns_empty()
                 .build().expect("valid endpoint fixture");
-            endpoint.response = ApiResponse::json_type("ItemsResponse");
+            endpoint.response = vec![SuccessShape::json_type("ItemsResponse")];
             endpoint
         })
         .collect();

@@ -4,7 +4,7 @@
 //! with the loss named here rather than made silently.
 
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthMethod, AuthStrategy, EndpointAuth, OAuth2Config, RestApi,
+    ApiRequest, AuthMethod, AuthStrategy, EndpointAuth, OAuth2Config, ResponseShape, RestApi,
 };
 
 use crate::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
@@ -118,8 +118,9 @@ fn postman_diagnostics(api: &RestApi) -> Vec<ValidationDiagnostic> {
                 Some(ApiRequest::Json(type_ref)) => Some(type_ref),
                 _ => None,
             }),
-            ("response", match &endpoint.response {
-                ApiResponse::Json(type_ref) => Some(type_ref),
+            // Postman describes the first success shape only.
+            ("response", match endpoint.response.first().map(|first| &first.shape) {
+                Some(ResponseShape::Json(type_ref)) => Some(type_ref),
                 _ => None,
             }),
         ];

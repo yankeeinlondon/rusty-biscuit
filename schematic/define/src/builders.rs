@@ -37,7 +37,7 @@ use serde_json::Value;
 use crate::error_table::{validate_error_entries, validate_error_policy};
 use crate::response::validate_success_shapes;
 use crate::{AddressRule, ErrorEntry, GraphQlOperation, GraphQlSurface, JsonTag, ResponseShape, StatusMatch, StreamEnd, StreamFraming, SuccessShape, TypeRef};
-use crate::{ApiRequest, ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, CrossOrigin, DefinitionContext,
+use crate::{ApiRequest, AuthMethod, AuthPolicy, AuthStrategy, CrossOrigin, DefinitionContext,
     DefinitionError, Endpoint, EndpointAuth, EndpointParams, EnvAuthStrategy, EnvList, EnvMapping, FormField,
     ParamDef, ParamStyle, QueryParamType, RateLimit, Registration, RestApi, RestMethod, RetryGuidance, TypeDesc};
 
@@ -177,9 +177,9 @@ impl Endpoint {
     #[allow(clippy::new_ret_no_self)]
     pub fn new(id: impl Into<String>, method: RestMethod, path: impl Into<String>) -> EndpointBuilder {
         EndpointBuilder { endpoint: Endpoint { id: id.into(), method, path: path.into(),
-            description: String::new(), request: None, response: ApiResponse::Empty,
+            description: String::new(), request: None, response: vec![],
             headers: vec![], params: None, cross_origin: None, pagination: None, rate_limit: None, retry_guidance: None,
-            deprecated: false, auth: None, errors: vec![], no_declared_errors: false, shapes_preview: vec![] }, successes: vec![], auth_choices: 0, error: None, state: PhantomData }
+            deprecated: false, auth: None, errors: vec![], no_declared_errors: false }, successes: vec![], auth_choices: 0, error: None, state: PhantomData }
     }
     pub fn get(id: impl Into<String>, path: impl Into<String>) -> EndpointBuilder { Self::new(id, RestMethod::Get, path) }
     pub fn post(id: impl Into<String>, path: impl Into<String>) -> EndpointBuilder { Self::new(id, RestMethod::Post, path) }
@@ -276,11 +276,7 @@ impl EndpointBuilder<Present, Present> {
         if let Some(misuse) = self.successes.iter().find_map(|success| success.misuse) { return Err(invalid("<endpoint>", &ep.id, misuse)); }
         let shapes = infer_json_tags(self.successes);
         validate_success_shapes(&shapes).map_err(|message| invalid("<endpoint>", &ep.id, message))?;
-        // Endpoint::response holds one ApiResponse until it holds success
-        // shapes; anything it cannot represent is refused, never dropped.
-        ep.response = match shapes.as_slice() { [only] => only.legacy_response(), _ => None }
-            .ok_or_else(|| invalid("<endpoint>", &ep.id, "several success shapes, streams, and success content types, statuses, \
-                tags, and notes are stored once Endpoint::response holds response model v2 shapes"))?;
+        ep.response = shapes;
         if ep.id.trim().is_empty() || ep.description.trim().is_empty() || !ep.path.starts_with('/') {
             return Err(invalid("<endpoint>", &ep.id, "id and description must be nonempty and path must start with /"));
         }
@@ -505,7 +501,7 @@ fn validate_endpoint_vocabulary(api: &str, ep: &Endpoint) -> Result<(), Definiti
         }
         validate_oauth2(policy).map_err(|error| fail(format!("endpoint auth policy: {error}")))?;
     }
-    validate_success_shapes(&ep.success_shapes()).map_err(&fail)?;
+    validate_success_shapes(&ep.response).map_err(&fail)?;
     validate_error_policy(&[], &ep.errors, ep.no_declared_errors).map_err(&fail)?;
     validate_typed_paths(ep).map_err(fail)
 }

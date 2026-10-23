@@ -17,7 +17,7 @@
 //! - `Chat` - Chat completion with SSE streaming support
 //! - `LoadModel` - Load a model into memory
 //! - `UnloadModel` - Unload a model from memory
-//! - `DownloadModel` - Download a model from HuggingFace with SSE progress
+//! - `DownloadModel` - Download a model from HuggingFace
 //! - `GetDownloadStatus` - Check the status of a download job
 //!
 //! ## Examples
@@ -118,11 +118,65 @@ impl From<::schematic_definitions::lmstudio::ChatBody> for ChatRequest {
         Self { body }
     }
 }
+/// The end condition of the `Chat` stream.
+#[derive(Debug, Clone, Copy)]
+pub struct ChatStreamEnd;
+impl schematic_runtime::StreamEnd for ChatStreamEnd {
+    const CONDITION: schematic_runtime::EndCondition = schematic_runtime::EndCondition::EventNamed(
+        "chat.end",
+    );
+    const KEEP: bool = true;
+}
+/// The success reply of `Chat`: one variant per declared shape, chosen from the reply's status, media type, and JSON tag.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub enum ChatResponse {
+    /// returned when `stream` is false or omitted
+    ///
+    /// Chosen by media type `application/json`.
+    Json(::schematic_definitions::lmstudio::ChatResult),
+    /// returned when `stream` is true
+    ///
+    /// Chosen by media type `text/event-stream`.
+    Stream(
+        schematic_runtime::ItemStream<::schematic_definitions::lmstudio::ChatStreamEvent>,
+    ),
+}
+impl schematic_runtime::Alternatives for ChatResponse {
+    const ROUTES: &'static [schematic_runtime::Route] = &[
+        schematic_runtime::Route::new(schematic_runtime::ShapeKind::Json)
+            .media("application/json"),
+        schematic_runtime::Route::new(schematic_runtime::ShapeKind::Stream)
+            .media("text/event-stream"),
+    ];
+    async fn decode_alternative(
+        index: usize,
+        body: schematic_runtime::LiveBody,
+    ) -> Result<Self, schematic_runtime::DecodeFailure> {
+        match index {
+            0 => {
+                <schematic_runtime::Json<
+                    ::schematic_definitions::lmstudio::ChatResult,
+                > as schematic_runtime::Decode>::decode(body)
+                    .await
+                    .map(Self::Json)
+            }
+            _ => {
+                <schematic_runtime::Sse<
+                    ::schematic_definitions::lmstudio::ChatStreamEvent,
+                    ChatStreamEnd,
+                > as schematic_runtime::Decode>::decode(body)
+                    .await
+                    .map(Self::Stream)
+            }
+        }
+    }
+}
 impl schematic_runtime::EndpointSpec for ChatRequest {
     type Api = LmStudioApi;
-    type Success = bytes::Bytes;
+    type Success = ChatResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Binary;
+    type Decoder = schematic_runtime::Shapes<ChatResponse>;
     const ENDPOINT_ID: &'static str = "Chat";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -329,9 +383,11 @@ for DownloadModelRequest {
 }
 impl schematic_runtime::EndpointSpec for DownloadModelRequest {
     type Api = LmStudioApi;
-    type Success = bytes::Bytes;
+    type Success = ::schematic_definitions::lmstudio::DownloadModelResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Binary;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::lmstudio::DownloadModelResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DownloadModel";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -767,7 +823,7 @@ impl LmStudio {
     ) -> UnloadModelCall<'_> {
         UnloadModelCall(self.0.send(UnloadModelRequest::new(body)))
     }
-    /// Download a model from HuggingFace with SSE progress
+    /// Download a model from HuggingFace
     ///
     /// `POST /api/v1/models/download`
     ///

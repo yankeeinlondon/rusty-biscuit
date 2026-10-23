@@ -41,7 +41,7 @@
                 }
               }
             },
-            "description": "Generate text completion from a prompt (streaming NDJSON by default)"
+            "description": "Generate text completion from a prompt (streaming NDJSON by default)\n\nResponse content type: `application/x-ndjson`."
           }
         },
         {
@@ -67,7 +67,7 @@
                 }
               }
             },
-            "description": "Generate chat completion from messages (streaming NDJSON by default)"
+            "description": "Generate chat completion from messages (streaming NDJSON by default)\n\nResponse content type: `application/x-ndjson`."
           }
         },
         {
@@ -162,7 +162,7 @@
                 }
               }
             },
-            "description": "Pull a model from the Ollama registry (streaming progress by default)"
+            "description": "Pull a model from the Ollama registry (streaming progress by default)\n\nResponse content type: `application/x-ndjson`."
           }
         },
         {
@@ -188,7 +188,7 @@
                 }
               }
             },
-            "description": "Push a model to the Ollama registry (streaming progress by default)"
+            "description": "Push a model to the Ollama registry (streaming progress by default)\n\nResponse content type: `application/x-ndjson`."
           }
         },
         {
@@ -266,7 +266,7 @@
                 }
               }
             },
-            "description": "Create a model from a Modelfile (streaming progress by default)"
+            "description": "Create a model from a Modelfile (streaming progress by default)\n\nResponse content type: `application/x-ndjson`."
           }
         },
         {

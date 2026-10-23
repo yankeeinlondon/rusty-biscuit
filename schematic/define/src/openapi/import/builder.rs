@@ -211,24 +211,29 @@ impl OpenApiImport {
         })
     }
 
-    /// Renames an endpoint's JSON response and request references to the
-    /// final names of models that yielded their name (for example, to a
-    /// request struct).
+    /// Renames an endpoint's JSON success, stream item, request, and error
+    /// references to the final names of models that yielded their name (for
+    /// example, to a request struct).
     fn remap_reference_names(
         endpoint: &mut crate::Endpoint,
         name_mapping: &std::collections::HashMap<String, String>,
     ) {
         use crate::request::ApiRequest;
-        use crate::response::ApiResponse;
-        let response = match &mut endpoint.response {
-            ApiResponse::Json(reference) => Some(reference),
+        use crate::response::{ResponseShape, StreamFraming};
+        let successes = endpoint.response.iter_mut().filter_map(|success| match &mut success.shape {
+            ResponseShape::Json(reference)
+            | ResponseShape::Stream { framing: StreamFraming::Sse(reference) | StreamFraming::Ndjson(reference), .. } => Some(reference),
             _ => None,
-        };
+        });
+        let errors = endpoint.errors.iter_mut().filter_map(|entry| match &mut entry.shape {
+            ResponseShape::Json(reference) => Some(reference),
+            _ => None,
+        });
         let request = match &mut endpoint.request {
             Some(ApiRequest::Json(reference)) => Some(reference),
             _ => None,
         };
-        for reference in response.into_iter().chain(request) {
+        for reference in successes.chain(request).chain(errors) {
             if let crate::TypeRef::Named(name) = reference
                 && let Some(new_name) = name_mapping.get(name)
             {
@@ -367,6 +372,7 @@ impl OpenApiImport {
 
             for (method, operation) in Self::get_operations(path_item) {
                 match map_operation(
+                    &name,
                     operation,
                     path,
                     method,
@@ -518,6 +524,7 @@ pub struct OpenApiImportResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::response::ResponseShape;
 
     // ========== OpenApiImport Builder Tests ==========
 
@@ -1042,8 +1049,8 @@ paths:
         let result = OpenApiImport::new(source).build().unwrap();
 
         assert!(matches!(
-            result.api.endpoints[0].response,
-            crate::response::ApiResponse::Json(_)
+            result.api.endpoints[0].response[0].shape,
+            ResponseShape::Json(_)
         ));
     }
 
@@ -1066,8 +1073,8 @@ paths:
         let result = OpenApiImport::new(source).build().unwrap();
 
         assert!(matches!(
-            result.api.endpoints[0].response,
-            crate::response::ApiResponse::Empty
+            result.api.endpoints[0].response[0].shape,
+            ResponseShape::Empty
         ));
     }
 
@@ -1095,8 +1102,8 @@ paths:
         let result = OpenApiImport::new(source).build().unwrap();
 
         assert!(matches!(
-            result.api.endpoints[0].response,
-            crate::response::ApiResponse::Binary
+            result.api.endpoints[0].response[0].shape,
+            ResponseShape::Binary
         ));
     }
 

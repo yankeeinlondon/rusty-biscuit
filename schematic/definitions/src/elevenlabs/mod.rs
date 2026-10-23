@@ -36,7 +36,7 @@ pub use types::*;
 use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 #[cfg(test)]
-use schematic_define::ApiResponse;
+use schematic_define::ResponseShape;
 use schematic_define::{
     ApiKeyEnv, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi, Schema,
     pagination::{Collection, CursorSource, MoreSignal, PageSize, Strategy},
@@ -386,7 +386,7 @@ pub fn define_elevenlabs_websocket_api() -> schematic_define::WebSocketApi {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::RestMethod;
+    use schematic_define::{RestMethod, StreamEnd, StreamFraming, TypeRef};
 
     #[test]
     fn rest_api_has_correct_metadata() {
@@ -494,31 +494,65 @@ mod tests {
         assert_eq!(update_webhook.method, RestMethod::Patch);
     }
 
+    fn endpoint<'a>(api: &'a RestApi, id: &str) -> &'a Endpoint {
+        api.endpoints
+            .iter()
+            .find(|e| e.id == id)
+            .unwrap_or_else(|| panic!("Missing endpoint: {id}"))
+    }
+
     #[test]
-    fn binary_response_endpoints() {
+    fn audio_endpoints_store_one_binary_shape_without_content_type() {
         let api = define_elevenlabs_rest_api();
 
-        let binary_endpoints = [
+        for id in [
             "CreateSpeech",
-            "StreamSpeech",
             "GetVoiceSampleAudio",
             "CreateSoundEffect",
             "GetHistoryItemAudio",
             "DownloadHistoryItems",
-        ];
-
-        for id in &binary_endpoints {
-            let endpoint = api
-                .endpoints
-                .iter()
-                .find(|e| &e.id == id)
-                .unwrap_or_else(|| panic!("Missing endpoint: {}", id));
-            assert!(
-                matches!(endpoint.response, ApiResponse::Binary),
-                "Endpoint {} should have Binary response",
-                id
-            );
+        ] {
+            let response = &endpoint(&api, id).response;
+            assert_eq!(response.len(), 1, "{id} should declare one shape");
+            assert_eq!(response[0].shape, ResponseShape::Binary, "{id}");
+            assert_eq!(response[0].content_type, None, "{id}");
         }
+    }
+
+    #[test]
+    fn stream_speech_stores_one_byte_stream_without_content_type() {
+        let api = define_elevenlabs_rest_api();
+
+        let response = &endpoint(&api, "StreamSpeech").response;
+        assert_eq!(response.len(), 1);
+        assert_eq!(
+            response[0].shape,
+            ResponseShape::Stream {
+                framing: StreamFraming::Bytes,
+                end: StreamEnd::ConnectionClose,
+                keep: false,
+            }
+        );
+        assert_eq!(response[0].content_type, None);
+    }
+
+    #[test]
+    fn stream_speech_with_timestamps_stores_one_ndjson_stream_ending_at_close() {
+        let api = define_elevenlabs_rest_api();
+
+        let response = &endpoint(&api, "StreamSpeechWithTimestamps").response;
+        assert_eq!(response.len(), 1);
+        assert_eq!(
+            response[0].shape,
+            ResponseShape::Stream {
+                framing: StreamFraming::Ndjson(TypeRef::Named(
+                    "SpeechWithTimestampsResponse".into()
+                )),
+                end: StreamEnd::ConnectionClose,
+                keep: false,
+            }
+        );
+        assert_eq!(response[0].content_type, None);
     }
 
     #[test]

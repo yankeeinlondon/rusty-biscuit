@@ -1713,7 +1713,8 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             .describes(
                 "Generates audio from the input text.\n\nReturns the audio file content, or a stream of audio events.\n",
             )
-            .returns_binary()
+            .returns(Success::binary())
+            .returns(Success::sse(ctx.register::<CreateSpeechResponseStreamEvent>()?))
             .request_json::<CreateSpeechRequest2>(ctx)
             .build()
     }
@@ -1723,7 +1724,10 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             .describes(
                 "Transcribes audio into the input language.\n\nReturns a transcription object in `json`, `diarized_json`, or `verbose_json`\nformat, or a stream of transcript events.\n",
             )
-            .returns_json::<serde_json::Value>(ctx)
+            .returns(Success::json(ctx.register::<serde_json::Value>()?))
+            .returns(
+                Success::sse(ctx.register::<CreateTranscriptionResponseStreamEvent>()?),
+            )
             .request_form(
                 Vec::from([
                     FormField::file("file")
@@ -2088,7 +2092,8 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             .describes(
                 "**Starting a new project?** We recommend trying [Responses](/docs/api-reference/responses)\nto take advantage of the latest OpenAI platform features. Compare\n[Chat Completions with Responses](/docs/guides/responses-vs-chat-completions?api-mode=responses).\n\n---\n\nCreates a model response for the given chat conversation. Learn more in the\n[text generation](/docs/guides/text-generation), [vision](/docs/guides/vision),\nand [audio](/docs/guides/audio) guides.\n\nParameter support can differ depending on the model used to generate the\nresponse, particularly for newer reasoning models. Parameters that are only\nsupported for reasoning models are noted below. For the current state of\nunsupported parameters in reasoning models,\n[refer to the reasoning guide](/docs/guides/reasoning).\n\nReturns a chat completion object, or a streamed sequence of chat completion\nchunk objects if the request is streamed.\n",
             )
-            .returns_json::<CreateChatCompletionResponse>(ctx)
+            .returns(Success::json(ctx.register::<CreateChatCompletionResponse>()?))
+            .returns(Success::sse(ctx.register::<CreateChatCompletionStreamResponse>()?))
             .request_json::<CreateChatCompletionRequest2>(ctx)
             .build()
     }
@@ -2640,6 +2645,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
         Endpoint::new("DeleteEval", RestMethod::Delete, "/evals/{eval_id}")
             .describes("Delete an evaluation.\n")
             .returns_json::<serde_json::Value>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(404u16),
+                        ErrorShape::json(ctx.register::<Error>()?),
+                    ),
+            )
             .build()
     }
     endpoints.push(endpoint_38(ctx)?);
@@ -2725,6 +2737,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 "Kicks off a new run for a given evaluation, specifying the data source, and what model configuration to use to test. The datasource will be validated against the schema specified in the config of the evaluation.\n",
             )
             .returns_json::<EvalRun>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<Error>()?),
+                    ),
+            )
             .request_json::<CreateEvalRunRequest2>(ctx)
             .build()
     }
@@ -2755,6 +2774,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             )
             .describes("Delete an eval run.\n")
             .returns_json::<serde_json::Value>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(404u16),
+                        ErrorShape::json(ctx.register::<Error>()?),
+                    ),
+            )
             .build()
     }
     endpoints.push(endpoint_43(ctx)?);
@@ -3265,7 +3291,8 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             .describes(
                 "Creates an edited or extended image given one or more source images and a prompt. This endpoint supports GPT Image models (`gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini`, and `chatgpt-image-latest`) and `dall-e-2`.",
             )
-            .returns_json::<ImagesResponse>(ctx)
+            .returns(Success::json(ctx.register::<ImagesResponse>()?))
+            .returns(Success::sse(ctx.register::<ImageEditStreamEvent>()?))
             .request_json::<EditImageBodyJsonParam>(ctx)
             .build()
     }
@@ -3275,7 +3302,8 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             .describes(
                 "Creates an image given a prompt. [Learn more](/docs/guides/images).\n",
             )
-            .returns_json::<ImagesResponse>(ctx)
+            .returns(Success::json(ctx.register::<ImagesResponse>()?))
+            .returns(Success::sse(ctx.register::<ImageGenStreamEvent>()?))
             .request_json::<CreateImageRequest2>(ctx)
             .build()
     }
@@ -4348,6 +4376,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             )
             .describes("Modifies a project in the organization.")
             .returns_json::<Project>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
             .request_json::<ProjectUpdateRequest>(ctx)
             .build()
     }
@@ -4437,6 +4472,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 "Deletes an API key from the project.\n\nReturns confirmation of the key deletion, or an error if the key belonged to\na service account.\n",
             )
             .returns_json::<ProjectApiKeyDeleteResponse>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
             .build()
     }
     endpoints.push(endpoint_109(ctx)?);
@@ -4788,6 +4830,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             )
             .describes("Updates a project rate limit.")
             .returns_json::<ProjectRateLimit>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
             .request_json::<ProjectRateLimitUpdateRequest>(ctx)
             .build()
     }
@@ -4800,6 +4849,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             )
             .describes("Returns a list of service accounts in the project.")
             .returns_json::<ProjectServiceAccountListResponse>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
             .query(ParamDef {
                 name: "limit".to_string(),
                 required: false,
@@ -4843,6 +4899,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 "Creates a new service account in the project. By default, this also returns an unredacted API key for the service account.",
             )
             .returns_json::<ProjectServiceAccountCreateResponse>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
             .request_json::<ProjectServiceAccountCreateRequest>(ctx)
             .build()
     }
@@ -5009,6 +5072,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             )
             .describes("Returns a list of users in the project.")
             .returns_json::<ProjectUserListResponse>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
             .query(ParamDef {
                 name: "limit".to_string(),
                 required: false,
@@ -5052,6 +5122,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 "Adds a user to the project. Users must already be members of the organization to be added to a project.",
             )
             .returns_json::<ProjectUser>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
             .request_json::<ProjectUserCreateRequest>(ctx)
             .build()
     }
@@ -5075,6 +5152,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             )
             .describes("Modifies a user's role in the project.")
             .returns_json::<ProjectUser>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
             .request_json::<ProjectUserUpdateRequest>(ctx)
             .build()
     }
@@ -5089,6 +5173,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 "Deletes a user from the project.\n\nReturns confirmation of project user deletion, or an error if the project is\narchived (archived projects have no users).\n",
             )
             .returns_json::<ProjectUserDeleteResponse>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
             .build()
     }
     endpoints.push(endpoint_141(ctx)?);
@@ -7421,7 +7512,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             .describes(
                 "Create a new Realtime API call over WebRTC and receive the SDP answer needed\nto complete the peer connection.",
             )
-            .returns_empty()
+            .returns(Success::binary().content_type("application/sdp"))
             .request_form(
                 Vec::from([
                     FormField::text("sdp")
@@ -7550,7 +7641,8 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             .describes(
                 "Creates a model response. Provide [text](/docs/guides/text) or\n[image](/docs/guides/images) inputs to generate [text](/docs/guides/text)\nor [JSON](/docs/guides/structured-outputs) outputs. Have the model call\nyour own [custom code](/docs/guides/function-calling) or use built-in\n[tools](/docs/guides/tools) like [web search](/docs/guides/tools-web-search)\nor [file search](/docs/guides/tools-file-search) to use your own data\nas input for the model's response.\n",
             )
-            .returns_json::<BetaResponse>(ctx)
+            .returns(Success::json(ctx.register::<BetaResponse>()?))
+            .returns(Success::sse(ctx.register::<BetaResponseStreamEvent>()?))
             .request_json::<BetaCreateResponse>(ctx)
             .query(ParamDef {
                 name: "beta".to_string(),
@@ -7686,10 +7778,17 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             .build()
     }
     endpoints.push(endpoint_193(ctx)?);
-    fn endpoint_194(_ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+    fn endpoint_194(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
         Endpoint::new("DeleteResponse", RestMethod::Delete, "/responses/{response_id}")
             .describes("Deletes a model response with the given ID.\n")
             .returns_empty()
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(404u16),
+                        ErrorShape::json(ctx.register::<BetaError>()?),
+                    ),
+            )
             .query(ParamDef {
                 name: "beta".to_string(),
                 required: false,
@@ -7735,6 +7834,13 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 "Cancels a model response with the given ID. Only responses created with\nthe `background` parameter set to `true` can be cancelled. \n[Learn more](/docs/guides/background).\n",
             )
             .returns_json::<BetaResponse>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(404u16),
+                        ErrorShape::json(ctx.register::<BetaError>()?),
+                    ),
+            )
             .query(ParamDef {
                 name: "beta".to_string(),
                 required: false,
@@ -8611,7 +8717,9 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
             .describes(
                 "Download the generated video bytes or a derived preview asset.\n\nStreams the rendered video content for the specified video job.",
             )
-            .returns_json::<serde_json::Value>(ctx)
+            .returns(Success::binary().content_type("video/mp4"))
+            .returns(Success::binary().content_type("image/webp"))
+            .returns(Success::json(ctx.register::<serde_json::Value>()?))
             .query(ParamDef {
                 name: "variant".to_string(),
                 required: false,
@@ -8808,7 +8916,8 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
     fn endpoint_246(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
         Endpoint::new("GetSkillContent", RestMethod::Get, "/skills/{skill_id}/content")
             .describes("Download a skill zip bundle by its ID.")
-            .returns_json::<serde_json::Value>(ctx)
+            .returns(Success::binary().content_type("application/zip"))
+            .returns(Success::json(ctx.register::<serde_json::Value>()?))
             .build()
     }
     endpoints.push(endpoint_246(ctx)?);
@@ -8902,7 +9011,8 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 "/skills/{skill_id}/versions/{version}/content",
             )
             .describes("Download a skill version zip bundle.")
-            .returns_json::<serde_json::Value>(ctx)
+            .returns(Success::binary().content_type("application/zip"))
+            .returns(Success::json(ctx.register::<serde_json::Value>()?))
             .build()
     }
     endpoints.push(endpoint_251(ctx)?);

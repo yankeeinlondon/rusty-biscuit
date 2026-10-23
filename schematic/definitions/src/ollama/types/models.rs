@@ -1,6 +1,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::StreamErrorLine;
+
 /// Model details in list response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelDetails {
@@ -163,8 +165,9 @@ impl schematic_define::Registration for PullModelBody {
     }
 }
 
-/// Progress response during model pull (streaming).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Progress line from a streaming model pull or push. The last line is
+/// `{"status": "success"}`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PullModelProgress {
     /// Current status message.
     pub status: String,
@@ -180,6 +183,13 @@ pub struct PullModelProgress {
     /// Completed bytes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed: Option<u64>,
+}
+
+impl schematic_define::Registration for PullModelProgress {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("PullModelProgress");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Request body for the `/api/push` endpoint.
@@ -206,6 +216,24 @@ impl schematic_define::Registration for PushModelBody {
 
 /// Progress response during model push (streaming).
 pub type PushModelProgress = PullModelProgress;
+
+/// One NDJSON line from a streaming `/api/pull` or `/api/push`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum PullModelStreamItem {
+    // Tried first: an error line lacks the required `status`.
+    /// A mid-stream error line.
+    Error(StreamErrorLine),
+    /// A progress line.
+    Progress(PullModelProgress),
+}
+
+impl schematic_define::Registration for PullModelStreamItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("PullModelStreamItem");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 
 /// Request body for the `/api/copy` endpoint.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -264,11 +292,52 @@ impl schematic_define::Registration for CreateModelBody {
     }
 }
 
-/// Progress response during model creation (streaming).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Progress line from a streaming model creation. The last line is
+/// `{"status": "success"}`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateModelProgress {
     /// Current status message.
     pub status: String,
+}
+
+impl schematic_define::Registration for CreateModelProgress {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CreateModelProgress");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
+/// One NDJSON line from a streaming `/api/create`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum CreateModelStreamItem {
+    // Tried first, as in `PullModelStreamItem`.
+    /// A mid-stream error line.
+    Error(StreamErrorLine),
+    /// A progress line.
+    Progress(CreateModelProgress),
+}
+
+impl schematic_define::Registration for CreateModelStreamItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CreateModelStreamItem");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
+/// Buffered reply from `/api/pull`, `/api/push`, or `/api/create`, returned
+/// when `stream` is false.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct StatusResponse {
+    /// The final status, `success` when the operation completed.
+    pub status: String,
+}
+
+impl schematic_define::Registration for StatusResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("StatusResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// A running model in the `/api/ps` response.
@@ -370,5 +439,41 @@ mod tests {
         let model: RunningModel = serde_json::from_str(json).unwrap();
         assert_eq!(model.name, "llama3:latest");
         assert!(model.expires_at.is_some());
+    }
+
+    #[test]
+    fn pull_model_stream_item_decodes_progress_success_and_error_lines() {
+        let progress = r#"{"status":"pulling digestname","digest":"digestname","total":2142590208,"completed":241970}"#;
+        let success = r#"{"status":"success"}"#;
+        let error = r#"{"error":"pull model manifest: file does not exist"}"#;
+
+        let progress: PullModelStreamItem = serde_json::from_str(progress).unwrap();
+        let success: PullModelStreamItem = serde_json::from_str(success).unwrap();
+        let error: PullModelStreamItem = serde_json::from_str(error).unwrap();
+
+        let PullModelStreamItem::Progress(progress) = progress else { panic!("expected progress: {progress:?}") };
+        assert_eq!(progress.digest.as_deref(), Some("digestname"));
+        assert_eq!(progress.total, Some(2_142_590_208));
+        assert_eq!(progress.completed, Some(241_970));
+        assert_eq!(
+            success,
+            PullModelStreamItem::Progress(PullModelProgress { status: "success".to_string(), digest: None, total: None, completed: None })
+        );
+        assert_eq!(error, PullModelStreamItem::Error(StreamErrorLine { error: "pull model manifest: file does not exist".to_string() }));
+    }
+
+    #[test]
+    fn create_model_stream_item_decodes_progress_and_error_lines() {
+        let progress: CreateModelStreamItem = serde_json::from_str(r#"{"status":"reading model metadata"}"#).unwrap();
+        let error: CreateModelStreamItem = serde_json::from_str(r#"{"error":"invalid model name"}"#).unwrap();
+
+        assert_eq!(progress, CreateModelStreamItem::Progress(CreateModelProgress { status: "reading model metadata".to_string() }));
+        assert_eq!(error, CreateModelStreamItem::Error(StreamErrorLine { error: "invalid model name".to_string() }));
+    }
+
+    #[test]
+    fn status_response_decodes_the_buffered_reply() {
+        let reply: StatusResponse = serde_json::from_str(r#"{"status":"success"}"#).unwrap();
+        assert_eq!(reply.status, "success");
     }
 }

@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 
 use schematic_define::openapi::ExportOptions;
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, FormField, RestApi, RestMethod,
+    ApiRequest, SuccessShape, AuthStrategy, CrossOrigin, Endpoint, FormField, RestApi, RestMethod,
     TypeRef,
 };
 use schematic_gen::diagnostics::Feature;
@@ -27,7 +27,7 @@ use schematic_gen::validation::validate_openapi;
 /// Builds a tiny `RestApi`, carrying no components, whose single endpoint
 /// references the supplied JSON response type by name.
 fn synthetic_api(name: &str, response_type: &str) -> RestApi {
-    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("Synthetic API for {} regression test", name); fixture.base_url = "https://example.test".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "DanglingResponse".to_string(); fixture.method = RestMethod::Get; fixture.path = "/dangling".to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = ApiResponse::json_type(response_type); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("Synthetic API for {} regression test", name); fixture.base_url = "https://example.test".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "DanglingResponse".to_string(); fixture.method = RestMethod::Get; fixture.path = "/dangling".to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = vec![SuccessShape::json_type(response_type)]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
 }
 
 /// The OpenAPI validator's single diagnostic for `api`, as the generator
@@ -57,12 +57,12 @@ fn single_api_with_missing_schema_fails_validation() {
 #[test]
 fn every_dangling_name_of_a_wrapped_reference_is_reported() {
     let mut api = synthetic_api("Wrapped", "Unused");
-    api.endpoints[0].response = ApiResponse::json(TypeRef::KeyedMap {
+    api.endpoints[0].response = vec![SuccessShape::json(TypeRef::KeyedMap {
         key: "crate::Key".into(),
         value: Box::new(TypeRef::Optional(Box::new(TypeRef::Array(Box::new(TypeRef::Named(
             "Deep".into(),
         )))))),
-    });
+    })];
     api.endpoints[0].request = Some(ApiRequest::FormData {
         fields: vec![FormField::json("metadata", TypeRef::Named("Part".into()))],
     });
@@ -126,7 +126,7 @@ fn dangling_json_ref_cannot_be_emitted() {
 
 #[test]
 fn request_body_types_must_be_registered() {
-    let api = { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "RequestBodyTest".to_string(); fixture.description = "Test API with missing request body type".to_string(); fixture.base_url = "https://example.test".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Create".to_string(); fixture.method = RestMethod::Post; fixture.path = "/create".to_string(); fixture.description = String::new(); fixture.request = Some(ApiRequest::json_type("SomeBody")); fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture };
+    let api = { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "RequestBodyTest".to_string(); fixture.description = "Test API with missing request body type".to_string(); fixture.base_url = "https://example.test".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Create".to_string(); fixture.method = RestMethod::Post; fixture.path = "/create".to_string(); fixture.description = String::new(); fixture.request = Some(ApiRequest::json_type("SomeBody")); fixture.response = vec![SuccessShape::empty()]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture };
 
     let rendered = render_error(&api);
     assert!(rendered.contains("api=RequestBodyTest endpoint=Create "), "{rendered}");

@@ -23,7 +23,8 @@ pub struct Message {
 
 /// Request body for the `/api/v1/chat` endpoint.
 ///
-/// The chat endpoint supports SSE streaming by default.
+/// The reply is a [`ChatResult`] unless `stream` is `true`, in which case it
+/// is a stream of [`ChatStreamEvent`]s.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatBody {
     /// Model identifier to use for generation.
@@ -36,7 +37,7 @@ pub struct ChatBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_length: Option<u32>,
 
-    /// Whether to stream the response (default: true).
+    /// Whether to stream the response as SSE (default: false).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
 
@@ -302,8 +303,6 @@ impl schematic_define::Registration for UnloadModelResponse {
 // =============================================================================
 
 /// Request body for the `/api/v1/models/download` endpoint.
-///
-/// The download endpoint supports SSE streaming for progress updates.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DownloadModelBody {
     /// Model identifier to download (e.g., "lmstudio-community/gemma-2-2b-it-GGUF").
@@ -317,17 +316,37 @@ impl schematic_define::Registration for DownloadModelBody {
     }
 }
 
-/// Response from the `/api/v1/models/download` endpoint.
-///
-/// Initial response before streaming begins.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Response from the `/api/v1/models/download` endpoint: the download job,
+/// returned as one JSON object (the endpoint does not stream).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DownloadModelResponse {
-    /// Download job identifier.
-    pub job_id: String,
-
-    /// Download status message.
+    /// Download job identifier; absent when `status` is `already_downloaded`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
+    pub job_id: Option<String>,
+
+    /// Job status: `downloading`, `paused`, `completed`, `failed`, or
+    /// `already_downloaded`.
+    pub status: String,
+
+    /// Total download size in bytes; absent when `status` is
+    /// `already_downloaded`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_size_bytes: Option<u64>,
+
+    /// ISO 8601 start time; absent when `status` is `already_downloaded`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+
+    /// ISO 8601 completion time; present when `status` is `completed`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
+}
+
+impl schematic_define::Registration for DownloadModelResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("DownloadModelResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 // =============================================================================
@@ -398,39 +417,312 @@ impl schematic_define::Registration for DownloadStatusResponse {
 }
 
 // =============================================================================
-// Streaming Types
+// Chat Result Types
 // =============================================================================
 
-/// A streaming chunk from the `/api/v1/chat` endpoint (SSE format).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ChatStreamChunk {
-    /// The chunk content.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
-
-    /// Whether this is the final chunk.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub done: Option<bool>,
-
-    /// Usage statistics (final chunk only).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage: Option<ChatUsage>,
+/// The provider of a tool the model called.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolProviderInfo {
+    /// A tool provided by an LM Studio plugin.
+    Plugin {
+        /// The plugin identifier.
+        plugin_id: String,
+    },
+    /// A tool provided by an ephemeral MCP server.
+    EphemeralMcp {
+        /// The MCP server label.
+        server_label: String,
+    },
 }
 
-/// Token usage statistics.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChatUsage {
-    /// Tokens in the prompt.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt_tokens: Option<u32>,
+impl schematic_define::Registration for ToolProviderInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ToolProviderInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 
-    /// Tokens generated.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub completion_tokens: Option<u32>,
+/// Why a tool call the model attempted was rejected.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct InvalidToolCallMetadata {
+    /// `invalid_name` or `invalid_arguments`.
+    #[serde(rename = "type")]
+    pub type_: String,
 
-    /// Total tokens.
+    /// The tool name the model used.
+    pub tool_name: String,
+
+    /// The arguments the model passed; only for `invalid_arguments`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub total_tokens: Option<u32>,
+    pub arguments: Option<serde_json::Value>,
+
+    /// The tool provider; only for `invalid_arguments`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_info: Option<ToolProviderInfo>,
+}
+
+impl schematic_define::Registration for InvalidToolCallMetadata {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("InvalidToolCallMetadata");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
+/// One item of a chat result's `output`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ChatOutputItem {
+    /// Text of the model's reply.
+    Message {
+        /// The reply text.
+        content: String,
+    },
+    /// A tool call the model made and its result.
+    ToolCall {
+        /// The tool name.
+        tool: String,
+        /// The arguments passed to the tool.
+        arguments: serde_json::Value,
+        /// The raw tool output.
+        output: String,
+        /// The tool provider.
+        provider_info: ToolProviderInfo,
+    },
+    /// The model's reasoning text.
+    Reasoning {
+        /// The reasoning text.
+        content: String,
+    },
+    /// A tool call that was rejected.
+    InvalidToolCall {
+        /// Why the call was invalid.
+        reason: String,
+        /// Details of the rejected call.
+        metadata: InvalidToolCallMetadata,
+    },
+}
+
+impl schematic_define::Registration for ChatOutputItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ChatOutputItem");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
+/// Token usage and performance of one chat.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ChatStats {
+    /// Input tokens, including formatting, tool definitions, and prior messages.
+    pub input_tokens: u64,
+
+    /// Total output tokens generated.
+    pub total_output_tokens: u64,
+
+    /// Output tokens spent on reasoning.
+    pub reasoning_output_tokens: u64,
+
+    /// Generation speed.
+    pub tokens_per_second: f64,
+
+    /// Seconds until the first token.
+    pub time_to_first_token_seconds: f64,
+
+    /// Seconds spent loading the model; only when the request loaded it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_load_time_seconds: Option<f64>,
+}
+
+impl schematic_define::Registration for ChatStats {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ChatStats");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
+/// The reply of `/api/v1/chat` when `stream` is false or omitted, and the
+/// `result` of the stream's final `chat.end` event.
+///
+/// Not named `ChatResponse`: that name belongs to the generated success enum
+/// of the `Chat` endpoint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ChatResult {
+    /// The loaded model instance that generated the reply.
+    pub model_instance_id: String,
+
+    /// Output items in generation order.
+    pub output: Vec<ChatOutputItem>,
+
+    /// Token usage and performance.
+    pub stats: ChatStats,
+
+    /// Response identifier starting with `resp_`; present when `store` is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_id: Option<String>,
+}
+
+impl schematic_define::Registration for ChatResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ChatResult");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
+/// The `error` object of a chat stream `error` event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ChatStreamErrorDetail {
+    /// The error category, such as `invalid_request` or `model_not_found`.
+    #[serde(rename = "type")]
+    pub type_: String,
+
+    /// Human-readable description.
+    pub message: String,
+
+    /// A more specific error code, such as `missing_required_parameter`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+
+    /// The request parameter the error relates to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub param: Option<String>,
+}
+
+impl schematic_define::Registration for ChatStreamErrorDetail {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ChatStreamErrorDetail");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
+/// One server-sent event of `/api/v1/chat` when `stream` is true, decoded
+/// from the event's `data`, whose `type` repeats the SSE event name.
+///
+/// The stream ends with [`ChatStreamEvent::ChatEnd`]. An `error` event does
+/// not end it: `chat.end` still follows with whatever was generated.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type")]
+pub enum ChatStreamEvent {
+    /// The chat began.
+    #[serde(rename = "chat.start")]
+    ChatStart {
+        /// The model instance serving the chat.
+        model_instance_id: String,
+    },
+    /// The model began loading.
+    #[serde(rename = "model_load.start")]
+    ModelLoadStart {
+        /// The model instance being loaded.
+        model_instance_id: String,
+    },
+    /// Model loading progressed.
+    #[serde(rename = "model_load.progress")]
+    ModelLoadProgress {
+        /// The model instance being loaded.
+        model_instance_id: String,
+        /// Progress from 0 to 1.
+        progress: f64,
+    },
+    /// The model finished loading.
+    #[serde(rename = "model_load.end")]
+    ModelLoadEnd {
+        /// The loaded model instance.
+        model_instance_id: String,
+        /// Seconds the load took.
+        load_time_seconds: f64,
+    },
+    /// Prompt processing began.
+    #[serde(rename = "prompt_processing.start")]
+    PromptProcessingStart,
+    /// Prompt processing progressed.
+    #[serde(rename = "prompt_processing.progress")]
+    PromptProcessingProgress {
+        /// Progress from 0 to 1.
+        progress: f64,
+    },
+    /// Prompt processing finished.
+    #[serde(rename = "prompt_processing.end")]
+    PromptProcessingEnd,
+    /// Reasoning output began.
+    #[serde(rename = "reasoning.start")]
+    ReasoningStart,
+    /// A fragment of reasoning text.
+    #[serde(rename = "reasoning.delta")]
+    ReasoningDelta {
+        /// The text fragment.
+        content: String,
+    },
+    /// Reasoning output finished.
+    #[serde(rename = "reasoning.end")]
+    ReasoningEnd,
+    /// The model began a tool call.
+    #[serde(rename = "tool_call.start")]
+    ToolCallStart {
+        /// The tool name.
+        tool: String,
+        /// The tool provider.
+        provider_info: ToolProviderInfo,
+    },
+    /// The arguments of the current tool call are complete.
+    #[serde(rename = "tool_call.arguments")]
+    ToolCallArguments {
+        /// The tool name.
+        tool: String,
+        /// The arguments, shaped by the tool.
+        arguments: serde_json::Value,
+        /// The tool provider.
+        provider_info: ToolProviderInfo,
+    },
+    /// The tool call returned.
+    #[serde(rename = "tool_call.success")]
+    ToolCallSuccess {
+        /// The tool name.
+        tool: String,
+        /// The arguments passed to the tool.
+        arguments: serde_json::Value,
+        /// The raw tool output.
+        output: String,
+        /// The tool provider.
+        provider_info: ToolProviderInfo,
+    },
+    /// The tool call was rejected.
+    #[serde(rename = "tool_call.failure")]
+    ToolCallFailure {
+        /// Why the call failed.
+        reason: String,
+        /// Details of the rejected call.
+        metadata: InvalidToolCallMetadata,
+    },
+    /// Reply text began.
+    #[serde(rename = "message.start")]
+    MessageStart,
+    /// A fragment of reply text.
+    #[serde(rename = "message.delta")]
+    MessageDelta {
+        /// The text fragment.
+        content: String,
+    },
+    /// Reply text finished.
+    #[serde(rename = "message.end")]
+    MessageEnd,
+    /// An error occurred; the stream continues to `chat.end`.
+    #[serde(rename = "error")]
+    Error {
+        /// The error details.
+        error: ChatStreamErrorDetail,
+    },
+    /// The chat finished; the stream's terminator.
+    #[serde(rename = "chat.end")]
+    ChatEnd {
+        /// The aggregated result, the same shape as the non-streaming reply.
+        result: ChatResult,
+    },
+}
+
+impl schematic_define::Registration for ChatStreamEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ChatStreamEvent");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 #[cfg(test)]
@@ -579,17 +871,5 @@ mod tests {
 
         let json = serde_json::to_string(&body).unwrap();
         assert!(json.contains("lmstudio-community/gemma-2-2b-it-GGUF"));
-    }
-
-    #[test]
-    fn chat_stream_chunk_deserialization() {
-        let json = r#"{
-            "content": "Hello",
-            "done": false
-        }"#;
-
-        let chunk: ChatStreamChunk = serde_json::from_str(json).unwrap();
-        assert_eq!(chunk.content, Some("Hello".to_string()));
-        assert_eq!(chunk.done, Some(false));
     }
 }

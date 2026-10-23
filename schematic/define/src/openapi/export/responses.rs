@@ -188,22 +188,21 @@ pub(super) fn error_keys(table: &ErrorTable) -> Vec<(StatusCode, &ErrorEntry)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::response::ApiResponse;
 
-    fn lone(response: ApiResponse) -> Responses {
-        map_responses(&[SuccessShape::from(response)], &ErrorTable::resolve(&[], &[], false)).unwrap()
+    fn lone(response: SuccessShape) -> Responses {
+        map_responses(&[response], &ErrorTable::resolve(&[], &[], false)).unwrap()
     }
 
     #[test]
     fn map_responses_json() {
-        let responses = lone(ApiResponse::json_type("UserResponse"));
+        let responses = lone(SuccessShape::json_type("UserResponse"));
 
         assert!(responses.responses.contains_key(&StatusCode::Code(200)));
     }
 
     #[test]
     fn map_responses_text() {
-        let responses = lone(ApiResponse::Text);
+        let responses = lone(SuccessShape::text());
 
         let resp = responses.responses.get(&StatusCode::Code(200)).unwrap();
         if let ReferenceOr::Item(r) = resp {
@@ -213,7 +212,7 @@ mod tests {
 
     #[test]
     fn map_responses_binary() {
-        let responses = lone(ApiResponse::Binary);
+        let responses = lone(SuccessShape::binary());
 
         let resp = responses.responses.get(&StatusCode::Code(200)).unwrap();
         if let ReferenceOr::Item(r) = resp {
@@ -223,7 +222,7 @@ mod tests {
 
     #[test]
     fn map_responses_empty() {
-        let responses = lone(ApiResponse::Empty);
+        let responses = lone(SuccessShape::empty());
 
         assert!(responses.responses.contains_key(&StatusCode::Code(204)));
     }

@@ -23,7 +23,7 @@
 use std::path::Path;
 
 use schematic_define::{
-    AddressRule, ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, AuthPolicy, AuthStrategy,
+    AddressRule, ApiKeyLocation, ApiRequest, AuthMethod, AuthPolicy, AuthStrategy,
     AuthorizationCodeGrant, CrossOrigin, Endpoint, EndpointParams, EnvList, ErrorEntry, FormField,
     GraphQlOperation, GraphQlSurface, GraphQlVariables, OAuth2ClientAuthMethod, OAuth2Config, ParamDef,
     ParamStyle, PkceRequirement, QueryParamType, ResponseShape, RestApi, RestMethod, StatusMatch, StreamEnd,
@@ -263,7 +263,7 @@ pub struct Problem {
     ),
 ];
 
-fn endpoint(id: &str, method: RestMethod, path: &str, response: ApiResponse) -> Endpoint {
+fn endpoint(id: &str, method: RestMethod, path: &str, response: Vec<SuccessShape>) -> Endpoint {
     { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = format!("{id} fixture endpoint"); fixture.request = None; fixture.response = response; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
@@ -294,27 +294,27 @@ fn located_params(query: Vec<ParamDef>, header: Vec<ParamDef>, cookie: Vec<Param
 fn pages_fixture() -> RestApi {
     let int = |name| named_param(name, QueryParamType::Integer);
     let mut list_entries =
-        endpoint("ListEntries", RestMethod::Get, "/entries", ApiResponse::json_vec_type("Entry"));
+        endpoint("ListEntries", RestMethod::Get, "/entries", vec![SuccessShape::json_vec_type("Entry")]);
     list_entries.params = Some(located_params(
         vec![int("page"), int("per_page"), named_param("state", QueryParamType::String)],
         vec![],
         vec![],
     ));
     let mut list_cursor =
-        endpoint("ListCursor", RestMethod::Get, "/cursor", ApiResponse::json_type("EntryCursorPage"));
+        endpoint("ListCursor", RestMethod::Get, "/cursor", vec![SuccessShape::json_type("EntryCursorPage")]);
     list_cursor.params = Some(located_params(vec![named_param("after", QueryParamType::String)], vec![], vec![]));
     let list_linked =
-        endpoint("ListLinked", RestMethod::Get, "/linked", ApiResponse::json_type("EntryLinkPage"));
+        endpoint("ListLinked", RestMethod::Get, "/linked", vec![SuccessShape::json_type("EntryLinkPage")]);
     let mut allowed_linked = list_linked.clone();
     allowed_linked.id = "ListAllowedLinked".to_string();
     allowed_linked.path = "/allowed-linked".to_string();
     let required = |name| ParamDef { rust_name: None, secret: false, pager_managed: false, required: true, ..int(name) };
     let mut list_required =
-        endpoint("ListRequired", RestMethod::Get, "/required", ApiResponse::json_vec_type("Entry"));
+        endpoint("ListRequired", RestMethod::Get, "/required", vec![SuccessShape::json_vec_type("Entry")]);
     // `scope` is required and no strategy adopts it: the one `new()` argument.
     let scope = ParamDef { required: true, ..named_param("scope", QueryParamType::String) };
     list_required.params = Some(located_params(vec![required("page"), scope, required("limit")], vec![], vec![]));
-    let scan_entries = endpoint("ScanEntries", RestMethod::Get, "/scan", ApiResponse::json_vec_type("Entry"));
+    let scan_entries = endpoint("ScanEntries", RestMethod::Get, "/scan", vec![SuccessShape::json_vec_type("Entry")]);
 
     let mut api = fixture_api(
         "FixturePages",
@@ -379,7 +379,7 @@ fn fixture_apis() -> Vec<RestApi> {
         "ListWidgets",
         RestMethod::Get,
         "/widgets",
-        ApiResponse::json_type("WidgetList"),
+        vec![SuccessShape::json_type("WidgetList")],
     );
     list_widgets.params = Some(EndpointParams::default().with_query_params(vec![
         ("limit", QueryParamType::Integer, false, None),
@@ -387,17 +387,17 @@ fn fixture_apis() -> Vec<RestApi> {
         ("tag", QueryParamType::Array(Box::new(QueryParamType::String)), false, None),
     ]));
     let mut create_widget =
-        endpoint("CreateWidget", RestMethod::Post, "/widgets", ApiResponse::json_type("Widget"));
+        endpoint("CreateWidget", RestMethod::Post, "/widgets", vec![SuccessShape::json_type("Widget")]);
     create_widget.request = Some(ApiRequest::json_type("CreateWidget"));
     let get_widget = endpoint(
         "GetWidget",
         RestMethod::Get,
         "/widgets/{widget_id}",
-        ApiResponse::json_type("Widget"),
+        vec![SuccessShape::json_type("Widget")],
     );
     // Static endpoint headers, including a Cookie, that parameters must
     // override (header) or merge with (cookie).
-    let mut search = endpoint("SearchWidgets", RestMethod::Get, "/widgets/search", ApiResponse::Empty);
+    let mut search = endpoint("SearchWidgets", RestMethod::Get, "/widgets/search", vec![SuccessShape::empty()]);
     search.headers = vec![
         ("X-Mode".to_string(), "static".to_string()),
         ("Cookie".to_string(), "theme=dark; session=static".to_string()),
@@ -416,35 +416,35 @@ fn fixture_apis() -> Vec<RestApi> {
         ],
     ));
 
-    let mut upload = endpoint("UploadFile", RestMethod::Post, "/files", ApiResponse::json_type("Accepted"));
+    let mut upload = endpoint("UploadFile", RestMethod::Post, "/files", vec![SuccessShape::json_type("Accepted")]);
     upload.request = Some(ApiRequest::form_data(vec![
         FormField::text("purpose"),
         FormField::file("file"),
     ]));
-    let mut submit = endpoint("SubmitForm", RestMethod::Post, "/forms", ApiResponse::json_type("Accepted"));
+    let mut submit = endpoint("SubmitForm", RestMethod::Post, "/forms", vec![SuccessShape::json_type("Accepted")]);
     submit.request = Some(ApiRequest::url_encoded(vec![
         FormField::text("name"),
         FormField::text("note").optional(),
     ]));
 
-    let mut send_note = endpoint("SendNote", RestMethod::Post, "/notes", ApiResponse::Empty);
+    let mut send_note = endpoint("SendNote", RestMethod::Post, "/notes", vec![SuccessShape::empty()]);
     send_note.request = Some(ApiRequest::Text {
         content_type: "text/plain; charset=utf-8".to_string(),
     });
-    let mut upload_blob = endpoint("UploadBlob", RestMethod::Put, "/blobs/{name}", ApiResponse::Empty);
+    let mut upload_blob = endpoint("UploadBlob", RestMethod::Put, "/blobs/{name}", vec![SuccessShape::empty()]);
     upload_blob.request = Some(ApiRequest::Binary {
         content_type: "application/octet-stream".to_string(),
     });
 
     // The declared `api_key` query parameter shares the credential's name.
-    let mut list_things = endpoint("ListThings", RestMethod::Get, "/things", ApiResponse::Empty);
+    let mut list_things = endpoint("ListThings", RestMethod::Get, "/things", vec![SuccessShape::empty()]);
     list_things.params = Some(located_params(
         vec![named_param("q", QueryParamType::String), named_param("api_key", QueryParamType::String)],
         vec![],
         vec![],
     ));
     // The declared `sid` cookie parameter shares the credential's name.
-    let mut get_profile = endpoint("GetProfile", RestMethod::Get, "/profile", ApiResponse::Empty);
+    let mut get_profile = endpoint("GetProfile", RestMethod::Get, "/profile", vec![SuccessShape::empty()]);
     get_profile.params = Some(located_params(
         vec![],
         vec![],
@@ -480,7 +480,7 @@ fn fixture_apis() -> Vec<RestApi> {
         "FixturePolicyKey",
         "fixture_policy_key",
         AuthStrategy::None,
-        vec![endpoint("Ping", RestMethod::Get, "/ping", ApiResponse::Empty)],
+        vec![endpoint("Ping", RestMethod::Get, "/ping", vec![SuccessShape::empty()])],
     );
     policy_key.auth_policy = Some(AuthPolicy {
         explicit: vec![AuthMethod::ApiKeyParam {
@@ -500,7 +500,7 @@ fn fixture_apis() -> Vec<RestApi> {
 
     // Secret names, a request-id header, and the tightest cross-origin policy,
     // all from the definition. Neither secret name is a built-in one.
-    let mut echo = endpoint("Echo", RestMethod::Get, "/echo", ApiResponse::json_type("Echo"));
+    let mut echo = endpoint("Echo", RestMethod::Get, "/echo", vec![SuccessShape::json_type("Echo")]);
     echo.params = Some(located_params(
         vec![ParamDef { secret: true, ..named_param("pin_code", QueryParamType::String) }, named_param("page", QueryParamType::String)],
         vec![ParamDef { secret: true, ..named_param("X-Pin", QueryParamType::String) }],
@@ -510,14 +510,14 @@ fn fixture_apis() -> Vec<RestApi> {
         "FixtureSettings",
         "fixture_settings",
         AuthStrategy::None,
-        vec![echo, endpoint("Moved", RestMethod::Get, "/moved", ApiResponse::Empty)],
+        vec![echo, endpoint("Moved", RestMethod::Get, "/moved", vec![SuccessShape::empty()])],
     );
     settings.request_id_header = Some("x-request-id".to_string());
     settings.cross_origin = CrossOrigin::deny();
 
     // Names the generator must rename: a `new` endpoint method (an API-struct
     // method), a `full` setter (a shared call method), and a keyword setter.
-    let mut list_items = endpoint("ListItems", RestMethod::Get, "/owners/{owner}/items", ApiResponse::Empty);
+    let mut list_items = endpoint("ListItems", RestMethod::Get, "/owners/{owner}/items", vec![SuccessShape::empty()]);
     list_items.params = Some(located_params(
         vec![
             named_param("full", QueryParamType::Boolean),
@@ -527,7 +527,7 @@ fn fixture_apis() -> Vec<RestApi> {
         vec![],
         vec![],
     ));
-    let mut tree = endpoint("GetTree", RestMethod::Get, "/tree", ApiResponse::Empty);
+    let mut tree = endpoint("GetTree", RestMethod::Get, "/tree", vec![SuccessShape::empty()]);
     tree.params = Some(located_params(
         vec![
             ParamDef { rust_name: Some("git_ref".to_string()), ..named_param("ref", QueryParamType::String) },
@@ -542,9 +542,9 @@ fn fixture_apis() -> Vec<RestApi> {
         "fixture_names",
         AuthStrategy::None,
         vec![
-            endpoint("New", RestMethod::Post, "/new", ApiResponse::Empty), list_items, tree,
-            endpoint("AllowedMove", RestMethod::Get, "/allowed-move", ApiResponse::Empty),
-            endpoint("SiblingMove", RestMethod::Get, "/sibling-move", ApiResponse::Empty),
+            endpoint("New", RestMethod::Post, "/new", vec![SuccessShape::empty()]), list_items, tree,
+            endpoint("AllowedMove", RestMethod::Get, "/allowed-move", vec![SuccessShape::empty()]),
+            endpoint("SiblingMove", RestMethod::Get, "/sibling-move", vec![SuccessShape::empty()]),
         ],
     );
 
@@ -561,9 +561,9 @@ fn fixture_apis() -> Vec<RestApi> {
             "fixture_basic",
             AuthStrategy::Basic { username_env: EnvList::new(vec![]), password_env: EnvList::single("FIXTURE_BASIC_TOKEN") },
             vec![
-                endpoint("DeleteThing", RestMethod::Delete, "/things/{id}", ApiResponse::Empty),
-                endpoint("GetNote", RestMethod::Get, "/note", ApiResponse::Text),
-                endpoint("GetBlob", RestMethod::Get, "/blob", ApiResponse::Binary),
+                endpoint("DeleteThing", RestMethod::Delete, "/things/{id}", vec![SuccessShape::empty()]),
+                endpoint("GetNote", RestMethod::Get, "/note", vec![SuccessShape::text()]),
+                endpoint("GetBlob", RestMethod::Get, "/blob", vec![SuccessShape::binary()]),
                 send_note,
                 upload_blob,
             ],
@@ -580,7 +580,7 @@ fn fixture_apis() -> Vec<RestApi> {
             "FixtureOAuth",
             "fixture_oauth",
             AuthStrategy::OAuth2(oauth),
-            vec![endpoint("WhoAmI", RestMethod::Get, "/me", ApiResponse::Empty)],
+            vec![endpoint("WhoAmI", RestMethod::Get, "/me", vec![SuccessShape::empty()])],
         ),
         settings,
         names,
@@ -593,11 +593,6 @@ fn fixture_apis() -> Vec<RestApi> {
 
 fn named(name: &str) -> TypeRef { TypeRef::Named(name.to_string()) }
 
-fn previewed(id: &str, method: RestMethod, path: &str, shapes: Vec<SuccessShape>) -> Endpoint {
-    let mut fixture = endpoint(id, method, path, ApiResponse::Empty);
-    fixture.shapes_preview = shapes;
-    fixture
-}
 
 fn shape(kind: ResponseShape, edit: impl FnOnce(&mut SuccessShape)) -> SuccessShape {
     let mut shape = SuccessShape::new(kind);
@@ -605,12 +600,9 @@ fn shape(kind: ResponseShape, edit: impl FnOnce(&mut SuccessShape)) -> SuccessSh
     shape
 }
 
-/// Several success shapes, streams, and declared errors. `Endpoint::response`
-/// cannot store these until the response model switch, so the endpoints
-/// carry them in the hidden `shapes_preview` seam, which every generator
-/// path reads through `Endpoint::success_shapes()`.
+/// Several success shapes, streams, and declared errors.
 fn shapes_fixture() -> RestApi {
-    let mut create = previewed("CreateMessage", RestMethod::Post, "/messages", vec![
+    let mut create = endpoint("CreateMessage", RestMethod::Post, "/messages", vec![
         shape(ResponseShape::Json(named("Message")), |s| s.note = Some("returned when `stream` is false or omitted".into())),
         shape(
             ResponseShape::Stream { framing: StreamFraming::Sse(named("Delta")), end: StreamEnd::DataLineEquals("[DONE]".into()), keep: false },
@@ -618,21 +610,21 @@ fn shapes_fixture() -> RestApi {
         ),
     ]);
     create.errors = vec![ErrorEntry::new(StatusMatch::exact(404), ResponseShape::Text)];
-    let chunks = previewed("StreamChunks", RestMethod::Get, "/chunks", vec![SuccessShape::new(ResponseShape::Stream {
+    let chunks = endpoint("StreamChunks", RestMethod::Get, "/chunks", vec![SuccessShape::new(ResponseShape::Stream {
         framing: StreamFraming::Ndjson(named("Chunk")),
         end: StreamEnd::FieldEquals { field: "done".into(), value: serde_json::json!(true) },
         keep: true,
     })]);
-    let mut download = previewed("Download", RestMethod::Get, "/download", vec![shape(
+    let mut download = endpoint("Download", RestMethod::Get, "/download", vec![shape(
         ResponseShape::Stream { framing: StreamFraming::Bytes, end: StreamEnd::ConnectionClose, keep: false },
         |s| s.content_type = Some("audio/mpeg".into()),
     )]);
     download.no_declared_errors = true;
-    let source = previewed("GetSource", RestMethod::Get, "/source/{path}", vec![
+    let source = endpoint("GetSource", RestMethod::Get, "/source/{path}", vec![
         shape(ResponseShape::Json(named("Listing")), |s| s.variant = Some("Directory".into())),
         shape(ResponseShape::Binary, |s| { s.fallback = true; s.variant = Some("File".into()); }),
     ]);
-    let mut submit = previewed("Submit", RestMethod::Post, "/jobs", vec![
+    let mut submit = endpoint("Submit", RestMethod::Post, "/jobs", vec![
         shape(ResponseShape::Json(named("Record")), |s| { s.statuses = vec![200]; s.variant = Some("Record".into()); }),
         shape(ResponseShape::Json(named("Job")), |s| { s.statuses = vec![202]; s.variant = Some("Job".into()); }),
     ]);
@@ -660,7 +652,7 @@ fn graphql_fixture() -> RestApi {
     rename.data = named("Login");
     rename.no_declared_errors = true;
     let mut api = fixture_api("FixtureGraphQl", "fixture_graphql", AuthStrategy::None, vec![
-        endpoint("GetUser", RestMethod::Get, "/user", ApiResponse::json_type("Login")),
+        endpoint("GetUser", RestMethod::Get, "/user", vec![SuccessShape::json_type("Login")]),
     ]);
     api.base_url = "http://127.0.0.1:1/api/v3".to_string();
     let mut surface = GraphQlSurface::new(AddressRule::github());
@@ -681,7 +673,7 @@ fn query_param(name: &str, required: bool, param_type: QueryParamType, style: Pa
 fn query_fixture() -> RestApi {
     let strings = || QueryParamType::Array(Box::new(QueryParamType::String));
     let enums = |values: &[&str]| QueryParamType::Enum(values.iter().map(|value| value.to_string()).collect());
-    let mut find = endpoint("Find", RestMethod::Get, "/find", ApiResponse::Empty);
+    let mut find = endpoint("Find", RestMethod::Get, "/find", vec![SuccessShape::empty()]);
     find.params = Some(located_params(
         vec![
             query_param("q", true, QueryParamType::String, ParamStyle::Form, false),
@@ -700,7 +692,7 @@ fn query_fixture() -> RestApi {
         vec![],
         vec![],
     ));
-    let mut browse = endpoint("Browse", RestMethod::Get, "/browse", ApiResponse::Empty);
+    let mut browse = endpoint("Browse", RestMethod::Get, "/browse", vec![SuccessShape::empty()]);
     browse.params = Some(located_params(
         vec![
             query_param("page", false, QueryParamType::Integer, ParamStyle::Form, true),
@@ -2091,7 +2083,8 @@ fn slow_real_apis_compile_offline() {
     // Partial generation of one Ollama member over the full output: both
     // Ollama members are regenerated and every other module is kept as it is.
     // The compile below then builds the retained-plus-regenerated crate.
-    let ollama = fresh.src_dir.join("ollama.rs");
+    // Ollama's module group is large enough to be written as a directory.
+    let ollama = fresh.src_dir.join("ollama/mod.rs");
     let anthropic = fresh.src_dir.join("anthropic.rs");
     let pristine_anthropic = std::fs::read(&anthropic).unwrap();
     for edited in [&ollama, &anthropic] {

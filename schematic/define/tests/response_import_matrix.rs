@@ -9,7 +9,7 @@
 //! edit to that unedited fixture, as JSON and re-serialized as YAML, and goes
 //! through the public importer: a rejection is an import error naming the
 //! member. Cells the importer accepts are classified by
-//! `classify_responses`, which production switches to in Phase 5. Exact
+//! `classify_responses`, which production import runs per operation. Exact
 //! textual duplicate keys exist only in text, so those cells run on JSON;
 //! duplicates by spelling (`4XX`/`4xx`, media case) run in both formats.
 
@@ -58,7 +58,7 @@ fn fixture() -> Value {
         .endpoints(endpoints).build().unwrap();
     let mut fallback = SuccessShape::new(ResponseShape::Binary);
     fallback.fallback = true;
-    api.endpoints[0].shapes_preview = vec![
+    api.endpoints[0].response = vec![
         SuccessShape::new(ResponseShape::Json(named("Message"))),
         SuccessShape::new(ResponseShape::Stream { framing: StreamFraming::Sse(named("Event")), end: StreamEnd::ConnectionClose, keep: false }),
         fallback,
@@ -69,7 +69,7 @@ fn fixture() -> Value {
         shape.json_tag = Some(JsonTag::Field { name: "type".into(), value: json!(value) });
         shape
     };
-    api.endpoints[1].shapes_preview = vec![tagged("Directory", "dir"), tagged("File", "file")];
+    api.endpoints[1].response = vec![tagged("Directory", "dir"), tagged("File", "file")];
 
     let mut document = serde_json::to_value(export(&api, &ExportOptions::new()).unwrap()).unwrap();
     let not_found = document.pointer(REFERENCED).unwrap().clone();

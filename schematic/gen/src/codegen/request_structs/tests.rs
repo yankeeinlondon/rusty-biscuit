@@ -1,5 +1,5 @@
 use super::*;
-use schematic_define::{ApiRequest, ApiResponse, QueryParamType, RestMethod};
+use schematic_define::{ApiRequest, SuccessShape, QueryParamType, RestMethod};
 
 fn make_endpoint(
     id: &str,
@@ -7,7 +7,7 @@ fn make_endpoint(
     path: &str,
     request: Option<ApiRequest>,
 ) -> Endpoint {
-    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = format!("Test endpoint for {}", id); fixture.request = request; fixture.response = ApiResponse::json_type("TestResponse"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = format!("Test endpoint for {}", id); fixture.request = request; fixture.response = vec![SuccessShape::json_type("TestResponse")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 #[test]
@@ -798,7 +798,7 @@ fn make_endpoint_with_query(
         })
     };
 
-    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = format!("Test endpoint for {}", id); fixture.request = request; fixture.response = ApiResponse::json_type("TestResponse"); fixture.headers = vec![]; fixture.params = params; fixture.cross_origin = None; fixture.pagination = None; fixture }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = format!("Test endpoint for {}", id); fixture.request = request; fixture.response = vec![SuccessShape::json_type("TestResponse")]; fixture.headers = vec![]; fixture.params = params; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 #[test]
@@ -1038,7 +1038,7 @@ mod pagination_doc_tests {
 
     fn make_endpoint_with_pagination(id: &str, path: &str, params: EndpointParams) -> Endpoint {
 
-        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = RestMethod::Get; fixture.path = path.to_string(); fixture.description = format!("Test endpoint for {}", id); fixture.request = None; fixture.response = ApiResponse::json_type("TestResponse"); fixture.headers = vec![]; fixture.params = Some(params); fixture.cross_origin = None; fixture.pagination = None; fixture }
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = RestMethod::Get; fixture.path = path.to_string(); fixture.description = format!("Test endpoint for {}", id); fixture.request = None; fixture.response = vec![SuccessShape::json_type("TestResponse")]; fixture.headers = vec![]; fixture.params = Some(params); fixture.cross_origin = None; fixture.pagination = None; fixture }
     }
 
     #[test]
@@ -1374,7 +1374,7 @@ fn qualified_and_container_body_examples_are_valid_rust() {
 /// POST endpoint sending and returning `reference`.
 fn wrapped_api(reference: schematic_define::TypeRef) -> (RestApi, Endpoint) {
     let mut endpoint = make_endpoint("Wrap", RestMethod::Post, "/wrap", Some(ApiRequest::json(reference.clone())));
-    endpoint.response = ApiResponse::json(reference);
+    endpoint.response = vec![SuccessShape::json(reference)];
     let mut api = crate::test_utils::api_for(&endpoint);
     if let Some(model) = api.schemas.iter_mut().find(|c| c.name == "Model") {
         model.rust_path = Some("crate::types::Model".into());
@@ -1420,7 +1420,7 @@ fn a_json_form_part_spells_its_rust_type_through_the_components() {
         "/upload",
         Some(ApiRequest::form_data(vec![FormField::json("meta", reference)])),
     );
-    endpoint.response = ApiResponse::Empty;
+    endpoint.response = vec![SuccessShape::empty()];
     let mut api = crate::test_utils::api_for(&endpoint);
     api.schemas[0].rust_path = Some("crate::types::Model".into());
 

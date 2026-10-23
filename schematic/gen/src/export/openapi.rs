@@ -1159,11 +1159,11 @@ mod tests {
         auth: schematic_define::AuthStrategy,
         endpoints: &[(&str, schematic_define::RestMethod, &str)],
     ) -> schematic_define::RestApi {
-        use schematic_define::{ApiResponse, Endpoint, RestApi};
+        use schematic_define::{SuccessShape, Endpoint, RestApi};
 
         { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} synthetic API", name); fixture.base_url = format!("https://{}.example.com", name.to_lowercase()); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.headers = vec![]; fixture.endpoints = endpoints
                 .iter()
-                .map(|(id, method, path)| { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = *method; fixture.path = path.to_string(); fixture.description = format!("Endpoint {}", id); fixture.request = None; fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture })
+                .map(|(id, method, path)| { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = *method; fixture.path = path.to_string(); fixture.description = format!("Endpoint {}", id); fixture.request = None; fixture.response = vec![SuccessShape::empty()]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture })
                 .collect(); fixture.module_path = Some(module.to_string()); fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }
     }
 

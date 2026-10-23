@@ -6,7 +6,7 @@ use schematic_define::pagination::{
     validate_pagination,
 };
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, ParamDef,
+    ApiRequest, SuccessShape, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, ParamDef,
     PrimitiveType, QueryParamType, RestApi, RestMethod, SchemaComponent, TypeRef,
 };
 
@@ -55,7 +55,7 @@ pub fn registered(mut api: RestApi) -> RestApi {
 }
 
 pub fn endpoint(id: &str, method: RestMethod, path: &str, response: &str) -> Endpoint {
-    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = String::new(); fixture.request = (method != RestMethod::Get).then(|| ApiRequest::json_type("Body")); fixture.response = ApiResponse::Json(reference(response)); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = String::new(); fixture.request = (method != RestMethod::Get).then(|| ApiRequest::json_type("Body")); fixture.response = vec![SuccessShape::json(reference(response))]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 pub fn get(id: &str, path: &str, response: &str) -> Endpoint {

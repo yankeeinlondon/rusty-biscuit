@@ -4,7 +4,6 @@ mod responses;
 mod schema;
 
 pub use classify::{ResponseClassification, classify_responses};
-pub use responses::map_responses;
 pub use schema::{SchemaMapResult, map_all_schemas};
 
 use std::collections::HashSet;
@@ -40,6 +39,7 @@ pub fn map_server(servers: &[Server], policy: &BaseUrlPolicy) -> String {
 }
 
 pub fn map_operation(
+    api: &str,
     op: &Operation,
     path: &str,
     method: RestMethod,
@@ -78,18 +78,19 @@ pub fn map_operation(
     let request =
         responses::map_request_body(&op.request_body, resolver, &mut diagnostics, options);
 
-    let response = map_responses(&op.responses, resolver, &mut diagnostics, options);
+    let classification = classify_responses(api, &id, &op.responses, resolver).map_err(|error| error.to_string())?;
+    diagnostics.extend(classification.diagnostics);
 
     let params = parameters::map_parameters(&op.parameters, resolver, &mut diagnostics);
 
     Ok((
-        Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false, shapes_preview: vec![],
+        Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: classification.errors, no_declared_errors: false,
             id,
             method,
             path: path.to_string(),
             description,
             request,
-            response,
+            response: classification.successes,
             headers: vec![],
             params: if params.query.is_empty()
                 && params.header.is_empty()

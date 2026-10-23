@@ -26,7 +26,7 @@ pub use types::*;
 #[cfg(test)]
 use schematic_define::ApiRequest;
 #[cfg(test)]
-use schematic_define::ApiResponse;
+use schematic_define::ResponseShape;
 use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 use schematic_define::{
@@ -265,12 +265,12 @@ mod tests {
         assert!(
             api.endpoints
                 .iter()
-                .any(|ep| matches!(ep.response, ApiResponse::Binary))
+                .any(|ep| matches!(ep.response[0].shape, ResponseShape::Binary))
         );
         assert!(
             api.endpoints
                 .iter()
-                .any(|ep| matches!(ep.response, ApiResponse::Text))
+                .any(|ep| matches!(ep.response[0].shape, ResponseShape::Text))
         );
     }
     #[test]

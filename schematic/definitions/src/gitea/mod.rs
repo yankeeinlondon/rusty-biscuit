@@ -304,7 +304,7 @@ pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::{ApiResponse, RestMethod, TypeRef};
+    use schematic_define::{ResponseShape, RestMethod, TypeRef};
     use schematic_define::pagination::{resolve, Resolution};
 
     // =============================================
@@ -412,7 +412,7 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/repos/{owner}/{repo}");
         assert!(endpoint.request.is_none());
-        assert!(matches!(endpoint.response, ApiResponse::Json { .. }));
+        assert!(matches!(endpoint.response[0].shape, ResponseShape::Json { .. }));
     }
 
     #[test]
@@ -441,7 +441,7 @@ mod tests {
 
         assert_eq!(endpoint.method, RestMethod::Get);
         assert!(endpoint.path.contains("/raw/"));
-        assert!(matches!(endpoint.response, ApiResponse::Text));
+        assert!(matches!(endpoint.response[0].shape, ResponseShape::Text));
     }
 
     #[test]
@@ -583,8 +583,8 @@ mod tests {
             .expect("GetTagReference endpoint missing");
 
         // Gitea returns an array for /git/refs/{ref}, unlike GitHub
-        match &endpoint.response {
-            ApiResponse::Json(schema) => {
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(schema) => {
                 assert!(
                     matches!(schema, TypeRef::Array(_)),
                     "GetTagReference should return Vec<GitRef>, got {:?}",
@@ -607,8 +607,8 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/repos/{owner}/{repo}/branches/{branch}");
         assert!(endpoint.request.is_none());
-        match &endpoint.response {
-            ApiResponse::Json(schema) => assert!(*schema == TypeRef::Named("Branch".into())),
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(schema) => assert!(*schema == TypeRef::Named("Branch".into())),
             _ => panic!("Expected JSON response"),
         }
         assert!(matches!(api.auth, AuthStrategy::ApiKey { .. }));
@@ -645,8 +645,8 @@ mod tests {
 
         for id in list_endpoints {
             let endpoint = api.endpoints.iter().find(|e| e.id == id).unwrap();
-            match &endpoint.response {
-                ApiResponse::Json(schema) => {
+            match &endpoint.response[0].shape {
+                ResponseShape::Json(schema) => {
                     assert!(
                         matches!(schema, TypeRef::Array(_)),
                         "Endpoint {} should return Vec type, got {:?}",
@@ -675,7 +675,7 @@ mod tests {
             let endpoint = api.endpoints.iter().find(|e| e.id == id).unwrap();
             // GetRepositoryContentRaw returns Text, which is fine; only
             // assert single-item shape for JSON responses.
-            if let ApiResponse::Json(schema) = &endpoint.response {
+            if let ResponseShape::Json(schema) = &endpoint.response[0].shape {
                 assert!(
                     !matches!(schema, TypeRef::Array(_)),
                     "Endpoint {} should return single item, not Vec",
@@ -743,8 +743,8 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/orgs/{org}/repos");
 
-        match &endpoint.response {
-            ApiResponse::Json(schema) => {
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(schema) => {
                 assert!(
                     matches!(schema, TypeRef::Array(_)),
                     "ListOrgRepos should return Vec type, got {:?}",

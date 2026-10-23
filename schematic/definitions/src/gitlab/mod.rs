@@ -184,7 +184,7 @@ pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
 mod tests {
     use super::*;
     use schematic_define::QueryParamType;
-    use schematic_define::{ApiResponse, RestMethod, TypeRef};
+    use schematic_define::{ResponseShape, RestMethod, TypeRef};
     use schematic_define::pagination::{resolve, Resolution};
 
     // =============================================
@@ -295,8 +295,8 @@ mod tests {
             "Path should not contain query params"
         );
         assert!(endpoint.request.is_none());
-        match &endpoint.response {
-            schematic_define::ApiResponse::Json(schema) => {
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(schema) => {
                 assert!(matches!(schema, TypeRef::Array(_)));
             }
             _ => panic!("Expected JSON response"),
@@ -329,7 +329,7 @@ mod tests {
         assert_eq!(git_ref.rust_name.as_deref(), Some("git_ref"));
         assert!(git_ref.required);
         assert_eq!(git_ref.param_type, QueryParamType::String);
-        assert!(matches!(&endpoint.response, ApiResponse::Json(schema) if *schema == TypeRef::Named("FileContent".into())));
+        assert!(matches!(&endpoint.response[0].shape, ResponseShape::Json(schema) if *schema == TypeRef::Named("FileContent".into())));
     }
 
     #[test]
@@ -454,8 +454,8 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/projects/{id}/repository/branches/{branch}");
         assert!(endpoint.request.is_none());
-        match &endpoint.response {
-            schematic_define::ApiResponse::Json(schema) => {
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(schema) => {
                 assert!(*schema == TypeRef::Named("Branch".into()));
             }
             _ => panic!("Expected JSON response"),
@@ -515,8 +515,8 @@ mod tests {
 
         for id in list_endpoints {
             let endpoint = api.endpoints.iter().find(|e| e.id == id).unwrap();
-            match &endpoint.response {
-                schematic_define::ApiResponse::Json(schema) => {
+            match &endpoint.response[0].shape {
+                ResponseShape::Json(schema) => {
                     assert!(
                         matches!(schema, TypeRef::Array(_)),
                         "Endpoint {} should return Vec type, got {:?}",
@@ -547,8 +547,8 @@ mod tests {
 
         for id in single_endpoints {
             let endpoint = api.endpoints.iter().find(|e| e.id == id).unwrap();
-            match &endpoint.response {
-                schematic_define::ApiResponse::Json(schema) => {
+            match &endpoint.response[0].shape {
+                ResponseShape::Json(schema) => {
                     assert!(
                         !matches!(schema, TypeRef::Array(_)),
                         "Endpoint {} should return single item, not Vec",
@@ -617,8 +617,8 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/projects/{id}");
 
-        match &endpoint.response {
-            schematic_define::ApiResponse::Json(schema) => {
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(schema) => {
                 assert!(*schema == TypeRef::Named("Project".into()));
             }
             _ => panic!("Expected JSON response"),
@@ -637,8 +637,8 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/projects/{id}/pipelines");
 
-        match &endpoint.response {
-            schematic_define::ApiResponse::Json(schema) => {
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(schema) => {
                 assert!(matches!(schema, TypeRef::Array(_)));
             }
             _ => panic!("Expected JSON response"),
@@ -663,8 +663,8 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/groups/{id}/projects");
 
-        match &endpoint.response {
-            schematic_define::ApiResponse::Json(schema) => {
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(schema) => {
                 assert!(matches!(schema, TypeRef::Array(_)));
             }
             _ => panic!("Expected JSON response"),

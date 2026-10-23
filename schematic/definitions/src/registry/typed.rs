@@ -33,7 +33,7 @@ pub fn assemble_module_group(
 mod tests {
     use super::*;
     use super::super::registered_names;
-    use schematic_define::{ApiResponse, Endpoint, TypeRef, definition_type, rust_path};
+    use schematic_define::{SuccessShape, Endpoint, TypeRef, definition_type, rust_path};
     use schemars::JsonSchema;
     use crate::huggingface::CommitInfo;
     mod ollama_fixture {
@@ -96,7 +96,7 @@ mod tests {
     fn a_dangling_reference_fails_group_assembly() {
         let error = assemble_module_group("::fixture", |ctx| {
             let mut api = fixture_api::<Nested>(ctx, "Fixture")?;
-            api.endpoints[0].response = ApiResponse::json(TypeRef::Array(Box::new(TypeRef::Named("Missing".into()))));
+            api.endpoints[0].response = vec![SuccessShape::json(TypeRef::Array(Box::new(TypeRef::Named("Missing".into()))))];
             Ok(vec![api])
         }).unwrap_err();
         assert_eq!(error, DefinitionError::UnresolvedReference { api: "Fixture".into(), endpoint: "Get".into(), name: "Missing".into() });

@@ -11763,6 +11763,7 @@ dependencies = [
 name = "schematic-definitions"
 version = "0.1.0"
 dependencies = [
+ "biscuit-test-harness",
  "indexmap 2.14.0",
  "schemars 1.2.1",
  "schematic-define",

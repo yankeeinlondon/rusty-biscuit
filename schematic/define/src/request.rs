@@ -679,7 +679,7 @@ mod tests {
 
     #[test]
     fn integration_mixed_endpoint_types() {
-        use crate::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+        use crate::{SuccessShape, AuthStrategy, Endpoint, RestApi, RestMethod};
 
         // Create an API with mixed request types
         let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None,
@@ -693,19 +693,19 @@ mod tests {
             headers: vec![],
             endpoints: vec![
                 // JSON endpoint
-                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false, shapes_preview: vec![],
+                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "CreateFolder".to_string(),
                     method: RestMethod::Post,
                     path: "/folders".to_string(),
                     description: "Create a new folder".to_string(),
                     request: Some(ApiRequest::json_type("CreateFolderRequest")),
-                    response: ApiResponse::json_type("Folder"),
+                    response: vec![SuccessShape::json_type("Folder")],
                     headers: vec![],
                     params: None,
                     cross_origin: None, pagination: None,
                 },
                 // FormData endpoint with file upload
-                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false, shapes_preview: vec![],
+                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "UploadFile".to_string(),
                     method: RestMethod::Post,
                     path: "/folders/{folder_id}/files".to_string(),
@@ -717,31 +717,31 @@ mod tests {
                             .with_description("Override filename"),
                         FormField::json("metadata", TypeRef::Named("FileMetadata".into())).optional(),
                     ])),
-                    response: ApiResponse::json_type("File"),
+                    response: vec![SuccessShape::json_type("File")],
                     headers: vec![],
                     params: None,
                     cross_origin: None, pagination: None,
                 },
                 // GET endpoint with no request body
-                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false, shapes_preview: vec![],
+                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "ListFiles".to_string(),
                     method: RestMethod::Get,
                     path: "/folders/{folder_id}/files".to_string(),
                     description: "List files in a folder".to_string(),
                     request: None,
-                    response: ApiResponse::json_type("ListFilesResponse"),
+                    response: vec![SuccessShape::json_type("ListFilesResponse")],
                     headers: vec![],
                     params: None,
                     cross_origin: None, pagination: None,
                 },
                 // Binary download
-                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false, shapes_preview: vec![],
+                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "DownloadFile".to_string(),
                     method: RestMethod::Get,
                     path: "/files/{file_id}/content".to_string(),
                     description: "Download file content".to_string(),
                     request: None,
-                    response: ApiResponse::Binary,
+                    response: vec![SuccessShape::binary()],
                     headers: vec![],
                     params: None,
                     cross_origin: None, pagination: None,

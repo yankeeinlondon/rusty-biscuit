@@ -44,10 +44,10 @@ pub use types::*;
 use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 #[cfg(test)]
-use schematic_define::{ApiResponse, RestMethod};
+use schematic_define::{ResponseShape, RestMethod, StreamEnd, StreamFraming, TypeRef};
 use schematic_define::{
     ApiKeyEnv, AuthStrategy, Endpoint, EnvList, EnvMapping,
-    RestApi,
+    RestApi, Success,
     pagination::{Collection},
 };
 
@@ -84,7 +84,15 @@ fn build_anthropic_api(ctx: &mut DefinitionContext) -> Result<RestApi, Definitio
             Endpoint::post("CreateMessage", "/messages")
                 .describes("Create a message with optional tool use for agent interactions")
                 .request_json::<CreateMessageBody>(ctx)
-                .returns_json::<MessageResponse>(ctx)
+                .returns(
+                    Success::json(ctx.register::<MessageResponse>()?)
+                        .note("returned when `stream` is false or omitted"),
+                )
+                .returns(
+                    Success::sse(ctx.register::<MessageStreamEvent>()?)
+                        .note("returned when `stream` is true")
+                        .ends_at_event("message_stop"),
+                )
                 .build()?,
 
             Endpoint::post("CountTokens", "/messages/count_tokens")
@@ -134,6 +142,8 @@ pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
         ctx.register::<Message>()?;
         ctx.register::<ContentBlock>()?;
         ctx.register::<Tool>()?;
+        ctx.register::<MessageStreamEvent>()?;
+        ctx.register::<ContentBlockDelta>()?;
         Ok(vec![
             build_anthropic_api(ctx)?,
         ])
@@ -193,7 +203,33 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.path, "/messages");
         assert!(endpoint.request.is_some());
-        assert!(matches!(endpoint.response, ApiResponse::Json { .. }));
+    }
+
+    #[test]
+    fn create_message_returns_json_or_message_stream() {
+        let api = define_anthropic_api();
+        let endpoint = api.endpoints.iter().find(|e| e.id == "CreateMessage").unwrap();
+
+        let [json, stream] = endpoint.response.as_slice() else {
+            panic!("expected two success shapes, got {:?}", endpoint.response)
+        };
+        assert_eq!(json.shape, ResponseShape::Json(TypeRef::Named("MessageResponse".into())));
+        assert_eq!(json.note.as_deref(), Some("returned when `stream` is false or omitted"));
+        assert_eq!(
+            stream.shape,
+            ResponseShape::Stream {
+                framing: StreamFraming::Sse(TypeRef::Named("MessageStreamEvent".into())),
+                end: StreamEnd::EventNamed("message_stop".into()),
+                keep: false,
+            }
+        );
+        assert_eq!(stream.note.as_deref(), Some("returned when `stream` is true"));
+        for shape in [json, stream] {
+            assert_eq!(shape.content_type, None);
+            assert_eq!(shape.variant, None);
+            assert!(shape.statuses.is_empty());
+            assert!(!shape.fallback);
+        }
     }
 
     #[test]
@@ -241,7 +277,7 @@ mod tests {
             group.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
             vec!["CreateMessage", "CountTokens", "ListModels", "RetrieveModel"]
         );
-        assert_eq!(crate::registry::registered_names(&group[0]), vec!["CreateMessageBody", "ContentBlock", "Message", "Tool", "CountTokensBody", "MessageResponse", "CountTokensResponse", "ListModelsResponse", "ModelInfo"]);
+        assert_eq!(crate::registry::registered_names(&group[0]), vec!["CreateMessageBody", "ContentBlock", "Message", "Tool", "CountTokensBody", "MessageResponse", "CountTokensResponse", "ListModelsResponse", "ModelInfo", "MessageStreamEvent", "ContentBlockDelta"]);
         for api in &group {
             api.validate_references().unwrap();
             assert_eq!(api.schemas, group[0].schemas);

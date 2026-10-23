@@ -58,7 +58,7 @@ pub use types::*;
 
 use crate as schematic_definitions;
 #[cfg(test)]
-use schematic_define::ApiResponse;
+use schematic_define::ResponseShape;
 use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError, rust_path};
 use schematic_define::{
@@ -462,7 +462,7 @@ mod tests {
                 .find(|e| &e.id == id)
                 .unwrap_or_else(|| panic!("Missing endpoint: {}", id));
             assert!(
-                matches!(endpoint.response, ApiResponse::Text),
+                matches!(endpoint.response[0].shape, ResponseShape::Text),
                 "Endpoint {} should have Text response",
                 id
             );
@@ -547,7 +547,7 @@ mod tests {
         }
         assert!(group[0].component("Commit").is_some());
         let commits = group[0].endpoints.iter().find(|ep| ep.id == "ListModelCommits").unwrap();
-        let schematic_define::ApiResponse::Json(schema) = &commits.response else { panic!("JSON commits"); };
+        let ResponseShape::Json(schema) = &commits.response[0].shape else { panic!("JSON commits"); };
         assert!(*schema == TypeRef::Array(Box::new(TypeRef::Named("Commit".into()))));
     }
 

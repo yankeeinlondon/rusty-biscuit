@@ -282,8 +282,9 @@ pub struct PronunciationDictionaryLocator {
     pub version_id: String,
 }
 
+/// Character timing for the HTTP with-timestamps endpoints. The provider sends
+/// snake_case field names; the WebSocket alignment is the camelCase one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct HttpAlignment {
     pub characters: Vec<String>,
     pub character_start_times_seconds: Vec<f64>,

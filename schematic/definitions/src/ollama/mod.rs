@@ -29,9 +29,9 @@ pub use types::*;
 use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 #[cfg(test)]
-use schematic_define::{ApiResponse, AuthStrategy, RestMethod};
+use schematic_define::{AuthStrategy, ResponseShape, RestMethod, StreamEnd, StreamFraming, SuccessShape, TypeRef};
 use schematic_define::{
-    Endpoint, EnvMapping, RestApi,
+    Endpoint, EnvMapping, RestApi, Success,
 };
 
 /// Creates the native Ollama API definition.
@@ -74,12 +74,24 @@ fn build_ollama_native_api(ctx: &mut DefinitionContext) -> Result<RestApi, Defin
             Endpoint::post("Generate", "/api/generate")
                 .describes("Generate text completion from a prompt (streaming NDJSON by default)")
                 .request_json::<GenerateBody>(ctx)
-                .returns_binary()
+                .returns(
+                    Success::ndjson(ctx.register::<GenerateStreamItem>()?)
+                        .note("returned when `stream` is true or omitted")
+                        .ends_when_field("done", true)
+                        .keep_end(),
+                )
+                .returns(Success::json(ctx.register::<GenerateCompletion>()?).note("returned when `stream` is false"))
                 .build()?,
             Endpoint::post("Chat", "/api/chat")
                 .describes("Generate chat completion from messages (streaming NDJSON by default)")
                 .request_json::<ChatBody>(ctx)
-                .returns_binary()
+                .returns(
+                    Success::ndjson(ctx.register::<ChatStreamItem>()?)
+                        .note("returned when `stream` is true or omitted")
+                        .ends_when_field("done", true)
+                        .keep_end(),
+                )
+                .returns(Success::json(ctx.register::<ChatCompletion>()?).note("returned when `stream` is false"))
                 .build()?,
             Endpoint::post("Embeddings", "/api/embeddings")
                 .describes("Generate embeddings for text")
@@ -99,12 +111,24 @@ fn build_ollama_native_api(ctx: &mut DefinitionContext) -> Result<RestApi, Defin
             Endpoint::post("PullModel", "/api/pull")
                 .describes("Pull a model from the Ollama registry (streaming progress by default)")
                 .request_json::<PullModelBody>(ctx)
-                .returns_binary()
+                .returns(
+                    Success::ndjson(ctx.register::<PullModelStreamItem>()?)
+                        .note("returned when `stream` is true or omitted")
+                        .ends_when_field("status", "success")
+                        .keep_end(),
+                )
+                .returns(Success::json(ctx.register::<StatusResponse>()?).note("returned when `stream` is false"))
                 .build()?,
             Endpoint::post("PushModel", "/api/push")
                 .describes("Push a model to the Ollama registry (streaming progress by default)")
                 .request_json::<PushModelBody>(ctx)
-                .returns_binary()
+                .returns(
+                    Success::ndjson(ctx.register::<PullModelStreamItem>()?)
+                        .note("returned when `stream` is true or omitted")
+                        .ends_when_field("status", "success")
+                        .keep_end(),
+                )
+                .returns(Success::json(ctx.register::<StatusResponse>()?).note("returned when `stream` is false"))
                 .build()?,
             Endpoint::post("CopyModel", "/api/copy")
                 .describes("Copy a model to a new name")
@@ -119,7 +143,13 @@ fn build_ollama_native_api(ctx: &mut DefinitionContext) -> Result<RestApi, Defin
             Endpoint::post("CreateModel", "/api/create")
                 .describes("Create a model from a Modelfile (streaming progress by default)")
                 .request_json::<CreateModelBody>(ctx)
-                .returns_binary()
+                .returns(
+                    Success::ndjson(ctx.register::<CreateModelStreamItem>()?)
+                        .note("returned when `stream` is true or omitted")
+                        .ends_when_field("status", "success")
+                        .keep_end(),
+                )
+                .returns(Success::json(ctx.register::<StatusResponse>()?).note("returned when `stream` is false"))
                 .build()?,
             Endpoint::get("ListRunningModels", "/api/ps")
                 .describes("List models currently loaded in memory")
@@ -169,12 +199,28 @@ fn build_ollama_openai_api(ctx: &mut DefinitionContext) -> Result<RestApi, Defin
             Endpoint::post("ChatCompletions", "/v1/chat/completions")
                 .describes("Create chat completion (SSE streaming when stream=true)")
                 .request_json::<OpenAIChatCompletionRequest>(ctx)
-                .returns_binary()
+                .returns(
+                    Success::json(ctx.register::<OpenAIChatCompletionResponse>()?)
+                        .note("returned when `stream` is false or omitted"),
+                )
+                .returns(
+                    Success::sse(ctx.register::<OpenAIChatStreamChunk>()?)
+                        .note("returned when `stream` is true")
+                        .ends_at_data_line("[DONE]"),
+                )
                 .build()?,
             Endpoint::post("Completions", "/v1/completions")
                 .describes("Create text completion (SSE streaming when stream=true)")
                 .request_json::<OpenAICompletionRequest>(ctx)
-                .returns_binary()
+                .returns(
+                    Success::json(ctx.register::<OpenAICompletionResponse>()?)
+                        .note("returned when `stream` is false or omitted"),
+                )
+                .returns(
+                    Success::sse(ctx.register::<OpenAICompletionStreamChunk>()?)
+                        .note("returned when `stream` is true")
+                        .ends_at_data_line("[DONE]"),
+                )
                 .build()?,
             Endpoint::post("Embeddings", "/v1/embeddings")
                 .describes("Generate embeddings for text")
@@ -226,6 +272,26 @@ pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
         ctx.register::<OpenAIUsage>()?;
         ctx.register::<OpenAIListModelsResponse>()?;
         ctx.register::<OpenAIModel>()?;
+        ctx.register::<OpenAIChatCompletionChoice>()?;
+        ctx.register::<OpenAIChatCompletionResponse>()?;
+        ctx.register::<OpenAIDelta>()?;
+        ctx.register::<OpenAIStreamChoice>()?;
+        ctx.register::<OpenAIChatStreamChunk>()?;
+        ctx.register::<OpenAICompletionChoice>()?;
+        ctx.register::<OpenAICompletionResponse>()?;
+        ctx.register::<OpenAICompletionStreamChunk>()?;
+        ctx.register::<StreamErrorLine>()?;
+        ctx.register::<GenerateStreamChunk>()?;
+        ctx.register::<GenerateStreamItem>()?;
+        ctx.register::<GenerateCompletion>()?;
+        ctx.register::<ChatStreamChunk>()?;
+        ctx.register::<ChatStreamItem>()?;
+        ctx.register::<ChatCompletion>()?;
+        ctx.register::<PullModelProgress>()?;
+        ctx.register::<PullModelStreamItem>()?;
+        ctx.register::<CreateModelProgress>()?;
+        ctx.register::<CreateModelStreamItem>()?;
+        ctx.register::<StatusResponse>()?;
         Ok(vec![
             build_ollama_native_api(ctx)?,
             build_ollama_openai_api(ctx)?,
@@ -236,6 +302,63 @@ pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const STREAM_NOTE: &str = "returned when `stream` is true or omitted";
+    const JSON_NOTE: &str = "returned when `stream` is false";
+
+    fn named(name: &str) -> TypeRef {
+        TypeRef::Named(name.to_string())
+    }
+
+    /// Asserts a native streaming endpoint's two shapes: an NDJSON stream of
+    /// `item` ending at the kept `field == value` line, then a JSON `reply`.
+    fn assert_native_stream_shapes(response: &[SuccessShape], item: &str, reply: &str, field: &str, value: serde_json::Value) {
+        assert_eq!(response.len(), 2);
+        let (stream, json) = (&response[0], &response[1]);
+        assert_eq!(
+            stream.shape,
+            ResponseShape::Stream {
+                framing: StreamFraming::Ndjson(named(item)),
+                end: StreamEnd::FieldEquals { field: field.to_string(), value },
+                keep: true,
+            }
+        );
+        assert_eq!(stream.note.as_deref(), Some(STREAM_NOTE));
+        assert_eq!(stream.media_type().as_deref(), Some("application/x-ndjson"));
+        assert_eq!(json.shape, ResponseShape::Json(named(reply)));
+        assert_eq!(json.note.as_deref(), Some(JSON_NOTE));
+        assert_eq!(json.media_type().as_deref(), Some("application/json"));
+        for shape in response {
+            assert_eq!(shape.content_type, None);
+            assert_eq!(shape.variant, None, "variant names are derived (`Stream`, `Json`)");
+            assert!(shape.statuses.is_empty());
+        }
+    }
+
+    /// Asserts an OpenAI-compatible endpoint's two shapes: a JSON `reply`, then
+    /// an SSE stream of `item` ending at a consumed `[DONE]` data line.
+    fn assert_openai_shapes(response: &[SuccessShape], reply: &str, item: &str) {
+        assert_eq!(response.len(), 2);
+        let (json, stream) = (&response[0], &response[1]);
+        assert_eq!(json.shape, ResponseShape::Json(named(reply)));
+        assert_eq!(json.note.as_deref(), Some("returned when `stream` is false or omitted"));
+        assert_eq!(json.media_type().as_deref(), Some("application/json"));
+        assert_eq!(
+            stream.shape,
+            ResponseShape::Stream {
+                framing: StreamFraming::Sse(named(item)),
+                end: StreamEnd::DataLineEquals("[DONE]".to_string()),
+                keep: false,
+            }
+        );
+        assert_eq!(stream.note.as_deref(), Some("returned when `stream` is true"));
+        assert_eq!(stream.media_type().as_deref(), Some("text/event-stream"));
+        for shape in response {
+            assert_eq!(shape.content_type, None);
+            assert_eq!(shape.variant, None, "variant names are derived (`Json`, `Stream`)");
+            assert!(shape.statuses.is_empty());
+        }
+    }
 
     // =========================================================================
     // Native API Tests
@@ -272,7 +395,7 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.path, "/api/generate");
         assert!(endpoint.request.is_some());
-        assert!(matches!(endpoint.response, ApiResponse::Binary));
+        assert_native_stream_shapes(&endpoint.response, "GenerateStreamItem", "GenerateCompletion", "done", true.into());
     }
 
     #[test]
@@ -283,7 +406,7 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.path, "/api/chat");
         assert!(endpoint.request.is_some());
-        assert!(matches!(endpoint.response, ApiResponse::Binary));
+        assert_native_stream_shapes(&endpoint.response, "ChatStreamItem", "ChatCompletion", "done", true.into());
     }
 
     #[test]
@@ -295,7 +418,7 @@ mod tests {
         assert_eq!(endpoint.path, "/api/embeddings");
         assert!(endpoint.request.is_some());
         // Non-streaming JSON response
-        assert!(matches!(endpoint.response, ApiResponse::Json { .. }));
+        assert!(matches!(endpoint.response[0].shape, ResponseShape::Json { .. }));
     }
 
     #[test]
@@ -325,7 +448,7 @@ mod tests {
 
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.path, "/api/pull");
-        assert!(matches!(endpoint.response, ApiResponse::Binary));
+        assert_native_stream_shapes(&endpoint.response, "PullModelStreamItem", "StatusResponse", "status", "success".into());
     }
 
     #[test]
@@ -335,7 +458,7 @@ mod tests {
 
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.path, "/api/push");
-        assert!(matches!(endpoint.response, ApiResponse::Binary));
+        assert_native_stream_shapes(&endpoint.response, "PullModelStreamItem", "StatusResponse", "status", "success".into());
     }
 
     #[test]
@@ -345,7 +468,7 @@ mod tests {
 
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.path, "/api/copy");
-        assert!(matches!(endpoint.response, ApiResponse::Empty));
+        assert!(matches!(endpoint.response[0].shape, ResponseShape::Empty));
     }
 
     #[test]
@@ -374,7 +497,7 @@ mod tests {
 
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.path, "/api/create");
-        assert!(matches!(endpoint.response, ApiResponse::Binary));
+        assert_native_stream_shapes(&endpoint.response, "CreateModelStreamItem", "StatusResponse", "status", "success".into());
     }
 
     #[test]
@@ -431,8 +554,7 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.path, "/v1/chat/completions");
         assert!(endpoint.request.is_some());
-        // SSE streaming
-        assert!(matches!(endpoint.response, ApiResponse::Binary));
+        assert_openai_shapes(&endpoint.response, "OpenAIChatCompletionResponse", "OpenAIChatStreamChunk");
     }
 
     #[test]
@@ -447,8 +569,7 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.path, "/v1/completions");
         assert!(endpoint.request.is_some());
-        // SSE streaming
-        assert!(matches!(endpoint.response, ApiResponse::Binary));
+        assert_openai_shapes(&endpoint.response, "OpenAICompletionResponse", "OpenAICompletionStreamChunk");
     }
 
     #[test]
@@ -460,7 +581,7 @@ mod tests {
         assert_eq!(endpoint.path, "/v1/embeddings");
         assert!(endpoint.request.is_some());
         // Non-streaming JSON response
-        assert!(matches!(endpoint.response, ApiResponse::Json { .. }));
+        assert!(matches!(endpoint.response[0].shape, ResponseShape::Json { .. }));
     }
 
     #[test]
@@ -540,7 +661,7 @@ mod tests {
             group.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
             vec!["Generate", "Chat", "Embeddings", "ListModels", "ShowModel", "PullModel", "PushModel", "CopyModel", "DeleteModel", "CreateModel", "ListRunningModels", "ChatCompletions", "Completions", "Embeddings", "ListModels"]
         );
-        assert_eq!(crate::registry::registered_names(&group[0]), vec!["GenerateBody", "ChatBody", "Message", "EmbeddingsBody", "ShowModelBody", "PullModelBody", "PushModelBody", "CopyModelBody", "DeleteModelBody", "CreateModelBody", "EmbeddingsResponse", "ListModelsResponse", "ModelDetails", "ModelInfo", "ShowModelResponse", "ListRunningModelsResponse", "RunningModel", "OpenAIChatCompletionRequest", "OpenAIMessage", "OpenAICompletionRequest", "OpenAIEmbeddingRequest", "OpenAIEmbeddingResponse", "OpenAIEmbeddingData", "OpenAIUsage", "OpenAIListModelsResponse", "OpenAIModel"]);
+        assert_eq!(crate::registry::registered_names(&group[0]), vec!["GenerateBody", "ChatBody", "Message", "EmbeddingsBody", "ShowModelBody", "PullModelBody", "PushModelBody", "CopyModelBody", "DeleteModelBody", "CreateModelBody", "EmbeddingsResponse", "ListModelsResponse", "ModelDetails", "ModelInfo", "ShowModelResponse", "ListRunningModelsResponse", "RunningModel", "OpenAIChatCompletionRequest", "OpenAIMessage", "OpenAICompletionRequest", "OpenAIEmbeddingRequest", "OpenAIEmbeddingResponse", "OpenAIEmbeddingData", "OpenAIUsage", "OpenAIListModelsResponse", "OpenAIModel", "OpenAIChatCompletionChoice", "OpenAIChatCompletionResponse", "OpenAIDelta", "OpenAIStreamChoice", "OpenAIChatStreamChunk", "OpenAICompletionChoice", "OpenAICompletionResponse", "OpenAICompletionStreamChunk", "StreamErrorLine", "GenerateStreamChunk", "GenerateStreamItem", "GenerateCompletion", "ChatStreamChunk", "ChatStreamItem", "ChatCompletion", "PullModelProgress", "PullModelStreamItem", "CreateModelProgress", "CreateModelStreamItem", "StatusResponse"]);
         for api in &group {
             api.validate_references().unwrap();
             assert_eq!(api.schemas, group[0].schemas);

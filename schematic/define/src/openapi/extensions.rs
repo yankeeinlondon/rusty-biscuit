@@ -13,11 +13,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::auth::AuthStrategy;
+use crate::cross_origin::CrossOrigin;
 use crate::headers::EnvMapping;
 use crate::metadata::{RateLimit, RetryGuidance};
 use crate::request::ApiRequest;
 use crate::error_table::ErrorEntry;
-use crate::response::{ApiResponse, SuccessShape};
+use crate::response::{ResponseShape, SuccessShape};
 
 /// Document-level vendor extension for Schematic metadata.
 ///
@@ -37,6 +38,8 @@ use crate::response::{ApiResponse, SuccessShape};
 ///     rate_limit: None,
 ///     retry_guidance: None,
 ///     errors: vec![],
+///     cross_origin: Default::default(),
+///     request_id_header: None,
 /// };
 ///
 /// let json: serde_json::Value = ext.into();
@@ -71,6 +74,18 @@ pub struct SchematicDocExtension {
     /// The API's default error entries, as declared (R26).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<ErrorEntry>,
+
+    /// The API's cross-origin policy; absent means the same-origin default.
+    #[serde(default, skip_serializing_if = "is_same_origin")]
+    pub cross_origin: CrossOrigin,
+
+    /// The response header carrying the provider's request id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id_header: Option<String>,
+}
+
+fn is_same_origin(policy: &CrossOrigin) -> bool {
+    *policy == CrossOrigin::SameOrigin
 }
 
 impl From<SchematicDocExtension> for serde_json::Value {
@@ -88,17 +103,18 @@ impl From<SchematicDocExtension> for serde_json::Value {
 ///
 /// ```
 /// use schematic_define::openapi::SchematicOpExtension;
-/// use schematic_define::{ApiRequest, ApiResponse};
+/// use schematic_define::{ApiRequest, ResponseShape, TypeRef};
 ///
 /// let ext = SchematicOpExtension {
 ///     request: Some(ApiRequest::json_type("CreateUserBody")),
-///     response: ApiResponse::json_type("User"),
+///     response: ResponseShape::Json(TypeRef::Named("User".into())),
 ///     headers: vec![("X-Custom".to_string(), "value".to_string())],
 ///     rate_limit: None,
 ///     retry_guidance: None,
 ///     success: vec![],
 ///     errors: vec![],
 ///     no_declared_errors: false,
+///     cross_origin: None,
 /// };
 ///
 /// let json: serde_json::Value = ext.into();
@@ -110,8 +126,9 @@ pub struct SchematicOpExtension {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<ApiRequest>,
 
-    /// Response specification.
-    pub response: ApiResponse,
+    /// The first success shape's kind, in its historical serialized form
+    /// (`{"Json": …}`, `"Text"`, `"Binary"`, `"Empty"`, or a stream).
+    pub response: ResponseShape,
 
     /// Endpoint-specific headers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -140,6 +157,11 @@ pub struct SchematicOpExtension {
     /// The endpoint opts out of the API's default errors.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_declared_errors: bool,
+
+    /// The endpoint's own cross-origin policy, which replaces the API's;
+    /// absent when the endpoint inherits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cross_origin: Option<CrossOrigin>,
 }
 
 impl From<SchematicOpExtension> for serde_json::Value {
@@ -305,9 +327,9 @@ mod tests {
 
     #[test]
     fn op_extension_with_json_request() {
-        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false,
+        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
             request: Some(ApiRequest::json_type("CreateBody")),
-            response: ApiResponse::json_type("Response"),
+            response: ResponseShape::Json(crate::TypeRef::Named("Response".into())),
             headers: vec![],
             };
         assert!(ext.request.is_some());
@@ -315,12 +337,12 @@ mod tests {
 
     #[test]
     fn op_extension_with_form_data_request() {
-        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false,
+        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
             request: Some(ApiRequest::form_data(vec![
                 FormField::file("document"),
                 FormField::text("name").optional(),
             ])),
-            response: ApiResponse::json_type("UploadResponse"),
+            response: ResponseShape::Json(crate::TypeRef::Named("UploadResponse".into())),
             headers: vec![],
             };
 
@@ -335,19 +357,19 @@ mod tests {
 
     #[test]
     fn op_extension_with_binary_response() {
-        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false,
+        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
             request: None,
-            response: ApiResponse::Binary,
+            response: ResponseShape::Binary,
             headers: vec![],
             };
-        assert!(ext.response.is_binary());
+        assert_eq!(ext.response, ResponseShape::Binary);
     }
 
     #[test]
     fn op_extension_with_endpoint_headers() {
-        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false,
+        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
             request: None,
-            response: ApiResponse::Empty,
+            response: ResponseShape::Empty,
             headers: vec![("X-Custom-Header".to_string(), "custom-value".to_string())],
             };
         assert_eq!(ext.headers.len(), 1);
@@ -355,9 +377,9 @@ mod tests {
 
     #[test]
     fn op_extension_into_json() {
-        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false,
+        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
             request: Some(ApiRequest::json_type("TestBody")),
-            response: ApiResponse::Text,
+            response: ResponseShape::Text,
             headers: vec![],
             };
 
@@ -369,9 +391,9 @@ mod tests {
 
     #[test]
     fn op_extension_serde_roundtrip() {
-        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false,
+        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
             request: Some(ApiRequest::form_data(vec![FormField::file("file")])),
-            response: ApiResponse::json_type("Result"),
+            response: ResponseShape::Json(crate::TypeRef::Named("Result".into())),
             headers: vec![("X-Header".to_string(), "value".to_string())],
             };
 
@@ -519,9 +541,9 @@ mod tests {
 
     #[test]
     fn op_extension_empty_headers_roundtrips() {
-        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false,
+        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
             request: Some(ApiRequest::json_type("Body")),
-            response: ApiResponse::json_type("Response"),
+            response: ResponseShape::Json(crate::TypeRef::Named("Response".into())),
             headers: vec![],
             };
         let json = serde_json::to_string(&ext).unwrap();
@@ -567,8 +589,8 @@ mod tests {
         let doc = serde_json::to_value(SchematicDocExtension::default()).unwrap();
         assert!(doc.get("rate_limit").is_none() && doc.get("retry_guidance").is_none());
         let op = serde_json::to_value(SchematicOpExtension {
-            rate_limit: None, retry_guidance: None, request: None, response: ApiResponse::Empty, headers: vec![],
-            success: vec![], errors: vec![], no_declared_errors: false,
+            rate_limit: None, retry_guidance: None, request: None, response: ResponseShape::Empty, headers: vec![],
+            success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
         }).unwrap();
         assert_eq!(op, serde_json::json!({"response": "Empty"}));
     }
@@ -595,7 +617,7 @@ mod tests {
 
         let op = SchematicOpExtension {
             rate_limit: Some(rate_limit), retry_guidance: Some(retry), request: None,
-            response: ApiResponse::Empty, headers: vec![], success: vec![], errors: vec![], no_declared_errors: false,
+            response: ResponseShape::Empty, headers: vec![], success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
         };
         let op_json: serde_json::Value = op.clone().into();
         assert_eq!(op_json["rate_limit"], expected_rate);
@@ -621,8 +643,8 @@ mod tests {
         });
         let errors = vec![ErrorEntry { content_type: Some("text/html".into()), ..ErrorEntry::new(StatusMatch::exact(404), ResponseShape::Text) }];
         let op = SchematicOpExtension {
-            rate_limit: None, retry_guidance: None, request: None, response: ApiResponse::Empty, headers: vec![],
-            success: vec![tagged, fallback, stream], errors: errors.clone(), no_declared_errors: false,
+            rate_limit: None, retry_guidance: None, request: None, response: ResponseShape::Empty, headers: vec![],
+            success: vec![tagged, fallback, stream], errors: errors.clone(), no_declared_errors: false, cross_origin: None,
         };
         let doc = SchematicDocExtension { errors, ..Default::default() };
 
@@ -630,5 +652,29 @@ mod tests {
         assert_eq!(op_json["success"][2]["shape"]["Stream"], serde_json::json!({"framing": {"Ndjson": {"Named": "Chunk"}}, "end": {"FieldEquals": {"field": "done", "value": true}}, "keep": true}));
         assert_eq!(serde_json::from_value::<SchematicOpExtension>(op_json).unwrap(), op);
         assert_eq!(serde_json::from_value::<SchematicDocExtension>(doc.clone().into()).unwrap(), doc);
+    }
+
+    #[test]
+    fn cross_origin_and_request_id_are_written_only_when_declared() {
+        let default_doc = serde_json::to_value(SchematicDocExtension::default()).unwrap();
+        assert!(default_doc.get("cross_origin").is_none() && default_doc.get("request_id_header").is_none());
+
+        let doc = SchematicDocExtension {
+            cross_origin: CrossOrigin::allow_origins(["https://uploads.example.com"]),
+            request_id_header: Some("x-request-id".into()),
+            ..Default::default()
+        };
+        let doc_json: serde_json::Value = doc.clone().into();
+        assert_eq!(doc_json["cross_origin"], serde_json::json!({"AllowOrigins": ["https://uploads.example.com"]}));
+        assert_eq!(doc_json["request_id_header"], "x-request-id");
+        assert_eq!(serde_json::from_value::<SchematicDocExtension>(doc_json).unwrap(), doc);
+
+        let op = SchematicOpExtension {
+            rate_limit: None, retry_guidance: None, request: None, response: ResponseShape::Empty, headers: vec![],
+            success: vec![], errors: vec![], no_declared_errors: false, cross_origin: Some(CrossOrigin::Deny),
+        };
+        let op_json: serde_json::Value = op.clone().into();
+        assert_eq!(op_json["cross_origin"], "Deny");
+        assert_eq!(serde_json::from_value::<SchematicOpExtension>(op_json).unwrap(), op);
     }
 }

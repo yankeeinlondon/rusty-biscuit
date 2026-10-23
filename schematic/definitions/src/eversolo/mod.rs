@@ -20,7 +20,7 @@ mod types;
 pub use types::*;
 
 #[cfg(test)]
-use schematic_define::{ApiResponse, AuthStrategy};
+use schematic_define::{ResponseShape, AuthStrategy};
 use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 use schematic_define::{
@@ -360,7 +360,7 @@ mod tests {
         assert_eq!(ep.method, RestMethod::Get);
         assert_eq!(ep.path, "/ZidooControlCenter/getModel");
         assert!(ep.request.is_none());
-        assert!(matches!(ep.response, ApiResponse::Json { .. }));
+        assert!(matches!(ep.response[0].shape, ResponseShape::Json { .. }));
         assert!(ep.params.is_none());
     }
 

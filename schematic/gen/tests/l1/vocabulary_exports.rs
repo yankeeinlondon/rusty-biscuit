@@ -9,7 +9,7 @@
 
 use schematic_define::openapi::ExportOptions;
 use schematic_define::{
-    ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, Backoff, DefinitionContext,
+    ApiKeyLocation, ApiRequest, SuccessShape, AuthMethod, AuthPolicy, AuthStrategy, Backoff, DefinitionContext,
     DeviceCodeGrant, Endpoint, EndpointBuilder, EnvList, EnvMapping, OAuth2ClientAuthMethod, OAuth2Config, ParamDef,
     QueryParamType, RateLimit, ResetUnit, RestApi, RestApiBuilder, RetryGuidance, SchemaComponent, StatusSelector,
 };
@@ -382,7 +382,7 @@ fn composed_api(name: &str, pet: Value) -> RestApi {
     ]);
     fixture.module_path = Some("grouped".into());
     fixture.endpoints[0].request = Some(ApiRequest::json_type("Pet"));
-    fixture.endpoints[0].response = ApiResponse::json_type("Both");
+    fixture.endpoints[0].response = vec![SuccessShape::json_type("Both")];
     fixture.schemas = vec![
         component("Cat", json!({"type": "object", "properties": {"meows": {"type": "boolean"}}})),
         component("Dog", json!({"type": "object", "properties": {"barks": {"type": "integer"}}})),

@@ -78,7 +78,7 @@
         },
         "responses": {
           "200": {
-            "description": "Successful binary response",
+            "description": "Successful byte stream",
             "content": {
               "application/octet-stream": {
                 "schema": {
@@ -95,7 +95,22 @@
               "Named": "CreateSpeechBody"
             }
           },
-          "response": "Binary"
+          "response": {
+            "Stream": {
+              "end": "ConnectionClose",
+              "framing": "Bytes"
+            }
+          },
+          "success": [
+            {
+              "shape": {
+                "Stream": {
+                  "end": "ConnectionClose",
+                  "framing": "Bytes"
+                }
+              }
+            }
+          ]
         }
       },
       "parameters": [
@@ -179,9 +194,9 @@
         },
         "responses": {
           "200": {
-            "description": "Successful JSON response",
+            "description": "Successful NDJSON stream",
             "content": {
-              "application/json": {
+              "application/x-ndjson": {
                 "schema": {
                   "$ref": "#/components/schemas/SpeechWithTimestampsResponse"
                 }
@@ -196,10 +211,29 @@
             }
           },
           "response": {
-            "Json": {
-              "Named": "SpeechWithTimestampsResponse"
+            "Stream": {
+              "end": "ConnectionClose",
+              "framing": {
+                "Ndjson": {
+                  "Named": "SpeechWithTimestampsResponse"
+                }
+              }
             }
-          }
+          },
+          "success": [
+            {
+              "shape": {
+                "Stream": {
+                  "end": "ConnectionClose",
+                  "framing": {
+                    "Ndjson": {
+                      "Named": "SpeechWithTimestampsResponse"
+                    }
+                  }
+                }
+              }
+            }
+          ]
         }
       },
       "parameters": [
@@ -2080,29 +2114,31 @@
       },
       "SpeechWithTimestampsResponse": {
         "title": "SpeechWithTimestampsResponse",
+        "description": "One with-timestamps reply, or one line of the streaming variant. Field names\nare snake_case on the wire (`audio_base64`), as the provider reference lists.",
         "type": "object",
         "properties": {
           "alignment": {},
-          "audioBase64": {
+          "audio_base64": {
             "type": "string"
           },
-          "normalizedAlignment": {}
+          "normalized_alignment": {}
         },
         "required": [
-          "audioBase64"
+          "audio_base64"
         ]
       },
       "HttpAlignment": {
+        "description": "Character timing for the HTTP with-timestamps endpoints. The provider sends\nsnake_case field names; the WebSocket alignment is the camelCase one.",
         "type": "object",
         "properties": {
-          "characterEndTimesSeconds": {
+          "character_end_times_seconds": {
             "type": "array",
             "items": {
               "type": "number",
               "format": "double"
             }
           },
-          "characterStartTimesSeconds": {
+          "character_start_times_seconds": {
             "type": "array",
             "items": {
               "type": "number",
@@ -2118,8 +2154,8 @@
         },
         "required": [
           "characters",
-          "characterStartTimesSeconds",
-          "characterEndTimesSeconds"
+          "character_start_times_seconds",
+          "character_end_times_seconds"
         ]
       },
       "ListVoicesResponse": {

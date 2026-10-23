@@ -96,9 +96,9 @@ impl StreamSpeechRequest {
 }
 impl schematic_runtime::EndpointSpec for StreamSpeechRequest {
     type Api = ElevenLabsApi;
-    type Success = bytes::Bytes;
+    type Success = schematic_runtime::ByteStream;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Binary;
+    type Decoder = schematic_runtime::ByteStream;
     const ENDPOINT_ID: &'static str = "StreamSpeech";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -222,10 +222,13 @@ impl StreamSpeechWithTimestampsRequest {
 }
 impl schematic_runtime::EndpointSpec for StreamSpeechWithTimestampsRequest {
     type Api = ElevenLabsApi;
-    type Success = ::schematic_definitions::elevenlabs::SpeechWithTimestampsResponse;
-    type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<
+    type Success = schematic_runtime::ItemStream<
         ::schematic_definitions::elevenlabs::SpeechWithTimestampsResponse,
+    >;
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Ndjson<
+        ::schematic_definitions::elevenlabs::SpeechWithTimestampsResponse,
+        schematic_runtime::UntilClose,
     >;
     const ENDPOINT_ID: &'static str = "StreamSpeechWithTimestamps";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;

@@ -2,7 +2,7 @@
 
 #[test]
 fn provider_authoring_uses_builders_and_typed_registrations() {
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let root = biscuit_test_harness::manifest_dir!().join("src");
     let mut pending = vec![root];
     let mut scanned = 0;
     while let Some(directory) = pending.pop() {
@@ -18,7 +18,7 @@ fn provider_authoring_uses_builders_and_typed_registrations() {
             let authored = source.split("#[cfg(test)]").next().unwrap();
             let authored = authored.split("pub fn define_elevenlabs_websocket_api").next().unwrap();
             for line in authored.lines().filter(|line| !line.trim_start().starts_with("//")) {
-                for forbidden in ["ApiResponse::json", "ApiRequest::json", "Schema::new(", "Schema::with_path(", "json_type("] {
+                for forbidden in ["SuccessShape::", "ApiRequest::json", "Schema::new(", "Schema::with_path(", "json_type("] {
                     assert!(!line.contains(forbidden), "{}: {line}", path.display());
                 }
                 for literal in ["Endpoint {", "RestApi {"] {

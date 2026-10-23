@@ -1,11 +1,11 @@
 //! Response model v2 vocabulary through the public API: success-shape
 //! distinguishability (R1, R3, R3a, R3b, R3c, R23), declared error tables
-//! (R16-R18), builder lowering while `Endpoint::response` holds one
-//! `ApiResponse` (R24), and serialized forms (R44).
+//! (R16-R18), builder lowering into `Endpoint::response` (R24), and
+//! serialized forms (R44).
 
 use schematic_define::response::{normalize_media_type, validate_success_shapes};
 use schematic_define::{
-    ApiResponse, DefinitionContext, Endpoint, ErrorEntry, ErrorSet, ErrorShape, ErrorTable, JsonTag, ResponseShape, RestApi,
+    DefinitionContext, Endpoint, ErrorEntry, ErrorSet, ErrorShape, ErrorTable, JsonTag, ResponseShape, RestApi,
     StatusMatch, StreamEnd, StreamFraming, Success, SuccessShape, TypeRef, definition_type,
 };
 use serde_json::{Value, json};
@@ -139,7 +139,7 @@ fn an_author_named_variant_is_an_identifier_unique_to_a_multi_shape_endpoint() {
     assert_eq!(serde_json::from_str::<SuccessShape>(&text).unwrap(), shape);
     assert!(serde_json::from_str::<SuccessShape>(r#"{"shape":"Text","variant":null}"#).is_err(), "null is not absent");
     assert!(serde_json::from_str::<SuccessShape>(r#"{"shape":"Text","variant":3}"#).is_err());
-    assert_eq!(shape.legacy_response(), None, "a named variant needs response model v2 storage");
+    assert_eq!(shape.plain(), None, "a named variant is not a plain shape");
 
     let mut ctx = DefinitionContext::types_in("::fixture");
     let record = ctx.register::<Record>().unwrap();
@@ -265,21 +265,31 @@ fn declared_errors_reach_the_effective_table_and_references_are_checked() {
 }
 
 #[test]
-fn builder_keeps_single_plain_successes_and_refuses_what_storage_cannot_hold() {
+fn builder_stores_every_success_shape_with_its_facts() {
     let mut ctx = DefinitionContext::types_in("::models");
     let record = ctx.register::<Record>().unwrap();
     let stored = |success: Success| Endpoint::get("Get", "/").describes("Get").returns(success).build().map(|endpoint| endpoint.response);
-    assert_eq!(stored(Success::json(record.clone())).unwrap(), ApiResponse::Json(record.type_ref().clone()));
-    assert_eq!(stored(Success::text()).unwrap(), ApiResponse::Text);
-    assert_eq!(stored(Success::binary()).unwrap(), ApiResponse::Binary);
-    assert_eq!(stored(Success::empty()).unwrap(), ApiResponse::Empty);
+    assert_eq!(stored(Success::json(record.clone())).unwrap(), vec![SuccessShape::json(record.type_ref().clone())]);
+    assert_eq!(stored(Success::text()).unwrap(), vec![SuccessShape::text()]);
+    assert_eq!(stored(Success::binary()).unwrap(), vec![SuccessShape::binary()]);
+    assert_eq!(stored(Success::empty()).unwrap(), vec![SuccessShape::empty()]);
 
-    let refused = "are stored once Endpoint::response holds response model v2 shapes";
-    for success in [Success::sse(record.clone()).ends_at_event("done"), Success::ndjson(record.clone()), Success::bytes(),
-        Success::binary().content_type("audio/mpeg"), Success::json(record.clone()).status(201), Success::json(record.clone()).note("always"),
-        Success::json(record.clone()).tagged("type", "record")] {
-        let error = stored(success).unwrap_err().to_string();
-        assert!(error.contains(refused), "{error}");
+    let item = record.type_ref().clone();
+    let with = |mut shape: SuccessShape, edit: fn(&mut SuccessShape)| { edit(&mut shape); shape };
+    let stream = |framing, end, keep| SuccessShape::new(ResponseShape::Stream { framing, end, keep });
+    for (success, expected) in [
+        (Success::sse(record.clone()).ends_at_event("done"), stream(StreamFraming::Sse(item.clone()), StreamEnd::EventNamed("done".into()), false)),
+        (Success::ndjson(record.clone()).ends_when_field("done", true).keep_end(),
+            stream(StreamFraming::Ndjson(item.clone()), StreamEnd::FieldEquals { field: "done".into(), value: json!(true) }, true)),
+        (Success::ndjson(record.clone()), stream(StreamFraming::Ndjson(item.clone()), StreamEnd::ConnectionClose, false)),
+        (Success::bytes(), stream(StreamFraming::Bytes, StreamEnd::ConnectionClose, false)),
+        (Success::binary().content_type("audio/mpeg"), with(SuccessShape::binary(), |s| s.content_type = Some("audio/mpeg".into()))),
+        (Success::json(record.clone()).status(201), with(SuccessShape::json(item.clone()), |s| s.statuses = vec![201])),
+        (Success::json(record.clone()).note("always"), with(SuccessShape::json(item.clone()), |s| s.note = Some("always".into()))),
+        (Success::json(record.clone()).tagged("type", "record"),
+            with(SuccessShape::json(item.clone()), |s| s.json_tag = Some(JsonTag::Field { name: "type".into(), value: json!("record") }))),
+    ] {
+        assert_eq!(stored(success).unwrap(), vec![expected]);
     }
     // Validation runs before storage, so an invalid shape reports its own problem.
     let error = stored(Success::ndjson(record.clone()).ends_at_event("done")).unwrap_err().to_string();
@@ -293,11 +303,11 @@ fn builder_keeps_single_plain_successes_and_refuses_what_storage_cannot_hold() {
 #[test]
 fn several_shapes_are_validated_at_build_with_inferred_json_tags() {
     let mut ctx = DefinitionContext::types_in("::models");
-    let refused = "are stored once Endpoint::response holds response model v2 shapes";
     // A sequence and a struct infer array and object tags.
-    let error = Endpoint::get("Contents", "/contents").describes("A directory or a file")
-        .returns_json::<Vec<Record>>(&mut ctx).returns_json::<Record>(&mut ctx).build().unwrap_err().to_string();
-    assert!(error.contains(refused), "{error}");
+    let contents = Endpoint::get("Contents", "/contents").describes("A directory or a file")
+        .returns_json::<Vec<Record>>(&mut ctx).returns_json::<Record>(&mut ctx).build().unwrap();
+    let tags: Vec<_> = contents.response.iter().map(|shape| shape.json_tag.clone()).collect();
+    assert_eq!(tags, [Some(JsonTag::Array), Some(JsonTag::Object)]);
     // Two structs infer nothing and are inseparable.
     let error = Endpoint::get("Either", "/either").describes("Either")
         .returns_json::<Record>(&mut ctx).returns_json::<Receipt>(&mut ctx).build().unwrap_err().to_string();
@@ -305,10 +315,11 @@ fn several_shapes_are_validated_at_build_with_inferred_json_tags() {
         && error.contains("no JSON tag separates them"), "{error}");
     // An explicit tag on every shape separates them.
     let (record, receipt) = (ctx.register::<Record>().unwrap(), ctx.register::<Receipt>().unwrap());
-    let error = Endpoint::get("Tagged", "/tagged").describes("Tagged")
+    let tagged = Endpoint::get("Tagged", "/tagged").describes("Tagged")
         .returns(Success::json(record.clone()).tagged("kind", "record")).returns(Success::json(receipt.clone()).tagged("kind", "receipt"))
-        .build().unwrap_err().to_string();
-    assert!(error.contains(refused), "{error}");
+        .build().unwrap();
+    let tags: Vec<_> = tagged.response.iter().map(|shape| shape.json_tag.clone()).collect();
+    assert_eq!(tags, [Some(JsonTag::Field { name: "kind".into(), value: json!("record") }), Some(JsonTag::Field { name: "kind".into(), value: json!("receipt") })]);
     // A declared tag is never replaced by an inferred one.
     let error = Endpoint::get("Mixed", "/mixed").describes("Mixed")
         .returns_json::<Vec<Record>>(&mut ctx).returns(Success::json(record).tagged("kind", "record")).build().unwrap_err().to_string();

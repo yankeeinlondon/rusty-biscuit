@@ -3,7 +3,9 @@
 //! containers, an alias, arbitrary JSON, a composition) and the additive
 //! vocabulary (typed paths, deprecation, metadata, endpoint authentication,
 //! ordered Basic lists, all three OAuth2 grants, declared errors at both
-//! levels with an opt-out, and a paginated GraphQL operation).
+//! levels with an opt-out, a paginated GraphQL operation, and success shapes:
+//! a JSON + SSE + fallback set with notes and variant names, tagged JSON
+//! shapes beside a byte stream and a 204 empty shape, and an NDJSON stream).
 
 use std::collections::HashMap;
 
@@ -12,7 +14,7 @@ use schematic_define::{
     AddressRule, AuthMethod, AuthPolicy, AuthorizationCodeGrant, Backoff, ClientCredentialsGrant, DefinitionBundle,
     DefinitionContext, DefinitionError, DeviceCodeGrant, Endpoint, EnvAuthStrategy, ErrorSet, ErrorShape, GraphQlOperation,
     OAuth2ClientAuthMethod, OAuth2Config, ParamDef, PkceRequirement, QueryParamType, RateLimit, ResetUnit, RestApi,
-    RetryGuidance, StatusMatch, StatusSelector, definition_type, rust_path,
+    RetryGuidance, StatusMatch, StatusSelector, Success, definition_type, rust_path,
 };
 use schemars::JsonSchema;
 
@@ -34,6 +36,8 @@ pub mod models {
     definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Problem { pub message: String });
     definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct IssuesVars { pub owner: String, pub first: Option<u32>, pub after: Option<String> });
     definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct IssuesData { pub issues: Vec<Item> });
+    definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Reply { pub kind: String, pub text: String });
+    definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Event { pub kind: String });
     #[derive(JsonSchema)]
     #[allow(dead_code)]
     pub struct Widget { pub size: u32 }
@@ -99,6 +103,16 @@ pub fn fixture() -> (RestApi, schematic_define::ModelCatalog) {
         .build().unwrap();
     let viewer = GraphQlOperation::mutation("Touch", "").describes("Touch nothing").no_variables()
         .data::<serde_json::Value>(&mut ctx).errors(ErrorSet::none()).build().unwrap();
+    let (reply, event) = (ctx.register::<Reply>().unwrap(), ctx.register::<Event>().unwrap());
+    let converse = Endpoint::post("Converse", "/converse").describes("Reply whole or as events")
+        .returns(Success::json(reply.clone()).note("when stream is false").variant("Whole"))
+        .returns(Success::sse(event.clone()).ends_at_event("done").keep_end().note("when stream is true"))
+        .returns(Success::binary().fallback().variant("Attachment")).build().unwrap();
+    let submit = Endpoint::post("Submit", "/submit").describes("Tagged replies, audio, or nothing")
+        .returns(Success::json(reply).tagged("kind", "reply")).returns(Success::json(event.clone()).tagged("kind", "event"))
+        .returns(Success::bytes().content_type("audio/mpeg")).returns(Success::empty().status(204)).build().unwrap();
+    let follow = Endpoint::get("Follow", "/follow").describes("Events per line")
+        .returns(Success::ndjson(event).ends_when_field("kind", "end").status(200)).build().unwrap();
     let api = RestApi::builder(&ctx, "Fixture", "https://api.example.com/v1")
         .describes("Bundle fixture API")
         .basic_env("FIXTURE_USER", ["FIXTURE_PASSWORD", "FIXTURE_PASSWORD_OLD"])
@@ -111,7 +125,7 @@ pub fn fixture() -> (RestApi, schematic_define::ModelCatalog) {
         .retry_guidance(RetryGuidance::new([StatusSelector::Code(429), StatusSelector::Range { start: 500, end: 599 }], true, 3,
             Backoff::Exponential { base_ms: 250, cap_ms: 8000 }).unwrap())
         .default_errors(ErrorSet::new().on(StatusMatch::class(5), ErrorShape::json(problem)).on(StatusMatch::exact(404), ErrorShape::text()))
-        .endpoints([node, parents, lookup, raw, pets])
+        .endpoints([node, parents, lookup, raw, pets, converse, submit, follow])
         .graphql(AddressRule::github()).operations([issues, viewer])
         .build().unwrap();
     (api, ctx.models().clone())

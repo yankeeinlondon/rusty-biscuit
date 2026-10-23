@@ -6,7 +6,7 @@
 //! - The `into_parts()` method correctly substitutes parameters into the path
 
 use proc_macro2::TokenStream;
-use schematic_define::{ApiRequest, ApiResponse, Endpoint, RestMethod};
+use schematic_define::{ApiRequest, SuccessShape, Endpoint, RestMethod};
 use schematic_gen::codegen::generate_request_struct;
 
 /// Formats generated tokens into readable code for assertions.
@@ -21,7 +21,7 @@ fn format_tokens(tokens: &TokenStream) -> String {
 
 #[test]
 fn single_path_param_struct_has_field() {
-    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetUser".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users/{user_id}".to_string(); fixture.description = "Get a user".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("User"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetUser".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users/{user_id}".to_string(); fixture.description = "Get a user".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("User")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
@@ -40,7 +40,7 @@ fn single_path_param_struct_has_field() {
 
 #[test]
 fn single_path_param_into_parts_format_string() {
-    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetUser".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users/{user_id}".to_string(); fixture.description = "Get a user".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("User"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetUser".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users/{user_id}".to_string(); fixture.description = "Get a user".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("User")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
@@ -69,7 +69,7 @@ fn single_path_param_into_parts_format_string() {
 
 #[test]
 fn multiple_path_params_struct_has_all_fields() {
-    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetMessage".to_string(); fixture.method = RestMethod::Get; fixture.path = "/threads/{thread_id}/messages/{message_id}".to_string(); fixture.description = "Get a message".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("Message"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetMessage".to_string(); fixture.method = RestMethod::Get; fixture.path = "/threads/{thread_id}/messages/{message_id}".to_string(); fixture.description = "Get a message".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("Message")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
@@ -87,7 +87,7 @@ fn multiple_path_params_struct_has_all_fields() {
 
 #[test]
 fn multiple_path_params_into_parts_format_string() {
-    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetMessage".to_string(); fixture.method = RestMethod::Get; fixture.path = "/threads/{thread_id}/messages/{message_id}".to_string(); fixture.description = "Get a message".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("Message"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetMessage".to_string(); fixture.method = RestMethod::Get; fixture.path = "/threads/{thread_id}/messages/{message_id}".to_string(); fixture.description = "Get a message".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("Message")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
@@ -108,7 +108,7 @@ fn multiple_path_params_into_parts_format_string() {
 
 #[test]
 fn three_path_params_into_parts_format_string() {
-    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetIssueComment".to_string(); fixture.method = RestMethod::Get; fixture.path = "/orgs/{org}/repos/{repo}/issues/{issue}/comments".to_string(); fixture.description = "Get issue comments".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("Comments"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetIssueComment".to_string(); fixture.method = RestMethod::Get; fixture.path = "/orgs/{org}/repos/{repo}/issues/{issue}/comments".to_string(); fixture.description = "Get issue comments".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("Comments")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
@@ -140,7 +140,7 @@ fn three_path_params_into_parts_format_string() {
 
 #[test]
 fn no_path_params_no_fields() {
-    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListItems".to_string(); fixture.method = RestMethod::Get; fixture.path = "/items".to_string(); fixture.description = "List all items".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("ListResponse"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListItems".to_string(); fixture.method = RestMethod::Get; fixture.path = "/items".to_string(); fixture.description = "List all items".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("ListResponse")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
@@ -165,7 +165,7 @@ fn no_path_params_no_fields() {
 
 #[test]
 fn path_param_with_body_has_both_fields() {
-    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "UpdateThread".to_string(); fixture.method = RestMethod::Patch; fixture.path = "/threads/{thread_id}".to_string(); fixture.description = "Update a thread".to_string(); fixture.request = Some(ApiRequest::json_type("UpdateThreadBody")); fixture.response = ApiResponse::json_type("Thread"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "UpdateThread".to_string(); fixture.method = RestMethod::Patch; fixture.path = "/threads/{thread_id}".to_string(); fixture.description = "Update a thread".to_string(); fixture.request = Some(ApiRequest::json_type("UpdateThreadBody")); fixture.response = vec![SuccessShape::json_type("Thread")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
@@ -207,7 +207,7 @@ fn path_param_with_body_has_both_fields() {
 
 #[test]
 fn multiple_path_params_with_body() {
-    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "CreateComment".to_string(); fixture.method = RestMethod::Post; fixture.path = "/threads/{thread_id}/messages/{message_id}/comments".to_string(); fixture.description = "Create a comment".to_string(); fixture.request = Some(ApiRequest::json_type("CreateCommentBody")); fixture.response = ApiResponse::json_type("Comment"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "CreateComment".to_string(); fixture.method = RestMethod::Post; fixture.path = "/threads/{thread_id}/messages/{message_id}/comments".to_string(); fixture.description = "Create a comment".to_string(); fixture.request = Some(ApiRequest::json_type("CreateCommentBody")); fixture.response = vec![SuccessShape::json_type("Comment")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
@@ -256,7 +256,7 @@ fn all_http_methods_generate_correct_method_constant() {
     ];
 
     for (method, expected_str) in methods_and_expected {
-        let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = format!("Test{:?}", method); fixture.method = method; fixture.path = "/test/{id}".to_string(); fixture.description = "Test endpoint".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("Response"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
+        let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = format!("Test{:?}", method); fixture.method = method; fixture.path = "/test/{id}".to_string(); fixture.description = "Test endpoint".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("Response")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
         let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
         let code = format_tokens(&tokens);
@@ -279,7 +279,7 @@ fn all_http_methods_generate_correct_method_constant() {
 
 #[test]
 fn consecutive_path_params() {
-    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetNestedResource".to_string(); fixture.method = RestMethod::Get; fixture.path = "/{a}/{b}/{c}".to_string(); fixture.description = "Consecutive params".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("Response"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetNestedResource".to_string(); fixture.method = RestMethod::Get; fixture.path = "/{a}/{b}/{c}".to_string(); fixture.description = "Consecutive params".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("Response")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
@@ -301,7 +301,7 @@ fn consecutive_path_params() {
 
 #[test]
 fn path_param_at_start() {
-    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetByVersion".to_string(); fixture.method = RestMethod::Get; fixture.path = "/{version}/resource".to_string(); fixture.description = "Version-prefixed path".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("Response"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetByVersion".to_string(); fixture.method = RestMethod::Get; fixture.path = "/{version}/resource".to_string(); fixture.description = "Version-prefixed path".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("Response")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
@@ -324,7 +324,7 @@ fn path_param_at_start() {
 
 #[test]
 fn underscore_in_param_name() {
-    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetUserProfile".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users/{user_id}/profile".to_string(); fixture.description = "Get user profile".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("Profile"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetUserProfile".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users/{user_id}/profile".to_string(); fixture.description = "Get user profile".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("Profile")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
@@ -342,7 +342,7 @@ fn underscore_in_param_name() {
 
 /// Builds a GET endpoint at `path` with no request body.
 fn get_endpoint(id: &str, path: &str) -> Endpoint {
-    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = RestMethod::Get; fixture.path = path.to_string(); fixture.description = format!("Test endpoint for {id}"); fixture.request = None; fixture.response = ApiResponse::json_type("TestResponse"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = RestMethod::Get; fixture.path = path.to_string(); fixture.description = format!("Test endpoint for {id}"); fixture.request = None; fixture.response = vec![SuccessShape::json_type("TestResponse")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 #[test]

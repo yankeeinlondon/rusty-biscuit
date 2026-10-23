@@ -9,6 +9,7 @@ use super::request_body::map_request_body;
 use super::responses::map_responses;
 use super::security::endpoint_security;
 use crate::params::ParamDef;
+use crate::response::ResponseShape;
 use crate::types::{Endpoint, RestMethod};
 
 /// Maps all endpoints to OpenAPI paths.
@@ -188,23 +189,24 @@ pub(super) fn map_operation(
         .map(|req| map_request_body(req).map(ReferenceOr::Item)).transpose()?;
 
     let shapes = endpoint.success_shapes();
-    let responses = map_responses(&shapes, &api.effective_errors(endpoint))?;
+    let responses = map_responses(shapes, &api.effective_errors(endpoint))?;
 
     let mut extensions = IndexMap::new();
     if !options.skip_extensions {
         let op_ext = SchematicOpExtension {
             request: endpoint.request.clone(),
-            response: endpoint.response.clone(),
+            response: shapes.first().map(|first| first.shape.clone()).unwrap_or(ResponseShape::Empty),
             headers: endpoint.headers.clone(),
             rate_limit: endpoint.rate_limit.clone(),
             retry_guidance: endpoint.retry_guidance.clone(),
             // `response` already says everything about a lone plain shape.
-            success: match shapes.as_slice() {
-                [only] if only.legacy_response().is_some() => vec![],
-                _ => shapes.clone(),
+            success: match shapes {
+                [only] if only.plain().is_some() => vec![],
+                _ => shapes.to_vec(),
             },
             errors: endpoint.errors.clone(),
             no_declared_errors: endpoint.no_declared_errors,
+            cross_origin: endpoint.cross_origin.clone(),
         };
         extensions.insert("x-schematic".to_string(), op_ext.into());
     }

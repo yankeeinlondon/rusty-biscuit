@@ -16,7 +16,6 @@ use crate::metadata::{RateLimit, RetryGuidance};
 use crate::pagination::Strategy;
 use crate::params::EndpointParams;
 use crate::request::ApiRequest;
-use crate::response::ApiResponse;
 
 /// HTTP methods supported by REST APIs.
 ///
@@ -485,8 +484,10 @@ pub struct Endpoint {
     /// Author JSON bodies with [`crate::EndpointBuilder::request_json`] and
     /// multipart uploads with [`crate::EndpointBuilder::request_form`].
     pub request: Option<ApiRequest>,
-    /// Expected response type for this endpoint.
-    pub response: ApiResponse,
+    /// The success shapes a reply may take (R1): nonempty, and selectable by
+    /// status, media type, and JSON tag when there are several. Serialized as
+    /// an array under the historical member name.
+    pub response: Vec<crate::SuccessShape>,
     /// HTTP headers specific to this endpoint.
     ///
     /// These headers are merged with API-level headers, with endpoint headers
@@ -529,25 +530,12 @@ pub struct Endpoint {
     /// `ErrorSet::none()`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_declared_errors: bool,
-    /// Temporary test seam: success shapes [`Self::response`] cannot hold yet.
-    /// When nonempty, [`Self::success_shapes`] returns these instead, so
-    /// generator and exporter tests can exercise several shapes and streams
-    /// before `response` stores them. No builder sets it and it is never
-    /// serialized; it disappears when `response` becomes a list of shapes.
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub shapes_preview: Vec<crate::SuccessShape>,
 }
 
 impl Endpoint {
-    /// The endpoint's success shapes. While [`Self::response`] holds one
-    /// [`ApiResponse`], that is its only shape, with no selection facts
-    /// (unless a test set the hidden preview).
+    /// The endpoint's success shapes, in declaration order.
     #[must_use]
-    pub fn success_shapes(&self) -> Vec<crate::SuccessShape> {
-        if !self.shapes_preview.is_empty() { return self.shapes_preview.clone(); }
-        vec![crate::SuccessShape::from(self.response.clone())]
-    }
+    pub fn success_shapes(&self) -> &[crate::SuccessShape] { &self.response }
 
     /// Placeholder names in [`Self::path`], `{+name}` read as `name`, each
     /// once in order of first occurrence.

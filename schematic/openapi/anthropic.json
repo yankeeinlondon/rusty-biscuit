@@ -29,11 +29,16 @@
         },
         "responses": {
           "200": {
-            "description": "Successful JSON response",
+            "description": "Successful response\n\napplication/json: returned when `stream` is false or omitted\n\ntext/event-stream: returned when `stream` is true",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MessageResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageStreamEvent"
                 }
               }
             }
@@ -49,7 +54,32 @@
             "Json": {
               "Named": "MessageResponse"
             }
-          }
+          },
+          "success": [
+            {
+              "note": "returned when `stream` is false or omitted",
+              "shape": {
+                "Json": {
+                  "Named": "MessageResponse"
+                }
+              }
+            },
+            {
+              "note": "returned when `stream` is true",
+              "shape": {
+                "Stream": {
+                  "end": {
+                    "EventNamed": "message_stop"
+                  },
+                  "framing": {
+                    "Sse": {
+                      "Named": "MessageStreamEvent"
+                    }
+                  }
+                }
+              }
+            }
+          ]
         }
       }
     },
@@ -589,6 +619,119 @@
           "created_at",
           "display_name",
           "type"
+        ]
+      },
+      "MessageStreamEvent": {
+        "title": "MessageStreamEvent",
+        "description": "One event of a streamed Create Message reply."
+      },
+      "ContentBlockDelta": {
+        "title": "ContentBlockDelta",
+        "description": "The update carried by a `content_block_delta` event."
+      },
+      "MessageDelta": {
+        "description": "Top-level message fields changed by `message_delta`.",
+        "type": "object",
+        "properties": {
+          "stop_reason": {
+            "description": "Why generation stopped."
+          },
+          "stop_sequence": {
+            "description": "The stop sequence that was matched, if any."
+          }
+        }
+      },
+      "MessageDeltaUsage": {
+        "description": "Cumulative token counts reported by `message_delta`.",
+        "type": "object",
+        "properties": {
+          "cache_creation_input_tokens": {
+            "description": "Tokens written to cache."
+          },
+          "cache_read_input_tokens": {
+            "description": "Tokens read from cache."
+          },
+          "input_tokens": {
+            "description": "Input tokens."
+          },
+          "output_tokens": {
+            "description": "Output tokens so far.",
+            "type": "integer",
+            "format": "uint32"
+          }
+        },
+        "required": [
+          "output_tokens"
+        ]
+      },
+      "StreamErrorDetail": {
+        "description": "The body of an in-stream `error` event.",
+        "type": "object",
+        "properties": {
+          "message": {
+            "description": "Human-readable message.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Error type, such as `overloaded_error`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "message"
+        ]
+      },
+      "StreamMessage": {
+        "description": "The message carried by `message_start`.\n\nUnlike [`super::MessageResponse`], `stop_reason` is null until a later\n`message_delta`, and `usage` may be omitted.",
+        "type": "object",
+        "properties": {
+          "content": {
+            "description": "Content blocks; empty at `message_start`.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ContentBlock"
+                }
+              ]
+            }
+          },
+          "id": {
+            "description": "Unique message identifier.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Model used for generation.",
+            "type": "string"
+          },
+          "role": {
+            "description": "Message role (always \"assistant\").",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MessageRole"
+              }
+            ]
+          },
+          "stop_reason": {
+            "description": "Why generation stopped; null at `message_start`."
+          },
+          "stop_sequence": {
+            "description": "The stop sequence that was matched, if any."
+          },
+          "type": {
+            "description": "Object type (always \"message\").",
+            "type": "string"
+          },
+          "usage": {
+            "description": "Initial token usage."
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "role",
+          "model"
         ]
       }
     },

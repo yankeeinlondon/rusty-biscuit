@@ -130,13 +130,66 @@ for CreateMessageRequest {
         Self { body }
     }
 }
+/// The end condition of the `CreateMessage` stream.
+#[derive(Debug, Clone, Copy)]
+pub struct CreateMessageStreamEnd;
+impl schematic_runtime::StreamEnd for CreateMessageStreamEnd {
+    const CONDITION: schematic_runtime::EndCondition = schematic_runtime::EndCondition::EventNamed(
+        "message_stop",
+    );
+}
+/// The success reply of `CreateMessage`: one variant per declared shape, chosen from the reply's status, media type, and JSON tag.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub enum CreateMessageResponse {
+    /// returned when `stream` is false or omitted
+    ///
+    /// Chosen by media type `application/json`.
+    Json(::schematic_definitions::anthropic::MessageResponse),
+    /// returned when `stream` is true
+    ///
+    /// Chosen by media type `text/event-stream`.
+    Stream(
+        schematic_runtime::ItemStream<
+            ::schematic_definitions::anthropic::MessageStreamEvent,
+        >,
+    ),
+}
+impl schematic_runtime::Alternatives for CreateMessageResponse {
+    const ROUTES: &'static [schematic_runtime::Route] = &[
+        schematic_runtime::Route::new(schematic_runtime::ShapeKind::Json)
+            .media("application/json"),
+        schematic_runtime::Route::new(schematic_runtime::ShapeKind::Stream)
+            .media("text/event-stream"),
+    ];
+    async fn decode_alternative(
+        index: usize,
+        body: schematic_runtime::LiveBody,
+    ) -> Result<Self, schematic_runtime::DecodeFailure> {
+        match index {
+            0 => {
+                <schematic_runtime::Json<
+                    ::schematic_definitions::anthropic::MessageResponse,
+                > as schematic_runtime::Decode>::decode(body)
+                    .await
+                    .map(Self::Json)
+            }
+            _ => {
+                <schematic_runtime::Sse<
+                    ::schematic_definitions::anthropic::MessageStreamEvent,
+                    CreateMessageStreamEnd,
+                > as schematic_runtime::Decode>::decode(body)
+                    .await
+                    .map(Self::Stream)
+            }
+        }
+    }
+}
 impl schematic_runtime::EndpointSpec for CreateMessageRequest {
     type Api = AnthropicApi;
-    type Success = ::schematic_definitions::anthropic::MessageResponse;
+    type Success = CreateMessageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<
-        ::schematic_definitions::anthropic::MessageResponse,
-    >;
+    type Decoder = schematic_runtime::Shapes<CreateMessageResponse>;
     const ENDPOINT_ID: &'static str = "CreateMessage";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
