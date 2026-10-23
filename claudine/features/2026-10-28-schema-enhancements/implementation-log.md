@@ -2361,6 +2361,55 @@ no path, process, console, or `#[cfg]` code. No `just cross-check` was run.
 Evidence is macOS only; Linux and macOS are proven by the pull request's CI,
 native Windows and WSL2 by the nightly. No other environment is claimed.
 
+### Review iteration 1: design decisions
+
+21. **Continue the technical review without a design question for the author.**
+    - Decision: `human_in_the_loop` is null. The remaining ledger inspection
+      is a post-repair human review, not an unresolved design decision.
+    - Alternatives considered: stop the review because the ledger additions
+      have not been inspected; reopen the previously approved choices.
+    - Why: two independent decision audits found no unresolved choice meeting
+      the review's human-decision bar. The author approved the Phase 1 choices
+      and ledger rows on 2026-10-22. Criterion 13 still explicitly requires
+      inspection of the closing ledger additions before merge.
+    - Downsides: technical readiness does not establish completion of that
+      separate human review.
+22. **The shared commit-result declaration remains required scope.**
+    - Decision: report the independently declared `ctx.recent_commits` type
+      as a high finding; repair must implement the shared named definition.
+    - Alternatives considered: accept matching `string[]` declarations and
+      cross-referenced descriptions as equivalent to a shared type.
+    - Why: catalog migration item 9 expressly requires one shared named type.
+      Updating existing fixtures is implementation work, not grounds to
+      remove that requirement. The approved ledger also promises the shared
+      type, so this does not reopen a settled choice.
+    - Downsides: the repair must update embedded/on-disk schema dependencies
+      and the fixture copies that exercise them.
+23. **Classify preserved text as a possible input, while retaining proven fits.**
+    - Decision: `numberlike` and `boolish` source classification must account
+      for their text representation in both conversion families and source
+      exclusions. A call is category 5 only when every admitted value fails.
+    - Alternatives considered: treat each as its native scalar family; make
+      every use unknown; convert their frontmatter values eagerly.
+    - Why: the spec requires delivery as sent and conservative five-category
+      checks. Public API and CLI probes show valid text values rejected by
+      the present family collapse. Existing guaranteed fits, such as
+      `numberlike` to `number`, remain category 1.
+    - Downsides: type-level classification needs to retain these two types'
+      representation semantics rather than treating every shape as one
+      primitive family.
+24. **Retain the author-approved network and identifier signatures.**
+    - Decision: do not raise a new finding merely because a plain `number`
+      timeout or the approved identifier union leaves a domain rejection in
+      its handler.
+    - Alternatives considered: apply the spec's broad signature-refinement
+      sentence to require new timeout/identifier constraints.
+    - Why: the author explicitly approved the ledger's exact signatures for
+      `ping`, `ping_under`, `pr`, and `cicd`; settled choices are not reopened
+      by this review. Probes confirmed the binder follows those signatures.
+    - Downsides: those known domain failures are not proven call errors in
+      the editor, and callers can still reach a handler before they fail.
+
 ## Pipeline Refresh
 
 - `2026-10-29-recursive-schema-types`: changed. Spec names the real
@@ -2390,3 +2439,20 @@ native Windows and WSL2 by the nightly. No other environment is claimed.
   only in a sample output that is still accurate).
 
 No downstream decision meets the bar for the author (`decisions_for_author: []`).
+
+## Review 1 repairs
+
+Repairs for `review-1.md`; the finding ledger and evidence are in `log.md`
+under "Implementation of Review Findings #1".
+
+- **R1-F1: Phase 4 decision 7 is superseded.** `ctx.recent_commits` now
+  references the catalog's `recent-commits` named type through the reserved
+  `recent-commits@darkmatter:functions` import, and `functions.yaml` joined the
+  embedded `SHIPPED` documents. The reserved import reads no disk, so the
+  fixture copies that motivated decision 7 needed no change. The resolved type
+  is unchanged (`string[]`, generated, required).
+- **R1-F2: retained text in call classification.** A `numberlike` or
+  `boolish` source is classified as both its native scalar and its retained
+  text. Decision for the author to confirm: `numberlike`/`boolish` → `yaml` is
+  category 3, not the review's expected 1, because admission trims a tab-led
+  value such as `\t4` that does not parse as YAML.
