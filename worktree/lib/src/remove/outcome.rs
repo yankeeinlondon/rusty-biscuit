@@ -7,16 +7,21 @@
 //! `2026-10-05-graceful-file-contention`; a stop after the move is never
 //! reduced to a refusal or to an unexplained Git failure.
 
+use serde::de::{Deserializer, Error as _};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sniff::filesystem::query::{FileIdentity, NativeString, PathUsageReport};
 
 use super::observation::ObservationDiagnostics;
 use super::recovery::OperationId;
 use super::recovery::journal::JournalEntry;
+use super::recovery::store::ENTRIES_FILE;
+use crate::strict_json;
 
 /// Version of the [`OperationReport`] serialization. Bump it with any change
-/// to the persisted shape.
-pub const REPORT_VERSION: u32 = 5;
+/// to the persisted shape. Versions 4 and 5, which list
+/// [`OperationReport::journal_entries`] inline, are still read.
+pub const REPORT_VERSION: u32 = 6;
 
 /// The most activity observations a report lists. Later ones are counted in
 /// [`Truncation::activity_omitted`]; the deletion journal itself is never
@@ -24,8 +29,8 @@ pub const REPORT_VERSION: u32 = 5;
 pub const MAX_REPORTED_ACTIVITY: usize = 200;
 
 /// The most deleted entries [`OperationReport::deleted`] names. The journal
-/// summary's counts stay exact, and [`OperationReport::journal_entries`]
-/// lists every entry.
+/// summary's counts stay exact, and the entries file
+/// ([`OperationReport::entries_file`]) lists every entry.
 pub const MAX_REPORTED_DELETED: usize = 200;
 
 /// The most retained entries a report names. The count in
@@ -257,8 +262,8 @@ pub struct BranchOutcome {
     pub state: BranchState,
 }
 
-/// Lists cut short in this report. The counts and
-/// [`OperationReport::journal_entries`] stay complete.
+/// Lists cut short in this report. The counts and the entries file
+/// ([`OperationReport::entries_file`]) stay complete.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Truncation {
@@ -300,11 +305,11 @@ pub struct EarlierAttempt {
 }
 
 /// Everything known about one removal operation; persisted as
-/// `report.json`. The top-level fields describe the latest attempt; earlier
-/// attempts are in [`OperationReport::earlier_attempts`], and the journal
-/// counts and entries cover every attempt.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// `report.json`, with its entries in a separate file. The top-level fields
+/// describe the latest attempt; earlier attempts are in
+/// [`OperationReport::earlier_attempts`], and the journal counts and entries
+/// cover every attempt.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct OperationReport {
     pub report_version: u32,
     /// `None` when the attempt stopped before a recovery record existed.
@@ -319,9 +324,16 @@ pub struct OperationReport {
     pub activity: Vec<ObservedActivity>,
     pub journal: JournalSummary,
     /// Every entry any attempt's journal planned, with its resolved state;
-    /// never truncated. The journals themselves are deleted once completion
-    /// saves this list.
+    /// never truncated. Saved in [`OperationReport::entries_file`], never in
+    /// `report.json`, so a version 6 report reads back with none. The
+    /// journals themselves are deleted once completion saves this list.
+    #[serde(skip_serializing)]
     pub journal_entries: Vec<JournalEntry>,
+    /// The file beside `report.json` that holds
+    /// [`OperationReport::journal_entries`]: always [`ENTRIES_FILE`], or
+    /// `None` (saved as `null`) when there are no entries or they could not
+    /// be listed. Set with [`OperationReport::set_entries`].
+    pub entries_file: Option<String>,
     /// Up to [`MAX_REPORTED_DELETED`] entries this operation deleted, as
     /// absolute paths.
     pub deleted: Vec<NativeString>,
@@ -354,6 +366,7 @@ impl OperationReport {
             activity: Vec::new(),
             journal: JournalSummary::default(),
             journal_entries: Vec::new(),
+            entries_file: None,
             deleted: Vec::new(),
             notes: Vec::new(),
             branches: Vec::new(),
@@ -407,6 +420,13 @@ impl OperationReport {
         quarantine.retained = entries.into_iter().take(MAX_REPORTED_RETAINED).collect();
     }
 
+    /// Records every journal entry, to be saved in [`ENTRIES_FILE`]; with
+    /// none, the report names no entries file.
+    pub fn set_entries(&mut self, entries: Vec<JournalEntry>) {
+        self.entries_file = (!entries.is_empty()).then(|| ENTRIES_FILE.to_string());
+        self.journal_entries = entries;
+    }
+
     /// Records the entries this operation deleted: the first
     /// [`MAX_REPORTED_DELETED`] by name, the rest counted.
     pub fn set_deleted(&mut self, entries: Vec<NativeString>) {
@@ -418,6 +438,97 @@ impl OperationReport {
     pub fn branch_failed(&self) -> bool {
         self.branches.iter().any(|branch| matches!(branch.state, BranchState::Failed { .. }))
     }
+}
+
+/// A saved report is read by its `report_version`: versions 4 and 5 list
+/// `journal_entries` inline and have no `entries_file`; version 6 names its
+/// `entries_file` (explicitly, `null` when there is none) and lists no
+/// entries. No member is repeated, unknown, or missing.
+impl<'de> Deserialize<'de> for OperationReport {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value: Value = strict_json::nested(deserializer)?;
+        from_wire(value).map_err(D::Error::custom)
+    }
+}
+
+/// The members every report version shares, once the version-specific
+/// entry members are taken out.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SharedMembers {
+    report_version: u32,
+    operation_id: Option<OperationId>,
+    outcome: RemovalOutcome,
+    original: NativeString,
+    original_state: OriginalState,
+    quarantine: Option<QuarantineReport>,
+    registration: RegistrationState,
+    timeline: Vec<TimelineEvent>,
+    discovery: Vec<DiscoveryRun>,
+    activity: Vec<ObservedActivity>,
+    journal: JournalSummary,
+    deleted: Vec<NativeString>,
+    notes: Vec<ReportNote>,
+    branches: Vec<BranchOutcome>,
+    errors: Vec<String>,
+    truncation: Truncation,
+    earlier_attempts: Vec<EarlierAttempt>,
+    /// Absent before version 5; see [`OperationReport::observation`].
+    observation: Option<ObservationDiagnostics>,
+}
+
+fn from_wire(value: Value) -> Result<OperationReport, String> {
+    let Value::Object(mut members) = value else { return Err("a report is one JSON object".into()) };
+    let version = match members.get("report_version") {
+        None => return Err("report_version is missing".into()),
+        Some(version) => version.as_u64().ok_or_else(|| format!("report_version is not a whole number: {version}"))?,
+    };
+    let inline = members.remove("journal_entries");
+    let named = members.remove("entries_file");
+    let (journal_entries, entries_file) = match version {
+        4 | 5 => {
+            if named.is_some() {
+                return Err(format!("a version {version} report has no entries_file"));
+            }
+            let inline = inline.ok_or_else(|| format!("journal_entries is missing from a version {version} report"))?;
+            (Vec::<JournalEntry>::deserialize(inline).map_err(|error| format!("journal_entries: {error}"))?, None)
+        }
+        6 => {
+            if inline.is_some() {
+                return Err("a version 6 report lists no journal_entries; its entries file does".into());
+            }
+            match named {
+                None => return Err("entries_file is missing".into()),
+                Some(Value::Null) => (Vec::new(), None),
+                Some(Value::String(name)) if name == ENTRIES_FILE => (Vec::new(), Some(name)),
+                Some(other) => return Err(format!("entries_file is neither null nor \"{ENTRIES_FILE}\": {other}")),
+            }
+        }
+        other => return Err(format!("report version {other} is not one this wt reads")),
+    };
+    let shared = SharedMembers::deserialize(Value::Object(members)).map_err(|error| error.to_string())?;
+    Ok(OperationReport {
+        report_version: shared.report_version,
+        operation_id: shared.operation_id,
+        outcome: shared.outcome,
+        original: shared.original,
+        original_state: shared.original_state,
+        quarantine: shared.quarantine,
+        registration: shared.registration,
+        timeline: shared.timeline,
+        discovery: shared.discovery,
+        activity: shared.activity,
+        journal: shared.journal,
+        journal_entries,
+        entries_file,
+        deleted: shared.deleted,
+        notes: shared.notes,
+        branches: shared.branches,
+        errors: shared.errors,
+        truncation: shared.truncation,
+        earlier_attempts: shared.earlier_attempts,
+        observation: shared.observation,
+    })
 }
 
 #[cfg(test)]

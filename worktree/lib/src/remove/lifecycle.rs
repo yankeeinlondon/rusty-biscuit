@@ -287,9 +287,11 @@ impl Refusal {
             Self::Store(error) => match error {
                 StoreError::Storage { .. } | StoreError::Io(_) | StoreError::JournalWrite(_) => ExitClass::Blocked,
                 StoreError::Lock(LockError::Busy | LockError::Storage(_) | LockError::Io(_)) => ExitClass::Blocked,
-                StoreError::Pending(_) | StoreError::Record { .. } | StoreError::Journal { .. } | StoreError::InventoryMismatch => {
-                    ExitClass::Refused
-                }
+                StoreError::Pending(_)
+                | StoreError::Record { .. }
+                | StoreError::Report { .. }
+                | StoreError::Journal { .. }
+                | StoreError::InventoryMismatch => ExitClass::Refused,
                 StoreError::WrongLock | StoreError::PhaseOrder | StoreError::Completed(_) => ExitClass::Failure,
             },
             Self::Move(error) => match error.class() {
@@ -799,8 +801,8 @@ struct Attempt<'a> {
     identity: FileIdentity,
     admin_dir: PathBuf,
     warnings: Vec<String>,
-    /// The report lists every journal entry, so completion may delete the
-    /// journals.
+    /// The report's entries file lists every journal entry, so completion
+    /// may delete the journals.
     journal_reported: bool,
     /// The attempt's observer, read into the report whenever it is saved;
     /// `None` for an attempt that started none.
@@ -1086,10 +1088,13 @@ impl<'a> Attempt<'a> {
                 if self.report.journal.deleted.total() > 0 && !self.report.notes.contains(&ReportNote::ConcurrentWriteLimit) {
                     self.report.notes.push(ReportNote::ConcurrentWriteLimit);
                 }
-                self.report.journal_entries = entries;
+                self.report.set_entries(entries);
                 self.journal_reported = true;
             }
             Err(error) => {
+                // Never an entries file older than this report: the journals
+                // are kept instead.
+                self.report.set_entries(Vec::new());
                 self.journal_reported = false;
                 self.report.errors.push(format!("the deletion journal could not be summarized: {error}"));
             }

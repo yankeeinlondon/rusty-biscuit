@@ -1,5 +1,5 @@
 ---
-source: worktree/cli/tests/remove_usage_refusal.rs
+source: worktree/cli/tests/remove_usage_holders.rs
 expression: "notes.join(\"\\n\")"
 ---
 complete: None

@@ -1,8 +1,8 @@
 ---
-source: worktree/cli/tests/remove_usage_refusal.rs
-expression: rendered
+source: worktree/cli/tests/remove_usage_holders.rs
+expression: "holders(report(\"usable\", processes, &[], false))"
 ---
-Removal paused: other processes are using fix-path-spelling.
+In use: 12 processes are using this worktree now.
 
 PID 100  busy
   Open handle: /work/fix-path-spelling/f0
@@ -40,8 +40,4 @@ PID 109  worker
   Open handle: /work/fix-path-spelling
 …and 2 more processes
 
-Stop the relevant process or task, then rerun:
-  wt remove fix-path-spelling
-
-The checkout and branches were kept.
-Some of this usage may be harmless, such as a tool watching for changes, but removal pauses whenever usage is seen.
+They don't stop the removal; a tool watching for changes is often harmless. A program working in the worktree may lose its files. On Windows, a file one of them holds open can stop deletion partway; running the same command again continues it.

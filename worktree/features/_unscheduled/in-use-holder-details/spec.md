@@ -38,17 +38,20 @@ report (exit 3, "Removal paused"), so the merge of `main` into that branch
 kept the new report and dropped this message. This spec carries the ideas
 forward.
 
-## Open question (2026-10-23)
+## Decided (2026-10-23)
 
-`2026-10-23-remove-deletes-what-was-agreed` set the rule that once the user
-agrees, `wt remove` deletes and warns instead of stopping. The usage check
-was left as it is, a pause with exit 3, pending a separate decision. If it
-becomes a warning too, this spec's facts belong in that warning rather than
-in a paused-removal report; decide that before scheduling this.
+The usage check no longer pauses anything. `wt remove` lists the processes
+using the worktree in its report, before the question (`In use: …`), and
+removes the worktree if the user agrees; the completion repeats them as a
+warning. The facts this spec asks for belong in that report section
+(`holders_markup` in `worktree/cli/src/commands/remove/usage.rs`), where they
+help the user decide whether to answer yes. The "command that ends them all"
+line still helps there, as a suggestion. The problem statement below still
+describes the paused-removal message it was written against.
 
 ## Scope
 
-- carry the same four facts into the holder lines of the paused-removal report
+- carry the same four facts into the holder lines of the report's `In use` section
 - `Holder` today has no command line, start time, or parent PID; decide
   whether Sniff's path-usage query supplies them or `worktree` looks them up
   afterward, keeping the existing rule that a holder whose identity is

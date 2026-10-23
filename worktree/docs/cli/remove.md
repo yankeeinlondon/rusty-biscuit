@@ -79,45 +79,29 @@ With `--force-remote`, the branch on origin is deleted through origin's push URL
 
 ### Background programs writing into the worktree
 
-After the report and the questions, and immediately before anything moves,
-`wt remove` checks whether another process is using the checkout (see
-[Deleting the checkout](#deleting-the-checkout)).
-A process standing in the worktree, holding a file open in it, watching it, or
-running a program from it pauses the removal with exit 3. No flag overrides
-this. Your own shell and the programs that started `wt` are never listed.
+While it builds the report, `wt remove` checks whether another process is
+using the checkout: standing in the worktree, holding a file open in it,
+watching it, or running a program from it. Your own shell and the programs
+that started `wt` are never listed. What it finds is part of the report, so
+you see it before you answer:
 
 ```text
-Removal paused: another process is using feat-x.
+In use: 1 process is using this worktree now.
 
 PID 39871  rust-analyzer /opt/bin/rust-analyzer
   Watching: /code/wts/repo/feat-x/src
 
-Stop the relevant process or task, then rerun:
-  wt remove feat-x
-
-The checkout and branches were kept.
+They don't stop the removal; a tool watching for changes is often harmless. A program working in the worktree may lose its files. On Windows, a file one of them holds open can stop deletion partway; running the same command again continues it.
 ```
 
-**Windows Search gets one recheck.** On Windows, Windows Search opens files
-for a few milliseconds soon after they are written, to index them, so a
-check that lands at that moment would pause a removal no program of yours is
-involved in. When every process the check finds is one of Windows Search's
-own, `SearchProtocolHost.exe`, `SearchFilterHost.exe`, or
-`SearchIndexer.exe` running from the Windows system directory (normally
-`C:\Windows\System32`), `wt remove` waits 500 ms and checks exactly once
-more. That second check decides:
-
-- nothing found: the removal goes ahead, with nothing extra on screen;
-- anything found, Windows Search included: the removal pauses as above, and
-  the message ends with
-  `The first check found only Windows Search, so wt waited 500 ms and checked once more; the processes above are from that second check.`
-
-The recheck never happens when the first check also finds any other process,
-or a program with one of those names running from anywhere else; the removal
-pauses at once. A removal that went ahead after a recheck records it in its
-saved report (see [Recovery records and retry](#recovery-records-and-retry)):
-both checks under `discovery`, and the `discovery` step of the `timeline`
-reads `Windows Search held 1 file(s); rechecked after 500 ms; released`.
+**Usage never stops a removal you agreed to**, and `wt` never waits for a
+process to let go. If you agree, the removal goes ahead, and its completion
+warns again: `rust-analyzer (PID 39871) was using the worktree when it was
+removed`. The removal reuses the report's check rather than running a second
+one, and its saved report keeps it under `discovery`. A check that saw
+nothing adds nothing to the report. Only a check that could not verify the
+checkout at all (it vanished, or its identity could not be read) refuses,
+with exit 3, before anything moves.
 
 A program the check cannot see can still write while the checkout is
 deleted. **Once you have agreed, `wt remove` deletes**: it never stops
@@ -212,7 +196,7 @@ With the wrapper, removal happens in two runs:
 
 The second run deletes nothing when anything approved has changed in between: protected files, the include rules, the copy record, the branch tip, the worktree's `.git` link (where it leads, or whether Git can still read it), the worktree's path (a link now standing [in its place](#a-link-in-place-of-the-worktree)), or the branch on origin. It also refuses when the handoff is more than a minute old. A changed state is exit 3; a file it can't read, a shell still inside the worktree, or an expired or unknown handoff is exit 4. The second run never repairs anything. It asks the network only for what the approvals still need: a branch approved because a PR or an `origin/*` copy held its commits is checked live again.
 
-The first run does not check whether other processes use the worktree, because the shell it is about to move would always be found. The second run, after the shell has moved, makes that check: a program still using the worktree pauses the removal there with exit 3 (see [Background programs writing into the worktree](#background-programs-writing-into-the-worktree)), and no `cd:` or `remove-handoff:` line is printed after a failure. A retry of a stopped removal is never handed off: run it from outside the moved checkout, for example from the base checkout.
+The first run reports the other processes using the worktree, as any removal does; your own shell is never among them. The second run, after the shell has moved, checks again: a program still using the worktree is named in a warning when the removal finishes (see [Background programs writing into the worktree](#background-programs-writing-into-the-worktree)), and no `cd:` or `remove-handoff:` line is printed after a failure. A retry of a stopped removal is never handed off: run it from outside the moved checkout, for example from the base checkout.
 
 ## Deleting the checkout
 
@@ -224,20 +208,15 @@ watching both paths, and only then unregisters it and runs the branch steps:
 
 ```mermaid
 flowchart LR
-    W[Start watching for changes] --> A[Check usage]
-    A -->|Usage found| B[Pause, exit 3; show processes]
-    A -->|Only Windows Search, on Windows| R[Wait 500 ms; check once more]
-    R -->|Usage found| B
-    R -->|No usage observed| C
-    A -->|No usage observed| C[Move checkout]
+    Q[Report, with the processes using it; you agree] --> W[Start watching for changes]
+    W --> C[Move checkout]
     C --> D[Delete while watching both paths]
     D -->|Changes after you agreed| D
     D -->|Interrupt or a step that fails| E[Keep what is left, exit 1; report recovery]
     D -->|Done| F[Unregister; run branch steps; warn about any changes]
 ```
 
-The usage check is conservative: observed usage does not necessarily mean a
-handle would prevent deletion, but it always refuses. It is also incomplete:
+The usage check informs; it never decides. It is also incomplete:
 some platforms cannot see every kind of usage, and a move does not revoke a
 handle that is already open or stop a process from recreating the original
 path. That is why the deletion itself is watched: not to stop it, but so
@@ -638,10 +617,10 @@ flowchart LR
 - `deleted` names at most 200 deleted paths, with the rest counted in
   `truncation.deleted_omitted`; `journal_entries` is never cut short.
 - `discovery` lists the run's process checks by `purpose`: `preflight` (the
-  check that let the move or the deletion start), `diagnostic` (a check of
-  each location after a stop), and `windows_search_hold` (a first check that
-  found only Windows Search; the `preflight` after it is the one recheck that
-  decided).
+  check made for the report, or before deleting from the moved directory on a
+  retry), and `diagnostic` (a check of each location after a stop). A report
+  from before 2026-10-23 may also list `windows_search_hold`, a first check a
+  since-removed recheck followed.
 - `observation` describes the run's change watching: the `backend`
   (`fs_events`, `inotify`, or `read_directory_changes`), how long watching
   took to start (`startup_ms`), and the latest and longest time a check's
@@ -928,7 +907,7 @@ The path is checked before anything else, again after a [repair](#the-directory-
 | 0 | Done, including a question you declined or cancelled, and a removal that warned about changes after you agreed |
 | 1 | Something failed, or the removal was [interrupted](#interrupting-a-removal). Git failures name the worktree, its path, and what was being done (`could not check the files of worktree …`). A removal that stopped after the checkout was moved exits 1 even if nothing was deleted yet, with both locations and the saved report; when a branch step fails after the checkout was removed, the report says which branches were deleted and which were kept |
 | 2 | Invalid arguments |
-| 3 | Refused, to avoid losing work: another process is using the checkout, approved files or the branch changed, the checkout holds something it cannot safely delete, or a pending removal or a name matching it and another worktree needs resolving. **No working files, branches, or worktree records were removed**, but a repair attempt may have changed Git's link metadata, and the message says so when it might have |
+| 3 | Refused, to avoid losing work: the usage check could not verify the checkout, approved files or the branch changed between a handoff's two runs, the checkout holds something it cannot safely delete, or a pending removal or a name matching it and another worktree needs resolving. **No working files, branches, or worktree records were removed**, but a repair attempt may have changed Git's link metadata, and the message says so when it might have |
 | 4 | Blocked by the environment (no shell wrapper, an expired handoff, a filesystem that cannot move the checkout without risking replacement, change watching that cannot start, a recovery record that cannot be written, another `wt remove` of the same worktree running, or on Windows a file held open that blocks the move); nothing was removed, and no flag helps |
 
 Exit 3 means "nothing removed", not "nothing changed": `wt remove` never prints "nothing was changed" after a repair attempt.

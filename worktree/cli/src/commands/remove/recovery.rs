@@ -170,7 +170,7 @@ pub fn stopped_markup(finished: &Finished, display_name: &str, name: &str, branc
         if report.notes.contains(&ReportNote::ConcurrentWriteLimit) {
             lines.push(
                 "  <dim>A file written in the instant before <i>wt</i> deleted its path would have been deleted \
-                too; the saved report lists every deleted path.</dim>"
+                too; the saved entries list (entries.jsonl.gz) names every deleted path.</dim>"
                     .to_string(),
             );
         }
@@ -580,12 +580,12 @@ fn activity_verb(kind: ActivityKind) -> &'static str {
     }
 }
 
-/// `124 files and 3 folders (listed in the saved report)`, or `nothing`.
+/// `124 files and 3 folders (listed in entries.jsonl.gz)`, or `nothing`.
 fn deleted_phrase(deleted: &EntryCounts) -> String {
     if deleted.total() == 0 {
         return "nothing".to_string();
     }
-    format!("{} <dim>(listed in the saved report)</dim>", counts(deleted))
+    format!("{} <dim>(listed in entries.jsonl.gz)</dim>", counts(deleted))
 }
 
 /// `3 files, 1 folder and 2 links`, leaving out zero counts.

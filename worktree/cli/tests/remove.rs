@@ -662,12 +662,12 @@ fn an_unknown_name_fails_and_the_base_checkout_is_refused() {
         .stderr(predicate::str::contains("main checkout"));
 }
 
-/// Usage is checked after the report and the questions, right before
-/// anything moves: a process standing in the worktree refuses with exit 3,
-/// names its PID, and no force flag overrides it.
+/// Usage is part of the report, before the questions: a process standing in
+/// the worktree is named by PID, and the removal goes ahead once the user
+/// agreed (here through the force flags), with a warning naming it again.
 #[cfg(unix)]
 #[test]
-fn a_process_standing_in_the_worktree_refuses_after_the_questions_with_exit_3() {
+fn a_process_standing_in_the_worktree_is_reported_and_the_removal_completes() {
     let fixture = Fixture::new();
     let wt = fixture.add_worktree("feat/busy", "busy");
     let mut holder = Command::new("sleep").arg("60").current_dir(&wt).spawn().unwrap();
@@ -682,17 +682,19 @@ fn a_process_standing_in_the_worktree_refuses_after_the_questions_with_exit_3() 
     let _ = holder.kill();
     let _ = holder.wait();
     let stderr = stderr_of(&output);
-    assert_eq!(output.status.code(), Some(3), "{stderr}");
-    assert!(stderr.contains("Removal paused: another process is using busy."), "{stderr}");
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains("In use: 1 process is using this worktree now."), "{stderr}");
     assert!(stderr.contains(&format!("PID {pid}")) && stderr.contains("sleep"), "{stderr}");
     assert!(stderr.contains("Working directory:"), "{stderr}");
-    assert!(stderr.contains("The checkout and branches were kept."), "{stderr}");
-    assert!(stderr.find("Branch feat/busy") < stderr.find("Removal paused"), "after the report: {stderr}");
+    assert!(stderr.contains("They don't stop the removal"), "{stderr}");
+    assert!(stderr.find("Branch feat/busy") < stderr.find("In use:"), "with the report: {stderr}");
+    assert!(stderr.find("In use:") < stderr.find("Removed worktree"), "before the removal: {stderr}");
+    assert!(stderr.contains(&format!("(PID {pid}) was using the worktree when it was removed")), "{stderr}");
+    assert!(!stderr.contains("Removal paused"), "{stderr}");
     assert!(output.stdout.is_empty(), "no protocol lines");
-    assert!(wt.join("README.md").exists());
-    assert!(fixture.branch_exists("feat/busy"));
-    assert!(listed_block(&fixture, &wt).is_some(), "still registered");
-    assert_eq!(pending_removals(&fixture), 0, "a refusal leaves no recovery record");
+    assert!(!wt.exists());
+    assert!(listed_block(&fixture, &wt).is_none(), "unregistered");
+    assert_eq!(pending_removals(&fixture), 0);
 }
 
 /// The pending (or any) operation directories under the repository's
@@ -1902,10 +1904,10 @@ fn the_parent_shell_inside_does_not_block_the_handoff_and_the_second_run_removes
 }
 
 /// A different process still using the worktree when the second run starts
-/// refuses there (exit 3), with no protocol line, and nothing is removed.
+/// is named in a warning there, and the removal completes.
 #[cfg(unix)]
 #[test]
-fn a_process_still_inside_after_the_handoff_refuses_the_second_run() {
+fn a_process_still_inside_after_the_handoff_is_reported_by_the_second_run() {
     let fixture = Fixture::new();
     let wt = fixture.add_worktree("feat/x", "feat-x");
     let (landing, token) = first_run(&fixture, &wt, &[]);
@@ -1917,10 +1919,10 @@ fn a_process_still_inside_after_the_handoff_refuses_the_second_run() {
     let _ = holder.kill();
     let _ = holder.wait();
     let stderr = stderr_of(&output);
-    assert_eq!(output.status.code(), Some(3), "{stderr}");
-    assert!(stderr.contains("Removal paused") && stderr.contains(&format!("PID {pid}")), "{stderr}");
-    assert!(output.stdout.is_empty(), "no cd: or remove-handoff: after a refusal");
-    assert_nothing_removed(&fixture, &wt);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains(&format!("(PID {pid}) was using the worktree when it was removed")), "{stderr}");
+    assert!(!stderr.contains("Removal paused"), "{stderr}");
+    assert!(!wt.exists());
     assert_eq!(pending_removals(&fixture), 0);
 }
 

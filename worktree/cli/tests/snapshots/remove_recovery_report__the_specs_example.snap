@@ -6,14 +6,14 @@ Removal stopped: new files appeared at the original path.
 
 Original: /work/fix-path-spelling (something new is here; it was not touched)
 Moved to: /work/.wt-remove-fix-path-spelling-a91c
-Deleted before stopping: 124 files (listed in the saved report)
+Deleted before stopping: 124 files (listed in entries.jsonl.gz)
 Remaining: 6 entries in the moved directory
 Observed: /work/fix-path-spelling/.gitnexus/index.db was created (reported at 14:03:07 UTC)
 Git registration: now points to the moved directory
 Branch fix/path-spelling: kept (not attempted)
 Branch origin/fix/path-spelling: kept (not attempted)
 Only entries you approved before the move were deleted.
-  A file written in the instant before wt deleted its path would have been deleted too; the saved report lists every deleted path.
+  A file written in the instant before wt deleted its path would have been deleted too; the saved entries list (entries.jsonl.gz) names every deleted path.
 
 What to do:
   1. Move or save what is now at /work/fix-path-spelling; wt never deletes it, and the retry refuses until it is gone.

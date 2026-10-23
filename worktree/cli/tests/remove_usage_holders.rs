@@ -1,10 +1,11 @@
-//! The refusal `wt remove` prints when another process is using the
-//! checkout, rendered from reports injected through the library's real
-//! policy ([`assess`]): the spec's example, every evidence location, untrusted
-//! text, the listing limits, the coverage notes, an unverified checkout, a
-//! refusal after the Windows Search recheck, and the exit code.
+//! The report section `wt remove` prints, before its question, when other
+//! processes are using the checkout, rendered from reports injected through
+//! the library's real policy ([`assess`]): the spec's example, every evidence
+//! location, untrusted text, the listing limits, the coverage notes; and the
+//! refusal for a checkout the usage query could not verify, with its exit
+//! code.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use biscuit_terminal::components::prose::{LineBreaks, Prose};
@@ -12,9 +13,9 @@ use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::terminal::Terminal;
 use serde_json::{Value, json};
-use sniff::filesystem::query::{NativeString, PathUsageError, PathUsageReport};
-use worktree::remove::usage::{CoverageSummary, OwnedHandles, UsageRefusal, UsageSource, assess, check_usage};
-use worktree_cli::commands::remove::usage::{coverage_note, refusal_markup, usage_refusal};
+use sniff::filesystem::query::PathUsageError;
+use worktree::remove::usage::{CoverageSummary, OwnedHandles, UsageClearance, UsageRefusal, assess};
+use worktree_cli::commands::remove::usage::{coverage_note, holders_markup, refusal_markup, usage_refusal};
 
 const TARGET: &str = "/work/fix-path-spelling";
 
@@ -80,9 +81,13 @@ fn evidence(kind: &str, mechanism: &str, paths: &[&str]) -> Value {
 }
 
 /// The refusal for `report`, through the library's policy.
-fn refused(report: Value) -> UsageRefusal {
+fn found(report: Value) -> UsageClearance {
     let report = serde_json::from_value(report).expect("valid report");
-    assess(report, &OwnedHandles::default()).expect_err("usage refuses")
+    assess(report, &OwnedHandles::default())
+}
+
+fn holders(report: Value) -> String {
+    render(holders_markup(&found(report)).expect("a holder"))
 }
 
 fn render(markup: String) -> String {
@@ -102,7 +107,7 @@ const MACOS_COVERAGE: &[(&str, &str)] = &[
 
 #[test]
 fn the_specs_example() {
-    let refusal = refused(report(
+    insta::assert_snapshot!(holders(report(
         "usable",
         vec![process(8124, Some("node"), Some("node"), vec![evidence(
             "open_handle",
@@ -111,9 +116,13 @@ fn the_specs_example() {
         )])],
         MACOS_COVERAGE,
         false,
-    ));
+    )));
+}
 
-    insta::assert_snapshot!(render(refusal_markup(&refusal, "fix-path-spelling", "fix/path-spelling")));
+/// Nothing is said when no other process was seen.
+#[test]
+fn no_holder_says_nothing() {
+    assert_eq!(holders_markup(&found(report("usable", vec![], MACOS_COVERAGE, true))), None);
 }
 
 /// Several processes, each evidence kind, several names for one object,
@@ -123,7 +132,7 @@ fn the_specs_example() {
 fn every_evidence_location_and_holder_shape() {
     let mut unnamed = evidence("open_handle", "open_handles", &[]);
     unnamed["observed_path"] = json!({"display": "/tmp/elsewhere.log"});
-    let refusal = refused(report(
+    insta::assert_snapshot!(holders(report(
         "usable",
         vec![
             process(311, Some("rust-analyzer"), Some("/opt/bin/rust-analyzer"), vec![
@@ -138,17 +147,14 @@ fn every_evidence_location_and_holder_shape() {
         ],
         &[("open_handles", "complete"), ("working_directories", "complete")],
         false,
-    ));
-
-    insta::assert_snapshot!(render(refusal_markup(&refusal, "fix-path-spelling", "fix/path-spelling")));
+    )));
 }
 
 /// Process names and paths can hold markup and control characters; they are
-/// shown literally and escaped, never interpreted. A name no shell can
-/// spell the same way gets no command to paste.
+/// shown literally and escaped, never interpreted.
 #[test]
 fn untrusted_text_is_shown_literally() {
-    let refusal = refused(report(
+    let rendered = holders(report(
         "usable",
         vec![process(
             8124,
@@ -160,13 +166,8 @@ fn untrusted_text_is_shown_literally() {
         false,
     ));
 
-    let quoted = render(refusal_markup(&refusal, "it has spaces", "it has spaces"));
-    let unquotable = render(refusal_markup(&refusal, "it's", "it's"));
-
-    insta::assert_snapshot!(quoted);
-    assert!(quoted.contains("  wt remove 'it has spaces'"), "{quoted}");
-    assert!(unquotable.contains("  wt remove for this worktree"), "{unquotable}");
-    assert!(!quoted.contains('\u{1b}') && quoted.contains("/new\\nline_`x`.txt"), "{quoted:?}");
+    insta::assert_snapshot!(rendered);
+    assert!(!rendered.contains('\u{1b}') && rendered.contains("/new\\nline_`x`.txt"), "{rendered:?}");
 }
 
 /// Past the limits, processes and evidence are counted, not listed.
@@ -176,9 +177,7 @@ fn long_lists_are_counted() {
     let mut processes = vec![process(100, Some("busy"), Some("busy"), many)];
     processes.extend((101..112).map(|pid| process(pid, Some("worker"), Some("worker"), vec![evidence("open_handle", "open_handles", &[TARGET])])));
 
-    let rendered = render(refusal_markup(&refused(report("usable", processes, &[], false)), "fix-path-spelling", "fix-path-spelling"));
-
-    insta::assert_snapshot!(rendered);
+    insta::assert_snapshot!(holders(report("usable", processes, &[], false)));
 }
 
 /// Each coverage shape the summary can take, as its note.
@@ -206,7 +205,8 @@ fn coverage_notes() {
     insta::assert_snapshot!(notes.join("\n"));
 }
 
-/// A checkout the query could not verify refuses, for every typed error.
+/// A checkout the query could not verify refuses, for every typed error,
+/// with exit 3 and no flag that would override it.
 #[test]
 fn an_unverified_checkout_refuses() {
     let path = PathBuf::from(TARGET);
@@ -220,61 +220,15 @@ fn an_unverified_checkout_refuses() {
 
     let rendered: Vec<String> = errors
         .into_iter()
-        .map(|error| render(refusal_markup(&UsageRefusal::Unverified(error), "fix-path-spelling", "fix/path-spelling")))
+        .map(UsageRefusal::Unverified)
+        .map(|refusal| {
+            let error = usage_refusal(&refusal, "fix-path-spelling", "fix/path-spelling");
+            assert_eq!(worktree_cli::exit::exit_code(&error), 3, "{refusal:?}");
+            let markup = refusal_markup(&refusal, "fix-path-spelling", "fix/path-spelling");
+            assert!(!markup.contains("--force"), "{markup}");
+            render(markup)
+        })
         .collect();
 
     insta::assert_snapshot!(rendered.join("\n\n"));
-}
-
-/// Both refusals exit 3, the code for "nothing was removed; fix it and run
-/// again", and neither offers a flag that would override it.
-#[test]
-fn refusals_exit_3_and_offer_no_override() {
-    let in_use = refused(report("usable", vec![process(1, Some("x"), Some("x"), vec![evidence("open_handle", "open_handles", &[TARGET])])], &[], false));
-    let unverified = UsageRefusal::Unverified(PathUsageError::MissingTarget { path: TARGET.into() });
-
-    for refusal in [in_use, unverified] {
-        let error = usage_refusal(&refusal, "fix-path-spelling", "fix/path-spelling");
-        assert_eq!(worktree_cli::exit::exit_code(&error), 3, "{refusal:?}");
-        let markup = refusal_markup(&refusal, "fix-path-spelling", "fix/path-spelling");
-        assert!(!markup.contains("--force"), "{markup}");
-    }
-}
-
-/// Answers every query with Windows Search holding a file, on a Windows host
-/// whose system directory is `C:\Windows\System32`; never sleeps.
-struct SearchStaysOpen;
-
-impl UsageSource for SearchStaysOpen {
-    fn query(&self, _path: &Path) -> Result<PathUsageReport, PathUsageError> {
-        let search = process(
-            6808,
-            Some("SearchProtocolHost.exe"),
-            Some(r"C:\Windows\System32\SearchProtocolHost.exe"),
-            vec![evidence("open_handle", "open_handles", &["/work/fix-path-spelling/notes.txt"])],
-        );
-        Ok(serde_json::from_value(report("usable", vec![search], &[], false)).expect("valid report"))
-    }
-
-    fn system_directory(&self) -> Option<NativeString> {
-        Some(NativeString::from(r"C:\Windows\System32"))
-    }
-
-    fn pause(&self, _wait: Duration) {}
-}
-
-/// A refusal that followed the one Windows Search recheck says so; an
-/// ordinary refusal does not.
-#[test]
-fn a_refusal_after_the_windows_search_recheck_says_so() {
-    let note = "The first check found only Windows Search, so wt waited 500 ms and checked once more";
-
-    let refusal = check_usage(&SearchStaysOpen, Path::new(TARGET), &OwnedHandles::default()).expect_err("still held");
-    let rechecked = render(refusal_markup(&refusal, "fix-path-spelling", "fix/path-spelling"));
-    let ordinary = refused(report("usable", vec![process(1, Some("x"), Some("x"), vec![evidence("open_handle", "open_handles", &[TARGET])])], &[], false));
-    let ordinary = render(refusal_markup(&ordinary, "fix-path-spelling", "fix/path-spelling"));
-
-    assert!(rechecked.replace('\n', " ").contains(note), "{rechecked}");
-    assert!(rechecked.contains("SearchProtocolHost.exe"), "{rechecked}");
-    assert!(!ordinary.contains("Windows Search"), "{ordinary}");
 }

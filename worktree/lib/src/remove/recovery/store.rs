@@ -20,6 +20,9 @@ pub const STORE_DIR: &str = "wt-removal";
 pub const RECORD_FILE: &str = "record.json";
 pub const JOURNAL_FILE: &str = "journal.jsonl";
 pub const REPORT_FILE: &str = "report.json";
+/// Every journal entry of the operation, beside the report that names it
+/// ([`OperationReport::entries_file`]).
+pub const ENTRIES_FILE: &str = "entries.jsonl.gz";
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -37,6 +40,8 @@ pub enum StoreError {
     Completed(OperationId),
     #[error("removal record {id} cannot be used: {reason}")]
     Record { id: String, reason: RecordInvalid },
+    #[error("the saved report {} cannot be read: {reason}", path.display())]
+    Report { path: PathBuf, reason: String },
     #[error("the deletion journal of removal {id} cannot be used: {reason}")]
     Journal { id: OperationId, reason: JournalInvalid },
     /// The inventory was not taken of the checkout the record names.
@@ -288,7 +293,9 @@ impl RecoveryStore {
     }
 
     /// The report the last attempt of operation `id` saved, or `None` when no
-    /// attempt saved one.
+    /// attempt saved one. A version 6 report reads with no
+    /// [`OperationReport::journal_entries`]: they are in its entries file,
+    /// which is never read back.
     pub fn read_report(&self, id: &OperationId) -> Result<Option<OperationReport>, StoreError> {
         let path = self.operation_dir(id).join(REPORT_FILE);
         let bytes = match storage::read_private_file(&path) {
@@ -296,7 +303,7 @@ impl RecoveryStore {
             Err(StorageProblem::Missing) => return Ok(None),
             Err(problem) => return Err(storage_error(&path)(problem)),
         };
-        let report = serde_json::from_slice(&bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let report = serde_json::from_slice(&bytes).map_err(|error| StoreError::Report { path, reason: error.to_string() })?;
         Ok(Some(report))
     }
 }
@@ -384,19 +391,43 @@ impl Operation {
     }
 
     /// Saves `report` as `report.json`, replacing any earlier one.
+    ///
+    /// When the report names [`ENTRIES_FILE`], its
+    /// [`OperationReport::journal_entries`] are published there first, so a
+    /// report never names an entries file older than itself. A report naming
+    /// none removes an earlier entries file once it is published; failing to
+    /// is not an error. Two files cannot be replaced at once: a stop between
+    /// them leaves new entries beside the older report, while the journals,
+    /// which a pending operation keeps, stay authoritative.
     pub fn save_report(&self, report: &OperationReport) -> Result<(), StoreError> {
+        let entries = self.dir.join(ENTRIES_FILE);
+        match report.entries_file.as_deref() {
+            Some(ENTRIES_FILE) => entries::write(&entries, &report.journal_entries)?,
+            None => {}
+            Some(other) => {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("a report cannot name {other:?} as its entries file")).into());
+            }
+        }
+        fault::save_at(SaveStep::EntriesPublished, &entries)?;
         let bytes = serde_json::to_vec_pretty(report).map_err(io::Error::from)?;
-        Ok(storage::write_durable(&self.report_path(), &bytes)?)
+        storage::write_durable(&self.report_path(), &bytes)?;
+        if report.entries_file.is_none() {
+            let _ = fs::remove_file(&entries);
+        }
+        Ok(())
     }
 
     /// Saves the final `report`, then persists completion, then deletes every
-    /// journal when `journal_reported` says `report` lists all of their
-    /// entries ([`OperationReport::journal_entries`]); otherwise they are
-    /// kept as the only full record. Completion is durable before a journal
-    /// goes, so a failure to delete one is only a [`BookkeepingWarning`].
+    /// journal when `journal_reported` says `report`'s entries file holds all
+    /// of their entries ([`OperationReport::journal_entries`]); otherwise
+    /// they are kept as the only full record. Completion is durable before a
+    /// journal goes, so a failure to delete one is only a
+    /// [`BookkeepingWarning`].
     pub fn complete(mut self, report: &OperationReport, journal_reported: bool) -> Result<Vec<BookkeepingWarning>, StoreError> {
         self.save_report(report)?;
+        fault::save_at(SaveStep::ReportPublished, &self.report_path())?;
         self.persist_phase(Phase::Completed)?;
+        fault::save_at(SaveStep::Completed, &self.dir.join(RECORD_FILE))?;
         let Self { dir, journal, .. } = self;
         drop(journal);
         if !journal_reported {
@@ -496,13 +527,35 @@ pub(crate) enum ReopenStep {
     Initialized,
 }
 
+/// The points inside [`Operation::save_report`] and [`Operation::complete`]
+/// where a test can stop them, in the order they are reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum SaveStep {
+    /// The entries file is fully written under its hidden name, not yet
+    /// flushed.
+    EntriesWritten,
+    /// The entries file is flushed under its hidden name, not yet published.
+    EntriesFlushed,
+    /// The entries file is published (or not needed); the report is not yet
+    /// written.
+    EntriesPublished,
+    /// The final report is published; completion is not yet persisted.
+    ReportPublished,
+    /// Completion is persisted; the journals are not yet deleted.
+    Completed,
+}
+
 #[cfg(not(test))]
 mod fault {
     use std::path::Path;
 
-    use super::{ReopenStep, StoreError};
+    use super::{ReopenStep, SaveStep, StoreError};
 
     pub(super) fn at(_step: ReopenStep, _path: &Path) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    pub(super) fn save_at(_step: SaveStep, _path: &Path) -> Result<(), StoreError> {
         Ok(())
     }
 
@@ -511,14 +564,15 @@ mod fault {
     }
 }
 
-/// Test-only fault injection for [`RecoveryStore::reopen`].
+/// Test-only fault injection for [`RecoveryStore::reopen`],
+/// [`Operation::save_report`], and [`Operation::complete`].
 #[cfg(test)]
 pub(crate) mod fault {
     use std::cell::RefCell;
     use std::io;
     use std::path::Path;
 
-    use super::{ReopenStep, StoreError};
+    use super::{ReopenStep, SaveStep, StoreError};
 
     /// What an injected fault does at a [`ReopenStep`].
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -531,9 +585,11 @@ pub(crate) mod fault {
     }
 
     type Injector = Box<dyn FnMut(ReopenStep, &Path) -> Option<Fault>>;
+    type SaveInjector = Box<dyn FnMut(SaveStep, &Path) -> Option<Fault>>;
 
     thread_local! {
         static INJECTOR: RefCell<Option<Injector>> = const { RefCell::new(None) };
+        static SAVE_INJECTOR: RefCell<Option<SaveInjector>> = const { RefCell::new(None) };
     }
 
     const CRASHED: &str = "injected crash";
@@ -544,6 +600,7 @@ pub(crate) mod fault {
     impl Drop for Injected {
         fn drop(&mut self) {
             INJECTOR.with(|slot| *slot.borrow_mut() = None);
+            SAVE_INJECTOR.with(|slot| *slot.borrow_mut() = None);
         }
     }
 
@@ -556,8 +613,24 @@ pub(crate) mod fault {
         Injected
     }
 
+    /// [`inject`] for the steps of saving a report and completing. The path
+    /// is the file the step concerns: the hidden entries file, the published
+    /// entries file, the report, then the record.
+    #[must_use]
+    pub(crate) fn inject_save(injector: impl FnMut(SaveStep, &Path) -> Option<Fault> + 'static) -> Injected {
+        SAVE_INJECTOR.with(|slot| *slot.borrow_mut() = Some(Box::new(injector)));
+        Injected
+    }
+
     pub(super) fn at(step: ReopenStep, path: &Path) -> Result<(), StoreError> {
-        let fault = INJECTOR.with(|slot| slot.borrow_mut().as_mut().and_then(|injector| injector(step, path)));
+        fail(INJECTOR.with(|slot| slot.borrow_mut().as_mut().and_then(|injector| injector(step, path))))
+    }
+
+    pub(super) fn save_at(step: SaveStep, path: &Path) -> Result<(), StoreError> {
+        fail(SAVE_INJECTOR.with(|slot| slot.borrow_mut().as_mut().and_then(|injector| injector(step, path))))
+    }
+
+    fn fail(fault: Option<Fault>) -> Result<(), StoreError> {
         match fault {
             None => Ok(()),
             Some(Fault::Crash) => Err(StoreError::Io(io::Error::other(CRASHED))),
@@ -570,7 +643,11 @@ pub(crate) mod fault {
     }
 }
 
+mod entries;
 mod retention;
+
+#[cfg(test)]
+pub(crate) use entries::read as read_entries;
 
 pub use retention::RETENTION;
 

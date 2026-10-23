@@ -1096,3 +1096,5 @@ fn a_failed_deletion_is_skipped_and_finished_on_the_next_run() {
     f.store.prune_completed(now());
     assert!(!leftover.exists());
 }
+
+mod saved_report;

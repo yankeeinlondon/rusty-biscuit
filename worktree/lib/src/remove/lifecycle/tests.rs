@@ -27,7 +27,7 @@ use crate::remove::observation::{CoverageLost, EventKind, ObservationStage, Root
 use crate::remove::outcome::{BranchState, EntryCounts, MAX_REPORTED_DELETED};
 use crate::remove::recovery::journal::EntryState;
 use crate::remove::recovery::store::fault::{self as store_fault, Fault};
-use crate::remove::recovery::store::{JOURNAL_FILE, RECORD_FILE, REPORT_FILE, ReopenStep};
+use crate::remove::recovery::store::{ENTRIES_FILE, JOURNAL_FILE, RECORD_FILE, REPORT_FILE, ReopenStep};
 use crate::remove::test_support::TestRepo;
 use crate::worktree::parse_worktree_list;
 
@@ -142,22 +142,15 @@ impl Fixture {
     }
 }
 
-/// A usage source answering every query with `processes` (or, after the
-/// first, `then` when set), counting queries and recording the pauses before
-/// a Windows Search recheck instead of sleeping.
+/// A usage source answering every query with `processes`, counting queries.
 struct Usage {
     outcome: &'static str,
     processes: Vec<ProcessRecord>,
-    then: Option<Vec<ProcessRecord>>,
     /// The shared budget ran out (partial discovery).
     exhausted: bool,
     /// Queries after this many fail.
     fail_after: Option<usize>,
-    /// The system directory a Windows Search image must be in; `None` (the
-    /// default, whatever the host) never rechecks.
-    system: Option<&'static str>,
     queries: AtomicUsize,
-    pauses: Mutex<Vec<Duration>>,
 }
 
 impl Usage {
@@ -166,34 +159,13 @@ impl Usage {
             outcome: "usable",
             exhausted: false,
             processes: Vec::new(),
-            then: None,
             fail_after: None,
-            system: None,
             queries: AtomicUsize::new(0),
-            pauses: Mutex::new(Vec::new()),
         }
-    }
-
-    /// First `first`, then `then` for every later query, on a Windows host
-    /// whose system directory is [`SYSTEM32`].
-    fn search_first(first: Vec<ProcessRecord>, then: Vec<ProcessRecord>) -> Self {
-        Self { processes: first, then: Some(then), system: Some(SYSTEM32), ..Self::clear() }
-    }
-
-    fn pauses(&self) -> Vec<Duration> {
-        self.pauses.lock().unwrap().clone()
     }
 }
 
 impl UsageSource for Usage {
-    fn system_directory(&self) -> Option<NativeString> {
-        self.system.map(NativeString::from)
-    }
-
-    fn pause(&self, wait: Duration) {
-        self.pauses.lock().unwrap().push(wait);
-    }
-
     fn query(&self, path: &Path) -> Result<PathUsageReport, PathUsageError> {
         let earlier = self.queries.fetch_add(1, Ordering::SeqCst);
         if self.fail_after.is_some_and(|after| earlier >= after) {
@@ -219,10 +191,7 @@ impl UsageSource for Usage {
             "limitations": []
         }))
         .unwrap();
-        report.processes = match &self.then {
-            Some(then) if earlier > 0 => then.clone(),
-            _ => self.processes.clone(),
-        };
+        report.processes = self.processes.clone();
         Ok(report)
     }
 }
@@ -250,27 +219,6 @@ fn holder(path: &Path) -> ProcessRecord {
             access: None,
             event_only: None,
         }],
-    }
-}
-
-const SYSTEM32: &str = r"C:\Windows\System32";
-
-/// Windows Search's protocol host, from the system directory, with an open
-/// file in the checkout.
-fn search_holder(path: &Path) -> ProcessRecord {
-    let file = path.join("notes.txt");
-    ProcessRecord {
-        pid: 6808,
-        creation_token: Some(91),
-        name: Some(NativeString::from("SearchProtocolHost.exe")),
-        executable: Some(NativeString::from(r"C:\WINDOWS\System32\SearchProtocolHost.exe")),
-        evidence: vec![Evidence {
-            matched_paths: vec![NativeString::from(file.as_path())],
-            observed_path: Some(NativeString::from(file.as_path())),
-            descriptor: None,
-            ..holder(path).evidence.remove(0)
-        }],
-        ..holder(path)
     }
 }
 
@@ -347,8 +295,24 @@ fn finished(removal: Removal) -> Finished {
     }
 }
 
+/// The saved report with its entries read back from the entries file it
+/// names. The saved JSON lists none inline, and names the file exactly when
+/// there are entries.
 fn saved_report(finished: &Finished) -> OperationReport {
-    serde_json::from_slice(&fs::read(&finished.report_path).unwrap()).unwrap()
+    let bytes = fs::read(&finished.report_path).unwrap();
+    let raw: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(raw.get("journal_entries").is_none(), "no inline entries: {raw}");
+    let mut report: OperationReport = serde_json::from_slice(&bytes).unwrap();
+    let entries = finished.report_path.with_file_name(ENTRIES_FILE);
+    match report.entries_file.as_deref() {
+        Some(name) => {
+            assert_eq!(name, ENTRIES_FILE);
+            report.journal_entries = crate::remove::recovery::store::read_entries(&entries);
+            assert!(!report.journal_entries.is_empty(), "an entries file is named only when there are entries");
+        }
+        None => assert!(!entries.exists(), "no entries file beside a report that names none"),
+    }
+    report
 }
 
 /// Asserts a completed removal: both locations and the registration gone,
@@ -557,20 +521,22 @@ fn unsupported_discovery_still_removes_and_is_kept_in_the_report() {
     assert_incomplete_discovery_removes("unsupported", false);
 }
 
-/// Acceptance item 1: usage refuses before anything moves; consent to
-/// discard does not override it.
+/// Another process using the checkout never stops a removal the user
+/// agreed to: it is named in a warning, and the report keeps the query.
 #[test]
-fn observed_usage_refuses_before_anything_moves() {
+fn observed_usage_is_reported_and_the_removal_completes() {
     let fixture = fixture();
     let usage = Usage { processes: vec![holder(&fixture.gone)], ..Usage::clear() };
-    let refusal = refused(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
-    match &refusal {
-        Refusal::Usage(UsageRefusal::InUse(in_use)) => assert_eq!(in_use.holders[0].pid, 8124),
-        other => panic!("{other:?}"),
-    }
-    assert_eq!(refusal.exit_class(), ExitClass::Refused);
-    assert!(fixture.untouched());
-    assert!(fixture.no_pending(), "no record is created before the decisive query clears");
+    let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
+    assert_removed(&fixture, &finished);
+    assert!(
+        finished.warnings.iter().any(|warning| warning.contains("node (PID 8124) was using the worktree")),
+        "{:?}",
+        finished.warnings
+    );
+    assert_eq!(usage.queries.load(Ordering::SeqCst), 1, "queried once, never rechecked");
+    let DiscoveryResult::Report(report) = &finished.report.discovery[0].result else { panic!("{:?}", finished.report.discovery) };
+    assert_eq!(report.processes[0].pid, 8124);
 }
 
 /// A query that could not verify the checkout refuses.
@@ -582,85 +548,6 @@ fn an_unverified_checkout_refuses() {
     assert!(matches!(refusal, Refusal::Usage(UsageRefusal::Unverified(_))), "{refusal:?}");
     assert_eq!(refusal.exit_class(), ExitClass::Refused);
     assert!(fixture.untouched());
-}
-
-/// Only Windows Search holding a file: one 500 ms pause, exactly one more
-/// query, and the removal goes ahead with the recheck in the saved report
-/// (`assert_removed` compares it with the returned one).
-#[test]
-fn a_windows_search_hold_is_rechecked_once_and_recorded() {
-    let fixture = fixture();
-    let usage = Usage::search_first(vec![search_holder(&fixture.gone)], Vec::new());
-
-    let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
-
-    assert_removed(&fixture, &finished);
-    assert_eq!(usage.queries.load(Ordering::SeqCst), 2);
-    assert_eq!(usage.pauses(), [crate::remove::usage::SEARCH_RECHECK_WAIT]);
-    let purposes: Vec<_> = finished.report.discovery.iter().map(|run| run.purpose).collect();
-    assert_eq!(purposes, [DiscoveryPurpose::WindowsSearchHold, DiscoveryPurpose::Preflight]);
-    let DiscoveryResult::Report(first) = &finished.report.discovery[0].result else { panic!("{:?}", finished.report.discovery) };
-    assert_eq!(first.processes[0].pid, 6808, "the first query's report is kept");
-    let discovery = finished.report.timeline.iter().find(|event| event.step == Step::Discovery).expect("a discovery step");
-    assert_eq!(discovery.detail.as_deref(), Some("Windows Search held 1 file(s); rechecked after 500 ms; released"));
-}
-
-/// Windows Search still holding a file at the recheck refuses, as any
-/// holder does, after exactly one recheck.
-#[test]
-fn a_windows_search_hold_that_outlasts_the_recheck_refuses() {
-    let fixture = fixture();
-    let usage = Usage::search_first(vec![search_holder(&fixture.gone)], vec![search_holder(&fixture.gone)]);
-
-    let refusal = refused(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
-
-    let Refusal::Usage(UsageRefusal::InUse(in_use)) = &refusal else { panic!("{refusal:?}") };
-    assert_eq!(in_use.holders[0].pid, 6808);
-    assert_eq!(in_use.search_recheck.as_ref().map(|search| search.held), Some(1), "the refusal says a recheck happened");
-    assert_eq!(usage.queries.load(Ordering::SeqCst), 2, "one recheck, never a loop");
-    assert_eq!(usage.pauses().len(), 1);
-    assert_eq!(refusal.exit_class(), ExitClass::Refused);
-    assert!(fixture.untouched());
-    assert!(fixture.no_pending());
-}
-
-/// Any other holder beside Windows Search refuses at once: no pause and no
-/// second query.
-#[test]
-fn a_windows_search_hold_beside_another_holder_refuses_without_waiting() {
-    let fixture = fixture();
-    let usage = Usage::search_first(vec![holder(&fixture.gone), search_holder(&fixture.gone)], Vec::new());
-
-    let refusal = refused(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
-
-    let Refusal::Usage(UsageRefusal::InUse(in_use)) = &refusal else { panic!("{refusal:?}") };
-    assert_eq!(in_use.holders.len(), 2);
-    assert!(in_use.search_recheck.is_none());
-    assert_eq!(usage.queries.load(Ordering::SeqCst), 1);
-    assert!(usage.pauses().is_empty());
-    assert!(fixture.untouched());
-}
-
-/// A retry rechecks the quarantine the same way and records it.
-#[test]
-fn a_retry_rechecks_a_windows_search_hold_of_the_quarantine() {
-    let fixture = fixture();
-    let observers = Observers::default();
-    let id = crash_at(&fixture, &observers, Boundary::Moved);
-    let quarantine = fixture.quarantine_of(&id);
-    let fresh = fixture.resume_approval(&id);
-    let usage = Usage::search_first(vec![search_holder(&quarantine)], Vec::new());
-    let base = fixture.base();
-    let request = ResumeRequest { base: &base, id: &id, approval: Some(&fresh), record: None, branches: &BranchActions::default() };
-
-    let resumed = finished(with_env(&usage, &observers, &|| false, |env| resume(&request, env)));
-
-    assert_removed(&fixture, &resumed);
-    assert_eq!((usage.queries.load(Ordering::SeqCst), usage.pauses().len()), (2, 1));
-    let purposes: Vec<_> = resumed.report.discovery.iter().map(|run| run.purpose).collect();
-    assert_eq!(purposes, [DiscoveryPurpose::WindowsSearchHold, DiscoveryPurpose::Preflight]);
-    assert!(resumed.report.timeline.iter().any(|event| event.step == Step::Discovery
-        && event.detail.as_deref() == Some("Windows Search held 1 file(s); rechecked after 500 ms; released")));
 }
 
 #[test]
@@ -991,6 +878,7 @@ fn an_interrupted_removal_is_resumed() {
     assert_eq!(finished.report.outcome, RemovalOutcome::CleanupFailed);
     assert_eq!(finished.exit_class(), ExitClass::Failure);
     assert!(fixture.branch_exists());
+    assert_eq!(saved_report(&finished), finished.report, "the stop saves every entry so far");
     let first = finished.report;
     let deleted_first = first.journal.deleted.total();
     assert!(deleted_first >= 2 && deleted_first < FIXTURE_ENTRIES.total(), "{:?}", first.journal);
@@ -1015,6 +903,138 @@ fn an_interrupted_removal_is_resumed() {
     assert_eq!(earlier.discovery, first.discovery);
     assert_eq!(earlier.branches, first.branches);
     assert!(report.errors.is_empty(), "the earlier stop is not this attempt's: {:?}", report.errors);
+}
+
+/// Stops a first removal once `batches` deletion batches are done, with
+/// `at_batch` run at each batch boundary.
+fn interrupted_after(fixture: &Fixture, batches: u64, mut at_batch: impl FnMut(u64)) -> Finished {
+    let entry = fixture.entry();
+    let (approval, branches) = (fixture.approval(), fixture.delete_branch());
+    let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
+    let interrupted = std::sync::atomic::AtomicBool::new(false);
+    let mut hook = |boundary: Boundary| {
+        if let Boundary::DeletionBatch(batch) = boundary {
+            at_batch(batch);
+            if batch == batches + 1 {
+                interrupted.store(true, Ordering::SeqCst);
+            }
+        }
+        false
+    };
+    let stop = || interrupted.load(Ordering::SeqCst);
+    let finished = finished(with_env(&Usage::clear(), &Observers::default(), &stop, |env| run_with(&request, env, &mut hook)).unwrap());
+    assert_eq!(finished.report.outcome, RemovalOutcome::CleanupFailed);
+    finished
+}
+
+/// A pending operation whose report a version 5 `wt` saved, with its
+/// entries inline and no entries file, resumes: that report is read and
+/// carried as the earlier attempt, and the completed entries file lists
+/// every attempt's entries as the journals recorded them, never the inline
+/// list.
+#[test]
+fn a_removal_stopped_by_a_version_5_wt_resumes_and_completes() {
+    let fixture = fixture();
+    let first = interrupted_after(&fixture, 2, |_| {});
+    let id = fixture.pending();
+    let report_path = first.report_path.clone();
+    let quarantine = fixture.quarantine_of(&id);
+    let deleted_by_first: Vec<_> = first.report.journal_entries.iter().filter(|entry| entry.state == EntryState::Deleted).cloned().collect();
+    assert!(!deleted_by_first.is_empty());
+    let original = serde_json::to_value(NativeString::from(fixture.gone.as_path())).unwrap();
+    // Frozen version 5 bytes: only the operation's own id and paths are
+    // filled in. Its one inline entry is one no journal planned.
+    let legacy = json!({
+        "report_version": 5,
+        "operation_id": id.as_str(),
+        "outcome": "activity_detected",
+        "original": original,
+        "original_state": "moved",
+        "quarantine": null,
+        "registration": "at_quarantine",
+        "timeline": [{"at_ms": 5, "step": "moved", "result": "succeeded", "detail": null}],
+        "discovery": [],
+        "activity": [],
+        "journal": {
+            "deleted": {"files": 1, "directories": 0, "links": 0},
+            "externally_absent": {"files": 0, "directories": 0, "links": 0},
+            "kept": {"files": 0, "directories": 0, "links": 0},
+            "planned": {"files": 0, "directories": 0, "links": 0},
+            "uncertain": {"files": 0, "directories": 0, "links": 0}
+        },
+        "journal_entries": [{"attempt": 1, "batch": 1, "path": {"display": "only-in-version-5"}, "kind": "file", "state": "deleted"}],
+        "deleted": [],
+        "notes": [],
+        "branches": [],
+        "errors": ["stopped by version 5"],
+        "truncation": {"activity_omitted": 0, "retained_omitted": 0, "deleted_omitted": 0},
+        "earlier_attempts": [],
+        "observation": null
+    });
+    // Overwriting keeps the saved file's owner-only mode.
+    fs::write(&report_path, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
+    fs::remove_file(report_path.with_file_name(ENTRIES_FILE)).unwrap();
+    let read = fixture.store().read_report(&id).unwrap().expect("read");
+    assert_eq!((read.report_version, read.journal_entries.len()), (5, 1));
+
+    let fresh = fixture.resume_approval(&id);
+    let resumed = finished_resume(&fixture, &id, Some(&fresh), None, &fixture.delete_branch(), &Observers::default());
+    assert_removed(&fixture, &resumed);
+    assert!(!quarantine.exists());
+    let saved = saved_report(&resumed);
+    assert_eq!(saved.report_version, crate::remove::outcome::REPORT_VERSION);
+    assert_accounted_once(&saved, FIXTURE_ENTRIES);
+    let from_first: Vec<_> = saved.journal_entries.iter().filter(|entry| entry.attempt == 1).cloned().collect();
+    assert_eq!(from_first, deleted_by_first, "the first attempt's entries come from its journal");
+    assert!(saved.journal_entries.iter().all(|entry| entry.path.as_path() != Path::new("only-in-version-5")));
+    let [earlier] = saved.earlier_attempts.as_slice() else { panic!("{:?}", saved.earlier_attempts) };
+    assert_eq!((earlier.outcome, earlier.errors.as_slice()), (RemovalOutcome::ActivityDetected, ["stopped by version 5".to_string()].as_slice()));
+    assert_eq!((earlier.timeline[0].at_ms, earlier.observation.as_ref()), (5, None));
+}
+
+/// A stopped retry whose earlier report cannot be read warns, naming the
+/// file, and still resumes from the journals.
+#[test]
+fn an_unreadable_earlier_report_is_named_and_the_retry_still_completes() {
+    let fixture = fixture();
+    let first = interrupted_after(&fixture, 2, |_| {});
+    let id = fixture.pending();
+    fs::write(&first.report_path, b"{\"report_version\":6,").unwrap();
+    let fresh = fixture.resume_approval(&id);
+    let resumed = finished_resume(&fixture, &id, Some(&fresh), None, &fixture.delete_branch(), &Observers::default());
+    assert_removed(&fixture, &resumed);
+    assert_accounted_once(&saved_report(&resumed), FIXTURE_ENTRIES);
+    let path = first.report_path.display().to_string();
+    assert!(
+        resumed.warnings.iter().any(|warning| warning.starts_with("the earlier attempt's report could not be read") && warning.contains(&path)),
+        "{:?}",
+        resumed.warnings
+    );
+    assert!(resumed.report.earlier_attempts.is_empty());
+}
+
+/// A journal that cannot be read back when the stop is reported: the report
+/// says so, lists no entries, and names no entries file, and the journal is
+/// kept.
+#[test]
+fn a_stop_whose_journal_cannot_be_summarized_saves_no_entries_file() {
+    use std::io::Write as _;
+    let fixture = fixture();
+    let store = fixture.store();
+    let stopped = interrupted_after(&fixture, 1, |batch| {
+        if batch == 2 {
+            // A complete line no journal version has: replay refuses it.
+            let id = fixture.pending();
+            let journal = store.operation_dir(&id).join(JOURNAL_FILE);
+            fs::OpenOptions::new().append(true).open(journal).unwrap().write_all(b"{\"surprise\":true}\n").unwrap();
+        }
+    });
+    let report = &stopped.report;
+    assert!(report.errors.iter().any(|error| error.starts_with("the deletion journal could not be summarized")), "{:?}", report.errors);
+    assert_eq!((report.entries_file.as_deref(), report.journal_entries.len()), (None, 0));
+    assert_eq!(saved_report(&stopped), *report);
+    assert!(stopped.report_path.with_file_name(JOURNAL_FILE).exists());
+    assert!(!stopped.report_path.with_file_name(ENTRIES_FILE).exists());
 }
 
 #[test]
@@ -1171,9 +1191,10 @@ fn new_content_in_the_quarantine_is_deleted_after_a_retry_is_approved() {
     assert!(resumed.warnings.iter().any(|warning| warning.contains("files")), "{:?}", resumed.warnings);
 }
 
-/// Usage of the quarantine refuses the retry, as it would a first attempt.
+/// Usage of the quarantine is reported on a retry, as on a first attempt,
+/// and the retry completes.
 #[test]
-fn usage_of_the_quarantine_refuses_the_retry() {
+fn usage_of_the_quarantine_is_reported_on_the_retry() {
     let fixture = fixture();
     let observers = Observers::default();
     let id = crash_at(&fixture, &observers, Boundary::Moved);
@@ -1182,9 +1203,9 @@ fn usage_of_the_quarantine_refuses_the_retry() {
     let usage = Usage { processes: vec![holder(&quarantine)], ..Usage::clear() };
     let base = fixture.base();
     let request = ResumeRequest { base: &base, id: &id, approval: Some(&fresh), record: None, branches: &BranchActions::default() };
-    let refusal = refused(with_env(&usage, &observers, &|| false, |env| resume(&request, env)));
-    assert!(matches!(refusal, Refusal::Usage(UsageRefusal::InUse(_))), "{refusal:?}");
-    assert!(quarantine.join("README.md").is_file());
+    let resumed = finished(with_env(&usage, &observers, &|| false, |env| resume(&request, env)));
+    assert_removed(&fixture, &resumed);
+    assert!(resumed.warnings.iter().any(|warning| warning.contains("PID 8124")), "{:?}", resumed.warnings);
 }
 
 #[test]

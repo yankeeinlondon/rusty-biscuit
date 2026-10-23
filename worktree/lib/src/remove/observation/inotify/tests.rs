@@ -9,7 +9,7 @@ use std::time::SystemTime;
 
 use super::*;
 use crate::remove::observation::{Drain, ObserverOptions, Observation, Scope};
-use crate::remove::usage::{OwnedHandles, SniffUsage, UsageRefusal, check_usage};
+use crate::remove::usage::{OwnedHandles, SniffUsage, check_usage};
 
 struct Fixture {
     _root: tempfile::TempDir,
@@ -184,8 +184,8 @@ fn thread_count() -> usize {
 }
 
 /// Sniff sees the session's watches as this process's evidence; registering
-/// them is what keeps the decisive query from refusing the removal, and
-/// dropping the session leaves neither a watch nor a thread.
+/// them is what keeps the usage query from naming `wt` itself as a holder,
+/// and dropping the session leaves neither a watch nor a thread.
 #[test]
 fn sniff_sees_the_watches_until_the_session_ends() {
     let fixture = new_fixture();
@@ -194,17 +194,14 @@ fn sniff_sees_the_watches_until_the_session_ends() {
     let _ = observation.drain(&|| false);
     assert_eq!(thread_count(), threads, "the adapter starts no thread");
 
-    match check_usage(&SniffUsage, &fixture.checkout, &OwnedHandles::default()) {
-        Err(UsageRefusal::InUse(in_use)) => {
-            let own = in_use.holders.iter().find(|holder| holder.pid == std::process::id()).expect("this process holds the watches");
-            assert!(own.evidence.iter().all(|evidence| evidence.kind == EvidenceKind::WatchRegistration), "{own:?}");
-        }
-        other => panic!("unregistered watches must refuse: {other:?}"),
-    }
+    let unregistered = check_usage(&SniffUsage, &fixture.checkout, &OwnedHandles::default()).unwrap();
+    let own = unregistered.holders.iter().find(|holder| holder.pid == std::process::id()).expect("this process holds the watches");
+    assert!(own.evidence.iter().all(|evidence| evidence.kind == EvidenceKind::WatchRegistration), "{own:?}");
 
     let mut own = OwnedHandles::default();
     observation.register_handles(&mut own);
-    let clearance = check_usage(&SniffUsage, &fixture.checkout, &own).expect("registered watches are excluded");
+    let clearance = check_usage(&SniffUsage, &fixture.checkout, &own).unwrap();
+    assert!(clearance.holders.is_empty(), "registered watches are excluded: {:?}", clearance.holders);
     assert_eq!(clearance.own_handles_excluded, 2, "the checkout and its subdirectory");
 
     drop(observation);

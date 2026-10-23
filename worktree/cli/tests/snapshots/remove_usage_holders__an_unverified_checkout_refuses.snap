@@ -1,5 +1,5 @@
 ---
-source: worktree/cli/tests/remove_usage_refusal.rs
+source: worktree/cli/tests/remove_usage_holders.rs
 expression: "rendered.join(\"\\n\\n\")"
 ---
 Nothing was removed. wt could not confirm the checkout of fix-path-spelling right before removing it: it disappeared after it was checked.

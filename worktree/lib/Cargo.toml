@@ -17,6 +17,9 @@ biscuit-file = { path = "../../biscuit-file/lib", default-features = false, feat
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["blake3"] }
 cap-std = "4"
 dirs = "6"
+# Writes a removal's `entries.jsonl.gz`; the pure-Rust backend only, so no C
+# compiler or system zlib is needed on any OS.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 fs4 = "0.13"
 getrandom = "0.4"
 # In-process reads of local repository metadata (`git_metadata`) and of the
