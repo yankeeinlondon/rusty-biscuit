@@ -33,7 +33,7 @@ packages:
 related:
     - 2026-10-22-dmls-watched-file-flood
 human_review: true
-needs_rulings: true
+needs_rulings: false
 ---
 
 # DMLS: update the workspace graph incrementally
@@ -88,8 +88,9 @@ rebuild. They must be distinguished from watched-file cases when measuring;
 the optimization should address the cost actually observed.
 
 > **Review note:** Stable document IDs and copy-on-write edge updates were
-> previously presented as required solutions. They are possible designs,
-> not established requirements. An unlisted creation can affect reference
+> previously presented as required solutions. Neither is an established
+> requirement, and stable document IDs are now out of scope (see the ruling
+> under Conditional implementation requirements). An unlisted creation can affect reference
 > precedence and derived lookups as well as one edge. The design must first
 > show which work can safely be reused. The existing snapshot-local ID
 > contract and full rebuild remain the default.
@@ -164,14 +165,15 @@ estimate and do not claim it proves the CPU bound.
 - Otherwise, specify incremental work for the observed dominant cause.
   Prefer the unlisted-creation case only when it materially contributes;
   being smaller does not make it useful if it rarely occurs.
-- If the short sample does not answer the decision, record the uncertainty
-  under Open Questions. Do not silently expand the performance study or
-  change the thresholds; those choices belong to the author.
+- If the short sample is inconclusive, retain full rebuilds: the outcome is
+  the same as meeting both bounds. Record in the measurement record which
+  figure was inconclusive and why. Do not expand the performance study or
+  change the thresholds to force an answer.
 
 ### Measurement and decision record
 
 Pending. Record the observed costs, chosen outcome, rationale, and any
-remaining uncertainty here before defining an implementation phase. This
+inconclusive figures here before defining an implementation phase. This
 review does not claim to have run the performance sample.
 
 ## Conditional implementation requirements
@@ -180,6 +182,27 @@ The next phase must name the measured cause it addresses, what is reused,
 what invalidates that reuse, and when a full rebuild is still required.
 A narrow optimization may retain full rebuilds for listing, configuration,
 context, or wiki-root changes. It need not solve every trigger at once.
+
+**Ruling (2026-10-23): membership changes keep the full rebuild.** A listed
+Markdown file joining or leaving the file list rebuilds the whole graph, and
+snapshots keep their dense, path-ordered document IDs. Stable document
+identities, whether stored per document with explicit lookup maps or
+remapped to dense IDs at publication, are out of scope for this spec. The
+conditional phase may optimize another measured cause or make full-build work
+cheaper, but it must not change the ID representation. If Phase 1 shows
+membership changes are the remaining bottleneck, record that finding in the
+measurement record; a representation change then needs its own spec, which
+must define document and node lifetime rules, deterministic output ordering,
+and wiki-slot mapping.
+
+The ruling weighed three options. Stable per-document identities would avoid
+renumbering on insertion but need deletion and reuse rules and proof that a
+stale handle cannot name a replacement document, and node and edge work may
+still dominate. Remapping stable identities to dense IDs at publication keeps
+reader APIs but still touches every published reference, so it may keep most
+of the rebuild's cost. Keeping full rebuilds preserves current storage,
+ordering, and invalidation rules, at the cost that membership changes remain
+proportional to workspace size.
 
 Any implementation must preserve these contracts:
 
@@ -249,32 +272,4 @@ review; an agent leaves the work ready for review.
 
 ## Open Questions
 
-### Should listing changes require stable document identities?
-
-This is unresolved only if listing changes dominate the measured cost.
-Assigning IDs independently of sorted paths would affect dense graph storage,
-node references, wiki-slot mappings, and any consumer that assumes vector
-indexing. It is a representation decision, not a prerequisite for Phase 1.
-
-1. **Keep full rebuilds for membership changes; optimize another measured
-   cause or reusable full-build work.** Pros: preserves current storage and
-   ordering, and minimizes invalidation rules. Cons: membership changes
-   remain proportional to workspace size.
-2. **Introduce stable internal document identities with per-document stored
-   nodes and explicit lookup maps.** Pros: insertion need not renumber all
-   documents and could support later targeted edits. Cons: requires a wider
-   representation change, deletion/reuse rules, and proof that stale handles
-   cannot identify a replacement document; node and edge work may still
-   dominate.
-3. **Keep stable internal identities but reconstruct dense snapshot IDs at
-   publication.** Pros: preserves dense reader APIs while allowing some
-   assembly reuse. Cons: remapping still touches published references and
-   may retain most of the full rebuild's cost.
-
-**Recommendation:** Keep full rebuilds for membership changes unless Phase 1
-shows they are the remaining bottleneck and cheaper reuse cannot address it.
-That preserves the current snapshot contract and avoids paying for a broader
-storage redesign without evidence of a useful editor improvement. If stable
-identities are selected, the conditional design must specify both document
-and node lifetime rules, deterministic output ordering, and wiki-slot mapping
-before implementation.
+None.
