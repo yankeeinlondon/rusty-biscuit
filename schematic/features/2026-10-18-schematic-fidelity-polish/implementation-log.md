@@ -15,15 +15,75 @@ skills_files_updated_during_phase_1: []
 packages:
     - schematic-gen
     - schematic-definitions
+    - schematic-define
 human_review: false
 message_to_agent: |-
-    Phase 1 (contracts and baselines) is complete; read "## Phase 1" in implementation-log.md and contracts.md before starting.
-    - The schemars-to-OpenAPI bridge is schematic/define/src/openapi/export/conversion.rs, NOT definitions/src/registry/conversion.rs as the spec/plan say.
-    - schematic/definitions/tests/schema_fidelity_baseline.rs holds reusable classify/walk/scan/typed_losses helpers; grow it into the R5 zero-lost scan (baseline: 766 lost, 624 typed losses over 18 APIs; OpenAI's 1175 deliberate free-form props are serde_json::Value in the definitions themselves).
-    - Nullable forms for OAS 3.0.3 (validator-checked): nullable $ref -> {"anyOf":[{"$ref":X},{"type":"object","nullable":true,"enum":[null]}]}; nullable string enum -> {"type":"string","nullable":true,"enum":[...,null]}.
-    - Registered schemars schemas mix OpenAPI style at the root (nullable) with 2020-12 style in nested components (type arrays, const, anyOf with {type:null}); handle both.
-    - jsonschema 0.55 needs options().with_draft(Draft::Draft202012).offline() (Draft4 falsely rejects const-based oneOf) and a nullable -> type:[T,"null"] rewrite before compiling.
-    - Narrow scoped test runs with BISCUIT_TEST_NARROW='test(x)' just _test <pkg>; `just _test <pkg> -E '...'` breaks or runs every L1 test.
+    Phase 3 (required constant headers) is complete; read "## Phase 3" in implementation-log.md.
+    - Export now emits each ordinary fixed header (RestApi::headers / Endpoint::headers, endpoint over API, case-insensitive) as an operation-level header parameter: required, style simple, schema {type: string, enum: [value], default: value}. Code: schematic/define/src/openapi/export/headers.rs, called from map_paths after operation security is set.
+    - Credential headers (from the operation's effective security schemes), Accept/Content-Type/Authorization, and incompatible explicit-param collisions are left out and returned by the public schematic_define::openapi::header_gaps(api); schematic-gen reports them as Feature::FixedHeader ("fixed-header") OpenAPI warnings. 17 shipped gaps (GitHub Accept x16, Gitea raw Accept x1) are pinned in gen/tests/l1/output_validation.rs FIXED_HEADER_GAPS; a definitions change that alters them must update that list.
+    - Phase 4 importer: Anthropic/GitHub/GitLab artifacts now carry header parameters with a single-value enum that mirror x-schematic.headers entries. Per contracts.md (RestApi::headers row), the importer must recognize such a parameter (same name case-insensitively, enum == value) as the fixed header and NOT create a ParamDef; until then re-import gains header ParamDefs. A compatible explicit header ParamDef merged with a fixed header exports as required + default with its own schema (no single-value enum) — keep it a ParamDef on import.
+    - Same gate notes as before: use `just _test schematic-define --all-features` and `cargo clippy -p schematic-define --all-features --all-targets -- -D warnings`.
+source_files_during_phase_2:
+    - schematic/define/src/openapi/export/conversion.rs
+    - schematic/define/src/openapi/export/components.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/components.rs
+    - schematic/define/src/registration.rs
+    - schematic/define/src/lib.rs
+    - schematic/define/src/builders.rs
+    - schematic/define/src/bundle.rs
+    - schematic/define/tests/schema_closure.rs
+    - schematic/define/tests/openapi_tests.rs
+    - schematic/gen/src/validation.rs
+    - schematic/definitions/Cargo.toml
+    - schematic/definitions/tests/schema_fidelity.rs
+    - schematic/definitions/tests/schema_fidelity_baseline.rs
+    - schematic/definitions/tests/schema_values.rs
+    - Cargo.lock
+    - schematic/openapi/anthropic.json
+    - schematic/openapi/artificial_analysis.json
+    - schematic/openapi/bitbucket.json
+    - schematic/openapi/elevenlabs.json
+    - schematic/openapi/emqx.json
+    - schematic/openapi/eversolo.json
+    - schematic/openapi/gitea.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+    - schematic/openapi/huggingface.json
+    - schematic/openapi/lmstudio.json
+    - schematic/openapi/ollama.json
+    - schematic/openapi/openai.json
+    - schematic/openapi/samsung_smart_tv.json
+    - schematic/openapi/unfolded_circle_core_rest.json
+docs_updated_during_phase_2:
+    - schematic/docs/io/export-openapi.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/typed-registration.md
+    - schematic/docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/define.md
+    - .claude/skills/schematic-define/schematic/openapi.md
+source_files_during_phase_3:
+    - schematic/define/src/openapi/export/headers.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/export/paths.rs
+    - schematic/define/src/openapi/mod.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/export/vocabulary.rs
+    - schematic/gen/tests/l1/fixed_header_export.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/openapi/anthropic.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+docs_updated_during_phase_3:
+    - schematic/docs/io/export-openapi.md
+    - schematic/docs/generation/validation.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/schematic-define/schematic/openapi.md
 ---
 
 # Implementation Log for 2026-10-18-schematic-fidelity-polish (13 phases)
@@ -522,3 +582,410 @@ reproduction is retained, the baseline and inventory are logged, the
 mapping and matrices are frozen in contracts.md, the spike decisions are
 recorded, and the baseline `just test`/`just lint` are green. R47 (sniff) is
 reported open separately, as the plan requires.
+
+## Phase 2
+
+Started 2026-10-23 on macOS (Darwin 27.2.0), worktree `feat-better-schematics`,
+HEAD `fdf26a265`, clean tree (so the uncommitted tree is exactly this phase).
+No subagents were used: the bridge, the closure check, and their tests share
+two files' worth of design, and splitting them would have raced on
+`define/src/openapi/export/` and the regenerated artifacts.
+
+### Wave 4: Bridge (R1–R4)
+
+`define/src/openapi/export/conversion.rs` is rewritten as a JSON→JSON
+transform (schemars JSON Schema → OAS 3.0.3 JSON) followed by
+`serde_json::from_value::<openapiv3::Schema>`; `openapiv3`'s deserializer
+keeps mixed keywords by falling back to `AnySchema`, so no keyword is dropped
+by the typed model. Handles both dialects found by a keyword survey of all 18
+registries (only OAS-expressible keywords plus `const`, type arrays, and
+`{type: null}` / `{nullable: true, enum: [null]}` members; every `$ref` is
+`#/components/schemas/…`):
+
+- type arrays → `type` + `nullable`, several non-null types → `anyOf` of
+  single-type members carrying their own keywords (never `oneOf`);
+- nullable `$ref`/composition → `anyOf: [X, {type: object, nullable: true, enum: [null]}]`
+  (the Phase 1 validator-checked form); nullable enums keep `null` in `enum`;
+- `const` → one-value `enum`; untyped `enum` gets its shared JSON type;
+- compositions, `properties`, `items`, `additionalProperties` (schema or
+  boolean), `not` convert recursively; constraints beside a `$ref` move into
+  `allOf: [{$ref}]` alongside it;
+- bounds, lengths, pattern, format, required, default, multipleOf kept;
+  numeric `exclusiveMinimum`/`exclusiveMaximum` → bound + boolean;
+- any other keyword, tuple `items`, non-string `type` entries, non-array
+  `enum`, or a non-object schema fails export with
+  `OpenApiError::UnsupportedFeature { feature, context: Some(json-pointer) }`
+  (no new error type; none of the 18 registries hits it).
+
+`map_components` became fallible to propagate that error.
+
+Decisions and deviations:
+
+- **deviation (R3 "preserve defaults"), `"default": null` only:** dropped.
+  `SchemaData::default` is an `Option<Value>`, so `openapiv3` reads
+  `"default": null` as absent. Restoring it after deserialization was
+  implemented and reverted: it broke
+  `response_adapters::shipped_bitbucket_get_source_exports_json_and_a_fallback`,
+  which requires every artifact to equal its own `openapiv3` re-parse (the
+  importer's parser). The field's `nullable` plus its absence from `required`
+  convey the same meaning; the R5 scan accepts a dropped null default only
+  when the output is nullable. All non-null defaults are kept.
+- **intended representation change:** a `$ref` with no siblings is now
+  exported bare instead of `allOf: [{$ref}]` (465 such wrappers in HEAD's
+  artifacts, 0 now; 1530 bare refs). OAS 3.0 ignores `$ref` siblings, so the
+  wrapper is kept only when annotations or constraints need carrying.
+  `define/tests/openapi_tests.rs` pinned the old wrapper and was updated to
+  `/properties/status/$ref`; the importer accepts both forms (all
+  `schematic-gen` re-import tests pass).
+- adopted default: the plan's "bridge in `definitions/src/registry/conversion.rs`"
+  is the Phase 1 correction — the bridge is in `schematic-define`, so the
+  shape-level bridge unit tests live there and the R1–R4 value/export tests in
+  `schematic-definitions` (source: Phase 1 log, "Plan corrections").
+
+### Wave 5: Closure (R7) and loss audit (R5, R6)
+
+**R7.** New `RestApi::validate_schema_closure` (`define/src/components.rs`):
+walks every component schema once (so recursive models terminate without
+following refs), schema-aware — values under `const`/`default`/`enum`/
+`example`/`examples` are data, but a *property named* `default` or `enum` is
+still a schema (a latent bug in the old bundle walker). Only
+`#/components/schemas/{name}` resolves, with `%XX` and `~1`/`~0` decoded;
+everything else (URLs, other files, deep pointers, `#/$defs/`, non-string or
+empty `$ref`) is reported with `missing: None` and never fetched. New
+`DefinitionError::UnresolvedSchemaReferences { api, references: Vec<SchemaReference> }`
+lists *every* failure with `parent`, JSON-pointer `path`, `reference`, and
+`missing` name.
+
+Where it runs: API build (`builders::validate_api`), bundle construction and
+load (the bundle's own `check_refs` walker was deleted and its result mapped
+to the unchanged `BundleError::SchemaReference` contract, same precedence),
+gen validation (`check_schema_references`, so every output reports
+`invalid-schema-reference` and nothing is written), and `openapi::export`.
+Spec 4a's typed registration already extracts nested definitions, so for
+built APIs this is a **backstop**; all 18 shipped registries close.
+
+- **adopted decision, not in `validate_references`:** putting the closure
+  inside `validate_references` made `OpenApiImport::build` fail on two
+  shipped import corpora — the Unfolded Circle import keeps deep pointer refs
+  (`#/components/schemas/DeviceButtonLayout/properties/grid`, even
+  `#/paths/~1cfg~1profile/…`) and an OpenAI import-matrix case leaves a
+  dangling `BetaItemResource`. R7 requires blocking generation and export,
+  not import, and importer diagnostics are Phase 4's input-robustness work,
+  so `validate_references` keeps its endpoint scope and the closure is a
+  separate check. Those imports still fail at export/generation, as they did
+  before (the old export closure rejected the deep refs as missing names).
+  **Phase 4 should turn these into importer ERROR diagnostics.**
+
+**R53.** Containers already export inline (spec 4a): the new export test
+asserts a `Vec<Child>` response is `{type: array, items: {$ref: Child}}` and no
+container component exists; the 18-registry test asserts no `Array_of`/
+`Map_of`/`Nullable_`/`Vec<`/`Option<`/`HashMap<`/`BTreeMap<`/`IndexMap<` key.
+**Deviation:** nine Bitbucket keys contain `<` (`PaginatedResponse<Repository>`
+etc.). They are generic *struct* instantiations, not containers, named by
+schemars from the definition type; OAS 3.0.3's key pattern forbids `<`.
+Renaming needs a `#[schemars(rename)]` on the Bitbucket type or a naming rule
+in typed registration — a definitions change beyond API-level constructor
+calls — so it is left unmade per the plan's authority rule, and the test pins
+exactly those nine names so a new one fails. Review item.
+
+**R5/R6 scan.** `definitions/tests/schema_fidelity_baseline.rs` was renamed to
+`schema_fidelity.rs` (it is now the gate, not a baseline) and its classifier
+taught the new forms: null members are the position's nullability (paired
+member walk skips them on both sides), a folded `anyOf[X, null]` compares X
+with the output, keywords moved into split-type `anyOf` members count as kept,
+`$ref` targets and every source type must survive. The registry test now
+asserts zero lost and zero typed-loss positions.
+
+| | props | untyped | deliberate | lost | typed loss | components lost |
+| --- | --- | --- | --- | --- | --- | --- |
+| Before (Phase 1, 18 APIs) | 7433 | 1970 | 1204 | 766 | 624 (284 beyond default) | 150 of 1872 |
+| After | 7558 | 1208 | 1208 | **0** | **0** | **0** of 1872 |
+
+Per API after: every row has lost 0 and typed loss 0; untyped = deliberate:
+Anthropic 2, ArtificialAnalysisData 2, ArtificialAnalysisCritPt 2, Bitbucket 0,
+OpenAI 1175, ElevenLabs 0, Gitea 1, GitHub 1, GitLab 0, HuggingFaceHub 2,
+LmStudio 4, OllamaNative 1, OllamaOpenAI 1, EmqxBasic 8, EmqxBearer 8,
+Eversolo 1, SamsungSmartTv 0, UnfoldedCircleCoreRest 0. Other positions
+(items, members, map values): 1826, of which 146 deliberate (all OpenAI
+`serde_json::Value` items/members), 0 lost. Properties rose 7433 → 7558
+because tagged-enum member objects (Anthropic 71 → 139, LmStudio 70 → 127)
+are now exported and walked.
+
+Deliberate free-form positions outside OpenAI (33; OpenAI's 1175 properties
+and 146 other positions are `serde_json::Value` in `definitions/src/openai/types.rs`):
+Anthropic `ContentBlock|oneOf[3].input`, `Tool.input_schema`;
+ArtificialAnalysis{Data,CritPt} `CritPtSubmission.generation_config`,
+`CritPtEvaluateBody.batch_metadata`; Gitea/GitHub `IssueSummary.pull_request`;
+HuggingFaceHub `MetricResult.value`, `DatasetConfig.data_files`; LmStudio
+`ChatOutputItem|oneOf[1].arguments`, `InvalidToolCallMetadata.arguments`,
+`ChatStreamEvent|oneOf[11].arguments`, `ChatStreamEvent|oneOf[12].arguments`;
+Ollama{Native,OpenAI} `ShowModelResponse.model_info`; Emqx{Basic,Bearer}
+`LoginResponse.license`, `PublishBody.user_properties`,
+`CreateRuleBody.metadata`, `RuleAction.args`, `TestRuleBody.context`,
+`RuleInfo.metadata`, `TestRuleResponse.data`, `AlarmInfo.details`; Eversolo
+`InputOutputListResponse.outputInfo`. The four new entries are composition
+members the old export never reached.
+
+### Wave 6: Artifacts
+
+`just generate` (twice; the second run confirmed the final code reproduces
+the committed files). Only the 15 `openapi/*.json` changed (+14.8k/−3.6k
+lines); `schema/src` and `postman/` are byte-identical to HEAD, so the
+generated Rust needed no comparison tree beyond `git status` (clean). A
+structural diff over all 15 documents: everything outside
+`components.schemas` is identical (paths, info, security, extensions),
+component key sets are identical, and no property disappeared (property
+positions 7029 → 7092 counted per document; Anthropic and LmStudio gained
+member properties). `nullable` occurrences: 0 → 1978.
+
+### Verification
+
+Requirement-to-test mapping (all L1, F1 in-process at the crates' public
+APIs; generation and export are exercised through `schematic-gen`'s public
+validation and the real `just generate` recipe):
+
+| Requirement | Tests |
+| --- | --- |
+| R1 type arrays, nullable (shape) | `schematic-define` `openapi::export::conversion::tests::{a_type_array_with_null_exports_typed_and_nullable, several_non_null_types_export_as_any_of_with_their_own_keywords, a_nullable_reference_joins_the_null_branch_in_either_dialect, a_folded_nullable_member_keeps_its_constraints}` |
+| R1 accepted/rejected values: `Option<String>`, `Option<Vec<T>>`, `Option<Struct>`, nullable enum (root and nested dialects), integer/number union | `schematic-definitions` `schema_values::{optional_fields_accept_null_and_their_type_only, an_integer_and_number_union_accepts_both}` |
+| R2 enums, const, `rename_all` export | `conversion::tests::enums_and_constants_keep_their_value_domain`; `schema_values::enums_keep_their_renamed_value_domain` |
+| R3 compositions, tagged enum, flattened struct, sibling constraints, bounds, unsupported keywords | `conversion::tests::{compositions_convert_their_members_and_keep_sibling_constraints, bounds_formats_defaults_and_required_survive, an_unsupported_keyword_fails_with_its_schema_path}`; `schema_values::{tagged_enums_flattened_structs_and_maps_keep_their_shape, bounds_and_lengths_are_enforced}` |
+| R4 `additionalProperties`, `HashMap<String,T>`, `HashMap<String,Value>` | `conversion::tests::{additional_properties_survive_as_a_schema_or_a_boolean, free_form_and_boolean_schemas_export_unconstrained_or_impossible}`; `schema_values::tagged_enums_flattened_structs_and_maps_keep_their_shape` |
+| R5 paired fixtures + 18-registry zero-lost scan | `schema_fidelity::{a_serde_json_value_field_exports_as_deliberate_free_form, an_untyped_output_of_a_constrained_source_is_lost, a_typed_output_that_drops_a_constraint_is_a_typed_loss, every_registry_exports_without_losing_a_schema_constraint}` |
+| R6 before/after counts | the table above (printed by the scan with `--no-capture`) |
+| R7 unresolved nested ref (all facts), every failure listed, external/deep/wrong-type refs, escapes, data keywords, extracted nested definition, recursion, deserialized definition, export + bundle block | `schematic-define` `schema_closure::*` (6 tests) |
+| R7 generation blocks | `schematic-gen` `validation::tests::a_dangling_reference_inside_a_component_blocks_rust_and_openapi_with_its_location` |
+| R7 18 registries / R53 keys | `schema_fidelity::every_registry_closes_its_references_and_names_no_container_component` |
+| R53 `Vec<T>` inline | `schema_values::a_vec_response_exports_inline_with_an_element_reference` |
+
+Regression proof: with HEAD's `conversion.rs`/`components.rs`/`mod.rs`
+swapped back in temporarily, all five R1–R4 `schema_values` value tests and
+the registry zero-loss scan fail; with the new bridge they pass. The R53
+inline-array test passes on both (spec 4a already did it; it is a guard).
+
+Input Robustness Matrix: the only reader-like code changed is the component
+`$ref` walk the bundle loader now shares. Its `$ref` field shapes: absent → no
+reference; string resolving → ok; missing name → `Some(name)`; `null`, number
+(wrong type), `""` and `#/components/schemas/` (empty) → reported with
+`missing: None`, never read as absent; all asserted in
+`schema_closure::every_unresolved_reference_is_reported_in_component_then_schema_order`.
+Document shapes are unchanged (the bundle's JSON loader is untouched;
+`bundle_json_matrix` passes). Smell grep over `conversion.rs` and
+`components.rs`: no `#[serde(default)]`, no `unwrap_or_default`; `.ok()` only
+in `percent_decode`, where a malformed escape yields `None` and so a reported
+reference, not a resolved one; one `filter_map(Value::as_str)` over `type`
+entries already checked to be strings.
+
+Gates, run once after all edits with nothing else running, from `schematic/`:
+
+- `just test` → exit 0: L1 2800 run, 2800 passed (4 slow), 20 skipped;
+  fresh-output 14 passed (real APIs compile offline against the new
+  `schematic-define`); compile-fail 1 passed.
+- `just lint` → exit 0. `just lint` runs `schematic-define` clippy without
+  features, so the `openapi` code is not linted by it; additionally
+  `cargo clippy -p schematic-define --all-features --all-targets -- -D warnings`
+  → exit 0.
+- `just check-tier-coverage schematic` → 0 stranded. New tests are all L1 by
+  name; `define/tests/schema_closure.rs` and the two `definitions/tests/*.rs`
+  files are auto-discovered test binaries (neither package sets
+  `autotests = false`); `schema_closure`'s export assertions are
+  `#[cfg(feature = "openapi")]`, which CI enables (`all-features = true`).
+- `just lint-schema` not run: generated Rust is byte-identical to HEAD
+  (`git status schema/` clean after `just generate`), so it would lint
+  unchanged code.
+- The affected-scope skip was not considered: code changed, so both gates ran.
+
+Development note: early `just _test schematic-define` runs lacked
+`--all-features` and silently omitted the 233 `openapi`-gated tests (and the
+new bridge tests failed to compile unnoticed); every later define run used
+`just _test schematic-define --all-features`, as the area recipe does.
+
+Dependents: `model-citizen` (direct, `schematic-definitions` data types only)
+and `schematic-schema` (generated, byte-identical) with its consumers
+(`homelab/*`, `sniff`, `biscuit-speaks`). None calls the builders, export, or
+the closure at runtime (grep), and no definitions type changed, so only the
+code touching those types was run:
+`BISCUIT_TEST_NARROW='test(/scanner::(ollama|lmstudio)/)' just _test model-citizen`
+→ 45 passed. `schematic-schema` compiles against the new crates in the
+fresh-output gate.
+
+Cross-OS check: not run. The change is pure JSON-to-JSON transformation and
+string handling (JSON pointers, percent-decoding); it touches no paths,
+processes, terminals, or `#[cfg]` OS code.
+
+Skills: `schematic-define` skill updated (SKILL.md build rule, define.md
+closure check, openapi.md conversion rules and gates).
+
+### Review agenda (Phase 2)
+
+1. `"default": null` is dropped from exported schemas (R3 deviation; the
+   alternative breaks the artifact-equals-its-own-parse invariant).
+2. Nine Bitbucket `PaginatedResponse<…>` component keys contain `<` (R53
+   deviation; OAS 3.0.3 key pattern). Fix needs a Bitbucket
+   `#[schemars(rename = "PaginatedResponse_{T}")]` or a typed-registration
+   naming rule — both outside this feature's authority.
+3. The closure check is not part of `validate_references`, so OpenAPI import
+   still accepts unresolved and deep-pointer refs (Unfolded Circle corpus,
+   OpenAI matrix); Phase 4 owns importer diagnostics.
+4. Bare `$ref` properties are no longer wrapped in `allOf` (465 positions).
+5. New public API: `RestApi::validate_schema_closure`,
+   `DefinitionError::UnresolvedSchemaReferences`, `SchemaReference`.
+
+Phase 2 status: checkpoint met. R1–R7/R53 have evidence (R53 with the
+recorded `<` deviation); all 18 registries pass closure and the zero-loss
+scan; lost count 766 → 0 and typed losses 624 → 0; deliberate free-form
+positions are named above; artifacts regenerated and drift tests pass;
+generated Rust unchanged; `just test` and `just lint` green.
+
+## Phase 3
+
+Scope: Wave 7 "Map headers" (R8, R9). Single-task wave, implemented directly
+(no subagents).
+
+### Design and adopted defaults
+
+- New `schematic/define/src/openapi/export/headers.rs`. `map_paths` sets each
+  operation's `security` first, then derives the operation's **credential
+  headers** from its *effective* requirements (own `security`, else the
+  document's) resolved against the emitted `components.securitySchemes`:
+  `apiKey`/`in: header` → its `name`; `http`, `oauth2`, `openIdConnect` →
+  `Authorization`; query/cookie keys → none. So "covered by a securitySchemes
+  entry" is literal, and an endpoint auth override (replacement or
+  `.public()`) changes which headers are credentials.
+- Effective fixed headers = API headers overlaid by endpoint headers, names
+  compared case-insensitively, endpoint wins (keeps the endpoint's spelling).
+  This mirrors the runtime: API headers are client defaults and a request
+  part with the same name replaces them (`runtime/src/client.rs`, request
+  assembly).
+- Each ordinary fixed header → operation-level `in: header`,
+  `required: true`, `style: simple`,
+  `schema: {type: string, enum: [value], default: value}`. Adopted default:
+  emitted inline per operation, not as a `components.parameters` `$ref`
+  (source: plan Wave 7 says "emit required ordinary headers"; inline avoids a
+  new ref kind the importer cannot yet resolve — Phase 4 adds parameter-ref
+  resolution).
+- Reserved names: `Accept`/`Content-Type`/`Authorization` are never emitted,
+  fixed or explicit. A fixed `Accept` equal (case-insensitive) to a 2xx
+  response media type, or a fixed `Content-Type` equal to a request-body
+  media type, is expressed by `content` and silent; otherwise it is a gap.
+- Explicit header `ParamDef` collisions (adopted default, source: R9 "merge a
+  matching ordinary header parameter or diagnose incompatible declarations"):
+  compatible = an unconstrained string or a string enum listing the value →
+  one parameter, the declared one, made `required: true` with the value as
+  `default` (its enum, description, explode kept). Incompatible (non-string
+  type, or enum without the value) → declared parameter exported unchanged +
+  gap. Explicit header params whose name is reserved or a credential header
+  are also dropped with a gap (checkpoint: "no duplicate/reserved/credential
+  parameter is emitted").
+- **Diagnostics:** export keeps returning `Result<OpenAPI, _>`; gaps flow
+  through a new public `schematic_define::openapi::header_gaps(api)` →
+  `Vec<HeaderGap { endpoint_id, name, value: Option<String>, reason }>`
+  (`HeaderGapReason::{Credential{scheme}, Accept, ContentType, Authorization,
+  IncompatibleParameter}`). `schematic-gen`'s `export/vocabulary.rs` turns
+  each into a new `Feature::FixedHeader` (`fixed-header`) **warning** for the
+  OpenAPI output — consistent with every other export-loss finding there
+  (warning, output still written). One mapping implementation serves both
+  the document and the diagnostics.
+- "Preserve extra fixed-header detail in the extension": already true — the
+  document- and operation-level `x-schematic.headers` keep every declaration;
+  nothing new was needed.
+
+### Artifact effect (regenerated with `just generate-openapi`)
+
+Rust under `schematic/schema/` unchanged (no git diff after generation).
+Fixed-header parameters now in artifacts: Anthropic 4 (`anthropic-version:
+2023-06-01` on every operation; `X-Api-Key` is the `apiKeyAuth` credential and
+stays a scheme), GitHub 32 (`X-GitHub-Api-Version`, `User-Agent` on 16
+operations), GitLab 19 (`User-Agent`). Gitea and OpenAI gain none.
+Changed artifacts this phase: `anthropic.json`, `github.json`, `gitlab.json`.
+
+### Shipped gaps (review item)
+
+17 `fixed-header` warnings now print on every `just generate`:
+- GitHub, 16 operations: `Accept: application/vnd.github+json` (15) and the
+  endpoint override `application/vnd.github.raw+json` (GetRepositoryContentRaw)
+  — responses declare `application/json`/text, so OpenAPI cannot say it.
+- Gitea `GetRepositoryContentRaw`: inherits `Accept: application/json` but
+  returns text. This looks like a latent definition imperfection; fixing it
+  (an endpoint `Accept` override) changes runtime behavior and generated Rust,
+  which this phase must not do, so it is reported, not fixed.
+
+Two existing gen tests asserted "no warnings" and were updated to pin these
+exact gaps rather than weakened: `output_validation::
+live_definitions_have_no_embedded_queries_or_validation_gaps` gains a pinned
+`FIXED_HEADER_GAPS` (17 rows, OpenAPI only, warning severity), and
+`cli_migrated_provider_generates_all_outputs_without_warnings` was renamed
+`..._with_only_its_known_warning` and asserts exactly Gitea's one line.
+
+### Requirement → test mapping
+
+New file `schematic/gen/tests/l1/fixed_header_export.rs` (declared in
+`tests/l1/main.rs`; L1, no tier marker). All go through public
+`build_openapi_grouped`, `validate_openapi`, and `openapi::header_gaps`:
+
+| Requirement | Test |
+| --- | --- |
+| R8 fixed header → required single-value enum + default; extension retained | `api_fixed_header_exports_as_a_required_single_value_enum_with_default` |
+| R9 endpoint over API, case-insensitive, exactly one param | `endpoint_header_overrides_the_api_header_case_insensitively` |
+| R9 credential exclusion via effective auth incl. override and `.public()` | `credential_headers_follow_the_effective_operation_auth` |
+| R9 reserved Accept/Content-Type/Authorization (matching vs gap; public vs bearer Authorization) | `reserved_headers_are_never_parameters_and_unexpressed_values_warn` |
+| R9 merge compatible / diagnose incompatible / explicit reserved param | `explicit_header_parameters_merge_when_compatible_and_warn_when_not` |
+| R8 committed Anthropic artifact | `committed_anthropic_artifact_sends_anthropic_version_on_every_operation` |
+| Checkpoint: no duplicate/reserved/credential header param in any artifact | `committed_artifacts_declare_no_duplicate_reserved_or_credential_header_parameter` (all 15 via `include_str!`, count guarded against the directory) |
+| Shipped gaps pinned | `output_validation::live_definitions_have_no_embedded_queries_or_validation_gaps`, `output_validation::cli_migrated_provider_generates_all_outputs_with_only_its_known_warning` (spawns the CLI: wiring of the warning into rendered output) |
+| Artifacts equal fresh output | existing `artifact_drift` |
+
+Input robustness matrix: not applicable — this phase changes a writer
+(OpenAPI export) and adds no reader or config field.
+
+### Gates
+
+- Targeted during development: `just _test schematic-gen -E '…'` (one early
+  run used `cargo nextest run` directly before switching to the recipe).
+  First run failed only on my own expected JSON (`explode: false`,
+  omitted `required: false`), then the two "no warnings" tests above.
+- `just test` (schematic): 2807 passed / 20 skipped; fresh-output 14 passed;
+  compile-fail 1 passed. No failures, none load-sensitive.
+- `just lint`: clean. `cargo clippy -p schematic-define --all-features
+  --all-targets -- -D warnings`: clean.
+- `just check-tier-coverage schematic`: 0 stranded.
+- Scope calculator not used to skip gates; both gates ran.
+- Dependents: no package outside `schematic/` imports `schematic_define::
+  openapi` or `schematic_gen` (grep over `biscuit-speaks`, `homelab/*`,
+  `sniff`, `model-citizen`); they consume `schematic-schema`, whose generated
+  source is byte-identical, and define's change is additive (the `export`
+  signature is unchanged). No dependent tests run.
+- Cross-OS check: not run — no path, process, terminal, or `#[cfg]` code; the
+  one filesystem read in the new test joins a literal onto
+  `CARGO_MANIFEST_DIR`.
+
+### Docs and skills
+
+- `schematic/docs/io/export-openapi.md`: new "Fixed headers" section (rules,
+  example, Mermaid flow).
+- `schematic/docs/generation/validation.md`: `fixed-header` row; the header
+  parameter paragraph now says OpenAPI reports what it leaves out.
+- `.claude/skills/schematic-define/schematic/openapi.md`: fixed-header export
+  rules and the pinned shipped gaps.
+
+### Review agenda (Phase 3)
+
+1. 17 `fixed-header` warnings on every generation (GitHub `Accept` vendor
+   media types, Gitea raw-content `Accept`). Alternative was to treat any
+   `Accept` as expressed and stay silent, which hides a real difference
+   between the runtime and an OpenAPI-generated client.
+2. Gitea `GetRepositoryContentRaw` sends `Accept: application/json` for a
+   text response — probably a definition bug worth a separate fix.
+3. New public API: `openapi::header_gaps`, `HeaderGap`, `HeaderGapReason`;
+   new `schematic_gen::diagnostics::Feature::FixedHeader`.
+4. Merged compatible parameters are `required: true` with a `default`: the
+   runtime always sends the header, so a consumer must too.
+5. Phase 4 importer: header parameters with a single-value `enum` equal to an
+   `x-schematic.headers` entry must be recognized as the fixed header and not
+   become a `ParamDef` (contracts.md `RestApi::headers` row). Until then a
+   re-import of Anthropic/GitHub/GitLab artifacts gains header `ParamDef`s.
+
+Phase 3 status: checkpoint met. Ordinary fixed headers are standard header
+parameters; no duplicate/reserved/credential header parameter in any
+committed artifact; Rust output unchanged; export, drift, and the common
+phase checks pass.

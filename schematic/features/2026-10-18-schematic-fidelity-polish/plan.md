@@ -16,6 +16,68 @@ skills_files_updated_during_phase_1: []
 packages:
     - schematic-gen
     - schematic-definitions
+    - schematic-define
+source_files_during_phase_2:
+    - schematic/define/src/openapi/export/conversion.rs
+    - schematic/define/src/openapi/export/components.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/components.rs
+    - schematic/define/src/registration.rs
+    - schematic/define/src/lib.rs
+    - schematic/define/src/builders.rs
+    - schematic/define/src/bundle.rs
+    - schematic/define/tests/schema_closure.rs
+    - schematic/define/tests/openapi_tests.rs
+    - schematic/gen/src/validation.rs
+    - schematic/definitions/Cargo.toml
+    - schematic/definitions/tests/schema_fidelity.rs
+    - schematic/definitions/tests/schema_fidelity_baseline.rs
+    - schematic/definitions/tests/schema_values.rs
+    - Cargo.lock
+    - schematic/openapi/anthropic.json
+    - schematic/openapi/artificial_analysis.json
+    - schematic/openapi/bitbucket.json
+    - schematic/openapi/elevenlabs.json
+    - schematic/openapi/emqx.json
+    - schematic/openapi/eversolo.json
+    - schematic/openapi/gitea.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+    - schematic/openapi/huggingface.json
+    - schematic/openapi/lmstudio.json
+    - schematic/openapi/ollama.json
+    - schematic/openapi/openai.json
+    - schematic/openapi/samsung_smart_tv.json
+    - schematic/openapi/unfolded_circle_core_rest.json
+docs_updated_during_phase_2:
+    - schematic/docs/io/export-openapi.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/typed-registration.md
+    - schematic/docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/define.md
+    - .claude/skills/schematic-define/schematic/openapi.md
+source_files_during_phase_3:
+    - schematic/define/src/openapi/export/headers.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/export/paths.rs
+    - schematic/define/src/openapi/mod.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/export/vocabulary.rs
+    - schematic/gen/tests/l1/fixed_header_export.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/openapi/anthropic.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+docs_updated_during_phase_3:
+    - schematic/docs/io/export-openapi.md
+    - schematic/docs/generation/validation.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/schematic-define/schematic/openapi.md
 ---
 
 # Schematic fidelity and polish implementation plan
@@ -304,7 +366,7 @@ A review finding on a cell requires reporting the entire row and column state.
 
 ### Wave 4: Bridge implementation
 
-- [ ] **Recover constraints**
+- [x] **Recover constraints**
   - R1–R4: implement recursive conversion in
     `definitions/src/registry/conversion.rs`: type arrays, nullable primitives,
     refs/enums, const/enum, compositions, and additionalProperties booleans/maps.
@@ -316,7 +378,7 @@ A review finding on a cell requires reporting the entire row and column state.
 
 ### Wave 5: Independent registry checks
 
-- [ ] **Validate closure**
+- [x] **Validate closure**
   - R7, R53: resolve against emitted components including extracted nested
     definitions; walk registered roots and endpoint schemas with visited refs,
     JSON-pointer unescaping, recursive models, and external-ref diagnostics.
@@ -324,7 +386,7 @@ A review finding on a cell requires reporting the entire row and column state.
   - Test missing refs, extracted definitions, valid recursion, and inline Vec<T>
     with element ref and no container component. Ownership: registry closure code.
 
-- [ ] **Audit losses**
+- [x] **Audit losses**
   - R5, R6: implement recursive source/output constraint comparison; inspect
     properties, items, composition branches, map values and referenced components.
     Catch losses in typed output as well as accidental Any; paired free-form/lost
@@ -334,7 +396,7 @@ A review finding on a cell requires reporting the entire row and column state.
 
 ### Wave 6: Artifact integration
 
-- [ ] **Regenerate schemas**
+- [x] **Regenerate schemas**
   - Regenerate OpenAPI artifacts, review only intended type/constraint recovery,
     and run closure/loss/export/drift tests. Confirm no property disappears.
     Regenerate Rust into a comparison tree and assert byte-identical output;
@@ -348,7 +410,7 @@ checks pass. A bridge-only change must not change generated Rust.
 
 ### Wave 7: Header mapping
 
-- [ ] **Map headers**
+- [x] **Map headers**
   - R8, R9: emit required ordinary headers with string single-value enum and
     default; merge API/endpoint declarations case-insensitively, endpoint wins.
     Merge compatible explicit parameters and diagnose incompatible collisions.
