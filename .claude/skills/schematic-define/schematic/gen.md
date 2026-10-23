@@ -123,6 +123,15 @@ Generated REST code only describes requests; the hand-written
 `schematic-runtime` sends them. The generated `Cargo.toml` depends on
 `schematic-runtime` (path `../runtime`), not on `reqwest`.
 
+The manifest declares one Cargo feature per module group (named for the
+module, default = all), built by `cargo_gen::ModuleFeatures::new(registry,
+registrations)` from the whole registry on every run, partial or full.
+`lib.rs` gates each `pub mod`, `prelude.rs` each re-export, and both their doc
+lines, with `#[cfg(feature = "<module>")]`; `ws_shared` compiles under any
+WebSocket feature. `futures-util`, `thiserror`, and `tokio-tungstenite` are
+optional, enabled only by WebSocket module features. Feature selections are
+proven by the `slow_` test `module_features::slow_feature_selections_compile_only_their_module_groups`.
+
 ### `lib.rs` and the Shared Module
 
 ```rust

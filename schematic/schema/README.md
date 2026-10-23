@@ -40,6 +40,15 @@ Generated API outputs produced by `schematic-gen`.
 - `unfolded_circle_integration_ws`
 - `samsung_smart_tv_remote_ws`
 
+Each module is a Cargo feature of the same name, and the default features
+enable all of them. To build only what you use, turn the defaults off:
+
+```toml
+schematic-schema = { path = "../schematic/schema", default-features = false, features = ["ollama"] }
+```
+
+See [selecting modules with Cargo features](../docs/generation/generated-clients.md#selecting-modules-with-cargo-features).
+
 ## Quick Start
 
 Each REST API is one client struct (for example `OpenAI`): `OpenAI::new()` returns a usable client, and settings are chained onto it. Every endpoint is a method on that struct, so nothing beyond the prelude needs importing:

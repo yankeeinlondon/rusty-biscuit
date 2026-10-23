@@ -327,7 +327,12 @@ let api = RestApi::builder(&context, "OllamaOpenAI", "http://localhost:11434/v1"
 
 #### Automatic Path Inference
 
-For API names with recognized suffixes, the generator can infer the module path:
+Without an explicit `module_path`, one resolver,
+`schematic_definitions::naming::resolve_module_name`, names the module. The
+generated Rust module, the OpenAPI document, the Postman collection, the
+module grouping, and the definitions module written by `import` all use it,
+so an API never lands under two names. For API names with recognized
+suffixes it drops the suffix:
 
 | API Name | Inferred Module |
 |----------|-----------------|
@@ -340,7 +345,10 @@ For API names with recognized suffixes, the generator can infer the module path:
 
 The supported suffixes for inference are: `Native`, `Client`, `Service`, `Hub`, `Api`, `Sdk`.
 
-Explicit `module_path` always takes precedence over inference.
+Explicit `module_path` always takes precedence over inference. Any other name
+is lowercased (`OpenAI` becomes `openai`). Module names that differ only by
+letter case are refused, because they would collide on case-insensitive file
+systems (macOS, Windows).
 
 **Multi-API modules require explicit configuration**. When multiple APIs share a definitions module, set both `module_path` and `request_suffix` to avoid naming collisions:
 
@@ -1155,8 +1163,10 @@ Cargo.toml generation:
 
 | Function | Description |
 |----------|-------------|
-| `generate_cargo_toml()` | Returns Cargo.toml content string |
-| `write_cargo_toml(&dir, dry_run)` | Writes Cargo.toml to directory |
+| `ModuleFeatures::new(&registry, registrations)` | The module groups the crate declares, one Cargo feature each |
+| `generate_cargo_toml(workspace_root, &features)` | Returns Cargo.toml content string |
+| `generate_cargo_toml_with_paths(define, definitions, runtime, &features)` | The same, with explicit dependency paths |
+| `write_cargo_toml(&dir, dry_run, workspace_root, &features)` | Writes Cargo.toml to directory |
 
 ### `errors`
 
@@ -1187,13 +1197,16 @@ Per-output validators; each takes the whole batch and returns
 | `validate_postman(&apis)` | Routes, embedded queries, collection file names |
 | `endpoint_uniqueness_key(&endpoint)` | The `(method, normalized path)` identity two endpoints of one API may not share |
 
-### `inference`
+### Module names
 
-Module path inference utilities:
+The resolver lives in `schematic_definitions::naming`; the generator has no
+copy of its own:
 
 | Function | Description |
 |----------|-------------|
-| `infer_module_path(&name)` | Infers module path from API name (for recognized suffixes: Native, Client, Service, Hub, Api, Sdk) |
+| `resolve_module_name(&api)` | The module name and artifact file stem of an API |
+| `module_name(&name, explicit)` | The same, from a name and an optional explicit module path |
+| `infer_module_path(&name)` | The suffix rule alone (Native, Client, Service, Hub, Api, Sdk) |
 
 ### Runtime compatibility
 
@@ -1453,7 +1466,6 @@ Shared normalized types consumed by both OpenAPI and Postman writers:
 
 | Function | Description |
 |----------|-------------|
-| `export::resolve_module_name(&api)` | Canonical module name from API definition |
 | `export::extract_folder_key(&path)` | Folder key from URL path for Postman grouping |
 | `export::auth::map_auth(&strategy)` | Map `AuthStrategy` to `ExportAuth` |
 | `export::body::map_body(&request)` | Map `ApiRequest` to `ExportBody` |
@@ -1530,6 +1542,38 @@ To close the testing gap, we need:
 
 1. **E2E smoke tests** - Optional integration tests against real APIs (gated by feature flag)
 
+## Selecting modules with Cargo features
+
+Each generated module is behind a Cargo feature named for the module, and
+the default features enable every module. A consumer that needs only some
+APIs turns the defaults off and lists the modules it uses:
+
+```toml
+[dependencies]
+schematic-schema = { path = "../schematic/schema", default-features = false, features = ["anthropic", "elevenlabs_ws"] }
+```
+
+- **One feature per module, not per API.** APIs that share a module share
+  its feature: `ollama` enables both `OllamaNative` and `OllamaOpenAI`.
+- **Features are additive.** A REST module and a WebSocket module can be
+  enabled together; with no feature at all the crate still builds and holds
+  only `shared`, `prelude`, and the runtime re-export.
+- **Everything about a module follows its feature:** the `pub mod`
+  declaration, its `prelude` re-exports, and its rows in the crate and
+  prelude docs. `ws_shared` compiles when any WebSocket module is enabled.
+  A disabled module is simply absent; naming it fails with rustc's
+  "the item is gated behind the `<module>` feature" note.
+- **WebSocket transport is optional.** `futures-util`, `thiserror`, and
+  `tokio-tungstenite` are used only by WebSocket modules, so they are
+  optional dependencies enabled by each WebSocket module's feature. A
+  REST-only selection does not build `tokio-tungstenite`.
+- **The manifest comes from the whole registry.** Every run, full or
+  partial, writes the same `[features]` table, so selecting one API for
+  regeneration never drops another module's feature.
+
+A module named `default` is refused by validation (`invalid-module-path`),
+since it would collide with the `default` feature.
+
 ## Dependencies
 
 The generated code requires these runtime dependencies (automatically included in generated `Cargo.toml`):
@@ -1537,26 +1581,35 @@ The generated code requires these runtime dependencies (automatically included i
 ```toml
 [dependencies]
 bytes = "1"
-futures-util = "0.3"
+futures-util = { version = "0.3", optional = true }
 schematic-define = { version = "0.1.0", path = "../define" }
 schematic-definitions = { version = "0.1.0", path = "../definitions" }
 schematic-runtime = { version = "0.1.0", path = "../runtime" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-thiserror = "2.0"
+thiserror = { version = "2.0", optional = true }
 tokio = { version = "1.43", features = ["rt", "macros", "sync", "time", "net"] }
 tokio-stream = "0.1"
-tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-native-roots"], optional = true }
 urlencoding = "2.1"
+
+[features]
+default = ["anthropic", "elevenlabs_ws", "ollama"] # every module, abridged here
+anthropic = []
+elevenlabs_ws = ["dep:futures-util", "dep:thiserror", "dep:tokio-tungstenite"]
+ollama = []
 
 [dev-dependencies]
 serial_test = "3"
+trybuild = "1.0"
 wiremock = "0.6"
 ```
 
 REST requests are sent by `schematic-runtime`, so the generated crate does
 not depend on an HTTP client directly; the WebSocket modules use
-`tokio-tungstenite`. The template lives in `src/cargo_gen.rs`.
+`tokio-tungstenite`. The template lives in `src/cargo_gen.rs`. When the
+registry has no WebSocket module, the three WebSocket-only dependencies are
+left out of the manifest.
 
 ## License
 

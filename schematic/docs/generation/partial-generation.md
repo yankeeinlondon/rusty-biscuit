@@ -37,7 +37,9 @@ full generation would write. `lib.rs` also records the `schematic-runtime`
 ABI the crate was generated for (see
 [shared runtime compatibility](#shared-runtime-compatibility)). `shared.rs`,
 `ws_shared.rs`, the WebSocket definition modules, and `schema/Cargo.toml` are
-rewritten on every run.
+rewritten on every run. The manifest's module features come from the whole
+registry, never from the selection, so a partial run writes the same
+`Cargo.toml` as full generation.
 
 OpenAPI and Postman follow the same rule with their own module names: a
 partial run rewrites only the selected groups' `<module>.json` and

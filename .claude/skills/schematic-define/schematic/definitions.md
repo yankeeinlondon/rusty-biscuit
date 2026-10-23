@@ -163,7 +163,11 @@ definitions/src/
 3. Choose correct success shapes (`returns_*`/`returns(Success::…)`, streams
    as `Success::sse`/`ndjson`/`bytes`) and declared errors (`.errors(..)`,
    `.default_errors(..)`) for each endpoint; see [`responses.md`](./responses.md)
-4. Set `module_path` if API name differs from module name
+4. Set `module_path` if API name differs from module name. Without it,
+   `schematic_definitions::naming::resolve_module_name` (the only module-name
+   resolver; Rust, OpenAPI, Postman, grouping, and `import` all call it) drops
+   a Native/Client/Service/Hub/Api/Sdk suffix or lowercases the name. The
+   registration's `module` must equal it; names differing only by case are refused
 5. Add types with `#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]`
    and a `Registration` impl (`definition_type!` or the nominal macro)
 6. Export from `lib.rs` and `prelude.rs`, register the API with one entry in
