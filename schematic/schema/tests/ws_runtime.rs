@@ -5,6 +5,8 @@
 mod common;
 mod ws_mock;
 
+use ws_mock::no_setup;
+
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
@@ -23,7 +25,7 @@ use schematic_schema::unfolded_circle_core_ws::{
 };
 use schematic_schema::unfolded_circle_dock_ws::{
     DockRootServerMessage, DockWsAuthRequired, DockWsEnvelopeType, DockWsKnownMessage, DockWsMessageName,
-    UnfoldedCircleDockWs,
+    DockWsResponseEnvelope, UnfoldedCircleDockWs,
 };
 use schematic_schema::unfolded_circle_integration_ws::{
     IntegrationServerMessage, IntegrationWsKnownMessage, IntegrationWsMessageName,
@@ -115,7 +117,7 @@ async fn ws_correlated_request_uses_options_timeout() {
     let options = WsClientOptions::builder()
         .request_timeout(Duration::from_millis(100))
         .build();
-    let ws = client.connect_core_ws(options).await.unwrap();
+    let ws = client.connect_core_ws_with_setup(options, no_setup).await.unwrap();
 
     let err = ws
         .request_value(serde_json::json!({"cmd": "no_response"}))
@@ -145,7 +147,7 @@ async fn ws_disconnect_fails_pending_requests() {
     let options = WsClientOptions::builder()
         .request_timeout(Duration::from_secs(2))
         .build();
-    let ws = client.connect_core_ws(options).await.unwrap();
+    let ws = client.connect_core_ws_with_setup(options, no_setup).await.unwrap();
 
     let err = ws
         .request_value(serde_json::json!({"cmd": "disconnect_me"}))
@@ -193,7 +195,7 @@ async fn ws_reconnect_policy_redials_after_disconnect() {
         .request_timeout(Duration::from_secs(2))
         .reconnect(Some(reconnect))
         .build();
-    let ws = client.connect_core_ws(options).await.unwrap();
+    let ws = client.connect_core_ws_with_setup(options, no_setup).await.unwrap();
 
     let first_err = ws
         .request_value(serde_json::json!({"cmd": "first"}))
@@ -232,23 +234,23 @@ async fn core_endpoints_dial_their_documented_channel_paths() {
     let base_path = after_scheme.find('/').map_or("", |index| &after_scheme[index..]);
     let client = UnfoldedCircleCoreWs::with_base_url(format!("{}{base_path}", server.ws_origin()));
 
-    client.connect_core_ws(WsClientOptions::default()).await.unwrap().close().await.unwrap();
+    client.connect_core_ws_with_setup(WsClientOptions::default(), no_setup).await.unwrap().close().await.unwrap();
     client
-        .connect_core_integrations(WsClientOptions::default())
+        .connect_core_integrations_with_setup(WsClientOptions::default(), no_setup)
         .await
         .unwrap()
         .close()
         .await
         .unwrap();
     client
-        .connect_core_profiles(WsClientOptions::default())
+        .connect_core_profiles_with_setup(WsClientOptions::default(), no_setup)
         .await
         .unwrap()
         .close()
         .await
         .unwrap();
     client
-        .connect_core_events(WsClientOptions::default())
+        .connect_core_events_with_setup(WsClientOptions::default(), no_setup)
         .await
         .unwrap()
         .close()
@@ -376,12 +378,13 @@ async fn core_ws_decodes_every_server_message_variant() {
         r#"{"kind":"resp","req_id":905,"code":200,"msg":"factory_reset_token","msg_data":{"token":"8d1f2c"}}"#,
     ];
     let server = ws_mock::MockWsServer::start(vec![sends_text(&frames)]).await;
-    let mut ws = core_client(&server).connect_core_ws(WsClientOptions::default()).await.unwrap();
+    let mut ws = core_client(&server).connect_core_ws_with_setup(WsClientOptions::default(), no_setup).await.unwrap();
 
     let event = decoded(ws.next_event()).await;
     let CoreWsServerMessage::AuthRequired(auth_required) = event else { panic!("expected AuthRequired, got {event:?}") };
     assert_eq!(auth_required.kind, CoreWsEnvelopeKind::Event);
     assert_eq!(auth_required.msg, CoreWsKnownMessage::AuthRequired);
+    assert_eq!(raw_json(auth_required.msg_data.as_deref().unwrap())["api"]["name"], "UC Core API");
 
     let event = decoded(ws.next_event()).await;
     let CoreWsServerMessage::Authentication(authentication) = event else { panic!("expected Authentication, got {event:?}") };
@@ -410,12 +413,14 @@ async fn core_ws_decodes_every_server_message_variant() {
     let CoreWsServerMessage::EventEnvelope(entity_event) = event else { panic!("expected EventEnvelope, got {event:?}") };
     assert_eq!(entity_event.msg, CoreWsMessageName::Known(CoreWsKnownMessage::EntityChange));
     assert_eq!(entity_event.cat, Some(CoreWsEventCategory::Known(CoreWsKnownCategory::Entity)));
+    assert_eq!(raw_json(&entity_event.msg_data)["entity_id"], "uc.main.light.1");
 
     let event = decoded(ws.next_event()).await;
     let CoreWsServerMessage::ResponseEnvelope(response) = event else { panic!("expected ResponseEnvelope, got {event:?}") };
     assert_eq!(response.req_id, 905);
     assert_eq!(response.msg, CoreWsMessageName::Other("factory_reset_token".to_string()));
     assert_eq!(response.code, 200);
+    assert_eq!(raw_json(response.msg_data.as_deref().unwrap()), json!({"token": "8d1f2c"}));
 
     server.shutdown().await;
 }
@@ -433,7 +438,7 @@ async fn core_ws_selects_the_most_specific_message_before_the_fallback() {
         r#"{"kind":"event","msg":"auth_required","msg_data":{}}"#,
     ];
     let server = ws_mock::MockWsServer::start(vec![sends_text(&frames)]).await;
-    let mut ws = core_client(&server).connect_core_ws(WsClientOptions::default()).await.unwrap();
+    let mut ws = core_client(&server).connect_core_ws_with_setup(WsClientOptions::default(), no_setup).await.unwrap();
 
     let event = decoded(ws.next_event()).await;
     let CoreWsServerMessage::Pong(pong) = event else { panic!("expected Pong, got {event:?}") };
@@ -457,7 +462,7 @@ async fn core_ws_reports_a_non_json_text_frame_and_keeps_decoding() {
     let malformed = "{\"kind\":\"resp\", not json at all";
     let frames = [malformed, r#"{"kind":"resp","req_id":921,"code":200,"msg":"pong","msg_data":{}}"#];
     let server = ws_mock::MockWsServer::start(vec![sends_text(&frames)]).await;
-    let mut ws = core_client(&server).connect_core_ws(WsClientOptions::default()).await.unwrap();
+    let mut ws = core_client(&server).connect_core_ws_with_setup(WsClientOptions::default(), no_setup).await.unwrap();
 
     match received(ws.next_event()).await {
         Err(WsError::Decode { frame: WsRawFrame::Text(text), reason }) => {
@@ -484,7 +489,7 @@ async fn core_ws_reports_a_non_json_binary_frame_with_its_bytes() {
         ws_mock::Step::text(r#"{"kind":"resp","req_id":931,"code":200,"msg":"pong","msg_data":{}}"#),
     ]);
     let server = ws_mock::MockWsServer::start(vec![script]).await;
-    let mut ws = core_client(&server).connect_core_ws(WsClientOptions::default()).await.unwrap();
+    let mut ws = core_client(&server).connect_core_ws_with_setup(WsClientOptions::default(), no_setup).await.unwrap();
 
     match received(ws.next_event()).await {
         Err(WsError::Decode { frame: WsRawFrame::Binary(bytes), .. }) => assert_eq!(bytes, malformed),
@@ -506,7 +511,7 @@ async fn core_ws_reports_a_selected_payload_that_does_not_decode() {
     // Selects `Pong`, but lacks the required `req_id`.
     let incomplete = r#"{"kind":"resp","msg":"pong"}"#;
     let server = ws_mock::MockWsServer::start(vec![sends_text(&[incomplete])]).await;
-    let mut ws = core_client(&server).connect_core_ws(WsClientOptions::default()).await.unwrap();
+    let mut ws = core_client(&server).connect_core_ws_with_setup(WsClientOptions::default(), no_setup).await.unwrap();
 
     match received(ws.next_event()).await {
         Err(WsError::Decode { frame: WsRawFrame::Text(text), reason }) => {
@@ -530,7 +535,7 @@ async fn core_ws_typed_and_value_receivers_share_one_queue() {
         r#"{"kind":"resp","req_id":943,"code":200,"msg":"pong","msg_data":{}}"#,
     ];
     let server = ws_mock::MockWsServer::start(vec![sends_text(&frames)]).await;
-    let mut ws = core_client(&server).connect_core_ws(WsClientOptions::default()).await.unwrap();
+    let mut ws = core_client(&server).connect_core_ws_with_setup(WsClientOptions::default(), no_setup).await.unwrap();
 
     let first = decoded(ws.next_value_event()).await;
     assert_eq!(first, serde_json::from_str::<serde_json::Value>(frames[0]).unwrap());
@@ -557,7 +562,7 @@ async fn core_ws_events_stream_keeps_the_connection_open() {
         ws_mock::Step::text(r#"{"kind":"event","msg":"entity_change","cat":"ENTITY","msg_data":{"entity_id":"uc.main.light.1"}}"#),
     ]);
     let server = ws_mock::MockWsServer::start(vec![script]).await;
-    let ws = core_client(&server).connect_core_ws(WsClientOptions::default()).await.unwrap();
+    let ws = core_client(&server).connect_core_ws_with_setup(WsClientOptions::default(), no_setup).await.unwrap();
     let mut events = ws.events();
 
     let event = decoded(events.next()).await;
@@ -579,7 +584,7 @@ async fn core_ws_events_stream_keeps_the_connection_open() {
 async fn core_ws_typed_send_writes_the_payload_alone() {
     let script = ws_mock::Script::Accept(vec![ws_mock::Step::Receive(2)]);
     let server = ws_mock::MockWsServer::start(vec![script]).await;
-    let ws = core_client(&server).connect_core_ws(WsClientOptions::default()).await.unwrap();
+    let ws = core_client(&server).connect_core_ws_with_setup(WsClientOptions::default(), no_setup).await.unwrap();
 
     let ping = CoreWsPingMessage {
         kind: CoreWsEnvelopeKind::Req,
@@ -606,26 +611,39 @@ async fn core_ws_typed_send_writes_the_payload_alone() {
     server.shutdown().await;
 }
 
-/// R10: every `DockRootServerMessage` variant. Frames follow the official
-/// UCD2 AsyncAPI (`schematic/specs/unfolded-circle/UCD2-asyncapi.yaml`),
-/// except the response, see below.
+// Recorded Dock frames, verbatim from the UCD2 AsyncAPI examples
+// (`schematic/specs/unfolded-circle/UCD2-asyncapi.yaml`).
+const DOCK_AUTH_REQUIRED: &str = r#"{"type":"auth_required","model":"UCD2","revision":"5.4","version":"0.6.0"}"#;
+const DOCK_SYSINFO_REPLY: &str = r#"{"type":"dock","req_id":2,"msg":"get_sysinfo","code":200,"name":"My dock","hostname":"UC-Dock-1234","model":"UCD2","revision":"5.4","version":"0.4.0","serial":"0042","ir_learning":false}"#;
+const DOCK_IR_RECEIVE: &str = r#"{"type":"event","msg":"ir_receive","ir_code":"4;0x10;12;0"}"#;
+
+/// Asserts `response` is the recorded `get_sysinfo` reply, result fields included.
+fn assert_dock_sysinfo_reply(response: &DockWsResponseEnvelope) {
+    assert_eq!(response.type_name, DockWsEnvelopeType::Dock);
+    assert_eq!(response.req_id, Some(2));
+    assert_eq!(response.msg, DockWsMessageName::Known(DockWsKnownMessage::GetSysinfo));
+    assert_eq!(response.code, Some(200));
+    assert_eq!(response.data["name"], "My dock");
+    assert_eq!(response.data["model"], "UCD2");
+    assert_eq!(response.data["version"], "0.4.0");
+    assert_eq!(response.data["ir_learning"], false);
+}
+
+/// R10: every `DockRootServerMessage` variant, each from an unmodified
+/// recorded frame (the `authResponseMsg` and `pong` schemas have no example,
+/// so those two are their required fields alone).
 #[tokio::test]
 async fn dock_root_decodes_every_server_message_variant() {
     let frames = [
-        // `authRequiredEvent` example, verbatim
-        r#"{"type":"auth_required","model":"UCD2","revision":"5.4","version":"0.6.0"}"#,
-        // `authResponseMsg`
+        DOCK_AUTH_REQUIRED,
         r#"{"type":"auth","msg":"authentication","code":200}"#,
-        // `irReceiveEvent` example, verbatim
-        r#"{"type":"event","msg":"ir_receive","ir_code":"4;0x10;12;0"}"#,
-        // The spec's `systemInfoMsg` example, but with `type` set to `resp`:
-        // the official frame says `"type":"dock"`, which `DockWsEnvelopeType`
-        // has no variant for, so the recorded frame does not decode today.
-        r#"{"type":"resp","req_id":2,"msg":"get_sysinfo","code":200,"name":"My dock","hostname":"UC-Dock-1234","model":"UCD2","revision":"5.4","version":"0.4.0","serial":"0042","ir_learning":false}"#,
+        DOCK_IR_RECEIVE,
+        DOCK_SYSINFO_REPLY,
+        r#"{"type":"dock","msg":"pong"}"#,
     ];
     let server = ws_mock::MockWsServer::start(vec![sends_text(&frames)]).await;
     let client = UnfoldedCircleDockWs::with_base_url(server.ws_origin());
-    let mut ws = client.connect_dock_root(WsClientOptions::default()).await.unwrap();
+    let mut ws = client.connect_dock_root_with_setup(WsClientOptions::default(), no_setup).await.unwrap();
 
     let event = decoded(ws.next_event()).await;
     let DockRootServerMessage::AuthRequired(auth_required) = event else { panic!("expected AuthRequired, got {event:?}") };
@@ -646,14 +664,45 @@ async fn dock_root_decodes_every_server_message_variant() {
 
     let event = decoded(ws.next_event()).await;
     let DockRootServerMessage::EventEnvelope(ir_event) = event else { panic!("expected EventEnvelope, got {event:?}") };
-    assert_eq!(ir_event.msg, DockWsMessageName::Other("ir_receive".to_string()));
+    assert_eq!(ir_event.msg, DockWsMessageName::Known(DockWsKnownMessage::IrReceive));
+    assert_eq!(ir_event.data["ir_code"], "4;0x10;12;0");
 
     let event = decoded(ws.next_event()).await;
     let DockRootServerMessage::ResponseEnvelope(response) = event else { panic!("expected ResponseEnvelope, got {event:?}") };
-    assert_eq!(response.req_id, 2);
-    assert_eq!(response.msg, DockWsMessageName::Other("get_sysinfo".to_string()));
-    assert_eq!(response.code, 200);
+    assert_dock_sysinfo_reply(&response);
 
+    let event = decoded(ws.next_event()).await;
+    let DockRootServerMessage::ResponseEnvelope(pong) = event else { panic!("expected ResponseEnvelope, got {event:?}") };
+    assert_eq!(pong.msg, DockWsMessageName::Known(DockWsKnownMessage::Pong));
+    assert_eq!((pong.req_id, pong.code), (None, None));
+
+    server.shutdown().await;
+}
+
+/// R10: `next_value_event()` returns recorded Dock frames exactly as sent,
+/// and the typed `events()` stream decodes the same recorded reply as
+/// `next_event()` does.
+#[tokio::test]
+async fn dock_root_value_and_typed_streams_keep_recorded_frames() {
+    let frames = [DOCK_SYSINFO_REPLY, DOCK_IR_RECEIVE, DOCK_SYSINFO_REPLY, DOCK_IR_RECEIVE];
+    let server = ws_mock::MockWsServer::start(vec![sends_text(&frames)]).await;
+    let client = UnfoldedCircleDockWs::with_base_url(server.ws_origin());
+    let mut ws = client.connect_dock_root_with_setup(WsClientOptions::default(), no_setup).await.unwrap();
+
+    let reply: serde_json::Value = serde_json::from_str(DOCK_SYSINFO_REPLY).unwrap();
+    let ir_event: serde_json::Value = serde_json::from_str(DOCK_IR_RECEIVE).unwrap();
+    assert_eq!(decoded(ws.next_value_event()).await, reply);
+    assert_eq!(decoded(ws.next_value_event()).await, ir_event);
+
+    let mut events = ws.events();
+    let event = decoded(events.next()).await;
+    let DockRootServerMessage::ResponseEnvelope(response) = event else { panic!("expected ResponseEnvelope, got {event:?}") };
+    assert_dock_sysinfo_reply(&response);
+    let event = decoded(events.next()).await;
+    let DockRootServerMessage::EventEnvelope(ir) = event else { panic!("expected EventEnvelope, got {event:?}") };
+    assert_eq!(ir.data["ir_code"], "4;0x10;12;0");
+
+    drop(events);
     server.shutdown().await;
 }
 
@@ -675,11 +724,12 @@ async fn integration_decodes_every_server_message_variant() {
     let server = ws_mock::MockWsServer::start(vec![sends_text(&frames)]).await;
     let mut client = UnfoldedCircleIntegrationWs::with_base_url(server.ws_origin());
     client = client.api_key("test-token");
-    let mut ws = client.connect_integration(WsClientOptions::default()).await.unwrap();
+    let mut ws = client.connect_integration_with_setup(WsClientOptions::default(), no_setup).await.unwrap();
 
     let event = decoded(ws.next_event()).await;
     let IntegrationServerMessage::AuthRequired(auth_required) = event else { panic!("expected AuthRequired, got {event:?}") };
     assert_eq!(auth_required.msg, IntegrationWsKnownMessage::AuthRequired);
+    assert_eq!(raw_json(auth_required.msg_data.as_deref().unwrap())["name"], "Demo driver");
 
     let event = decoded(ws.next_event()).await;
     let IntegrationServerMessage::Authentication(authentication) = event else { panic!("expected Authentication, got {event:?}") };
@@ -695,6 +745,7 @@ async fn integration_decodes_every_server_message_variant() {
     let IntegrationServerMessage::ResponseEnvelope(response) = event else { panic!("expected ResponseEnvelope, got {event:?}") };
     assert_eq!(response.req_id, 3);
     assert_eq!(response.msg, IntegrationWsMessageName::Known(IntegrationWsKnownMessage::DriverVersion));
+    assert_eq!(raw_json(response.msg_data.as_deref().unwrap())["version"]["driver"], "1.0.0");
 
     server.shutdown().await;
 }
@@ -776,6 +827,7 @@ async fn samsung_art_mode_decodes_every_server_message_variant() {
     let event = decoded(ws.next_event()).await;
     let ArtModeServerMessage::ChannelEnvelope(envelope) = event else { panic!("expected ChannelEnvelope, got {event:?}") };
     assert_eq!(envelope.event, Some(SamsungRemoteEventName::Other("ms.channel.ready".to_string())));
+    assert_eq!(raw_json(envelope.data.as_deref().unwrap()), json!({}));
 
     server.shutdown().await;
 }

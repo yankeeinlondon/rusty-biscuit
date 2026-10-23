@@ -252,7 +252,7 @@ impl ElevenLabsTTSWs {
         opening: TtsInitMessage,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<TextToSpeechClient, super::ws_shared::WsError> {
-        self.open_text_to_speech(voice_id, params, opening, options, None).await
+        self.open_text_to_speech(voice_id, params, opening, options).await
     }
     async fn open_text_to_speech(
         &self,
@@ -260,7 +260,6 @@ impl ElevenLabsTTSWs {
         params: TextToSpeechConnectionParams,
         opening: TtsInitMessage,
         options: super::ws_shared::WsClientOptions,
-        setup: Option<super::ws_shared::SetupFactory>,
     ) -> Result<TextToSpeechClient, super::ws_shared::WsError> {
         let mut path = "/v1/text-to-speech/{voice_id}/stream-input".to_string();
         let voice_id_value = voice_id.into();
@@ -373,7 +372,7 @@ impl ElevenLabsTTSWs {
                 )?,
             ),
             handshake,
-            setup,
+            setup: None,
             correlation: None,
             binary: false,
         };
@@ -393,8 +392,7 @@ impl ElevenLabsTTSWs {
         opening: MultiContextInitMessage,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<MultiContextTextToSpeechClient, super::ws_shared::WsError> {
-        self.open_multi_context_text_to_speech(voice_id, params, opening, options, None)
-            .await
+        self.open_multi_context_text_to_speech(voice_id, params, opening, options).await
     }
     async fn open_multi_context_text_to_speech(
         &self,
@@ -402,7 +400,6 @@ impl ElevenLabsTTSWs {
         params: MultiContextTextToSpeechConnectionParams,
         opening: MultiContextInitMessage,
         options: super::ws_shared::WsClientOptions,
-        setup: Option<super::ws_shared::SetupFactory>,
     ) -> Result<MultiContextTextToSpeechClient, super::ws_shared::WsError> {
         let mut path = "/v1/text-to-speech/{voice_id}/multi-stream-input".to_string();
         let voice_id_value = voice_id.into();
@@ -457,7 +454,7 @@ impl ElevenLabsTTSWs {
                 super::ws_shared::opening_message(&opening, None, &credential, false)?,
             ),
             handshake,
-            setup,
+            setup: None,
             correlation: None,
             binary: false,
         };

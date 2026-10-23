@@ -33,9 +33,9 @@ pub fn define_api() -> schematic_define::websocket::WebSocketApi {
 ///Messages the DockRoot endpoint's server sends. A value serializes as its payload alone.
 #[derive(Debug)]
 pub enum DockRootServerMessage {
-    ///Server response envelope with `req_id`, status `code`, and optional `reboot`.
+    ///Command reply (`type=dock`) with `req_id`, `msg`, status `code`, and top-level result fields.
     ResponseEnvelope(DockWsResponseEnvelope),
-    ///Asynchronous dock event envelope. Deserialize `msg_data` based on `msg`.
+    ///Asynchronous dock event (`type=event`); `msg` names it and its fields are top-level.
     EventEnvelope(DockWsEventEnvelope),
     ///Post-connect auth challenge (`type=auth_required`).
     AuthRequired(DockWsAuthRequired),
@@ -92,7 +92,7 @@ impl DockRootServerMessage {
 ///Messages the DockRoot endpoint's client sends. A value serializes as its payload alone.
 #[derive(Debug)]
 pub enum DockRootClientMessage {
-    ///Client request envelope using `type=req`, `id`, `msg`, and deferred `msg_data`.
+    ///Command request (`type=dock`) with `id`, `command`, and top-level parameters.
     RequestEnvelope(DockWsRequestEnvelope),
     ///Post-connect auth request (`type=auth`).
     Auth(DockWsAuthMessage),
@@ -161,18 +161,7 @@ impl UnfoldedCircleDockWs {
         self.headers.push((name.into(), value.into()));
         self
     }
-    /**Connect to the DockRoot endpoint. It is ready once the upgrade and the opening message, if any, are done.
-
-## Errors
-
-[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
-    pub async fn connect_dock_root(
-        &self,
-        options: super::ws_shared::WsClientOptions,
-    ) -> Result<DockRootClient, super::ws_shared::WsError> {
-        self.open_dock_root(options, None).await
-    }
-    /**Connect to the DockRoot endpoint, running `setup` on this connection and on every reconnect before the client is ready.
+    /**Connect to the DockRoot endpoint, running `setup` on this connection and on every reconnect before the client is ready. The endpoint declares a challenge flow, so this is its only connect; a caller that has already authenticated by other means passes `|_| async { Ok(()) }`.
 
 `setup` gets a fresh [`DockRootSetup`] each time, after the opening message, and performs the endpoint's challenge exchange, such as answering an authentication request; the session's `credential` is the one the handshake carried. The whole attempt is bounded by `handshake_timeout`. Returning [`super::ws_shared::WsSetupError::Rejected`] closes the client with [`super::ws_shared::WsError::SetupRejected`] and is never retried; any other error is [`super::ws_shared::WsError::Setup`] and uses the reconnect budget on a reconnect.
 
@@ -199,12 +188,12 @@ impl UnfoldedCircleDockWs {
                 ),
             )
         });
-        self.open_dock_root(options, Some(setup)).await
+        self.open_dock_root(options, setup).await
     }
     async fn open_dock_root(
         &self,
         options: super::ws_shared::WsClientOptions,
-        setup: Option<super::ws_shared::SetupFactory>,
+        setup: super::ws_shared::SetupFactory,
     ) -> Result<DockRootClient, super::ws_shared::WsError> {
         let path = "/".to_string();
         if path.contains('{') {
@@ -230,7 +219,7 @@ impl UnfoldedCircleDockWs {
         let session = super::ws_shared::WsSession {
             opening: None,
             handshake,
-            setup,
+            setup: Some(setup),
             correlation: Some(super::ws_shared::CorrelationConfig {
                 id_field: "req_id",
                 string_ids: false,
@@ -382,21 +371,6 @@ The request id is allocated by the client and written over any id the payload ca
         self.correlate(&message, Some("ResponseEnvelope"))
             .await?
             .decode_payload("ResponseEnvelope")
-    }
-    /**Sends `Auth` and returns the payload of the `Authentication` that answers it.
-
-The request id is allocated by the client and written over any id the payload carries. Only a frame selected as `Authentication` with the same id completes the request; another message carrying that id stays an ordinary event.
-
-## Errors
-
-[`super::ws_shared::WsError::RequestTimeout`] when no answer arrives in the request timeout, [`super::ws_shared::WsError::Disconnected`] when the connection is lost first (the request is never re-sent), [`super::ws_shared::WsError::BackpressureFull`] at the pending-request limit, and [`super::ws_shared::WsError::Decode`] when the answer does not decode.*/
-    pub async fn request_auth(
-        &self,
-        message: DockWsAuthMessage,
-    ) -> Result<DockWsAuthenticationMessage, super::ws_shared::WsError> {
-        self.correlate(&message, Some("Authentication"))
-            .await?
-            .decode_payload("Authentication")
     }
     /// Sends `message` with a client-allocated request id and returns
     /// the first inbound frame carrying that id, as a JSON value,

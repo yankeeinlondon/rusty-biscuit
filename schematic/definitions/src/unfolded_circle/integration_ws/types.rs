@@ -147,12 +147,16 @@ pub struct IntegrationWsAuthMessage {
 }
 
 /// Integration auth-required event from peer (`msg=auth_required`).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IntegrationWsAuthRequired {
     /// Envelope kind discriminator.
     pub kind: IntegrationWsEnvelopeKind,
     /// Message id/name (`auth_required`).
     pub msg: IntegrationWsKnownMessage,
+    /// Optional raw payload: the driver's name and version
+    /// (`driverVersion`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub msg_data: Option<Box<RawValue>>,
 }
 
 /// Integration authentication result (`kind=resp`, `msg=authentication`).
@@ -480,5 +484,20 @@ mod tests {
 
         let state: State = envelope.parse_payload().unwrap();
         assert_eq!(state.brightness, 255);
+    }
+
+    /// The `authRequiredEvent` frame keeps the driver's name and version.
+    #[test]
+    fn auth_required_retains_msg_data() {
+        let text = r#"{"kind":"event","msg":"auth_required","msg_data":{"name":"Demo driver","version":{"api":"0.12.1","driver":"1.0.0"}}}"#;
+        let event: IntegrationWsAuthRequired = serde_json::from_str(text).unwrap();
+        assert_eq!(event.msg, IntegrationWsKnownMessage::AuthRequired);
+        let data: serde_json::Value = serde_json::from_str(event.msg_data.as_deref().unwrap().get()).unwrap();
+        assert_eq!(data["name"], "Demo driver");
+        assert_eq!(serde_json::to_string(&event).unwrap(), text);
+
+        let bare: IntegrationWsAuthRequired =
+            serde_json::from_str(r#"{"kind":"event","msg":"auth_required"}"#).unwrap();
+        assert!(bare.msg_data.is_none());
     }
 }

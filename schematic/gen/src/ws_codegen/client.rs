@@ -679,13 +679,17 @@ fn generate_connect_method(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStre
          any, are done.{opening_doc}{errors_doc}",
         ep.id
     );
-    let with_setup = if ep.has_setup {
+    // A challenge endpoint gets only the setup-taking connect: `Ready` promises the
+    // exchange completed, so no generated path may reach it without the callback.
+    let (public_connect, open_setup_param, session_setup) = if ep.has_setup {
         let setup_method = format_ident!("connect_{}_with_setup", to_snake_case(&ep.id));
         let setup_type = format_ident!("{}Setup", ep.id);
         let server_message = format_ident!("{}ServerMessage", ep.id);
         let setup_doc = format!(
             "Connect to the {} endpoint, running `setup` on this connection and on every \
-             reconnect before the client is ready.{opening_doc}\n\n\
+             reconnect before the client is ready. The endpoint declares a challenge flow, so \
+             this is its only connect; a caller that has already authenticated by other means \
+             passes `|_| async {{ Ok(()) }}`.{opening_doc}\n\n\
              `setup` gets a fresh [`{setup_type}`] each time, after the opening message, and \
              performs the endpoint's challenge exchange, such as answering an authentication \
              request; the session's `credential` is the one the handshake carried. The whole \
@@ -696,7 +700,7 @@ fn generate_connect_method(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStre
              reconnect.{errors_doc}",
             ep.id
         );
-        quote! {
+        let connect = quote! {
             #[doc = #setup_doc]
             pub async fn #setup_method<F, Fut>(
                 &self,
@@ -710,28 +714,34 @@ fn generate_connect_method(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStre
                 let setup: super::ws_shared::SetupFactory = std::sync::Arc::new(move |channel| {
                     Box::pin(setup(super::ws_shared::WsSetupSession::new(channel, #server_message::decode)))
                 });
-                self.#open_method(#(#forwarded,)* Some(setup)).await
+                self.#open_method(#(#forwarded,)* setup).await
             }
-        }
+        };
+        (
+            connect,
+            quote! { setup: super::ws_shared::SetupFactory, },
+            quote! { Some(setup) },
+        )
     } else {
-        TokenStream::new()
+        let connect = quote! {
+            #[doc = #description]
+            pub async fn #method_name(
+                &self,
+                #(#method_args),*
+            ) -> Result<#client_name, super::ws_shared::WsError> {
+                self.#open_method(#(#forwarded),*).await
+            }
+        };
+        (connect, TokenStream::new(), quote! { None })
     };
 
     quote! {
-        #[doc = #description]
-        pub async fn #method_name(
-            &self,
-            #(#method_args),*
-        ) -> Result<#client_name, super::ws_shared::WsError> {
-            self.#open_method(#(#forwarded,)* None).await
-        }
-
-        #with_setup
+        #public_connect
 
         async fn #open_method(
             &self,
             #(#method_args,)*
-            setup: Option<super::ws_shared::SetupFactory>,
+            #open_setup_param
         ) -> Result<#client_name, super::ws_shared::WsError> {
             #path_binding
             #(#path_substitutions)*
@@ -758,7 +768,7 @@ fn generate_connect_method(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStre
             let session = super::ws_shared::WsSession {
                 opening: #opening_value,
                 handshake,
-                setup,
+                setup: #session_setup,
                 correlation: #correlation,
                 binary: #binary,
             };
@@ -1211,6 +1221,30 @@ mod tests {
         assert!(code.contains("TestApiWs"));
         assert!(code.contains("EchoClient"));
         assert!(code.contains("connect_echo"));
+    }
+
+    #[test]
+    fn plain_connect_is_kept_only_without_a_challenge_flow() {
+        let mut plan = test_plan();
+        let plain = generate_ws_client_module(&plan).to_string();
+        assert!(plain.contains("pub async fn connect_echo ("), "{plain}");
+        assert!(!plain.contains("connect_echo_with_setup"), "{plain}");
+
+        plan.endpoints[0].has_setup = true;
+        let challenge = generate_ws_client_module(&plan).to_string();
+        assert!(
+            challenge.contains("pub async fn connect_echo_with_setup <"),
+            "{challenge}"
+        );
+        assert!(
+            !challenge.contains("pub async fn connect_echo ("),
+            "a challenge endpoint must not get a setup-less connect: {challenge}"
+        );
+        assert!(
+            challenge.contains("setup : super :: ws_shared :: SetupFactory ,"),
+            "the private open method must require setup: {challenge}"
+        );
+        assert!(!challenge.contains("Option < super :: ws_shared :: SetupFactory >"));
     }
 
     #[test]

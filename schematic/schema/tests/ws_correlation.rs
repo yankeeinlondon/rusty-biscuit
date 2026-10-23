@@ -1,8 +1,11 @@
-//! Request/response correlation of generated WebSocket clients (Core).
+//! Request/response correlation of generated WebSocket clients (Core, and
+//! one Dock request on the recorded wire shape).
 
 #![allow(clippy::result_large_err)]
 
 mod ws_mock;
+
+use ws_mock::no_setup;
 
 use std::future::Future;
 use std::time::{Duration, Instant};
@@ -11,6 +14,10 @@ use futures_util::{SinkExt, StreamExt};
 use schematic_schema::unfolded_circle_core_ws::{
     CoreWsClient, CoreWsEnvelopeKind, CoreWsKnownMessage, CoreWsPingMessage, CoreWsServerMessage,
     UnfoldedCircleCoreWs,
+};
+use schematic_schema::unfolded_circle_dock_ws::{
+    DockWsEnvelopeType, DockWsKnownMessage, DockWsMessageName, DockWsRequestEnvelope,
+    UnfoldedCircleDockWs,
 };
 use schematic_schema::ws_shared::{
     ReconnectPolicy, WsClientOptions, WsClientOptionsBuilder, WsConnectionState, WsError,
@@ -75,7 +82,7 @@ fn builder() -> WsClientOptionsBuilder {
 async fn connect(origin: &str, options: WsClientOptions) -> CoreWsClient {
     UnfoldedCircleCoreWs::with_base_url(origin)
         .api_key("test-key")
-        .connect_core_ws(options)
+        .connect_core_ws_with_setup(options, no_setup)
         .await
         .unwrap()
 }
@@ -367,4 +374,46 @@ async fn request_value_returns_the_first_frame_with_its_id() {
     let _ = ws.close().await;
     let request = peer.await.unwrap();
     assert_eq!(request["id"], json!(1), "the client's id replaces the caller's");
+}
+
+// R10/R11: a typed Dock command is written as the UCD2 AsyncAPI records it
+// (`type=dock`, `command`, the allocated `id`), and the recorded
+// `systemInfoMsg` reply, with only `req_id` set to that id, returns typed
+// result fields.
+#[tokio::test]
+async fn dock_get_sysinfo_request_uses_the_recorded_wire_shape() {
+    let (origin, peer) = spawn_peer(|mut peer| async move {
+        let request = peer.recv().await.unwrap();
+        let mut reply: Value = serde_json::from_str(
+            r#"{"type":"dock","req_id":2,"msg":"get_sysinfo","code":200,"name":"My dock","hostname":"UC-Dock-1234","model":"UCD2","revision":"5.4","version":"0.4.0","serial":"0042","ir_learning":false}"#,
+        )
+        .unwrap();
+        reply["req_id"] = request["id"].clone();
+        peer.send(reply).await;
+        while peer.recv().await.is_some() {}
+        request
+    })
+    .await;
+    let ws = UnfoldedCircleDockWs::with_base_url(&origin)
+        .connect_dock_root_with_setup(builder().build(), no_setup)
+        .await
+        .unwrap();
+
+    let request = DockWsRequestEnvelope {
+        type_name: DockWsEnvelopeType::Dock,
+        id: 0,
+        command: DockWsMessageName::Known(DockWsKnownMessage::GetSysinfo),
+        params: serde_json::Map::new(),
+    };
+    let answer = ws.request_request_envelope(request).await.unwrap();
+    assert_eq!(answer.req_id, Some(1));
+    assert_eq!(answer.msg, DockWsMessageName::Known(DockWsKnownMessage::GetSysinfo));
+    assert_eq!(answer.code, Some(200));
+    assert_eq!(answer.data["name"], "My dock");
+    assert_eq!(answer.data["model"], "UCD2");
+    assert_eq!(answer.data["version"], "0.4.0");
+
+    let _ = ws.close().await;
+    let wire = peer.await.unwrap();
+    assert_eq!(wire, json!({"type": "dock", "id": 1, "command": "get_sysinfo"}));
 }

@@ -863,13 +863,15 @@ fn elevenlabs_connect_takes_the_opening_payload_and_binds_its_credential_field()
     assert!(code.contains("fn send_eos"), "close helpers remain: {code}");
 }
 
-/// R3: an endpoint with a challenge flow gets a setup connect; one without
-/// does not.
+/// R3: an endpoint with a challenge flow gets only the setup connect, so no
+/// connect reaches `Ready` without the exchange; one without gets only the
+/// plain connect.
 #[test]
 fn only_challenge_flow_endpoints_get_a_setup_connect() {
     let core = lower_to_plan(&define_unfolded_circle_core_ws_api()).unwrap();
     let code = generate_ws_client_module(&core).to_string();
     assert!(code.contains("pub async fn connect_core_ws_with_setup"), "{code}");
+    assert!(!code.contains("pub async fn connect_core_ws ("), "{code}");
     assert!(
         code.contains("pub type CoreWsSetup = super :: ws_shared :: WsSetupSession < CoreWsClientMessage , CoreWsServerMessage >"),
         "{code}"
@@ -879,6 +881,12 @@ fn only_challenge_flow_endpoints_get_a_setup_connect() {
     let code = generate_ws_client_module(&samsung).to_string();
     assert!(!code.contains("_with_setup"), "{code}");
     assert!(!code.contains("WsSetupSession"), "{code}");
+    assert!(code.contains("pub async fn connect_remote_control ("), "{code}");
+
+    let elevenlabs = lower_to_plan(&define_elevenlabs_websocket_api()).unwrap();
+    let code = generate_ws_client_module(&elevenlabs).to_string();
+    assert!(!code.contains("_with_setup"), "{code}");
+    assert!(code.contains("pub async fn connect_text_to_speech ("), "{code}");
 }
 
 /// R8: the receive timeout is enforced by the shared supervisor, so the

@@ -10,10 +10,20 @@
 //! 4. Server responds with `type=auth`, `msg=authentication`
 //!    (`DockWsAuthenticationMessage`); its `code` is the result
 //!
+//! Neither auth message carries a request id, so the exchange is not a
+//! correlated request: run it in the connect setup callback.
+//!
 //! ## Envelope Differences from Core WS
 //!
 //! The Dock API uses `type` (not `kind`) as the envelope discriminator field.
 //! In Rust types this is mapped to `type_name` with `#[serde(rename = "type")]`.
+//!
+//! Commands and their replies share `type=dock`: a request names its command
+//! in `command` (`{"type":"dock","id":2,"command":"get_sysinfo"}`), and the
+//! reply echoes it in `msg` beside `req_id` and `code`. Events use
+//! `type=event`. There is no `msg_data` object: parameters, results, and
+//! event data are top-level fields, which the envelopes keep in a map
+//! (`params` on a request, `data` on a reply or event).
 
 mod types;
 
@@ -32,29 +42,32 @@ fn message(name: &str, direction: MessageDirection, schema: &str, description: &
 /// Build the Unfolded Circle Dock WebSocket API definition.
 ///
 /// Selectors are the `type`/`msg` wire values of the official Dock AsyncAPI
-/// (`specs/unfolded-circle/UCD2-asyncapi.yaml`): the auth exchange uses
-/// `type=auth_required`, `type=auth`, and `type=auth,msg=authentication`
-/// rather than the `req`/`resp`/`event` envelope types.
+/// (`specs/unfolded-circle/UCD2-asyncapi.yaml`): commands are `type=dock`,
+/// events `type=event`, and the auth exchange uses `type=auth_required`,
+/// `type=auth`, and `type=auth,msg=authentication`. Every other server frame,
+/// a `type=dock` reply included, reaches the `ResponseEnvelope` fallback.
 #[must_use]
 pub fn define_unfolded_circle_dock_ws_api() -> WebSocketApi {
     use MessageDirection::{Client, Server};
     let messages = vec![
         message("RequestEnvelope", Client, "DockWsRequestEnvelope",
-            "Client request envelope using `type=req`, `id`, `msg`, and deferred `msg_data`.")
-            .matches("type", "req")
+            "Command request (`type=dock`) with `id`, `command`, and top-level parameters.")
+            .matches("type", "dock")
             .responds_with("ResponseEnvelope"),
         message("ResponseEnvelope", Server, "DockWsResponseEnvelope",
-            "Server response envelope with `req_id`, status `code`, and optional `reboot`.")
+            "Command reply (`type=dock`) with `req_id`, `msg`, status `code`, and top-level result fields.")
             .fallback(),
         message("EventEnvelope", Server, "DockWsEventEnvelope",
-            "Asynchronous dock event envelope. Deserialize `msg_data` based on `msg`.")
+            "Asynchronous dock event (`type=event`); `msg` names it and its fields are top-level.")
             .matches("type", "event"),
         message("AuthRequired", Server, "DockWsAuthRequired",
             "Post-connect auth challenge (`type=auth_required`).")
             .matches("type", "auth_required"),
+        // No `responds_with`: neither the auth request nor its result carries
+        // an id, so the exchange cannot be correlated; the connect setup
+        // callback sends `Auth` and reads `Authentication`.
         message("Auth", Client, "DockWsAuthMessage", "Post-connect auth request (`type=auth`).")
-            .matches("type", "auth")
-            .responds_with("Authentication"),
+            .matches("type", "auth"),
         message("Authentication", Server, "DockWsAuthenticationMessage",
             "Auth outcome (`type=auth`, `msg=authentication`); `code` is the result.")
             .matches("type", "auth")

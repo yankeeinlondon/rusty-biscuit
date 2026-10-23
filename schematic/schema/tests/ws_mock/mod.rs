@@ -556,3 +556,10 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for FailingStream<S> {
         Pin::new(&mut self.inner).poll_shutdown(cx)
     }
 }
+
+/// The explicit "already authenticated" setup callback for a challenge
+/// endpoint, whose only connect requires one. Tests that exercise transport
+/// behavior rather than the challenge exchange pass it.
+pub async fn no_setup<S>(_session: S) -> Result<(), schematic_schema::ws_shared::WsSetupError> {
+    Ok(())
+}

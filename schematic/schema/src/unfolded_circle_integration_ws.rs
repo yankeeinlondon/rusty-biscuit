@@ -244,18 +244,7 @@ impl UnfoldedCircleIntegrationWs {
         self.headers.push((name.into(), value.into()));
         self
     }
-    /**Connect to the Integration endpoint. It is ready once the upgrade and the opening message, if any, are done.
-
-## Errors
-
-[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
-    pub async fn connect_integration(
-        &self,
-        options: super::ws_shared::WsClientOptions,
-    ) -> Result<IntegrationClient, super::ws_shared::WsError> {
-        self.open_integration(options, None).await
-    }
-    /**Connect to the Integration endpoint, running `setup` on this connection and on every reconnect before the client is ready.
+    /**Connect to the Integration endpoint, running `setup` on this connection and on every reconnect before the client is ready. The endpoint declares a challenge flow, so this is its only connect; a caller that has already authenticated by other means passes `|_| async { Ok(()) }`.
 
 `setup` gets a fresh [`IntegrationSetup`] each time, after the opening message, and performs the endpoint's challenge exchange, such as answering an authentication request; the session's `credential` is the one the handshake carried. The whole attempt is bounded by `handshake_timeout`. Returning [`super::ws_shared::WsSetupError::Rejected`] closes the client with [`super::ws_shared::WsError::SetupRejected`] and is never retried; any other error is [`super::ws_shared::WsError::Setup`] and uses the reconnect budget on a reconnect.
 
@@ -282,12 +271,12 @@ impl UnfoldedCircleIntegrationWs {
                 ),
             )
         });
-        self.open_integration(options, Some(setup)).await
+        self.open_integration(options, setup).await
     }
     async fn open_integration(
         &self,
         options: super::ws_shared::WsClientOptions,
-        setup: Option<super::ws_shared::SetupFactory>,
+        setup: super::ws_shared::SetupFactory,
     ) -> Result<IntegrationClient, super::ws_shared::WsError> {
         let path = "/intg".to_string();
         if path.contains('{') {
@@ -313,7 +302,7 @@ impl UnfoldedCircleIntegrationWs {
         let session = super::ws_shared::WsSession {
             opening: None,
             handshake,
-            setup,
+            setup: Some(setup),
             correlation: Some(super::ws_shared::CorrelationConfig {
                 id_field: "req_id",
                 string_ids: false,

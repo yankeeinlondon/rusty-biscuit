@@ -6,6 +6,8 @@
 mod common;
 mod ws_mock;
 
+use ws_mock::no_setup;
+
 use std::time::{Duration, Instant};
 
 use common::EnvGuard;
@@ -82,21 +84,21 @@ async fn core_credential_precedence_per_call_then_client_then_env() {
         .credential(Credential::api_key("sentinel-per-call"))
         .build();
 
-    let ws = with_client.connect_core_ws(per_call).await.unwrap();
+    let ws = with_client.connect_core_ws_with_setup(per_call, no_setup).await.unwrap();
     assert_eq!(ws.auth_method(), &AuthMethod::PerCall);
     let _ = ws.close().await;
 
-    let ws = with_client.connect_core_ws(options()).await.unwrap();
+    let ws = with_client.connect_core_ws_with_setup(options(), no_setup).await.unwrap();
     assert_eq!(ws.auth_method(), &AuthMethod::ClientLevel);
     let _ = ws.close().await;
 
     let anonymous_client = UnfoldedCircleCoreWs::with_base_url(server.ws_origin());
-    let ws = anonymous_client.connect_core_ws(options()).await.unwrap();
+    let ws = anonymous_client.connect_core_ws_with_setup(options(), no_setup).await.unwrap();
     assert_eq!(ws.auth_method(), &AuthMethod::EnvVar("UCR_CORE_API_KEY".to_string()));
     let _ = ws.close().await;
 
     env.set("UCR_CORE_API_KEY", "");
-    let ws = anonymous_client.connect_core_ws(options()).await.unwrap();
+    let ws = anonymous_client.connect_core_ws_with_setup(options(), no_setup).await.unwrap();
     assert_eq!(
         ws.auth_method(),
         &AuthMethod::EnvVar("UNFOLDED_CIRCLE_API_KEY".to_string())
@@ -125,7 +127,7 @@ async fn core_without_any_credential_connects_anonymously() {
     let _env = EnvGuard::clear(&CORE_ENV);
     let server = MockWsServer::start(vec![Script::accept()]).await;
     let ws = UnfoldedCircleCoreWs::with_base_url(server.ws_origin())
-        .connect_core_ws(options())
+        .connect_core_ws_with_setup(options(), no_setup)
         .await
         .unwrap();
     assert_eq!(ws.auth_method(), &AuthMethod::Anonymous);
@@ -152,7 +154,7 @@ async fn initial_401_and_403_are_returned_without_a_second_attempt() {
             .build();
         let error = UnfoldedCircleCoreWs::with_base_url(server.ws_origin())
             .api_key("sentinel-client")
-            .connect_core_ws(options)
+            .connect_core_ws_with_setup(options, no_setup)
             .await
             .err()
             .expect("the upgrade is refused");
@@ -191,7 +193,7 @@ async fn assert_redial_rejection_is_terminal(rejection: Script, status: u16) {
         .build();
     let mut ws = UnfoldedCircleCoreWs::with_base_url(server.ws_origin())
         .api_key("sentinel-client")
-        .connect_core_ws(options)
+        .connect_core_ws_with_setup(options, no_setup)
         .await
         .unwrap();
 
@@ -252,7 +254,7 @@ async fn redial_reuses_the_credential_selected_at_connect() {
         .reconnect(Some(reconnect()))
         .build();
     let ws = UnfoldedCircleCoreWs::with_base_url(server.ws_origin())
-        .connect_core_ws(options)
+        .connect_core_ws_with_setup(options, no_setup)
         .await
         .unwrap();
     assert_eq!(ws.auth_method(), &AuthMethod::EnvVar("UCR_CORE_API_KEY".to_string()));
@@ -276,7 +278,7 @@ async fn dock_without_auth_policy_ignores_its_env_token() {
     env.set("UCR_DOCK_TOKEN", SENTINEL);
     let server = MockWsServer::start(vec![Script::accept()]).await;
     let ws = UnfoldedCircleDockWs::with_base_url(server.ws_origin())
-        .connect_dock_root(options())
+        .connect_dock_root_with_setup(options(), no_setup)
         .await
         .unwrap();
     assert_eq!(ws.auth_method(), &AuthMethod::Anonymous);
@@ -305,7 +307,7 @@ async fn redirect_is_not_followed_and_its_location_is_redacted() {
     .await;
 
     let error = UnfoldedCircleCoreWs::with_base_url(server.ws_origin())
-        .connect_core_ws(options())
+        .connect_core_ws_with_setup(options(), no_setup)
         .await
         .err()
         .expect("the redirect is refused");
@@ -344,7 +346,7 @@ async fn refusal_headers_redact_set_cookie_and_secret_values() {
     .await;
 
     let error = UnfoldedCircleCoreWs::with_base_url(server.ws_origin())
-        .connect_core_ws(options())
+        .connect_core_ws_with_setup(options(), no_setup)
         .await
         .err()
         .expect("the upgrade is refused");
@@ -452,7 +454,7 @@ async fn invalid_headers_and_credential_kinds_fail_before_dialing() {
     for name in ["Sec-WebSocket-Key", "Host", "Upgrade", "API-KEY", "api-key"] {
         let error = client()
             .header(name, "x")
-            .connect_core_ws(options())
+            .connect_core_ws_with_setup(options(), no_setup)
             .await
             .err()
             .unwrap_or_else(|| panic!("header {name} was accepted"));
@@ -465,13 +467,13 @@ async fn invalid_headers_and_credential_kinds_fail_before_dialing() {
     let basic = WsClientOptions::builder()
         .credential(Credential::basic("user", SENTINEL))
         .build();
-    let error = client().connect_core_ws(basic).await.err().expect("Basic is refused");
+    let error = client().connect_core_ws_with_setup(basic, no_setup).await.err().expect("Basic is refused");
     assert!(matches!(error, WsError::InvalidCredential(_)), "{error:?}");
     assert_no_sentinel(&error);
 
     let error = client()
         .credentials(Credential::basic("user", SENTINEL))
-        .connect_core_ws(options())
+        .connect_core_ws_with_setup(options(), no_setup)
         .await
         .err()
         .expect("a client-level Basic is refused");

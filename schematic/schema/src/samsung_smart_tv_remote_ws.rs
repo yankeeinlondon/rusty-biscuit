@@ -265,13 +265,12 @@ impl SamsungSmartTvRemoteWs {
         params: RemoteControlConnectionParams,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<RemoteControlClient, super::ws_shared::WsError> {
-        self.open_remote_control(params, options, None).await
+        self.open_remote_control(params, options).await
     }
     async fn open_remote_control(
         &self,
         params: RemoteControlConnectionParams,
         options: super::ws_shared::WsClientOptions,
-        setup: Option<super::ws_shared::SetupFactory>,
     ) -> Result<RemoteControlClient, super::ws_shared::WsError> {
         let mut path = "/api/v2/channels/samsung.remote.control".to_string();
         if path.contains('{') {
@@ -317,7 +316,7 @@ impl SamsungSmartTvRemoteWs {
         let session = super::ws_shared::WsSession {
             opening: None,
             handshake,
-            setup,
+            setup: None,
             correlation: None,
             binary: false,
         };
@@ -333,13 +332,12 @@ impl SamsungSmartTvRemoteWs {
         params: ArtModeConnectionParams,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<ArtModeClient, super::ws_shared::WsError> {
-        self.open_art_mode(params, options, None).await
+        self.open_art_mode(params, options).await
     }
     async fn open_art_mode(
         &self,
         params: ArtModeConnectionParams,
         options: super::ws_shared::WsClientOptions,
-        setup: Option<super::ws_shared::SetupFactory>,
     ) -> Result<ArtModeClient, super::ws_shared::WsError> {
         let mut path = "/api/v2/channels/com.samsung.art-app".to_string();
         if path.contains('{') {
@@ -385,7 +383,7 @@ impl SamsungSmartTvRemoteWs {
         let session = super::ws_shared::WsSession {
             opening: None,
             handshake,
-            setup,
+            setup: None,
             correlation: None,
             binary: false,
         };

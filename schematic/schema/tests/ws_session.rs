@@ -8,6 +8,8 @@
 mod common;
 mod ws_mock;
 
+use ws_mock::no_setup;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -111,7 +113,7 @@ fn frames_of(server: &MockWsServer, connection: usize) -> Vec<Value> {
 async fn core_connect(server: &MockWsServer, options: WsClientOptions) -> CoreWsClient {
     UnfoldedCircleCoreWs::with_base_url(server.ws_origin())
         .api_key("test-key")
-        .connect_core_ws(options)
+        .connect_core_ws_with_setup(options, no_setup)
         .await
         .unwrap()
 }
@@ -549,6 +551,48 @@ async fn setup_runs_before_ready_on_every_connection() {
     let _ = ws.close().await;
 }
 
+// R3: a challenge endpoint's connect requires setup and does not return a
+// Ready client while the challenge is unanswered: with the server holding its
+// answer, the connect is still pending; once answered, setup has completed
+// and the client is Ready, having sent nothing but the auth message.
+#[tokio::test]
+async fn challenge_connect_is_not_ready_until_setup_completes() {
+    let answer_gate = Barrier::new();
+    let mut steps = auth_steps(200);
+    steps.insert(2, Step::Wait(answer_gate.clone()));
+    let server = MockWsServer::start(vec![Script::Accept(steps)]).await;
+    let runs = Arc::new(AtomicUsize::new(0));
+    let connect = tokio::spawn({
+        let origin = server.ws_origin();
+        let runs = Arc::clone(&runs);
+        async move {
+            UnfoldedCircleCoreWs::with_base_url(origin)
+                .api_key("k")
+                .connect_core_ws_with_setup(options(None), move |session| {
+                    let runs = Arc::clone(&runs);
+                    async move {
+                        authenticate(session).await?;
+                        runs.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    }
+                })
+                .await
+        }
+    });
+
+    server.wait_for_frames(1, WAIT).await;
+    tokio::time::sleep(QUIET).await;
+    assert!(!connect.is_finished(), "connect returned before the challenge was answered");
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
+
+    answer_gate.release();
+    let ws = tokio::time::timeout(WAIT, connect).await.unwrap().unwrap().unwrap();
+    assert_eq!(runs.load(Ordering::SeqCst), 1, "Ready before setup completed");
+    assert_eq!(ws.state(), WsConnectionState::Ready);
+    assert_eq!(frames_of(&server, 0), [auth_frame("k")]);
+    let _ = ws.close().await;
+}
+
 // R3: a rejection from setup on the explicit connect is returned, with no
 // second attempt of any kind.
 #[tokio::test]
@@ -769,7 +813,7 @@ async fn stalled_initial_upgrade_times_out_after_one_attempt() {
     let started = Instant::now();
     let error = UnfoldedCircleCoreWs::with_base_url(server.ws_origin())
         .api_key("test-key")
-        .connect_core_ws(options)
+        .connect_core_ws_with_setup(options, no_setup)
         .await
         .err()
         .expect("the upgrade stalls");

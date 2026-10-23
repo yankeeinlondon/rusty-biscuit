@@ -113,8 +113,10 @@ fn default_correlation_timeout() -> u64 {
 
 /// Auth flow hints for WebSocket APIs that use message-based authentication.
 ///
-/// When present, the generator produces auth challenge/response handling
-/// in the connection state machine.
+/// When present, the endpoint's only generated connect is
+/// `connect_{endpoint}_with_setup`, whose caller-supplied callback answers
+/// the challenge before the client reports `Ready`; the generator does not
+/// derive the exchange from these hints.
 ///
 /// ## Examples
 ///

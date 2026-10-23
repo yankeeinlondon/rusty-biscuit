@@ -561,18 +561,7 @@ impl UnfoldedCircleCoreWs {
         self.headers.push((name.into(), value.into()));
         self
     }
-    /**Connect to the CoreWs endpoint. It is ready once the upgrade and the opening message, if any, are done.
-
-## Errors
-
-[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
-    pub async fn connect_core_ws(
-        &self,
-        options: super::ws_shared::WsClientOptions,
-    ) -> Result<CoreWsClient, super::ws_shared::WsError> {
-        self.open_core_ws(options, None).await
-    }
-    /**Connect to the CoreWs endpoint, running `setup` on this connection and on every reconnect before the client is ready.
+    /**Connect to the CoreWs endpoint, running `setup` on this connection and on every reconnect before the client is ready. The endpoint declares a challenge flow, so this is its only connect; a caller that has already authenticated by other means passes `|_| async { Ok(()) }`.
 
 `setup` gets a fresh [`CoreWsSetup`] each time, after the opening message, and performs the endpoint's challenge exchange, such as answering an authentication request; the session's `credential` is the one the handshake carried. The whole attempt is bounded by `handshake_timeout`. Returning [`super::ws_shared::WsSetupError::Rejected`] closes the client with [`super::ws_shared::WsError::SetupRejected`] and is never retried; any other error is [`super::ws_shared::WsError::Setup`] and uses the reconnect budget on a reconnect.
 
@@ -599,12 +588,12 @@ impl UnfoldedCircleCoreWs {
                 ),
             )
         });
-        self.open_core_ws(options, Some(setup)).await
+        self.open_core_ws(options, setup).await
     }
     async fn open_core_ws(
         &self,
         options: super::ws_shared::WsClientOptions,
-        setup: Option<super::ws_shared::SetupFactory>,
+        setup: super::ws_shared::SetupFactory,
     ) -> Result<CoreWsClient, super::ws_shared::WsError> {
         let path = "/ws".to_string();
         if path.contains('{') {
@@ -630,7 +619,7 @@ impl UnfoldedCircleCoreWs {
         let session = super::ws_shared::WsSession {
             opening: None,
             handshake,
-            setup,
+            setup: Some(setup),
             correlation: Some(super::ws_shared::CorrelationConfig {
                 id_field: "req_id",
                 string_ids: false,
@@ -640,18 +629,7 @@ impl UnfoldedCircleCoreWs {
         };
         CoreWsClient::connect(session, options).await
     }
-    /**Connect to the CoreIntegrations endpoint. It is ready once the upgrade and the opening message, if any, are done.
-
-## Errors
-
-[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
-    pub async fn connect_core_integrations(
-        &self,
-        options: super::ws_shared::WsClientOptions,
-    ) -> Result<CoreIntegrationsClient, super::ws_shared::WsError> {
-        self.open_core_integrations(options, None).await
-    }
-    /**Connect to the CoreIntegrations endpoint, running `setup` on this connection and on every reconnect before the client is ready.
+    /**Connect to the CoreIntegrations endpoint, running `setup` on this connection and on every reconnect before the client is ready. The endpoint declares a challenge flow, so this is its only connect; a caller that has already authenticated by other means passes `|_| async { Ok(()) }`.
 
 `setup` gets a fresh [`CoreIntegrationsSetup`] each time, after the opening message, and performs the endpoint's challenge exchange, such as answering an authentication request; the session's `credential` is the one the handshake carried. The whole attempt is bounded by `handshake_timeout`. Returning [`super::ws_shared::WsSetupError::Rejected`] closes the client with [`super::ws_shared::WsError::SetupRejected`] and is never retried; any other error is [`super::ws_shared::WsError::Setup`] and uses the reconnect budget on a reconnect.
 
@@ -678,12 +656,12 @@ impl UnfoldedCircleCoreWs {
                 ),
             )
         });
-        self.open_core_integrations(options, Some(setup)).await
+        self.open_core_integrations(options, setup).await
     }
     async fn open_core_integrations(
         &self,
         options: super::ws_shared::WsClientOptions,
-        setup: Option<super::ws_shared::SetupFactory>,
+        setup: super::ws_shared::SetupFactory,
     ) -> Result<CoreIntegrationsClient, super::ws_shared::WsError> {
         let path = "/intg".to_string();
         if path.contains('{') {
@@ -709,7 +687,7 @@ impl UnfoldedCircleCoreWs {
         let session = super::ws_shared::WsSession {
             opening: None,
             handshake,
-            setup,
+            setup: Some(setup),
             correlation: Some(super::ws_shared::CorrelationConfig {
                 id_field: "req_id",
                 string_ids: false,
@@ -719,18 +697,7 @@ impl UnfoldedCircleCoreWs {
         };
         CoreIntegrationsClient::connect(session, options).await
     }
-    /**Connect to the CoreProfiles endpoint. It is ready once the upgrade and the opening message, if any, are done.
-
-## Errors
-
-[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
-    pub async fn connect_core_profiles(
-        &self,
-        options: super::ws_shared::WsClientOptions,
-    ) -> Result<CoreProfilesClient, super::ws_shared::WsError> {
-        self.open_core_profiles(options, None).await
-    }
-    /**Connect to the CoreProfiles endpoint, running `setup` on this connection and on every reconnect before the client is ready.
+    /**Connect to the CoreProfiles endpoint, running `setup` on this connection and on every reconnect before the client is ready. The endpoint declares a challenge flow, so this is its only connect; a caller that has already authenticated by other means passes `|_| async { Ok(()) }`.
 
 `setup` gets a fresh [`CoreProfilesSetup`] each time, after the opening message, and performs the endpoint's challenge exchange, such as answering an authentication request; the session's `credential` is the one the handshake carried. The whole attempt is bounded by `handshake_timeout`. Returning [`super::ws_shared::WsSetupError::Rejected`] closes the client with [`super::ws_shared::WsError::SetupRejected`] and is never retried; any other error is [`super::ws_shared::WsError::Setup`] and uses the reconnect budget on a reconnect.
 
@@ -757,12 +724,12 @@ impl UnfoldedCircleCoreWs {
                 ),
             )
         });
-        self.open_core_profiles(options, Some(setup)).await
+        self.open_core_profiles(options, setup).await
     }
     async fn open_core_profiles(
         &self,
         options: super::ws_shared::WsClientOptions,
-        setup: Option<super::ws_shared::SetupFactory>,
+        setup: super::ws_shared::SetupFactory,
     ) -> Result<CoreProfilesClient, super::ws_shared::WsError> {
         let path = "/profiles".to_string();
         if path.contains('{') {
@@ -788,7 +755,7 @@ impl UnfoldedCircleCoreWs {
         let session = super::ws_shared::WsSession {
             opening: None,
             handshake,
-            setup,
+            setup: Some(setup),
             correlation: Some(super::ws_shared::CorrelationConfig {
                 id_field: "req_id",
                 string_ids: false,
@@ -798,18 +765,7 @@ impl UnfoldedCircleCoreWs {
         };
         CoreProfilesClient::connect(session, options).await
     }
-    /**Connect to the CoreEvents endpoint. It is ready once the upgrade and the opening message, if any, are done.
-
-## Errors
-
-[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
-    pub async fn connect_core_events(
-        &self,
-        options: super::ws_shared::WsClientOptions,
-    ) -> Result<CoreEventsClient, super::ws_shared::WsError> {
-        self.open_core_events(options, None).await
-    }
-    /**Connect to the CoreEvents endpoint, running `setup` on this connection and on every reconnect before the client is ready.
+    /**Connect to the CoreEvents endpoint, running `setup` on this connection and on every reconnect before the client is ready. The endpoint declares a challenge flow, so this is its only connect; a caller that has already authenticated by other means passes `|_| async { Ok(()) }`.
 
 `setup` gets a fresh [`CoreEventsSetup`] each time, after the opening message, and performs the endpoint's challenge exchange, such as answering an authentication request; the session's `credential` is the one the handshake carried. The whole attempt is bounded by `handshake_timeout`. Returning [`super::ws_shared::WsSetupError::Rejected`] closes the client with [`super::ws_shared::WsError::SetupRejected`] and is never retried; any other error is [`super::ws_shared::WsError::Setup`] and uses the reconnect budget on a reconnect.
 
@@ -836,12 +792,12 @@ impl UnfoldedCircleCoreWs {
                 ),
             )
         });
-        self.open_core_events(options, Some(setup)).await
+        self.open_core_events(options, setup).await
     }
     async fn open_core_events(
         &self,
         options: super::ws_shared::WsClientOptions,
-        setup: Option<super::ws_shared::SetupFactory>,
+        setup: super::ws_shared::SetupFactory,
     ) -> Result<CoreEventsClient, super::ws_shared::WsError> {
         let path = "/events".to_string();
         if path.contains('{') {
@@ -867,7 +823,7 @@ impl UnfoldedCircleCoreWs {
         let session = super::ws_shared::WsSession {
             opening: None,
             handshake,
-            setup,
+            setup: Some(setup),
             correlation: Some(super::ws_shared::CorrelationConfig {
                 id_field: "req_id",
                 string_ids: false,

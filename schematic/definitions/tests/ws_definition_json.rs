@@ -72,7 +72,7 @@ fn control_loads_with_every_decision_bearing_field() {
     assert_eq!(endpoint.messages[0].responds_with.as_deref(), Some("ResponseEnvelope"));
     assert_eq!(
         endpoint.messages[0].selectors.as_deref(),
-        Some(&[MessageSelector::new("type", "req")][..])
+        Some(&[MessageSelector::new("type", "dock")][..])
     );
     assert!(endpoint.messages[1].fallback && endpoint.messages[1].selectors.is_none());
     let hints = endpoint.runtime.as_ref().unwrap();

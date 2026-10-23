@@ -6,6 +6,8 @@
 
 mod ws_mock;
 
+use ws_mock::no_setup;
+
 use std::time::{Duration, Instant};
 
 use schematic_schema::unfolded_circle_core_ws::{CoreWsClient, UnfoldedCircleCoreWs};
@@ -45,7 +47,7 @@ fn reconnect(backoff: Duration) -> ReconnectPolicy {
 async fn connect(origin: &str, options: WsClientOptions) -> CoreWsClient {
     UnfoldedCircleCoreWs::with_base_url(origin)
         .api_key("test-key")
-        .connect_core_ws(options)
+        .connect_core_ws_with_setup(options, no_setup)
         .await
         .unwrap()
 }

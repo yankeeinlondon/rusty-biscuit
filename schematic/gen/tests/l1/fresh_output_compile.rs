@@ -5192,7 +5192,7 @@ async fn assert_not_dialed(listener: &TcpListener) {
 #[tokio::test]
 async fn the_opening_frame_comes_first_on_the_initial_connection_and_on_a_redial() {
     let (listener, api) = bind().await;
-    let (client, peer) = tokio::join!(within(api.connect_feed(hello(), options(None))), accept_opened(&listener));
+    let (client, peer) = tokio::join!(within(api.connect_feed_with_setup(hello(), options(None), |_| async { Ok(()) })), accept_opened(&listener));
     let mut client = client.unwrap();
     drop_connection(peer).await;
     let mut peer = accept_opened(&listener).await;
@@ -5206,7 +5206,7 @@ async fn the_opening_frame_comes_first_on_the_initial_connection_and_on_a_redial
 async fn an_opening_key_that_differs_from_the_credential_fails_the_connect_before_dialing() {
     let (listener, api) = bind().await;
     let opening = Hello { mode: "fast".to_string(), api_key: Some("other-key".to_string()) };
-    match within(api.connect_feed(opening, options(None))).await.err() {
+    match within(api.connect_feed_with_setup(opening, options(None), |_| async { Ok(()) })).await.err() {
         Some(WsError::InvalidCredential(reason)) => {
             assert!(!reason.contains("other-key") && !reason.contains(KEY), "{reason}");
         }
@@ -5345,6 +5345,7 @@ fn slow_ws_session_setup_and_recovery_run() {
     let session = schematic_gen::output::ws_modules::render_ws_api_module(&session_ws_fixture())
         .unwrap_or_else(|error| panic!("SessionFixtureWs lowers: {error}"));
     assert!(session.contains("pub async fn connect_feed_with_setup<"), "{session}");
+    assert!(!session.contains("pub async fn connect_feed("), "a challenge endpoint has no setup-less connect: {session}");
     assert!(session.contains("pub type FeedSetup"), "{session}");
 
     let fresh = FreshCrate::generate(&[], Definitions::Checkout, &lockfile);
