@@ -145,11 +145,11 @@ pub struct RestApi {
     pub headers: Vec<(String, String)>,
     /// All endpoints defined for this API.
     pub endpoints: Vec<Endpoint>,
-    /// Custom module path for generated code (defaults to `api.name.to_lowercase()`).
+    /// Explicit generated module name and artifact file stem.
     ///
-    /// This allows APIs to specify a different module name than the default
-    /// lowercase version of the API name. For example, an API named "HuggingFaceHub"
-    /// might want to use "huggingface" instead of "huggingfacehub".
+    /// When absent, `schematic_definitions::naming::resolve_module_name`
+    /// drops a variant suffix (`PagerDutyApi` becomes `pagerduty`) or else
+    /// lowercases the name. Every writer resolves through that one function.
     pub module_path: Option<String>,
     /// Custom suffix for generated request structs (defaults to "Request").
     ///

@@ -34,7 +34,7 @@ use schematic_define::pagination::{
     Partition, Relay, Session, SessionStep, Strategy, ValueSource,
 };
 use schematic_gen::output::{
-    RustOutputRequest, Selection, generate_and_write_all, get_module_path, prepare_rust_output,
+    RustOutputRequest, Selection, generate_and_write_all, prepare_rust_output,
 };
 use schematic_gen::pipeline::resolve_all_apis;
 
@@ -2430,7 +2430,7 @@ fn slow_real_apis_compile_offline() {
     .expect("prepare the partial run");
     assert_eq!(prepared.regenerated, ["ollama"]);
     let groups: std::collections::BTreeSet<String> =
-        api_refs.iter().map(|api| get_module_path(api)).collect();
+        api_refs.iter().map(|api| schematic_definitions::naming::resolve_module_name(api)).collect();
     assert_eq!(prepared.retained.len(), groups.len() - 1, "every other module group is retained");
     prepared.plan.publish().expect("publish the partial run");
     assert_eq!(std::fs::read(&anthropic).unwrap(), edited_anthropic, "retained module untouched");

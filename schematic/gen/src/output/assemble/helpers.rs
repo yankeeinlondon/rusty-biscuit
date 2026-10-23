@@ -4,22 +4,6 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::RestApi;
 
-/// Returns the module path for the given API.
-///
-/// Uses `api.module_path` if set, otherwise attempts to infer from the API name.
-/// Falls back to `api.name.to_lowercase()` if inference returns None.
-///
-/// ## Resolution Order
-///
-/// 1. Explicit `module_path` (highest priority)
-/// 2. Inferred from CamelCase name (e.g., "OllamaNative" -> "ollama")
-/// 3. Lowercase API name (fallback)
-pub fn get_module_path(api: &RestApi) -> String {
-    api.module_path.clone().unwrap_or_else(|| {
-        crate::inference::infer_module_path(&api.name).unwrap_or_else(|| api.name.to_lowercase())
-    })
-}
-
 /// Returns the request suffix for the given API.
 ///
 /// Uses `api.request_suffix` if set, otherwise defaults to `"Request"`.

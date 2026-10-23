@@ -271,7 +271,7 @@ fn mismatch(api: &RestApi, endpoint: &schematic_define::Endpoint, row: Option<&R
             }
             let got_type = list.and_then(|list| list.item_type.as_deref());
             let expected_type = if endpoint.pagination.as_ref().and_then(|collection| collection.item_type.as_ref()).is_none() {
-                format!("::schematic_definitions::{}::{item_type}", api.module_path.clone().unwrap_or_else(|| api.name.to_lowercase()))
+                format!("::schematic_definitions::{}::{item_type}", schematic_definitions::naming::resolve_module_name(api))
             } else { (*item_type).to_owned() };
             if got_type != Some(expected_type.as_str()) {
                 problems.push(format!("item type {got_type:?}, want {expected_type:?}"));

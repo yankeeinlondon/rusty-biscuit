@@ -1,35 +1,62 @@
-//! Module path inference from API names.
+//! The one module-name resolver for every generated artifact.
 //!
-//! This module provides heuristics for inferring the module path from an API name
-//! when no explicit `module_path` is set. The inference is conservative and only
-//! applies to specific naming patterns that clearly indicate a variant API.
+//! An API's module name is its generated Rust module (`pub mod <name>;`,
+//! `<name>.rs`) and the file stem of its OpenAPI document and Postman
+//! collection. Every writer, and the registration grouping, calls
+//! [`resolve_module_name`], so one API never lands under two names.
 //!
-//! ## Inference Rules
+//! ## Resolution order
 //!
-//! The inference only triggers for names with recognizable variant suffixes:
-//! - "Native", "Client", "Service", "Hub", "Api", "Sdk"
+//! 1. An explicit `module_path` wins.
+//! 2. A CamelCase name ending in a variant suffix (Native, Client, Service,
+//!    Hub, Api, Sdk) drops the suffix: `PagerDutyApi` resolves to `pagerduty`.
+//! 3. Otherwise the lowercased name: `OpenAI` resolves to `openai`.
 //!
-//! For example:
-//! - "OllamaNative" -> "ollama" (has "Native" suffix)
-//! - "OpenAI" -> None (no inference, falls back to "openai")
-//! - "HuggingFaceHub" -> "huggingface" (has "Hub" suffix)
-//!
-//! This conservative approach prevents breaking changes for existing APIs
-//! while enabling inference for obvious variant patterns.
+//! The suffix rule is conservative so names without a clear variant suffix
+//! keep their lowercased module, which dependents import by name.
 //!
 //! ## Examples
 //!
 //! ```
-//! use schematic_gen::infer_module_path;
+//! use schematic_definitions::naming::module_name;
 //!
-//! // Variant suffix detected - extract base name
-//! assert_eq!(infer_module_path("OllamaNative"), Some("ollama".to_string()));
-//! assert_eq!(infer_module_path("HuggingFaceHub"), Some("huggingface".to_string()));
-//!
-//! // No variant suffix - returns None (caller should fall back)
-//! assert_eq!(infer_module_path("OpenAI"), None);
-//! assert_eq!(infer_module_path("HuggingFace"), None);
+//! assert_eq!(module_name("PagerDutyApi", None), "pagerduty");
+//! assert_eq!(module_name("OpenAI", None), "openai");
+//! assert_eq!(module_name("PagerDutyApi", Some("pager_duty")), "pager_duty");
 //! ```
+
+use schematic_define::RestApi;
+
+/// The module name and artifact file stem of `api`.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::{DefinitionContext, RestApi};
+/// use schematic_definitions::naming::resolve_module_name;
+///
+/// let ctx = DefinitionContext::types_in("crate::types");
+/// let api = RestApi::builder(&ctx, "PagerDutyApi", "https://api.pagerduty.com")
+///     .describes("PagerDuty")
+///     .no_auth()
+///     .build()
+///     .unwrap();
+/// assert_eq!(resolve_module_name(&api), "pagerduty");
+/// ```
+#[must_use]
+pub fn resolve_module_name(api: &RestApi) -> String {
+    module_name(&api.name, api.module_path.as_deref())
+}
+
+/// The module name of an API called `api_name`, with or without an explicit
+/// module path; the form for callers that hold no [`RestApi`] yet.
+#[must_use]
+pub fn module_name(api_name: &str, explicit: Option<&str>) -> String {
+    match explicit {
+        Some(path) => path.to_owned(),
+        None => infer_module_path(api_name).unwrap_or_else(|| api_name.to_lowercase()),
+    }
+}
 
 /// Known suffixes that indicate a variant API.
 ///
@@ -51,7 +78,7 @@ const VARIANT_SUFFIXES: &[&str] = &["Native", "Client", "Service", "Hub", "Api",
 /// ## Examples
 ///
 /// ```
-/// use schematic_gen::infer_module_path;
+/// use schematic_definitions::naming::infer_module_path;
 ///
 /// // Variant suffix detected
 /// assert_eq!(infer_module_path("OllamaNative"), Some("ollama".to_string()));
@@ -271,5 +298,26 @@ mod tests {
             infer_module_path("OpenAINative"),
             Some("openai".to_string())
         );
+    }
+
+    // === module_name tests ===
+
+    #[test]
+    fn module_name_prefers_an_explicit_path_over_inference() {
+        assert_eq!(module_name("PagerDutyApi", Some("pager_duty")), "pager_duty");
+        assert_eq!(module_name("OllamaNative", Some("ollama")), "ollama");
+    }
+
+    #[test]
+    fn module_name_infers_a_variant_suffix() {
+        assert_eq!(module_name("PagerDutyApi", None), "pagerduty");
+        assert_eq!(module_name("HuggingFaceHub", None), "huggingface");
+    }
+
+    #[test]
+    fn module_name_falls_back_to_the_lowercased_name() {
+        assert_eq!(module_name("OpenAI", None), "openai");
+        assert_eq!(module_name("ElevenLabs", None), "elevenlabs");
+        assert_eq!(module_name("Api", None), "api");
     }
 }

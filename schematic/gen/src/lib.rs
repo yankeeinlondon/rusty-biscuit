@@ -80,7 +80,6 @@ pub mod diagnostics;
 pub mod errors;
 pub mod export;
 pub mod import_pipeline;
-pub mod inference;
 pub mod model_gen;
 pub mod openapi_output;
 pub mod output;
@@ -89,8 +88,6 @@ pub mod pipeline;
 pub mod postman_output;
 pub mod validation;
 pub mod ws_codegen;
-
-pub use inference::infer_module_path;
 
 /// The `schematic_runtime::ABI` this generator emits code for.
 ///

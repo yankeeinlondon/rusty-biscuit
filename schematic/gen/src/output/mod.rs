@@ -49,9 +49,10 @@ use std::path::{Path, PathBuf};
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
 use schematic_define::RestApi;
+use schematic_definitions::naming::resolve_module_name;
 use schematic_definitions::registry::{ApiRegistration, registrations};
 
-use crate::cargo_gen::generate_cargo_toml;
+use crate::cargo_gen::{ModuleFeatures, generate_cargo_toml};
 use crate::diagnostics::Output;
 use crate::errors::GeneratorError;
 use crate::validation::{ensure_no_errors, validate_rust_client_in};
@@ -71,7 +72,7 @@ pub use assemble::{
     assemble_api_module_with_options, assemble_combined_api_module, assemble_lib_rs,
     assemble_lib_rs_with_options, assemble_prelude,
     assemble_shared_module, assemble_split_api_module, assemble_split_combined_api_module,
-    get_module_path, get_request_suffix,
+    get_request_suffix,
 };
 pub use format::{GENERATED_FILE_HEADER, format_code, validate_code};
 pub use options::OutputOptions;
@@ -144,7 +145,9 @@ pub enum Selection<'a> {
 #[derive(Debug, Clone, Copy)]
 pub struct RustOutputRequest<'a> {
     /// Every API the generator knows, in registry order. `lib.rs` and
-    /// `prelude.rs` list modules in this order.
+    /// `prelude.rs` list modules in this order. The manifest declares one
+    /// feature per module group of the whole registry, whatever `selection`
+    /// regenerates.
     pub registry: &'a [&'a RestApi],
     /// The registration inventory whose WebSocket entries the crate
     /// packages: their modules, `lib.rs` and `prelude.rs` entries, and
@@ -259,7 +262,7 @@ pub fn prepare_rust_output(
         .registry
         .iter()
         .copied()
-        .filter(|api| exported.contains(get_module_path(api).as_str()))
+        .filter(|api| exported.contains(resolve_module_name(api).as_str()))
         .collect();
 
     let lib = render(&assemble_lib_rs(&crate_apis, request.registrations))?;
@@ -288,7 +291,7 @@ pub fn prepare_rust_output(
     if let Some(manifest_dir) = request.manifest_dir {
         planner.write(
             manifest_dir.join("Cargo.toml"),
-            generate_cargo_toml(None),
+            generate_cargo_toml(None, &ModuleFeatures::new(request.registry, request.registrations)),
             Proof::Manifest,
         );
     }
@@ -313,7 +316,7 @@ pub fn prepare_rust_output(
 fn module_groups<'a>(registry: &[&'a RestApi]) -> IndexMap<String, Vec<&'a RestApi>> {
     let mut groups: IndexMap<String, Vec<&RestApi>> = IndexMap::new();
     for api in registry {
-        groups.entry(get_module_path(api)).or_default().push(api);
+        groups.entry(resolve_module_name(api)).or_default().push(api);
     }
     groups
 }
@@ -332,7 +335,7 @@ pub fn expand_selection<'a>(
     Ok(registry
         .iter()
         .copied()
-        .filter(|api| selected.contains(&get_module_path(api)))
+        .filter(|api| selected.contains(&resolve_module_name(api)))
         .collect())
 }
 
@@ -343,14 +346,14 @@ fn selected_groups(
     selection: Selection<'_>,
 ) -> Result<BTreeSet<String>, GeneratorError> {
     let Selection::Apis(apis) = selection else {
-        return Ok(registry.iter().map(|api| get_module_path(api)).collect());
+        return Ok(registry.iter().map(|api| resolve_module_name(api)).collect());
     };
     apis.iter()
         .map(|api| {
             registry
                 .iter()
                 .find(|known| known.name == api.name)
-                .map(|known| get_module_path(known))
+                .map(|known| resolve_module_name(known))
                 .ok_or_else(|| {
                     GeneratorError::ConfigError(format!(
                         "API `{}` is not in the registry, so its module group is unknown",
@@ -369,7 +372,7 @@ fn render(tokens: &TokenStream) -> Result<String, GeneratorError> {
 fn assemble_modules(apis: &[&RestApi]) -> Result<Vec<GeneratedModule>, GeneratorError> {
     let mut module_groups: BTreeMap<String, Vec<&RestApi>> = BTreeMap::new();
     for api in apis {
-        module_groups.entry(get_module_path(api)).or_default().push(api);
+        module_groups.entry(resolve_module_name(api)).or_default().push(api);
     }
 
     let mut generated = Vec::new();
@@ -670,7 +673,7 @@ pub fn generate_and_write_standalone(
     // `foo.rs` never stays beside `foo/`, which Rust rejects as ambiguous.
     let mut planner = Planner::new(output_dir);
     planner.module(&GeneratedModule::SingleFile {
-        filename: format!("{}.rs", get_module_path(api)),
+        filename: format!("{}.rs", resolve_module_name(api)),
         content: api_formatted.clone(),
     });
     planner.file("shared.rs", shared);
@@ -1302,7 +1305,7 @@ mod tests {
     fn standalone_import_removes_conflicting_owned_directory() {
         let api = make_simple_api();
         let temp_dir = TempDir::new().unwrap();
-        let module = get_module_path(&api);
+        let module = resolve_module_name(&api);
 
         // Simulate a prior directory-form module owned by the generator.
         let dir = temp_dir.path().join(&module);
@@ -1329,7 +1332,7 @@ mod tests {
     fn standalone_import_preserves_hand_written_conflicting_directory() {
         let api = make_simple_api();
         let temp_dir = TempDir::new().unwrap();
-        let module = get_module_path(&api);
+        let module = resolve_module_name(&api);
 
         // A conflicting directory that is NOT generator-owned is a conflict:
         // the run refuses before writing anything and leaves it in place.

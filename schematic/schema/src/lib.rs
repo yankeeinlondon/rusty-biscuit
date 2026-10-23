@@ -9,38 +9,114 @@
 //! credentials, redirects, deadlines, and the response envelope belong
 //! to [`schematic_runtime`].
 //!
+//! ## Features
+//!
+//! Every module is behind a Cargo feature named for the module, and
+//! the default features enable all of them. Build with
+//! `default-features = false` and list the modules you use to compile
+//! only those; APIs that share a module share its feature.
+//!
 //! ## Available REST APIs
 //!
 //! | Module | API | Description | Auth |
 //! |--------|-----|-------------|------|
-//! | [`anthropic`] | [`Anthropic`](anthropic::Anthropic) | Anthropic Messages API for Claude AI interactions and agent tool use | API Key (`X-Api-Key`) |
-//! | [`artificial_analysis`] | [`ArtificialAnalysisData`](artificial_analysis::ArtificialAnalysisData) | Artificial Analysis free data API: LLM and media-model benchmark catalogs. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/. | API Key (`x-api-key`) |
-//! | [`artificial_analysis`] | [`ArtificialAnalysisCritPt`](artificial_analysis::ArtificialAnalysisCritPt) | Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/. | API Key (`x-api-key`) |
-//! | [`bitbucket`] | [`Bitbucket`](bitbucket::Bitbucket) | Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows | Basic |
-//! | [`openai`] | [`OpenAI`](openai::OpenAI) | The OpenAI REST API. Please see https://platform.openai.com/docs/api-reference for more details. | Bearer |
-//! | [`elevenlabs`] | [`ElevenLabs`](elevenlabs::ElevenLabs) | ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation | API Key (`xi-api-key`) |
-//! | [`gitea`] | [`Gitea`](gitea::Gitea) | Gitea REST API v1.25+ for repository, PR, issue, and release workflows | API Key (`Authorization`) |
-//! | [`github`] | [`GitHub`](github::GitHub) | GitHub REST API v2022-11-28 for repository, PR, issue, and release workflows | Bearer |
-//! | [`gitlab`] | [`GitLab`](gitlab::GitLab) | GitLab REST API v4 for repository, MR, issue, and release workflows | API Key (`PRIVATE-TOKEN`) |
-//! | [`huggingface`] | [`HuggingFaceHub`](huggingface::HuggingFaceHub) | Hugging Face Hub API for model discovery, dataset management, spaces, and repository operations | Bearer |
-//! | [`lmstudio`] | [`LmStudio`](lmstudio::LmStudio) | LM Studio v1 native REST API for local LLM inference and model management | Bearer |
-//! | [`ollama`] | [`OllamaNative`](ollama::OllamaNative) | Ollama native REST API for local LLM inference and model management | None |
-//! | [`ollama`] | [`OllamaOpenAI`](ollama::OllamaOpenAI) | Ollama OpenAI-compatible REST API for drop-in replacement of OpenAI clients | None |
-//! | [`emqx`] | [`EmqxBasic`](emqx::EmqxBasic) | EMQX Broker REST API with Basic Authentication (API Key + Secret) | Basic |
-//! | [`emqx`] | [`EmqxBearer`](emqx::EmqxBearer) | EMQX Broker REST API with Bearer Token authentication (JWT) | Bearer |
-//! | [`eversolo`] | [`Eversolo`](eversolo::Eversolo) | Eversolo DMP-A8 local-network HTTP control API (Zidoo lineage) | None |
-//! | [`samsung_smart_tv`] | [`SamsungSmartTv`](samsung_smart_tv::SamsungSmartTv) | Samsung Smart TV LAN API (S95C-focused modern Tizen subset) | None |
-//! | [`unfolded_circle_core_rest`] | [`UnfoldedCircleCoreRest`](unfolded_circle_core_rest::UnfoldedCircleCoreRest) | Unfolded Circle Core REST API | Bearer |
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " | [`anthropic`] | [`Anthropic`](anthropic::Anthropic) | Anthropic Messages API for Claude AI interactions and agent tool use | API Key (`X-Api-Key`) |"
+)]
+#![cfg_attr(
+    feature = "artificial_analysis",
+    doc = " | [`artificial_analysis`] | [`ArtificialAnalysisData`](artificial_analysis::ArtificialAnalysisData) | Artificial Analysis free data API: LLM and media-model benchmark catalogs. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/. | API Key (`x-api-key`) |"
+)]
+#![cfg_attr(
+    feature = "artificial_analysis",
+    doc = " | [`artificial_analysis`] | [`ArtificialAnalysisCritPt`](artificial_analysis::ArtificialAnalysisCritPt) | Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/. | API Key (`x-api-key`) |"
+)]
+#![cfg_attr(
+    feature = "bitbucket",
+    doc = " | [`bitbucket`] | [`Bitbucket`](bitbucket::Bitbucket) | Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows | Basic |"
+)]
+#![cfg_attr(
+    feature = "openai",
+    doc = " | [`openai`] | [`OpenAI`](openai::OpenAI) | The OpenAI REST API. Please see https://platform.openai.com/docs/api-reference for more details. | Bearer |"
+)]
+#![cfg_attr(
+    feature = "elevenlabs",
+    doc = " | [`elevenlabs`] | [`ElevenLabs`](elevenlabs::ElevenLabs) | ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation | API Key (`xi-api-key`) |"
+)]
+#![cfg_attr(
+    feature = "gitea",
+    doc = " | [`gitea`] | [`Gitea`](gitea::Gitea) | Gitea REST API v1.25+ for repository, PR, issue, and release workflows | API Key (`Authorization`) |"
+)]
+#![cfg_attr(
+    feature = "github",
+    doc = " | [`github`] | [`GitHub`](github::GitHub) | GitHub REST API v2022-11-28 for repository, PR, issue, and release workflows | Bearer |"
+)]
+#![cfg_attr(
+    feature = "gitlab",
+    doc = " | [`gitlab`] | [`GitLab`](gitlab::GitLab) | GitLab REST API v4 for repository, MR, issue, and release workflows | API Key (`PRIVATE-TOKEN`) |"
+)]
+#![cfg_attr(
+    feature = "huggingface",
+    doc = " | [`huggingface`] | [`HuggingFaceHub`](huggingface::HuggingFaceHub) | Hugging Face Hub API for model discovery, dataset management, spaces, and repository operations | Bearer |"
+)]
+#![cfg_attr(
+    feature = "lmstudio",
+    doc = " | [`lmstudio`] | [`LmStudio`](lmstudio::LmStudio) | LM Studio v1 native REST API for local LLM inference and model management | Bearer |"
+)]
+#![cfg_attr(
+    feature = "ollama",
+    doc = " | [`ollama`] | [`OllamaNative`](ollama::OllamaNative) | Ollama native REST API for local LLM inference and model management | None |"
+)]
+#![cfg_attr(
+    feature = "ollama",
+    doc = " | [`ollama`] | [`OllamaOpenAI`](ollama::OllamaOpenAI) | Ollama OpenAI-compatible REST API for drop-in replacement of OpenAI clients | None |"
+)]
+#![cfg_attr(
+    feature = "emqx",
+    doc = " | [`emqx`] | [`EmqxBasic`](emqx::EmqxBasic) | EMQX Broker REST API with Basic Authentication (API Key + Secret) | Basic |"
+)]
+#![cfg_attr(
+    feature = "emqx",
+    doc = " | [`emqx`] | [`EmqxBearer`](emqx::EmqxBearer) | EMQX Broker REST API with Bearer Token authentication (JWT) | Bearer |"
+)]
+#![cfg_attr(
+    feature = "eversolo",
+    doc = " | [`eversolo`] | [`Eversolo`](eversolo::Eversolo) | Eversolo DMP-A8 local-network HTTP control API (Zidoo lineage) | None |"
+)]
+#![cfg_attr(
+    feature = "samsung_smart_tv",
+    doc = " | [`samsung_smart_tv`] | [`SamsungSmartTv`](samsung_smart_tv::SamsungSmartTv) | Samsung Smart TV LAN API (S95C-focused modern Tizen subset) | None |"
+)]
+#![cfg_attr(
+    feature = "unfolded_circle_core_rest",
+    doc = " | [`unfolded_circle_core_rest`] | [`UnfoldedCircleCoreRest`](unfolded_circle_core_rest::UnfoldedCircleCoreRest) | Unfolded Circle Core REST API | Bearer |"
+)]
 //!
 //! ## Available WebSocket Definitions
 //!
 //! | Module | API | Description |
 //! |--------|-----|-------------|
-//! | [`elevenlabs_ws`] | [`ElevenLabsTTS`](elevenlabs_ws::define_api) | ElevenLabs Text-to-Speech WebSocket API definition |
-//! | [`unfolded_circle_core_ws`] | [`UnfoldedCircleCoreWs`](unfolded_circle_core_ws::define_api) | Unfolded Circle Core WebSocket API definition |
-//! | [`unfolded_circle_dock_ws`] | [`UnfoldedCircleDockWs`](unfolded_circle_dock_ws::define_api) | Unfolded Circle Dock WebSocket API definition |
-//! | [`unfolded_circle_integration_ws`] | [`UnfoldedCircleIntegrationWs`](unfolded_circle_integration_ws::define_api) | Unfolded Circle Integration WebSocket API definition |
-//! | [`samsung_smart_tv_remote_ws`] | [`SamsungSmartTvRemote`](samsung_smart_tv_remote_ws::define_api) | Samsung Smart TV Remote Control WebSocket API definition |
+#![cfg_attr(
+    feature = "elevenlabs_ws",
+    doc = " | [`elevenlabs_ws`] | [`ElevenLabsTTS`](elevenlabs_ws::define_api) | ElevenLabs Text-to-Speech WebSocket API definition |"
+)]
+#![cfg_attr(
+    feature = "unfolded_circle_core_ws",
+    doc = " | [`unfolded_circle_core_ws`] | [`UnfoldedCircleCoreWs`](unfolded_circle_core_ws::define_api) | Unfolded Circle Core WebSocket API definition |"
+)]
+#![cfg_attr(
+    feature = "unfolded_circle_dock_ws",
+    doc = " | [`unfolded_circle_dock_ws`] | [`UnfoldedCircleDockWs`](unfolded_circle_dock_ws::define_api) | Unfolded Circle Dock WebSocket API definition |"
+)]
+#![cfg_attr(
+    feature = "unfolded_circle_integration_ws",
+    doc = " | [`unfolded_circle_integration_ws`] | [`UnfoldedCircleIntegrationWs`](unfolded_circle_integration_ws::define_api) | Unfolded Circle Integration WebSocket API definition |"
+)]
+#![cfg_attr(
+    feature = "samsung_smart_tv_remote_ws",
+    doc = " | [`samsung_smart_tv_remote_ws`] | [`SamsungSmartTvRemote`](samsung_smart_tv_remote_ws::define_api) | Samsung Smart TV Remote Control WebSocket API definition |"
+)]
 //!
 //! ## Quick Start
 //!
@@ -74,24 +150,65 @@ const _: () = assert!(
 pub use schematic_runtime;
 pub mod shared;
 pub mod prelude;
+#[cfg(feature = "anthropic")]
 pub mod anthropic;
+#[cfg(feature = "artificial_analysis")]
 pub mod artificial_analysis;
+#[cfg(feature = "bitbucket")]
 pub mod bitbucket;
+#[cfg(feature = "openai")]
 pub mod openai;
+#[cfg(feature = "elevenlabs")]
 pub mod elevenlabs;
+#[cfg(feature = "gitea")]
 pub mod gitea;
+#[cfg(feature = "github")]
 pub mod github;
+#[cfg(feature = "gitlab")]
 pub mod gitlab;
+#[cfg(feature = "huggingface")]
 pub mod huggingface;
+#[cfg(feature = "lmstudio")]
 pub mod lmstudio;
+#[cfg(feature = "ollama")]
 pub mod ollama;
+#[cfg(feature = "emqx")]
 pub mod emqx;
+#[cfg(feature = "eversolo")]
 pub mod eversolo;
+#[cfg(feature = "samsung_smart_tv")]
 pub mod samsung_smart_tv;
+#[cfg(feature = "unfolded_circle_core_rest")]
 pub mod unfolded_circle_core_rest;
+#[cfg(
+    any(
+        feature = "elevenlabs_ws",
+        feature = "unfolded_circle_core_ws",
+        feature = "unfolded_circle_dock_ws",
+        feature = "unfolded_circle_integration_ws",
+        feature = "samsung_smart_tv_remote_ws"
+    )
+)]
+#[cfg_attr(
+    not(
+        all(
+            feature = "elevenlabs_ws",
+            feature = "unfolded_circle_core_ws",
+            feature = "unfolded_circle_dock_ws",
+            feature = "unfolded_circle_integration_ws",
+            feature = "samsung_smart_tv_remote_ws"
+        )
+    ),
+    allow(dead_code)
+)]
 pub mod ws_shared;
+#[cfg(feature = "elevenlabs_ws")]
 pub mod elevenlabs_ws;
+#[cfg(feature = "unfolded_circle_core_ws")]
 pub mod unfolded_circle_core_ws;
+#[cfg(feature = "unfolded_circle_dock_ws")]
 pub mod unfolded_circle_dock_ws;
+#[cfg(feature = "unfolded_circle_integration_ws")]
 pub mod unfolded_circle_integration_ws;
+#[cfg(feature = "samsung_smart_tv_remote_ws")]
 pub mod samsung_smart_tv_remote_ws;

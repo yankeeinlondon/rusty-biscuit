@@ -172,6 +172,7 @@ pub mod github;
 pub mod gitlab;
 pub mod huggingface;
 pub mod lmstudio;
+pub mod naming;
 pub mod ollama;
 pub mod openai;
 pub mod openai_pagination;

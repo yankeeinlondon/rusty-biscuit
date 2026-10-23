@@ -19,7 +19,8 @@ use crate::codegen::{
     generate_request_struct_with_defaults,
 };
 
-use super::helpers::{build_definitions_import, get_module_path, get_request_suffix};
+use super::helpers::{build_definitions_import, get_request_suffix};
+use schematic_definitions::naming::resolve_module_name;
 use crate::output::options::OutputOptions;
 
 /// Threshold (in lines of formatted code) above which an API module is split
@@ -98,7 +99,7 @@ fn with_api_cookies(endpoint: &Endpoint, api_cookies: &[(String, String)]) -> En
 
 /// Assembles an API module with configurable options.
 pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) -> TokenStream {
-    let module_path = get_module_path(api);
+    let module_path = resolve_module_name(api);
     let requests = api_requests(api, &module_path);
     let api_struct = generate_api_struct(api);
     let module_docs = ModuleDocBuilder::new(api).build();
@@ -147,7 +148,7 @@ pub fn assemble_combined_api_module(apis: &[&RestApi]) -> TokenStream {
         "assemble_combined_api_module requires at least one API"
     );
 
-    let module_path = get_module_path(apis[0]);
+    let module_path = resolve_module_name(apis[0]);
     let combined_docs = build_combined_module_docs(apis);
     let definitions_import = build_definitions_import(&module_path);
 
@@ -217,7 +218,7 @@ fn build_combined_module_docs(apis: &[&RestApi]) -> TokenStream {
 ///   pager impls, the call types, and the endpoint methods
 /// - `responses.rs` - definitions re-exports
 pub fn assemble_split_api_module(api: &RestApi, options: &OutputOptions) -> SplitApiParts {
-    let module_path = get_module_path(api);
+    let module_path = resolve_module_name(api);
     let module_docs = ModuleDocBuilder::new(api).build();
 
     let definitions_import = if options.standalone {
@@ -246,7 +247,7 @@ pub fn assemble_split_combined_api_module(apis: &[&RestApi]) -> SplitApiParts {
         "assemble_split_combined_api_module requires at least one API"
     );
 
-    let module_path = get_module_path(apis[0]);
+    let module_path = resolve_module_name(apis[0]);
     let combined_docs = build_combined_module_docs(apis);
     let definitions_import = build_definitions_import(&module_path);
     split_parts(apis, combined_docs, definitions_import, &module_path)

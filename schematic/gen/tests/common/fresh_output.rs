@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use schematic_define::RestApi;
-use schematic_gen::cargo_gen::generate_cargo_toml_with_paths;
+use schematic_gen::cargo_gen::{ModuleFeatures, generate_cargo_toml_with_paths};
 use schematic_gen::output::generate_and_write_all;
 use tempfile::TempDir;
 
@@ -129,6 +129,7 @@ impl FreshCrate {
             path_str(&define),
             path_str(&definitions_path),
             path_str(runtime),
+            &ModuleFeatures::new(apis, schematic_definitions::registry::registrations()),
         );
         fs::write(crate_dir.join("Cargo.toml"), manifest).expect("write Cargo.toml");
         fs::copy(lockfile, crate_dir.join("Cargo.lock"))
@@ -178,6 +179,24 @@ impl FreshCrate {
             command.env(key, value);
         }
         run(command)
+    }
+
+    /// `cargo <args> --offline --locked` against the crate, for a command the
+    /// helpers above do not cover (a feature selection, `cargo tree`). Only
+    /// commands that accept `--target-dir` get the shared child target
+    /// directory.
+    pub fn cargo_offline(&self, args: &[&str]) -> CargoRun {
+        self.resolve_offline();
+        if args.first() == Some(&"tree") {
+            let mut command = cargo_command();
+            command
+                .args(args)
+                .args(["--offline", "--locked", "--manifest-path"])
+                .arg(self.crate_dir.join("Cargo.toml"));
+            run(command)
+        } else {
+            self.cargo(args)
+        }
     }
 
     /// Adds the temporary package entries to the copied lockfile without

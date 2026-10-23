@@ -60,9 +60,9 @@ use crate::codegen::pagination::pager_view;
 use crate::codegen::responses::{end_marker_names, failure_enum_needed, success_variant_names};
 use crate::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use crate::errors::GeneratorError;
-use crate::export::resolve_module_name;
 use crate::output::assemble::definitions_module_path;
-use crate::output::{get_module_path, get_request_suffix};
+use crate::output::get_request_suffix;
+use schematic_definitions::naming::resolve_module_name;
 use crate::parser::extract_path_params;
 
 /// Severity of the `query-in-path` check.
@@ -140,10 +140,11 @@ pub fn validate_rust_client_in(
         check_schema_references(api, Output::Rust, &mut diagnostics);
         check_rust_api(api, registrations, &mut diagnostics);
     }
+    check_stem_case_collisions(apis, Output::Rust, &mut diagnostics);
 
     let mut groups: BTreeMap<String, Vec<&RestApi>> = BTreeMap::new();
     for api in apis {
-        groups.entry(get_module_path(api)).or_default().push(api);
+        groups.entry(resolve_module_name(api)).or_default().push(api);
     }
     for group in groups.values() {
         check_group_type_names(group, &mut diagnostics);
@@ -164,6 +165,7 @@ pub fn validate_openapi(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
         check_schema_references(api, Output::OpenApi, &mut diagnostics);
         diagnostics.extend(crate::export::vocabulary::diagnostics(api, Output::OpenApi));
     }
+    check_stem_case_collisions(apis, Output::OpenApi, &mut diagnostics);
     diagnostics
 }
 
@@ -178,6 +180,7 @@ pub fn validate_postman(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
         check_export_filename(api, Output::Postman, &mut diagnostics);
         diagnostics.extend(crate::export::vocabulary::diagnostics(api, Output::Postman));
     }
+    check_stem_case_collisions(apis, Output::Postman, &mut diagnostics);
     diagnostics
 }
 
@@ -318,6 +321,29 @@ fn check_export_filename(
             output,
             format!("output file name `{stem}` {reason}"),
         ));
+    }
+}
+
+/// Checks that no two module names of the batch differ only by letter case.
+///
+/// Case-insensitive file systems (the macOS and Windows defaults) would
+/// write both modules to one file.
+fn check_stem_case_collisions(apis: &[&RestApi], output: Output, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    let mut seen: HashMap<String, String> = HashMap::new();
+    for api in apis {
+        let stem = resolve_module_name(api);
+        let first = seen.entry(stem.to_lowercase()).or_insert_with(|| stem.clone());
+        if *first != stem {
+            diagnostics.push(ValidationDiagnostic::new(
+                Severity::Error,
+                &api.name,
+                None,
+                Feature::InvalidOutputFilename,
+                output,
+                format!("module name `{stem}` differs from `{first}` only by letter case, so both \
+                         would name one file on a case-insensitive file system"),
+            ));
+        }
     }
 }
 
@@ -632,10 +658,11 @@ fn check_type_ident(name: &str) -> Result<(), &'static str> {
 ///
 /// The module path becomes `pub mod <path>;`, the file `<path>.rs` or
 /// directory `<path>/`, and (through its definitions mapping) a
-/// `schematic_definitions::<a>::<b>` import path, so it must be one plain
-/// identifier that names no other generated file.
+/// `schematic_definitions::<a>::<b>` import path, and names the module's
+/// Cargo feature, so it must be one plain identifier that names no other
+/// generated file and is not `default`.
 fn check_module_path(api: &RestApi, registrations: &[ApiRegistration], diagnostics: &mut Vec<ValidationDiagnostic>) {
-    let module_path = get_module_path(api);
+    let module_path = resolve_module_name(api);
     let push = |diagnostics: &mut Vec<ValidationDiagnostic>, feature, message: String| {
         diagnostics.push(ValidationDiagnostic::new(
             Severity::Error,
@@ -659,6 +686,16 @@ fn check_module_path(api: &RestApi, registrations: &[ApiRegistration], diagnosti
         return;
     }
 
+    if module_path == "default" {
+        push(
+            diagnostics,
+            Feature::InvalidModulePath,
+            "module path `default` would name the generated crate's `default` Cargo feature, \
+             which enables every module"
+                .to_string(),
+        );
+    }
+
     let definitions_path = definitions_module_path(&module_path);
     if definitions_path
         .split("::")
@@ -671,8 +708,9 @@ fn check_module_path(api: &RestApi, registrations: &[ApiRegistration], diagnosti
         );
     }
 
-    if RESERVED_MODULE_NAMES.contains(&module_path.as_str())
-        || crate::output::ws_modules::ws_registrations(registrations).any(|(entry, _)| entry.module == module_path)
+    if RESERVED_MODULE_NAMES.iter().any(|reserved| reserved.eq_ignore_ascii_case(&module_path))
+        || crate::output::ws_modules::ws_registrations(registrations)
+            .any(|(entry, _)| entry.module.eq_ignore_ascii_case(&module_path))
     {
         push(
             diagnostics,
@@ -1718,6 +1756,16 @@ mod tests {
                     api
                 },
                 Feature::InvalidOutputFilename,
+                None,
+            ),
+            (
+                "module path naming the default feature",
+                {
+                    let mut api = make_test_api();
+                    api.module_path = Some("default".to_string());
+                    api
+                },
+                Feature::InvalidModulePath,
                 None,
             ),
             (

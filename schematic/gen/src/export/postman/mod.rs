@@ -9,7 +9,7 @@ use schematic_define::RestApi;
 
 use crate::diagnostics::Output;
 use crate::errors::GeneratorError;
-use crate::export::naming::resolve_module_name;
+use schematic_definitions::naming::resolve_module_name;
 use crate::validation::{ensure_no_errors, validate_postman};
 
 mod auth;
@@ -53,7 +53,7 @@ pub use collection::{build_postman_collection, build_postman_collection_grouped}
 ///     .build().unwrap();
 ///
 /// let path = write_postman(&api, Path::new("/tmp"), false).unwrap();
-/// assert_eq!(path.file_name().unwrap(), "testapi.postman_collection.json");
+/// assert_eq!(path.file_name().unwrap(), "test.postman_collection.json");
 /// ```
 pub fn write_postman(api: &RestApi, dir: &Path, dry_run: bool) -> Result<PathBuf, GeneratorError> {
     ensure_no_errors(Output::Postman, validate_postman(&[api]))?;

@@ -452,7 +452,7 @@ fn write_postman_dry_run() {
     let temp_dir = std::env::temp_dir();
     let path = write_postman(&api, &temp_dir, true).unwrap();
 
-    assert_eq!(path.file_name().unwrap(), "testapi.postman_collection.json");
+    assert_eq!(path.file_name().unwrap(), "test.postman_collection.json");
 }
 
 #[test]
@@ -464,7 +464,7 @@ fn write_postman_creates_file() {
     let path = write_postman(&api, temp_dir.path(), false).unwrap();
 
     assert!(path.exists());
-    assert_eq!(path.file_name().unwrap(), "testapi.postman_collection.json");
+    assert_eq!(path.file_name().unwrap(), "test.postman_collection.json");
 
     // Verify it's valid JSON
     let content = fs::read_to_string(&path).unwrap();

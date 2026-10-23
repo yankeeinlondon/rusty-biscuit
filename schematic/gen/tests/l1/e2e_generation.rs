@@ -19,9 +19,10 @@ use schematic_define::openapi::ExportOptions;
 use schematic_definitions::apis_by_module;
 use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
 use schematic_definitions::openai::define_openai_api;
-use schematic_gen::cargo_gen::write_cargo_toml;
+use schematic_definitions::registry::registrations;
+use schematic_gen::cargo_gen::{ModuleFeatures, write_cargo_toml};
 use schematic_gen::export::openapi::write_openapi_grouped;
-use schematic_gen::infer_module_path;
+use schematic_definitions::naming::resolve_module_name;
 use schematic_gen::output::{generate_and_write, generate_and_write_all};
 
 /// Returns true if a module exists as either a single `.rs` file or a directory
@@ -143,7 +144,8 @@ fn generated_code_compiles() {
     // Generate the code from OpenAI API definition
     let api = define_openai_api();
     generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
-    write_cargo_toml(&schema_dir, false, Some(schematic_workspace_root()))
+    let features = ModuleFeatures::new(&[&api], registrations());
+    write_cargo_toml(&schema_dir, false, Some(schematic_workspace_root()), &features)
         .expect("Failed to write Cargo.toml");
 
     // Try to compile with cargo check
@@ -180,7 +182,8 @@ fn generated_code_passes_clippy() {
     // Generate the code
     let api = define_openai_api();
     generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
-    write_cargo_toml(&schema_dir, false, Some(schematic_workspace_root()))
+    let features = ModuleFeatures::new(&[&api], registrations());
+    write_cargo_toml(&schema_dir, false, Some(schematic_workspace_root()), &features)
         .expect("Failed to write Cargo.toml");
 
     // Run cargo clippy with warnings as errors
@@ -210,7 +213,8 @@ fn generated_files_exist_and_have_expected_structure() {
 
     let api = define_openai_api();
     generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
-    write_cargo_toml(&schema_dir, false, Some(schematic_workspace_root()))
+    let features = ModuleFeatures::new(&[&api], registrations());
+    write_cargo_toml(&schema_dir, false, Some(schematic_workspace_root()), &features)
         .expect("Failed to write Cargo.toml");
 
     // Verify files exist
@@ -332,12 +336,7 @@ fn generate_code_for_various_api_configurations() {
         );
 
         // Check the API module file (e.g., simple.rs, allmethods.rs)
-        // Use the same inference logic as production code
-        let module_name = api
-            .module_path
-            .clone()
-            .or_else(|| infer_module_path(&api.name))
-            .unwrap_or_else(|| api.name.to_lowercase());
+        let module_name = resolve_module_name(&api);
         let api_module_path = src_dir.join(format!("{}.rs", module_name));
         assert!(
             api_module_path.exists(),
@@ -602,7 +601,8 @@ fn multiple_apis_compile() {
 
     let apis: Vec<&schematic_define::RestApi> = vec![&openai, &elevenlabs];
     generate_and_write_all(&apis, &src_dir, false).expect("Failed to generate code");
-    write_cargo_toml(&schema_dir, false, Some(schematic_workspace_root()))
+    let features = ModuleFeatures::new(&apis, registrations());
+    write_cargo_toml(&schema_dir, false, Some(schematic_workspace_root()), &features)
         .expect("Failed to write Cargo.toml");
 
     let output = Command::new("cargo")

@@ -8,7 +8,7 @@ use std::process::Command;
 use biscuit_test_harness::bin_exe;
 use schematic_define::openapi::{ExportFormat, ExportOptions};
 use schematic_define::{DefinitionBundle, RestApi};
-use schematic_gen::export::naming::resolve_module_name;
+use schematic_definitions::naming::resolve_module_name;
 use schematic_gen::export::openapi::{build_openapi_grouped, render_openapi_document};
 use schematic_gen::export::postman::render_postman_module;
 

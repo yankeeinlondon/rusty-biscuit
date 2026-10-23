@@ -6,7 +6,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::{AuthStrategy, RestApi, RestMethod};
 
-use super::helpers::get_module_path;
+use schematic_definitions::naming::resolve_module_name;
 use crate::output::options::OutputOptions;
 use schematic_definitions::registry::ApiRegistration;
 
@@ -14,15 +14,20 @@ use crate::output::ws_modules::ws_registrations;
 
 /// Assembles the lib.rs content for the schema crate, declaring and listing
 /// every WebSocket entry of `registrations` beside the REST `apis`.
+///
+/// Each module declaration, and its row in the crate docs, is behind the
+/// Cargo feature named for the module (see [`crate::cargo_gen::ModuleFeatures`]);
+/// `ws_shared` compiles when any WebSocket module does.
 pub fn assemble_lib_rs(apis: &[&RestApi], registrations: &[ApiRegistration]) -> TokenStream {
     let mut seen_modules = HashSet::new();
     let mut module_decls: Vec<_> = apis
         .iter()
         .filter_map(|api| {
-            let path = get_module_path(api);
+            let path = resolve_module_name(api);
             if seen_modules.insert(path.clone()) {
                 let module_name = format_ident!("{}", path);
                 Some(quote! {
+                    #[cfg(feature = #path)]
                     pub mod #module_name;
                 })
             } else {
@@ -30,24 +35,33 @@ pub fn assemble_lib_rs(apis: &[&RestApi], registrations: &[ApiRegistration]) -> 
             }
         })
         .collect();
+    let ws_modules: Vec<&str> = ws_registrations(registrations)
+        .map(|(entry, _)| entry.module)
+        .filter(|module| !seen_modules.contains(*module))
+        .collect();
     if seen_modules.insert("ws_shared".to_string()) {
+        // Some helpers serve only some WebSocket modules, so a build without
+        // every one of them may leave those unused; the default build checks all.
         module_decls.push(quote! {
+            #[cfg(any(#(feature = #ws_modules),*))]
+            #[cfg_attr(not(all(#(feature = #ws_modules),*)), allow(dead_code))]
             pub mod ws_shared;
         });
     }
-    for (entry, _) in ws_registrations(registrations) {
-        if seen_modules.insert(entry.module.to_string()) {
-            let module_name = format_ident!("{}", entry.module);
+    for module in &ws_modules {
+        if seen_modules.insert(module.to_string()) {
+            let module_name = format_ident!("{}", module);
             module_decls.push(quote! {
+                #[cfg(feature = #module)]
                 pub mod #module_name;
             });
         }
     }
 
-    let api_rows: Vec<String> = apis
+    let api_table_tokens: TokenStream = apis
         .iter()
         .map(|api| {
-            let module = get_module_path(api);
+            let module = resolve_module_name(api);
             let name = &api.name;
             let desc = &api.description;
             let auth_desc = match &api.auth {
@@ -57,19 +71,23 @@ pub fn assemble_lib_rs(apis: &[&RestApi], registrations: &[ApiRegistration]) -> 
                 AuthStrategy::Basic { .. } => "Basic".to_string(),
                 _ => "Custom".to_string(),
             };
-            format!("//! | [`{module}`] | [`{name}`]({module}::{name}) | {desc} | {auth_desc} |")
-        })
-        .collect();
-    let api_table = api_rows.join("\n");
-    let ws_rows: Vec<String> = ws_registrations(registrations)
-        .map(|(entry, ws)| {
-            format!(
-                "//! | [`{}`] | [`{}`]({}::define_api) | {} |",
-                entry.module, entry.name, entry.module, ws.summary
+            feature_doc(
+                &module,
+                &format!(" | [`{module}`] | [`{name}`]({module}::{name}) | {desc} | {auth_desc} |"),
             )
         })
         .collect();
-    let ws_table = ws_rows.join("\n");
+    let ws_table_tokens: TokenStream = ws_registrations(registrations)
+        .map(|(entry, ws)| {
+            feature_doc(
+                entry.module,
+                &format!(
+                    " | [`{}`] | [`{}`]({}::define_api) | {} |",
+                    entry.module, entry.name, entry.module, ws.summary
+                ),
+            )
+        })
+        .collect();
 
     let example_api = apis
         .iter()
@@ -78,8 +96,6 @@ pub fn assemble_lib_rs(apis: &[&RestApi], registrations: &[ApiRegistration]) -> 
 
     let quick_start_example = build_quick_start_example(example_api);
 
-    let api_table_tokens: TokenStream = api_table.parse().unwrap_or_default();
-    let ws_table_tokens: TokenStream = ws_table.parse().unwrap_or_default();
     let quick_start_tokens: TokenStream = quick_start_example.parse().unwrap_or_default();
     let runtime_compatibility = runtime_compatibility();
 
@@ -92,6 +108,13 @@ pub fn assemble_lib_rs(apis: &[&RestApi], registrations: &[ApiRegistration]) -> 
         //! its response types re-exported from the definitions. Sending,
         //! credentials, redirects, deadlines, and the response envelope belong
         //! to [`schematic_runtime`].
+        //!
+        //! ## Features
+        //!
+        //! Every module is behind a Cargo feature named for the module, and
+        //! the default features enable all of them. Build with
+        //! `default-features = false` and list the modules you use to compile
+        //! only those; APIs that share a module share its feature.
         //!
         //! ## Available REST APIs
         //!
@@ -130,6 +153,13 @@ pub fn assemble_lib_rs(apis: &[&RestApi], registrations: &[ApiRegistration]) -> 
     }
 }
 
+/// A crate-level doc line shown only when `feature` is enabled.
+pub(crate) fn feature_doc(feature: &str, line: &str) -> TokenStream {
+    quote! {
+        #![cfg_attr(feature = #feature, doc = #line)]
+    }
+}
+
 /// The ABI marker of generated `lib.rs`, the compile-time check that the
 /// `schematic-runtime` being built against has that ABI, and the runtime
 /// re-export.
@@ -165,7 +195,7 @@ pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) 
     let module_decls: Vec<_> = apis
         .iter()
         .filter_map(|api| {
-            let path = get_module_path(api);
+            let path = resolve_module_name(api);
             if seen_modules.insert(path.clone()) {
                 let module_name = format_ident!("{}", path);
                 Some(quote! {
@@ -188,7 +218,7 @@ pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) 
     let api_rows: Vec<String> = apis
         .iter()
         .map(|api| {
-            let module = get_module_path(api);
+            let module = resolve_module_name(api);
             let name = &api.name;
             let desc = &api.description;
             let auth_desc = match &api.auth {

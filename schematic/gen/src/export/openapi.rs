@@ -22,7 +22,7 @@ use schematic_define::openapi::{
 
 use crate::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use crate::errors::GeneratorError;
-use crate::export::resolve_module_name;
+use schematic_definitions::naming::resolve_module_name;
 use crate::validation::{ensure_no_errors, validate_openapi};
 
 /// Writes an OpenAPI specification file to the specified directory.

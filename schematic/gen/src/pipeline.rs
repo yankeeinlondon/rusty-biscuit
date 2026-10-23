@@ -10,6 +10,7 @@ use colored::Colorize;
 use indexmap::IndexMap;
 use schematic_define::RestApi;
 use schematic_define::openapi::{ExportFormat, ExportOptions};
+use schematic_definitions::naming::resolve_module_name;
 use schematic_definitions::registry::{ApiRegistration, registrations};
 
 use crate::diagnostics::{Output, ValidationDiagnostic, has_errors};
@@ -440,12 +441,12 @@ fn export_batch<'a>(
     }
     let modules: HashSet<String> = selected
         .iter()
-        .map(|api| crate::export::resolve_module_name(api))
+        .map(|api| resolve_module_name(api))
         .collect();
     registry
         .iter()
         .copied()
-        .filter(|api| modules.contains(&crate::export::resolve_module_name(api)))
+        .filter(|api| modules.contains(&resolve_module_name(api)))
         .collect()
 }
 
@@ -454,7 +455,7 @@ fn export_groups<'a>(apis: &[&'a RestApi]) -> IndexMap<String, Vec<&'a RestApi>>
     let mut groups: IndexMap<String, Vec<&RestApi>> = IndexMap::new();
     for api in apis {
         groups
-            .entry(crate::export::resolve_module_name(api))
+            .entry(resolve_module_name(api))
             .or_default()
             .push(api);
     }

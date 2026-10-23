@@ -161,10 +161,7 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
     match &options.definitions_out {
         Some(definitions_out) => {
             let definitions_dir = Path::new(definitions_out);
-            let module_name = options
-                .module_path
-                .clone()
-                .unwrap_or_else(|| api_name.to_lowercase());
+            let module_name = schematic_definitions::naming::resolve_module_name(&api);
 
             if has_types {
                 model_gen::generate_models_with(&models, definitions_dir, options.dry_run, true)?;

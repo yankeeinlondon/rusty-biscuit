@@ -23,6 +23,8 @@ mod fixed_header_export;
 mod fresh_output_compile;
 mod http_client;
 mod import_overlay;
+mod module_features;
+mod module_naming;
 mod openapi_import_test;
 mod openapi_strict_completeness;
 mod output_validation;

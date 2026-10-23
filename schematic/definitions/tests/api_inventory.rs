@@ -130,7 +130,7 @@ fn every_shipped_registration_agrees_with_the_api_it_builds() {
                 assert!(rest.key.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'), "{}: key {:?} is not kebab-case", entry.name, rest.key);
                 assert_eq!(registry_key_for(entry.name), rest.key);
                 let api = apis.iter().find(|api| api.name == entry.name).expect("built");
-                let resolved = api.module_path.clone().unwrap_or_else(|| api.name.to_lowercase());
+                let resolved = schematic_definitions::naming::resolve_module_name(api);
                 assert_eq!(entry.module, resolved, "{}: registered module differs from the API's module", entry.name);
             }
             Protocol::WebSocket(ws) => {
@@ -139,6 +139,18 @@ fn every_shipped_registration_agrees_with_the_api_it_builds() {
                 assert!(ws.summary.ends_with("WebSocket API definition"), "{}: summary {:?}", entry.name, ws.summary);
             }
         }
+    }
+}
+
+#[test]
+fn shipped_module_names_are_unique_ignoring_case_and_portable() {
+    // Case-insensitive file systems (macOS and Windows defaults) would write
+    // two modules differing only by case to one file.
+    let modules: HashSet<&str> = registrations().iter().map(|entry| entry.module).collect();
+    let folded: HashSet<String> = modules.iter().map(|module| module.to_lowercase()).collect();
+    assert_eq!(folded.len(), modules.len(), "{modules:?}");
+    for module in modules {
+        assert!(module.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'), "{module:?} is not a portable stem");
     }
 }
 
