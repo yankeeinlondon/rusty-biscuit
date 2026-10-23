@@ -138,8 +138,9 @@ impl<E: fmt::Debug> std::error::Error for ApiError<E> {}
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum ErrorKind<E> {
-    /// A declared error status whose body decoded into the endpoint's
-    /// declared failure type.
+    /// A declared failure: an error status whose body decoded into the
+    /// endpoint's declared failure type, or a 2xx body that the codec reports
+    /// as a declared failure, such as a GraphQL reply carrying errors.
     Declared(E),
     /// A non-2xx reply the endpoint declares no body for.
     Undeclared,

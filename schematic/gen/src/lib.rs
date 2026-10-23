@@ -12,9 +12,9 @@
 //!   infallible `new()`, and `basic_auth()` when the API accepts HTTP Basic
 //! - a `{Name}Api` tag type that the API's request types name, so the client
 //!   sends only that API's requests
-//! - one request struct per endpoint, implementing
-//!   `schematic_runtime::EndpointSpec` (its API, success type, codec, and
-//!   endpoint id)
+//! - one request struct per endpoint and per GraphQL operation, implementing
+//!   `schematic_runtime::EndpointSpec` (its API, success, failure, and codec
+//!   types, error table, and endpoint id)
 //!
 //! ## Modules
 //!
@@ -98,7 +98,7 @@ pub use inference::infer_module_path;
 /// compile time that the runtime it builds against has the same value;
 /// partial generation refuses to keep modules generated for another value.
 /// It changes together with the runtime's constant, which a test checks.
-pub const RUNTIME_ABI: u32 = 6;
+pub const RUNTIME_ABI: u32 = 7;
 
 
 pub use export::openapi::{

@@ -269,8 +269,29 @@ pub(crate) fn validate_surface(api: &crate::RestApi, surface: &GraphQlSurface) -
             return Err(fail("operation id equals an endpoint id; they share the generated naming space".into()));
         }
         validate_operation(operation, &api.errors).map_err(fail)?;
+        if let Some(variable) = required_pager_variable(api, operation) {
+            return Err(fail(format!("pager-managed variable `{variable}` must be optional in the variables type; the pager supplies it")));
+        }
     }
     Ok(())
+}
+
+/// A top-level variable the pager writes that the registered variables
+/// schema lists as `required` (R40: pager-managed inputs are exempt from the
+/// caller's required check, so the type must not force the caller to set
+/// them). A component that is not bundled yet is checked by reference
+/// resolution instead.
+fn required_pager_variable(api: &crate::RestApi, operation: &GraphQlOperation) -> Option<String> {
+    let (Some(collection), GraphQlVariables::Typed(TypeRef::Named(name))) = (&operation.pagination, &operation.variables) else { return None };
+    let Pagination::Explicit(strategy) = &collection.pagination else { return None };
+    let required = api.component(name)?.schema.get("required")?.as_array()?;
+    crate::pagination::request_inputs(strategy).into_iter().find_map(|(_, input)| match input {
+        InputParam::Body(path) if path.as_segments().len() == 2 => {
+            let variable = &path.as_segments()[1];
+            required.iter().any(|entry| entry.as_str() == Some(variable.as_str())).then(|| variable.clone())
+        }
+        _ => None,
+    })
 }
 
 fn valid_rule_path(path: &str) -> bool {

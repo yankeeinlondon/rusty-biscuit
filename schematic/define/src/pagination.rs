@@ -28,12 +28,14 @@
 //! ```
 
 mod collection;
+mod relay;
 mod resolve;
 mod selector;
 mod strategy;
 mod validate;
 
 pub use collection::{Alternate, Collection, Pagination};
+pub use relay::Relay;
 pub use resolve::{
     AdoptionOutcome, Direction, Knob, ManagedRole, ParamAdoption, ParamLocation, Resolution,
     ResolutionOrigin, ResolvedList, adopted_params, caller_knobs, param_adoptions, resolve,

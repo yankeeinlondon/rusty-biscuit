@@ -185,3 +185,59 @@ fn graphql_members_keep_their_frozen_serialized_forms() {
     null_name["operation_name"] = serde_json::Value::Null;
     assert!(serde_json::from_value::<GraphQlOperation>(null_name).is_err());
 }
+
+definition_type!(#[derive(schemars::JsonSchema)] #[allow(dead_code)] pub struct ForcedVars {
+    pub owner: String, pub first: u32, pub after: Option<String> });
+
+#[test]
+fn the_relay_preset_expands_to_a_cursor_strategy_over_data_and_variables() {
+    use schematic_define::pagination::{PageStrategy, Pagination, Relay};
+    let cursor = |collection: &Collection| match &collection.pagination {
+        Pagination::Explicit(strategy) => match &strategy.kind { PageStrategy::Cursor(kind) => kind.clone(), other => panic!("{other:?}") },
+        other => panic!("{other:?}"),
+    };
+    let forward = Relay::forward("repository.issues").max_page_size(100).collection("Issue");
+    assert_eq!(forward.items.to_string(), "repository.issues.nodes[*]");
+    assert_eq!(forward.item_type.as_deref(), Some("Issue"));
+    let kind = cursor(&forward);
+    assert_eq!(kind.forward.parts[0].param, InputParam::body("variables.after"));
+    assert_eq!(kind.forward.parts[0].source, CursorSource::body("repository.issues.pageInfo.endCursor"));
+    assert_eq!(kind.more, Some(MoreSignal::has_more("repository.issues.pageInfo.hasNextPage")));
+    assert_eq!(kind.size, Some(PageSize::new(InputParam::body("variables.first")).max(100)));
+    assert!(kind.backward.is_none() && !kind.resumable);
+    // The preset is exactly the hand-written strategy of `relay()`.
+    assert_eq!(Relay::forward("repository.issues").max_page_size(100).strategy(), match relay().pagination {
+        Pagination::Explicit(strategy) => strategy, other => panic!("{other:?}") });
+
+    let backward = Relay::backward("viewer.repositories").with_edges().cursor_variable("cursor").size_variable("count")
+        .sent_page_size(20).resumable().collection("Repo");
+    assert_eq!(backward.items.to_string(), "viewer.repositories.edges[*].node");
+    let kind = cursor(&backward);
+    assert_eq!(kind.forward.parts[0].param, InputParam::body("variables.cursor"));
+    assert_eq!(kind.forward.parts[0].source, CursorSource::body("viewer.repositories.pageInfo.startCursor"));
+    assert_eq!(kind.more, Some(MoreSignal::has_more("viewer.repositories.pageInfo.hasPreviousPage")));
+    assert_eq!(kind.size, Some(PageSize::new(InputParam::body("variables.count")).sent_default(20)));
+    assert!(kind.resumable);
+    // A connection at the data root reads `pageInfo` and `nodes` directly.
+    let root = Relay::forward("").collection("Node");
+    assert_eq!(root.items.to_string(), "nodes[*]");
+    assert_eq!(cursor(&root).more, Some(MoreSignal::has_more("pageInfo.hasNextPage")));
+}
+
+#[test]
+fn a_relay_operation_builds_and_its_pager_variables_must_be_optional() {
+    use schematic_define::pagination::Relay;
+    let mut ctx = DefinitionContext::types_in("::models");
+    let preset = GraphQlOperation::query("Issues", DOCUMENT).describes("Issues").variables::<IssuesVars>(&mut ctx)
+        .data::<IssuesData>(&mut ctx).pagination(Relay::forward("repository.issues").max_page_size(100).collection("Issue")).build().unwrap();
+    assert!(api(&ctx, AddressRule::github(), vec![preset]).is_ok());
+
+    let forced = GraphQlOperation::query("Forced", DOCUMENT).describes("Forced").variables::<ForcedVars>(&mut ctx)
+        .data::<IssuesData>(&mut ctx).pagination(Relay::forward("repository.issues").collection("Issue")).build().unwrap();
+    fails(api(&ctx, AddressRule::github(), vec![forced]),
+        "GitHub operation Forced: pager-managed variable `first` must be optional in the variables type");
+    // The same type is fine when the pager does not manage `first`.
+    let renamed = GraphQlOperation::query("Renamed", DOCUMENT).describes("Renamed").variables::<ForcedVars>(&mut ctx)
+        .data::<IssuesData>(&mut ctx).pagination(Relay::forward("repository.issues").size_variable("limit").collection("Issue")).build().unwrap();
+    assert!(api(&ctx, AddressRule::github(), vec![renamed]).is_ok());
+}

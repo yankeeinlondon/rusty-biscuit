@@ -91,7 +91,8 @@ pub use spec::{ItemSelector, Strategy};
 ///
 /// The generator implements it, with the capability traits of the controls
 /// the definition authors, for exactly the endpoints whose resolved
-/// pagination is a strategy. Its constants must agree with its associated
+/// pagination is a strategy and the GraphQL operations that declare one. Its
+/// constants must agree with its associated
 /// types: [`Kind`](Self::Kind) names the kind of
 /// [`STRATEGY`](Self::STRATEGY), and [`Session`](Self::Session) whether it
 /// has a session. Failure bodies must be `Sync` so retained error evidence can
@@ -112,11 +113,40 @@ pub trait Paginated: EndpointSpec<Failure: Sync> {
 
     /// The strategy.
     const STRATEGY: &'static Strategy;
-    /// Where a page's items are.
+    /// Where a page's items are, within the value
+    /// [`page_root`](Self::page_root) returns.
     const ITEMS: &'static ItemSelector;
     /// The endpoint's path template, whose `{placeholders}` a follow-up path
-    /// may use.
+    /// may use; empty for a GraphQL operation.
     const PATH: &'static str;
+
+    /// The value a 2xx page's item, continuation, and total paths read,
+    /// taken from the body after the client-global JSON hook ran.
+    ///
+    /// The default is the whole body. A GraphQL operation reads its `data`
+    /// and ends paging at a reply carrying GraphQL errors
+    /// ([`graphql::page_data`](crate::graphql::page_data)).
+    ///
+    /// ## Errors
+    ///
+    /// [`PageRootError`] when the page delivers no item: a declared failure,
+    /// or a body that does not hold the value.
+    fn page_root(body: Value) -> Result<Value, PageRootError<Self::Failure>> {
+        Ok(body)
+    }
+}
+
+/// Why [`Paginated::page_root`] found no page in a 2xx body.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum PageRootError<E> {
+    /// A declared failure the body carries, such as GraphQL errors. The
+    /// pager reports it as [`ErrorKind::Declared`](crate::ErrorKind::Declared)
+    /// with the body as received, and delivers none of the page's items.
+    Declared(E),
+    /// The body does not hold the value the paths read; reported as
+    /// [`ErrorKind::MalformedSuccess`](crate::ErrorKind::MalformedSuccess).
+    Malformed,
 }
 
 mod sealed {

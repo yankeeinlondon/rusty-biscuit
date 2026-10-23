@@ -8,7 +8,8 @@
 //! marker impl per authored knob. Kind-only and session capabilities are the
 //! runtime's blanket impls over the `Kind` and `Session` associated types, so
 //! nothing is emitted for them. Unpaginated lists, non-lists, and alternates
-//! emit nothing.
+//! emit nothing. A paginated GraphQL operation gets the same impls through
+//! `operation_paginated_impl`, with `page_root` reading the reply's `data`.
 //!
 //! The parameters the strategy adopts (`adopted_params`) leave the request:
 //! [`pager_view`] is the one place that removes them, and request structs,
@@ -25,9 +26,9 @@ use schematic_define::pagination::{
     Boundary, Carry, CountUnit, CursorLeg, CursorPart, CursorSource, Direction, FixedParam,
     FollowUp, IndexBase, InputParam, ItemSelector, KeepAlive, Knob, LinkSource, MoreSignal,
     PageSize, PageStrategy, ParamLocation, Partition, Polarity, Resolution, Session, SessionOpen, SessionStep,
-    Step, Strategy, ValueSource, adopted_params, caller_knobs, resolve,
+    Pagination, Step, Strategy, ValueSource, adopted_params, caller_knobs, resolve, strategy_knobs,
 };
-use schematic_define::{Endpoint, RestApi, RestMethod};
+use schematic_define::{Endpoint, GraphQlOperation, RestApi, RestMethod};
 
 use crate::codegen::request_structs::endpoint_spec::method_tokens;
 use crate::codegen::request_structs::shared::type_name_to_tokens;
@@ -207,16 +208,7 @@ fn paginated_impl(api: &RestApi, endpoint: &Endpoint, suffix: &str) -> TokenStre
         // Validation refuses a paginated list without an item type.
         None => unsupported(&format!("the paginated list of `{}` names no item type", endpoint.id)),
     };
-    let kind = format_ident!(
-        "{}",
-        match &strategy.kind {
-            PageStrategy::PageNumber(_) => "PageNumberKind",
-            PageStrategy::Offset(_) => "OffsetKind",
-            PageStrategy::Cursor(_) => "CursorKind",
-            PageStrategy::NextLink(_) => "NextLinkKind",
-            _ => "UnsupportedKind",
-        }
-    );
+    let kind = kind_ident(&strategy.kind);
     let session = if strategy.session.is_some() {
         quote! { WithSession }
     } else {
@@ -238,6 +230,65 @@ fn paginated_impl(api: &RestApi, endpoint: &Endpoint, suffix: &str) -> TokenStre
             const STRATEGY: &'static schematic_runtime::pager::Strategy = &#strategy_value;
             const ITEMS: &'static schematic_runtime::pager::ItemSelector = &#items;
             const PATH: &'static str = #path;
+        }
+
+        #(#markers)*
+    }
+}
+
+fn kind_ident(kind: &PageStrategy) -> proc_macro2::Ident {
+    format_ident!(
+        "{}",
+        match kind {
+            PageStrategy::PageNumber(_) => "PageNumberKind",
+            PageStrategy::Offset(_) => "OffsetKind",
+            PageStrategy::Cursor(_) => "CursorKind",
+            PageStrategy::NextLink(_) => "NextLinkKind",
+            _ => "UnsupportedKind",
+        }
+    )
+}
+
+/// The `Paginated` and capability marker impls of a paginated GraphQL
+/// operation's request `{id}{suffix}`, or nothing when it is not paginated
+/// (R40).
+///
+/// Its paths are relative to the reply's `data`, which `page_root` takes
+/// through `schematic_runtime::graphql::page_data`, so a page carrying
+/// GraphQL errors stops paging as a declared failure. Definition validation
+/// limits an operation to an explicit, sessionless, follow-up-free strategy
+/// whose inputs are body paths under `variables`.
+pub(crate) fn operation_paginated_impl(operation: &GraphQlOperation, suffix: &str) -> TokenStream {
+    let Some(collection) = &operation.pagination else {
+        return TokenStream::new();
+    };
+    let Pagination::Explicit(strategy) = &collection.pagination else {
+        return unsupported(&format!("the operation `{}` declares no explicit strategy", operation.id));
+    };
+    let request = format_ident!("{}{}", operation.id, suffix);
+    let item = match &collection.item_type {
+        Some(item_type) => type_name_to_tokens(item_type),
+        None => unsupported(&format!("the paginated operation `{}` names no item type", operation.id)),
+    };
+    let kind = kind_ident(&strategy.kind);
+    let strategy_value = strategy_tokens(strategy);
+    let items = item_selector(&collection.items);
+    let markers = strategy_knobs(strategy).into_iter().filter_map(|knob| marker_impl(&knob, &request));
+    quote! {
+        impl schematic_runtime::pager::Paginated for #request {
+            type Item = #item;
+            type Kind = schematic_runtime::pager::#kind;
+            type Session = schematic_runtime::pager::NoSession;
+
+            const STRATEGY: &'static schematic_runtime::pager::Strategy = &#strategy_value;
+            const ITEMS: &'static schematic_runtime::pager::ItemSelector = &#items;
+            const PATH: &'static str = "";
+
+            fn page_root(
+                body: schematic_runtime::serde_json::Value,
+            ) -> Result<schematic_runtime::serde_json::Value, schematic_runtime::pager::PageRootError<Self::Failure>> {
+                schematic_runtime::graphql::page_data(body)
+            }
         }
 
         #(#markers)*

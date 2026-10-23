@@ -11,7 +11,7 @@ use super::error::{Incomplete, Page, PagerError};
 use super::request::{PageRequest, build_parts, decode_items, write_input};
 use super::session::{DEFAULT_CLOSE_GRACE, SessionShared};
 use super::{
-    AdjustablePageSize, HasPrev, HasTotal, PageSizeKnob, Paginated, Partitioned, Renewable, ResumeAfter,
+    AdjustablePageSize, HasPrev, HasTotal, PageRootError, PageSizeKnob, Paginated, Partitioned, Renewable, ResumeAfter,
     ResumeBefore, Sessionless, StartOffset, StartPage, cursor_values,
 };
 use crate::call::{Call, CallFuture};
@@ -585,11 +585,25 @@ impl<'a, A: Api, R: Paginated<Api = A>> Pages<'a, A, R> {
         };
         response.meta.request.page = Some(number);
         let (meta, outcome) = response.into_parts();
-        let document = match outcome {
+        let mut document = match outcome {
             Outcome::Success(document) => document,
             Outcome::Failure(error) => {
                 return Err(PagerError::Api {
                     error: error.into(),
+                    meta: Box::new(meta),
+                });
+            }
+        };
+        document.json = match R::page_root(std::mem::take(&mut document.json)) {
+            Ok(root) => root,
+            Err(PageRootError::Malformed) => return Err(malformed(document.bytes, meta)),
+            Err(PageRootError::Declared(failure)) => {
+                return Err(PagerError::Api {
+                    error: ApiError {
+                        kind: ErrorKind::Declared(failure),
+                        body: document.bytes,
+                    }
+                    .into(),
                     meta: Box::new(meta),
                 });
             }

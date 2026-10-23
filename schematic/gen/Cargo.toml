@@ -73,3 +73,6 @@ l2-backends = ["tmux"]
 sidecars = ["backend-proof", "harness-broker"]
 features = ["terminal-tests"]
 local-features = []
+# R43's parity test re-derives sniff's check-status query from its source
+# (`fresh_output_compile::the_parity_document_is_sniffs_check_status_query`).
+source-inputs = ["sniff/lib/src/remote/check_status.rs"]

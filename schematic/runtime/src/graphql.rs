@@ -22,6 +22,11 @@
 //! classification. A typed mutator runs on decoded data only after a
 //! failure-free reply, never on partial data.
 //!
+//! A paginated operation's pages are classified the same way by
+//! [`page_data`]: the pager reads items and continuations from `data`, and a
+//! page with GraphQL errors ends paging as a declared failure whose partial
+//! data never joins the collected items.
+//!
 //! ## The operation address
 //!
 //! An endpoint whose [`EndpointSpec::ADDRESS`](crate::EndpointSpec::ADDRESS)
@@ -59,6 +64,7 @@ use crate::codec::{Decode, DecodeFailure, DecodeFailureKind, LiveBody};
 use crate::endpoint::{ErrorBody, RequestBody};
 use crate::error::InvalidArgument;
 use crate::hooks::{HookStage, SupportsHooks};
+use crate::pager::PageRootError;
 
 /// The JSON body of a GraphQL request: `{"query", "variables",
 /// "operationName"}`.
@@ -337,18 +343,66 @@ impl<D: DeserializeOwned + Send + 'static> Decode for GraphQl<D> {
 
 fn classify<D: DeserializeOwned + Send + 'static>(wrapper: Value, bytes: Bytes) -> Result<D, DecodeFailure> {
     let malformed = || DecodeFailure::new(DecodeFailureKind::Malformed, bytes.clone());
+    match classify_wrapper::<D>(wrapper) {
+        Classified::Data(data) => serde_json::from_value(data).map_err(|_| malformed()),
+        Classified::Failed(failure) => Err(DecodeFailure::declared(failure, bytes)),
+        Classified::Malformed => Err(malformed()),
+    }
+}
+
+/// A wrapper's classification before its data is decoded.
+enum Classified<D> {
+    /// No errors and non-null data, not yet decoded.
+    Data(Value),
+    /// A valid non-empty `errors` array.
+    Failed(GraphQlFailure<D>),
+    /// Not an object, an invalid `errors` member, or no data without errors.
+    Malformed,
+}
+
+fn classify_wrapper<D: DeserializeOwned>(wrapper: Value) -> Classified<D> {
     let Value::Object(mut wrapper) = wrapper else {
-        return Err(malformed());
+        return Classified::Malformed;
     };
     let data = wrapper.remove("data").filter(|data| !data.is_null());
     let errors: Vec<GraphQlError> = match wrapper.remove("errors") {
         None => Vec::new(),
-        Some(errors @ Value::Array(_)) => serde_json::from_value(errors).map_err(|_| malformed())?,
-        Some(_) => return Err(malformed()),
+        Some(errors @ Value::Array(_)) => match serde_json::from_value(errors) {
+            Ok(errors) => errors,
+            Err(_) => return Classified::Malformed,
+        },
+        Some(_) => return Classified::Malformed,
     };
     if !errors.is_empty() {
         let partial_data = data.and_then(|data| serde_json::from_value(data).ok());
-        return Err(DecodeFailure::declared(GraphQlFailure::<D> { errors, partial_data }, bytes));
+        return Classified::Failed(GraphQlFailure { errors, partial_data });
     }
-    serde_json::from_value(data.ok_or_else(malformed)?).map_err(|_| malformed())
+    data.map_or(Classified::Malformed, Classified::Data)
+}
+
+/// The page root of a paginated GraphQL operation: the reply's `data`,
+/// classified as an ordinary reply is (see the [module documentation](self)).
+///
+/// A paginated operation's item, cursor, and end-signal paths are relative
+/// to `data`. A reply with GraphQL errors ends paging as a declared
+/// [`GraphQlFailure`], whose `partial_data` is kept in the error and never
+/// joins the collected items. Data that does not decode as `D` is a
+/// malformed page, as it is a malformed success for one send.
+///
+/// ## Errors
+///
+/// [`PageRootError::Declared`] for GraphQL errors, and
+/// [`PageRootError::Malformed`] for a wrapper the classification rejects.
+pub fn page_data<D, H>(wrapper: Value) -> Result<Value, PageRootError<GraphQlOperationError<D, H>>>
+where
+    D: DeserializeOwned,
+{
+    match classify_wrapper::<D>(wrapper) {
+        Classified::Data(data) => match D::deserialize(&data) {
+            Ok(_) => Ok(data),
+            Err(_) => Err(PageRootError::Malformed),
+        },
+        Classified::Failed(failure) => Err(PageRootError::Declared(GraphQlOperationError::GraphQl(failure))),
+        Classified::Malformed => Err(PageRootError::Malformed),
+    }
 }

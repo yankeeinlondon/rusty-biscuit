@@ -7,7 +7,9 @@
 //! sends it to the GraphQL address (`EndpointSpec::ADDRESS`), which the API
 //! definition derives from the base URL by the definition's address rules
 //! unless the caller overrides it. The document is emitted verbatim and never
-//! parsed. See `schematic/docs/graphql.md`.
+//! parsed. A paginated operation's request also implements the runtime's
+//! `Paginated`, so `send(request).pager()` pages it (R40). See
+//! `schematic/docs/graphql.md`.
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -67,6 +69,7 @@ pub(crate) fn generate_operation_request(api: &RestApi, operation: &GraphQlOpera
             quote! { None::<&()> },
         ),
     };
+    let pager = crate::codegen::pagination::operation_paginated_impl(operation, suffix);
     let derives = match &operation.variables {
         GraphQlVariables::Typed(_) => quote! { #[derive(Debug, Clone)] },
         _ => quote! { #[derive(Debug, Clone, Copy, Default)] },
@@ -112,6 +115,8 @@ pub(crate) fn generate_operation_request(api: &RestApi, operation: &GraphQlOpera
                 })
             }
         }
+
+        #pager
     }
 }
 
@@ -229,6 +234,30 @@ mod tests {
         let opted_out = generated(&api, 2);
         assert_has(&opted_out, "GraphQlOperationError<::defs::ItemData, schematic_runtime::NoDeclaredError>");
         assert!(!opted_out.contains("constERRORS"), "{opted_out}");
+    }
+
+    #[test]
+    fn a_relay_operation_implements_paginated_over_data_and_variables() {
+        use schematic_define::pagination::Relay;
+        let api = api_with(vec![
+            operation("ListItems", Some("ItemVars"), |op| {
+                op.pagination = Some(Relay::forward("repository.items").max_page_size(50).resumable().collection("Item"));
+            }),
+            operation("ReadItem", Some("ItemVars"), |_| {}),
+        ]);
+        let code = generated(&api, 0);
+        assert_has(&code, "impl schematic_runtime::pager::Paginated for ListItemsRequest { type Item = Item;");
+        assert_has(&code, "type Kind = schematic_runtime::pager::CursorKind; type Session = schematic_runtime::pager::NoSession;");
+        assert_has(&code, "schematic_runtime::pager::spec::Input::Body(&[\"variables\", \"after\"])");
+        assert_has(&code, "schematic_runtime::pager::spec::Input::Body(&[\"variables\", \"first\"])");
+        assert_has(&code, "&[\"repository\", \"items\", \"pageInfo\", \"endCursor\"]");
+        assert_has(&code, "&[\"repository\", \"items\", \"pageInfo\", \"hasNextPage\"]");
+        assert_has(&code, "const PATH: &'static str = \"\";");
+        assert_has(&code, "fn page_root(body: schematic_runtime::serde_json::Value,) -> Result<schematic_runtime::serde_json::Value, schematic_runtime::pager::PageRootError<Self::Failure>> { schematic_runtime::graphql::page_data(body) }");
+        assert_has(&code, "impl schematic_runtime::pager::PageSizeKnob for ListItemsRequest {}");
+        assert_has(&code, "impl schematic_runtime::pager::ResumeAfter for ListItemsRequest { type Cursor = String; }");
+        assert!(!code.contains("ResumeBefore") && !code.contains("HasPrev"), "only authored knobs get markers: {code}");
+        assert!(!generated(&api, 1).contains("Paginated"), "an unpaginated operation has no pager");
     }
 
     #[test]

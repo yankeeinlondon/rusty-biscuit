@@ -31,7 +31,7 @@ use schematic_define::{
 };
 use schematic_define::pagination::{
     Collection, CursorSource, InputParam, KeepAlive, LinkSource, MoreSignal, PageSize,
-    Partition, Session, SessionStep, Strategy, ValueSource,
+    Partition, Relay, Session, SessionStep, Strategy, ValueSource,
 };
 use schematic_gen::output::{
     RustOutputRequest, Selection, generate_and_write_all, get_module_path, prepare_rust_output,
@@ -114,7 +114,8 @@ const FIXTURE_COVERAGE: &[(&str, &[&str])] = &[
             "single-and-enum-failures",
         ],
     ),
-    ("FixtureGraphQl", &["graphql-typed-variables", "graphql-unit-variables", "graphql-address-rules", "graphql-http-errors"]),
+    ("FixtureGraphQl", &["graphql-typed-variables", "graphql-unit-variables", "graphql-address-rules", "graphql-http-errors",
+        "graphql-relay-pager", "graphql-check-status-parity", "graphql-unparsed-document", "graphql-anonymous-bearer"]),
 ];
 
 /// Request and response types for the fixture APIs, one module per API.
@@ -253,6 +254,93 @@ pub struct CheckVars {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CheckData {
     pub repository: Option<serde_json::Value>,
+}
+
+/// Relay variables: the pager writes `first` and `after`, so both are
+/// optional; `after` is sent `null` until the pager has a cursor.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IssuesVars {
+    pub owner: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first: Option<u32>,
+    pub after: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IssuesData {
+    pub repository: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Issue {
+    pub number: u64,
+}
+
+/// Variables of sniff's check-status query for three pull requests.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ParityVars {
+    pub owner: String,
+    pub name: String,
+    pub n0: u64,
+    pub n1: u64,
+    pub n2: u64,
+}
+
+/// `data` of sniff's check-status query; every field the query can null is
+/// an `Option`.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ParityData {
+    pub repository: Option<ParityRepository>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ParityRepository {
+    pub p0: Option<ParityPullRequest>,
+    pub p1: Option<ParityPullRequest>,
+    pub p2: Option<ParityPullRequest>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ParityPullRequest {
+    pub state: String,
+    pub commits: ParityCommits,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ParityCommits {
+    pub nodes: Vec<ParityCommitNode>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ParityCommitNode {
+    pub commit: ParityCommit,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParityCommit {
+    pub oid: String,
+    pub status_check_rollup: Option<ParityRollup>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ParityRollup {
+    pub contexts: ParityContexts,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParityContexts {
+    pub check_run_count: u64,
+    pub status_context_count: u64,
+    pub check_run_counts_by_state: Vec<ParityStateCount>,
+    pub status_context_counts_by_state: Vec<ParityStateCount>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ParityStateCount {
+    pub state: String,
+    pub count: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -634,6 +722,12 @@ fn shapes_fixture() -> RestApi {
     crate::common::components::with_referenced_components(api)
 }
 
+/// The document sniff's `batch_query(3)` builds
+/// (`sniff/lib/src/remote/check_status.rs`); the guard test
+/// `the_parity_document_is_sniffs_check_status_query` re-derives it from
+/// that source.
+const CHECK_STATUS_DOCUMENT: &str = "query($owner:String!,$name:String!,$n0:Int!,$n1:Int!,$n2:Int!){repository(owner:$owner,name:$name){p0:pullRequest(number:$n0){...F}p1:pullRequest(number:$n1){...F}p2:pullRequest(number:$n2){...F}}}fragment F on PullRequest{state commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:1){checkRunCount statusContextCount checkRunCountsByState{state count} statusContextCountsByState{state count}}}}}}}";
+
 /// GraphQL operations beside one REST endpoint, under the GitHub address
 /// rules. The definition's base ends in `/api/v3`; tests point it at a mock.
 fn graphql_fixture() -> RestApi {
@@ -651,12 +745,27 @@ fn graphql_fixture() -> RestApi {
         .describes("Rename the signed-in user").no_variables().data::<serde_json::Value>(&mut ctx).build().unwrap();
     rename.data = named("Login");
     rename.no_declared_errors = true;
-    let mut api = fixture_api("FixtureGraphQl", "fixture_graphql", AuthStrategy::None, vec![
+    let mut issues = GraphQlOperation::query("Issues", "query Issues($owner: String!, $first: Int, $after: String) { repository(owner: $owner) { issues(first: $first, after: $after) { nodes { number } pageInfo { endCursor hasNextPage } } } }")
+        .describes("Issues of a repository, page by page").no_variables().data::<serde_json::Value>(&mut ctx).build().unwrap();
+    issues.variables = GraphQlVariables::Typed(named("IssuesVars"));
+    issues.pagination = Some(Relay::forward("repository.issues").max_page_size(50).collection("Issue"));
+    issues.data = named("IssuesData");
+    // R43: sniff's check-status query for three pull requests, unnamed, with
+    // no declared HTTP errors so a 403 keeps its raw body.
+    let mut parity = GraphQlOperation::query("CheckStatusParity", CHECK_STATUS_DOCUMENT)
+        .describes("Sniff's check-status query, for parity").no_variables().data::<serde_json::Value>(&mut ctx).build().unwrap();
+    parity.variables = GraphQlVariables::Typed(named("ParityVars"));
+    parity.data = named("ParityData");
+    // Not valid GraphQL: the document is sent as written, never parsed.
+    let mut draft = GraphQlOperation::mutation("Draft", "mutation { draft(title: \"unterminated")
+        .describes("A document the server rejects").no_variables().data::<serde_json::Value>(&mut ctx).build().unwrap();
+    draft.data = named("Login");
+    let mut api = fixture_api("FixtureGraphQl", "fixture_graphql", AuthStrategy::BearerToken { header: None }, vec![
         endpoint("GetUser", RestMethod::Get, "/user", vec![SuccessShape::json_type("Login")]),
     ]);
     api.base_url = "http://127.0.0.1:1/api/v3".to_string();
     let mut surface = GraphQlSurface::new(AddressRule::github());
-    surface.operations = vec![viewer, check, rename];
+    surface.operations = vec![viewer, check, rename, issues, parity, draft];
     api.graphql = Some(surface);
     crate::common::components::with_referenced_components(api)
 }
@@ -1908,6 +2017,163 @@ async fn graphql_errors_and_http_errors_reach_the_composite_failure() {
     assert!(matches!(&error.kind, ErrorKind::Declared(GraphQlOperationError::GraphQl(failure)) if failure.errors[0].message == "denied"),
         "GraphQL errors stay declared after an HTTP opt-out: {error}");
 }
+
+fn relay_page(numbers: &[u64], end: serde_json::Value, more: bool) -> serde_json::Value {
+    let nodes: Vec<serde_json::Value> = numbers.iter().map(|number| serde_json::json!({"number": number})).collect();
+    serde_json::json!({"data": {"repository": {"issues": {"nodes": nodes, "pageInfo": {"endCursor": end, "hasNextPage": more}}}}})
+}
+
+async fn relay_server(pages: impl Fn(Option<&str>) -> serde_json::Value + Send + Sync + 'static) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(path("/graphql"))
+        .respond_with(move |request: &Request| {
+            let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+            ResponseTemplate::new(200).set_body_json(pages(body["variables"]["after"].as_str()))
+        })
+        .mount(&server)
+        .await;
+    server
+}
+
+#[tokio::test]
+async fn a_generated_relay_pager_pages_data_and_stops_at_graphql_errors() {
+    use schematic_schema::fixture_graphql::{FixtureGraphQl, Issue, IssuesRequest, IssuesVars};
+    use schematic_schema::schematic_runtime::GraphQlOperationError;
+    use schematic_schema::schematic_runtime::pager::{IncompleteReason, PagerError};
+    let variables = || IssuesVars { owner: "acme".into(), first: None, after: None };
+
+    let server = relay_server(|after| match after {
+        None => relay_page(&[1, 2], serde_json::json!("c1"), true),
+        Some("c1") => relay_page(&[3], serde_json::Value::Null, false),
+        other => panic!("unexpected cursor {other:?}"),
+    }).await;
+    let client = FixtureGraphQl::new().base_url(server.uri()).build().unwrap();
+    let items = client.send(IssuesRequest::new(variables())).pager().page_size(2).collect_all().await.unwrap();
+    assert_eq!(items, [Issue { number: 1 }, Issue { number: 2 }, Issue { number: 3 }]);
+    let sent: Vec<serde_json::Value> = server.received_requests().await.unwrap().iter()
+        .map(|request| serde_json::from_slice::<serde_json::Value>(&request.body).unwrap()).collect();
+    assert_eq!(sent.iter().map(|body| body["variables"].clone()).collect::<Vec<_>>(), [
+        serde_json::json!({"owner": "acme", "first": 2, "after": null}),
+        serde_json::json!({"owner": "acme", "first": 2, "after": "c1"}),
+    ], "a null initial cursor is valid; the pager writes its inputs over the serialized variables");
+    assert!(sent.iter().all(|body| body["query"] == IssuesRequest::DOCUMENT));
+    assert!(sent.iter().all(|body| body.get("operationName").is_none()));
+
+    let error = client.send(IssuesRequest::new(variables())).pager().page_size(51).fetch_page().await.unwrap_err();
+    assert!(matches!(error, PagerError::Transport(_)), "the authored maximum refuses 51 before sending: {error:?}");
+
+    let failing = relay_server(|after| match after {
+        None => relay_page(&[1], serde_json::json!("c1"), true),
+        _ => {
+            let mut page = relay_page(&[2], serde_json::json!("c2"), true);
+            page["errors"] = serde_json::json!([{"message": "rate limited", "type": "RATE_LIMITED"}]);
+            page
+        }
+    }).await;
+    let client = FixtureGraphQl::new().base_url(failing.uri()).build().unwrap();
+    let incomplete = client.send(IssuesRequest::new(variables())).pager().collect_all().await.unwrap_err();
+    assert_eq!(incomplete.reason, IncompleteReason::HttpError);
+    assert_eq!(incomplete.items, [Issue { number: 1 }], "partial data never joins the collected items");
+    let Some(PagerError::Api { error, .. }) = &incomplete.error else { panic!("{incomplete:?}") };
+    let ErrorKind::Declared(GraphQlOperationError::GraphQl(failure)) = &error.kind else { panic!("{error:?}") };
+    assert_eq!(failure.errors[0].other["type"], "RATE_LIMITED");
+}
+
+/// R43: every sniff check-status fixture through the generated operation,
+/// with the HTTP status and JSON content type the fixture table assigns.
+#[tokio::test]
+async fn check_status_parity_preserves_every_sniff_fixture() {
+    use schematic_schema::fixture_graphql::{CheckStatusParityRequest, FixtureGraphQl, ParityData, ParityVars};
+    use schematic_schema::schematic_runtime::{GraphQlFailure, GraphQlOperationError};
+    let fixture = |name: &str| std::env::var(format!("CHECK_STATUS_{}", name.to_uppercase())).expect("the parent passes every fixture");
+    let server = MockServer::start().await;
+    let client = FixtureGraphQl::new().base_url(server.uri()).build().unwrap();
+    let request = || CheckStatusParityRequest::new(ParityVars { owner: "acme".into(), name: "project".into(), n0: 7, n1: 8, n2: 9 });
+    let succeed = |name: &'static str| {
+        let (client, server) = (&client, &server);
+        async move {
+            reply(server, "/graphql", ResponseTemplate::new(200).set_body_raw(fixture(name), "application/json")).await;
+            let response = client.send(request()).full().await.expect("a response");
+            response.into_result().unwrap_or_else(|error| panic!("{name}: {error}"))
+        }
+    };
+    let fail = |name: &'static str, status: u16| {
+        let (client, server) = (&client, &server);
+        async move {
+            reply(server, "/graphql", ResponseTemplate::new(status).set_body_raw(fixture(name), "application/json")).await;
+            client.send(request()).full().await.expect("a response").into_result().expect_err(name)
+        }
+    };
+    let graphql = |error: &schematic_schema::schematic_runtime::ApiError<GraphQlOperationError<ParityData, schematic_schema::schematic_runtime::NoDeclaredError>>| -> GraphQlFailure<ParityData> {
+        match &error.kind {
+            ErrorKind::Declared(GraphQlOperationError::GraphQl(failure)) => failure.clone(),
+            other => panic!("expected a GraphQL failure, got {other:?}"),
+        }
+    };
+
+    let success = succeed("success").await;
+    let body: serde_json::Value = serde_json::from_slice(&only_request(&server).await.body).unwrap();
+    assert_eq!(body, serde_json::json!({"query": CheckStatusParityRequest::DOCUMENT,
+        "variables": {"owner": "acme", "name": "project", "n0": 7, "n1": 8, "n2": 9}}), "sniff's document and variables, unnamed");
+    let repository = success.repository.expect("success has a repository");
+    let failing = repository.p1.expect("p1").commits.nodes[0].commit.status_check_rollup.clone().expect("rollup");
+    assert!(failing.contexts.check_run_counts_by_state.iter().any(|count| count.state == "FAILURE"), "{failing:?}");
+    assert!(repository.p2.is_some());
+
+    let passed = succeed("passed").await.repository.expect("passed has a repository");
+    assert!(passed.p1.is_none() && passed.p2.is_none(), "absent lookups decode as None");
+    let changed = succeed("changed_head").await.repository.unwrap().p0.unwrap();
+    assert_eq!(changed.commits.nodes[0].commit.oid, "fedcba9876543210fedcba9876543210fedcba98", "a changed head is domain data");
+    let null_rollup = succeed("null_rollup").await.repository.unwrap().p0.unwrap();
+    assert_eq!(null_rollup.commits.nodes[0].commit.status_check_rollup, None, "a null rollup is domain data");
+
+    let partial = fail("partial_errors", 200).await;
+    let failure = graphql(&partial);
+    assert_eq!(failure.errors[0].other["type"], "NOT_FOUND");
+    let partial_data = failure.partial_data.expect("usable partial data").repository.expect("repository");
+    assert!(partial_data.p0.is_some() && partial_data.p1.is_none());
+    assert_eq!(partial.body.as_ref(), fixture("partial_errors").as_bytes(), "the raw body is kept");
+
+    for name in ["request_wide_errors", "rate_limit"] {
+        let error = fail(name, 200).await;
+        let failure = graphql(&error);
+        let expected: serde_json::Value = serde_json::from_str(&fixture(name)).unwrap();
+        assert_eq!(failure.errors[0].message, expected["errors"][0]["message"], "{name}");
+        assert_eq!(failure.errors[0].other["type"], expected["errors"][0]["type"], "{name}: GitHub's type is kept");
+        assert_eq!(error.body.as_ref(), fixture(name).as_bytes(), "{name}");
+    }
+
+    let permission = fail("permission_failure", 403).await;
+    assert!(matches!(permission.kind, ErrorKind::Undeclared), "a 403 takes the HTTP path, not the wrapper: {permission}");
+    assert_eq!(permission.body.as_ref(), fixture("permission_failure").as_bytes(), "the raw permission body is kept");
+}
+
+#[tokio::test]
+async fn graphql_sends_report_their_credential_and_keep_unparsed_documents_and_transport_failures_apart() {
+    use schematic_schema::fixture_graphql::{DraftRequest, FixtureGraphQl, ViewerRequest};
+    use schematic_schema::schematic_runtime::Credential;
+    let server = MockServer::start().await;
+    reply(&server, "/graphql", ResponseTemplate::new(200).set_body_raw(r#"{"errors":[{"message":"Syntax Error","locations":[{"line":1,"column":30}]}]}"#, "application/json")).await;
+    let client = FixtureGraphQl::new().base_url(server.uri()).env_order(["SCHEMATIC_FIXTURE_UNSET_KEY_7F3A"]).build().unwrap();
+
+    let response = client.send(DraftRequest::new()).full().await.expect("a GraphQL failure is a received response");
+    assert_eq!(response.meta.request.auth, AuthMethod::Anonymous, "no credential resolves, so the operation is sent anonymously");
+    let request = only_request(&server).await;
+    assert!(header(&request, "authorization").is_empty());
+    let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+    assert_eq!(body, serde_json::json!({"query": "mutation { draft(title: \"unterminated"}), "an invalid document is sent unchanged");
+    let error = response.into_result().expect_err("into_result surfaces the GraphQL failure");
+    assert!(error.declared().is_some(), "{error}");
+
+    reply(&server, "/graphql", ResponseTemplate::new(200).set_body_raw(r#"{"data":{"viewer":{"login":"me"}}}"#, "application/json")).await;
+    let response = client.send(ViewerRequest::new()).credential(Credential::access_token("tok")).full().await.unwrap();
+    assert_eq!(response.meta.request.auth, AuthMethod::PerCall);
+    assert_eq!(header(&only_request(&server).await, "authorization"), ["Bearer tok"]);
+
+    let unreachable = FixtureGraphQl::new().base_url("http://127.0.0.1:1").build().unwrap();
+    let outer = unreachable.send(ViewerRequest::new()).full().await;
+    assert!(outer.is_err(), "the outer result carries transport failures only");
+}
 "##;
 
 /// Environment for the child test process; see [`REQUEST_SIDE_TEST`].
@@ -1961,7 +2227,54 @@ const REQUEST_SIDE_TESTS: &[&str] = &[
     "declared_errors_decode_by_the_most_specific_status_and_opt_outs_stay_undeclared",
     "graphql_operations_post_their_document_to_the_address_the_rules_derive",
     "graphql_errors_and_http_errors_reach_the_composite_failure",
+    "a_generated_relay_pager_pages_data_and_stops_at_graphql_errors",
+    "check_status_parity_preserves_every_sniff_fixture",
+    "graphql_sends_report_their_credential_and_keep_unparsed_documents_and_transport_failures_apart",
 ];
+
+/// Renders a `format!` template whose arguments are all named in `args`:
+/// `{{` and `}}` are literal braces, `{name}` is replaced.
+fn render_format(template: &str, args: &[(&str, String)]) -> String {
+    let mut out = String::new();
+    let mut rest = template;
+    while let Some(index) = rest.find(['{', '}']) {
+        out.push_str(&rest[..index]);
+        rest = &rest[index..];
+        if rest.starts_with("{{") || rest.starts_with("}}") {
+            out.push_str(&rest[..1]);
+            rest = &rest[2..];
+        } else {
+            let end = rest.find('}').expect("a closed argument");
+            let name = &rest[1..end];
+            out.push_str(&args.iter().find(|(arg, _)| *arg == name).unwrap_or_else(|| panic!("no argument {name}")).1);
+            rest = &rest[end + 1..];
+        }
+    }
+    out + rest
+}
+
+/// R43 uses sniff's own query: re-derive `batch_query(3)` from the source
+/// of `sniff/lib/src/remote/check_status.rs` and compare it with the
+/// fixture's document, so a change to sniff's query fails here.
+#[test]
+fn the_parity_document_is_sniffs_check_status_query() {
+    let source = include_str!("../../../../sniff/lib/src/remote/check_status.rs").replace("\r\n", "\n");
+    let function = source.split("pub(crate) fn batch_query(count: usize) -> String {").nth(1).expect("sniff declares batch_query")
+        .split("\n}\n").next().unwrap();
+    let variable = r#"format!(",$n{index}:Int!")"#;
+    let lookup = r#"format!("p{index}:pullRequest(number:$n{index}){{...F}}")"#;
+    assert!(function.contains(variable) && function.contains(lookup), "sniff's per-lookup formats changed:\n{function}");
+    // The query template: a string literal whose `\` line continuations
+    // drop the newline and the next line's indentation.
+    let literal = function.split("format!(\n        \"").nth(1).expect("the query format").split("\"\n    )").next().unwrap();
+    let template: String = literal.split("\\\n").map(str::trim_start).collect();
+    let count = 3;
+    let args = |index: usize| [("index", index.to_string())];
+    let variables: String = (0..count).map(|index| render_format(&variable[9..variable.len() - 2], &args(index))).collect();
+    let lookups: String = (0..count).map(|index| render_format(&lookup[9..lookup.len() - 2], &args(index))).collect();
+    let document = render_format(&template, &[("variables", variables), ("lookups", lookups)]);
+    assert_eq!(document, CHECK_STATUS_DOCUMENT);
+}
 
 #[test]
 fn request_side_test_list_names_every_child_test() {
@@ -1969,7 +2282,7 @@ fn request_side_test_list_names_every_child_test() {
         .split("async fn ")
         .skip(1)
         .filter_map(|rest| rest.split('(').next())
-        .filter(|name| !["start_server", "only_request", "assert_nothing_sent", "reply"].contains(name))
+        .filter(|name| !["start_server", "only_request", "assert_nothing_sent", "reply", "relay_server"].contains(name))
         .collect();
     assert_eq!(declared, REQUEST_SIDE_TESTS);
 }
@@ -2054,6 +2367,18 @@ fn slow_fixture_apis_compile_and_send_offline() {
     fresh.add_test_file("request_side", REQUEST_SIDE_TEST);
     let mut env = FIXTURE_ENV.to_vec();
     env.push(("FIXTURE_SECOND_ORIGIN", second_origin.url.as_str()));
+    // R43: sniff's frozen check-status fixtures, read here so the CI input
+    // index sees each file, and handed to the child test unchanged.
+    env.extend([
+        ("CHECK_STATUS_SUCCESS", include_str!("../../../../sniff/lib/tests/fixtures/remote/graphql_check_status/success.json")),
+        ("CHECK_STATUS_PASSED", include_str!("../../../../sniff/lib/tests/fixtures/remote/graphql_check_status/passed.json")),
+        ("CHECK_STATUS_CHANGED_HEAD", include_str!("../../../../sniff/lib/tests/fixtures/remote/graphql_check_status/changed_head.json")),
+        ("CHECK_STATUS_NULL_ROLLUP", include_str!("../../../../sniff/lib/tests/fixtures/remote/graphql_check_status/null_rollup.json")),
+        ("CHECK_STATUS_PARTIAL_ERRORS", include_str!("../../../../sniff/lib/tests/fixtures/remote/graphql_check_status/partial_errors.json")),
+        ("CHECK_STATUS_REQUEST_WIDE_ERRORS", include_str!("../../../../sniff/lib/tests/fixtures/remote/graphql_check_status/request_wide_errors.json")),
+        ("CHECK_STATUS_RATE_LIMIT", include_str!("../../../../sniff/lib/tests/fixtures/remote/graphql_check_status/rate_limit.json")),
+        ("CHECK_STATUS_PERMISSION_FAILURE", include_str!("../../../../sniff/lib/tests/fixtures/remote/graphql_check_status/permission_failure.json")),
+    ]);
     let run = fresh.nextest_run(&env);
     run.assert_success();
     let report = format!("{}{}", run.stdout, run.stderr);
@@ -2151,6 +2476,12 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
         "fn misuse() { let _ = schematic_schema::fixture_graphql::CheckStatusRequest::new(schematic_schema::fixture_graphql::Login::default()); }",
         "E0308",
         "CheckVars",
+    ),
+    (
+        "an unauthored pager knob on a GraphQL operation",
+        "fn misuse() { let c = schematic_schema::fixture_graphql::FixtureGraphQl::new(); let _ = c.send(schematic_schema::fixture_graphql::IssuesRequest::new(Default::default())).pager().after(String::new()); }",
+        "E0277",
+        "IssuesRequest",
     ),
     (
         "a mutator on an SSE/NDJSON stream endpoint",
@@ -2507,6 +2838,9 @@ fn slow_generated_types_reject_misuse_at_compile_time() {
             .mutate_response::<schematic_schema::fixture_shapes::SubmitRequest, _>(|_, _: &mut schematic_schema::fixture_shapes::SubmitResponse| Ok(()));
         let _ = schematic_schema::fixture_graphql::FixtureGraphQl::new()
             .mutate_response::<schematic_schema::fixture_graphql::ViewerRequest, _>(|_, _: &mut schematic_schema::fixture_graphql::ViewerData| Ok(()));
+        // A Relay operation's authored knob compiles.
+        let graphql = schematic_schema::fixture_graphql::FixtureGraphQl::new();
+        let _ = graphql.send(schematic_schema::fixture_graphql::IssuesRequest::new(Default::default())).pager().page_size(10);
         // An all-optional request keeps `Default`; a required query value
         // goes through `new()`.
         fn needs_default<T: Default>() {}

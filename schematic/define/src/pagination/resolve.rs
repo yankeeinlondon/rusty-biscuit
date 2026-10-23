@@ -86,8 +86,8 @@ impl Resolution {
 
 /// Resolves `endpoint`'s pagination within `api`.
 ///
-/// The endpoint collection decides first. Without one, a GET whose response
-/// is an explicit `Vec<T>` inherits the API default or stays unpaginated.
+/// The endpoint collection decides first. Without one, a GET whose only
+/// success shape is JSON typed as an explicit `Vec<T>` inherits the API default or stays unpaginated.
 /// Aliases and opaque responses require an explicit collection.
 pub fn resolve(api: &RestApi, endpoint: &Endpoint) -> Resolution {
     let Some(collection) = endpoint.pagination.as_ref() else {

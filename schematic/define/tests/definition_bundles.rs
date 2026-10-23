@@ -643,6 +643,8 @@ fn cells() -> Vec<(&'static str, Edit, Expect)> {
         ("variables null", Set("/api/graphql/operations/1/variables", Value::Null), Fails("/api/graphql/operations/1/variables: explicit null")),
         ("variables empty descriptor", Set("/api/graphql/operations/1/variables", json!({})), Fails("expected value")),
         ("variables dangling", Set("/api/graphql/operations/0/variables/Typed/Named", json!("Gone")), Fails("Fixture operation Issues: unresolved schema reference \"Gone\"")),
+        ("variables require a pager input", Set("/api/schemas/9/schema/required", json!(["owner", "after"])),
+            Fails("Fixture operation Issues: pager-managed variable `after` must be optional in the variables type")),
         ("variables not an object", Set("/api/graphql/operations/0/variables/Typed", json!({"Array": {"Named": "IssuesVars"}})), Fails("variables must be a named type or map")),
         ("data absent", Remove("/api/graphql/operations/0/data"), Fails("missing field `data`")),
         ("data null", Set("/api/graphql/operations/0/data", Value::Null), Fails("/api/graphql/operations/0/data: explicit null")),

@@ -15,6 +15,7 @@ mod envelope;
 mod error_routes;
 mod graphql;
 mod graphql_address;
+mod graphql_pager;
 mod hooks;
 mod metadata_boundary;
 mod origin_policy;

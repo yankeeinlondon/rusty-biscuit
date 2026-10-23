@@ -195,8 +195,8 @@ pub struct RestApi {
     pub secret_names: Vec<String>,
     /// Strategy inherited by every list endpoint without an endpoint override.
     ///
-    /// `None` leaves lists unpaginated. A GET endpoint whose response is an
-    /// explicit `Vec<T>` is a list automatically; any other list needs an endpoint collection. See [`crate::pagination::resolve`].
+    /// `None` leaves lists unpaginated. A GET endpoint whose only success
+    /// shape is JSON typed as an explicit `Vec<T>` is a list automatically; any other list needs an endpoint collection. See [`crate::pagination::resolve`].
     pub default_pagination: Option<Strategy>,
     /// Rate-limit headers for every endpoint without its own
     /// [`Endpoint::rate_limit`]. Descriptive only; nothing enforces it.
