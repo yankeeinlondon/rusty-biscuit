@@ -594,6 +594,39 @@ for reference and never authorizes another removal. Its journals are deleted
 once `report.json` lists every journal entry; if the entries could not be
 read, the journals are kept and `wt remove` warns.
 
+### How long records are kept
+
+A finished removal's folder is deleted once it is more than **14 days** old.
+A pending one is kept until it finishes, however old, because its journal is
+the only list of what is left in the moved checkout.
+
+```mermaid
+flowchart LR
+    S[wt remove starts] --> L{each folder in wt-removal/}
+    L -->|pending, or its record can't be read| K[keep]
+    L -->|finished 14 days ago or less| K
+    L -->|finished more than 14 days ago, not in use| D[delete]
+    L -->|.id.tmp left by a crash, older than 14 days| D
+    L -->|locks/ and anything else| K
+```
+
+- **When:** every `wt remove` (and the shell wrapper's `wt remove --handoff`)
+  checks the store before it looks up the name you typed. `wt list` reads
+  the store but never deletes anything from it.
+- **Age:** a finished removal's age is measured from the last event in its
+  `report.json` `timeline`. If the report is missing, can't be read, or has
+  no events, the folder's modification time is used instead. Exactly 14 days
+  old, or dated in the future, is kept.
+- **In use:** a folder is deleted only while `wt` holds the lock for the
+  worktree its record names, taken without waiting. If another `wt remove`
+  holds that lock, the folder waits for a later run.
+- **Quiet:** cleanup prints nothing and never changes the exit status. A
+  folder that can't be deleted (a link, a permission problem) is skipped and
+  tried again on the next run.
+- **Safe to interrupt:** a finished removal is renamed to a hidden
+  `.<operation-id>.expired` folder before it is deleted, so an interrupted
+  deletion never looks like a pending removal; the next run finishes it.
+
 `report.json` describes the whole removal, not only the last run of it:
 
 - `journal` counts and `journal_entries` cover every attempt. Each entry

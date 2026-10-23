@@ -14,6 +14,10 @@
 //! with the current journal (see [`store::Operation::journal_entries`]), and
 //! the completed report lists every entry before the journals are deleted.
 //!
+//! "Kept after completion" lasts 14 days: the next `wt remove` after that
+//! deletes the whole folder ([`store::RecoveryStore::prune_completed`]). A
+//! pending operation is never deleted that way.
+//!
 //! The store lives in the common Git directory, outside both checkout paths
 //! and outside the target's own worktree record, which removal deletes.
 //! [`lock`] keys an OS-held lock on that record; [`store`] ties them together.

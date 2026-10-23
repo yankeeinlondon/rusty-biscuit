@@ -50,15 +50,12 @@ fsevent-sys = "4.1"
 [target.'cfg(windows)'.dependencies]
 # The quarantine move's no-replacement rename (`SetFileInformationByHandle`)
 # and its `FileIdInfo` directory identity; `wt remove`'s activity observer
-# (`ReadDirectoryChangesW` with overlapped reads and events); the system
-# directory (`GetSystemDirectoryW`) that Windows Search's processes must run
-# from for the usage check's one recheck.
+# (`ReadDirectoryChangesW` with overlapped reads and events).
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
-    "Win32_System_SystemInformation",
     "Win32_System_Threading",
 ] }
 
@@ -66,6 +63,7 @@ windows-sys = { version = "0.61", features = [
 count-git = []
 
 [dev-dependencies]
+filetime = "0.2"
 serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 tempfile = "3"

@@ -570,5 +570,9 @@ pub(crate) mod fault {
     }
 }
 
+mod retention;
+
+pub use retention::RETENTION;
+
 #[cfg(test)]
 mod tests;

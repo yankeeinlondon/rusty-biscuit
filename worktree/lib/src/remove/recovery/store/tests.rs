@@ -822,3 +822,277 @@ fn a_discarded_operation_is_never_left_pending_without_its_journal() {
     assert!(!dir.exists());
     assert!(!f.store.root().join(format!(".{}.discarded", other.operation_id)).exists());
 }
+
+// Retention of finished operations (`prune_completed`). Every case runs on a
+// fixed clock and backdates folders with `filetime`; nothing sleeps.
+
+const DAY_MS: u64 = 24 * 60 * 60 * 1000;
+const NOW_MS: u64 = 1_900_000_000_000;
+
+fn now() -> std::time::SystemTime {
+    std::time::UNIX_EPOCH + std::time::Duration::from_millis(NOW_MS)
+}
+
+/// Sets `path`'s modification time to `NOW_MS - age_ms`.
+fn backdate(path: &Path, age_ms: u64) {
+    let at = std::time::UNIX_EPOCH + std::time::Duration::from_millis(NOW_MS - age_ms);
+    filetime::set_file_mtime(path, filetime::FileTime::from_system_time(at)).unwrap();
+}
+
+/// A completed operation on worktree record `admin` whose saved report's
+/// timeline holds `events` (Unix milliseconds), in order. Its folder's
+/// modification time is set to `NOW_MS - dir_age_ms`.
+fn completed(f: &Fixture, admin: &str, events: &[u64], dir_age_ms: u64) -> PathBuf {
+    use crate::remove::outcome::{Step, StepResult, TimelineEvent};
+    let saved = record(f, admin);
+    let op = begin(f, saved.clone());
+    let dir = op.dir().to_path_buf();
+    let mut report = OperationReport::new(Some(saved.operation_id.clone()), RemovalOutcome::Removed, saved.original.clone());
+    report.timeline = events
+        .iter()
+        .map(|&at_ms| TimelineEvent { at_ms, step: Step::Moved, result: StepResult::Succeeded, detail: None })
+        .collect();
+    assert_eq!(op.complete(&report, true).unwrap(), Vec::new());
+    backdate(&dir, dir_age_ms);
+    dir
+}
+
+/// A completed operation finished `age_ms` ago by its report, in a folder
+/// last modified just now.
+fn finished_ago(f: &Fixture, admin: &str, age_ms: u64) -> PathBuf {
+    completed(f, admin, &[NOW_MS - age_ms], 0)
+}
+
+/// A staging folder `begin` never published, last modified `age_ms` ago.
+fn staging(f: &Fixture, age_ms: u64) -> PathBuf {
+    let dir = f.store.root().join(format!(".{}.tmp", OperationId::generate().unwrap()));
+    storage::create_private_dir(&dir).unwrap();
+    storage::write_durable(&dir.join(RECORD_FILE), b"{}").unwrap();
+    backdate(&dir, age_ms);
+    dir
+}
+
+/// Names in the store root, sorted.
+fn store_names(f: &Fixture) -> Vec<String> {
+    let mut names: Vec<String> =
+        fs::read_dir(f.store.root()).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    names
+}
+
+fn name_of(path: &Path) -> String {
+    path.file_name().unwrap().to_string_lossy().into_owned()
+}
+
+/// The success criterion's store: of a completed operation finished 15 days
+/// ago, one finished 13 days ago, one pending for 30 days, a 15-day-old
+/// staging folder, and an expired completed one whose lock is held, only the
+/// first and the staging folder go.
+#[test]
+fn retention_deletes_only_expired_unlocked_completed_operations_and_old_staging() {
+    let f = fixture();
+    let expired = finished_ago(&f, "wt1", 15 * DAY_MS);
+    let recent = finished_ago(&f, "wt2", 13 * DAY_MS);
+    let pending_record = record(&f, "wt3");
+    let pending = begin(&f, pending_record.clone()).dir().to_path_buf();
+    backdate(&pending, 30 * DAY_MS);
+    let stale_staging = staging(&f, 15 * DAY_MS);
+    let locked = finished_ago(&f, "wt4", 15 * DAY_MS);
+    let lock = f.store.lock(&binding(&f, "wt4")).unwrap();
+
+    f.store.prune_completed(now());
+
+    let mut kept = vec![name_of(&recent), name_of(&pending), name_of(&locked), LOCKS_DIR.to_string()];
+    kept.sort();
+    assert_eq!(store_names(&f), kept, "only {} and {} go", name_of(&expired), name_of(&stale_staging));
+    assert!(f.store.read_record(&pending_record.operation_id).is_ok(), "the pending record is untouched");
+    assert_eq!(f.store.pending().unwrap().len(), 1);
+
+    drop(lock);
+    f.store.prune_completed(now());
+    assert!(!locked.exists(), "the lock was the only reason it stayed");
+    assert!(recent.exists() && pending.exists());
+}
+
+#[test]
+fn retention_keeps_exactly_fourteen_days_and_future_completions() {
+    let f = fixture();
+    let boundary = finished_ago(&f, "wt1", 14 * DAY_MS);
+    let past_boundary = finished_ago(&f, "wt2", 14 * DAY_MS + 1);
+    let future = completed(&f, "wt3", &[NOW_MS + DAY_MS], 30 * DAY_MS);
+
+    f.store.prune_completed(now());
+
+    assert!(boundary.exists(), "exactly 14 days is kept");
+    assert!(!past_boundary.exists(), "one millisecond more is not");
+    assert!(future.exists(), "a completion after now is kept, whatever the folder's age");
+}
+
+/// The last timeline event dates completion: not the latest event, and not
+/// the folder's modification time.
+#[test]
+fn retention_dates_completion_by_the_last_timeline_event() {
+    let f = fixture();
+    let last_is_old = completed(&f, "wt1", &[NOW_MS - 13 * DAY_MS, NOW_MS - 15 * DAY_MS], 0);
+    let last_is_recent = completed(&f, "wt2", &[NOW_MS - 30 * DAY_MS, NOW_MS - 13 * DAY_MS], 30 * DAY_MS);
+
+    f.store.prune_completed(now());
+
+    assert!(!last_is_old.exists(), "the last event is 15 days old though an earlier one is 13 and the folder is new");
+    assert!(last_is_recent.exists(), "the last event is 13 days old though the folder is 30");
+}
+
+/// A report that is missing, malformed, or has no timeline events falls back
+/// to the folder's modification time.
+#[test]
+fn retention_falls_back_to_the_folder_time_when_the_report_cannot_date_completion() {
+    let f = fixture();
+    let mut cases = Vec::new();
+    for (n, edit) in ["missing", "malformed", "empty timeline", "not an object"].into_iter().enumerate() {
+        for (age, expect_kept) in [(15 * DAY_MS, false), (13 * DAY_MS, true)] {
+            let admin = format!("wt-{n}-{}", age / DAY_MS);
+            let events: &[u64] = match edit {
+                "empty timeline" => &[],
+                _ => &[NOW_MS],
+            };
+            let dir = completed(&f, &admin, events, 0);
+            let report = dir.join(REPORT_FILE);
+            match edit {
+                "missing" => fs::remove_file(&report).unwrap(),
+                "malformed" => storage::write_durable(&report, b"{\"timeline\": [").unwrap(),
+                "not an object" => storage::write_durable(&report, b"[1, 2]").unwrap(),
+                _ => {}
+            }
+            backdate(&dir, age);
+            cases.push((edit, age / DAY_MS, dir, expect_kept));
+        }
+    }
+
+    f.store.prune_completed(now());
+
+    for (edit, days, dir, expect_kept) in cases {
+        assert_eq!(dir.exists(), expect_kept, "{edit}, folder {days} days old");
+    }
+}
+
+/// Only a readable record marked completed lets an operation go: a pending
+/// one and one whose record cannot be read are kept however old.
+#[test]
+fn retention_never_expires_a_pending_or_unreadable_record() {
+    let f = fixture();
+    let pending = begin(&f, record(&f, "wt1")).dir().to_path_buf();
+    backdate(&pending, 365 * DAY_MS);
+    let foreign = finished_ago(&f, "wt3", 30 * DAY_MS);
+    let unreadable = finished_ago(&f, "wt2", 30 * DAY_MS);
+    // Corrupted only now: `begin` refuses while any record is unreadable.
+    let mut other_id = f.store.read_record(&OperationId::parse(&name_of(&foreign)).unwrap()).unwrap();
+    other_id.operation_id = OperationId::generate().unwrap();
+    storage::write_durable(&foreign.join(RECORD_FILE), &other_id.to_json()).unwrap();
+    storage::write_durable(&unreadable.join(RECORD_FILE), b"{\"record_version\": 1").unwrap();
+    backdate(&unreadable, 30 * DAY_MS);
+    backdate(&foreign, 30 * DAY_MS);
+
+    f.store.prune_completed(now());
+
+    assert!(pending.exists());
+    assert!(unreadable.exists(), "an unreadable record could be pending");
+    assert!(foreign.exists(), "a record naming another operation is not this folder's");
+}
+
+/// Young staging folders, the locks, discarded folders, other names, files,
+/// and a staging name that is a file are all left alone.
+#[test]
+fn retention_leaves_everything_that_is_not_an_operation_or_old_staging() {
+    let f = fixture();
+    let young = staging(&f, 13 * DAY_MS);
+    let id = || OperationId::generate().unwrap();
+    let others = [
+        f.store.root().join("notes"),
+        f.store.root().join(format!(".{}.discarded", id())),
+        f.store.root().join(format!(".{}.tmp.extra", id())),
+        f.store.root().join(".not-an-id.tmp"),
+    ];
+    for dir in &others {
+        storage::create_private_dir(dir).unwrap();
+        backdate(dir, 30 * DAY_MS);
+    }
+    let staging_file = f.store.root().join(format!(".{}.tmp", id()));
+    storage::write_durable(&staging_file, b"x").unwrap();
+    backdate(&staging_file, 30 * DAY_MS);
+    let loose = f.store.root().join("loose.json");
+    storage::write_durable(&loose, b"x").unwrap();
+    drop(f.store.lock(&binding(&f, "wt1")).unwrap());
+    let before = store_names(&f);
+
+    f.store.prune_completed(now());
+
+    assert_eq!(store_names(&f), before);
+    assert!(young.exists() && f.store.root().join(LOCKS_DIR).join(format!("{}.lock", lock::key_for("wt1".as_ref()))).exists());
+}
+
+/// A link named as an operation or as staging is never followed: its target
+/// survives even when it is an expired completed operation.
+#[test]
+fn retention_never_follows_a_link() {
+    let f = fixture();
+    let expired = finished_ago(&f, "wt1", 30 * DAY_MS);
+    let moved = f.common.join("elsewhere");
+    fs::rename(&expired, &moved).unwrap();
+    let old_staging = staging(&f, 30 * DAY_MS);
+    let staging_target = f.common.join("staging-elsewhere");
+    fs::rename(&old_staging, &staging_target).unwrap();
+    if symlink_dir(&moved, &expired).is_err() || symlink_dir(&staging_target, &old_staging).is_err() {
+        // Windows without symlink privilege cannot build this fixture.
+        return;
+    }
+
+    f.store.prune_completed(now());
+
+    assert!(fs::symlink_metadata(&expired).is_ok() && fs::symlink_metadata(&old_staging).is_ok(), "the links stay");
+    assert!(moved.join(RECORD_FILE).is_file() && staging_target.join(RECORD_FILE).is_file(), "their targets are untouched");
+}
+
+#[cfg(unix)]
+fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(windows)]
+fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_dir(target, link)
+}
+
+/// A deletion that fails is skipped without stopping the others. The folder
+/// it left is no longer named as an operation, so it never reads as an
+/// unreadable pending record, and the next call finishes it.
+#[cfg(unix)]
+#[test]
+fn a_failed_deletion_is_skipped_and_finished_on_the_next_run() {
+    use std::os::unix::fs::PermissionsExt;
+    // SAFETY: `geteuid` has no preconditions.
+    if unsafe { libc::geteuid() } == 0 {
+        // Root ignores the permission that makes the deletion fail.
+        return;
+    }
+    let f = fixture();
+    let stuck = finished_ago(&f, "wt1", 30 * DAY_MS);
+    let protected = stuck.join("protected");
+    fs::create_dir(&protected).unwrap();
+    fs::write(protected.join("f"), b"x").unwrap();
+    fs::set_permissions(&protected, fs::Permissions::from_mode(0o500)).unwrap();
+    let other = finished_ago(&f, "wt2", 30 * DAY_MS);
+    let stuck_id = name_of(&stuck);
+
+    f.store.prune_completed(now());
+
+    assert!(!other.exists(), "the other expired operation still goes");
+    assert!(!stuck.exists());
+    let leftover = f.store.root().join(format!(".{stuck_id}.expired"));
+    assert!(leftover.is_dir(), "the cut-short deletion is left hidden: {:?}", store_names(&f));
+    assert!(f.store.pending().unwrap().is_empty(), "and never reads as pending");
+    drop(begin(&f, record(&f, "wt3")));
+
+    fs::set_permissions(leftover.join("protected"), fs::Permissions::from_mode(0o700)).unwrap();
+    f.store.prune_completed(now());
+    assert!(!leftover.exists());
+}

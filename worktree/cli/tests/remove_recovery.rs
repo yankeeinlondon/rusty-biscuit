@@ -449,3 +449,107 @@ fn a_retry_with_new_work_beside_files_the_removal_already_deleted_refuses() {
     assert!(fixture.branch_exists("feat/x"));
     assert_eq!(fixture.pending(), 1);
 }
+
+// Retention of finished removals: the cleanup runs at the start of both
+// `wt remove` entry points, prints nothing, and `wt list` never runs it.
+
+const DAY_MS: u64 = 24 * 60 * 60 * 1000;
+
+impl Fixture {
+    /// `wt <args>` from the base checkout with a private home and cache,
+    /// non-interactive and wrapper-less.
+    fn wt(&self, args: &[&str]) -> Output {
+        let home = self.root.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        Command::new(assert_cmd::cargo::cargo_bin("wt"))
+            .current_dir(self.repo())
+            .args(args)
+            .env("HOME", &home)
+            .env("XDG_CACHE_HOME", home.join("cache"))
+            .env_remove("WT_SHELL_WRAPPER")
+            .env_remove("CI")
+            .env_remove("COMPLETE")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("NO_COLOR", "1")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    }
+
+    /// Removes a fresh worktree to completion and backdates its saved
+    /// report's last timeline event by `age_days`. Returns its operation
+    /// directory.
+    fn finished_removal(&self, branch: &str, dir_name: &str, age_days: u64) -> PathBuf {
+        let store = self.repo().join(".git").join("wt-removal");
+        let before: Vec<PathBuf> = operation_dirs(&store);
+        git(&self.repo(), &["worktree", "add", "-q", "-b", branch, self.wts().join(dir_name).to_str().unwrap(), "main"]);
+        let removed = self.wt(&["remove", dir_name]);
+        assert_eq!(removed.status.code(), Some(0), "{}", stderr_of(&removed));
+        let dir = operation_dirs(&store).into_iter().find(|dir| !before.contains(dir)).expect("the removal saved an operation");
+        let report_path = dir.join("report.json");
+        let mut report: serde_json::Value = serde_json::from_str(&fs::read_to_string(&report_path).unwrap()).unwrap();
+        let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+        let last = report["timeline"].as_array_mut().and_then(|events| events.last_mut()).expect("a timeline event");
+        last["at_ms"] = serde_json::json!(now_ms - age_days * DAY_MS);
+        // Rewritten in place, so the owner-only mode the store requires stays.
+        fs::write(&report_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+        dir
+    }
+}
+
+/// The operation directories (32 lowercase hex characters) under `store`.
+fn operation_dirs(store: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(store) else { return Vec::new() };
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            let name = path.file_name().unwrap().to_string_lossy();
+            name.len() == 32 && name.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+        .collect()
+}
+
+/// `wt remove` of a name that matches nothing deletes the expired finished
+/// removal before it resolves the name, keeps the recent one, and prints
+/// exactly what it prints with a clean store.
+#[test]
+fn remove_deletes_expired_finished_removals_first_and_silently() {
+    let (fixture, _) = Fixture::new("feat/x", "feat-x");
+    let expired = fixture.finished_removal("feat/old", "old", 15);
+    let recent = fixture.finished_removal("feat/new", "new", 13);
+
+    let with_expired = fixture.wt(&["remove", "no-such-worktree"]);
+
+    assert!(!expired.exists(), "the expired removal is gone before the name failed to resolve");
+    assert!(recent.exists(), "the recent removal is kept");
+    let control = fixture.wt(&["remove", "no-such-worktree"]);
+    assert_ne!(control.status.code(), Some(0), "{}", stderr_of(&control));
+    assert_eq!(with_expired.status.code(), control.status.code());
+    assert_eq!(String::from_utf8_lossy(&with_expired.stdout), String::from_utf8_lossy(&control.stdout));
+    assert_eq!(stderr_of(&with_expired), stderr_of(&control), "the cleanup printed nothing");
+}
+
+/// The shell wrapper's second run cleans up too, before it reads its handoff.
+#[test]
+fn a_handoff_run_deletes_expired_finished_removals() {
+    let (fixture, _) = Fixture::new("feat/x", "feat-x");
+    let expired = fixture.finished_removal("feat/old", "old", 15);
+
+    let handoff = fixture.wt(&["remove", "--handoff", &"0".repeat(32)]);
+
+    assert!(stderr_of(&handoff).contains("There is no pending removal for this handoff token"), "{}", stderr_of(&handoff));
+    assert!(!expired.exists());
+}
+
+/// `wt list` reads the store but never writes it, so it never cleans up.
+#[test]
+fn list_never_deletes_expired_finished_removals() {
+    let (fixture, _) = Fixture::new("feat/x", "feat-x");
+    let expired = fixture.finished_removal("feat/old", "old", 15);
+
+    let listed = fixture.wt(&["list"]);
+
+    assert_eq!(listed.status.code(), Some(0), "{}", stderr_of(&listed));
+    assert!(expired.join("record.json").is_file() && expired.join("report.json").is_file());
+}

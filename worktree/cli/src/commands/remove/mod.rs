@@ -28,6 +28,7 @@ pub mod recovery;
 mod report;
 pub mod usage;
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -49,7 +50,9 @@ use worktree::remove::lifecycle::{
     native_observation, release_unstarted, remove_checkout, resolve_target, resolve_target_in, resume, resume_consent,
 };
 use worktree::remove::outcome::{BranchState, BranchTarget};
+use worktree::remove::admin_entry::common_git_dir;
 use worktree::remove::recovery::record::BranchBinding;
+use worktree::remove::recovery::store::{RecoveryStore, STORE_DIR};
 use worktree::remove::remote::{
     Reinterpretation, RemoteState, delete_remote_branch, origin_url, preflight_remote_deletion, remote_destination,
 };
@@ -59,7 +62,7 @@ use worktree::remove::safety::{
 };
 use worktree::remove::missing::{MissingCheckout, MissingRefusal, remove_missing_record};
 use worktree::remove::repair::{self, RepairRefusal};
-use worktree::remove::usage::SniffUsage;
+use worktree::remove::usage::{OwnedHandles, ReportedUsage, SniffUsage, UsageClearance, UsageSource, check_usage};
 use worktree::remove::{
     CheckoutState, Inventory, PrepareRefusal, branch_tip, collect_inventory, prepare, remove_local_branch,
 };
@@ -150,6 +153,11 @@ struct Facts {
     /// The checkout and its registration are already gone
     /// ([`Resolution::CheckoutRemoved`]): only branch actions are left.
     branch_only: bool,
+    /// Who was using the checkout when the report was made, shown before
+    /// the question and passed to the removal as its usage check. `None`
+    /// when nothing was queried (no checkout, a handoff's second run) or the
+    /// query failed, which the removal's own query then reports.
+    usage: Option<UsageClearance>,
 }
 
 impl Facts {
@@ -197,6 +205,7 @@ impl Facts {
             excluded: 0,
             retry: None,
             branch_only: false,
+            usage: None,
         })
     }
 
@@ -230,6 +239,7 @@ impl Facts {
             excluded: 0,
             retry: None,
             branch_only: true,
+            usage: None,
         }
     }
 
@@ -349,6 +359,20 @@ impl SafetyContext {
     }
 }
 
+/// Deletes the removal store's expired finished operations
+/// ([`RecoveryStore::prune_completed`]), silently and only when the store
+/// exists. `wt list` reads the store too but never calls this: only a removal
+/// writes there.
+fn prune_recovery_store(base: &Path) {
+    let Ok(common) = common_git_dir(base) else { return };
+    if fs::symlink_metadata(common.join(STORE_DIR)).is_err() {
+        return;
+    }
+    if let Ok(store) = RecoveryStore::open(&common) {
+        store.prune_completed(SystemTime::now());
+    }
+}
+
 /// `wt remove <name>`.
 pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     let terminal = Terminal::default();
@@ -356,6 +380,7 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     // One listing finds the base checkout and resolves the name.
     let entries = worktree_entries()?;
     let base = resolve_worktree(&entries, "base")?.path;
+    prune_recovery_store(&base);
     let (entry, retry) = resolve(&terminal, &base, entries, name)?;
     if entry.is_main {
         return Err(WorktreeError::GitCommand(format!(
@@ -424,11 +449,20 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
         facts.reported = Some(fingerprint(&facts)?);
     }
     facts.assess(flags.force_remote);
+    // Part of what the user weighs before answering; it never stops the
+    // removal.
+    if facts.missing().is_none() && !facts.branch_only {
+        facts.usage = check_usage(&SniffUsage, &facts.entry.path, &OwnedHandles::default()).ok();
+    }
     if let Some(inspection) = &facts.retry {
         eprintln!();
         print(&terminal, retry_markup(inspection, facts.excluded));
     }
     eprintln!("{}", facts.render_report(&terminal));
+    if let Some(holders) = facts.usage.as_ref().and_then(usage::holders_markup) {
+        print(&terminal, holders);
+        eprintln!();
+    }
     if let Some(refusal) = unprovable_remote(facts.remote.as_ref()) {
         return Err(WorktreeError::RefusedToLoseWork(refusal + &facts.kept_link_note()));
     }
@@ -775,12 +809,17 @@ fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), W
         return execute_record_only(terminal, facts, actions);
     }
     let branches = branch_actions(facts, &actions);
-    let usage = SniffUsage;
+    // The report's query stands in for the removal's, so the checkout is
+    // queried once.
+    let usage: Box<dyn UsageSource> = match &facts.usage {
+        Some(clearance) => Box::new(ReportedUsage::new(&facts.entry.path, clearance.report.clone())),
+        None => Box::new(SniffUsage),
+    };
     // Opened only now: an interrupt while asking keeps its default effect.
     let window = interrupt::Window::open();
     let interrupted = || window.interrupted();
     let env = Environment {
-        usage: &usage,
+        usage: usage.as_ref(),
         interrupted: &interrupted,
         observe: &native_observation,
         slow_startup: &|startup| print(terminal, recovery::slow_startup_markup(startup)),
@@ -1296,6 +1335,7 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
     // One listing finds the base checkout and the target.
     let entries = worktree_entries()?;
     let base = resolve_worktree(&entries, "base")?.path;
+    prune_recovery_store(&base);
 
     let record = handoff::handoff_path(&base, token)
         .and_then(|path| handoff::consume(&path, now()))

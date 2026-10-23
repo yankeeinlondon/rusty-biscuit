@@ -20,7 +20,7 @@ use sniff::filesystem::query::NativeString;
 
 use super::{
     Approval, Attempt, BranchActions, Boundary, Crashed, Environment, Hook, Presence, Refusal, Removal, ResumeConsent, Tree,
-    check_usage, confirm_unchanged, consent_state, event, explain_deletions, now_ms, preflight_runs, presence, recheck,
+    check_usage, confirm_unchanged, consent_state, event, holders_warning, explain_deletions, now_ms, preflight_runs, presence, recheck,
     registration_state, report_slow_startup, retained_entries,
 };
 use crate::availability::{self, EntryKind};
@@ -493,9 +493,7 @@ impl<'r, 'a> Resumed<'r, 'a> {
             retained_entries: inventory.entries().len() as u64,
             retained: Vec::new(),
         });
-        if let Some(search) = &clearance.search_recheck {
-            report.timeline.push(event(Step::Discovery, StepResult::Succeeded, Some(search.summary(true))));
-        }
+        let holders_warning = holders_warning(&clearance);
         report.discovery.extend(preflight_runs(discovered_at, self.record.quarantine.clone(), clearance));
         let mut attempt = match self.attempt(lock, Arc::clone(&inventory), report) {
             Ok(attempt) => attempt,
@@ -515,6 +513,7 @@ impl<'r, 'a> Resumed<'r, 'a> {
         for observed in early_activity {
             attempt.report.push_activity(observed);
         }
+        attempt.warnings.extend(holders_warning);
         attempt.warnings.append(&mut early_warnings);
         attempt.delete(observation, &binding, hook)
     }

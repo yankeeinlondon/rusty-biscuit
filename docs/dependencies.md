@@ -360,6 +360,9 @@
   without replacement and `FileIdInfo` directory identities.
   `std::fs::rename` is not used for it because it may replace an existing
   destination.
+  Its tests use `filetime` 0.2 (development only, already in the workspace
+  graph) to backdate folder modification times for the 14-day retention of
+  finished removals, instead of sleeping.
   `wt remove`'s activity observer uses `inotify` 0.11 (ISC, no default
   features, so no tokio stream) on Linux only, and `fsevent-sys` 4.1 (MIT,
   FSEvents and Core Foundation declarations, including
@@ -1735,6 +1738,12 @@ This is a Rust workspace with the following modules:
     _Async stream/future combinators. Used in `darkmatter/lib` browser-render tests to pump the `chromiumoxide` CDP handler stream._
 
     _Tags: testing, async, browser_
+
+- [filetime](https://github.com/alexcrichton/filetime) _v0.2_ [📄](https://docs.rs/filetime)
+
+    _Portable access to file and directory timestamps. Used by `worktree/lib` tests to backdate recovery-store folders for the removal retention rule._
+
+    _Tags: testing, filesystem, timestamps_
 
 - [insta](https://github.com/mitsuhiko/insta) _v1.41_ [📄](https://insta.rs)
 

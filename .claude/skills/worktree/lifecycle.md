@@ -166,7 +166,10 @@ registration from the admin `gitdir` (`registration_state`), then:
   journal_reported)` deletes the journals only once `report.journal_entries`
   lists them all.
 - **A completed record** is `StoreError::Completed` from `inspect`,
-  `resume`, and `reopen`, and `pending()` skips it.
+  `resume`, and `reopen`, and `pending()` skips it. Its folder is deleted by
+  the next `wt remove` once its report's last timeline event is more than 14
+  days old ([remove.md](remove.md), retention); a pending record is never
+  expired.
 
 ## How `wt remove` drives it (`cli/src/commands/remove/`)
 

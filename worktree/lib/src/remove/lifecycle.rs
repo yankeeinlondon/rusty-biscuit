@@ -1,5 +1,5 @@
-//! One contention-aware removal of a linked checkout, from the decisive usage
-//! query to the closed recovery record.
+//! One contention-aware removal of a linked checkout, from the usage query
+//! to the closed recovery record.
 //!
 //! [`remove_checkout`] runs the order `2026-10-05-graceful-file-contention`
 //! decides (its decision 8), each step through the module that owns it:
@@ -9,9 +9,9 @@
 //! 2. activity [`observation`](super::observation) starts and the
 //!    [`DeletionInventory`] is captured, so no window exists in which a new
 //!    writer is seen by neither;
-//! 3. the decisive [`check_usage`] runs, excluding only the observer's own
-//!    registered handles (and rechecking once when only Windows Search
-//!    held files);
+//! 3. [`check_usage`] runs, excluding only the observer's own registered
+//!    handles; holders are warnings, never a refusal (the CLI already
+//!    showed them before the question, and passes that report in);
 //! 4. the approval's bindings are read again (the branch tip and the consent
 //!    fingerprint), the inventory is confirmed against everything observed
 //!    so far, and the index is bound ([`bind_index`]);
@@ -423,8 +423,8 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
         Ok(clearance) => clearance,
         Err(refusal) => return refuse(Refusal::Usage(refusal)),
     };
-    let search_recheck = clearance.search_recheck.as_ref().map(|search| search.summary(true));
-    timeline.push(event(Step::Discovery, StepResult::Succeeded, search_recheck));
+    timeline.push(event(Step::Discovery, StepResult::Succeeded, None));
+    let holders_warning = holders_warning(&clearance);
 
     // After discovery and observation setup: the approval must still
     // describe the checkout.
@@ -484,6 +484,7 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
     for observed in early_activity {
         attempt.report.push_activity(observed);
     }
+    attempt.warnings.extend(holders_warning);
     attempt.warnings.append(&mut early_warnings);
     match moved {
         Ok(()) => {}
@@ -529,23 +530,36 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
     attempt.delete(observation, &binding, hook)
 }
 
-/// The report's runs for one preflight check that started at
-/// `discovered_at`: the decisive query, preceded by the first one when only
-/// Windows Search held files and the check rechecked.
+/// The report's run for the preflight check that started at
+/// `discovered_at`.
 fn preflight_runs(discovered_at: u64, path: NativeString, clearance: UsageClearance) -> Vec<DiscoveryRun> {
-    let mut runs = Vec::new();
-    let mut at_ms = discovered_at;
-    if let Some(recheck) = clearance.search_recheck {
-        runs.push(DiscoveryRun {
-            at_ms,
-            purpose: DiscoveryPurpose::WindowsSearchHold,
-            path: path.clone(),
-            result: DiscoveryResult::Report(Box::new(recheck.first)),
-        });
-        at_ms = ms(recheck.rechecked_at);
+    vec![DiscoveryRun {
+        at_ms: discovered_at,
+        purpose: DiscoveryPurpose::Preflight,
+        path,
+        result: DiscoveryResult::Report(Box::new(clearance.report)),
+    }]
+}
+
+/// The warning for processes using the checkout when it was removed, naming
+/// at most three; `None` when there were none.
+pub(crate) fn holders_warning(clearance: &UsageClearance) -> Option<String> {
+    let holders = &clearance.holders;
+    if holders.is_empty() {
+        return None;
     }
-    runs.push(DiscoveryRun { at_ms, purpose: DiscoveryPurpose::Preflight, path, result: DiscoveryResult::Report(Box::new(clearance.report)) });
-    runs
+    let named: Vec<String> = holders
+        .iter()
+        .take(3)
+        .map(|holder| match &holder.name {
+            Some(name) => format!("{} (PID {})", name.display(), holder.pid),
+            None => format!("PID {}", holder.pid),
+        })
+        .collect();
+    let more = holders.len().saturating_sub(named.len());
+    let rest = if more > 0 { format!(" and {more} more") } else { String::new() };
+    let verb = if holders.len() == 1 { "was" } else { "were" };
+    Some(format!("{}{rest} {verb} using the worktree when it was removed", named.join(", ")))
 }
 
 /// Refuses while any operation of the worktree record `admin_dir` is

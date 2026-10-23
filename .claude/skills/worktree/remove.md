@@ -372,6 +372,24 @@ the ones that cost time.
   one `fs4` lock file per worktree record (key: BLAKE3 of the admin directory
   name, 32 hex). A lock file is never deleted; only a held lock is an active
   operation.
+- **Retention (`store/retention.rs`, `RecoveryStore::prune_completed`):**
+  only a valid record at `Phase::Completed` may expire; a pending or
+  unreadable one never does. Never infer completion from the report's
+  `outcome`: a branch failure leaves `outcome: removed` with a pending
+  record. Age is the report's **last** `timeline` event (a permissive
+  `timeline[].at_ms`-only read, so every report version dates alike), else
+  the folder mtime; strictly more than 14 days. The record is reread under
+  `self.lock(&record.repository)` (taken without waiting) and the lock is
+  held through deletion. Only `run`/`run_handoff` call it, through
+  `prune_recovery_store`, never `open`/`pending`/`resolve_target_in`:
+  `wt list` reads those and must not write the store.
+- **Trap: an expired operation is renamed to `.<id>.expired` before
+  `remove_dir_all`.** Deleting in place can remove `record.json` first,
+  leaving a folder named as an operation with no readable record, which
+  `pending()` reports and `begin` then refuses for every worktree. A leftover
+  `.<id>.expired` is deleted on the next run regardless of age. Staging
+  `.<id>.tmp` folders expire by their own mtime without a lock; `.discarded`
+  folders are left alone.
 - **An operation directory appears atomically.** `RecoveryStore::begin` builds
   it as `.<id>.tmp`, flushes, and renames it. `pending()` skips any name that
   is not an operation ID, so a staging directory a crash left is not a record.
