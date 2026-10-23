@@ -27,11 +27,12 @@
   `rustybuzz` 0.20.1 and `ttf-parser` 0.25.1 (the versions `usvg` uses, so no
   second copy), `unicode-bidi` 0.3 and `unicode-script` 0.5 (already in the
   graph through `usvg`), and `fontique` 0.12.0 (`default-features = false`,
-  feature `system`) for the OS's generic font family. `fontique` brings
-  `read-fonts` 0.41, `font-types` 0.12, `parlance`,
-  `linebender_resource_handle`, and, on Linux and FreeBSD,
-  `yeslogic-fontconfig-sys` 6, which links the system `libfontconfig` at
-  build time (its pkg-config file must be installed). On macOS and Windows it
+  features `system` and `fontconfig-dlopen`) for the OS's generic font
+  family. `fontique` brings `read-fonts` 0.41, `font-types` 0.12,
+  `parlance`, `linebender_resource_handle`, and, on Linux and FreeBSD,
+  `yeslogic-fontconfig-sys` 6, which with `fontconfig-dlopen` loads
+  `libfontconfig` at run time, so builds need no fontconfig development
+  package and a host without the library skips the OS step. On macOS and Windows it
   uses `objc2-core-text` and `windows` 0.62, both already in the graph.
 - `biscuit-visualized` compiles in two font assets (2026-10-22): Inter 4.1
   Regular and Bold (SIL OFL 1.1, about 0.8 MB, every OS) and Noto Emoji
@@ -51,7 +52,7 @@
   `worktree-cli`) depend on `biscuit-visualized` with `terminal` directly;
   `worktree-cli`'s former `biscuit-visualized` development dependency is now
   that normal dependency. Packages that depend only on `biscuit-terminal` no
-  longer compile `mermaid-rs-renderer`. No crate enters or leaves the lockfile.
+  longer compile a Mermaid renderer. No crate enters or leaves the lockfile.
 - Generated REST clients send through `schematic-runtime` (2026-10-12):
   the regenerated `schematic-schema` depends on `schematic-runtime` and no
   longer on `reqwest`, and re-exports the runtime, so its dependents need no
@@ -124,16 +125,6 @@
   graph. It streams, so peak memory stays flat for large lockfiles.
   `json-five`, already present through `biscuit-file`, was rejected because it
   builds a full AST. See `sniff/docs/dependencies.md`.
-- `biscuit-visualized` moves `mermaid-rs-renderer` from 0.2 (locked 0.2.1) to
-  0.3.1 (2026-09-24, worktree `2026-09-24-ux-improvements`), for 0.3's
-  `measure_svg_dimensions` (the natural SVG size that scale-based image widths
-  need) and its layout and theme fixes. The edge now sets
-  `default-features = false`: the crate's `png` feature pulled a second
-  `resvg`/`usvg` (0.46 under 0.2, 0.47 under 0.3) and `cli` pulled `clap`, and
-  biscuit rasterizes with its own `resvg` 0.45. The lockfile drops `resvg` 0.46,
-  `usvg` 0.46, `kurbo` 0.13, `svgtypes` 0.16, `roxmltree` 0.21, and `imagesize`
-  0.14. 0.3 derives its default pie palette as `hsl()`, which biscuit's
-  pie-label contrast fix now parses.
 
 - Every `reqwest` edge in the workspace sets `default-features = false` and
   re-lists `default-tls`, `charset`, and `http2`. The one default this drops is
@@ -1146,7 +1137,7 @@ This is a Rust workspace with the following modules:
 
 - [resvg](https://github.com/linebender/resvg) _v0.47_ [📄](https://docs.rs/resvg)
 
-    _SVG rendering and rasterization (with its `usvg` parser and `tiny-skia` 0.12 backend). Used by `biscuit-terminal` and `biscuit-visualized` under their `image` features._
+    _SVG rendering and rasterization (with its `usvg` 0.47 parser, `fontdb` 0.23, and `tiny-skia` 0.12 backend). Used by `biscuit-terminal` and `biscuit-visualized` under their `image` features._
 
     _Tags: image, svg, rasterization_
 
@@ -1170,9 +1161,15 @@ This is a Rust workspace with the following modules:
 
 - [merman](https://github.com/yankeeinlondon/merman) _v0.9.1, git rev `6e6b1e6554e8`_
 
-    _Pure-Rust Mermaid parser, layout engine, and SVG renderer. Used by `biscuit-visualized` (feature `image`) as a git dependency on Ken's fork of [Latias94/merman](https://github.com/Latias94/merman), pinned to rev `6e6b1e6554e8e75d468c1f991652c1c53a85bace` on branch `gitgraph-commit-spacing` (adds the gitGraph `commitSpacing` key), with `default-features = false` and features `svg`, `all-diagrams`, and `layout-cytoscape` (no `png`, `native-fonts`, ELK, or `math`: biscuit rasterizes with its own `resvg` and measures with its own font chain)._
+    _Pure-Rust Mermaid parser, layout engine, and SVG renderer modeling Mermaid.js 12.2.0 (MIT OR Apache-2.0). Used by `biscuit-visualized` (feature `image`) as a git dependency on Ken's fork of [Latias94/merman](https://github.com/Latias94/merman), pinned to rev `6e6b1e6554e8e75d468c1f991652c1c53a85bace` on branch `gitgraph-commit-spacing`, with `default-features = false` and features `svg`, `all-diagrams`, and `layout-cytoscape` (no `png`, `native-fonts`, ELK, or `math`: biscuit rasterizes with its own `resvg` and measures with its own font chain). The fork exists because it adds the gitGraph `commitSpacing` setting that `biscuit-visualized`'s tag spacing writes; when upstream Merman merges or releases a commit-spacing setting, the dependency moves back to upstream in its own change, the goldens are re-reviewed, and the fork is no longer referenced. `merman-core` enables `serde_json`'s `preserve_order` and `float_roundtrip` features, which Cargo unifies into every build reaching `biscuit-visualized`'s `image` feature. See [biscuit-visualized dependencies](../biscuit-visualized/docs/dependencies.md)._
 
     _Tags: image, diagrams, svg_
+
+- **Bundled fonts** (not crates): [Inter](https://github.com/rsms/inter) 4.1 Regular and Bold (SIL Open Font License 1.1, every OS) and the monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) (SIL Open Font License 1.1, compiled in on Linux only)
+
+    _Compiled into `biscuit-visualized` (feature `image`) from `biscuit-visualized/src/assets/fonts/`, which holds each font's license text and checksums. Inter is matched only by name (`MERMAID_FONT=Inter` gives the same layout on every host); Noto Emoji is the last fallback face for emoji._
+
+    _Tags: fonts, assets_
 
 - [image](https://github.com/image-rs/image) _v0.25_ [📄](https://docs.rs/image)
 
@@ -1466,7 +1463,7 @@ This is a Rust workspace with the following modules:
 
 - [serde_json](https://github.com/serde-rs/json) _v1.0_
 
-    _Fast JSON serialization/deserialization using serde._
+    _Fast JSON serialization/deserialization using serde. Any build that reaches `biscuit-visualized`'s `image` feature also gets `preserve_order` (an insertion-ordered `Map`) and `float_roundtrip`, enabled by `merman-core` and unified by Cargo._
 
     _Tags: json, serialization_
 

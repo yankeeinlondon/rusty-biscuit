@@ -83,18 +83,39 @@ flowchart LR
     package, and a host without the library skips this step instead of
     failing._
 
-- [merman](https://github.com/yankeeinlondon/merman) _v0.9.1, git rev `6e6b1e6554e8e75d468c1f991652c1c53a85bace`_ (feature: `image`)
+- [merman](https://github.com/yankeeinlondon/merman) _v0.9.1, git rev `6e6b1e6554e8e75d468c1f991652c1c53a85bace`_ (feature: `image`; license MIT OR Apache-2.0)
 
-    _The Mermaid parser, layout engine, and SVG renderer. A git dependency on
-    Ken's fork of [Latias94/merman](https://github.com/Latias94/merman),
-    pinned to an exact commit on its `gitgraph-commit-spacing` branch, which
-    adds the gitGraph `commitSpacing` key that tag spacing writes. With
+    _The Mermaid parser, layout engine, and SVG renderer, modeling Mermaid.js
+    12.2.0 (see [Merman rendering](./merman.md)). With
     `default-features = false` and features `svg`, `all-diagrams`, and
     `layout-cytoscape`; `png`, `native-fonts`, ELK, and `math` stay off,
     because this crate rasterizes with its own `resvg` and measures text with
     its own font chain. Brings `merman-core`, `merman-render`,
-    `merman-analysis`, `merman-ascii`, and `merman-editor-core` from the same
+    `merman-theme-contract`, and `merman-unicode-linebreak` from the same
     rev._
+
+    ```toml
+    merman = { git = "https://github.com/yankeeinlondon/merman.git", rev = "6e6b1e6554e8e75d468c1f991652c1c53a85bace", default-features = false, features = ["svg", "all-diagrams", "layout-cytoscape"], optional = true }
+    ```
+
+    - **Why a fork.** The dependency is Ken's fork of
+      [Latias94/merman](https://github.com/Latias94/merman), pinned to an
+      exact commit on its `gitgraph-commit-spacing` branch (based on upstream
+      `482fcde7`). The fork adds one gitGraph setting, `commitSpacing`, which
+      [tag spacing](./mermaid-gitgraph.md) writes so tags on neighboring
+      commits do not overlap; stock Merman lays commits out at a fixed 50 px.
+    - **Return path.** When upstream Merman merges or releases a
+      commit-spacing setting, the dependency moves back to upstream Merman in
+      its own change, the goldens are re-reviewed, and the fork is no longer
+      referenced. If upstream's setting differs in name or meaning, the tag
+      spacing code adapts in that same change.
+    - **Side effect on `serde_json`.** `merman-core` enables `serde_json`'s
+      `preserve_order` and `float_roundtrip` features. Cargo unifies features,
+      so every build that reaches this crate's `image` feature gets a
+      `serde_json::Map` that keeps insertion order (an `IndexMap` rather than
+      a `BTreeMap`) and exact float parsing, including in crates that never
+      asked for either. Code that relied on sorted `Map` keys must sort them
+      itself._
 
 - [biscuit-terminal](../../biscuit-terminal/lib) _v0.1.0_ (feature: `terminal`, with its `image` feature)
 
@@ -113,7 +134,9 @@ flowchart LR
 ## Bundled Assets
 
 Font files compiled into the library under the `image` feature, from
-`biscuit-visualized/src/assets/fonts/`. Each directory holds the license
+`biscuit-visualized/src/assets/fonts/` (embedded by
+[`fonts/bundled.rs`](../src/src/fonts/bundled.rs); see
+[Bundled fonts](./merman.md#bundled-fonts) for how each is used). Each directory holds the license
 text (`OFL.txt`) and a `README.md` with the source, release, and SHA-256 of
 every file.
 

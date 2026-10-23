@@ -6,13 +6,20 @@ overlap**. When two tags on different commits would collide, the commits are
 spaced just far enough apart to leave a one-em gap between them, and no
 further.
 
-This applies to every gitGraph and every caller: `MermaidDiagram` directly,
-the `GitGraph` component and `bt git-graph`, and Darkmatter's Mermaid blocks.
-There is nothing to opt into and no new option.
+(An em is a length equal to the diagram's font size, 16 px by default; see
+[the rules](#tag-spacing).)
+
+This applies to every gitGraph and every caller: the library's
+[`MermaidDiagram`](../src/src/mermaid/render.rs) directly, the
+[`GitGraph`](./components/git_graph.md) terminal component and `bt git-graph`
+built on it, and Darkmatter's Mermaid blocks. There is nothing to opt into and
+no new option.
 
 ## Merges
 
-Merman follows Mermaid.js, so a merge needs no correction:
+Merman follows Mermaid.js's gitGraph rules, so a merge needs no correction.
+(A gitGraph's _branch_ is drawn as a horizontal _lane_; each `commit` is a dot
+on the lane of the branch checked out at that point.)
 
 - A labeled merge keeps both parents. In `merge feat id: "M" tag: "v1"`,
   `M`'s parents are the current branch's head and `feat`'s head, and `M`
@@ -31,8 +38,21 @@ gitGraph
 
 Here `M`'s parents are `B` and `A`.
 
-A merge **into** a branch that has no commit yet is still an error, in Merman
-and in Mermaid.js alike; the `GitGraph` component never emits one.
+A merge is still an error, in Merman and in Mermaid.js alike, when the two
+heads (each branch's latest commit) cannot make a merge commit with two
+distinct parents:
+
+- the current branch has no commit at all (it was created before the first
+  `commit`), or the merged branch has none;
+- both branches are at the same commit, as in
+  `commit id: "A"` / `branch side` / `checkout main` / `merge side`;
+- the current branch has no commit of its own and the merge brings in the
+  branch it was created from (`Cannot merge branch 'main' into itself`).
+
+Such a diagram does not render; it
+[falls back to its source](./merman.md#when-a-diagram-falls-back-to-its-source).
+The `GitGraph` component emits a merge only onto a lane that already has a
+commit of its own, so it never produces one.
 
 ## Tag spacing
 
@@ -52,10 +72,12 @@ gitGraph
 %%{init: {"gitGraph": {"commitSpacing": 74.5}}}%%
 ```
 
-(The value is illustrative; it depends on the measured tag widths.) The
-directive is appended as the last line. Merman reads directives anywhere in
-the source and merges them over frontmatter and earlier directives, so it
-changes no other setting.
+(The value is illustrative; it depends on the measured tag widths.) A
+`%%{init: …}%%` line is a Mermaid **directive**: JSON configuration written
+inside the diagram text. It is appended as the last line. Merman, like
+Mermaid.js, reads directives anywhere in the source and merges them over the
+diagram's frontmatter (a `---` YAML block before the diagram) and earlier
+directives, so it changes no other setting.
 
 ```mermaid
 flowchart TD
@@ -93,8 +115,19 @@ The rules:
 - **Tag widths.** Each tag is measured with the same measurer and font chain
   Merman lays the diagram out with, at the tag font size
   (`themeVariables.tagLabelFontSize`, 10 px by default), and its box follows
-  Merman's own tag-box formula. A theme font override therefore changes the
-  gap, not the tag widths.
+  Merman's own tag-box formula. The tag size is read exactly as Merman reads
+  it, so the measured tag is the drawn one: a string in `px`, `em` or `%`
+  (the last two relative to `fontSize`), `inherit` or `unset` (equal to
+  `fontSize`), or `0`. Anything else, including a bare JSON number such as
+  `14` or a unitless string such as `"14"`, is drawn at 10 px:
+
+  ```text
+  %%{init: {"themeVariables": {"tagLabelFontSize": "150%"}}}%%   → tags at 24 px (150% of 16)
+  %%{init: {"themeVariables": {"tagLabelFontSize": 14}}}%%       → tags at 10 px
+  ```
+
+  Raising only `fontSize` therefore widens the gap and leaves `px` tags
+  unchanged, but also enlarges tags sized in `em` or `%`.
 - **The author wins.** A source that already sets `gitGraph.commitSpacing`,
   in a directive or in frontmatter, is never changed, even when its value
   lets tags overlap.
@@ -128,27 +161,53 @@ under its own [time budget](./merman.md#time-budget), so a tagged gitGraph
 costs one Merman layout even when its image is cached. The cache key covers
 the source as rewritten, so the written spacing is part of the key. A change
 to how spacing is computed changes output for the same input, so it bumps the
-`+bv<n>` suffix of the backend id (`cache::file_cache::MERMAID_BACKEND`).
+`+bv<n>` suffix of the backend id
+([`MERMAID_BACKEND`](../src/src/cache/file_cache.rs)), the version string
+every cache key starts from:
+
+```text
+merman@6e6b1e6554e8+bv4    Merman commit 6e6b1e6554e8, this crate's layer at version 4
+merman@6e6b1e6554e8+bv5    after a spacing change: no artifact cached under bv4 is reused
+```
 
 `commitSpacing` is not a setting stock Merman reads. `biscuit-visualized`
 pins Merman to a fork that adds it (see [Dependencies](./dependencies.md)).
 
 ## Checking a layout
 
-`MermaidDiagram::gitgraph_geometry()` returns the laid-out commits (ID, lane,
-parents, placement index and x, tag text and bounds), the commit step, the
-tag gap, and the size, built from Merman's layout data for the source as
-rewritten, so it is the layout that renders. `tag_boxes()` and
-`tag_overlaps()` answer "do any tags overlap?" without rasterizing.
-`biscuit_visualized::mermaid::default_gitgraph_commit_step()` gives Merman's
-default spacing (50) to compare against. Both are `#[doc(hidden)]` test
-support, not a stable API. The `GitGraph` component's tests and worktree tests
+[`MermaidDiagram::gitgraph_geometry()`](../src/src/mermaid/render.rs)
+returns the laid-out commits (ID, lane, parents, placement index and x, tag
+text and bounds), the commit step (the distance between neighboring commits),
+the tag gap, and the size, built from Merman's layout data for the source as
+rewritten, so it is the layout that renders. On the returned
+[`GitGraphGeometry`](../src/src/mermaid/gitgraph.rs), `tag_boxes()` lists
+every tag's box and `tag_overlaps()` answers "do any tags overlap?" without
+rasterizing.
+[`biscuit_visualized::mermaid::default_gitgraph_commit_step()`](../src/src/mermaid/gitgraph.rs)
+gives Merman's default spacing (50) to compare against. Both are
+`#[doc(hidden)]` (left out of the generated API docs): test support, not a
+stable API.
+
+```rust
+use biscuit_visualized::mermaid::{default_gitgraph_commit_step, MermaidDiagram};
+
+let source = "gitGraph
+  commit id: \"d1\"
+  commit id: \"d2\" tag: \"main\"
+  commit id: \"d3\" tag: \"origin/main\"
+";
+let layout = MermaidDiagram::new(source).gitgraph_geometry()?.expect("a gitGraph");
+assert!(layout.tag_overlaps().is_empty());
+assert!(layout.commit_step > default_gitgraph_commit_step()); // widened for this pair
+```
+
+The `GitGraph` component's tests and worktree tests
 use them to prove placement on real layouts, because Mermaid text alone
 cannot show an overlap.
 
 ## Tests
 
-- `src/src/tests/gitgraph_tests.rs` (L1): both parents of a labeled merge, a
+- [`src/src/tests/gitgraph_tests.rs`](../src/src/tests/gitgraph_tests.rs) (L1, the fast in-process tier): both parents of a labeled merge, a
   merge of a branch without its own commit, and real layouts: long labels on
   neighboring commits, `main`/`origin/main` one commit apart, a stack of
   three tags, and cross-lane tags, each checked for no overlap and for the
@@ -156,7 +215,7 @@ cannot show an overlap.
   for lanes apart without shared rows, for a real `wt list` graph, for
   untagged graphs, and for vertical graphs; a larger `%%{init}%%` font
   widening only the gap; and that the measured size is the spaced layout.
-- `src/src/tests/gitgraph_layout_tests.rs` (L1): reading Merman's layout
+- [`src/src/tests/gitgraph_layout_tests.rs`](../src/src/tests/gitgraph_layout_tests.rs) (L1): reading Merman's layout
   data strictly (missing, mistyped, and duplicate fields, trailing content),
   tag bounds matching the drawn tags in every direction, and the spacing
   separating adjacent tags.

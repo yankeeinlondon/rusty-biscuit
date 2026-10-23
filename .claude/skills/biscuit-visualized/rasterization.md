@@ -123,8 +123,8 @@ Mermaid text measurer (`fonts::measure::LabelMeasurer`) resolves with:
 - Resolution order: `MERMAID_FONT` (installed or bundled Inter, any casing)
   → the CSS stack (names case-insensitive; generics by the OS answer) → the
   OS `sans-serif` answer (fontique) → an installed OS/2 sans-serif face by a
-  fixed rule. Fallback: installed faces by case-folded family name, then
-  Noto Emoji (Linux) last; bundled Inter is never a fallback face.
+  fixed rule. Fallback: the resolved face, then installed faces by case-folded
+  family name, then Noto Emoji (Linux) last; bundled Inter is never a fallback face.
 - `MERMAID_FONT` therefore overrides every rasterized SVG's fonts, graphs
   included.
 - Tests build a chain with `FontChain::injected(installed_bytes,
