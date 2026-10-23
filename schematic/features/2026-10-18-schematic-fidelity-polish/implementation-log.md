@@ -228,13 +228,11 @@ docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
     - .claude/skills/schematic-define/schematic/gen.md
 message_to_agent: |-
-  Phase 9 (runnable Postman artifacts) is complete; read "## Phase 9" in implementation-log.md.
+  Phase 11 (R42 README doctests; R43/R50/R52 verification) is complete; read "## Phase 11" in implementation-log.md.
 
-  - Example values come from `schematic_gen::export::examples::ExampleSource` (P10-c over `RestApi::schemas`, validated with `jsonschema` 0.55, now a normal `schematic-gen` dependency, through one prepared `Registry` per API). Reuse it rather than writing another example generator; it is format-neutral (`example(&TypeRef)`, `check(&TypeRef, &Value)`). For the AsyncAPI phase, note that WebSocket payloads have no JSON schemas (D12), so it does not apply there yet.
-  - Compile validators against a prepared registry, never per reference from the whole component document: the OpenAI corpus went from 5.2 s to 0.78 s that way (L1 budget is 5 s).
-  - `GenerateOpts` gained `postman_environment: bool`; every struct literal must set it. The `just generate` recipes pass `--postman-environment`, and `schematic/postman/` now holds 15 collections plus 15 environments (drift-checked).
-  - Postman no longer skips GraphQL; only OpenAPI reports `graphql-operation` per operation. `Feature::SchemaComposition` was removed and `Feature::ExampleValue` added.
-  - `schematic/schema/src` changes in the working tree are Phase 8's (still uncommitted when Phase 9 ran); Phase 9 changed no generated Rust or OpenAPI output.
+  - `schematic/define/README.md` is now compiled as doctests through `ReadmeDoc` (`#[cfg(doctest)]` in `define/src/lib.rs`). A doc audit that edits its Rust examples must keep them compiling under `just doctest`.
+  - `just doctest` had a stale example in `gen/src/validation.rs` (Postman now reports an `example-value` warning for a dangling schema reference since Phase 9); it was fixed. Every `just doctest` set passes now.
+  - Phase 10's changes were still uncommitted in the working tree when Phase 11 started; Phase 11's own edits are only the files listed in `source_files_during_phase_11`, `docs_updated_during_phase_11`, and `skills_files_updated_during_phase_11`.
 source_files_during_phase_8:
     - schematic/gen/src/codegen/endpoint_methods/mod.rs
     - schematic/gen/src/codegen/endpoint_methods/tests.rs
@@ -367,6 +365,53 @@ skills_files_updated_during_phase_9:
     - .claude/skills/schematic-define/SKILL.md
     - .claude/skills/schematic-define/schematic/gen.md
     - .claude/skills/schematic-define/schematic/responses.md
+source_files_during_phase_10:
+    - schematic/gen/src/asyncapi_import.rs
+    - schematic/gen/src/asyncapi_import/extensions.rs
+    - schematic/gen/src/asyncapi_import/reader.rs
+    - schematic/gen/src/asyncapi_import/v3.rs
+    - schematic/gen/src/commands.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/export/asyncapi/mod.rs
+    - schematic/gen/src/export/mod.rs
+    - schematic/gen/src/main.rs
+    - schematic/gen/tests/common/asyncapi.rs
+    - schematic/gen/tests/common/mod.rs
+    - schematic/gen/tests/l1/artifact_drift.rs
+    - schematic/gen/tests/l1/asyncapi_export.rs
+    - schematic/gen/tests/l1/asyncapi_import_matrix.rs
+    - schematic/gen/tests/l1/asyncapi_persist.rs
+    - schematic/gen/tests/l1/asyncapi_round_trip.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/fixtures/asyncapi/spec-json-schemas/3.0.0.json
+    - schematic/gen/tests/fixtures/asyncapi/spec-json-schemas/LICENSE
+    - schematic/gen/tests/fixtures/asyncapi/spec-json-schemas/NOTICE
+    - schematic/justfile
+    - schematic/asyncapi/elevenlabs_ws.json
+    - schematic/asyncapi/samsung_smart_tv_remote_ws.json
+    - schematic/asyncapi/unfolded_circle_core_ws.json
+    - schematic/asyncapi/unfolded_circle_dock_ws.json
+    - schematic/asyncapi/unfolded_circle_integration_ws.json
+docs_updated_during_phase_10:
+    - schematic/docs/dependencies.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/generation/workflow.md
+    - schematic/docs/io/export-openapi.md
+    - schematic/docs/websocket-definitions.md
+docs_created_during_phase_10:
+    - schematic/docs/io/asyncapi.md
+    - schematic/gen/tests/fixtures/asyncapi/spec-json-schemas/PROVENANCE.md
+skills_files_updated_during_phase_10:
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/websocket.md
+source_files_during_phase_11:
+    - schematic/define/src/lib.rs
+    - schematic/gen/src/validation.rs
+docs_updated_during_phase_11:
+    - schematic/define/README.md
+docs_created_during_phase_11: []
+skills_files_updated_during_phase_11:
+    - .claude/skills/schematic-define/SKILL.md
 ---
 
 # Implementation Log for 2026-10-18-schematic-fidelity-polish (13 phases)
@@ -2430,3 +2475,339 @@ registered schema and output is deterministic. Every variable is declared,
 with or without environments. OAuth2, content types, and parameters
 survive. GraphQL is runnable in Postman and skipped by name in OpenAPI.
 Drift passes for collections and environments.
+
+## Phase 10
+
+Export and persist AsyncAPI definitions (R25–R28, R56–R58). Implemented
+directly by the orchestrator (no subagents): exporter and importer are one
+contract and their round trip was easier to keep consistent in one hand.
+
+### What was built
+
+- **Exporter** `schematic-gen::export::asyncapi` (`gen/src/export/asyncapi/mod.rs`):
+  `export_asyncapi`, `render_asyncapi`, `asyncapi_documents` (file naming),
+  `prepare_asyncapi_output` (staged `MutationPlan` through the existing
+  `output::prepare_export_output`), `dangling_refs`. AsyncAPI **3.0.0**: one
+  server `default` (`host`/`protocol`/`pathname` from `base_url`), one channel
+  per endpoint (`address`, `parameters`, `bindings.ws.{query,headers}`), one
+  component message per `{EndpointId}.{MessageName}`, one operation per
+  message and action (`{Endpoint}.send.{Message}` / `.receive.`), payload
+  schema components, security scheme applied by the server.
+  `responds_with` → the send operation's standard `reply`.
+- New `Output::AsyncApi` (`"asyncapi"`) diagnostic output; export findings use
+  `Feature::WebSocketDefinition`. Errors (not `ws(s)://`, duplicate message
+  name, unknown `responds_with`, a name AsyncAPI keys cannot hold, a dangling
+  `$ref`) fail with `GeneratorError::Validation`; header/cookie params and
+  OAuth2 are warnings.
+- **Importer** (`gen/src/asyncapi_import.rs` + `asyncapi_import/{reader,extensions,v3}.rs`):
+  version dispatch (`2.x.y` → legacy reader, `3.0.y` → new reader, anything
+  else ERROR); `import_asyncapi_text` (no writes) and `run_import_asyncapi`
+  (persists); shared located-diagnostic reader with duplicate-key-rejecting
+  loading (`UniqueValue`, copied from the OpenAPI importer because that one is
+  private to `schematic-define`); any ERROR fails the import before writing.
+- **Persistence (R26)**: `{module}.definition.json` (`WebSocketApi`),
+  `{module}.models.json` (`ModelCatalog`), `{module}_asyncapi_import.txt`,
+  planned with `prepare_export_output` and published with `MutationPlan`;
+  `read_import_output` reads them back; `AsyncImportResult` gained
+  `module_path`, `version`, `outputs`. A module path that is not
+  `[A-Za-z0-9_]+` is a `ConfigError`.
+- **CLI**: new `schematic-gen export-asyncapi --output DIR [--api NAME] [--dry-run]`;
+  `import-asyncapi` prints the files it wrote.
+- **Recipes/artifacts (R28)**: `just generate-asyncapi`; `just generate` also
+  runs the export. `schematic/asyncapi/` holds 5 documents:
+  `elevenlabs_ws.json`, `unfolded_circle_core_ws.json`,
+  `unfolded_circle_dock_ws.json`, `unfolded_circle_integration_ws.json`,
+  `samsung_smart_tv_remote_ws.json`.
+- **Vendored schema**: `gen/tests/fixtures/asyncapi/spec-json-schemas/3.0.0.json`
+  (sha256 `1786a007…7fe9a`, the Phase 1 spike's copy) with upstream `LICENSE`,
+  `NOTICE` (fetched from the same commit), and `PROVENANCE.md`.
+
+### Extension names and shapes (R56–R58, spec item 15)
+
+| Extension | Placement | Shape |
+| --- | --- | --- |
+| `x-schematic-selectors` | component message | `[{"field", "value"}]`; `[]` = declared empty |
+| `x-schematic-fallback` | component message | `true` |
+| `x-schematic-role` | channel | `"client"` / `"host"` / `"both"` |
+| `x-schematic-heartbeat` | channel | `{"interval_secs", "timeout_secs"?}` — **read back** |
+| `x-schematic-param` | channel parameter / ws query property | non-default `type` (path), `style`, `explode`, `rust_name`, `secret`, `pager_managed`, `deprecated` (path) |
+| `x-schematic-value-prefix` | httpApiKey scheme | string |
+| `x-schematic-bearer-header` | http bearer scheme | string |
+
+### Adopted defaults and decisions
+
+- adopted default: AsyncAPI 3.0, API-specific documents, `{module}.json`, and
+  `{module}.{snake_api}.json` when a module is shared (source: spec P10-a and
+  Open Question "AsyncAPI document boundaries", option 1).
+- adopted default: payload schemas are unconstrained `{}` components with a
+  description naming the Rust type (source: contracts D12, Phase 1 log).
+- adopted default: correlation, `auth_flow`, lifecycle roles, API runtime
+  hints, and env metadata stay outside the subset (source: P10-a, D11).
+- adopted default: `x-schematic-param` added (name logged here, spec R56
+  "name and shape are logged"): without it Samsung's `secret` token query
+  parameter and typed path parameters could not round-trip, which R27 lists
+  under "parameters". Same rule for value prefix / bearer header (D57 item 22
+  analogue for AsyncAPI).
+- decision: one operation per message and action (not one per channel and
+  action), because AsyncAPI 3.0 `reply` belongs to an operation and each
+  message has its own `responds_with`.
+- decision: an undeclared path placeholder exports as `{}`; a declared one
+  always carries `x-schematic-param.type`; on import, a channel with any typed
+  or described parameter declares all its placeholders (D17 analogue).
+- deviation from the frozen matrix (contracts §3): an operation **without**
+  `messages` is INFO and covers every message of its channel (the AsyncAPI 3.0
+  meaning) rather than ERROR; an empty `messages` list is WARN as frozen.
+- deviation: contracts §3 lists `info.description` absent as "O (today a
+  placeholder)"; absent now reads as `""` for both versions, and a channel's
+  absent description is `""` (was a placeholder for 2.x).
+- behavior change (contracts R-S smells, matrix 3): 2.x auth now comes only
+  from the server's **applied** `security`; a declared but unapplied
+  component scheme is anonymous (INFO). The `maps_http_api_key_auth_scheme`
+  unit test gained the `security` line it relied on implicitly. 2.x `apiKey`
+  without `name` is ERROR (was `X-API-Key`); `apiKey` `in: user|password` is
+  WARN and anonymous. A non-string payload `const` is INFO (was silent).
+- Equality for R27 is order-insensitive (endpoints by id, messages and query
+  parameters and headers by name): `serde_json` here has no `preserve_order`
+  (enabling it would change every committed JSON artifact), AsyncAPI maps are
+  unordered, and selection never uses declaration order.
+
+### R27 round-trip results per API (spec item 15)
+
+Each row is asserted by `asyncapi_round_trip::<module>_round_trips` (JSON and
+YAML forms; everything outside the listed losses compares equal: channels,
+messages, directions, payload type names, selectors, fallback, role, auth,
+parameters, heartbeat):
+
+| API | Listed differences | Re-import lowers to a client? |
+| --- | --- | --- |
+| `elevenlabs_ws` | env metadata; version → `1.0.0`; lifecycle `open`/`close` become ordinary messages (and `open_credential_field` is lost) | yes |
+| `unfolded_circle_core_ws` | env metadata; version; correlation hints; auth-flow hints | **no** — `responds_with needs the endpoint's runtime.correlation hints` |
+| `unfolded_circle_dock_ws` | same as Core | **no** (same reason) |
+| `unfolded_circle_integration_ws` | same as Core | **no** (same reason) |
+| `samsung_smart_tv_remote_ws` | version → `1.0.0` | yes |
+| fixture (`common::asyncapi::fixture_api`) | env metadata only | n/a |
+
+Schema validation of the output: **verified** offline — all five documents
+and the fixture validate against the vendored AsyncAPI 3.0.0 JSON Schema
+(Draft 7), and a 2.x-shaped channel under `asyncapi: 3.0.0` is rejected.
+Heartbeat hints are read back (not only exported).
+
+### Requirement-to-test mapping
+
+All L1 in `schematic-gen` (`tests/l1`), F2 in-process at the public crate API
+unless noted; CLI wiring is F3 (spawned binary).
+
+| Requirement / behavior | Tests |
+| --- | --- |
+| R25 structure, ref closure, five APIs | `asyncapi_export::every_websocket_api_exports_a_closed_document`, `server_auth_and_parameters_use_standard_fields` |
+| R25 determinism | `asyncapi_export::export_is_deterministic` |
+| R25 schema validation | `asyncapi_export::exported_documents_validate_against_the_asyncapi_3_schema` |
+| R25 refusals / lossy warnings | `asyncapi_export::definitions_that_cannot_become_a_valid_document_fail`, `unexportable_declarations_are_reported` |
+| client perspective for every role | `asyncapi_export::operations_take_the_client_perspective_for_every_role`, `asyncapi_round_trip::each_role_survives_and_never_changes_directions` |
+| filename rule incl. shared module | `asyncapi_export::documents_are_named_by_module_and_split_when_a_module_is_shared` |
+| R56 selectors/fallback export + read-back, overlapping payloads | `asyncapi_export::schematic_metadata_is_written_as_extensions`, `asyncapi_round_trip::overlapping_payloads_are_told_apart_by_their_selectors` |
+| R56 duplicate-fallback diagnostic | `asyncapi_import_matrix::fallback_extension` |
+| R57 role per fixture | `asyncapi_round_trip::each_role_survives_and_never_changes_directions`, `asyncapi_import_matrix::role_extension` |
+| R58 heartbeat export + read-back | `asyncapi_export::schematic_metadata_is_written_as_extensions`, `asyncapi_round_trip::heartbeat_hints_are_read_back`, `asyncapi_import_matrix::heartbeat_extension` |
+| R27 per API (5) + guard | `asyncapi_round_trip::{elevenlabs_ws,unfolded_circle_core_ws,unfolded_circle_dock_ws,unfolded_circle_integration_ws,samsung_smart_tv_remote_ws}_round_trips`, `every_shipped_websocket_api_round_trips`, `the_fixture_keeps_every_subset_field` |
+| base-path handshake URL (no duplicated segment) | `asyncapi_round_trip::a_base_path_assembles_the_same_handshake_url` |
+| auth forms + applied security | `asyncapi_round_trip::every_auth_form_in_the_subset_round_trips`, `asyncapi_import_matrix::applied_security_decides_auth` |
+| R26 persisted output read back | `asyncapi_persist::saved_output_reads_back_as_the_imported_definition_and_catalog` |
+| R26 write/read/write/read round trip | `asyncapi_persist::persisted_definitions_survive_a_second_round_trip` |
+| R26 dry run writes nothing | `asyncapi_persist::a_dry_run_writes_nothing` |
+| R26 staged failure (conflict, failed import, unsafe module path) | `asyncapi_persist::a_conflicting_path_fails_before_anything_is_written`, `a_failed_import_writes_nothing` |
+| CLI wiring (F3) | `asyncapi_persist::cli_commands_export_and_import` (control export + import, invalid protocol → located error, nothing written) |
+| R28 drift + closure | `artifact_drift::generated_asyncapi_artifacts_are_up_to_date` (proven to fail on a byte edit and on a stray file) |
+| 2.x compatibility retained | existing `asyncapi_import::*` (official UC 2.2.0 YAML + JSON) and unit tests; `asyncapi_import_matrix::legacy_reader_fields` |
+| version dispatch | `asyncapi_import::tests::versions_dispatch_on_major_and_reject_everything_else`, `asyncapi_import_matrix::version_field` |
+
+### Input robustness matrix (reader)
+
+Default outcomes stated once: a malformed standard field is an ERROR at its
+JSON pointer and the import fails with nothing written; a malformed
+Schematic extension is a WARN and reads as absent. Exceptions are asserted
+in `asyncapi_import_matrix` and listed in `schematic/docs/io/asyncapi.md`:
+absent servers (WARN, `ws://localhost`), absent/empty applied security
+(anonymous, INFO when absent), unsupported scheme types (WARN), empty channels
+(WARN), absent payload (3.0 WARN, 2.x INFO), `{}` payload (any value), absent
+`name` (channel key), absent operation `messages` (INFO, covers the channel),
+empty operation `messages` (WARN), unused message (WARN, dropped), unplaced
+parameter (WARN), object-typed query parameter (INFO, JSON), non-constant
+header (WARN, dropped), `--api-name` replacing an absent title, absent
+`x-schematic-role` (`--ws-role`), empty selector value and empty selector list
+(valid), unknown extension members (INFO).
+Document shapes (one loader, JSON and YAML branches):
+`duplicate_keys_trailing_content_and_extra_documents_are_rejected`,
+`yaml_bare_key_is_null_not_absent`. Smell grep done: the remaining
+`unwrap_or_default`/`unwrap_or` uses follow an emitted ERROR or are
+documented defaults; the 2.x parameter `schema.type` and non-string `const`
+silent reads were fixed (ERROR / INFO).
+
+### Gates and verification (macOS, this host)
+
+- `just lint` (schematic): clean, after one fix (`clippy::field_reassign_with_default`
+  in `channel_params`).
+- `just test` (schematic): exit 0 — L1 `2972 tests run: 2972 passed (4 slow), 22 skipped`;
+  fresh-output `16 passed`; compile-fail `1 passed`. The 4 SLOW tests are
+  `schematic-runtime::l1 builder::*` TLS tests this phase did not touch; they
+  passed while the suite was compiling (load-sensitive, not rerun).
+- New/changed tests run in isolation first: `-E 'test(/asyncapi/)'` → 49
+  passed; `artifact_drift::generated_asyncapi_artifacts_are_up_to_date`
+  passed, and failed as expected on a one-byte edit and on a stray
+  `asyncapi/stray.json` (both reverted).
+- `just check-tier-coverage schematic`: stranded 0.
+- Test inputs the scope calculator flagged outside `schematic-gen`:
+  `cargo test --doc -p schematic-define --all-features WebSocketDefinitionsDoc`
+  (the page `websocket-definitions.md` is a doctest) → 5 passed;
+  `cargo nextest run -p darkmatter --test l1 -E 'test(/shipped_schema_corpus/)'`
+  (reads `.claude/skills`) → 8 passed;
+  `cargo nextest run -p test-toolkit -E 'binary(ci_workflow_contracts)'`
+  (reads justfiles) → 178 passed.
+- Dependents: only `schematic-gen` changed as a crate. Its reverse
+  dependencies (`schematic-oauth`, `schematic-runtime`, the generated
+  `schematic-schema`) are in this area and covered by `just test`; the
+  generated Rust is unchanged, so the eight external dependents of
+  `schematic-schema` are unaffected and were not rebuilt.
+- Cross-OS check: not run. The change is in-memory JSON building, files
+  joined with `Path::join`, temp-dir tests, and one `CARGO_BIN_EXE_` spawn; no
+  path comparison, OS-specific API, or terminal behavior. Byte-exact drift of
+  committed JSON follows the existing OpenAPI/Postman drift tests.
+- `just lint-schema` / `just test-schema`: not run; no generated Rust changed.
+
+### Review agenda (Phase 10)
+
+1. Correlation hints outside the subset (D11): the Core, Dock, and
+   Integration documents re-import into definitions that no longer lower to a
+   client. An `x-schematic-correlation` channel extension (and `auth_flow`)
+   would be additive.
+2. `x-schematic-param`, `x-schematic-value-prefix`, `x-schematic-bearer-header`
+   are extension names beyond the spec's proposed three; review the names.
+3. 2.x auth now follows applied server security only (a declared, unapplied
+   scheme no longer authenticates the import).
+4. The operation-without-`messages` deviation from the frozen matrix (INFO,
+   standard 3.0 meaning).
+5. Unconstrained payload schemas (D12) remain an open R25 gap.
+
+Phase 10 status: checkpoint met. All five WebSocket APIs export and
+re-import (JSON and YAML); saved output is reusable and read back; no local
+`$ref` dangles and no file collides; role, selector, fallback, and heartbeat
+semantics survive; the reader matrix and drift pass; schema validation is
+verified offline.
+- Scope calculator after every Phase 10 edit (`git status --porcelain
+  --untracked-files=all | awk '{print $NF}' | xargs python3
+  scripts/ci/affected_scope.py`): `packages: [schematic-define, schematic-gen,
+  test-toolkit, darkmatter]`, `change_class: package`; gates were required and
+  ran (above).
+
+## Phase 11
+
+### Wave 24: Compile README (R42)
+
+- `schematic/define/src/lib.rs`: new `#[cfg(doctest)] #[doc = include_str!("../README.md")] pub struct ReadmeDoc;`.
+  Adopted default: the spec's "or an equivalent that makes the examples run"
+  (R42), using the pattern `websocket/mod.rs` already uses for
+  `websocket-definitions.md`. The crate-root `#![doc]` was not used: the
+  README's H1 and `../docs/...` links are written for GitHub and would
+  duplicate the crate title and break in rustdoc.
+- Measured before the change: the README was not compiled; its second
+  example used `Issue` and `context` without defining them, and its prose
+  named `AddressRule::github()` as the GraphQL example.
+- `schematic/define/README.md` rewritten around five compiled examples
+  (quick start; endpoint facts with typed path params, a required query
+  param, `deprecated`, and an asserted `?`-in-path build error; authentication
+  policies with `.public()`, `.auth(AuthPolicy { .. })`, and a
+  `ResolvedEndpointAuth::Public` assertion; success shapes with a repeated
+  `.returns(..)`, SSE end event, endpoint `errors` and API `default_errors`;
+  pagination with a provider-local strategy function, `default_pagination`,
+  and `Collection::root().unpaginated()`). None sends a request, so none
+  needs `no_run`; none is `ignore`d. The GraphQL bullet now says `rules`
+  rather than naming a vendor constructor. It stays an overview and links to
+  `docs/`.
+- Drift proof (deliberately broken fixture): changing
+  `api.endpoints[0].response.len()` to `.success.len()` in the README made
+  `just _doctest schematic-define --all-features` fail with
+  `error[E0609]: no field 'success' on type 'schematic_define::Endpoint'`
+  and exit 101; restored, it passes (177 + 18).
+- `schematic/README.md` and `schematic/definitions/README.md` contain no
+  `schematic-define` examples; nothing to update there.
+
+### Pre-existing doctest failure fixed (comment drift)
+
+`just doctest` failed in `schematic-gen`: the `validation` module example
+asserted `validate_postman(..).is_empty()` for an API with a dangling
+`Item` reference. Since Phase 9 (runnable Postman examples), Postman builds
+example bodies from schemas, so it now reports one `example-value`
+**warning** (the topic page `docs/generation/validation.md` already says
+so). The code is correct; the module doc was wrong. Fixed in
+`gen/src/validation.rs`: the prose ("Postman never reads a schema") now
+says Postman reads a schema only for an example body and an unresolved one
+is a warning, and the example asserts every Postman diagnostic is a warning
+of feature `ExampleValue`. Comment/doc-only change; no behavior change.
+
+### Wave 24: Confirm invariants (R43, R50, R52)
+
+This phase moves no presets, migrates no endpoint literals, and deletes no
+upstream-owned tree.
+
+- **R50 holds.** `ls schematic/gen/schematic` → no such file;
+  `git ls-files schematic/gen/schematic | wc -l` → `0`;
+  `upstream_hygiene::stale_nested_schematic_tree_is_absent` passed.
+- **R43 holds** (same results as Phase 1).
+  `rg -n '(Strategy|Pagination|PaginationStrategy|MoreSignal|Collection|Paginated)::(github|gitlab|bitbucket|gitea)\b' -g '*.rs' ..`
+  → no match. `rg -n -i 'fn [a-z_]*(github|gitlab|bitbucket|gitea)[a-z_]*\s*[<(]' define/src`
+  → `graphql.rs:65` `AddressRule::github()` (GraphQL address rule, outside
+  R43's pagination scope, already on the Phase 1 review agenda) and the
+  private test fn `metadata.rs:359`. `rg -n -i -l preset definitions/src define/src`
+  → `define/src/headers/builder/tests.rs` and the generic
+  `define/src/pagination/relay.rs` only; no shared vendor preset layer. The
+  README now shows a provider-local strategy function and states that the
+  crate ships no vendor presets.
+- **R52 holds.** `rg -n '"/[^"\s]*\?[^"]*"' definitions/src` → no match.
+  Passed: `output_validation::live_definitions_have_no_embedded_queries_or_validation_gaps`,
+  `validation::tests::query_in_path_severity_is_an_error`,
+  `validation::tests::query_in_path_is_one_error_per_output`,
+  `construction_enforcement::query_bearing_paths_fail_endpoint_and_destination_api_build`,
+  `definition_bundles::construction_runs_the_builder_validation`, and the new
+  README assertion that `/items?limit=10` fails `build()`.
+
+### Requirement-to-test mapping
+
+| Requirement | Test |
+| --- | --- |
+| R42 README compiles (5 examples) | `schematic-define` doctests `lib.rs - ReadmeDoc (line …)` via `just doctest` (F2: real shipped README, normal doctest path) |
+| R42 drift fails the recipe | broken-fixture run above (exit 101), reverted |
+| R42 README claim: `?` path is an error | README endpoint-facts example assertion |
+| R43 | recorded greps above |
+| R50 | `upstream_hygiene::stale_nested_schematic_tree_is_absent` |
+| R52 | the five tests above plus the grep |
+
+The input robustness matrix does not apply: no reader or loader changed.
+
+### Gates (macOS, this host)
+
+- `just lint` (schematic): exit 0.
+- `just doctest` (schematic): exit 0 — define 177 passed / 7 ignored + 18
+  (pages), definitions 48 / 2 ignored, gen 19, oauth 3, runtime 3,
+  schematic-schema 577 + 78. (First run failed on the pre-existing
+  `validation` example above; rerun after the fix passed.)
+- `just test` (schematic): exit 0 — L1 `2972 tests run: 2972 passed (4 slow), 22 skipped`;
+  fresh-output `16 passed (1 slow)`; compile-fail `1 passed`. No failures,
+  no reruns.
+- `just check-tier-coverage schematic`: stranded 0.
+- Dependents: no public API changed (`ReadmeDoc` exists only under
+  `cfg(doctest)`; the gen change is a module doc), so no dependent package
+  was rebuilt.
+- Cross-OS check: not run; no path, process, or OS-specific code changed.
+- Scope calculator after every Phase 11 edit (`git status --porcelain
+  --untracked-files=all | awk '{print $NF}' | xargs python3
+  scripts/ci/affected_scope.py`): `packages: [schematic-define, schematic-gen,
+  test-toolkit, darkmatter]`, `change_class: package` (the tree still holds
+  Phase 10's uncommitted work); gates were required and ran (above). Test
+  inputs outside the area: `cargo nextest run -p darkmatter --test l1 -E
+  'test(/shipped_schema_corpus/)'` (reads `.claude/skills`) → 8 passed;
+  `cargo nextest run -p test-toolkit -E 'binary(ci_workflow_contracts)'`
+  → 178 passed.
+
+Phase 11 status: checkpoint met. The README examples compile through
+`just doctest` and a drifted example fails it; R43, R50, and R52 hold; lint,
+doctest, and test gates pass.

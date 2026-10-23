@@ -359,6 +359,53 @@ skills_files_updated_during_phase_9:
     - .claude/skills/schematic-define/SKILL.md
     - .claude/skills/schematic-define/schematic/gen.md
     - .claude/skills/schematic-define/schematic/responses.md
+source_files_during_phase_10:
+    - schematic/gen/src/asyncapi_import.rs
+    - schematic/gen/src/asyncapi_import/extensions.rs
+    - schematic/gen/src/asyncapi_import/reader.rs
+    - schematic/gen/src/asyncapi_import/v3.rs
+    - schematic/gen/src/commands.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/export/asyncapi/mod.rs
+    - schematic/gen/src/export/mod.rs
+    - schematic/gen/src/main.rs
+    - schematic/gen/tests/common/asyncapi.rs
+    - schematic/gen/tests/common/mod.rs
+    - schematic/gen/tests/l1/artifact_drift.rs
+    - schematic/gen/tests/l1/asyncapi_export.rs
+    - schematic/gen/tests/l1/asyncapi_import_matrix.rs
+    - schematic/gen/tests/l1/asyncapi_persist.rs
+    - schematic/gen/tests/l1/asyncapi_round_trip.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/fixtures/asyncapi/spec-json-schemas/3.0.0.json
+    - schematic/gen/tests/fixtures/asyncapi/spec-json-schemas/LICENSE
+    - schematic/gen/tests/fixtures/asyncapi/spec-json-schemas/NOTICE
+    - schematic/justfile
+    - schematic/asyncapi/elevenlabs_ws.json
+    - schematic/asyncapi/samsung_smart_tv_remote_ws.json
+    - schematic/asyncapi/unfolded_circle_core_ws.json
+    - schematic/asyncapi/unfolded_circle_dock_ws.json
+    - schematic/asyncapi/unfolded_circle_integration_ws.json
+docs_updated_during_phase_10:
+    - schematic/docs/dependencies.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/generation/workflow.md
+    - schematic/docs/io/export-openapi.md
+    - schematic/docs/websocket-definitions.md
+docs_created_during_phase_10:
+    - schematic/docs/io/asyncapi.md
+    - schematic/gen/tests/fixtures/asyncapi/spec-json-schemas/PROVENANCE.md
+skills_files_updated_during_phase_10:
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/websocket.md
+source_files_during_phase_11:
+    - schematic/define/src/lib.rs
+    - schematic/gen/src/validation.rs
+docs_updated_during_phase_11:
+    - schematic/define/README.md
+docs_created_during_phase_11: []
+skills_files_updated_during_phase_11:
+    - .claude/skills/schematic-define/SKILL.md
 ---
 
 # Schematic fidelity and polish implementation plan
@@ -906,7 +953,7 @@ runnable in Postman and explicitly skipped in OpenAPI, and drift passes.
 
 ### Wave 21: Independent format implementations
 
-- [ ] **Export AsyncAPI**
+- [x] **Export AsyncAPI**
   - R25/R56–R58: add `gen/src/export/asyncapi/` over confirmed spec 6 types.
     Emit real 3.0 servers with host/pathname, channel addresses/messages,
     separate send/receive operations, and component schemas/security.
@@ -914,7 +961,7 @@ runnable in Postman and explicitly skipped in OpenAPI, and drift passes.
     applied auth, selectors/fallback, role, heartbeat hints, and handshake URLs.
     Validate deterministic naming and local ref closure. Ownership: exporter.
 
-- [ ] **Read AsyncAPI**
+- [x] **Read AsyncAPI**
   - R26, R27: version-dispatch 2.x and 3.0 readers; retain legacy fixtures,
     reject unsupported versions, resolve local refs, and derive security from
     declarations applied to the endpoint rather than the first component scheme.
@@ -924,14 +971,14 @@ runnable in Postman and explicitly skipped in OpenAPI, and drift passes.
 
 ### Wave 22: Persistence and round trips
 
-- [ ] **Persist imports**
+- [x] **Persist imports**
   - R26: use the upstream staged OpenAPI import-output contract for reusable
     WebSocket definition/model outputs; retain in-memory results and diagnostics.
     Read saved outputs back and prove dry-run writes nothing.
   - Validate partial-write/failure behavior inherited from that contract in a
     temporary directory; do not replace it with a report-only or bespoke format.
 
-- [ ] **Verify roundtrips**
+- [x] **Verify roundtrips**
   - R27/R56–R58: per shipped API, compare semantic channels, messages/schemas,
     directions, auth/parameters, selectors/fallback, roles, and hints. Include
     overlapping payloads, each role, shared modules, and base-path URL fixtures.
@@ -941,7 +988,7 @@ runnable in Postman and explicitly skipped in OpenAPI, and drift passes.
 
 ### Wave 23: AsyncAPI integration
 
-- [ ] **Publish artifacts**
+- [x] **Publish artifacts**
   - R28: add `just generate-asyncapi`, write one collision-safe document per API
     into schematic/asyncapi, and add L1 drift/closure coverage derived from inventory.
   - Document subset, 2.x import compatibility, 3.0 structure, filename rule,
@@ -956,7 +1003,7 @@ survive, matrices and drift pass, and schema-validation status is explicit.
 
 ### Wave 24: Independent checks
 
-- [ ] **Compile README**
+- [x] **Compile README**
   - R42: include define/README.md as crate docs and rewrite examples to the real
     upstream vocabulary, including pagination, response shapes, and auth policies.
     Network/credential examples use no_run; ignore needs a stated compilation
@@ -964,7 +1011,7 @@ survive, matrices and drift pass, and schema-validation status is explicit.
   - Ownership: define README/lib docs. Run `just doctest`, including generated
     docs from Phase 8, and update related README usage.
 
-- [ ] **Confirm invariants**
+- [x] **Confirm invariants**
   - R43/R50/R52: rerun the retained correctness assertions for no vendor-named
     neutral constructors, no shared preset layer, no stale gen/schematic tree,
     and no query delimiter in registered paths, with the upstream hard-error test.
