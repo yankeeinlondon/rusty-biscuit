@@ -347,6 +347,62 @@ multipart/form-data:
 
 A request body whose `content` is empty is an ERROR, and the body is omitted.
 
+### Value constraints
+
+Value rules (`minLength`, `maximum`, `multipleOf`, `uniqueItems`, `enum`,
+`const`, and the rest of the [value constraints](../value-constraints.md)
+keywords) are kept wherever the source writes them:
+
+| Source position | Imported as |
+| --- | --- |
+| A parameter's schema (and its array `items`) | `ParamDef::constraints` |
+| A text body, or a JSON body whose schema is inline rather than a `$ref` | `Endpoint::request_constraints` |
+| An inline text or JSON form-part schema | `FormField::constraints` |
+| A component schema, at any depth | The component's stored schema in `RestApi::schemas` |
+
+```yaml
+- name: limit
+  in: query
+  schema: { type: integer, minimum: 0, exclusiveMinimum: true, maximum: 18446744073709551616 }
+# ParamDef "limit": Constraints { exclusive_minimum: "0", maximum: "18446744073709551616" }
+```
+
+**Numbers are never narrowed.** `openapiv3`, which parses the document, reads
+bounds as `i64` or `f64`, so the importer first reads every numeric keyword's
+text from the source (YAML or JSON) and takes the value from there. A bound
+beyond `u64`, or a decimal no `f64` holds exactly (`0.10000000000000000001`),
+arrives exactly. In a stored component schema such a value keeps the nearest
+`f64` and adds its exact text in an `x-schematic-exact` member beside it:
+
+```json
+{"type": "integer", "maximum": 1e20, "x-schematic-exact": {"maximum": "99999999999999999999"}}
+```
+
+An integer bound beyond `i64` also keeps its schema's `integer` type. A
+numeric keyword no decimal can represent, YAML's `.inf`/`.nan` or an exponent
+beyond ±10 000, fails the import with `OpenApiError::Validation` at the
+keyword's pointer, such as `#/components/schemas/Pet/properties/age/maximum`.
+A parsed `OpenApiSource::Document` has no source text, so its numbers are the
+ones `openapiv3` holds.
+
+**Spelling is normalized.** OpenAPI 3.0's Boolean `exclusiveMinimum: true`
+beside `minimum: 5` becomes the numeric bound `exclusiveMinimum: 5`, both in
+constraints and in stored component schemas; a `false` flag is dropped. A
+`const`, which `openapiv3` would drop, is kept.
+
+**Patterns.** A pattern inside the [enforced subset](../value-constraints.md#patterns)
+imports as an enforced rule. One outside it, or one that is not a valid
+regular expression, is kept as an unenforced pattern
+(`Constraints::unenforced_pattern`) for export and documentation, with a
+warning at its pointer that says which of the two it is. `format`, `title`,
+and `description` never produce a warning.
+
+**Rules a definition cannot carry** are dropped with a warning naming the
+input and keyword, so the import stays usable: a numeric rule on a URL-encoded
+text field, a source whose `minimum` is above its `maximum`, or a keyword such
+as `minProperties` on a parameter. Rules inside component schemas are always
+kept as written.
+
 ### Authentication
 
 The API's authentication comes from the root `security`. With no
@@ -417,6 +473,33 @@ like a hand-written one.
 schematic-gen import --input specs/openai/openapi.yaml --api-name OpenAI \
     --module-path openai --definitions-out definitions/src/openai
 ```
+
+The emitted module rebuilds the import's [value constraints](#value-constraints)
+when it is assembled:
+
+- parameter, form-field, and body-root rules become `Constraints` builder
+  calls, with every number passed as text (`.maximum("18446744073709551616")`);
+  an endpoint's typed path parameters are emitted when one of them carries
+  rules;
+- a model field's rules become one `#[schemars(extend(..))]` attribute,
+  read from its component's stored schema. `extend` attaches to any field
+  type, where schemars' native `length`/`range` would silently drop on a
+  mismatched one, and it expresses `exclusiveMinimum`, `multipleOf`, `enum`,
+  and `const`, which have no native attribute. A field typed by a plain
+  alias (`pub type Limit = i64;`) carries the alias' rules; an optional
+  field's `enum` also admits `null`; a number no JSON number holds exactly
+  keeps its `x-schematic-exact` text:
+
+```rust
+#[schemars(extend("maximum" = 18446744073709552000f64, "minimum" = 1u64,
+    "x-schematic-exact" = {"maximum": "18446744073709551616"}))]
+pub quantity: i64,
+```
+
+Not rebuilt on model fields: a source `format` (schemars writes the format
+the Rust type implies), item rules of an array of named models, and rules
+beside a reference to a struct, enum, or union model, which belong to that
+model.
 
 ### Overlays: authored additions the import keeps
 

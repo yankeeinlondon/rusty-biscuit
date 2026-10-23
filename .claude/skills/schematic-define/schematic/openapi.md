@@ -110,7 +110,23 @@ models implement `Registration`; the emitter bounds stack use with small
 endpoint helpers and batched registrations. The importer normalizes
 query-bearing paths (OpenAI's seven beta operations share their ordinary ids
 with an optional `beta` query input), rejects GET bodies, duplicate keys, and
-malformed input, and clamps out-of-`i64` schema bounds with a warning.
+malformed input. It never clamps or narrows a value rule: numeric keyword
+text is captured from the source before `openapiv3` parses it (an
+out-of-`i64` bound gets an `i64` stand-in only so the document parses), a
+stored component schema keeps a value no JSON number holds exactly in an
+`x-schematic-exact` member that `openapi::serialize` writes back, Boolean
+3.0 exclusive bounds become numeric ones, and `const` is kept. Rules land in
+`ParamDef`/`FormField`/`request_constraints`; see
+`schematic/docs/io/import-openapi.md#value-constraints`.
+`--definitions-out` re-emits them: endpoint rules as `Constraints` builder
+calls (numbers as text), model-field rules as one `#[schemars(extend(..))]`
+read from the stored component schema (never native `length`/`range`, which
+drop silently on mismatched types). Export writes every rule in 3.0 spelling,
+including an adopted page size's strategy bounds. An imported page-size
+parameter's source bounds must agree with the overlay's strategy
+(`openai_pagination::align_page_size_bounds`). Acceptance:
+`define` `constraint_preservation` (import/export) and `gen`
+`constraint_preservation::slow_definitions_out_rebuilds_every_rule_through_registration`.
 OpenAI is regenerated through `just -f schematic/justfile import-openai`,
 never edited by hand;
 `import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition`

@@ -175,6 +175,44 @@ the operation's
 [`x-schematic.request`](openapi-extensions.md#request-types); no other body
 kind writes that member.
 
+## Value constraints
+
+[Value constraints](../value-constraints.md) export as standard schema
+keywords beside the type, in OpenAPI 3.0 spelling:
+
+| Rule source | Exported in |
+| --- | --- |
+| `ParamDef::constraints` (any location, including typed path parameters) | The parameter's `schema`; `items(..)` rules go into its `items` |
+| A page-size parameter a pager adopts | The parameter's `schema`, with the strategy's `min`/`max` as `minimum`/`maximum` |
+| `EndpointBuilder::request_constraints` | The text body's schema, or the inline JSON body root's |
+| `FormField::constraints` | The field's property schema |
+| Schemars attributes on a registered model | Its component schema (see [How component schemas convert](#how-component-schemas-convert)) |
+
+```rust
+ParamDef::new("score", QueryParamType::Number)
+    .constraints(Constraints::new().exclusive_minimum(0).maximum(10).constant(5))
+```
+
+```yaml
+- name: score
+  in: query
+  schema: { type: number, minimum: 0, exclusiveMinimum: true, maximum: 10, enum: [5] }
+```
+
+- A numeric `exclusive_minimum(x)` becomes `minimum: x` plus
+  `exclusiveMinimum: true`, and `constant(c)` becomes `enum: [c]`.
+- An `Enum` parameter type's values stay authoritative; its rules' `enum` and
+  `const` are not written again.
+- When a body rule names a keyword the body type's own schema already has,
+  such as `exclusive_minimum(0)` on a `u32` root whose schema says
+  `minimum: 0`, the body schema is written as `allOf: [<type schema>,
+  <rules>]` so neither bound widens the other.
+- Numbers are written exactly (see below), and a definition without rules
+  exports exactly as before.
+
+GitHub's `per_page` exports `minimum: 1, maximum: 100`, from its pagination
+strategy, without declaring the bounds on the parameter itself.
+
 ## Path parameters, deprecation, and composition
 
 A path parameter declared with `path_param` exports with its type, its
@@ -436,6 +474,13 @@ The rules behind the table:
 - Bounds, lengths, `pattern`, `format`, `required`, `default`, `enum`, and
   `multipleOf` are kept. A 2020-12 numeric `exclusiveMinimum: 0` becomes
   `minimum: 0, exclusiveMinimum: true`.
+- Numbers are never narrowed. `openapiv3` holds bounds as `i64` or `f64`, so a
+  bound either would change (`9223372036854775808`, `18446744073709551616`,
+  `0.10000000000000000001`, or a stored schema's `x-schematic-exact` text)
+  is carried beside the document, and `serialize` writes its exact decimal
+  text in place of the stand-in. The written document never contains
+  `x-schematic-exact`, and a document without such a bound serializes exactly
+  as before.
 - `"default": null` is dropped: `openapiv3`, which the importer parses with,
   reads it as no default, so keeping it would make an artifact differ from its
   own parse. The field's `nullable` and its absence from `required` already

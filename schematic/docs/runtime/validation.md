@@ -49,13 +49,14 @@ assert_eq!(violations.len(), 2);
 // body.tags violates uniqueItems: must not repeat an item; items 0 and 1 are equal
 ```
 
-**Planned:** generated code calls these checks for you. Each generated
-request with constraints gets a `validate(&self)` method returning every
-violation, and request preparation runs the same checks before any
-credential or network work, so `.build()?`, an awaited call, `.full()`,
-`client.send(request)`, and `send_raw` all refuse a violating request with
-the existing `InvalidArgument` error. The pager will check each page size
-it chooses through the same helpers.
+Generated code calls these checks for you. Each generated request with
+rules gets a `validate(&self)` method returning every violation, and
+request preparation runs the same checks before any credential or network
+work, so `.build()?`, an awaited call, `.full()`, `client.send(request)`,
+and `send_raw` all refuse a violating request with the existing
+`InvalidArgument` error (see [value rules](../generation/request-side.md#value-rules)).
+**Planned:** the pager will check each page size it chooses through the same
+helpers.
 
 ## The checks
 

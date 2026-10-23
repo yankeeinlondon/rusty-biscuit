@@ -222,6 +222,36 @@ impl schematic_runtime::EndpointSpec for GetUserRequest {
 }
 ```
 
+### Value rules
+
+A request whose parameters, form fields, body root, or reached components
+carry value rules (`codegen/value_rules/`) gets:
+
+- `pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations>`;
+- the same checks at the top of `into_parts`, returned together as one
+  `InvalidArgument` before the path is built: parameters on typed values
+  (path, query, header, cookie; arrays by count, then each item, then
+  `uniqueItems`/`enum` through JSON), then text bodies and text form fields,
+  then JSON bodies and multipart JSON fields. A checked JSON body is
+  `serde_json::to_value` once, checked, and that `Value` is sent (keys in
+  sorted order); an unchecked one keeps `to_string(&self.body)`;
+- plans as `static`s in one private `{api_snake}_value_rules` module per API
+  (`COMPONENT_{n}_{NAME}`, `{REQUEST}_{LOCATION}_{FIELD}`, `PATTERN_{n}`);
+  a component reached by several requests is emitted once and recursion is
+  `Plan::reference(&ITS_OWN_STATIC)`;
+- rustdoc: per-parameter "Value rules checked before sending: ..." / "Not
+  checked: ..." lines and a `## Value rules` section on the request.
+
+Skipped as the Rust type's own: Schemars integer-width bounds
+(`is_width_bound`) and string `enum`/`const` that are a unit enum's value set
+or a Rust enum's variant/tag. `validate_rust_client` reports `type-constraint`
+from `value_rules::api_findings`: **error** for a rule beneath a composition
+or beside an unresolved `$ref`; **warning** for `format` (not `int32`/
+`int64`/`float`/`double`), a pattern outside the subset, and a rule inside a
+member of a union component (`anyOf`/`oneOf` at a component's root — OpenAI
+`CreateResponse` has 42, pinned in `output_validation::UNCHECKED_VALUE_RULES`).
+Pager-adopted parameters are not request fields; the pager checks them.
+
 ### API Client Struct
 
 ```rust
@@ -399,6 +429,7 @@ $ schematic-gen validate --api example
 |--------|----------|---------|
 | `codegen/api_struct/` | `generate_api_struct()` | API client struct, `{Api}Api` tag and its `Api` impl, the `api_client!` invocation, constants, `definition()`, `new()`, `basic_auth()` for Basic APIs; `auth.rs` translates the effective auth policy into `AuthConfig`, `helpers.rs` builds the rest of `definition()` |
 | `codegen/request_structs/` | `generate_request_struct()` | Per-endpoint structs; `endpoint_spec.rs` emits the `EndpointSpec` impl, `into_parts.rs` its `into_parts` body, `named_params.rs` header/cookie parameter fields, `form.rs` form structs |
+| `codegen/value_rules/` | `ApiValueRules`, `api_findings()` | Compiles request rules into `schematic_runtime::validate` plans, emits the per-API plans module, and lists unenforced rules (diagnostics, rustdoc) |
 | `codegen/shared.rs` | `generate_request_helpers()` | Request helpers of the generated `shared.rs`: `encode_cookie_value`, `combine_cookie_headers`, `FormFile` |
 | `codegen/pagination/` | `paginated_impl()`, `operation_paginated_impl()` | `impl schematic_runtime::pager::Paginated` and capability markers for endpoints and GraphQL operations |
 | `codegen/responses.rs` | `success_code()`, `failure_code()`, `api_error_body_impls()` | `Success`/`Decoder`/`Failure`, `{Id}Response`/`{Id}Error` enums, stream end markers, `ERRORS` |

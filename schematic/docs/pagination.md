@@ -639,8 +639,10 @@ The pager sends the page size, so the strategy's `PageSize` is where its
 bounds live: `min` (default 1) and `max` become the adopted parameter's
 `minimum` and `maximum`. `pagination::page_size_constraints(&size)` returns
 those rules, and `pagination::adopted_page_size(&api, &endpoint)` returns
-the adopted page-size parameter (its location, name, and effective rules) so
-exports and generated docs can show the bounds.
+the adopted page-size parameter (its location, name, and effective rules).
+OpenAPI export writes those effective bounds into the parameter's schema, so
+GitHub's `per_page` exports `minimum: 1, maximum: 100` without declaring
+them itself.
 
 Declare the parameter with no rules and the bounds come from the strategy.
 If it declares its own rules, they must agree, or API build and bundle load
@@ -653,6 +655,12 @@ fail with `page-size-constraint-conflict`:
 - No other value rule is allowed (`exclusiveMinimum`, `multipleOf`, `enum`,
   `pattern`, and so on), because the pager chooses the value and could not
   honor it. `format` is only an annotation and is allowed.
+
+An imported parameter carries the bounds its OpenAPI document declares, so a
+pagination overlay that adopts it must make the two agree. OpenAI's documents
+`limit` as `minimum: 0`, while its strategies start at 1 (the lowest the
+pagination model accepts); its overlay replaces each adopted parameter's
+bounds with the strategy's, keeping any other rule such as `format`.
 
 ```rust
 .default_pagination(Strategy::page_number("page", MoreSignal::NonEmptyPage)

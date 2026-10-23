@@ -126,7 +126,10 @@ adopted page-size param takes `minimum`/`maximum` from the strategy
 (`page_size_constraints`, `adopted_page_size`); its own differing bounds or
 other rules are `page-size-constraint-conflict`. `unenforceable_rules` finds
 model rules beneath unsupported composition or unresolved refs. Generated
-requests do not enforce constraints yet.
+requests enforce them: a request with rules gets `validate() ->
+Result<(), schematic_runtime::validate::Violations>`, and its `into_parts`
+runs the same checks before encoding, so every send refuses with
+`InvalidArgument` (detail: [`gen.md`](./schematic/gen.md#value-rules)).
 
 ## Generated-Client Contracts To Keep In Sync
 

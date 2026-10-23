@@ -186,8 +186,8 @@ reports the outcome:
 | --- | --- |
 | API build, bundle load | Every rule is checked for contradictions (above). |
 | Pagination | A page-size parameter adopted by a pager takes its bounds from the strategy's `min`/`max`; see [pagination](pagination.md). |
-| Generated clients | **Planned:** each generated request checks its inputs before sending, through `schematic_runtime::validate` (see [request validation](runtime/validation.md)). |
-| OpenAPI import and export | **Planned:** rules travel through import, `--definitions-out`, and export without narrowing. |
+| Generated clients | Each generated request with rules checks them before sending and has a `validate()` method; see [value rules](generation/request-side.md#value-rules). Formats and patterns outside the enforced subset are labeled, not checked. |
+| OpenAPI import and export | Rules travel through import, `--definitions-out`, and export without narrowing; see [importing](io/import-openapi.md#value-constraints) and [exporting](io/export-openapi.md#value-constraints). |
 
 Responses are never validated: a reply that decodes is returned even if it
 breaks a declared rule.

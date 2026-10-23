@@ -24,6 +24,8 @@ You can:
   content type
 - set header and cookie parameters with `with_*` builders; every request
   carries at most one `Cookie` header
+- rely on a request's declared [value rules](#value-rules) being checked
+  before anything is sent, or check them early with `validate()`
 - authenticate an API whose key travels in a query parameter or a cookie,
   per call, per client, or from an environment variable, without the key
   ever appearing in `Debug` output or stored request metadata
@@ -392,6 +394,110 @@ client.list_things().anonymous().await?;
   kind neither the API nor any endpoint replacement accepts is refused with
   `BuildError::IncompatibleCredential` at `build()`, or else on the first
   call as `TransportErrorKind::InvalidClient`.
+
+## Value rules
+
+A request whose definition declares value rules, such as "at most 100
+characters" on a query parameter or `minimum: 1` on a body field, checks
+them before it is sent. You can:
+
+- call `request.validate()` to get every violation of a request before
+  sending it
+- rely on every send refusing a violating request before any credential or
+  network work: `.build()?`, an awaited call, `.full()`,
+  `client.send(request)`, and `send_raw`
+- read a violation's location (`query.limit`, `body.items[2].displayName`),
+  keyword, and reason, knowing it never contains a submitted value
+
+The rules come from the definition: the [value constraints](../value-constraints.md)
+of parameters, form fields, and a body root, and the
+[Schemars attributes](../typed-registration.md#value-rules-on-registered-models)
+of the models a JSON body reaches.
+
+```rust,ignore
+let request = ListItemsRequest::new().with_limit(500); // declared maximum: 100
+let violations = request.validate().unwrap_err();
+assert_eq!(violations.to_string(), "query.limit violates maximum: must be at most 100");
+
+// Sending it fails the same way, and nothing is sent.
+let error = client.list_items().limit(500).build().unwrap_err();
+assert_eq!(error.reason(), "query.limit violates maximum: must be at most 100");
+```
+
+### Where a request is checked
+
+```mermaid
+flowchart TD
+    V["request.validate()"] --> C
+    B["call.build()?"] --> P
+    A["awaited call, .full(), client.send(request), send_raw"] --> P
+    P["EndpointSpec::into_parts()<br/>(generated)"] --> C
+    C["the request's checks<br/>1. parameters, as typed values<br/>2. text body and text form fields<br/>3. JSON body and JSON form fields,<br/>each serialized once"]
+    C -->|violations| E["InvalidArgument naming every violation<br/>(validate() returns Violations)"]
+    C -->|none| S["parts built from the checked values;<br/>credential added; request sent"]
+```
+
+Every send runs the checks again, because a send prepares the request
+afresh: changing a field after `validate()` returned `Ok` is still caught.
+`validate()` is an early report, not a permit.
+
+| Send | A violating request returns |
+| --- | --- |
+| `.build()?` | `InvalidArgument` |
+| awaited call | `CallError::Transport` holding `TransportErrorKind::InvalidArgument` |
+| `.full().await`, `send_raw` | the `TransportError` itself, with the redacted request metadata |
+
+The error's reason lists every violation in a fixed order: parameters in
+declaration order (path, query, header, cookie), then body values with object
+members in key order and array items by index. Callers that need the
+individual violations use `validate()`, which returns them as
+`schematic_runtime::validate::Violations`.
+
+### What is checked
+
+- **Parameters** are checked as typed values, before they are joined or
+  exploded into the query, path, or headers: an array's item count first,
+  then each item under its index (`query.ids[1]`).
+- **Text bodies and form fields** are checked as strings before URL encoding
+  or multipart assembly.
+- **JSON bodies and JSON multipart fields** are serialized once into a
+  `serde_json::Value`, checked, and that same value is sent. Renamed,
+  skipped, and flattened fields are therefore checked as the server sees
+  them, under their serialized names. Two consequences: the body's object
+  members are sent in key order rather than struct order (the same JSON
+  document), and an `f32` field passes through `f64`, so `0.1_f32` is
+  checked and sent as `0.10000000149011612`. A request without JSON rules
+  serializes its body directly, as before.
+- A value that cannot be serialized is refused with the existing "cannot be
+  serialized as JSON" error, not reported as a violation.
+- A map's keys can hold secrets, so a map value's path shows
+  `[redacted]` in place of its key: `body.labels[[redacted]]`.
+- A parameter adopted by a [pager](../pagination.md) is not a request field;
+  the pager checks each page size it chooses.
+
+### What is not checked
+
+| Rule | Outcome |
+| --- | --- |
+| `format` | an annotation only; labeled in rustdoc and reported as a `type-constraint` warning |
+| a pattern outside the [enforced subset](../value-constraints.md#patterns) | labeled in rustdoc and reported as a `type-constraint` warning |
+| a rule inside a member of a union component (an `anyOf`/`oneOf` that is a component's whole schema, as a Rust enum of structs is) | the serialized body does not say which member it is, so the rule is labeled and reported as a `type-constraint` warning |
+| a rule beneath any other `oneOf`, `anyOf`, `allOf`, or `not`, or beside a `$ref` that names no component | a `type-constraint` **error**: the Rust client is not generated |
+| a Rust enum's own variant values (a unit enum's `enum`, a tagged enum's tag `const`) and the bounds Schemars writes for an integer width (`minimum: 0` on a `u32`) | the Rust type already guarantees them; neither checked nor reported |
+
+Responses are never checked: a reply that decodes is returned even when it
+breaks a declared rule.
+
+Generated rustdoc says which rules are checked. A parameter or form field
+lists them, for example "Value rules checked before sending: `minLength` 1,
+`maxLength` 100." and "Not checked: `format` `uuid` (an annotation only).",
+and a request with rules has a `## Value rules` section listing anything it
+does not check.
+
+The checks live in `schematic_runtime::validate` (see
+[request validation](../runtime/validation.md)); a generated module keeps
+its plans in a private `{api}_value_rules` module, so the generated crate
+needs no validation dependency of its own.
 
 ## Debug output never shows a credential
 

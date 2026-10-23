@@ -292,8 +292,14 @@ let rules = unenforceable_rules(&api, &TypeRef::Named("Order".into()));
 // [(Some("Choice"), "/anyOf/0", "maxLength"), (Some("Choice"), "/anyOf/1", "minimum")]
 ```
 
-Generated clients checking a registered model's rules before sending a request,
-and reporting the unenforceable ones, is **planned**.
+A generated client checks a registered model's enforceable rules before
+sending a request whose JSON body reaches it (see
+[value rules](generation/request-side.md#value-rules)). For the
+unenforceable ones, generation reports a `type-constraint` diagnostic: a
+warning for a rule inside a member of a union that is itself a component
+(the shape of a Rust enum of structs), an error for any other. The
+`enum`/`const` values Schemars writes for a Rust enum's own variants and
+tags are guaranteed by the Rust type, so neither is reported.
 
 ## References in transferred definitions
 

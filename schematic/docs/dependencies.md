@@ -35,7 +35,7 @@
 
 - `url` v2 validates HTTP(S) base URLs at REST API build.
 - `schemars` v1 generates provider-neutral typed registrations with OpenAPI 3.0 settings.
-- `serde_json` v1 is an unconditional production dependency for schema component wire schemas and transfer data.
+- `serde_json` v1 is an unconditional production dependency for schema component wire schemas and transfer data. Its `raw_value` feature lets the OpenAPI importer read each numeric schema keyword's exact source text before `openapiv3` narrows it to `i64`/`f64`.
 
 - [regex-syntax](https://github.com/rust-lang/regex/tree/master/regex-syntax) _v0.8_ [📄](https://docs.rs/regex-syntax)
 
