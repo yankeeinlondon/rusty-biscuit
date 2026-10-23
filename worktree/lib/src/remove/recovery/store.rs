@@ -7,7 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::journal::{self, DEFAULT_JOURNAL_LIMIT, EntryState, JournalEntry, JournalInvalid, JournalLog, JournalWriteError, JournalWriter};
+use super::journal::{self, EntryState, JournalEntry, JournalInvalid, JournalLog, JournalWriteError, JournalWriter};
 use super::lock::{self, LOCKS_DIR, LockError, OperationLock};
 use super::record::{self, Phase, RecordInvalid, RecoveryRecord, RepositoryBinding};
 use super::storage::{self, StorageProblem};
@@ -146,6 +146,7 @@ impl RecoveryStore {
             }
         }
 
+        let limit = journal::limit_for(&inventory);
         let staging = self.root.join(format!(".{id}.tmp"));
         let dir = self.operation_dir(&id);
         let staged = (|| -> Result<(), StoreError> {
@@ -153,7 +154,7 @@ impl RecoveryStore {
             let file = storage::create_private_file(&staging.join(JOURNAL_FILE))?;
             // Closed before the rename: Windows refuses to rename a
             // directory with an open file anywhere inside it.
-            drop(JournalWriter::start(file, &id, Arc::clone(&inventory), DEFAULT_JOURNAL_LIMIT)?);
+            drop(JournalWriter::start(file, &id, Arc::clone(&inventory), limit)?);
             storage::write_durable(&staging.join(RECORD_FILE), &record.to_json())?;
             storage::sync_dir(&staging)?;
             fs::rename(&staging, &dir)?;
@@ -169,7 +170,7 @@ impl RecoveryStore {
         // From here the operation is durable and pending; a failure leaves it
         // for recovery.
         let file = storage::open_append(&dir.join(JOURNAL_FILE))?;
-        let journal = JournalWriter::after_header(file, inventory, DEFAULT_JOURNAL_LIMIT);
+        let journal = JournalWriter::after_header(file, inventory, limit);
         Ok(Operation { dir, record, journal, _lock: lock })
     }
 
@@ -244,11 +245,12 @@ impl RecoveryStore {
         archive_journal(&dir, &previous)?;
         fault::at(ReopenStep::Archived, &current)?;
         let next = storage::temp_beside(&current)?;
+        let limit = journal::limit_for(&inventory);
         let staged = (|| -> Result<(), StoreError> {
             let file = storage::create_private_file(&next)?;
             fault::at(ReopenStep::Created, &next)?;
             // Closed before the rename, as in `begin`.
-            drop(JournalWriter::start(file, id, Arc::clone(&inventory), DEFAULT_JOURNAL_LIMIT)?);
+            drop(JournalWriter::start(file, id, Arc::clone(&inventory), limit)?);
             fault::at(ReopenStep::Initialized, &next)?;
             Ok(storage::publish(&next, &current)?)
         })();
@@ -259,7 +261,7 @@ impl RecoveryStore {
             return Err(error);
         }
         let file = storage::open_append(&current)?;
-        let journal = JournalWriter::after_header(file, inventory, DEFAULT_JOURNAL_LIMIT);
+        let journal = JournalWriter::after_header(file, inventory, limit);
         Ok(Operation { dir, record, journal, _lock: lock })
     }
 

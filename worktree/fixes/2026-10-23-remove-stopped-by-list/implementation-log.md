@@ -58,3 +58,29 @@ check. The final assertion would then see a failed check instead of `in-sync`.
 This is a hypothesis, not a finding. This change does not touch the worker
 or the remote-head store. The test is still flaky: it is a failing test
 until it is diagnosed.
+
+## 2026-10-23 — journal size limit (found on the retry)
+
+The retry of the same removal stopped with `the deletion journal reached its
+67108864-byte limit` after deleting 151,615 files. `DEFAULT_JOURNAL_LIMIT`
+was a fixed 64 MiB cap on batch lines. Each entry costs about 440 bytes
+there (its path twice, in the intent and in the result), so any attempt
+stopped near 150k entries, and the retry's 817,460-entry inventory would
+have needed about six retries. Most removals in this repository are that
+large.
+
+The constant is gone. `journal::limit_for(inventory)` is the most bytes the
+batch lines can take with every listed entry planned once, alone in a batch,
+with the longest kind and result. `JournalWriter::begin_batch` now refuses an
+entry an earlier batch of the same journal planned (a `Vec<bool>` by
+inventory position), so the limit is a proven bound. It stops only a writer
+that has gone wrong, never a removal. Tests:
+`the_limit_fits_every_entry_planned_alone_with_the_longest_result` and
+`an_entry_an_earlier_batch_planned_is_refused`. Every `remove::` test passes,
+so the deletion engine never re-plans an entry.
+
+Not changed: the journal is large (the inventory line alone was 257 MB for
+this checkout, and the batches about 360 MB more), because each batch
+repeats the inventory's paths. Referring to entries by inventory position
+would cut that to a few bytes each; that is a format change (journal
+version 3) for its own fix.

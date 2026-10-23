@@ -43,11 +43,45 @@ pub const JOURNAL_VERSION: u32 = 2;
 /// two directories; S2 found 256-event bursts arrive intact on FSEvents.
 pub const MAX_BATCH_ENTRIES: usize = 256;
 
-/// The journal's size limit for deletion batches; the header and inventory
-/// lines do not count against it. Reaching it stops deletion; an intent is
-/// refused while there is still room for the results it would need, so a
-/// confirmed deletion is never lost to the limit.
-pub const DEFAULT_JOURNAL_LIMIT: u64 = 64 * 1024 * 1024;
+/// The journal's size limit for the deletion batches of `inventory`: the
+/// most bytes their lines can take when every listed entry is planned once,
+/// each in a batch of its own, with the longest kind and result. A journal
+/// plans each entry at most once, so the limit binds only a writer that has
+/// gone wrong, never a removal, however large the checkout. The header and
+/// inventory lines do not count against it.
+pub fn limit_for(inventory: &DeletionInventory) -> u64 {
+    let empty: [PlannedEntry; 0] = [];
+    let per_batch = (line(&Line::Intent { batch: u64::MAX, entries: empty.to_vec() }).len()
+        + results_line(u64::MAX, &empty, &[]).len()) as u64;
+    inventory
+        .entries()
+        .iter()
+        .map(|entry| {
+            let path = entry.path.clone();
+            // Each element, with the comma that separates it from the next.
+            let planned = json_len(&PlannedEntry { path: path.clone(), kind: EntryKind::Directory }) + 1;
+            let result = json_len(&EntryResult { path, state: ResultState::ExternallyAbsent }) + 1;
+            planned + result + per_batch
+        })
+        .sum()
+}
+
+/// The length of `value` as JSON, without keeping the bytes.
+fn json_len(value: &impl Serialize) -> u64 {
+    struct Count(u64);
+    impl Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0 += bytes.len() as u64;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count(0);
+    serde_json::to_writer(&mut count, value).expect("a journal element always serializes");
+    count.0
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -344,6 +378,8 @@ pub struct JournalWriter<S: JournalSink = File> {
     inventory: Arc<DeletionInventory>,
     written: u64,
     limit: u64,
+    /// Which inventory entries an earlier batch of this journal planned.
+    planned: Vec<bool>,
     last_batch: u64,
     open: Option<Vec<PlannedEntry>>,
     poisoned: bool,
@@ -373,7 +409,8 @@ impl<S: JournalSink> JournalWriter<S> {
     /// Continues, through a newly opened `sink`, a journal that holds only
     /// its header and inventory.
     pub(super) fn after_header(sink: S, inventory: Arc<DeletionInventory>, limit: u64) -> Self {
-        Self { sink, inventory, written: 0, limit, last_batch: 0, open: None, poisoned: false }
+        let planned = vec![false; inventory.entries().len()];
+        Self { sink, inventory, written: 0, limit, planned, last_batch: 0, open: None, poisoned: false }
     }
 
     pub fn inventory(&self) -> &Arc<DeletionInventory> {
@@ -391,6 +428,12 @@ impl<S: JournalSink> JournalWriter<S> {
             return Err(JournalWriteError::InvalidBatch("the previous batch has no results"));
         }
         check_batch(&entries, &self.inventory).map_err(JournalWriteError::InvalidBatch)?;
+        // `limit_for` counts every entry once.
+        let positions: Vec<usize> =
+            entries.iter().filter_map(|entry| self.inventory.position(entry.path.as_path())).collect();
+        if positions.iter().any(|&at| self.planned[at]) {
+            return Err(JournalWriteError::InvalidBatch("a batch plans an entry an earlier batch planned"));
+        }
         let batch = self.last_batch + 1;
         let intent = line(&Line::Intent { batch, entries: entries.clone() });
         // Reserve the longest results line this batch could need.
@@ -399,6 +442,9 @@ impl<S: JournalSink> JournalWriter<S> {
             return Err(JournalWriteError::LimitReached { limit: self.limit });
         }
         self.write(&intent)?;
+        for at in positions {
+            self.planned[at] = true;
+        }
         self.last_batch = batch;
         self.open = Some(entries);
         Ok(batch)
@@ -528,7 +574,7 @@ mod tests {
     #[test]
     fn a_journal_without_batches_means_nothing_was_attempted() {
         let sink = MemorySink::default();
-        start(sink.clone(), DEFAULT_JOURNAL_LIMIT).unwrap();
+        start(sink.clone(), limit_for(&listed())).unwrap();
         let log = parse(&sink.contents(), &id()).unwrap();
         assert!(log.batches.is_empty());
         assert!(!log.torn_tail);
@@ -538,7 +584,7 @@ mod tests {
     #[test]
     fn confirmed_results_and_an_interrupted_batch_recover_distinctly() {
         let sink = MemorySink::default();
-        let mut writer = start(sink.clone(), DEFAULT_JOURNAL_LIMIT).unwrap();
+        let mut writer = start(sink.clone(), limit_for(&listed())).unwrap();
         writer.begin_batch(vec![file("d/a"), file("d/b"), file("d/c")]).unwrap();
         writer.finish_batch(&[ResultState::Deleted, ResultState::ExternallyAbsent, ResultState::Kept]).unwrap();
         writer.begin_batch(vec![file("e/x"), file("e/y")]).unwrap();
@@ -563,7 +609,7 @@ mod tests {
     #[test]
     fn a_torn_results_line_leaves_its_batch_uncertain() {
         let sink = MemorySink { fail_append: Some(3), torn: 20, ..MemorySink::default() };
-        let mut writer = start(sink.clone(), DEFAULT_JOURNAL_LIMIT).unwrap();
+        let mut writer = start(sink.clone(), limit_for(&listed())).unwrap();
         writer.begin_batch(vec![file("a")]).unwrap();
         let error = writer.finish_batch(&[ResultState::Deleted]).unwrap_err();
         assert!(matches!(error, JournalWriteError::Io(_)), "{error}");
@@ -577,10 +623,40 @@ mod tests {
     #[test]
     fn a_failed_intent_flush_refuses_the_batch_and_every_later_write() {
         let sink = MemorySink { fail_sync: Some(2), ..MemorySink::default() };
-        let mut writer = start(sink.clone(), DEFAULT_JOURNAL_LIMIT).unwrap();
+        let mut writer = start(sink.clone(), limit_for(&listed())).unwrap();
         assert!(matches!(writer.begin_batch(vec![file("a")]), Err(JournalWriteError::Io(_))));
         assert_eq!(writer.open_batch(), None);
         assert!(matches!(writer.finish_batch(&[ResultState::Deleted]), Err(JournalWriteError::Poisoned)));
+    }
+
+    /// The limit for an inventory holds its worst case: every entry in a
+    /// batch of its own, each result the longest.
+    #[test]
+    fn the_limit_fits_every_entry_planned_alone_with_the_longest_result() {
+        let inventory = listed();
+        let sink = MemorySink::default();
+        let mut writer = JournalWriter::start(sink, &id(), Arc::clone(&inventory), limit_for(&inventory)).unwrap();
+        for entry in inventory.entries() {
+            let planned = PlannedEntry { path: entry.path.clone(), kind: EntryKind::of(&entry.shape) };
+            writer.begin_batch(vec![planned]).unwrap();
+            writer.finish_batch(&[ResultState::ExternallyAbsent]).unwrap();
+        }
+        assert!(writer.written <= writer.limit, "{} of {}", writer.written, writer.limit);
+    }
+
+    /// The limit counts each entry once, so planning one again is refused
+    /// before anything is written, in any later batch.
+    #[test]
+    fn an_entry_an_earlier_batch_planned_is_refused() {
+        let sink = MemorySink::default();
+        let mut writer = start(sink.clone(), limit_for(&listed())).unwrap();
+        writer.begin_batch(vec![file("d/a"), file("d/b")]).unwrap();
+        writer.finish_batch(&[ResultState::Kept, ResultState::Deleted]).unwrap();
+        let before = sink.contents().len();
+
+        assert!(matches!(writer.begin_batch(vec![file("d/c"), file("d/a")]), Err(JournalWriteError::InvalidBatch(_))));
+        assert_eq!(sink.contents().len(), before, "nothing written");
+        writer.begin_batch(vec![file("d/c")]).unwrap();
     }
 
     #[test]
@@ -612,7 +688,7 @@ mod tests {
 
     #[test]
     fn a_batch_names_only_inventory_entries_of_their_kind() {
-        let mut writer = start(MemorySink::default(), DEFAULT_JOURNAL_LIMIT).unwrap();
+        let mut writer = start(MemorySink::default(), limit_for(&listed())).unwrap();
         for entries in [
             vec![file("d/unlisted")],
             vec![PlannedEntry { path: NativeString::from("d/a"), kind: EntryKind::Directory }],
@@ -626,7 +702,7 @@ mod tests {
 
     #[test]
     fn batches_outside_the_bound_are_refused_by_writer_and_reader() {
-        let mut writer = start(MemorySink::default(), DEFAULT_JOURNAL_LIMIT).unwrap();
+        let mut writer = start(MemorySink::default(), limit_for(&listed())).unwrap();
         let too_many: Vec<_> = (0..=MAX_BATCH_ENTRIES).map(|n| file(&format!("d/{n}"))).collect();
         let full: Vec<_> = (0..MAX_BATCH_ENTRIES).map(|n| file(&format!("d/{n}"))).collect();
         let invalid = [
@@ -650,7 +726,7 @@ mod tests {
     #[test]
     fn another_operations_journal_is_refused() {
         let sink = MemorySink::default();
-        start(sink.clone(), DEFAULT_JOURNAL_LIMIT).unwrap();
+        start(sink.clone(), limit_for(&listed())).unwrap();
         let other = OperationId::parse("ffffffffffffffffffffffffffffffff").unwrap();
         assert_eq!(parse(&sink.contents(), &other), Err(JournalInvalid::OperationMismatch));
     }
