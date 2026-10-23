@@ -21,7 +21,8 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 status: draft-spec
 reviewed: false
-review_iterations: 0
+review_iterations: 1
+completed: true
 clarified: false
 implemented: true
 related:
