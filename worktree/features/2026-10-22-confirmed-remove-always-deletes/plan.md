@@ -16,6 +16,47 @@ skills_files_updated_during_phase_1:
     - .claude/skills/worktree/testing.md
 packages:
     - worktree
+source_files_during_phase_2:
+    - worktree/lib/src/remove/recovery/compact.rs
+    - worktree/lib/src/remove/recovery/compact/tests.rs
+    - worktree/lib/src/remove/recovery/legacy.rs
+    - worktree/lib/src/remove/recovery/legacy/tests.rs
+    - worktree/lib/src/remove/recovery/store/compact.rs
+    - worktree/lib/src/remove/recovery/store/compact/tests.rs
+    - worktree/lib/src/remove/recovery/store.rs
+    - worktree/lib/src/remove/recovery/mod.rs
+    - worktree/lib/src/remove/recovery/record.rs
+    - worktree/lib/src/remove/lifecycle.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/worktree/lifecycle.md
+source_files_during_phase_3:
+    - worktree/lib/src/remove/delete/mod.rs
+    - worktree/lib/src/remove/delete/classify.rs
+    - worktree/lib/src/remove/delete/wait.rs
+    - worktree/lib/src/remove/delete/platform.rs
+    - worktree/lib/src/remove/delete/tests.rs
+    - worktree/lib/src/remove/mounts.rs
+    - worktree/lib/src/remove/mounts/mountinfo.rs
+    - worktree/lib/src/remove/mounts/linux.rs
+    - worktree/lib/src/remove/mounts/macos.rs
+    - worktree/lib/src/remove/mounts/windows.rs
+    - worktree/lib/src/remove/quarantine/placement.rs
+    - worktree/lib/src/remove/quarantine/placement/tests.rs
+    - worktree/lib/src/remove/quarantine/association.rs
+    - worktree/lib/src/remove/quarantine/association/tests.rs
+    - worktree/lib/src/remove/quarantine/mod.rs
+    - worktree/lib/src/remove/test_support.rs
+    - worktree/lib/src/remove/mod.rs
+docs_updated_during_phase_3:
+    - worktree/docs/cli/remove.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/worktree/remove.md
+    - .claude/skills/worktree/deletion.md
+    - .claude/skills/os/linux.md
 ---
 
 # Plan: a confirmed `wt remove` always deletes
@@ -442,7 +483,7 @@ Goal: durable approval and recovery data (R19, R25, R26) with no journal.
 
 #### Wave 3 (parallel; disjoint files)
 
-- [ ] **Record v2** — new `recovery/record.rs` shape.
+- [x] **Record v2** — new `recovery/record.rs` shape.
   - Fields per R25: operation id, aliases, original/deletion paths, checkout and
     repository identities, admin record binding, deletion mode, approved branch
     steps with bindings (expected local tip; explicit vs conditional approval;
@@ -452,7 +493,7 @@ Goal: durable approval and recovery data (R19, R25, R26) with no journal.
     (the old "never authorizes retry" contract is replaced — fix the doc in the
     same change).
   - Tests: control + field-shape matrix through the public parse result.
-- [ ] **Legacy reader** — separate v1 parse plus optional report (≤ v6) parse.
+- [x] **Legacy reader** — separate v1 parse plus optional report (≤ v6) parse.
   - Validate record v1 independently of reports; report version alone grants no
     authority; a corrupt/absent report does not block migration.
   - Produce a `LegacyApproval` (bound checkout + intent) and a list of
@@ -464,7 +505,7 @@ Goal: durable approval and recovery data (R19, R25, R26) with no journal.
 
 #### Wave 4 (sequential; depends on Wave 3)
 
-- [ ] **Store and migration** — `recovery/store.rs`, `lock.rs`, `storage.rs`.
+- [x] **Store and migration** — `recovery/store.rs`, `lock.rs`, `storage.rs`.
   - Atomic durable save (write temp, fsync file, rename, fsync dir); a failure
     returns exit 1 before any mutation and says nothing was deleted (R29).
   - `begin`/`reopen`/`recover` for v2; migration publishes the compact v2 record
@@ -475,7 +516,7 @@ Goal: durable approval and recovery data (R19, R25, R26) with no journal.
     lock wait honors cancellation.
   - Completed operation leaves nothing (record, journal, report, copy record).
   - Never require a readable journal; ignore and delete a leftover one.
-- [ ] **Store tests** — crash injection around save/migrate, stale lock,
+- [x] **Store tests** — crash injection around save/migrate, stale lock,
   concurrent waiters, corrupt/foreign/unknown-version records (plain
   explanation, no deletion), record-write failure.
 
@@ -491,7 +532,7 @@ Goal: delete a bound checkout without watcher, journal, or content checks
 
 #### Wave 5 (sequential core)
 
-- [ ] **Engine core** — new module (e.g. `remove/delete/`) replacing
+- [x] **Engine core** — new module (e.g. `remove/delete/`) replacing
   `observation/deletion.rs`.
   - Handle-based, no-follow traversal (`openat`/`unlinkat` on Unix; handle-based
     on Windows); links removed as entries, never traversed; revalidate a
@@ -510,17 +551,17 @@ Goal: delete a bound checkout without watcher, journal, or content checks
 
 #### Wave 6 (parallel; plug into the Wave 5 interface)
 
-- [ ] **Mount detection** — Linux `/proc/self/mountinfo` (bind mounts on the
+- [x] **Mount detection** — Linux `/proc/self/mountinfo` (bind mounts on the
   same device included), macOS `getfsstat`/`statfs`, Windows volume mount points
   and junction-to-volume; injected `MountInfo` for L1; never unmount or elevate.
-- [ ] **Windows waits** — `ERROR_SHARING_VIOLATION` classification, holder naming
+- [x] **Windows waits** — `ERROR_SHARING_VIOLATION` classification, holder naming
   through the Sniff query (initial query only; query again to explain a wait),
   "has a file open" wording unless writing observed, wait messages only on
   holder change; a missing process record is never proof of release.
   Reparse points: cloud placeholders/deduplicated files removed without
   opening/hydrating; unknown reparse type removed as an entry or reported as a
   filesystem failure.
-- [ ] **Quarantine and in-place mode** — keep `quarantine/rename.rs`
+- [x] **Quarantine and in-place mode** — keep `quarantine/rename.rs`
   no-replacement guarantee and `admin_entry.rs` association checks unchanged.
   - Add drvfs fallback (atomic no-replace rename unsupported → in-place using the
     same record; a check-then-rename is forbidden).
@@ -530,7 +571,7 @@ Goal: delete a bound checkout without watcher, journal, or content checks
     → in-place mode.
   - Replaced original after a quarantine move is left untouched and reported;
     in-place replaced root stops the operation (outside the approval).
-- [ ] **Error classifier** — N4 `classify` with per-OS tables and unit tests.
+- [x] **Error classifier** — N4 `classify` with per-OS tables and unit tests.
 
 **Checkpoint 3:** L1 engine tests: permanent failure deletes everything else and
 does not retry; links swapped during traversal expose nothing; hard-linked data
