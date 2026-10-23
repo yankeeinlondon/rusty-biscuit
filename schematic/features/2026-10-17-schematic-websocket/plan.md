@@ -16,6 +16,12 @@ packages:
     - schematic-definitions
     - schematic-gen
     - schematic-schema
+    - homelab
+    - unfolded-integration-helper
+    - arcam-amp-integration
+    - eversolo-integration
+    - sony-receiver-integration
+    - schematic-runtime
 source_files_during_phase_2:
     - schematic/definitions/src/unfolded_circle/core_ws/mod.rs
     - schematic/gen/src/diagnostics.rs
@@ -83,6 +89,82 @@ skills_files_updated_during_phase_3:
     - .claude/skills/schematic-define/schematic/gen.md
     - .claude/skills/schematic-define/schematic/websocket.md
     - .claude/skills/unfolded-circle/core-api.md
+source_files_during_phase_4:
+    - homelab/arcam-amp-integration/src/handler.rs
+    - homelab/eversolo-integration/src/handler.rs
+    - homelab/lib/src/samsung_tv.rs
+    - homelab/sony-receiver-integration/src/handler.rs
+    - homelab/unfolded-integration-helper/Cargo.toml
+    - homelab/unfolded-integration-helper/src/envelope.rs
+    - homelab/unfolded-integration-helper/src/lib.rs
+    - homelab/unfolded-integration-helper/src/subscriptions.rs
+    - homelab/unfolded-integration-helper/src/test_fixtures.rs
+    - schematic/definitions/src/unfolded_circle/dock_ws/types.rs
+    - schematic/definitions/src/unfolded_circle/integration_ws/types.rs
+    - schematic/gen/src/asyncapi_import.rs
+    - schematic/gen/src/ws_codegen/client.rs
+    - schematic/gen/src/ws_codegen/host.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/src/ws_codegen/shared.rs
+    - schematic/gen/tests/l1/asyncapi_import.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/schema/src/elevenlabs_ws.rs
+    - schematic/schema/src/samsung_smart_tv_remote_ws.rs
+    - schematic/schema/src/unfolded_circle_core_ws.rs
+    - schematic/schema/src/unfolded_circle_dock_ws.rs
+    - schematic/schema/src/unfolded_circle_integration_ws.rs
+    - schematic/schema/src/ws_shared.rs
+    - schematic/schema/tests/ws_runtime.rs
+docs_updated_during_phase_4:
+    - homelab/eversolo-integration/README.md
+    - homelab/unfolded-integration-helper/README.md
+    - schematic/README.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/websocket-definitions.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/schematic-define/schematic/websocket.md
+source_files_during_phase_5:
+    - schematic/gen/src/codegen/api_struct/auth.rs
+    - schematic/gen/src/codegen/api_struct/mod.rs
+    - schematic/gen/src/ws_codegen/client.rs
+    - schematic/gen/src/ws_codegen/host.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/src/ws_codegen/shared.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/gen/tests/l1/ws_validation.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/credentials.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/tests/l1/handshake_credentials.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/schema/src/elevenlabs_ws.rs
+    - schematic/schema/src/samsung_smart_tv_remote_ws.rs
+    - schematic/schema/src/unfolded_circle_core_ws.rs
+    - schematic/schema/src/unfolded_circle_dock_ws.rs
+    - schematic/schema/src/unfolded_circle_integration_ws.rs
+    - schematic/schema/src/ws_shared.rs
+    - schematic/schema/tests/ws_correlation.rs
+    - schematic/schema/tests/ws_handshake.rs
+    - schematic/schema/tests/ws_mock/mod.rs
+    - schematic/schema/tests/ws_mock_harness.rs
+    - schematic/schema/tests/ws_runtime.rs
+docs_updated_during_phase_5:
+    - schematic/README.md
+    - schematic/docs/dependencies.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/headers/README.md
+    - schematic/docs/runtime/credentials.md
+    - schematic/docs/websocket-definitions.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/headers.md
+    - .claude/skills/schematic-define/schematic/websocket.md
 ---
 
 # Schematic WebSocket Implementation Plan
@@ -273,7 +355,7 @@ The existing AsyncAPI reader supports JSON and YAML. Its parsing/field interpret
 
 ### Wave 8 — Typed Codecs (sequential shared contract)
 
-- [ ] **Emit Messages**
+- [x] **Emit Messages**
   - Emit per-endpoint client/server enums with payload-only serialization, client-relative directions, lifecycle exclusion, and derives limited to payload capabilities. Empty directions compile as uninhabited enums.
   - Select by declared predicates before decoding, enforce overlap/fallback/selector errors, and retain original text or bytes in decode errors. JSON text/binary remain distinct; unsupported raw/mixed framing yields a named diagnostic.
   - Change primary `send`, `next_event`, and `events` to typed messages; add explicit value counterparts consuming the same bounded queue exactly once. Malformed messages yield an error and leave the connection usable.
@@ -281,17 +363,17 @@ The existing AsyncAPI reader supports JSON and YAML. Its parsing/field interpret
 
 ### Wave 9 — Host and Consumers (parallel with disjoint ownership)
 
-- [ ] **Generalize Hosts**
+- [x] **Generalize Hosts**
   - Use `{ApiName}EventHub`, remove fixed Unfolded Circle envelopes, and emit endpoint-specific typed `on_authenticated` hooks with default None. Host input uses client enums; output uses server enums.
   - Prove one hook invocation after successful auth and before application traffic, no invocation on auth failure, exact custom output/no extra frame, and connection closure plus reporting on hook-write failure.
   - Compile/test a non-Unfolded and multi-endpoint host fixture; its generated source contains no Unfolded Circle assumptions.
-- [ ] **Migrate Consumers**
+- [x] **Migrate Consumers**
   - Update `homelab/lib/src/samsung_tv.rs` and the four named integration packages for typed messages, value escape hatches where intentionally needed, and the finalized hub/hook API. Implement protocol-specific auth-success messages in integration handlers.
   - Coordinate the host contract before editing; do not concurrently edit templates, manifests, or generated files. Build against regenerated output in Wave 10.
 
 ### Wave 10 — Typed Integration (sequential)
 
-- [ ] **Integrate Surfaces**
+- [x] **Integrate Surfaces**
   - Regenerate, finish host consumer integration, and update public README/topic/skill examples with typed and value operations and queue ownership.
   - Run typed/host fixture tests, schema tests, affected consumer builds, `just lint-schema`, and drift checks.
 
@@ -301,11 +383,11 @@ The existing AsyncAPI reader supports JSON and YAML. Its parsing/field interpret
 
 ### Wave 11 — Independent Runtime Features (parallel only after file split)
 
-- [ ] **Apply Credentials**
+- [x] **Apply Credentials**
   - Reuse shared resolution, auth policy, header merging, redaction, errors, timing, and TLS adaptation. If needed, extract the smallest transport-neutral helper inside the existing runtime and log it; never copy credential policy into generated text.
   - Resolve per-call, client, ordered first-nonempty env, then anonymous once per connect. Cover Bearer/custom header, API-key header, query/cookie, Basic pair, None policy, cookie merge, auth accessor, retained selection on redials, and explicit-source conflicts.
   - Reject upgrade-header overrides; preserve structured rejection status/redacted headers. Refuse all redirects without a second request. Test sentinels in URL/options/private storage Debug and Display, refused/stalled dials, Location and Set-Cookie, and a second origin receiving zero requests.
-- [ ] **Implement Correlation**
+- [x] **Implement Correlation**
   - Use only endpoint hints plus `responds_with`, with all R11 Error/Warning cases. Remove envelope-name and hard-coded field inference; renaming messages changes no behavior.
   - Emit typed request methods returning the linked response payload and retain `request_value`. Insert runtime-owned unique String/U64 IDs, never resetting across redials; only the declared response variant with the same ID completes a request.
   - Remove pending entries on serialize/send failure, timeout, cancellation, and disconnect; wake loss with `Disconnected` and never replay commands. Prove wrong-type same-ID frames remain events and capacity is reclaimed under a small pending limit.
@@ -314,7 +396,7 @@ The existing AsyncAPI reader supports JSON and YAML. Its parsing/field interpret
 
 ### Wave 12 — Runtime Integration (sequential)
 
-- [ ] **Integrate Runtime**
+- [x] **Integrate Runtime**
   - Regenerate and migrate changed request/credential call sites in the same phase. Run auth placement/precedence/rejection/redaction, request ID/type/rename/capacity, schema, consumer, and drift checks.
   - Verify initial and redial 401/403/redirect errors are terminal; retain the old receive-timeout diagnostic until Phase 6. Update auth/correlation docs and any runtime dependency documentation touched by actual changes.
 

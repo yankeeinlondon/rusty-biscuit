@@ -15,36 +15,47 @@ packages:
     - schematic-definitions
     - schematic-gen
     - schematic-schema
+    - homelab
+    - unfolded-integration-helper
+    - arcam-amp-integration
+    - eversolo-integration
+    - sony-receiver-integration
+    - schematic-runtime
 human_review: false
 message_to_agent: |-
-    Phase 3 landed R12 and R13 (shared vocabulary, normalized definitions).
-    What Phase 4 builds on:
-    - Every shipped endpoint declares selectors/fallback on documented wire
-      values and an explicit role; EndpointPlan.messages carries the full
-      MessageSchema list (selectors, fallback, responds_with) in declaration
-      order. Directions are client-relative; Integration is role Both with
-      EventEnvelope the only Bidirectional message.
-    - Selector enforcement (fallback count, overlap with the Phase 1
-      strict-subset rule, missing selector) is NOT in validate_ws_api yet;
-      definitions/tests/ws_conformance.rs already checks the shipped five
-      for at most one fallback, non-empty selectors, and no identical sets.
-    - Dock payload types cannot decode the documented auth frames: the
-      official UCD2 AsyncAPI sends {type: auth_required}, {type: auth, token},
-      {type: auth, msg: authentication, code}, but DockWsEnvelopeType only
-      has req/resp/event and DockWsAuth* use `msg: DockWsKnownMessage`. The
-      Dock selectors follow the wire; Phase 4's recorded-frame decode test
-      will need those payload types fixed.
-    - Correlation inference by envelope name and the receive-timeout Info are
-      still present (Phases 5 and 6 remove them). request_id_type is still a
-      plain RequestIdType with a serde default, so "explicitly declared but
-      unconsumed" cannot be told from the default yet; Phase 5 needs
-      presence (e.g. Option<RequestIdType>) for the R11 warning. Samsung now
-      declares no runtime hints at all.
-    - Dock keeps env_auth [UCR_DOCK_TOKEN] with an explicit empty env_mapping
-      (AuthStrategy::None); how the setup callback obtains the Dock token is
-      still Phase 6's decision.
-    - Phase 2 changes are still uncommitted in this tree; the
-      *_during_phase_3 lists name only this phase's files.
+    Phase 5 landed R5/R6/R7 (handshake credential) and R11 (typed
+    correlation). What Phase 6 builds on:
+    - Each explicit `connect_*` builds one `ws_shared::WsHandshake` (URL and
+      headers with the selected credential already placed, redacted Debug)
+      and calls `handshake.dial(&options)`; the supervisor redials with the
+      same handshake. Dial errors are `HandshakeRejected{status, headers}`
+      (redacted), `Handshake(String)` (URL redacted) or `HandshakeTimeout`.
+      `err.is_terminal_handshake_rejection()` (401/403/3xx) closes the
+      supervisor on a redial; keep that when you rework the loop.
+    - The supervisor loop itself is otherwise Phase 4's: the reconnect
+      counter still increments on a successful redial and resets when a
+      stream is taken (R2 is yours), there is no opening write/setup callback
+      (R3), no receive timeout (R8; the Info diagnostic in `lower_to_plan`
+      and the `_receive_timeout` TODO in `client.rs` are still there), and
+      `Ready` is sent right after the split. `handshake_timeout` alone bounds
+      a dial; the shared deadline (plan rule 7) is not implemented.
+    - On connection loss the supervisor now calls `fail_pending` (wakes
+      requests with Disconnected) and `discard_queued(&mut writer_rx)`
+      (drops queued commands; returns true on Close/closed channel). A send
+      while disconnected still queues and returns Ok; making it return
+      `Disconnected` is Phase 6.
+    - The ElevenLabs opening payload's `xi-api-key` binding (plan rule 6) is
+      not done: the selected credential is placed on the handshake only.
+      `WsHandshake` keeps `auth_method` but not the raw secret; the setup
+      session needs a private accessor (e.g. keep the `HandshakeCredential`,
+      whose Debug is redacted) to fill or check an opening auth field.
+    - No WS TLS opt-in exists (logged open issue); do not add one.
+    - Tests to extend: `schema/tests/ws_handshake.rs`,
+      `schema/tests/ws_correlation.rs` (F3 local) and the fresh-output child
+      list `CREDENTIAL_WS_CLIENT_TESTS` in `gen/tests/l1/fresh_output_compile.rs`
+      (CI-visible). The mock gained `Script::RefuseWith{status, headers}`.
+    - Phase 4 was uncommitted when Phase 5 started; the *_during_phase_5
+      lists name only Phase 5's files (diffed against a snapshot).
 source_files_during_phase_2:
     - schematic/definitions/src/unfolded_circle/core_ws/mod.rs
     - schematic/gen/src/diagnostics.rs
@@ -112,6 +123,82 @@ skills_files_updated_during_phase_3:
     - .claude/skills/schematic-define/schematic/gen.md
     - .claude/skills/schematic-define/schematic/websocket.md
     - .claude/skills/unfolded-circle/core-api.md
+source_files_during_phase_4:
+    - homelab/arcam-amp-integration/src/handler.rs
+    - homelab/eversolo-integration/src/handler.rs
+    - homelab/lib/src/samsung_tv.rs
+    - homelab/sony-receiver-integration/src/handler.rs
+    - homelab/unfolded-integration-helper/Cargo.toml
+    - homelab/unfolded-integration-helper/src/envelope.rs
+    - homelab/unfolded-integration-helper/src/lib.rs
+    - homelab/unfolded-integration-helper/src/subscriptions.rs
+    - homelab/unfolded-integration-helper/src/test_fixtures.rs
+    - schematic/definitions/src/unfolded_circle/dock_ws/types.rs
+    - schematic/definitions/src/unfolded_circle/integration_ws/types.rs
+    - schematic/gen/src/asyncapi_import.rs
+    - schematic/gen/src/ws_codegen/client.rs
+    - schematic/gen/src/ws_codegen/host.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/src/ws_codegen/shared.rs
+    - schematic/gen/tests/l1/asyncapi_import.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/schema/src/elevenlabs_ws.rs
+    - schematic/schema/src/samsung_smart_tv_remote_ws.rs
+    - schematic/schema/src/unfolded_circle_core_ws.rs
+    - schematic/schema/src/unfolded_circle_dock_ws.rs
+    - schematic/schema/src/unfolded_circle_integration_ws.rs
+    - schematic/schema/src/ws_shared.rs
+    - schematic/schema/tests/ws_runtime.rs
+docs_updated_during_phase_4:
+    - homelab/eversolo-integration/README.md
+    - homelab/unfolded-integration-helper/README.md
+    - schematic/README.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/websocket-definitions.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/schematic-define/schematic/websocket.md
+source_files_during_phase_5:
+    - schematic/gen/src/codegen/api_struct/auth.rs
+    - schematic/gen/src/codegen/api_struct/mod.rs
+    - schematic/gen/src/ws_codegen/client.rs
+    - schematic/gen/src/ws_codegen/host.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/src/ws_codegen/shared.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/gen/tests/l1/ws_validation.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/credentials.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/tests/l1/handshake_credentials.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/schema/src/elevenlabs_ws.rs
+    - schematic/schema/src/samsung_smart_tv_remote_ws.rs
+    - schematic/schema/src/unfolded_circle_core_ws.rs
+    - schematic/schema/src/unfolded_circle_dock_ws.rs
+    - schematic/schema/src/unfolded_circle_integration_ws.rs
+    - schematic/schema/src/ws_shared.rs
+    - schematic/schema/tests/ws_correlation.rs
+    - schematic/schema/tests/ws_handshake.rs
+    - schematic/schema/tests/ws_mock/mod.rs
+    - schematic/schema/tests/ws_mock_harness.rs
+    - schematic/schema/tests/ws_runtime.rs
+docs_updated_during_phase_5:
+    - schematic/README.md
+    - schematic/docs/dependencies.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/headers/README.md
+    - schematic/docs/runtime/credentials.md
+    - schematic/docs/websocket-definitions.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/headers.md
+    - .claude/skills/schematic-define/schematic/websocket.md
 ---
 
 # Implementation Log for 2026-10-17-schematic-websocket (7 phases)
@@ -1037,3 +1124,465 @@ Integration host is still generated (role `Both`); the five definitions
 survive JSON write/read/write/read without losing roles, selectors,
 fallbacks, links, or hints. R10 typed selection and R11 link execution remain
 pending for Phases 4 and 5.
+
+## Phase 4
+
+Started 2026-10-22. Phases 2 and 3 are committed; the working tree holds only
+this phase's changes. The generator work (Waves 8–9 host template) was done
+by the orchestrator in sequence; three subagents then ran in parallel on
+disjoint files: the homelab consumer migration, the `schematic-schema` runtime
+tests, and the `schematic-gen` fresh-output fixtures. Each ran only scoped
+tests; the area gates ran once afterwards.
+
+### What changed
+
+- **Message enums (R10, `ws_codegen/client.rs`).** Every endpoint gets
+  `{Ep}ServerMessage` and `{Ep}ClientMessage`, one variant per `MessageSchema`
+  named after it and holding the payload type its `Schema` names
+  (`Bidirectional` in both; lifecycle messages are not variants). Only
+  `Debug` is derived. A direction gets a payload-only `serde::Serialize` impl
+  where the endpoint *sends* it (client → ClientMessage, host → ServerMessage)
+  and `decode(WsInboundFrame)` where it *receives* it, so payloads need only
+  the serde capability their direction uses; empty directions are
+  uninhabited enums. `decode` tries selectors most-specific-first (selector
+  count descending; validation guarantees any two matching sets are in a
+  strict-subset chain), then the fallback (or a direction's sole unselected
+  message), else `WsError::Decode`. Payloads decode from the **raw** frame,
+  not the parsed `Value`, because `serde_json::from_value` cannot produce the
+  `Box<RawValue>` fields the Unfolded Circle envelopes use.
+- **Shared runtime (`ws_codegen/shared.rs`).** New `WsRawFrame`
+  (`Text`/`Binary`, exactly as received), `WsInboundFrame` (raw + parsed
+  value; `parse`, `matches`, `decode_payload`, `unmatched`), `WsError::Decode
+  { frame, reason }`, and `WsEventStream<T>`. The unused `WsEncode`/`WsDecode`
+  blanket traits are removed (no caller in the repo).
+- **Client surface.** `send({Ep}ClientMessage)`, `send_value(Value)`,
+  `next_event()` typed, `next_value_event()`, `events()`/`value_events()`. The
+  event queue now carries `WsInboundFrame`, so typed and value receivers read
+  one bounded queue and each message is delivered once. Non-JSON frames are
+  `Decode` errors that keep the frame; the connection stays open. The generic
+  `send_typed` is gone (a private `send_payload` serves lifecycle helpers and
+  `request`). The API struct and endpoint clients are now emitted only for
+  `Client`/`Both` endpoints (before, `Host` endpoints got a client too, which
+  contradicted the documented role table). `request(Value)` is unchanged
+  (Phase 5).
+- **Defect fixed on the way:** `events()` used to move the receiver out and
+  drop the transport handle, whose `Drop` aborts the supervisor — the stream
+  ended the connection it was reading. `WsEventStream` now holds the
+  transport; the fresh-output child test checks the stream keeps the
+  connection and that dropping it ends the connection.
+- **Host (R14, `ws_codegen/host.rs`).** `{ApiBase}EventHub` (for Integration
+  `UnfoldedCircleIntegrationEventHub`); `HostOutbound` trait implemented by
+  each host endpoint's ServerMessage so typed `send_to_connection`,
+  `broadcast`, `broadcast_to_subscribers` reach only connections of that
+  endpoint; `_value` escape hatches reach any connection. Outbound queues
+  carry encoded frames, so fan-out needs no `Clone` payload. `WsHandler`:
+  `handle_message(ClientMessage) -> Option<ServerMessage>`, default
+  `on_authenticated(ctx) -> Option<ServerMessage>` (None), default
+  `on_error(WsError, ctx)`. Multi-endpoint hosts get
+  `handle_{ep}_message`/`on_{ep}_authenticated` and route the upgrade by
+  request path (`{x}` matches one segment, unknown path → 404); a
+  single-endpoint host still accepts any path. The hook's message is written
+  directly on the socket before the writer task starts, so it precedes every
+  reply or broadcast; an encode or write failure removes the connection,
+  closes it, and calls `on_error`. Undecodable inbound frames go to
+  `on_error` and the connection continues. The hard-coded Unfolded Circle
+  `authentication_success_response` is gone; `WsConnectionContext` gains
+  `credential_verified()` (the upgrade presented a configured credential that
+  matched). Host auth helpers became `check_upgrade_credential(request) ->
+  Result<bool, ErrorResponse>`, called from the routing callback.
+- **Validation (`ws_codegen/plan.rs`).** Per direction the role receives
+  (client: `Server`+`Bidirectional`; host: `Client`+`Bidirectional`):
+  >1 fallback, fallback with selectors, a selector-less message beside
+  others, a repeated selector field, identical selectors, and incomparable
+  overlap are Errors (strict-subset overlap allowed). Message names must be
+  Rust identifiers and unique per endpoint. `raw_binary`/`mixed` frame
+  formats are a named Error at `runtime/frame_format`.
+- **Definitions.** Dock auth payloads now match the UCD2 AsyncAPI:
+  `DockWsEnvelopeType` gains `auth_required`/`auth` (snake_case),
+  `DockWsAuthRequired { type, model?, revision?, version? }`,
+  `DockWsAuthMessage { type, token }`, `DockWsAuthenticationMessage` gains
+  `code`. Integration: `IntegrationWsAuthMessage` gains `id` (AsyncAPI
+  `authRequestMsg` is a `commonReq`), `IntegrationWsAuthenticationMessage`
+  gains `req_id`/`code` (`authMsg` is a `commonResp`), and
+  `IntegrationWsEventEnvelope.cat`/`ts` are omitted from the wire when absent
+  (drivers built events without them; typed serialization would otherwise
+  add `null`s).
+- **Consumers (R15 partial).** `homelab/lib/src/samsung_tv.rs` sends typed
+  `RemoteControlClientMessage`/`ArtModeClientMessage` (no `send_value` needed).
+  The three integration handlers keep their JSON routing in a private
+  `route(Value) -> Option<Value>` and adapt at the typed boundary through
+  `unfolded-integration-helper` helpers `client_message_value` and
+  `server_message`; `on_authenticated` calls the shared
+  `authentication_greeting`, which returns
+  `{"kind":"resp","req_id":0,"msg":"authentication","code":200,"msg_data":{}}`
+  exactly when `!credential_verified()` — the condition under which the old
+  generated host sent it, and what the Integration AsyncAPI requires of a
+  driver that does not require authentication. Mid-request pushes and
+  subscriber broadcasts use the `_value` escape hatches (they are the helper
+  crate's JSON builders). The helper crate enables serde_json's `raw_value`
+  feature (`to_raw_value`); no crate added.
+- Regenerated twice with `just generate` (after the generator change, and
+  after the Integration payload fix); only the five `*_ws.rs` modules and
+  `ws_shared.rs` changed.
+
+### Adopted defaults and deviations
+
+- adopted default: enum derives are `Debug` only; `Serialize` and `decode`
+  are emitted per direction by what the role sends/receives (source: spec
+  R10 "Derives must respect payload capabilities"). Payloads must implement
+  `Debug`; every shipped payload does.
+- adopted default: inbound JSON is decoded from either frame kind; the frame
+  kind is kept in `WsRawFrame` so a binary decode error retains bytes, and
+  outbound frames follow `frame_format` (source: R10 "JSON text and JSON
+  binary framing remain distinct … Binary decode errors retain bytes").
+  Rejecting a text frame on a `json_binary` endpoint was rejected as a
+  behavior change for real devices.
+- adopted default: a direction's sole message without selectors takes every
+  frame (source: R10 Error list applies only "in a direction with more than
+  one inbound message").
+- adopted default: a fallback that declares selectors is an Error, and a
+  repeated selector field on one message is an Error (source: plan rule 4
+  "A fallback cannot also declare selectors"; the repeat rule keeps the
+  subset comparison well-defined).
+- adopted default: selection rules are checked only for directions the role
+  receives (source: R10 "an inbound frame is matched"; Samsung's
+  outbound-only `AppLaunchCommand`/`InstalledAppsCommand` share a wire value
+  and stay valid).
+- adopted default: single host endpoint → `handle_message`/`on_authenticated`;
+  several → endpoint-specific names (source: spec item 14 and R14
+  "Multi-endpoint hosts use endpoint-specific hook methods").
+- adopted default: "authentication" for the hook = an accepted upgrade,
+  including header-credential validation where the host configures one
+  (source: R14 "failed authentication never invokes it"; the generated host
+  performs no message-based auth). Hook-write failure is "reported" through
+  the new `on_error` handler method.
+- adopted default: typed hub broadcasts return `Result<usize, WsError>` (an
+  encode failure is reported, not silently 0); value broadcasts keep
+  `usize`.
+- adopted default: the Integration greeting is sent as the `ResponseEnvelope`
+  variant, byte-identical to the old envelope (the `Authentication` payload
+  now also carries `req_id`/`code`; either variant is valid).
+- deviation (scope): the Dock/Integration payload-type corrections above are
+  outside the plan's file list but required by R10 ("decoding every inbound
+  message type … from a recorded fixture frame") and by the consumer
+  migration keeping its wire bytes.
+- adopted default (found by the gate): AsyncAPI import now derives each
+  message's selectors from its payload's top-level string `const`
+  properties, through `$ref` and `allOf` (a non-`const` redeclaration keeps
+  an earlier `const`; `$ref` chains are bounded at depth 16). Without it the
+  new selection Errors rejected every imported multi-message definition and
+  `asyncapi_import::imported_definitions_lower_with_their_declared_role`
+  failed (source: plan rule 11 "Keep AsyncAPI import working by adapting its
+  typed construction"). The official Integration AsyncAPI imports and lowers
+  for the client, server, and both roles. Tests:
+  `asyncapi_import::selectors_are_read_from_the_payloads_string_consts`,
+  `asyncapi_import::tests::payload_selectors_keep_string_consts_across_parts_and_end_on_cycles`;
+  the Phase 3 assertion "imports declare no selectors" now asserts every
+  imported message selects on `kind`.
+- Subagent process note: the homelab subagent ran `rustfmt --edition 2024`
+  on the five `.rs` files it edited (they were rustfmt-clean at HEAD, so
+  only its own lines were reflowed). No `cargo fmt` was run.
+
+### Findings for review (not fixed; new scope or later phases)
+
+1. **Dock request/response envelopes do not match UCD2.** The official
+   `commonReq`/`commonResp` use `type: dock|auth` and requests carry
+   `command`, not `msg`; `req_id`/`code` are optional. The definition models
+   `type=req|resp` with required `req_id`/`code`, so the documented
+   `systemInfoMsg` example (`{"type":"dock","req_id":2,"msg":"get_sysinfo",
+   …}`) is selected as the `ResponseEnvelope` fallback and fails to decode
+   (`unknown variant dock`). The Dock runtime test sends that frame with
+   `"type":"resp"` and a comment. Remodeling the Dock protocol is new scope;
+   Dock has no consumer.
+2. **Generated clients never send the env-mapped credential (Phase 5).**
+   `connect_*` calls `self.headers.clone().build()`, and `Headers::build()`
+   never reads `env_mapping` (only `from_env()` does), so e.g. ElevenLabs'
+   `xi-api-key` from `ELEVEN_LABS_API_KEY` is never attached. Present since
+   the first WS generator commit; it is R5/R6 credential resolution, Phase 5.
+   The fresh-output Lobby routing test calls `.from_env()` explicitly.
+3. Samsung unauthorized/error/installed-apps frames are not recorded in the
+   repo; the runtime tests use the definition's documented shapes.
+
+### Requirement-to-test map
+
+| Requirement | Boundary / rung | Test(s) |
+|---|---|---|
+| R10 selector Errors (each) | gen plan API | `plan::tests::{more_than_one_fallback_in_a_direction_is_an_error, identical_selectors_are_an_error, incomparable_overlapping_selectors_are_an_error, a_message_without_selectors_beside_others_is_an_error (None and Some([])), a_fallback_with_selectors_and_a_repeated_selector_field_are_errors, a_bidirectional_message_is_checked_in_both_directions, selection_rules_apply_to_the_directions_the_role_receives}`; controls `a_strict_subset_overlap_and_one_fallback_lower`, `contradictory_selectors_never_conflict`, `a_sole_inbound_message_needs_no_selector` |
+| R10 named framing diagnostic; variant names | gen plan API | `plan::tests::raw_and_mixed_framing_are_named_errors` (+ json_text/json_binary controls), `message_names_are_unique_identifiers` |
+| R10 generated variant names/directions | gen output (syn over shipped modules) | `ws_codegen::{core_message_enums_name_one_variant_per_declared_message, a_bidirectional_integration_message_is_a_variant_of_both_directions, elevenlabs_client_enums_hold_the_declared_client_messages, every_shipped_client_sends_its_typed_enum_and_values_only_through_send_value, core_decode_tries_the_most_specific_selectors_before_generic_ones_and_the_fallback}` |
+| R10 every inbound type of all five, variant asserted | generated client ↔ loopback mock, F3 (local; CI does not run schema tests) | `schematic-schema` `ws_runtime::{core_ws_decodes_every_server_message_variant, dock_root_decodes_every_server_message_variant, integration_decodes_every_server_message_variant, samsung_remote_control_decodes_every_server_message_variant, samsung_art_mode_decodes_every_server_message_variant, elevenlabs_text_to_speech_decodes_every_server_message_variant, elevenlabs_multi_context_decodes_every_server_message_variant}` |
+| R10 overlap (Core pong vs response), fallback | as above | `ws_runtime::core_ws_selects_the_most_specific_message_before_the_fallback`; CI-visible: fresh-output child `every_server_message_is_selected_from_its_frame` |
+| R10 unmatched → error, connection usable | compiled fixture ↔ loopback, F3, CI-visible | child `an_unmatched_frame_without_a_fallback_is_a_decode_error_and_the_connection_stays_usable`, `an_endpoint_without_server_messages_reports_every_frame_as_undecodable` |
+| R10 malformed-then-valid, text and bytes retained | both | `ws_runtime::{core_ws_reports_a_non_json_text_frame_and_keeps_decoding, core_ws_reports_a_non_json_binary_frame_with_its_bytes, core_ws_reports_a_selected_payload_that_does_not_decode}`; child `malformed_text_and_binary_frames_are_decode_errors_that_keep_the_frame` |
+| R10 payload-only send, `send_value` | both | `ws_runtime::core_ws_typed_send_writes_the_payload_alone`; child `send_writes_the_payload_alone_and_send_value_writes_the_value_verbatim` |
+| R10 one shared queue; `events()` | both | `ws_runtime::{core_ws_typed_and_value_receivers_share_one_queue, core_ws_events_stream_keeps_the_connection_open}`; child `typed_and_value_receives_share_one_queue_and_the_event_stream_keeps_the_connection_open` |
+| R10 JSON binary distinct | compiled fixture | child `a_json_binary_api_sends_and_receives_binary_frames` |
+| R10 wrong send does not compile | compile-fail (E0308 per file) | `WS_MISUSES` in `slow_typed_ws_clients_and_a_multi_endpoint_host_compile_and_run`: server enum to `send`, bare payload to `send`, another endpoint's ClientMessage |
+| R10 empty / non-Clone payload compile | compiled fixture | same slow test: `ws_payloads` without `Clone`; `ListenClientMessage`/`ShoutServerMessage` uninhabited, matched in `ws_send_control` |
+| R14 no UC assumptions; hub name; hooks per endpoint | rendered module text | parent assertions in the slow test (`ChatFixtureWs`), `ws_codegen::{the_integration_host_is_named_for_its_api_and_sends_no_protocol_envelope, the_integration_handler_takes_and_returns_typed_messages}`; `shared::tests::host_common_auth_helpers_produces_tokens` |
+| R14 hook once, first, before replies; None sends nothing; rejected auth never runs it; write failure closes + reported | compiled host ↔ client, F3, CI-visible | children `the_room_hook_message_is_the_first_frame_and_runs_once_per_connection`, `a_hook_returning_none_sends_nothing_before_the_reply`, `a_rejected_key_never_runs_the_hook`, `a_hook_message_that_fails_to_write_closes_the_connection_and_reaches_on_error` |
+| R14 typed host input/output, routing, per-endpoint fan-out | same | children `room_messages_arrive_typed_and_an_undecodable_frame_reaches_on_error_without_closing`, `connections_route_by_path_and_unknown_paths_are_rejected_with_404`, `typed_broadcasts_reach_their_endpoint_only_and_value_broadcasts_reach_every_connection`; guard `ws_child_test_lists_name_every_child_test` |
+| Bearer host still 401/401/101 | compiled host | `slow_bearer_ws_host_compiles_and_checks_tokens` |
+| Dock/Integration documented frames | unit | `dock_ws::types::tests::documented_authentication_frames_decode`, `integration_ws::types::tests::{documented_authentication_frames_keep_their_ids_and_code, absent_event_category_and_timestamp_stay_off_the_wire}` |
+| Consumer wire bytes kept | crate tests | `unfolded-integration-helper` `envelope` tests (greeting bytes, `server_message` round trip byte-equal), arcam `an_auth_request_keeps_its_id_and_is_answered_as_unknown`, each crate's `on_authenticated_sends_authentication_without_a_verified_credential`; Samsung homelab tests 12/12 |
+
+Input robustness matrix: not applicable this phase — no definition or
+configuration reader changed (selectors, fallbacks and roles are read by the
+Phase 3 loader and its matrix). The Dock/Integration changes are wire
+payload types, which the matrix excludes.
+
+### Gates and verification (Phase 4 close)
+
+- Gate-skip check not applicable: the phase changed source in
+  `schematic-gen`, `schematic-definitions`, `schematic-schema`, and five
+  homelab packages, so every gate was run.
+- `just lint` (schematic area): pass — after splitting the importer's two
+  component maps into a `Components` struct (`clippy::too_many_arguments`).
+  `just lint-schema`: pass.
+- `just test`: first run failed one test,
+  `asyncapi_import::imported_definitions_lower_with_their_declared_role`
+  (imported definitions had no selectors; fixed by deriving them, see
+  adopted defaults). Second run: pass — L1 2746 passed, 18 skipped;
+  `test-fresh-output` 12/12 (123 s, includes the new
+  `slow_typed_ws_clients_and_a_multi_endpoint_host_compile_and_run`);
+  `test-compile-fail` 1/1. The importer refactor after that run changed no
+  behavior; its 7 tests and the lint were rerun and pass.
+- `just test-schema`: 91/91 (`ws_runtime` 20, `ws_mock_harness` 10).
+- `just check-drift`: 9/9. `just check-tier-coverage schematic`: 0 stranded.
+- `just doctest`: pass (define 173 + 2 ignored — the two `rust,ignore`
+  generated-surface examples in `docs/websocket-definitions.md`, which need
+  `schematic-schema`; definitions 18; gen 44; oauth 19; runtime 3).
+- Dependents, serially: `unfolded-integration-helper` 32/32,
+  `arcam-amp-integration` 23 passed (2 tier-skipped), `eversolo-integration`
+  33 (3 skipped), `sony-receiver-integration` 28 (3 skipped), `homelab`
+  Samsung tests 12/12; clippy `-D warnings --all-targets` over the five
+  homelab packages clean; `cargo check -p sniff -p biscuit-speaks -p
+  model-citizen` pass (they use no WS module).
+- Removed-name grep (`UnfoldedCircleEventHub`, `send_typed`,
+  `authentication_success_response`, `WsEncode`, `WsDecode`) over `.rs`/`.md`
+  outside specs and reviews: only the new absence assertions remain.
+- Cross-OS: not run. The phase adds no path, process, or OS-specific code;
+  new tests use loopback TCP on `127.0.0.1:0` like the Phase 2 harness that
+  passed on native Windows. The host's path routing compares URL paths, not
+  filesystem paths.
+- Docs: `schematic/README.md` (typed quick start),
+  `docs/websocket-definitions.md` (selection rules + flowchart, the
+  generated messages/client/host section, AsyncAPI selector derivation; the
+  **Planned** selector marker removed), `docs/generation/validation.md`
+  (new Errors), `docs/generation/generated-clients.md` (fresh-output list),
+  homelab `eversolo-integration/README.md` and
+  `unfolded-integration-helper/README.md`. Skill:
+  `.claude/skills/schematic-define/schematic/websocket.md`.
+- No commits, no CI runs, no device or provider contact, no stale-file
+  deletion.
+
+Phase 4 checkpoint met: R10 and R14 pass through public boundaries
+(selector-chosen variants, not merely deserializable ones; protocol-neutral
+host names and hooks); consumer source compiles against the typed surfaces.
+R11 typed correlation and credential resolution remain for Phase 5.
+
+## Phase 5
+
+Started 2026-10-22. Phase 4 was still uncommitted when this phase began, so
+its tree was snapshotted (`git stash create`, no stash-stack entry) and the
+`*_during_phase_5` lists are the diff against that snapshot. The generator,
+runtime, and planner work was done by the orchestrator; two subagents then
+wrote tests in parallel on disjoint files (`schematic-schema` mock-server
+tests; `schematic-gen` fresh-output fixtures), each running only scoped
+tests. The area gates ran once afterwards.
+
+### What changed
+
+- **Runtime (pre-authorized minimal function, `runtime/src/credentials.rs`).**
+  `AuthConfig::select_handshake(per_call, client) -> HandshakeCredential`
+  selects one credential with the REST precedence (per-call, client, first
+  non-empty env variable, none) for a handshake another transport sends;
+  `HandshakeCredential::{auth_method, apply(&mut Url, &mut HeaderMap)}`
+  places it with the REST placement code (`place_credential` now takes the
+  URL and headers instead of the private `Assembled`; behavior unchanged),
+  refusing a request that already sets the credential's header, query
+  value, or cookie. `AuthConfig::secret_names()` is the redaction set.
+  `Debug` of the selection never shows the value. No new crate, no new
+  error kind.
+- **Handshake auth (R5/R6/R7, `ws_codegen/{client,shared}.rs`).** The WS
+  API struct drops the public `headers: schematic_define::Headers` field.
+  It gains `auth_config()` (the REST translation: `api_struct/auth.rs`
+  `policy_config`/`policy_tokens`, now `pub(crate)` and taking `env_auth`
+  instead of a `RestApi`), `credentials(Credential)`, `api_key(key)` (only
+  when a non-Basic placement is accepted), and `header(name, value)`; the
+  definition's constant `headers` are now emitted (they were ignored before).
+  `WsClientOptions.credential` is the per-connect source. `connect_*`
+  selects once and builds a `WsHandshake` (URL + headers with the credential
+  placed, kept privately; redacted `Debug`), which the supervisor reuses for
+  every redial, so an env change needs a new explicit connect. `dial` moved
+  from each endpoint client into `WsHandshake`. Endpoint clients expose
+  `auth_method()`. Handshake failures are no longer `WsError::Transport`:
+  any non-101 answer is `HandshakeRejected { status, headers }` (headers
+  redacted through `SecretNames::redact_headers`, so `Set-Cookie` and a
+  `Location` URL's secrets are hidden), other failures are
+  `Handshake(String)` with the URL replaced by its redacted form; new
+  `InvalidCredential`, `InvalidUrl`. A 401, 403 or 3xx on a redial closes
+  the supervisor. Caller headers may not name an upgrade-managed header or
+  the API's credential header. The unresolved-placeholder check now runs
+  before the query is appended, so its message cannot carry a query value.
+  This fixes the Phase 4 finding (generated clients never read their env
+  mapping).
+- **Correlation (R11, `ws_codegen/plan.rs`, `client.rs`, `shared.rs`).**
+  `infer_correlation` (envelope-name and `id`/`req_id` inference) is gone;
+  `lower_correlation` uses only endpoint `CorrelationHints` and
+  `responds_with` pairs, carried as `CorrelationStrategy::Correlated {
+  .., id_type, pairs: Vec<CorrelatedPair> }`. New validation (Errors):
+  link on a server message, naming no message, naming a client message,
+  link without hints, a linked request named `Value`; (Warnings): hints with
+  no link, hints on a `Host`-only endpoint, a `string` id type no client
+  endpoint consumes. The generated client has one `request_{snake(name)}`
+  per pair (request payload → response payload) and `request_value`. Ids
+  come from the existing per-connect counter (never reset by redials), JSON
+  number for `U64` and string for `String`. The pending table is a
+  `std::sync::Mutex<HashMap<String, PendingRequest>>`; a `PendingGuard`
+  removes the entry on every exit (send failure, timeout, cancellation);
+  `answer_pending` completes a request only when the id matches with the
+  declared JSON type and the frame's `selected_message` is the declared
+  response (`None` = any frame, for `request_value`). On connection loss the
+  supervisor drops every pending entry (`Disconnected`) and discards queued
+  writer commands, so nothing is replayed on the replacement. Each message
+  enum's `decode` is now driven by a public `selected_message(&frame)`.
+- **Regenerated** with `just generate`: only the five `*_ws.rs` and
+  `ws_shared.rs` changed (no OpenAPI/Postman change). No WS diagnostic is
+  emitted for the shipped definitions. Consumers needed no edit: homelab
+  never touched `headers` or `request`; `schema/tests/ws_runtime.rs` moved
+  to `api_key(..)` and `request_value(..)`.
+
+### Adopted defaults and deviations
+
+- adopted default: typed request method name is `request_{snake(request
+  message)}`, uniformly, e.g. Core's `request_request_envelope` (source:
+  spec Design "Emit a typed request operation for each declared
+  request/response pair"; plan rule 3 names `request_value`). A request named
+  `Value` is an Error so the names cannot collide.
+- adopted default: `request_value` completes on the first frame with its id,
+  whatever message it is (source: spec "retain `request_value` as the
+  explicit value escape hatch" — it has no declared response to check).
+- adopted default: the per-connect credential lives on `WsClientOptions`
+  (`credential`, redacted `Debug`); the client-level one is
+  `credentials`/`api_key` on the API struct, mirroring REST (source: R5
+  "per-connect-call value, client-level value"; REST `CallOptions`).
+- adopted default: "competing explicit sources" are a caller header named
+  like a credential placement header (`InvalidHeader`) and a request that
+  already sets the credential's query value or cookie (`InvalidCredential`);
+  a cookie key merges with other caller cookies (source: spec Design
+  "Headers and redaction"; R5 cookie merge). Unlike REST's
+  `AuthBearingDefaultHeader`, built-in secret names such as `Cookie` are not
+  refused outright, since R5 requires merging with existing cookies.
+- adopted default: upgrade-managed headers = `Host`, `Connection`,
+  `Upgrade`, `Sec-WebSocket-Key`, `Sec-WebSocket-Version`,
+  `Sec-WebSocket-Accept`, `Sec-WebSocket-Extensions`; `Sec-WebSocket-Protocol`
+  stays settable (subprotocol negotiation is the caller's).
+- adopted default: a programmatic `header` replaces a constant header of the
+  same name (source: spec "constant headers and programmatic overrides using
+  shared precedence").
+- adopted default: terminal redial statuses are 401, 403 and every 3xx;
+  other non-101 statuses (e.g. 500/503) keep using the reconnect budget
+  (source: R5 "A 401, 403, or refused redirect during a redial closes the
+  supervisor … Transient dial failures use the reconnect budget").
+- adopted default: the "explicitly declared `RequestIdType`" Warning fires
+  for a non-default `string`; an explicit `u64` is indistinguishable from the
+  default (the field is not optional) and never warns (source: R11 "An
+  implicit default ID type on an uncorrelated endpoint produces no Warning").
+- adopted default: commands queued when a connection is lost are dropped
+  (not only request commands), implementing "never replay commands" for
+  correlation now; returning `Disconnected` from a send while disconnected
+  stays Phase 6 (source: spec Design "Reconnect and shutdown").
+- open issue (plan rule 11, item 16): **no WS TLS opt-in.** The runtime's
+  `danger_accept_invalid_certificates` configures reqwest only; the runtime
+  builds no rustls `ClientConfig` to pass to tokio-tungstenite, and writing a
+  custom certificate verifier is a new capability. No WS-only switch was
+  added; a Samsung TV's self-signed `wss://` certificate is expected to fail
+  the handshake (unverified, no device contacted). Documented in
+  `docs/websocket-definitions.md`.
+- observation (not changed): `schematic_define::Headers` now has no
+  generated consumer (REST never used it); removing it is new scope.
+- observation (not changed): `resolve_auth` in `plan.rs` still detects auth
+  messages by the names `Auth`/`AuthRequired` for a Warning/Info only; it
+  does not affect correlation and R11 does not name it.
+- Subagent note: the schema test subagent saw nextest report `LEAK` once on
+  each of two different tests in 2 of 4 runs; both passed alone and in the
+  gate runs below (no LEAK in the gate). Recorded as load/timing noise.
+
+### Requirement-to-test map
+
+| Requirement | Boundary / rung | Test(s) |
+|---|---|---|
+| R5 runtime selection: precedence, first non-empty env, None ignores env, one placement each (header/query/Basic), cookie merge, second source refused, wrong kind refused, Debug/secret names | `schematic-runtime` public API, F1 | `runtime` L1 `handshake_credentials::{per_call_wins_over_client_and_environment_and_client_over_environment, the_first_non_empty_variable_wins_and_none_set_is_anonymous, an_api_accepting_no_credential_ignores_the_environment, each_placement_writes_exactly_one_credential, a_cookie_key_is_merged_with_existing_cookies, a_second_explicit_source_in_the_header_or_query_is_refused, a_credential_kind_the_api_does_not_accept_is_refused_before_reading_the_environment, the_selection_debug_and_secret_names_never_show_the_value}` |
+| R5 precedence with sentinels at every level, one credential seen by the server, `auth_method` | generated Core client ↔ loopback mock, F3 (local) | `schematic-schema` `ws_handshake::core_credential_precedence_per_call_then_client_then_env` |
+| R5 placement per strategy (header, query, cookie merge without duplicate, Basic env pair and client pair, Bearer), precedence | compiled fixtures ↔ loopback, F3, **CI-visible** | fresh-output `slow_ws_handshake_credentials_and_correlated_requests_run` children: `a_per_call_credential_wins_over_the_client_and_the_environment`, `a_client_credential_wins_over_the_environment`, `the_first_non_empty_env_variable_supplies_the_header_key`, `an_env_query_key_is_one_query_pair_and_nothing_else`, `a_cookie_key_merges_into_an_existing_cookie_header_and_never_duplicates_its_name`, `basic_credentials_from_the_env_lists_are_one_authorization_header`, `a_client_basic_credential_wins_over_the_env_lists`, `a_bearer_key_is_sent_as_an_access_token`; guard `ws_child_test_lists_name_every_child_test` |
+| R5 None policy attaches no env credential | F3 local | `ws_handshake::dock_without_auth_policy_ignores_its_env_token`; runtime `an_api_accepting_no_credential_ignores_the_environment` |
+| R5 retained selection on redials (env changed after connect) | F3 local | `ws_handshake::redial_reuses_the_credential_selected_at_connect` |
+| R5/R7 initial 401/403 not retried, exactly one upgrade | F3 local + CI-visible | `ws_handshake::initial_401_and_403_are_returned_without_a_second_attempt`; child `a_401_upgrade_is_rejected_once_and_never_retried` |
+| R5 redial 401/403/redirect terminal, one rejected upgrade | F3 local | `ws_handshake::{redial_401_is_terminal, redial_403_is_terminal, redial_redirect_is_terminal}` |
+| R5/R7 explicit-source conflicts and managed headers refused before any request | F3 local | `ws_handshake::invalid_headers_and_credential_kinds_fail_before_dialing` |
+| R6 anonymous connect, `Anonymous` reported | F3 local + CI-visible | `ws_handshake::core_without_any_credential_connects_anonymously`; child `nothing_resolved_connects_anonymously_and_reports_it` |
+| R7 redirect not followed, second origin zero requests, redacted Location | F3 local + CI-visible | `ws_handshake::redirect_is_not_followed_and_its_location_is_redacted`; child `a_302_upgrade_is_not_followed_and_its_location_is_redacted` |
+| R7 Set-Cookie / secret headers in a rejection | F3 local | `ws_handshake::refusal_headers_redact_set_cookie_and_secret_values` (mock gained `Script::RefuseWith`; harness test `ws_mock_harness::refuses_with_scripted_response_headers_in_order`) |
+| R7 query sentinel: refused port, stalled handshake, 302; options `Debug` | F3 local | `ws_handshake::query_secret_is_absent_from_every_dial_error` |
+| R11 each Error and Warning; implicit default no Warning; control | gen plan API, F1 | `plan::tests::{lower_pairs_requests_through_responds_with_and_the_endpoint_hints, the_api_request_id_type_reaches_each_correlated_endpoint, a_responds_with_link_without_endpoint_hints_is_an_error, a_link_on_a_server_message_or_to_an_unknown_or_client_message_is_an_error, a_bidirectional_request_may_name_a_bidirectional_response, a_request_named_value_is_an_error, hints_that_nothing_consumes_warn, a_declared_string_id_type_that_nothing_consumes_warns_and_the_implicit_default_does_not, no_endpoint_correlates_without_hints_whatever_its_messages_are_named}` |
+| R11 no envelope literal in the planner; rename invariance; names alone don't correlate; typed signatures | gen output | `ws_codegen::{the_planner_names_no_envelope_message, renaming_the_envelope_messages_changes_no_correlation, envelope_names_alone_correlate_nothing, core_requests_are_typed_per_declared_pair}` |
+| R11 id JSON type (U64 number / String string), typed response returned | F3 local + CI-visible | `ws_correlation::request_ping_sends_a_numeric_id_and_returns_the_pong`; child `string_request_ids_go_out_as_json_strings_and_return_the_declared_response` |
+| R11 same-id other message stays an event | both | `ws_correlation::{same_id_with_another_message_is_an_event_not_the_answer, same_id_with_another_message_alone_times_the_request_out}`; child `a_same_id_frame_of_another_message_is_an_event_not_the_answer` |
+| R11 capacity reclaimed (timeout, cancel, serialize failure) under limit 1, with `BackpressureFull` control | both | `ws_correlation::pending_capacity_is_reclaimed_after_timeout_cancel_and_serialize_failure`; children `a_timed_out_request_frees_its_pending_slot`, `a_cancelled_request_frees_its_pending_slot` |
+| R11 disconnect → `Disconnected`, not re-sent, ids not reset | F3 local | `ws_correlation::disconnect_fails_in_flight_request_without_resending_it` (existing `ws_runtime::ws_disconnect_fails_pending_requests` also passes) |
+| R11 concurrent requests, `request_value` | F3 local | `ws_correlation::{concurrent_requests_receive_their_own_answers_out_of_order, request_value_returns_the_first_frame_with_its_id}` |
+
+Send failure: the guard makes it the same exit path as cancellation; a
+supervisor-ended send (`Disconnected`) is exercised by
+`ws_runtime::ws_disconnect_fails_pending_requests`. An injected failing
+writer for the request path was not added (the `FailingStream` harness is
+for the opening write in Phase 6).
+
+Input robustness matrix: not applicable — no file format or configuration
+reader changed. The one new input read is an environment variable in the
+runtime selection; its shapes (unset → next variable, empty → skipped,
+set → selected, none set → anonymous) are covered by
+`the_first_non_empty_variable_wins_and_none_set_is_anonymous` and the
+precedence tests.
+
+### Gates and verification (Phase 5 close)
+
+- Gate-skip check not applicable: the phase changed source in
+  `schematic-runtime`, `schematic-gen`, and `schematic-schema`, so every gate
+  was run.
+- `just lint` (schematic area): pass. `just lint-schema`: pass.
+- `just test`: pass — L1 2766 passed, 19 skipped; `test-fresh-output` 13/13
+  (71 s, includes the new `slow_ws_handshake_credentials_and_correlated_requests_run`);
+  `test-compile-fail` 1/1.
+- `just test-schema`: 111/111 (`ws_handshake` 12, `ws_correlation` 7,
+  `ws_runtime` 20, `ws_mock_harness` 11, others unchanged).
+- `just check-drift`: 9/9. `just check-tier-coverage schematic` (root): 0
+  stranded. `just doctest`: pass (define 173 + 4 ignored — the
+  `rust,ignore` generated-surface examples of `docs/websocket-definitions.md`,
+  two of them new; definitions 18; gen 44 + 2 ignored; oauth 19; runtime 3+3).
+- Dependents, serially: `unfolded-integration-helper` 32/32,
+  `arcam-amp-integration` 23 (2 skipped), `eversolo-integration` 33 (3
+  skipped), `sony-receiver-integration` 28 (3 skipped), `homelab` Samsung
+  tests 12/12; clippy `-D warnings --all-targets` over the five homelab
+  packages clean; `cargo check -p sniff -p biscuit-speaks -p model-citizen`
+  pass.
+- Cross-OS: not run. No path, process, or OS-specific code; URL handling is
+  the `url` crate the REST runtime already uses on every OS, and the tests
+  use loopback `127.0.0.1:0` like the harness that passed on native Windows
+  in Phase 2.
+- Docs: `docs/websocket-definitions.md` (handshake credential section with a
+  precedence flowchart, correlation section with a sequence diagram; the
+  **Planned** correlation marker removed), `docs/generation/validation.md`,
+  `docs/generation/generated-clients.md`, `docs/headers/README.md` (WS
+  section rewritten; it described the removed `Headers` field),
+  `docs/runtime/credentials.md` (handshake selection), `docs/dependencies.md`,
+  `README.md` quick start. Skills: `schematic-define` `SKILL.md`,
+  `schematic/websocket.md`, `schematic/headers.md`.
+- No commits, no CI runs, no device or provider contact, no stale-file
+  deletion.
+
+Phase 5 checkpoint met: R5, R6, R7, and R11 pass through mock-observed
+handshakes and typed request results; no transport formatting leaks a
+credential URL; one selected credential is retained for recovery. The old
+receive-timeout Info diagnostic is retained for Phase 6.
