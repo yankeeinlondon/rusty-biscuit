@@ -38,14 +38,23 @@ When we map positional arguments into frontmatter properties the schemas activat
 
 ### Optional Types and Variadic Params
 
+- optional parameters
+    - once one of the properties defined `positional` is _optional_ no other positional parameters are allowed
+- variadic parameters
+    - if a parameter in the `positional` property is defined as being an array type then this becomes a variadic positional argument
+        - all parameters which can be coerced to to the array type are consumed 
+        - if a parameter being evaluated for being a member of this variadic parameter starts with `--{string}` where "string" is an alphanumeric string starting with an alphabetical character then this terminates the variadic parameter's  
 
+    - the only parameters which are allowed to follow a variadic parameter are those which are:
+        - explicitly given a TYPE
+        - the TYPE is unmistakeably distinguishable from the variadic parameter that preceded it
 
-
-## Handling Variadic Parameters
-
-
-
-## Avoiding CLI Switches
+        ```yaml
+        $schema:
+            colors: enum(red,blue,green; required)
+            numbers: number[]
+        positional: [ "colors", "numbers" ]
+        ```
 
 
 ## Documentation
