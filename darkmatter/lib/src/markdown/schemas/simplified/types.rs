@@ -259,6 +259,16 @@ pub enum TypeExpr {
     /// returns(...))`. It never validates data; a document schema that
     /// reaches one fails to convert.
     Function(Box<FunctionType>),
+    /// A use of a named type that takes part in a reference cycle, by its
+    /// identity in the resolution's [`DefinitionTable`](super::DefinitionTable).
+    ///
+    /// Only the resolver produces this variant, for every use of a cyclic
+    /// definition (acyclic named types still inline). The atom carrying it
+    /// holds the use site's presence markers and annotations, inherited from
+    /// the definition and merged with the use site's postfix; the shared body
+    /// in the table carries none. With `is_array` the atom is a list whose
+    /// items are the definition.
+    Ref(super::DefKey),
 }
 
 /// The positions of a `tuple([...])` type.

@@ -82,6 +82,7 @@ pub fn rewrite_eager_file_values(
     if let Some(arms) = json_schema.get("anyOf").and_then(Value::as_array) {
         return rewrite_root_union(
             arms,
+            json_schema,
             instance,
             base_dir,
             fallback,
@@ -96,6 +97,7 @@ pub fn rewrite_eager_file_values(
         fallback,
         composition_pending,
         request_context,
+        json_schema,
     )
 }
 
@@ -108,6 +110,7 @@ pub fn rewrite_eager_file_values(
 /// value under the wrong declaration, so only accepting arms take part.
 fn rewrite_root_union(
     arms: &[Value],
+    root: &Value,
     instance: &Value,
     base_dir: &Path,
     fallback: Option<&Path>,
@@ -116,7 +119,7 @@ fn rewrite_root_union(
 ) -> NormalizationOutcome {
     let mut agreed: Option<NormalizationOutcome> = None;
     for arm in arms {
-        let wrapped = validate::wrap_arm_as_root_schema(arm);
+        let wrapped = validate::wrap_arm_as_root_schema(arm, root);
         // A schema that fails to build cannot be a valid arm; skip it. The
         // surrounding validator already surfaces build failures elsewhere.
         // Preserve the production validator's request-scoped candidate plan
@@ -139,6 +142,7 @@ fn rewrite_root_union(
             fallback,
             composition_pending,
             request_context,
+            root,
         );
         match &agreed {
             None => agreed = Some(outcome),
@@ -198,6 +202,7 @@ fn rewrite_object(
     fallback: Option<&Path>,
     composition_pending: &HashSet<String>,
     request_context: &biscuit_file::FileResolutionContext,
+    root: &Value,
 ) -> NormalizationOutcome {
     let (Some(props), Some(obj)) = (
         schema.get("properties").and_then(Value::as_object),
@@ -222,7 +227,7 @@ fn rewrite_object(
             continue;
         };
         if let Some(rewritten) =
-            rewrite_property(prop_schema, value, base_dir, fallback, request_context)
+            rewrite_property(prop_schema, value, base_dir, fallback, request_context, root)
         {
             out.insert(name.clone(), rewritten);
             changed = true;
@@ -262,6 +267,7 @@ fn rewrite_property(
     base_dir: &Path,
     fallback: Option<&Path>,
     request_context: &biscuit_file::FileResolutionContext,
+    root: &Value,
 ) -> Option<Value> {
     if value.is_null() {
         return None;
@@ -275,7 +281,7 @@ fn rewrite_property(
     // Rewrite only through the one validating arm that carries the eager-file
     // marker (Decision #9: "no guessing").
     if let Some(arms) = effective.get("anyOf").and_then(Value::as_array) {
-        return rewrite_property_union(arms, value, base_dir, fallback, request_context);
+        return rewrite_property_union(arms, value, base_dir, fallback, request_context, root);
     }
 
     // Direct eager-file marker on the effective schema.
@@ -287,7 +293,7 @@ fn rewrite_property(
     if effective.get("type").and_then(Value::as_str) == Some("array")
         && let Some(items_schema) = effective.get("items")
     {
-        return rewrite_array_items(items_schema, value, base_dir, fallback, request_context);
+        return rewrite_array_items(items_schema, value, base_dir, fallback, request_context, root);
     }
 
     // Inline object with declared sub-properties: descend into each present
@@ -295,7 +301,7 @@ fn rewrite_property(
     if effective.get("type").and_then(Value::as_str) == Some("object")
         && let Some(sub_props) = effective.get("properties").and_then(Value::as_object)
     {
-        return rewrite_inline_object(sub_props, value, base_dir, fallback, request_context);
+        return rewrite_inline_object(sub_props, value, base_dir, fallback, request_context, root);
     }
 
     None
@@ -319,6 +325,7 @@ fn rewrite_property_union(
     base_dir: &Path,
     fallback: Option<&Path>,
     request_context: &biscuit_file::FileResolutionContext,
+    root: &Value,
 ) -> Option<Value> {
     let mut selected: Option<&Value> = None;
     for arm in arms {
@@ -327,8 +334,9 @@ fn rewrite_property_union(
         }
         // Preserve the production validator's request-scoped candidate plan
         // during arm acceptance; do not rebuild from ambient CWD.
+        // The arm compiles alone, so it takes its root's definitions.
         let Ok(validator) = validate::build_validator_in_context(
-            arm,
+            &super::scope::with_root_definitions(arm, root),
             Some(base_dir),
             fallback,
             request_context,
@@ -343,7 +351,7 @@ fn rewrite_property_union(
             selected = Some(arm);
         }
     }
-    rewrite_property(selected?, value, base_dir, fallback, request_context)
+    rewrite_property(selected?, value, base_dir, fallback, request_context, root)
 }
 
 /// Rewrites a single present eager-file value to its document-relative resolved
@@ -412,6 +420,7 @@ fn rewrite_array_items(
     base_dir: &Path,
     fallback: Option<&Path>,
     request_context: &biscuit_file::FileResolutionContext,
+    root: &Value,
 ) -> Option<Value> {
     let Value::Array(items) = value else {
         return None;
@@ -419,7 +428,7 @@ fn rewrite_array_items(
     let mut out = Vec::with_capacity(items.len());
     let mut changed = false;
     for item in items {
-        match rewrite_property(items_schema, item, base_dir, fallback, request_context) {
+        match rewrite_property(items_schema, item, base_dir, fallback, request_context, root) {
             Some(rewritten) => {
                 out.push(rewritten);
                 changed = true;
@@ -439,6 +448,7 @@ fn rewrite_inline_object(
     base_dir: &Path,
     fallback: Option<&Path>,
     request_context: &biscuit_file::FileResolutionContext,
+    root: &Value,
 ) -> Option<Value> {
     let Value::Object(obj) = value else {
         return None;
@@ -450,7 +460,7 @@ fn rewrite_inline_object(
             continue;
         };
         if let Some(rewritten) =
-            rewrite_property(sub_schema, sub_value, base_dir, fallback, request_context)
+            rewrite_property(sub_schema, sub_value, base_dir, fallback, request_context, root)
         {
             out.insert(name.clone(), rewritten);
             changed = true;

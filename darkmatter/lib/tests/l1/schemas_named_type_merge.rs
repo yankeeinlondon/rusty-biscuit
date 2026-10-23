@@ -746,10 +746,14 @@ fn a_schema_file_with_only_bare_references_expands() {
 fn a_cycle_through_bare_and_explicit_references_reports_the_chain() {
     let dir = TempDir::new().expect("tempdir");
     let err = resolve_inline(dir.path(), "a: b\nb: a@this\n").expect_err("cycle");
-    let SchemaError::ImportCycle { chain } = err else {
-        panic!("expected ImportCycle, got {err:?}");
+    let SchemaError::NonDescendingCycle { cycles } = &err else {
+        panic!("expected NonDescendingCycle, got {err:?}");
     };
-    assert_eq!(chain, "b -> a -> b");
+    let references: Vec<(String, &str)> = cycles[0]
+        .iter()
+        .map(|reference| (reference.site.path.to_string(), reference.target.as_str()))
+        .collect();
+    assert_eq!(references, [("b".to_string(), "a"), ("a".to_string(), "b")], "{err:?}");
 }
 
 // ── AC10: retained restrictions and unchanged output ──────────────────────

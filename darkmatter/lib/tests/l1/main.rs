@@ -177,6 +177,8 @@ mod scope_site_conformance;
 mod semantic_results_never_persist;
 mod serialized_code_neighbors;
 mod recursive_schema_golden;
+mod recursive_schema_merge;
+mod recursive_schema_types;
 mod recursive_schema_validator_probe;
 mod shipped_schema_corpus;
 mod set_overlay_integration;

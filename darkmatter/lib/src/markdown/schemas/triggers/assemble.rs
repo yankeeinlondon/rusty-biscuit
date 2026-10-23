@@ -210,6 +210,10 @@ pub(crate) struct ResolvedPayload {
     /// projections see the properties validation layers in. `None` for a raw
     /// JSON Schema payload, which has no SimplifiedSchema projection.
     pub shape: Option<std::sync::Arc<crate::markdown::schemas::SchemaShape>>,
+    /// The cyclic named types `shape` reaches through
+    /// [`TypeExpr::Ref`](crate::markdown::schemas::simplified::TypeExpr::Ref);
+    /// empty for a raw payload or one that does not recurse.
+    pub definitions: std::sync::Arc<crate::markdown::schemas::simplified::DefinitionTable>,
     /// Dependency edges: the payload file + its imports + its examples
     /// (sorted, deduplicated). Empty for an embedded trigger.
     pub dependencies: Vec<PathBuf>,
@@ -230,6 +234,7 @@ impl ResolvedPayload {
         Self {
             json_schema: std::sync::Arc::new(Value::Object(serde_json::Map::new())),
             shape: None,
+            definitions: std::sync::Arc::default(),
             dependencies: Vec::new(),
             searched: Vec::new(),
             advisories: Vec::new(),
@@ -310,6 +315,7 @@ fn resolve_file_payload(
 
     Ok(ResolvedPayload {
         shape: payload_shape(resolved.simplified),
+        definitions: resolved.definitions,
         json_schema: std::sync::Arc::new(resolved.json_schema),
         dependencies: deps,
         searched: resolved.searched,
@@ -751,6 +757,7 @@ fn resolve_embedded_payload(
     enforce_merge_compatible(&importer_path, payload, &resolved.json_schema)?;
     let payload = ResolvedPayload {
         shape: payload_shape(resolved.simplified),
+        definitions: resolved.definitions,
         json_schema: std::sync::Arc::new(resolved.json_schema),
         dependencies: Vec::new(),
         searched: Vec::new(),
@@ -767,24 +774,27 @@ fn enforce_merge_compatible(
     json_schema: &Value,
 ) -> Result<(), SchemaError> {
     let payload_desc = describe_payload(payload);
-    let json_obj = json_schema.as_object().ok_or_else(|| {
-        SchemaError::TriggerPayloadNotMergeable {
+    if !json_schema.is_object() {
+        return Err(SchemaError::TriggerPayloadNotMergeable {
             path: trigger_source.to_path_buf(),
-            payload: payload_desc.clone(),
+            payload: payload_desc,
             reason: "payload did not resolve to a JSON object".into(),
-        }
-    })?;
-    validate_simple_object_schema(json_obj).map_err(|err| {
+        });
+    }
+    let label = format!("the payload `{payload_desc}`");
+    validate_simple_object_schema(json_schema, &label).map_err(|err| {
+        // A reference error already says what is wrong with the payload's
+        // definitions; the shape hint applies to the root-shape errors.
         let reason = match &err {
-            SchemaError::Baseline { message, .. } => message.clone(),
+            SchemaError::Baseline { message, .. } => format!(
+                "{message}. Root unions and non-object schemas are rejected as trigger payloads"
+            ),
             _ => err.to_string(),
         };
         SchemaError::TriggerPayloadNotMergeable {
             path: trigger_source.to_path_buf(),
             payload: payload_desc,
-            reason: format!(
-                "{reason}. Root unions and non-object schemas are rejected as trigger payloads"
-            ),
+            reason,
         }
     })
 }

@@ -2401,7 +2401,8 @@ fn atom_has_suggestions(atom: &PropertyAtom) -> bool {
             TypeExpr::Primitive(_)
             | TypeExpr::Imported { .. }
             | TypeExpr::Tuple(_)
-            | TypeExpr::Function(_) => false,
+            | TypeExpr::Function(_)
+            | TypeExpr::Ref(_) => false,
         }
 }
 

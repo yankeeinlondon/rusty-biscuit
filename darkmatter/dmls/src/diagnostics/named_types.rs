@@ -1,7 +1,8 @@
 //! Schema-definition diagnostics for named-type resolution failures.
 //!
 //! An unknown name, contradictory constraints on a reused type, an operation a
-//! union-typed reference cannot take, and an import cycle are defects of the
+//! union-typed reference cannot take, a type cycle that never descends into a
+//! child value, and an over-deep reference chain are defects of the
 //! schema, not of a document value. Each is ranged on
 //! the consuming reference's name when this document wrote it, and lists the
 //! declarations that took part as `relatedInformation`, wherever they live.
@@ -37,6 +38,7 @@ pub(crate) fn is_named_type_error(error: &SchemaError) -> bool {
         SchemaError::UnknownNamedType { .. }
             | SchemaError::ConstraintConflict { .. }
             | SchemaError::UnionReference { .. }
+            | SchemaError::NonDescendingCycle { .. }
             | SchemaError::ImportCycle { .. }
     )
 }
@@ -154,6 +156,28 @@ impl<'a> NamedTypeScope<'a> {
                     }
                 }));
                 self.site_span(site)
+            }
+            // Ranged on the first reference of the cycle this document wrote;
+            // every other reference of the cycle is related information.
+            SchemaError::NonDescendingCycle { cycles } => {
+                let references: Vec<_> = cycles.iter().flatten().collect();
+                let primary = references.iter().position(|reference| reference.site.source == self.this);
+                for (index, reference) in references.iter().enumerate() {
+                    if Some(index) == primary {
+                        continue;
+                    }
+                    related.extend(self.site_location(&reference.site).map(|location| {
+                        DiagnosticRelatedInformation {
+                            location,
+                            message: format!("`{}` is referenced here", reference.target),
+                        }
+                    }));
+                }
+                match primary {
+                    Some(index) => self.site_span(&references[index].site),
+                    None => references.first().and_then(|reference| self.site_span(&reference.site)),
+                }
+                .or_else(|| self.fallback.clone())
             }
             other => self.target_span(other).or_else(|| self.fallback.clone()),
         };

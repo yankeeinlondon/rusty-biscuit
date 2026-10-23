@@ -70,7 +70,10 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
         // `name ('(' constraints ')')? ('[]' ('(' constraints ')')?)? ('@' ref)?`.
         // A local reference is written bare unless its name is a built-in
         // keyword, where only `@this` selects the local type.
-        TypeExpr::Imported { name, reference } => {
+        //
+        // A resolved reference to a cyclic definition is written as a
+        // back-reference by name, with no namespace.
+        TypeExpr::Imported { name, .. } | TypeExpr::Ref(super::DefKey { name, .. }) => {
             out.push_str(name);
             let constraints = render_constraints(&atom.constraints, None);
             if !constraints.is_empty() {
@@ -86,7 +89,9 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
                     out.push(')');
                 }
             }
-            if !atom.ty.is_local_reference() || SimplifiedType::is_keyword(name) {
+            if let TypeExpr::Imported { reference, .. } = &atom.ty
+                && (!atom.ty.is_local_reference() || SimplifiedType::is_keyword(name))
+            {
                 out.push('@');
                 out.push_str(reference);
             }

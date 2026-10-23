@@ -308,5 +308,6 @@ fn describe_atom(atom: &PropertyAtom) -> String {
         TypeExpr::Union(_) => format!("union{suffix}"),
         TypeExpr::Tuple(_) => format!("tuple{suffix}"),
         TypeExpr::Function(_) => format!("function{suffix}"),
+        TypeExpr::Ref(key) => format!("{name}{suffix}", name = key.name),
     }
 }

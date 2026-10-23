@@ -203,7 +203,8 @@ fn is_always_text(atom: &PropertyAtom) -> bool {
         | TypeExpr::Imported { .. }
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_) => false,
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => false,
     }
 }
 
@@ -232,7 +233,8 @@ fn identity(atom: &PropertyAtom) -> Identity<'_> {
         ty @ (TypeExpr::InlineObject(_)
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_)) => Identity::Structured(ty),
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_)) => Identity::Structured(ty),
     }
 }
 

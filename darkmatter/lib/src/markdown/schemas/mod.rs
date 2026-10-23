@@ -68,6 +68,7 @@ mod frontmatter_shape;
 mod json_shape;
 mod phase;
 mod reference;
+pub(crate) mod scope;
 pub mod resolve;
 pub mod rewrite;
 pub mod roots;
@@ -109,7 +110,7 @@ pub use detect::{
     detect_schema_with_contexts, schema_to_yaml,
 };
 pub use discriminant::select_literal_discriminant_arm;
-pub use errors::SchemaError;
+pub use errors::{CycleReference, SchemaError};
 pub use json_shape::shape_from_json_schema;
 pub use frontmatter_shape::{
     FrontmatterExpressionValue, effective_property_shape, expression_atom,
@@ -119,7 +120,8 @@ pub use phase::SchemaPhase;
 pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_reference};
 pub use rewrite::NormalizationOutcome;
 pub use simplified::{
-    AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef,
+    AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar, DefKey,
+    DefNamespace, Definition, DefinitionOuter, DefinitionTable, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef,
     SchemaArm,
     SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaCursor, SchemaCursorRole,
     SchemaDeclaration, SchemaReferenceSite, SchemaShape, SchemaSourceId, SchemaSourceMap,
@@ -135,7 +137,7 @@ pub use simplified::{
     parse_schema_declaration_with_source, suggestions_for_def, suggestions_for_path,
     Alternative, flattened_alternatives,
     SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
-    parse_yaml_schema, to_json_schema,
+    parse_yaml_schema, to_json_schema, to_json_schema_with_definitions,
 };
 #[cfg(feature = "work-counters")]
 pub use simplified::alias_search_work;
@@ -301,6 +303,8 @@ struct TriggerLayer {
     json_schema: Arc<Value>,
     /// The payload's SimplifiedSchema object shape, when it has one.
     shape: Option<Arc<SchemaShape>>,
+    /// The cyclic named types `shape` reaches.
+    definitions: Arc<DefinitionTable>,
     /// Payload dependency edges (referenced files + imports + examples).
     dependencies: Vec<PathBuf>,
     advisories: Vec<SchemaAdvisory>,
@@ -648,9 +652,16 @@ impl DarkmatterSchemas {
             &trigger_layers,
             resolved.as_ref(),
         );
+        let definitions = resolved.as_ref().map(|r| Arc::clone(&r.definitions)).unwrap_or_default();
         Ok(Some(EffectiveSchema {
             simplified: resolved.and_then(|r| r.simplified),
+            definitions,
             trigger_shapes: trigger_layers.iter().filter_map(|layer| layer.shape.clone()).collect(),
+            trigger_definitions: trigger_layers
+                .iter()
+                .filter(|layer| !layer.definitions.is_empty())
+                .map(|layer| Arc::clone(&layer.definitions))
+                .collect(),
             json_schema: merged_json,
             origins,
             validators,
@@ -702,11 +713,12 @@ impl DarkmatterSchemas {
             if !eval.matched || eval.trigger.envelope.payload.is_none() {
                 continue;
             }
-            let (json_schema, shape, dependencies, advisories) = if pre_resolved {
+            let (json_schema, shape, definitions, dependencies, advisories) = if pre_resolved {
                 let payload = &registry.payloads[idx];
                 (
                     payload.json_schema.clone(),
                     payload.shape.clone(),
+                    Arc::clone(&payload.definitions),
                     payload.dependencies.clone(),
                     payload.advisories.clone(),
                 )
@@ -716,12 +728,13 @@ impl DarkmatterSchemas {
                     registry.roots.search_paths(),
                     &self.file_resolution_context,
                 )?;
-                (payload.json_schema, payload.shape, payload.dependencies, payload.advisories)
+                (payload.json_schema, payload.shape, payload.definitions, payload.dependencies, payload.advisories)
             };
             layers.push(TriggerLayer {
                 source: eval.trigger.source.clone(),
                 json_schema,
                 shape,
+                definitions,
                 dependencies,
                 advisories,
             });
@@ -835,11 +848,12 @@ fn schema_declares_property(root: &Value, schema: &Value, name: &str, depth: usi
         .filter_map(|key| object.get(key).and_then(Value::as_array))
         .flatten()
         .chain(["if", "then", "else"].into_iter().filter_map(|key| object.get(key)));
-    let referenced = object
-        .get("$ref")
-        .and_then(Value::as_str)
-        .and_then(|reference| reference.strip_prefix('#'))
-        .and_then(|pointer| root.pointer(pointer));
+    // The compiled schema already resolved every reference, so a chain that
+    // fails here declares nothing rather than failing the query.
+    let referenced = scope::SchemaScope::new(root)
+        .chain(schema, "")
+        .map(|hops| hops.into_iter().skip(1).collect::<Vec<_>>())
+        .unwrap_or_default();
     arms.chain(referenced)
         .any(|arm| schema_declares_property(root, arm, name, depth + 1))
 }
@@ -858,10 +872,16 @@ pub struct EffectiveSchema {
     /// editor's full property shape, with matching trigger payloads layered
     /// in, is [`Self::property_shape`].
     pub simplified: Option<SimplifiedSchema>,
+    /// The cyclic named types [`Self::simplified`] reaches through
+    /// [`TypeExpr::Ref`]; empty when nothing recurses.
+    definitions: Arc<DefinitionTable>,
     /// The object shapes of the matching trigger payloads that have a
     /// SimplifiedSchema projection, in layering order (a later shape wins a
     /// shared top-level property, as it does in [`Self::json_schema`]).
     trigger_shapes: Vec<Arc<SchemaShape>>,
+    /// The non-empty definition tables of the matching trigger payloads,
+    /// searched by [`Self::definition`] after [`Self::definitions`].
+    trigger_definitions: Vec<Arc<DefinitionTable>>,
     /// The final Draft 2020-12 JSON Schema used by the validator.
     ///
     /// Held as `Arc<Value>` so the common baseline-only effective schema is
@@ -944,6 +964,26 @@ impl EffectiveSchema {
     /// requiring; an optional property is declared.
     pub fn declares_top_level_property(&self, name: &str) -> bool {
         schema_declares_property(&self.json_schema, &self.json_schema, name, 0)
+    }
+
+    /// The cyclic named types [`Self::simplified`] reaches through
+    /// [`TypeExpr::Ref`], each lowered once under the schema's root `$defs`.
+    /// Empty when nothing recurses.
+    pub fn definitions(&self) -> &Arc<DefinitionTable> {
+        &self.definitions
+    }
+
+    /// The definition a [`TypeExpr::Ref`] in [`Self::simplified`] or in one
+    /// of [`Self::trigger_shapes`] names. A [`DefKey`] identifies one
+    /// definition wherever it is reached, so one lookup serves every layer.
+    ///
+    /// Look a reference up here, not by its `$defs` key: each table's keys
+    /// are those of its own lowering, and a trigger payload's keys may have
+    /// been re-keyed when its JSON merged under the document's.
+    pub fn definition(&self, key: &DefKey) -> Option<&Definition> {
+        std::iter::once(&self.definitions)
+            .chain(&self.trigger_definitions)
+            .find_map(|table| table.get(key))
     }
 
     /// The files this schema depends on (imports + examples + the referenced
@@ -1055,13 +1095,14 @@ impl EffectiveSchema {
         positions: &PositionMap,
         phase: SchemaPhase,
     ) -> Result<ValidationReport, SchemaError> {
-        let (projected, projected_document) = match &self.simplified {
+        let (projected, definitions, projected_document) = match &self.simplified {
             Some(simplified) => {
                 let projected = phase::project(simplified, phase);
-                let projected_document = simplified::to_json_schema(&projected)?;
-                (Some(projected), Some(projected_document))
+                let definitions = phase::project_definitions(&self.definitions, phase);
+                let projected_document = simplified::to_json_schema_with_definitions(&projected, &definitions)?;
+                (Some(projected), Arc::new(definitions), Some(projected_document))
             }
-            None => (None, None),
+            None => (None, Arc::clone(&self.definitions), None),
         };
         let json_schema = phase_json_schema(&self.json_schema, projected_document, phase)?;
         let mut cache = SHARED_VALIDATOR_CACHE.clone().with_caller_origins(self.caller_origins.clone());
@@ -1072,7 +1113,9 @@ impl EffectiveSchema {
             CompiledValidators::build(&json_schema, &cache, self.base_dir.as_deref(), &self.file_resolution_context)?;
         let projected = Self {
             simplified: projected,
+            definitions,
             trigger_shapes: self.trigger_shapes.clone(),
+            trigger_definitions: self.trigger_definitions.clone(),
             json_schema,
             origins: self.origins.clone(),
             validators,
@@ -1879,7 +1922,7 @@ fn wrapped_root_arms(schema: &Arc<Value>) -> Option<Arc<[Arc<Value>]>> {
     }
     let arms: Arc<[Arc<Value>]> = arms
         .iter()
-        .map(|arm| Arc::new(validate::wrap_arm_as_root_schema(arm)))
+        .map(|arm| Arc::new(validate::wrap_arm_as_root_schema(arm, schema)))
         .collect();
     if wrapped.len() == RECENT_SCHEMAS {
         wrapped.remove(0);

@@ -12,6 +12,7 @@
 mod alphanumeric;
 pub mod convert;
 mod cursor;
+mod definitions;
 pub mod grammar;
 mod lint;
 pub mod query;
@@ -25,7 +26,10 @@ pub mod yaml_scalar;
 
 pub use alphanumeric::{AlphanumericOption, AlphanumericOptions, AsciiCharSet};
 pub use subtype::{is_definition_subtype, is_string_like, is_subtype};
-pub use convert::{DRAFT_2020_12, to_json_schema};
+pub use convert::{DRAFT_2020_12, to_json_schema, to_json_schema_with_definitions};
+pub use definitions::{
+    DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, definition_pointer,
+};
 pub use cursor::{
     SchemaCursor, SchemaCursorRole, is_union_arm_path, locate_schema_declaration_cursor,
     locate_type_definition_cursor,

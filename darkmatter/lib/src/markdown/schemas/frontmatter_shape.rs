@@ -299,7 +299,8 @@ fn arm_discriminant_json(atom: &PropertyAtom) -> Value {
         | TypeExpr::Imported { .. }
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_) => {
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => {
             serde_json::json!({})
         }
     }

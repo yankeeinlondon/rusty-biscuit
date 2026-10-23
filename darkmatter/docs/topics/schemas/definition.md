@@ -335,6 +335,14 @@ the selected arm still governs the value. Interactive collection is a
 top-level-property UI, so a missing nested property is reported rather than
 synthesized.
 
+The same holds at every level of a recursive named type: each property nested
+in its definition is timed by its own markers, whatever the timing of the
+property that uses the type. With
+`item: "{ name: string(required), kids: item[](required) }"`, a `name` missing
+five levels down is accepted at launch and reported at completion, and one
+`item` definition serves `now: item(required; eager)` and
+`later: item(required)` alike; only the two properties differ.
+
 ### Null-Admitting Properties
 
 Use a null-admitting type when a whole value may be left out even though the
@@ -1280,7 +1288,15 @@ Rules:
 - The right side resolves as a `biscuit_file::FileReference` whose `cwd` is the schema file's directory, in the request's file-resolution context when one is supplied — the same resolution as root-union file refs and `$schema`.
 - The target must be a SimplifiedSchema file whose payload is a mapping with a matching named type. Importing from a raw JSON Schema file, from a root-union schema file, from a file whose whole payload is a reference to another file, or from a missing file is a schema error. A name the target does not define is `SchemaError::UnknownNamedType`, naming the type, the schema searched, and the property that holds the reference.
 - **Every constraint of the definition survives the reference**, including `required` and `generated`. An inherited `required` keeps its scope: on `people: person[]` it makes `people` required, and inside one arm of a property-level union it is hoisted to the property like any arm's `required`. Requiring a field *inside* an object type does not require the property that holds the object.
-- Expansion is **eager, bounded, and cycle-checked**. Named types form a DAG; a type that transitively references itself, through bare or explicit references, is a recursion error (`SchemaError::ImportCycle`, reporting the chain such as `b -> a -> b`), and an import chain deeper than 32 references is rejected — the same protection as the inline-object nesting cap. True recursive types are deferred.
+- Expansion is **eager, bounded, and cycle-checked**. A named type may refer back to itself, directly or through other named types in the same or other files, as long as every cycle passes through a child value: an object property, a dictionary value, a list item, or a tuple position. `item: "{ value: string, children: item[] }"` is valid, and an empty `children: []` ends it. A cycle that never reaches a child value — an alias cycle (`a: b`, `b: a`), a self-union (`a: [a, string]`), or a cycle through a `function(...)` signature — is `SchemaError::NonDescendingCycle`, naming every reference in the cycle with its location in each file. A recursive type is stored once and every use of it lowers to a `$ref` into the schema's root `$defs`; a type that does not recurse is still inlined at each use, so its JSON Schema is unchanged. A chain of non-repeating references deeper than 32 is rejected (`SchemaError::ImportCycle`) — the same protection as the inline-object nesting cap.
+
+  ```yaml
+  $schema:
+    item: "{ value: string(required), children: item[](required) }"
+    tree: item(required)
+  ```
+
+  Each schema keeps its own `$defs`: a root-union arm that names another schema file, a trigger payload, and a baseline each bring theirs to the merged root, and a key two of them share with different bodies is renamed in the schema that joins (`item` becomes `item-2`) along with that schema's own references, so a reference never binds to another layer's type. See [JSON Schema Baseline Restrictions](#json-schema-baseline-restrictions).
 - Each import of another file is a **dependency edge** recorded on the resolved schema (`ResolvedSchema.imports`) so the schema cache and DMLS index can invalidate when an imported file changes. A local reference adds no edge.
 - An inherited `example(...)` reference resolves from the file that declared it, not from the importing schema.
 - `to_json_schema` rejects any unresolved import that reaches conversion, exactly as it rejects unresolved root-union file arms — imports are always expanded by the resolver first.
@@ -2389,9 +2405,31 @@ did before the built-in baseline was the default.
 
 When the baseline is a JSON Schema (rather than a SimplifiedSchema), it is restricted to **simple object schemas**. The merge algorithm operates on a property-name-keyed deep merge and cannot reason about arbitrary JSON Schema features.
 
-Allowed root keys: `$schema`, `type`, `properties`, `required`, `additionalProperties` (must be `true`), `description`, `title`.
+Allowed root keys: `$schema`, `type`, `properties`, `required`, `additionalProperties` (must be `true`), `description`, `title`, and `$defs`.
 
-Any other construct — `$ref`, `allOf`, `anyOf`, `if`/`then`/`else`, `patternProperties`, `additionalProperties: false`, etc. — produces `SchemaError::Baseline` at load time. `additionalProperties: false` is explicitly rejected so the baseline cannot lock out per-document extensions.
+Any other root construct — `$ref`, `allOf`, `anyOf`, `if`/`then`/`else`, `patternProperties`, `additionalProperties: false`, etc. — produces `SchemaError::Baseline` at load time. `additionalProperties: false` is explicitly rejected so the baseline cannot lock out per-document extensions. The same contract applies to a trigger payload, reported as `SchemaError::TriggerPayloadNotMergeable`.
+
+A property may refer to a definition in the baseline's own root `$defs`, including a recursive one:
+
+```json
+{
+  "type": "object",
+  "properties": { "tree": { "$ref": "#/$defs/item" } },
+  "$defs": {
+    "item": {
+      "type": "object",
+      "properties": { "label": { "type": "string" }, "kids": { "type": "array", "items": { "$ref": "#/$defs/item" } } },
+      "required": ["label", "kids"]
+    }
+  }
+}
+```
+
+Those definitions move to the merged root, so the baseline's references must keep their meaning there:
+
+- every `#/$defs/…` reference must name a definition in the baseline's own `$defs`; one that does not is `SchemaError::UnresolvedReference`, naming the reference and its location, whether or not the baseline has a `$defs` at all;
+- a baseline with `$defs` must be a valid Draft 2020-12 schema (`SchemaError::Baseline`), and may not use `$id`, `$anchor`, `$dynamicAnchor`, `$dynamicRef`, an external reference, or a local reference outside `$defs` (`#`, `#/properties/…`, the empty reference); each is `SchemaError::UnsupportedMergeReference` with its location;
+- a baseline without `$defs` keeps its other reference forms exactly as before: nothing of it moves.
 
 ### Merge Semantics (`baseline ⊕ document`)
 
@@ -2401,6 +2439,7 @@ Any other construct — `$ref`, `allOf`, `anyOf`, `if`/`then`/`else`, `patternPr
 - Properties present only in the baseline remain in the effective schema.
 - Properties present only in the document are added.
 - For root unions, the baseline is merged into each arm independently.
+- The baseline's `$defs` join the document's root `$defs` (the root of a root union, never an arm). The document's keys and references never change. A baseline key the document also uses is shared when both hold the same body and renamed (`item-2`) otherwise, together with every baseline reference to it; literal data that only looks like a reference (`const`, `enum`, `default`, `examples`, and extension annotations) is left byte-for-byte. A root-union arm that declares its own `$id` cannot receive a baseline with `$defs` (`SchemaError::UnsupportedMergeReference`), since references inside it would resolve in that arm.
 
 This semantics is chosen because per-constraint merging produces surprising results (e.g. a baseline `min(5)` silently shadowing a document `min(3)`).
 
@@ -3393,7 +3432,7 @@ written. See [Selecting the Baseline](#selecting-the-baseline).
 ## Limitations (v1)
 
 - **No remote `$schema`.** Download referenced schemas locally for now.
-- **No `$ref`.** Reuse a definition through [named types](#cross-file-named-type-imports-namefile), which are inlined at each use site; recursive types are not supported.
+- **No authored `$ref`.** Reuse a definition through [named types](#cross-file-named-type-imports-namefile). Non-recursive named types are inlined at each use site; recursive ones lower to generated `$ref`s into the root `$defs`.
 - **No `lenient` opt-out for inline object `additionalProperties: false`.** Every inline object rejects extra keys. Authors who want looser object typing should drop down to the opaque `object` type, which preserves the root-schema `additionalProperties: true` behavior.
 - **Hard 32-level inline object nesting cap.** The parser rejects deeper nesting with `SchemaError::Grammar`. Reference a JSON Schema file for deeper typing.
 - **No inline object detection.** `md schema detect` continues to emit `object` for object-typed values; inline object schemas must be hand-written.

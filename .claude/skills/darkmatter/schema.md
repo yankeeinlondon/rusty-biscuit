@@ -223,7 +223,7 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
 - `Name@darkmatter:<stem>` is reserved: it names type `Name` in the shipped
   partial `darkmatter/schemas/partials/<stem>.yaml` from `SHIPPED`, whatever
   the importer is (disk file, embedded document, host bundle), never reading
-  the disk (`NamespaceKey::Shipped`; relative imports inside it stay in
+  the disk (`DefNamespace::Shipped`; relative imports inside it stay in
   `SHIPPED`). `named_type_reference_path` returns `None` for it, as for
   `this`. Claudine's `action.yaml` uses it to reference Darkmatter's neutral
   action types.
@@ -266,12 +266,54 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   other block keys are `Convert` errors, and the root accepts only
   `min-keys`/`max-keys`. One-atom contradictions are `Convert` errors. Several
   patterns lower to `allOf`; one keeps the single `pattern` keyword.
-- A missing name is `SchemaError::UnknownNamedType { name, namespace, site }`;
-  cycles stay `ImportCycle`. Both new errors are wrapped by `ReferencedSchema`
-  when raised inside a referenced schema.
+- A missing name is `SchemaError::UnknownNamedType { name, namespace, site }`.
+  Both it and `NonDescendingCycle` are wrapped by `ReferencedSchema` when
+  raised inside a referenced schema; `ImportCycle` now means only an acyclic
+  reference chain deeper than 32.
+- **Recursive named types.** `resolve/graph.rs` discovers the reachable
+  definitions once, classifies each reference edge as descending (object
+  property, dictionary value, list item, tuple slot; never inside a
+  `function(...)` signature), and rejects every cycle left after dropping
+  descending edges as `NonDescendingCycle { cycles }` (each `CycleReference`
+  carries a span for a file source). Members of a cyclic group are
+  `DefKey { namespace: DefNamespace, name }`; every use becomes
+  `TypeExpr::Ref(DefKey)` carrying the use site's markers (the definition's
+  `required`/`generated`/`eager`/`default`/`suggest`/`example`/`category` and
+  description merged with the postfix), and the presence-free body goes into
+  the `DefinitionTable` (`ResolvedSchema.definitions`,
+  `EffectiveSchema::definitions()`, `NamedTypeExpansion.definitions`).
+  A schema with a cycle expands twice (`resolve/recursive.rs`: pass 1 learns
+  each definition's `UseSummary`); an acyclic one takes the old single pass,
+  pinned byte-for-byte by `lib/tests/l1/recursive_schema_golden.rs`. Lower
+  with `to_json_schema_with_definitions` (`$ref` with use-site siblings, one
+  root `$defs` body per reachable definition, in allocation order); plain
+  `to_json_schema` errors on a `Ref`. Typed walkers that cannot follow a `Ref`
+  yet treat it as opaque.
+- **`$defs` across merges** (`schemas/scope.rs`). `$defs` live only at a
+  schema's root. A sub-schema compiled alone (a root-union arm, a
+  discriminated arm, a property union arm, an example target) goes through
+  `with_root_definitions` / `wrap_arm_as_root_schema(arm, root)`; never
+  compile a fragment of a schema that may carry `$defs` without its root.
+  `merge_baseline` moves the baseline's `$defs` into the document root with
+  `fold_definitions` (the document's keys never move; a colliding different
+  body is renamed `key-2` with only the joining side's references rewritten,
+  schema keywords only, never `const`/`default`/`examples`/`x-*` data).
+  `validate_simple_object_schema(schema, label)` admits a root `$defs` and runs
+  `check_joined_references` (a `#/$defs/…` ref must resolve in its own table:
+  `UnresolvedReference`; with `$defs`, `$id`/anchors/external/other local refs
+  are `UnsupportedMergeReference`, and the schema is meta-validated). A
+  SimplifiedSchema file arm of a root union joins through
+  `DefinitionTable::absorb`, so the union's typed table and JSON keys agree
+  (phase lowering depends on that); a raw arm is folded after every arm.
+  Phase projection projects definition bodies with `phase::project_definitions`
+  (same keys) and `merge_with_effective` replaces the document's own bodies
+  while keeping layer-only ones. Look a `Ref` up through
+  `EffectiveSchema::definition(&DefKey)`, which also searches trigger tables;
+  a table's `json_key`s are those of its own lowering.
 - `resolve::expand_named_types` expands an in-memory schema with it as
-  `this` (DMLS unsaved buffers); `resolve::named_type_reference_path` returns
-  the file an explicit `Name@target` selects. Neither adds a second resolver.
+  `this` (DMLS unsaved buffers) and returns `NamedTypeExpansion { schema,
+  imports, definitions }`; `resolve::named_type_reference_path` returns the
+  file an explicit `Name@target` selects. Neither adds a second resolver.
 - Root unions can compose schema arms without erasing each arm's origin.
 - `file(match(...))` only suggests files in a single schema. In a root union,
   each simplified arm's declared glob emits `x-darkmatter-match`, including

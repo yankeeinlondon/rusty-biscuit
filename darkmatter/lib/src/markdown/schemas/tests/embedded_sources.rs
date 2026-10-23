@@ -176,7 +176,8 @@ fn malformed_imports_cycles_and_examples_fail_preparation() {
         "  a: \"one@./types.yaml\"\n",
         &[("schemas/types.yaml", "kind: schema\ntypes:\n  one: two\n  two: one\n")],
     );
-    assert!(matches!(cycle, Err(SchemaError::ImportCycle { .. })), "{cycle:?}");
+    // An alias cycle never descends into a child value.
+    assert!(matches!(cycle, Err(SchemaError::NonDescendingCycle { .. })), "{cycle:?}");
 
     let message = importer_message(
         prepare("  a: \"string(example(./a.md))\"\n", &[]).expect_err("example"),

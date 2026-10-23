@@ -428,7 +428,9 @@ fn families(atom: &PropertyAtom) -> &'static [Family] {
             _ => ALL_FAMILIES,
         },
         TypeExpr::Tuple(_) => &[Family::Array],
-        TypeExpr::Imported { .. } | TypeExpr::Union(_) | TypeExpr::Function(_) => ALL_FAMILIES,
+        TypeExpr::Imported { .. } | TypeExpr::Union(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {
+            ALL_FAMILIES
+        }
     }
 }
 

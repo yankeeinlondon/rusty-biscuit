@@ -1247,9 +1247,11 @@ fn is_numeric_segment(segment: &str) -> bool {
     !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_digit())
 }
 
-/// Adds the canonical `$schema` URI to an `anyOf` arm so the cache can
-/// compile it as a standalone validator.
-pub fn wrap_arm_as_root_schema(arm: &Value) -> Value {
+/// Adds the canonical `$schema` URI to an `anyOf` arm of `root` so the cache
+/// can compile it as a standalone validator, along with `root`'s `$defs`, where
+/// the arm's `#/$defs/…` references resolve.
+pub fn wrap_arm_as_root_schema(arm: &Value, root: &Value) -> Value {
+    let arm = super::scope::with_root_definitions(arm, root);
     let mut map = arm.as_object().cloned().unwrap_or_default();
     if !map.contains_key("$schema") {
         map.insert(
@@ -1329,6 +1331,8 @@ pub(super) fn narrow_discriminated_union_problems(
             object.insert("$schema".into(), super::simplified::DRAFT_2020_12.into());
             object.insert("type".into(), "object".into());
         }
+        // The selected arm keeps its `#/$defs/…` references in the root's scope.
+        let synthetic = super::scope::with_root_definitions(&synthetic, schema);
         let Ok(validator) = build_validator_with(&synthetic, &anchors.file_values()) else {
             continue;
         };
@@ -2284,14 +2288,14 @@ mod tests {
                 "doc": { "type": "string", "format": "darkmatter-file" }
             },
             "required": ["doc"]
-        }));
+        }), &json!({}));
         let arm1 = wrap_arm_as_root_schema(&json!({
             "type": "object",
             "properties": {
                 "doc": { "type": "number" }
             },
             "required": ["doc"]
-        }));
+        }), &json!({}));
         let v0 = Arc::new(resolving_validator(&arm0, &context));
         let v1 = Arc::new(resolving_validator(&arm1, &context));
         let instance = json!({ "doc": "./missing.md" });

@@ -348,7 +348,7 @@ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
             }
             true
         }
-        TypeExpr::Imported { .. } => {
+        TypeExpr::Imported { .. } | TypeExpr::Ref(_) => {
             // Imports are rejected at load time; unreachable in a loaded trigger.
             false
         }

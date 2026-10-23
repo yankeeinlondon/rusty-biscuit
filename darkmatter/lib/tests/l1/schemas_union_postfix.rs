@@ -619,8 +619,14 @@ fn a_rejection_inside_a_referenced_schema_keeps_the_referenced_wrapper() {
 #[test]
 fn cycles_and_depth_limits_still_apply_through_union_postfixes() {
     let (_dir, root) = temp_root();
+    // `b: a[]` descends into list items, so the cycle is admitted; `[]` over
+    // a union one of whose alternatives is already a list is still refused.
     let err = resolve_inline(&root, "a: [\"b(required)\", number]\nb: a[]\n").expect_err("cycle");
-    assert!(matches!(err, SchemaError::ImportCycle { .. }), "{err:?}");
+    assert!(
+        matches!(&err, SchemaError::UnionReference { rejection, .. }
+            if matches!(**rejection, darkmatter::markdown::schemas::SchemaUnionRejection::ArrayArm { arm: 0 })),
+        "{err:?}"
+    );
 
     let mut chain = String::new();
     for index in 0..40 {

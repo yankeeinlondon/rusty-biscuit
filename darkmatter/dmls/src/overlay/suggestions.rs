@@ -86,12 +86,12 @@ pub fn reference_lints(
     if written.is_empty() {
         return Vec::new();
     }
-    let Ok((expanded, _)) =
+    let Ok(expansion) =
         expand_named_types(schema, base_dir, defining_file, schema_roots, context)
     else {
         return Vec::new();
     };
-    lint_suggestions(&expanded)
+    lint_suggestions(&expansion.schema)
         .unwrap_or_default()
         .into_iter()
         .filter(|problem| written.contains(&(problem.span.clone(), problem.decoded.clone())))
@@ -128,7 +128,8 @@ fn collect_reference_candidates(schema: &SimplifiedSchema, out: &mut Vec<(Source
                     TypeExpr::Union(_)
                     | TypeExpr::Primitive(_)
                     | TypeExpr::Tuple(_)
-                    | TypeExpr::Function(_) => {}
+                    | TypeExpr::Function(_)
+                    | TypeExpr::Ref(_) => {}
                 }
             }
         }

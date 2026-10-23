@@ -278,7 +278,8 @@ fn project_one(index: usize, name: &str, def: &PropertyDef) -> ContextVariableDe
         TypeExpr::InlineObject(_)
         | TypeExpr::Imported { .. }
         | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_) => SimplifiedType::Object,
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => SimplifiedType::Object,
         // Only the resolver produces a union type, and the base schema is
         // parsed passively, so no `ctx.*` atom carries one. The drift guard
         // `projected_descriptors_match_base_schema` fails on any non-primitive.

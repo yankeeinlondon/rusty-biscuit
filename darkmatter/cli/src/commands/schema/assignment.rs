@@ -200,7 +200,8 @@ fn atom_prefers_string(atom: &PropertyAtom) -> bool {
         TypeExpr::InlineObject(_)
         | TypeExpr::Imported { .. }
         | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_) => return false,
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => return false,
         // A postfixed union reference (`U(required)`) prefers a string when
         // any alternative does, as a property-level union does.
         TypeExpr::Union(arms) => return arms.iter().any(atom_prefers_string),

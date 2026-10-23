@@ -230,7 +230,7 @@ fn accepts(schema: &Value, validator: &Validator, candidate: &Value, pending: &H
     }
     match schema.get("anyOf").and_then(Value::as_array) {
         Some(arms) => arms.iter().any(|arm| {
-            structural_validator(&validate::wrap_arm_as_root_schema(arm))
+            structural_validator(&validate::wrap_arm_as_root_schema(arm, schema))
                 .is_some_and(|arm_validator| only_pending_problems(&arm_validator, candidate, pending))
         }),
         None => only_pending_problems(validator, candidate, pending),

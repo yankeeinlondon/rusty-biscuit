@@ -359,7 +359,7 @@ fn visit_atom(atom: &PropertyAtom, visit: &mut impl FnMut(&PropertyAtom)) {
                 .for_each(|parameter| visit_def(&parameter.def, visit));
             visit_def(&function.returns, visit);
         }
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => {}
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Ref(_) => {}
     }
 }
 

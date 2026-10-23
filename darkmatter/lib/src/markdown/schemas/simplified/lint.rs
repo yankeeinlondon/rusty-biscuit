@@ -179,7 +179,7 @@ fn lint_property(
             TypeExpr::Imported { .. } => {}
             // Flattening never yields a union atom; tuple positions and
             // function signatures carry no suggestions to lint.
-            TypeExpr::Union(_) | TypeExpr::Tuple(_) | TypeExpr::Function(_) => {}
+            TypeExpr::Union(_) | TypeExpr::Tuple(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {}
             TypeExpr::Primitive(_) => {
                 lint_candidates(alternative, &alternatives, root_arm, property_path, problems)?;
             }

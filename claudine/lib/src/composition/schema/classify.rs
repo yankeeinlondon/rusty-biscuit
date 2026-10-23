@@ -385,7 +385,9 @@ pub(super) fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<Interact
         // property-level union.
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_) => None,
+        | TypeExpr::Function(_)
+        // A recursive named type is a nested structure.
+        | TypeExpr::Ref(_) => None,
     }
 }
 
@@ -434,6 +436,7 @@ pub(super) fn type_label_for_atom(atom: &PropertyAtom) -> String {
         TypeExpr::Union(_) => format!("union{suffix}"),
         TypeExpr::Tuple(_) => format!("tuple{suffix}"),
         TypeExpr::Function(_) => format!("function{suffix}"),
+        TypeExpr::Ref(key) => format!("{name}{suffix}", name = key.name),
     }
 }
 

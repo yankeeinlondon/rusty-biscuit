@@ -1,8 +1,10 @@
 //! Passive runtime-phase projection for resolved SimplifiedSchema values.
 
-use super::simplified::{Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, TypeExpr};
+use super::simplified::{
+    Constraint, DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, TypeExpr,
+};
 use super::{SchemaError, resolve};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// Runtime seam at which a resolved schema instance is validated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,13 +29,35 @@ pub(super) fn project(schema: &SimplifiedSchema, phase: SchemaPhase) -> Simplifi
     }
 }
 
+/// Projects every definition body of `definitions` for `phase`, under the
+/// same keys, so the projected document's references reach projected bodies.
+///
+/// A body carries no presence or timing of its own (each use site holds
+/// them), so projecting it touches only the properties nested inside it,
+/// each timed by its own markers. One projected body therefore serves an
+/// eager use and a deferred use alike; the two differ only at their sites.
+pub(super) fn project_definitions(definitions: &DefinitionTable, phase: SchemaPhase) -> DefinitionTable {
+    definitions.map_bodies(|body| {
+        let mut body = body.clone();
+        project_def(&mut body, phase);
+        body
+    })
+}
+
 /// Replaces the document SimplifiedSchema portion of an effective schema while
 /// preserving baseline and trigger-only properties already merged around it.
+///
+/// Definitions sit at the root of both schemas. The document was the
+/// receiving side of every merge that built `effective`, so its definitions
+/// kept their keys there, and the projection, lowered from the same table,
+/// reaches the same keys: each projected body replaces its unprojected
+/// counterpart, and the definitions only a baseline or trigger layer reaches
+/// are kept under their merged keys.
 pub(super) fn merge_with_effective(
     effective: &Value,
     projected_document: Value,
 ) -> Result<Value, SchemaError> {
-    match (
+    let mut merged = match (
         effective.get("anyOf").and_then(Value::as_array),
         projected_document.get("anyOf").and_then(Value::as_array),
     ) {
@@ -44,20 +68,39 @@ pub(super) fn merge_with_effective(
             let arms = effective_arms
                 .iter()
                 .zip(projected_arms)
-                .map(|(effective_arm, projected_arm)| {
-                    resolve::merge_baseline(effective_arm, projected_arm.clone())
-                })
+                .map(|(effective_arm, projected_arm)| merge_layer(effective_arm, projected_arm.clone()))
                 .collect::<Result<Vec<_>, _>>()?;
             root.insert("anyOf".into(), Value::Array(arms));
-            Ok(Value::Object(root))
+            Value::Object(root)
         }
-        (None, None) => resolve::merge_baseline(effective, projected_document),
+        (None, None) => merge_layer(effective, projected_document)?,
         // A mismatched root shape cannot be a layer-preserving projection.
         // Falling back to the document projection is safer than pairing arms
         // incorrectly; this only arises for mixed raw/Simplified root unions,
         // whose `EffectiveSchema::simplified` is already `None`.
-        _ => Ok(projected_document),
+        _ => return Ok(projected_document),
+    };
+    if let (Some(Value::Object(layer_defs)), Some(root)) = (effective.get("$defs"), merged.as_object_mut()) {
+        let Value::Object(defs) = root.entry("$defs").or_insert_with(|| Value::Object(Map::new())) else {
+            unreachable!("a lowered document's `$defs` is an object");
+        };
+        for (key, body) in layer_defs {
+            defs.entry(key.clone()).or_insert_with(|| body.clone());
+        }
     }
+    Ok(merged)
+}
+
+/// An effective schema (or one arm of it) as the lower layer of the phase
+/// merge. Its definitions are already at the merged root, so only its root
+/// shape is checked before the property merge.
+fn merge_layer(effective: &Value, projected: Value) -> Result<Value, SchemaError> {
+    let object = effective.as_object().ok_or_else(|| SchemaError::Baseline {
+        message: "the effective schema must be an object schema".into(),
+        source: None,
+    })?;
+    resolve::validate_simple_object_root(object)?;
+    resolve::merge_layer(effective, projected)
 }
 
 /// Removes the one validation format that probes the filesystem. Phase
@@ -124,7 +167,8 @@ fn project_atom(atom: &mut PropertyAtom, phase: SchemaPhase, property_eager: boo
         TypeExpr::Primitive(_)
         | TypeExpr::Imported { .. }
         | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_) => {}
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => {}
     }
     strip_presence(atom);
 
@@ -150,7 +194,8 @@ fn strip_union_arm(arm: &mut PropertyAtom, phase: SchemaPhase) {
         TypeExpr::Primitive(_)
         | TypeExpr::Imported { .. }
         | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_) => {}
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => {}
     }
     strip_presence(arm);
 }

@@ -370,6 +370,15 @@ impl<'r> Translator<'r> {
                 Shape::Union(options)
             }
             TypeExpr::Imported { name, reference } => self.reference(path, atom, name, reference)?,
+            // The grammar translator resolves authored references itself; a
+            // resolver-produced reference to a cyclic definition carries no
+            // table here.
+            TypeExpr::Ref(key) => {
+                return Err(invalid(
+                    path,
+                    format!("the recursive named type `{}` cannot be translated", key.name),
+                ));
+            }
         };
         let optional_empty_file = allow_optional_empty_file && is_scalar_file(atom) && !required;
         let shape = if atom.is_array {

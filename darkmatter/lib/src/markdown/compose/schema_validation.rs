@@ -723,15 +723,18 @@ fn resolve_caller_file_overrides(
             .cloned(),
     );
     let document_context = options.local_expression_resolution_context();
-    let Some(fragments_by_property) = effective.and_then(|effective| {
-        collect_applicable_root_schema_fragments(
-            &effective.json_schema,
-            instance,
-            &document_context,
-            &records,
-            composition_pending,
-        )
-    }) else {
+    let Some(effective) = effective else {
+        return Ok(resolved);
+    };
+    let root = effective.json_schema.as_ref();
+    let Some(fragments_by_property) = collect_applicable_root_schema_fragments(
+        root,
+        root,
+        instance,
+        &document_context,
+        &records,
+        composition_pending,
+    ) else {
         return Ok(resolved);
     };
     for (key, record) in &records {
@@ -743,7 +746,7 @@ fn resolve_caller_file_overrides(
         };
         let selections: Vec<_> = fragments
             .iter()
-            .filter_map(|fragment| select_file_mode(record.raw(), fragment, record.origin()))
+            .filter_map(|fragment| select_file_mode(record.raw(), fragment, root, record.origin()))
             .collect();
         if selections.len() != 1 {
             continue;
@@ -751,12 +754,13 @@ fn resolve_caller_file_overrides(
         let mode = selections[0];
         resolved.modes.insert(key.clone(), mode);
         for fragment in fragments {
-            if select_file_mode(record.raw(), fragment, record.origin()) != Some(mode) {
+            if select_file_mode(record.raw(), fragment, root, record.origin()) != Some(mode) {
                 continue;
             }
             if let Some(value) = resolve_caller_file_value(
                 record.raw(),
                 fragment,
+                root,
                 record.origin(),
                 key,
                 &caller_occurrence(key),
@@ -785,8 +789,10 @@ fn classify_caller_overrides(
     };
     let records = caller_input_records(options);
     let document_context = options.local_expression_resolution_context();
+    let root = effective.json_schema.as_ref();
     let Some(fragments_by_property) = collect_applicable_root_schema_fragments(
-        &effective.json_schema,
+        root,
+        root,
         instance,
         &document_context,
         &records,
@@ -803,7 +809,7 @@ fn classify_caller_overrides(
             let fragments = fragments_by_property.get(key)?;
             let modes: Vec<_> = fragments
                 .iter()
-                .filter_map(|fragment| select_file_mode(record.raw(), fragment, record.origin()))
+                .filter_map(|fragment| select_file_mode(record.raw(), fragment, root, record.origin()))
                 .collect();
             (modes.len() == 1).then(|| (key.clone(), modes[0]))
         })
@@ -841,6 +847,7 @@ fn caller_origins(
 fn select_file_mode(
     value: &serde_json::Value,
     schema: &serde_json::Value,
+    root: &serde_json::Value,
     context: &biscuit_file::FileResolutionContext,
 ) -> Option<CallerFileMode> {
     let mode = match schema.get("format").and_then(serde_json::Value::as_str) {
@@ -858,7 +865,7 @@ fn select_file_mode(
     if let Some(items) = schema.get("items") && let Some(values) = value.as_array() {
         let modes: Vec<_> = values
             .iter()
-            .filter_map(|item| select_file_mode(item, items, context))
+            .filter_map(|item| select_file_mode(item, items, root, context))
             .collect();
         if !values.is_empty() && modes.len() == values.len() && modes.iter().all(|m| *m == modes[0])
         {
@@ -872,8 +879,9 @@ fn select_file_mode(
                 .filter(|arm| {
                     // Which file mode applies is independent of a contested
                     // `match`: an arm that glob rules out is still a file arm.
+                    // The arm compiles alone, so it takes its root's definitions.
                     crate::markdown::schemas::validate::build_validator_in_context(
-                        &without_match_keyword(arm),
+                        &crate::markdown::schemas::scope::with_root_definitions(&without_match_keyword(arm), root),
                         Some(context.cwd()),
                         None,
                         context,
@@ -884,7 +892,7 @@ fn select_file_mode(
             if applicable.len() != 1 {
                 return None;
             }
-            return select_file_mode(value, applicable[0], context);
+            return select_file_mode(value, applicable[0], root, context);
         }
     }
     None
@@ -913,6 +921,7 @@ fn without_match_keyword(schema: &serde_json::Value) -> serde_json::Value {
 /// arm cannot apply.
 fn collect_applicable_root_schema_fragments<'a>(
     schema: &'a serde_json::Value,
+    root: &serde_json::Value,
     instance: &serde_json::Value,
     document_context: &super::expression::ResolutionContext,
     records: &crate::markdown::compose::CallerInputRecords,
@@ -933,6 +942,7 @@ fn collect_applicable_root_schema_fragments<'a>(
         for arm in arms {
             let arm_fragments = collect_applicable_root_schema_fragments(
                 arm,
+                root,
                 instance,
                 document_context,
                 records,
@@ -940,6 +950,7 @@ fn collect_applicable_root_schema_fragments<'a>(
             )?;
             if root_schema_arm_applies(
                 arm,
+                root,
                 instance,
                 document_context,
                 records,
@@ -964,6 +975,7 @@ fn collect_applicable_root_schema_fragments<'a>(
             .filter_map(|arm| {
                 let fragments = collect_applicable_root_schema_fragments(
                     arm,
+                    root,
                     instance,
                     document_context,
                     records,
@@ -971,6 +983,7 @@ fn collect_applicable_root_schema_fragments<'a>(
                 )?;
                 let applicability = root_schema_arm_applies(
                     arm,
+                    root,
                     instance,
                     document_context,
                     records,
@@ -999,7 +1012,7 @@ fn collect_applicable_root_schema_fragments<'a>(
         let selected_arm = match contending.as_slice() {
             [fragments] => *fragments,
             arms => {
-                undecided = caller_file_fragments_shared_by(arms, records);
+                undecided = caller_file_fragments_shared_by(arms, root, records);
                 &undecided
             }
         };
@@ -1026,6 +1039,7 @@ fn collect_applicable_root_schema_fragments<'a>(
 /// stand for all of them, since the mode alone decides how the value resolves.
 fn caller_file_fragments_shared_by<'a>(
     arms: &[&HashMap<String, Vec<&'a serde_json::Value>>],
+    root: &serde_json::Value,
     records: &crate::markdown::compose::CallerInputRecords,
 ) -> HashMap<String, Vec<&'a serde_json::Value>> {
     let Some((first, rest)) = arms.split_first() else {
@@ -1037,7 +1051,7 @@ fn caller_file_fragments_shared_by<'a>(
         let modes: Vec<_> = fragments
             .get(key)?
             .iter()
-            .filter_map(|fragment| select_file_mode(record.raw(), fragment, record.origin()))
+            .filter_map(|fragment| select_file_mode(record.raw(), fragment, root, record.origin()))
             .collect();
         (modes.len() == 1).then(|| modes[0])
     };
@@ -1061,17 +1075,24 @@ enum RootArmApplicability {
 
 fn root_schema_arm_applies(
     arm: &serde_json::Value,
+    root: &serde_json::Value,
     instance: &serde_json::Value,
     document_context: &super::expression::ResolutionContext,
     records: &crate::markdown::compose::CallerInputRecords,
     composition_pending: &HashSet<String>,
     fragments_by_property: &HashMap<String, Vec<&serde_json::Value>>,
 ) -> RootArmApplicability {
-    let mut candidate = coerce_frontmatter_with_pending(arm, instance, composition_pending).value;
-    if !project_root_arm_caller_values(&mut candidate, records, fragments_by_property) {
+    // The arm is judged alone, so it takes its root's definitions.
+    let mut candidate = coerce_frontmatter_with_pending(
+        &crate::markdown::schemas::scope::with_root_definitions(arm, root),
+        instance,
+        composition_pending,
+    )
+    .value;
+    if !project_root_arm_caller_values(&mut candidate, root, records, fragments_by_property) {
         return RootArmApplicability::None;
     }
-    let wrapped = crate::markdown::schemas::validate::wrap_arm_as_root_schema(arm);
+    let wrapped = crate::markdown::schemas::validate::wrap_arm_as_root_schema(arm, root);
     let Ok(validator) = crate::markdown::schemas::validate::build_validator_with_callers(
         &wrapped,
         Some(&document_context.cwd),
@@ -1107,6 +1128,7 @@ fn root_schema_arm_applies(
 
 fn project_root_arm_caller_values(
     candidate: &mut serde_json::Value,
+    root: &serde_json::Value,
     records: &crate::markdown::compose::CallerInputRecords,
     fragments_by_property: &HashMap<String, Vec<&serde_json::Value>>,
 ) -> bool {
@@ -1119,19 +1141,20 @@ fn project_root_arm_caller_values(
         };
         let modes: Vec<_> = fragments
             .iter()
-            .filter_map(|fragment| select_file_mode(record.raw(), fragment, record.origin()))
+            .filter_map(|fragment| select_file_mode(record.raw(), fragment, root, record.origin()))
             .collect();
         if modes.len() != 1 {
             continue;
         }
         let mode = modes[0];
         let projected = fragments.iter().find_map(|fragment| {
-            if select_file_mode(record.raw(), fragment, record.origin()) != Some(mode) {
+            if select_file_mode(record.raw(), fragment, root, record.origin()) != Some(mode) {
                 return None;
             }
             match resolve_caller_file_value(
                 record.raw(),
                 fragment,
+                root,
                 record.origin(),
                 key,
                 &caller_occurrence(key),
@@ -1175,6 +1198,7 @@ fn caller_occurrence(property: &str) -> String {
 fn resolve_caller_file_value(
     value: &serde_json::Value,
     schema: &serde_json::Value,
+    root: &serde_json::Value,
     context: &biscuit_file::FileResolutionContext,
     key: &str,
     occurrence: &str,
@@ -1183,7 +1207,7 @@ fn resolve_caller_file_value(
     let failure = |message, diagnostic, candidate| {
         caller_projection_failure(key, message, diagnostic, context, candidate)
     };
-    if select_file_mode(value, schema, context) == Some(mode)
+    if select_file_mode(value, schema, root, context) == Some(mode)
         && schema.get("format").and_then(serde_json::Value::as_str).is_some()
     {
         let Some(raw) = value.as_str() else {
@@ -1389,6 +1413,7 @@ fn resolve_caller_file_value(
             if let Some(resolved) = resolve_caller_file_value(
                 value,
                 items,
+                root,
                 context,
                 key,
                 &item_occurrence,
@@ -1415,7 +1440,7 @@ fn resolve_caller_file_value(
         if let Some(arms) = schema.get(combinator).and_then(serde_json::Value::as_array) {
             for arm in arms {
                 if let Some(resolved) =
-                    resolve_caller_file_value(value, arm, context, key, occurrence, mode)?
+                    resolve_caller_file_value(value, arm, root, context, key, occurrence, mode)?
                 {
                     return Ok(Some(resolved));
                 }

@@ -1615,6 +1615,7 @@ fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
             TypeExpr::Union(_) => "union".to_string(),
             TypeExpr::Tuple(_) => "tuple".to_string(),
             TypeExpr::Function(_) => "function".to_string(),
+            TypeExpr::Ref(key) => key.name.clone(),
         };
         if atom.is_array && !matches!(atom.ty, TypeExpr::Imported { .. }) {
             name.push_str("[]");
@@ -1845,6 +1846,7 @@ fn alternative_line(alternative: &PropertyAtom) -> String {
         TypeExpr::Union(_) => "- **union".to_string(),
         TypeExpr::Tuple(_) => "- **tuple".to_string(),
         TypeExpr::Function(_) => "- **function".to_string(),
+        TypeExpr::Ref(key) => format!("- **{}", key.name),
     };
     if alternative.is_array && !matches!(alternative.ty, TypeExpr::Imported { .. }) {
         line.push_str("[]");
@@ -1893,7 +1895,7 @@ pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
             format!("Type: **{}{}**", ty.as_keyword(), suffix)
         }
         TypeExpr::InlineObject(_) => "Type: **object**".to_string(),
-        TypeExpr::Tuple(_) | TypeExpr::Function(_) => {
+        TypeExpr::Tuple(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {
             let spelled = darkmatter::markdown::schemas::simplified::serialize_property_atom(&PropertyAtom {
                 description: None,
                 ..atom.clone()
@@ -2534,7 +2536,8 @@ fn inline_object_shape(def: &PropertyDef, item: bool) -> Option<&SchemaShape> {
         | TypeExpr::Imported { .. }
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_) => None,
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => None,
     })
 }
 

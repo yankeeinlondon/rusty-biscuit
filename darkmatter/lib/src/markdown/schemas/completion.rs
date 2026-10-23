@@ -261,7 +261,8 @@ fn is_completable(ty: &TypeExpr) -> bool {
         | TypeExpr::Imported { .. }
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_) => false,
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => false,
     }
 }
 
@@ -283,7 +284,8 @@ fn kind_for_atom(atom: &PropertyAtom) -> Option<CompletionKind> {
         | TypeExpr::Imported { .. }
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_) => return None,
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => return None,
     };
     match ty {
         SimplifiedType::File => {
@@ -501,7 +503,8 @@ pub fn alternatives_for_def(
             TypeExpr::Imported { .. }
             | TypeExpr::Union(_)
             | TypeExpr::Tuple(_)
-            | TypeExpr::Function(_) => {}
+            | TypeExpr::Function(_)
+            | TypeExpr::Ref(_) => {}
         }
     }
     Some(completion)

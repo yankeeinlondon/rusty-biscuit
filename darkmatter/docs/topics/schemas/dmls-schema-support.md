@@ -180,8 +180,12 @@ standalone schema file. Four library errors are projected this way:
   `relatedInformation`, so the editor can show the inherited `min(5)` in
   `types.yaml` beside the use site's `max(2)`. In a multi-hop chain each
   related location is the declaration that introduced the value.
-- An import cycle carries no single source location, so it is ranged on the
-  whole declaration; its message shows the chain, such as `b -> a -> b`.
+- A reference chain deeper than 32 carries no single source location, so it
+  is ranged on the whole declaration; its message shows the chain.
+- A type cycle that never descends into a child value (`a: b` with `b: a`)
+  is ranged on the first of its references this document wrote; each other
+  reference of the cycle, in this file or another, is related information.
+  The message names every reference.
 - A union reference accepts only `[]` with list constraints, `required`,
   `generated`, `eager`, and a description (see
   [Named Union References](./definition.md#named-union-references)). Anything

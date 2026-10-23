@@ -434,7 +434,8 @@ fn primitive(ty: &TypeExpr) -> Option<SimplifiedType> {
         | TypeExpr::Imported { .. }
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_) => None,
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => None,
     }
 }
 

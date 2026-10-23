@@ -25,6 +25,23 @@ use std::{ops::Range, path::PathBuf};
 
 use thiserror::Error;
 
+/// One reference of a rejected [`SchemaError::NonDescendingCycle`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CycleReference {
+    /// The authored reference: the source and path of the named type or
+    /// property that writes it.
+    pub site: SchemaReferenceSite,
+    /// The named type it refers to.
+    pub target: String,
+    /// The source whose named types declare `target`.
+    pub target_source: SchemaSourceId,
+    /// Byte range of the reference's name in `site.source`, when the
+    /// resolver held that source's text (a schema file). A reference in the
+    /// inline `$schema` is projected by the consumer that holds the document,
+    /// as for [`SchemaError::UnknownNamedType`].
+    pub span: Option<Range<usize>>,
+}
+
 use super::simplified::{
     SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaReferenceSite, SchemaSourceId,
     SchemaUnionRejection,
@@ -147,13 +164,60 @@ pub enum SchemaError {
     #[error("$schema frontmatter value has an unsupported shape: {message}")]
     FrontmatterShape { message: String },
 
-    /// A cross-file named-type import (`Name@file`) forms a direct or
-    /// transitive cycle. Named types must form a DAG in v1 — a type that
-    /// (transitively) references itself is a structural recursion error,
-    /// mirroring the inline-object depth cap. `chain` describes the offending
-    /// import path.
+    /// A chain of acyclic named-type references is deeper than the resolver
+    /// expands (32 levels). Recursion is not this error: a cycle that
+    /// descends into a child value is supported, and one that does not is
+    /// [`SchemaError::NonDescendingCycle`]. `chain` describes the reference
+    /// path where expansion stopped.
     #[error("named-type import cycle detected: {chain}")]
     ImportCycle { chain: String },
+
+    /// Named types form a cycle that never descends into a child value: an
+    /// alias cycle (`a: b`, `b: a`), a self-union (`a: [a, string]`), or a
+    /// cycle through a `function(...)` signature. Such a type revisits the
+    /// same value without progress, so no document can satisfy it.
+    ///
+    /// Each entry of `cycles` is one rejected cycle and lists every
+    /// reference in it; a recursive group that also holds descending cycles
+    /// reports only the non-descending ones.
+    #[error(
+        "named types form a cycle that never descends into a child value: {}",
+        cycles
+            .iter()
+            .map(|cycle| cycle
+                .iter()
+                .map(|reference| format!("{} -> `{}`", reference.site.path, reference.target))
+                .collect::<Vec<_>>()
+                .join(", "))
+            .collect::<Vec<_>>()
+            .join("; ")
+    )]
+    NonDescendingCycle { cycles: Vec<Vec<CycleReference>> },
+
+    /// A local `$ref` names no target in the schema it was written in: a
+    /// `#/$defs/…` pointer whose definition is absent, or a reference chain
+    /// that never reaches a schema. `location` is the JSON Pointer of the
+    /// schema holding the reference, in the schema that carried it
+    /// (`schema`, for example `the baseline` or a trigger file).
+    #[error("{schema} has a `$ref` `{reference}` at `{location}` that names no definition")]
+    UnresolvedReference {
+        schema: String,
+        reference: String,
+        location: String,
+    },
+
+    /// A schema joined to another at a merge boundary (a baseline, a trigger
+    /// payload, a root-union arm) uses a reference form whose meaning would
+    /// change once its definitions move to the merged root: a `$id`, an
+    /// anchor, a dynamic reference, an external target, or a local reference
+    /// outside `#/$defs/…`. `schema` names the joined schema and `location`
+    /// is the JSON Pointer of the offending keyword's schema.
+    #[error("{schema} cannot be merged: {reason} at `{location}`")]
+    UnsupportedMergeReference {
+        schema: String,
+        location: String,
+        reason: String,
+    },
 
     /// A named-type reference (bare `Name` or explicit `Name@file`) names a
     /// type its namespace does not define.
@@ -695,9 +759,58 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     Prose::escape_text(chain)
                 )))
                 .hint(
-                    "Named-type imports (<cyan>Name@file</cyan>) must form a DAG. Break the \
-                     self-reference; recursive types are not supported in v1.",
+                    "A chain of named-type references (<cyan>Name@file</cyan>) that never repeats \
+                     a type is limited to 32 levels. Shorten the chain.",
                 ),
+
+            SchemaError::NonDescendingCycle { cycles } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "non-descending type cycle"))
+                .body(cycles.iter().flatten().map(|reference| {
+                    Prose::new(format!(
+                        "<cyan>{}</cyan> in {} refers to <cyan>{}</cyan> from {}",
+                        Prose::escape_text(&reference.site.path.to_string()),
+                        Prose::escape_text_outside_code_spans(&reference.site.source.to_string()),
+                        Prose::escape_text(&reference.target),
+                        Prose::escape_text_outside_code_spans(&reference.target_source.to_string())
+                    ))
+                }).collect::<Vec<_>>())
+                .hint(
+                    "A recursive type must reach itself again only through a child value: an \
+                     object property, a dictionary value, a list item, or a tuple position \
+                     (<cyan>item: \"{ children: item[] }\"</cyan>). An alias, a union arm, or a \
+                     function signature does not count.",
+                ),
+
+            SchemaError::UnresolvedReference { schema, reference, location } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("SchemaError", "unresolved schema reference"))
+                    .body(Prose::new(format!(
+                        "{} refers to <cyan>{}</cyan> at <cyan>{}</cyan>, which names no definition.",
+                        Prose::escape_text_outside_code_spans(schema),
+                        Prose::escape_text(reference),
+                        Prose::escape_text(location)
+                    )))
+                    .hint(
+                        "A <cyan>#/$defs/…</cyan> reference resolves only in the schema that \
+                         declares it; add the definition to that schema's root <cyan>$defs</cyan>.",
+                    )
+            }
+
+            SchemaError::UnsupportedMergeReference { schema, location, reason } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("SchemaError", "unsupported reference at a merge"))
+                    .body(Prose::new(format!(
+                        "{} at <cyan>{}</cyan>: {}",
+                        Prose::escape_text_outside_code_spans(schema),
+                        Prose::escape_text(location),
+                        Prose::escape_text_outside_code_spans(reason)
+                    )))
+                    .hint(
+                        "A schema merged into another (a baseline, a trigger payload, a root-union \
+                         arm) may refer only to its own root <cyan>$defs</cyan> with \
+                         <cyan>#/$defs/name</cyan>, and may not change scope with <cyan>$id</cyan>.",
+                    )
+            }
 
             SchemaError::UnknownNamedType { name, namespace, site } => {
                 StatusBlock::new(StatusState::Error)

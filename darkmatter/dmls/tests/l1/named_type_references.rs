@@ -442,8 +442,25 @@ fn a_standalone_contradiction_and_a_mixed_cycle_are_schema_definition_errors() {
     let named = named_type_diagnostics(&diagnostics);
     assert_eq!(named.len(), 1, "{diagnostics:?}");
     let message = named[0]["message"].as_str().unwrap();
-    assert!(message.contains("import cycle"), "{message}");
-    assert!(message.contains("b -> a -> b"), "the chain through both spellings: {message}");
+    assert!(message.contains("never descends into a child value"), "{message}");
+    assert!(message.contains("b -> `a`") && message.contains("a -> `b`"), "both spellings: {message}");
+    // Ranged on the first reference of the cycle, the other one related.
+    let span = |needle: &str, skip: usize| {
+        let start = offset_of(&cycle.text, needle) + skip;
+        let (start_line, start_character) = position(&cycle.text, start);
+        let (end_line, end_character) = position(&cycle.text, start + 1);
+        json!({
+            "start": { "line": start_line, "character": start_character },
+            "end": { "line": end_line, "character": end_character },
+        })
+    };
+    assert_eq!(named[0]["range"], span("a@this", 0), "{:?}", named[0]);
+    assert_eq!(
+        named[0]["relatedInformation"][0]["location"],
+        json!({ "uri": canonical_uri(&cycle.path), "range": span("a: b", 3) }),
+        "{:?}",
+        named[0]
+    );
 
     fixture.shutdown();
 }

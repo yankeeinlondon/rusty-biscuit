@@ -885,7 +885,7 @@ impl OverlayCache {
         let expanded = match model.schema() {
             Some(schema) => {
                 expand_named_types(schema, base_dir, Some(path), &schema_roots, context)
-                    .map(|(_, imports)| imports)
+                    .map(|expansion| expansion.imports)
             }
             None => Ok(Vec::new()),
         };
