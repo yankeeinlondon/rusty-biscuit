@@ -339,7 +339,6 @@ fn public_default_set_equals_documented_allow_list() {
         include_str!("../src/websocket/hints.rs"),
         include_str!("../src/websocket/lifecycle.rs"),
         include_str!("../src/websocket/mod.rs"),
-        include_str!("../src/websocket/params.rs"),
     ];
     let mut observed = BTreeSet::new();
     for source in corpus {
@@ -368,7 +367,7 @@ fn public_default_set_equals_documented_allow_list() {
         }
     }
     let allowed = ["AuthPolicy", "AuthStrategy", "ConnectionLifecycle", "CrossOrigin", "EndpointParams",
-        "EnvMapping", "ExportFormat", "ExportOptions", "FrameFormat", "Headers", "OAuth2ClientAuthMethod",
+        "EndpointRole", "EnvMapping", "ExportFormat", "ExportOptions", "FrameFormat", "Headers", "OAuth2ClientAuthMethod",
         "OpenApiImportOptions", "PkceRequirement", "RequestIdType", "SchematicDocExtension",
         "SchematicSchemaExtension", "SensitiveString", "WebSocketEndpoint", "WebSocketEndpointHints",
         "WebSocketRuntimeHints"].into_iter().collect::<BTreeSet<_>>();

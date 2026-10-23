@@ -137,6 +137,18 @@ impl FreshCrate {
         Self { _root: root, crate_dir, src_dir }
     }
 
+    /// Adds `src/<name>.rs` beside the generated modules and declares it in
+    /// `lib.rs`, for a module rendered from a fixture definition the
+    /// generator does not ship (for example
+    /// [`render_ws_api_module`](schematic_gen::output::ws_modules::render_ws_api_module)).
+    pub fn add_module(&self, name: &str, source: &str) {
+        fs::write(self.src_dir.join(format!("{name}.rs")), source).expect("write module");
+        let lib = self.src_dir.join("lib.rs");
+        let mut lib_source = fs::read_to_string(&lib).expect("read lib.rs");
+        lib_source.push_str(&format!("\npub mod {name};\n"));
+        fs::write(&lib, lib_source).expect("write lib.rs");
+    }
+
     /// Adds `tests/<name>.rs` to the generated crate.
     pub fn add_test_file(&self, name: &str, source: &str) {
         let tests = self.crate_dir.join("tests");

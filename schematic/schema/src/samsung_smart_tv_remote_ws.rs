@@ -80,25 +80,24 @@ impl SamsungSmartTvRemoteWs {
         options: super::ws_shared::WsClientOptions,
     ) -> Result<RemoteControlClient, super::ws_shared::WsError> {
         let mut path = "/api/v2/channels/samsung.remote.control".to_string();
-        let mut query_pairs: Vec<(String, String)> = Vec::new();
-        query_pairs.push(("name".to_string(), params.name.to_string()));
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        {
+            let value = &params.name;
+            query_pairs
+                .push(("name", urlencoding::encode(&value.to_string()).into_owned()));
+        }
         if let Some(value) = params.token.as_ref() {
-            query_pairs.push(("token".to_string(), value.to_string()));
+            query_pairs
+                .push(("token", urlencoding::encode(&value.to_string()).into_owned()));
         }
         if !query_pairs.is_empty() {
-            query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            query_pairs.sort_by(|a, b| a.0.cmp(b.0));
             let query = query_pairs
                 .into_iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(& k), urlencoding::encode(& v))
-                })
+                .map(|(k, v)| format!("{}={}", urlencoding::encode(k), v))
                 .collect::<Vec<_>>()
                 .join("&");
-            if path.contains('?') {
-                path.push('&');
-            } else {
-                path.push('?');
-            }
+            path.push('?');
             path.push_str(&query);
         }
         if path.contains('{') {
@@ -123,25 +122,24 @@ impl SamsungSmartTvRemoteWs {
         options: super::ws_shared::WsClientOptions,
     ) -> Result<ArtModeClient, super::ws_shared::WsError> {
         let mut path = "/api/v2/channels/com.samsung.art-app".to_string();
-        let mut query_pairs: Vec<(String, String)> = Vec::new();
-        query_pairs.push(("name".to_string(), params.name.to_string()));
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        {
+            let value = &params.name;
+            query_pairs
+                .push(("name", urlencoding::encode(&value.to_string()).into_owned()));
+        }
         if let Some(value) = params.token.as_ref() {
-            query_pairs.push(("token".to_string(), value.to_string()));
+            query_pairs
+                .push(("token", urlencoding::encode(&value.to_string()).into_owned()));
         }
         if !query_pairs.is_empty() {
-            query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            query_pairs.sort_by(|a, b| a.0.cmp(b.0));
             let query = query_pairs
                 .into_iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(& k), urlencoding::encode(& v))
-                })
+                .map(|(k, v)| format!("{}={}", urlencoding::encode(k), v))
                 .collect::<Vec<_>>()
                 .join("&");
-            if path.contains('?') {
-                path.push('&');
-            } else {
-                path.push('?');
-            }
+            path.push('?');
             path.push_str(&query);
         }
         if path.contains('{') {
@@ -165,7 +163,7 @@ impl Default for SamsungSmartTvRemoteWs {
         Self::new()
     }
 }
-///Client for the RemoteControl endpoint.
+/// Client for the RemoteControl endpoint.
 pub struct RemoteControlClient {
     transport: super::ws_shared::WsTransportHandle,
     event_rx: tokio::sync::mpsc::Receiver<
@@ -385,7 +383,7 @@ impl RemoteControlClient {
         self.transport.state()
     }
 }
-///Client for the ArtMode endpoint.
+/// Client for the ArtMode endpoint.
 pub struct ArtModeClient {
     transport: super::ws_shared::WsTransportHandle,
     event_rx: tokio::sync::mpsc::Receiver<

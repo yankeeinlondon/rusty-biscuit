@@ -348,6 +348,22 @@ fn print_diagnostics(diagnostics: &[ValidationDiagnostic]) {
     }
 }
 
+/// Every Rust-output diagnostic of a run over `batch`: the REST batch's own,
+/// plus the shipped WebSocket definitions' (every Rust run writes their
+/// modules). WebSocket info notes have no shared severity; they print only
+/// when `verbose` is set.
+fn rust_diagnostics(batch: &[&RestApi], verbose: u8) -> Vec<ValidationDiagnostic> {
+    let mut diagnostics = validate_rust_client(batch);
+    let ws = crate::output::ws_modules::validate_ws_definition_modules();
+    if verbose > 0 {
+        for note in &ws.notes {
+            eprintln!("{} {note}", "[INFO]".dimmed());
+        }
+    }
+    diagnostics.extend(ws.diagnostics);
+    diagnostics
+}
+
 /// Validates one output's batch, then prepares and publishes it with
 /// `write` if nothing blocks.
 fn publish(
@@ -385,7 +401,7 @@ fn publish_rust(
         Ok(batch) => batch,
         Err(err) => return publish(Output::Rust, Vec::new(), || Err(err)),
     };
-    publish(Output::Rust, validate_rust_client(&batch), || {
+    publish(Output::Rust, rust_diagnostics(&batch, opts.verbose), || {
         println!("{}", "Generating code...".dimmed());
         let output_dir = Path::new(opts.output);
         let manifest_dir = output_dir.parent().unwrap_or(Path::new("schematic/schema"));
@@ -616,7 +632,7 @@ pub fn run_validate(api_name: &str, verbose: u8) -> Result<(), GeneratorError> {
 
     let mut report = GenerationReport::default();
     for (output, diagnostics) in [
-        (Output::Rust, validate_rust_client(&apis)),
+        (Output::Rust, rust_diagnostics(&apis, verbose)),
         (Output::OpenApi, validate_openapi(&apis)),
         (Output::Postman, validate_postman(&apis)),
     ] {

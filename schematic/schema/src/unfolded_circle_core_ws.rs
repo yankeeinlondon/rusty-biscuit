@@ -4,7 +4,7 @@
 //!
 //! Unfolded Circle Core WebSocket API
 //!
-//! Base URL: `ws://remote.local/ws`
+//! Base URL: `ws://remote.local`
 //!
 //! ## Endpoints
 //!
@@ -15,7 +15,7 @@
 //!
 //! ## Authentication
 //!
-//! - Handshake auth strategy: API key header.
+//! - Message-based authentication flow with handshake strategy: API key header.
 //! - Credential environment variables: `UCR_CORE_API_KEY`, `UNFOLDED_CIRCLE_API_KEY`.
 //!
 //! API documentation: <https://unfoldedcircle.github.io/core-api/ws/>
@@ -43,7 +43,7 @@ impl UnfoldedCircleCoreWs {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            base_url: "ws://remote.local/ws".to_string(),
+            base_url: "ws://remote.local".to_string(),
             headers: schematic_define::Headers::default()
                 .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
@@ -180,7 +180,7 @@ impl Default for UnfoldedCircleCoreWs {
         Self::new()
     }
 }
-///Client for the CoreWs endpoint.
+/// Client for the CoreWs endpoint.
 pub struct CoreWsClient {
     transport: super::ws_shared::WsTransportHandle,
     event_rx: tokio::sync::mpsc::Receiver<
@@ -457,7 +457,7 @@ impl CoreWsClient {
         }
     }
 }
-///Client for the CoreIntegrations endpoint.
+/// Client for the CoreIntegrations endpoint.
 pub struct CoreIntegrationsClient {
     transport: super::ws_shared::WsTransportHandle,
     event_rx: tokio::sync::mpsc::Receiver<
@@ -734,7 +734,7 @@ impl CoreIntegrationsClient {
         }
     }
 }
-///Client for the CoreProfiles endpoint.
+/// Client for the CoreProfiles endpoint.
 pub struct CoreProfilesClient {
     transport: super::ws_shared::WsTransportHandle,
     event_rx: tokio::sync::mpsc::Receiver<
@@ -1011,7 +1011,7 @@ impl CoreProfilesClient {
         }
     }
 }
-///Client for the CoreEvents endpoint.
+/// Client for the CoreEvents endpoint.
 pub struct CoreEventsClient {
     transport: super::ws_shared::WsTransportHandle,
     event_rx: tokio::sync::mpsc::Receiver<

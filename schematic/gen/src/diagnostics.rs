@@ -4,8 +4,9 @@
 //! the endpoint when one applies, the [`Feature`] at fault, and the [`Output`]
 //! it concerns. [`Severity::Error`] blocks that output; [`Severity::Warning`]
 //! is reported and never blocks. This is the one diagnostic format for
-//! generation: WebSocket validation maps onto the same types rather than
-//! inventing another.
+//! generation: WebSocket lowering maps onto the same types
+//! ([`Feature::WebSocketDefinition`], [`Output::Rust`]) rather than inventing
+//! another.
 //!
 //! See `schematic/docs/generation/validation.md` for the rules each output
 //! applies.
@@ -159,6 +160,10 @@ pub enum Feature {
     /// A GraphQL operation, which an output does not carry.
     #[serde(rename = "graphql-operation")]
     GraphQlOperation,
+    /// A WebSocket API definition, found while lowering it into its
+    /// generated module. The message starts with the definition path.
+    #[serde(rename = "websocket-definition")]
+    WebSocketDefinition,
 }
 
 impl Feature {
@@ -192,6 +197,7 @@ impl Feature {
             Self::OAuth2Grant => "oauth2-grant",
             Self::PathParameter => "path-parameter",
             Self::GraphQlOperation => "graphql-operation",
+            Self::WebSocketDefinition => "websocket-definition",
         }
     }
 }
@@ -381,6 +387,8 @@ mod tests {
             Feature::InvalidModulePath,
             Feature::InvalidOutputFilename,
             Feature::InvalidSchemaReference,
+            Feature::GraphQlOperation,
+            Feature::WebSocketDefinition,
         ];
         for feature in features {
             assert_eq!(

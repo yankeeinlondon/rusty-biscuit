@@ -2,6 +2,9 @@
 
 #![allow(clippy::result_large_err)]
 
+mod common;
+mod ws_mock;
+
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
@@ -189,4 +192,92 @@ async fn ws_reconnect_policy_redials_after_disconnect() {
 
     let _ = ws.close().await;
     server.await.unwrap();
+}
+
+/// R1: each Core endpoint, dialed from the generated client's default base
+/// URL (only its host replaced by the mock's), reaches its documented
+/// channel path once — not `/ws/ws`.
+#[tokio::test]
+#[serial_test::serial]
+async fn core_endpoints_dial_their_documented_channel_paths() {
+    let _env = common::EnvGuard::clear(&["UCR_CORE_API_KEY", "UNFOLDED_CIRCLE_API_KEY"]);
+    let server = ws_mock::MockWsServer::start(vec![ws_mock::Script::accept()]).await;
+
+    let default_base = UnfoldedCircleCoreWs::new().base_url().to_string();
+    assert_eq!(default_base, "ws://remote.local");
+    let (_, after_scheme) = default_base.split_once("://").unwrap();
+    let base_path = after_scheme.find('/').map_or("", |index| &after_scheme[index..]);
+    let client = UnfoldedCircleCoreWs::with_base_url(format!("{}{base_path}", server.ws_origin()));
+
+    client.connect_core_ws(WsClientOptions::default()).await.unwrap().close().await.unwrap();
+    client
+        .connect_core_integrations(WsClientOptions::default())
+        .await
+        .unwrap()
+        .close()
+        .await
+        .unwrap();
+    client
+        .connect_core_profiles(WsClientOptions::default())
+        .await
+        .unwrap()
+        .close()
+        .await
+        .unwrap();
+    client
+        .connect_core_events(WsClientOptions::default())
+        .await
+        .unwrap()
+        .close()
+        .await
+        .unwrap();
+
+    server.wait_for_requests(4, Duration::from_secs(5)).await;
+    let requests = server.requests();
+    let targets: Vec<String> = requests.iter().map(ws_mock::RecordedRequest::target).collect();
+    assert_eq!(targets, ["/ws", "/intg", "/profiles", "/events"]);
+    assert!(
+        requests.iter().all(|request| request.header("api-key").is_none()),
+        "no credential variable is set, so no API key is sent"
+    );
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn elevenlabs_handshake_encodes_one_path_segment_and_omits_unset_queries() {
+    let server = ws_mock::MockWsServer::start(vec![ws_mock::Script::accept()]).await;
+    // A base path is a prefix the endpoint path extends, never replaces.
+    let client = ElevenLabsTTSWs::with_base_url(format!("{}/proxy", server.ws_origin()));
+
+    client
+        .connect_text_to_speech("a/b c?d", TextToSpeechConnectionParams::default(), WsClientOptions::default())
+        .await
+        .unwrap()
+        .close()
+        .await
+        .unwrap();
+    let params = TextToSpeechConnectionParams {
+        seed: Some(7),
+        enable_logging: Some(false),
+        ..Default::default()
+    };
+    client
+        .connect_text_to_speech("v", params, WsClientOptions::default())
+        .await
+        .unwrap()
+        .close()
+        .await
+        .unwrap();
+
+    server.wait_for_requests(2, Duration::from_secs(5)).await;
+    let targets: Vec<String> =
+        server.requests().iter().map(ws_mock::RecordedRequest::target).collect();
+    assert_eq!(
+        targets,
+        [
+            "/proxy/v1/text-to-speech/a%2Fb%20c%3Fd/stream-input",
+            "/proxy/v1/text-to-speech/v/stream-input?enable_logging=false&seed=7",
+        ]
+    );
+    server.shutdown().await;
 }

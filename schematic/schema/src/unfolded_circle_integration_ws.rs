@@ -8,11 +8,11 @@
 //!
 //! ## Endpoints
 //!
-//! - `Integration` (`/intg`): Integration driver channel with role inversion support (driver-as-server). This endpoint is intentionally bidirectional for command handling and outbound event push.
+//! - `Integration` (`/intg`): Integration driver channel. The driver hosts it and the remote connects; requests flow from the remote, responses and entity events from the driver.
 //!
 //! ## Authentication
 //!
-//! - Handshake auth strategy: API key header.
+//! - Message-based authentication flow with handshake strategy: API key header.
 //! - Credential environment variables: `UCR_INTEGRATION_TOKEN`.
 //!
 //! API documentation: <https://unfoldedcircle.github.io/core-api/integration/>
@@ -108,7 +108,7 @@ impl Default for UnfoldedCircleIntegrationWs {
         Self::new()
     }
 }
-///Client for the Integration endpoint.
+/// Client for the Integration endpoint.
 pub struct IntegrationClient {
     transport: super::ws_shared::WsTransportHandle,
     event_rx: tokio::sync::mpsc::Receiver<

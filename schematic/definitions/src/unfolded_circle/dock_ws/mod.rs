@@ -5,9 +5,10 @@
 //! The Dock uses post-connect token authentication:
 //!
 //! 1. Connect to `ws://dock.local/`
-//! 2. Server sends `auth_required` (`DockWsAuthRequired`)
-//! 3. Client sends `auth` (`DockWsAuthMessage`) with `token` field
-//! 4. Server responds with `authentication` (`DockWsAuthenticationMessage`)
+//! 2. Server sends `type=auth_required` (`DockWsAuthRequired`)
+//! 3. Client sends `type=auth` (`DockWsAuthMessage`) with `token` field
+//! 4. Server responds with `type=auth`, `msg=authentication`
+//!    (`DockWsAuthenticationMessage`); its `code` is the result
 //!
 //! ## Envelope Differences from Core WS
 //!
@@ -19,86 +20,81 @@ mod types;
 pub use types::*;
 
 use schematic_define::websocket::{
-    AuthFlowHints, ConnectionLifecycle, MessageDirection, MessageSchema, WebSocketApi,
-    WebSocketEndpoint, WebSocketEndpointHints,
+    AuthFlowHints, ConnectionLifecycle, CorrelationHints, MessageDirection, MessageSchema,
+    WebSocketApi, WebSocketEndpoint, WebSocketEndpointHints,
 };
-use schematic_define::{AuthStrategy, Schema};
+use schematic_define::{AuthStrategy, EnvMapping, Schema};
+
+fn message(name: &str, direction: MessageDirection, schema: &str, description: &str) -> MessageSchema {
+    MessageSchema::new(name, direction, Schema::new(schema)).describe(description)
+}
 
 /// Build the Unfolded Circle Dock WebSocket API definition.
+///
+/// Selectors are the `type`/`msg` wire values of the official Dock AsyncAPI
+/// (`specs/unfolded-circle/UCD2-asyncapi.yaml`): the auth exchange uses
+/// `type=auth_required`, `type=auth`, and `type=auth,msg=authentication`
+/// rather than the `req`/`resp`/`event` envelope types.
 #[must_use]
-#[allow(clippy::vec_init_then_push)]
 pub fn define_unfolded_circle_dock_ws_api() -> WebSocketApi {
-    let mut messages = Vec::with_capacity(6);
-    messages.push(MessageSchema {
-        name: "RequestEnvelope".to_string(),
-        direction: MessageDirection::Client,
-        schema: Schema::new("DockWsRequestEnvelope"),
-        description: Some(
-            "Client request envelope using `type=req`, `id`, `msg`, and deferred `msg_data`."
-                .to_string(),
-        ),
-    });
-    messages.push(MessageSchema {
-        name: "ResponseEnvelope".to_string(),
-        direction: MessageDirection::Server,
-        schema: Schema::new("DockWsResponseEnvelope"),
-        description: Some(
-            "Server response envelope with `req_id`, status `code`, and optional `reboot`."
-                .to_string(),
-        ),
-    });
-    messages.push(MessageSchema {
-        name: "EventEnvelope".to_string(),
-        direction: MessageDirection::Server,
-        schema: Schema::new("DockWsEventEnvelope"),
-        description: Some(
-            "Asynchronous dock event envelope. Deserialize `msg_data` based on `msg`.".to_string(),
-        ),
-    });
-    messages.push(MessageSchema {
-        name: "AuthRequired".to_string(),
-        direction: MessageDirection::Server,
-        schema: Schema::new("DockWsAuthRequired"),
-        description: Some("Post-connect auth challenge (`msg=auth_required`).".to_string()),
-    });
-    messages.push(MessageSchema {
-        name: "Auth".to_string(),
-        direction: MessageDirection::Client,
-        schema: Schema::new("DockWsAuthMessage"),
-        description: Some("Post-connect auth request (`msg=auth`).".to_string()),
-    });
-    messages.push(MessageSchema {
-        name: "Authentication".to_string(),
-        direction: MessageDirection::Server,
-        schema: Schema::new("DockWsAuthenticationMessage"),
-        description: Some("Auth outcome (`msg=authentication`).".to_string()),
-    });
+    use MessageDirection::{Client, Server};
+    let messages = vec![
+        message("RequestEnvelope", Client, "DockWsRequestEnvelope",
+            "Client request envelope using `type=req`, `id`, `msg`, and deferred `msg_data`.")
+            .matches("type", "req")
+            .responds_with("ResponseEnvelope"),
+        message("ResponseEnvelope", Server, "DockWsResponseEnvelope",
+            "Server response envelope with `req_id`, status `code`, and optional `reboot`.")
+            .fallback(),
+        message("EventEnvelope", Server, "DockWsEventEnvelope",
+            "Asynchronous dock event envelope. Deserialize `msg_data` based on `msg`.")
+            .matches("type", "event"),
+        message("AuthRequired", Server, "DockWsAuthRequired",
+            "Post-connect auth challenge (`type=auth_required`).")
+            .matches("type", "auth_required"),
+        message("Auth", Client, "DockWsAuthMessage", "Post-connect auth request (`type=auth`).")
+            .matches("type", "auth")
+            .responds_with("Authentication"),
+        message("Authentication", Server, "DockWsAuthenticationMessage",
+            "Auth outcome (`type=auth`, `msg=authentication`); `code` is the result.")
+            .matches("type", "auth")
+            .matches("msg", "authentication"),
+    ];
 
     WebSocketApi {
         name: "UnfoldedCircleDockWs".to_string(),
         description: "Unfolded Circle Dock WebSocket API".to_string(),
         base_url: "ws://dock.local".to_string(),
         docs_url: Some("https://unfoldedcircle.github.io/core-api/dock/".to_string()),
+        // The token travels in the `auth` message after the upgrade, never in
+        // the handshake, so the handshake has no credential to map.
         auth: AuthStrategy::None,
+        auth_policy: None,
         env_auth: vec!["UCR_DOCK_TOKEN".to_string()],
+        env_mapping: Some(EnvMapping::default()),
+        headers: vec![],
         version: None,
         endpoints: vec![WebSocketEndpoint {
             id: "DockRoot".to_string(),
             path: "/".to_string(),
             description: "Dock command and telemetry channel. This endpoint uses `type` as the envelope discriminant (not `kind`) and requires post-connect authentication for most operations.".to_string(),
-            connection_params: vec![],
             lifecycle: ConnectionLifecycle::default(),
             messages,
             runtime: Some(WebSocketEndpointHints {
-                correlation: None,
+                correlation: Some(CorrelationHints {
+                    request_id_field: "id".to_string(),
+                    response_id_field: "req_id".to_string(),
+                    default_timeout_secs: 30,
+                }),
                 auth_flow: Some(AuthFlowHints {
                     challenge_message: "auth_required".to_string(),
                     auth_request_schema: "DockWsAuthMessage".to_string(),
                     success_indicator: Some("authentication".to_string()),
-                    failure_indicator: Some("authentication_failed".to_string()),
+                    failure_indicator: None,
                 }),
                 heartbeat: None,
             }),
+            ..WebSocketEndpoint::default()
         }],
         runtime: None,
     }

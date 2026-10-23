@@ -11,9 +11,10 @@ use biscuit_file::Yaml;
 use schematic_define::models::{ModelCatalog, ModelDef, PrimitiveType, TypeAlias, TypeRef};
 use schematic_define::openapi::import::{DiagnosticSeverity, OpenApiDiagnostic};
 use schematic_define::websocket::{
-    ConnectionLifecycle, MessageDirection, MessageSchema, WebSocketApi, WebSocketEndpoint,
+    ConnectionLifecycle, EndpointRole, MessageDirection, MessageSchema, WebSocketApi,
+    WebSocketEndpoint,
 };
-use schematic_define::{AuthStrategy, Schema};
+use schematic_define::{AuthStrategy, EndpointParams, Schema};
 use serde_json::{Map, Value};
 
 use crate::errors::GeneratorError;
@@ -155,6 +156,7 @@ pub fn run_import_asyncapi(
     }
 
     let env_auth = default_env_auth(&module_path, &auth);
+    let env_mapping = schematic_define::RestApi::legacy_env_mapping_for(&auth, &env_auth);
     let ws_api = WebSocketApi {
         name: api_name.clone(),
         description: info
@@ -165,7 +167,10 @@ pub fn run_import_asyncapi(
         base_url,
         docs_url: None,
         auth,
+        auth_policy: None,
         env_auth,
+        env_mapping: Some(env_mapping),
+        headers: vec![],
         version: None,
         endpoints,
         runtime: None,
@@ -384,7 +389,8 @@ fn map_channels_to_endpoints(
                     .and_then(Value::as_str)
                     .unwrap_or("Imported AsyncAPI channel")
                     .to_string(),
-                connection_params: vec![],
+                params: EndpointParams::default(),
+                role: endpoint_role(role),
                 lifecycle: ConnectionLifecycle::default(),
                 messages: dedup_messages(messages),
                 runtime: None,
@@ -425,12 +431,9 @@ fn resolve_operation_messages(
             diagnostics,
         );
 
-        result.push(MessageSchema {
-            name: message_name,
-            direction,
-            schema: Schema::new(payload_name),
-            description,
-        });
+        let mut schema = MessageSchema::new(message_name, direction, Schema::new(payload_name));
+        schema.description = description;
+        result.push(schema);
     }
 
     result
@@ -685,6 +688,15 @@ fn channel_id_from_path(path: &str) -> String {
         "RootChannel".to_string()
     } else {
         format!("{}Channel", id)
+    }
+}
+
+/// The endpoint role the CLI's `--ws-role` selects: `server` generates a host.
+fn endpoint_role(role: WsRole) -> EndpointRole {
+    match role {
+        WsRole::Client => EndpointRole::Client,
+        WsRole::Server => EndpointRole::Host,
+        WsRole::Both => EndpointRole::Both,
     }
 }
 

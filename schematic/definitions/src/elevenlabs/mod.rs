@@ -194,6 +194,18 @@ fn build_elevenlabs_rest_api(ctx: &mut DefinitionContext) -> Result<RestApi, Def
 /// ```
 pub fn define_elevenlabs_websocket_api() -> schematic_define::WebSocketApi {
     use schematic_define::websocket::*;
+    use schematic_define::{EndpointParams, ParamDef, QueryParamType};
+
+    let optional = |name: &str, param_type: QueryParamType, description: &str| {
+        ParamDef::new(name, param_type).describes(description)
+    };
+    let voice_id = || {
+        ParamDef::path("voice_id", QueryParamType::String)
+            .describes("Voice identifier used in the websocket path")
+    };
+    let message = |name: &str, direction: MessageDirection, schema: &str, description: &str| {
+        MessageSchema::new(name, direction, Schema::new(schema)).describe(description)
+    };
 
     WebSocketApi {
         name: "ElevenLabsTTS".to_string(),
@@ -204,179 +216,85 @@ pub fn define_elevenlabs_websocket_api() -> schematic_define::WebSocketApi {
             header: "xi-api-key".to_string(),
             value_prefix: None,
         },
+        auth_policy: None,
         env_auth: vec![
             "ELEVEN_LABS_API_KEY".to_string(),
             "ELEVENLABS_API_KEY".to_string(),
         ],
+        env_mapping: Some(EnvMapping {
+            api_key: Some(ApiKeyEnv {
+                names: EnvList::from_strs(&["ELEVEN_LABS_API_KEY", "ELEVENLABS_API_KEY"]),
+                header: "xi-api-key".to_string(),
+            }),
+            ..Default::default()
+        }),
+        headers: vec![],
         version: None,
         endpoints: vec![
             WebSocketEndpoint {
                 id: "TextToSpeech".to_string(),
                 path: "/v1/text-to-speech/{voice_id}/stream-input".to_string(),
                 description: "Stream text and receive audio chunks in real-time".to_string(),
-                connection_params: vec![
-                    ConnectionParam {
-                        name: "voice_id".to_string(),
-                        param_type: ParamType::String,
-                        required: true,
-                        description: Some(
-                            "Voice identifier used in the websocket path".to_string(),
-                        ),
-                    },
-                    ConnectionParam {
-                        name: "model_id".to_string(),
-                        param_type: ParamType::String,
-                        required: false,
-                        description: Some("TTS model to use".to_string()),
-                    },
-                    ConnectionParam {
-                        name: "language_code".to_string(),
-                        param_type: ParamType::String,
-                        required: false,
-                        description: Some("Target language code".to_string()),
-                    },
-                    ConnectionParam {
-                        name: "enable_logging".to_string(),
-                        param_type: ParamType::Boolean,
-                        required: false,
-                        description: Some("Enable logging (default: true)".to_string()),
-                    },
-                    ConnectionParam {
-                        name: "enable_ssml_parsing".to_string(),
-                        param_type: ParamType::Boolean,
-                        required: false,
-                        description: Some("Parse SSML tags".to_string()),
-                    },
-                    ConnectionParam {
-                        name: "output_format".to_string(),
-                        param_type: ParamType::String,
-                        required: false,
-                        description: Some("Audio output format".to_string()),
-                    },
-                    ConnectionParam {
-                        name: "inactivity_timeout".to_string(),
-                        param_type: ParamType::Integer,
-                        required: false,
-                        description: Some("Timeout in seconds (default: 20)".to_string()),
-                    },
-                    ConnectionParam {
-                        name: "sync_alignment".to_string(),
-                        param_type: ParamType::Boolean,
-                        required: false,
-                        description: Some("Synchronize alignment data".to_string()),
-                    },
-                    ConnectionParam {
-                        name: "auto_mode".to_string(),
-                        param_type: ParamType::Boolean,
-                        required: false,
-                        description: Some("Auto mode for generation".to_string()),
-                    },
-                    ConnectionParam {
-                        name: "apply_text_normalization".to_string(),
-                        param_type: ParamType::String,
-                        required: false,
-                        description: Some("Text normalization: auto, on, off".to_string()),
-                    },
-                    ConnectionParam {
-                        name: "seed".to_string(),
-                        param_type: ParamType::Integer,
-                        required: false,
-                        description: Some("Reproducibility seed".to_string()),
-                    },
-                ],
+                params: EndpointParams {
+                    path: vec![voice_id()],
+                    query: vec![
+                        optional("model_id", QueryParamType::String, "TTS model to use"),
+                        optional("language_code", QueryParamType::String, "Target language code"),
+                        optional("enable_logging", QueryParamType::Boolean, "Enable logging (default: true)"),
+                        optional("enable_ssml_parsing", QueryParamType::Boolean, "Parse SSML tags"),
+                        optional("output_format", QueryParamType::String, "Audio output format"),
+                        optional("inactivity_timeout", QueryParamType::Integer, "Timeout in seconds (default: 20)"),
+                        optional("sync_alignment", QueryParamType::Boolean, "Synchronize alignment data"),
+                        optional("auto_mode", QueryParamType::Boolean, "Auto mode for generation"),
+                        optional("apply_text_normalization", QueryParamType::String, "Text normalization: auto, on, off"),
+                        optional("seed", QueryParamType::Integer, "Reproducibility seed"),
+                    ],
+                    ..EndpointParams::default()
+                },
                 lifecycle: ConnectionLifecycle {
-                    open: Some(MessageSchema {
-                        name: "BOS".to_string(),
-                        direction: MessageDirection::Client,
-                        schema: Schema::new("TtsInitMessage"),
-                        description: Some("Begin-of-stream with voice settings".to_string()),
-                    }),
-                    close: Some(MessageSchema {
-                        name: "EOS".to_string(),
-                        direction: MessageDirection::Client,
-                        schema: Schema::new("TtsCloseMessage"),
-                        description: Some("End-of-stream signal".to_string()),
-                    }),
+                    open: Some(message("BOS", MessageDirection::Client, "TtsInitMessage",
+                        "Begin-of-stream with voice settings")),
+                    close: Some(message("EOS", MessageDirection::Client, "TtsCloseMessage",
+                        "End-of-stream signal")),
                     keepalive: None,
                 },
+                // One inbound message: no selector is needed to choose it.
                 messages: vec![
-                    MessageSchema {
-                        name: "TextChunk".to_string(),
-                        direction: MessageDirection::Client,
-                        schema: Schema::new("TtsTextMessage"),
-                        description: Some("Text to synthesize".to_string()),
-                    },
-                    MessageSchema {
-                        name: "AudioChunk".to_string(),
-                        direction: MessageDirection::Server,
-                        schema: Schema::new("TtsAudioResponse"),
-                        description: Some("Audio data with alignment".to_string()),
-                    },
+                    message("TextChunk", MessageDirection::Client, "TtsTextMessage",
+                        "Text to synthesize"),
+                    message("AudioChunk", MessageDirection::Server, "TtsAudioResponse",
+                        "Audio data with alignment"),
                 ],
-                runtime: None,
+                ..WebSocketEndpoint::default()
             },
             WebSocketEndpoint {
                 id: "MultiContextTextToSpeech".to_string(),
                 path: "/v1/text-to-speech/{voice_id}/multi-stream-input".to_string(),
                 description: "Manage multiple audio streams over a single connection".to_string(),
-                connection_params: vec![
-                    ConnectionParam {
-                        name: "voice_id".to_string(),
-                        param_type: ParamType::String,
-                        required: true,
-                        description: Some(
-                            "Voice identifier used in the websocket path".to_string(),
-                        ),
-                    },
-                    ConnectionParam {
-                        name: "model_id".to_string(),
-                        param_type: ParamType::String,
-                        required: false,
-                        description: Some("TTS model to use".to_string()),
-                    },
-                    ConnectionParam {
-                        name: "output_format".to_string(),
-                        param_type: ParamType::String,
-                        required: false,
-                        description: Some("Audio output format".to_string()),
-                    },
-                ],
+                params: EndpointParams {
+                    path: vec![voice_id()],
+                    query: vec![
+                        optional("model_id", QueryParamType::String, "TTS model to use"),
+                        optional("output_format", QueryParamType::String, "Audio output format"),
+                    ],
+                    ..EndpointParams::default()
+                },
                 lifecycle: ConnectionLifecycle {
-                    open: Some(MessageSchema {
-                        name: "InitContext".to_string(),
-                        direction: MessageDirection::Client,
-                        schema: Schema::new("MultiContextInitMessage"),
-                        description: Some("Initialize a context with settings".to_string()),
-                    }),
-                    close: Some(MessageSchema {
-                        name: "CloseSocket".to_string(),
-                        direction: MessageDirection::Client,
-                        schema: Schema::new("MultiContextCloseSocketMessage"),
-                        description: Some("Close the entire socket".to_string()),
-                    }),
+                    open: Some(message("InitContext", MessageDirection::Client,
+                        "MultiContextInitMessage", "Initialize a context with settings")),
+                    close: Some(message("CloseSocket", MessageDirection::Client,
+                        "MultiContextCloseSocketMessage", "Close the entire socket")),
                     keepalive: None,
                 },
                 messages: vec![
-                    MessageSchema {
-                        name: "TextChunk".to_string(),
-                        direction: MessageDirection::Client,
-                        schema: Schema::new("MultiContextTextMessage"),
-                        description: Some("Text to synthesize for a context".to_string()),
-                    },
-                    MessageSchema {
-                        name: "CloseContext".to_string(),
-                        direction: MessageDirection::Client,
-                        schema: Schema::new("MultiContextCloseMessage"),
-                        description: Some("Close a specific context".to_string()),
-                    },
-                    MessageSchema {
-                        name: "AudioChunk".to_string(),
-                        direction: MessageDirection::Server,
-                        schema: Schema::new("MultiContextAudioResponse"),
-                        description: Some("Audio data for a context".to_string()),
-                    },
+                    message("TextChunk", MessageDirection::Client, "MultiContextTextMessage",
+                        "Text to synthesize for a context"),
+                    message("CloseContext", MessageDirection::Client, "MultiContextCloseMessage",
+                        "Close a specific context"),
+                    message("AudioChunk", MessageDirection::Server, "MultiContextAudioResponse",
+                        "Audio data for a context"),
                 ],
-                runtime: None,
+                ..WebSocketEndpoint::default()
             },
         ],
         runtime: None,

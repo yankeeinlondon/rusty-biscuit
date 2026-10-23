@@ -5,10 +5,11 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use schematic_define::websocket::{FrameFormat, ParamType};
+use schematic_define::websocket::FrameFormat;
 
 use super::plan::{
-    CorrelationStrategy, EndpointPlan, LifecycleMessagePlan, WsAuthStrategy, WsRuntimePlan,
+    CorrelationStrategy, EndpointPlan, LifecycleMessagePlan, QueryParamPlan, WsAuthStrategy,
+    WsQueryForm, WsRuntimePlan, WsScalar,
 };
 
 /// Generate the complete client module for a WS API.
@@ -69,12 +70,50 @@ fn param_ident(name: &str) -> proc_macro2::Ident {
     format_ident!("{}", sanitize_ident(name))
 }
 
-fn ws_param_type_tokens(param_type: ParamType) -> TokenStream {
-    match param_type {
-        ParamType::String => quote! { String },
-        ParamType::Integer => quote! { i64 },
-        ParamType::Boolean => quote! { bool },
-        ParamType::Float => quote! { f64 },
+fn ws_scalar_tokens(scalar: WsScalar) -> TokenStream {
+    match scalar {
+        WsScalar::String => quote! { String },
+        WsScalar::Integer => quote! { i64 },
+        WsScalar::Number => quote! { f64 },
+        WsScalar::Boolean => quote! { bool },
+    }
+}
+
+/// The field type of a query parameter: its scalar, or a `Vec` of it for an
+/// array form.
+fn query_value_tokens(param: &QueryParamPlan) -> TokenStream {
+    let scalar = ws_scalar_tokens(param.scalar);
+    match param.form {
+        WsQueryForm::Single => scalar,
+        WsQueryForm::Exploded | WsQueryForm::Delimited(_) => quote! { Vec<#scalar> },
+    }
+}
+
+/// Statements pushing `(name, encoded value)` pairs for `value`, a reference
+/// to the field's value type. Values are percent-encoded here; a delimiter
+/// is already in its wire form.
+fn query_push_tokens(param: &QueryParamPlan) -> TokenStream {
+    let name = &param.name;
+    match param.form {
+        WsQueryForm::Single => quote! {
+            query_pairs.push((#name, urlencoding::encode(&value.to_string()).into_owned()));
+        },
+        WsQueryForm::Exploded => quote! {
+            if value.is_empty() {
+                query_pairs.push((#name, String::new()));
+            }
+            for element in value {
+                query_pairs.push((#name, urlencoding::encode(&element.to_string()).into_owned()));
+            }
+        },
+        WsQueryForm::Delimited(delimiter) => quote! {
+            let joined = value
+                .iter()
+                .map(|element| urlencoding::encode(&element.to_string()).into_owned())
+                .collect::<Vec<_>>()
+                .join(#delimiter);
+            query_pairs.push((#name, joined));
+        },
     }
 }
 
@@ -96,7 +135,7 @@ fn generate_connection_param_struct(ep: &EndpointPlan) -> TokenStream {
         .iter()
         .map(|param| {
             let ident = param_ident(&param.name);
-            let base_ty = ws_param_type_tokens(param.param_type);
+            let base_ty = query_value_tokens(param);
             let ty = if param.required {
                 quote! { #base_ty }
             } else {
@@ -281,10 +320,10 @@ fn generate_connect_method(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
         .iter()
         .map(|param| {
             let ident = param_ident(&param.name);
-            match param.param_type {
-                ParamType::String => quote! { #ident: impl Into<String> },
-                _ => {
-                    let ty = ws_param_type_tokens(param.param_type);
+            match param.scalar {
+                WsScalar::String => quote! { #ident: impl Into<String> },
+                scalar => {
+                    let ty = ws_scalar_tokens(scalar);
                     quote! { #ident: #ty }
                 }
             }
@@ -303,8 +342,8 @@ fn generate_connect_method(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
             let ident = param_ident(&param.name);
             let placeholder = format!("{{{}}}", param.name);
             let value_ident = format_ident!("{}_value", ident);
-            let value_expr = match param.param_type {
-                ParamType::String => quote! { #ident.into() },
+            let value_expr = match param.scalar {
+                WsScalar::String => quote! { #ident.into() },
                 _ => quote! { #ident.to_string() },
             };
 
@@ -320,15 +359,18 @@ fn generate_connect_method(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
         .iter()
         .map(|param| {
             let ident = param_ident(&param.name);
-            let name = &param.name;
+            let push = query_push_tokens(param);
             if param.required {
                 quote! {
-                    query_pairs.push((#name.to_string(), params.#ident.to_string()));
+                    {
+                        let value = &params.#ident;
+                        #push
+                    }
                 }
             } else {
                 quote! {
                     if let Some(value) = params.#ident.as_ref() {
-                        query_pairs.push((#name.to_string(), value.to_string()));
+                        #push
                     }
                 }
             }
@@ -339,20 +381,17 @@ fn generate_connect_method(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
         TokenStream::new()
     } else {
         quote! {
-            let mut query_pairs: Vec<(String, String)> = Vec::new();
+            let mut query_pairs: Vec<(&str, String)> = Vec::new();
             #(#query_collectors)*
             if !query_pairs.is_empty() {
-                query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+                // Stable: repeated values keep their order.
+                query_pairs.sort_by(|a, b| a.0.cmp(b.0));
                 let query = query_pairs
                     .into_iter()
-                    .map(|(k, v)| format!("{}={}", urlencoding::encode(&k), urlencoding::encode(&v)))
+                    .map(|(k, v)| format!("{}={}", urlencoding::encode(k), v))
                     .collect::<Vec<_>>()
                     .join("&");
-                if path.contains('?') {
-                    path.push('&');
-                } else {
-                    path.push('?');
-                }
+                path.push('?');
                 path.push_str(&query);
             }
         }
@@ -560,10 +599,10 @@ fn generate_endpoint_client(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
         TokenStream::new()
     };
 
-    let client_description = format!("Client for the {} endpoint.", ep.id);
+    let client_docs = endpoint_client_docs(ep);
 
     quote! {
-        #[doc = #client_description]
+        #(#[doc = #client_docs])*
         pub struct #client_name {
             transport: super::ws_shared::WsTransportHandle,
             event_rx: tokio::sync::mpsc::Receiver<Result<serde_json::Value, super::ws_shared::WsError>>,
@@ -847,6 +886,41 @@ fn parse_schema_type_tokens(schema_type: &str) -> TokenStream {
     }
 }
 
+/// Rustdoc lines of an endpoint client. A declared heartbeat is stated
+/// with its interval and message: heartbeats are caller-managed, so the
+/// caller must know to send them.
+fn endpoint_client_docs(ep: &EndpointPlan) -> Vec<String> {
+    let mut lines = vec![format!(" Client for the {} endpoint.", ep.id)];
+    let Some(heartbeat) = &ep.heartbeat else {
+        return lines;
+    };
+    let message = ep.lifecycle_keepalive.as_ref().map_or_else(
+        || "an application heartbeat message".to_string(),
+        |keepalive| {
+            format!(
+                "the `{}` keepalive message (`send_{}`)",
+                keepalive.name,
+                to_snake_case(&keepalive.name)
+            )
+        },
+    );
+    let reply = heartbeat
+        .timeout_secs
+        .map(|timeout| format!(", and expects the reply within {timeout} s"))
+        .unwrap_or_default();
+    lines.extend([
+        String::new(),
+        " ## Heartbeat".to_string(),
+        String::new(),
+        format!(
+            " The server expects {message} every {} s{reply}. This client does not send it: \
+             schedule it from the caller.",
+            heartbeat.interval_secs
+        ),
+    ]);
+    lines
+}
+
 fn generate_lifecycle_helper(method: &LifecycleMessagePlan, kind: &str) -> TokenStream {
     let method_ident = format_ident!("send_{}", to_snake_case(&method.name));
     let payload_type = parse_schema_type_tokens(&method.schema_type);
@@ -907,6 +981,7 @@ mod tests {
                 client_messages: vec!["Msg".to_string()],
                 server_messages: vec!["Reply".to_string()],
                 bidirectional_messages: vec![],
+                messages: vec![],
                 lifecycle_open: None,
                 lifecycle_close: None,
                 lifecycle_keepalive: None,

@@ -36,10 +36,10 @@
 //!
 //! - [`WebSocketApi`] - Complete WebSocket API definition with base URL, auth, and endpoints
 //! - [`WebSocketEndpoint`] - Single WebSocket endpoint with path, parameters, and message schemas
-//! - [`ConnectionParam`] - Query/path parameter definition for WebSocket connections
-//! - [`ParamType`] - Parameter types (String, Integer, Boolean, Float)
+//! - [`EndpointRole`] - Generated side of an endpoint (client, host, or both)
 //! - [`ConnectionLifecycle`] - Open, close, and keepalive message schemas
-//! - [`MessageSchema`] - Single message type with direction and schema
+//! - [`MessageSchema`] - Single message type with direction, schema, selectors, and response link
+//! - [`MessageSelector`] - Equality check on an inbound wire field that selects a message
 //! - [`MessageDirection`] - Message flow direction (Client, Server, Bidirectional)
 //!
 //! ### Model Definition Types (for API schema import)
@@ -172,9 +172,9 @@ pub use schema::{Schema, SchemaObject};
 pub use types::{Endpoint, ResolvedEndpointAuth, RestApi, RestMethod};
 pub use registration::{DefinitionContext, DefinitionError, MapKey, Registration, RustPath, TypeDesc, TypeRegistration};
 pub use websocket::{
-    AuthFlowHints, ConnectionLifecycle, ConnectionParam, CorrelationHints, FrameFormat,
-    HeartbeatHints, MessageDirection, MessageSchema, ParamType, RequestIdType, WebSocketApi,
-    WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
+    AuthFlowHints, ConnectionLifecycle, CorrelationHints, EndpointRole, FrameFormat,
+    HeartbeatHints, MessageDirection, MessageSchema, MessageSelector, RequestIdType,
+    WebSocketApi, WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
 };
 
 pub use builders::{EndpointBuilder, ErrorSet, ErrorShape, RestApiBuilder, Success};

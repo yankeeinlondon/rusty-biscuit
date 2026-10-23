@@ -93,6 +93,11 @@ fn integration_ws_has_both_role() {
     let plan = lower_to_plan(&define_unfolded_circle_integration_ws_api()).unwrap();
     assert_eq!(plan.endpoints.len(), 1);
     assert_eq!(plan.endpoints[0].role, EndpointRole::Both);
+    // The role is declared, not inferred: the messages are one-way except
+    // the shared event envelope, and the host is still generated.
+    assert!(!plan.endpoints[0].client_messages.is_empty());
+    assert!(!plan.endpoints[0].server_messages.is_empty());
+    assert!(!generate_ws_host_module(&plan).is_empty());
 }
 
 // --- Shared module generation tests ---
@@ -292,7 +297,7 @@ fn ws_shared_exposes_options_builder() {
 // --- Host generation tests ---
 
 #[test]
-fn host_generated_only_for_bidirectional_apis() {
+fn host_generated_only_for_host_or_both_roles() {
     for (name, plan) in lower_all_apis() {
         let tokens = generate_ws_host_module(&plan);
         let has_host_endpoints = plan
@@ -303,7 +308,7 @@ fn host_generated_only_for_bidirectional_apis() {
         if has_host_endpoints {
             assert!(
                 !tokens.is_empty(),
-                "{name} should generate host code for bidirectional endpoints"
+                "{name} should generate host code for its host/both endpoints"
             );
         } else {
             assert!(
@@ -419,5 +424,83 @@ fn samsung_remote_connect_has_connection_params() {
     assert!(
         code.contains("RemoteControlConnectionParams"),
         "Expected endpoint connection params struct for RemoteControl"
+    );
+}
+
+// --- Fixture definitions: declared role and heartbeat metadata ---
+
+fn one_way_fixture(role: EndpointRole) -> schematic_define::WebSocketApi {
+    use schematic_define::websocket::{MessageDirection, MessageSchema, WebSocketEndpoint};
+    use schematic_define::{AuthStrategy, Schema};
+    schematic_define::WebSocketApi {
+        name: "RelayWs".to_string(),
+        description: "Relay fixture".to_string(),
+        base_url: "ws://127.0.0.1".to_string(),
+        docs_url: None,
+        auth: AuthStrategy::None,
+        auth_policy: None,
+        env_auth: vec![],
+        env_mapping: None,
+        headers: vec![],
+        version: None,
+        endpoints: vec![WebSocketEndpoint {
+            id: "Relay".to_string(),
+            path: "/relay".to_string(),
+            description: "Relay channel".to_string(),
+            role,
+            messages: vec![
+                MessageSchema::new("Command", MessageDirection::Client, Schema::new("serde_json::Value")),
+                MessageSchema::new("Update", MessageDirection::Server, Schema::new("serde_json::Value")),
+            ],
+            ..WebSocketEndpoint::default()
+        }],
+        runtime: None,
+    }
+}
+
+#[test]
+fn a_both_role_with_one_way_messages_keeps_its_host_and_client() {
+    use schematic_gen::output::ws_modules::render_ws_api_module;
+    let both = render_ws_api_module(&one_way_fixture(EndpointRole::Both)).expect("renders");
+    assert!(both.contains("pub struct RelayWsHost"), "{both}");
+    assert!(both.contains("pub struct RelayClient"), "{both}");
+
+    let client = render_ws_api_module(&one_way_fixture(EndpointRole::Client)).expect("renders");
+    assert!(!client.contains("RelayWsHost"), "a client role generates no host");
+    assert!(client.contains("pub struct RelayClient"));
+}
+
+#[test]
+fn a_declared_heartbeat_is_documented_on_the_client_without_a_warning() {
+    use schematic_define::Schema;
+    use schematic_define::websocket::{HeartbeatHints, MessageDirection, MessageSchema, WebSocketEndpointHints};
+    use schematic_gen::output::ws_modules::{render_ws_api_module, validate_ws_apis};
+
+    let mut api = one_way_fixture(EndpointRole::Client);
+    api.endpoints[0].lifecycle.keepalive = Some(MessageSchema::new(
+        "Heartbeat",
+        MessageDirection::Client,
+        Schema::new("serde_json::Value"),
+    ));
+    api.endpoints[0].runtime = Some(WebSocketEndpointHints {
+        heartbeat: Some(HeartbeatHints { interval_secs: 20, timeout_secs: Some(5) }),
+        ..WebSocketEndpointHints::default()
+    });
+
+    assert!(validate_ws_apis(std::slice::from_ref(&api)).diagnostics.is_empty());
+    let module = render_ws_api_module(&api).expect("renders");
+    let doc = "/// The server expects the `Heartbeat` keepalive message (`send_heartbeat`) every \
+               20 s, and expects the reply within 5 s. This client does not send it: schedule \
+               it from the caller.";
+    assert!(module.contains("/// ## Heartbeat"), "{module}");
+    assert!(module.contains(doc), "{module}");
+
+    // Without a keepalive message the interval is still stated.
+    api.endpoints[0].lifecycle.keepalive = None;
+    api.endpoints[0].runtime.as_mut().unwrap().heartbeat.as_mut().unwrap().timeout_secs = None;
+    let module = render_ws_api_module(&api).expect("renders");
+    assert!(
+        module.contains("/// The server expects an application heartbeat message every 20 s. This"),
+        "{module}"
     );
 }

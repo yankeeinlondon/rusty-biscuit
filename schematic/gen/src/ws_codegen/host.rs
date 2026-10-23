@@ -504,6 +504,7 @@ mod tests {
                 client_messages: vec![],
                 server_messages: vec![],
                 bidirectional_messages: vec!["Msg".to_string()],
+                messages: vec![],
                 lifecycle_open: None,
                 lifecycle_close: None,
                 lifecycle_keepalive: None,

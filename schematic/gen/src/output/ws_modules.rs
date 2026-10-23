@@ -2,8 +2,13 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
+use schematic_define::WebSocketApi;
 
+use crate::diagnostics::{Feature, Output, ValidationDiagnostic};
 use crate::errors::GeneratorError;
+use crate::ws_codegen::client::generate_ws_client_module;
+use crate::ws_codegen::host::generate_ws_host_module;
+use crate::ws_codegen::plan::{WsRuntimePlan, lower_to_plan};
 
 /// Metadata for generated WebSocket definition helper modules.
 pub struct WsDefinitionModule {
@@ -51,16 +56,13 @@ pub fn ws_definition_modules() -> &'static [WsDefinitionModule] {
     WS_DEFINITION_MODULES
 }
 
-fn assemble_ws_definition_module(module: &str) -> Option<TokenStream> {
-    use crate::ws_codegen::client::generate_ws_client_module;
-    use crate::ws_codegen::host::generate_ws_host_module;
-    use crate::ws_codegen::plan::lower_to_plan;
+/// The definition function, re-export, and `define_api` tokens of one
+/// shipped WebSocket module; `None` for a module name not in
+/// [`WS_DEFINITION_MODULES`].
+type ShippedWsModule = (fn() -> WebSocketApi, TokenStream, TokenStream);
 
-    let (define_fn, reexport_path, api_fn): (
-        fn() -> schematic_define::WebSocketApi,
-        TokenStream,
-        TokenStream,
-    ) = match module {
+fn shipped_ws_module(module: &str) -> Option<ShippedWsModule> {
+    Some(match module {
         "elevenlabs_ws" => (
             || schematic_definitions::define_elevenlabs_websocket_api(),
             quote! { pub use schematic_definitions::elevenlabs::*; },
@@ -117,19 +119,76 @@ fn assemble_ws_definition_module(module: &str) -> Option<TokenStream> {
             },
         ),
         _ => return None,
-    };
+    })
+}
 
-    let api = define_fn();
-    let plan = match lower_to_plan(&api) {
-        Ok(plan) => plan,
-        Err(_) => return None,
-    };
+/// The shipped WebSocket API definitions, in [`WS_DEFINITION_MODULES`] order.
+pub fn shipped_ws_apis() -> Vec<WebSocketApi> {
+    WS_DEFINITION_MODULES
+        .iter()
+        .filter_map(|spec| shipped_ws_module(spec.module))
+        .map(|(define_fn, _, _)| define_fn())
+        .collect()
+}
 
-    let module_docs = crate::ws_codegen::docs::generate_module_docs(&plan);
-    let client_code = generate_ws_client_module(&plan);
-    let host_code = generate_ws_host_module(&plan);
+/// The findings of lowering WebSocket definitions for the Rust output.
+#[derive(Debug, Default)]
+pub struct WsValidation {
+    /// Warnings and errors in the shared format ([`Output::Rust`]); an error
+    /// blocks the Rust output like any other Rust validation error.
+    pub diagnostics: Vec<ValidationDiagnostic>,
+    /// Info notes, which the shared format has no level for. The pipeline
+    /// prints them only in a verbose run.
+    pub notes: Vec<String>,
+}
 
-    Some(quote! {
+/// Lowers every API in `apis` and collects all of their findings.
+pub fn validate_ws_apis(apis: &[WebSocketApi]) -> WsValidation {
+    let mut validation = WsValidation::default();
+    for api in apis {
+        let findings = match lower_to_plan(api) {
+            Ok(plan) => plan.diagnostics,
+            Err(failure) => failure.diagnostics,
+        };
+        for finding in findings {
+            match finding.to_validation_diagnostic(&api.name) {
+                Some(diagnostic) => validation.diagnostics.push(diagnostic),
+                None => validation.notes.push(format!(
+                    "severity=info api={} feature={} output={}: {}: {}",
+                    api.name,
+                    Feature::WebSocketDefinition,
+                    Output::Rust,
+                    finding.path,
+                    finding.message
+                )),
+            }
+        }
+    }
+    validation
+}
+
+/// [`validate_ws_apis`] over the shipped WebSocket definitions, which every
+/// Rust generation run writes.
+pub fn validate_ws_definition_modules() -> WsValidation {
+    validate_ws_apis(&shipped_ws_apis())
+}
+
+/// Lowers `api`, turning a failure into the Rust output's validation error.
+fn lower_for_rust(api: &WebSocketApi) -> Result<WsRuntimePlan, GeneratorError> {
+    lower_to_plan(api).map_err(|failure| GeneratorError::Validation {
+        output: Output::Rust,
+        diagnostics: failure.validation_diagnostics(),
+    })
+}
+
+/// The module body shared by shipped and fixture WebSocket modules: module
+/// docs, `prelude` items, client, and host.
+fn ws_module_tokens(plan: &WsRuntimePlan, prelude: TokenStream) -> TokenStream {
+    let module_docs = crate::ws_codegen::docs::generate_module_docs(plan);
+    let client_code = generate_ws_client_module(plan);
+    let host_code = generate_ws_host_module(plan);
+
+    quote! {
         #module_docs
 
         // Generated WebSocket modules intentionally use slightly verbose
@@ -146,26 +205,75 @@ fn assemble_ws_definition_module(module: &str) -> Option<TokenStream> {
             clippy::single_match,
         )]
 
-        #reexport_path
-
-        #api_fn
+        #prelude
 
         #client_code
         #host_code
-    })
+    }
+}
+
+/// Renders the WebSocket module for any `api`, formatted, as it would be
+/// written beside `ws_shared.rs` (it refers to `super::ws_shared`).
+///
+/// Unlike a shipped module it has no definition re-export or `define_api`,
+/// so a fixture definition can be compiled into a crate that does not
+/// register it.
+///
+/// ## Errors
+///
+/// [`GeneratorError::Validation`] for [`Output::Rust`] when lowering reports
+/// an error, carrying every warning and error of the run.
+pub fn render_ws_api_module(api: &WebSocketApi) -> Result<String, GeneratorError> {
+    let plan = lower_for_rust(api)?;
+    let tokens = ws_module_tokens(&plan, TokenStream::new());
+    let file = super::format::validate_code(&tokens)?;
+    Ok(super::format::format_code(&file))
 }
 
 /// Generate all WebSocket definition modules.
+///
+/// ## Errors
+///
+/// [`GeneratorError::Validation`] for [`Output::Rust`] naming every shipped
+/// definition's warnings and errors when any of them fails to lower; no
+/// module is dropped silently.
 pub fn generate_ws_definition_modules() -> Result<Vec<(String, String)>, GeneratorError> {
-    WS_DEFINITION_MODULES
-        .iter()
-        .filter_map(|spec| assemble_ws_definition_module(spec.module).map(|tokens| (spec, tokens)))
-        .map(|(spec, tokens)| {
-            let file = super::format::validate_code(&tokens)?;
-            let formatted = super::format::format_code(&file);
-            Ok((format!("{}.rs", spec.module), formatted))
-        })
-        .collect()
+    let mut modules = Vec::new();
+    let mut diagnostics = Vec::new();
+    for spec in WS_DEFINITION_MODULES {
+        let (define_fn, reexport_path, api_fn) = shipped_ws_module(spec.module)
+            .ok_or_else(|| {
+                GeneratorError::CodeGenError(format!(
+                    "WebSocket module `{}` has no definition function",
+                    spec.module
+                ))
+            })?;
+        let plan = match lower_for_rust(&define_fn()) {
+            Ok(plan) => plan,
+            Err(GeneratorError::Validation { diagnostics: found, .. }) => {
+                diagnostics.extend(found);
+                continue;
+            }
+            Err(other) => return Err(other),
+        };
+        let tokens = ws_module_tokens(
+            &plan,
+            quote! {
+                #reexport_path
+
+                #api_fn
+            },
+        );
+        let file = super::format::validate_code(&tokens)?;
+        modules.push((format!("{}.rs", spec.module), super::format::format_code(&file)));
+    }
+    if !diagnostics.is_empty() {
+        return Err(GeneratorError::Validation {
+            output: Output::Rust,
+            diagnostics,
+        });
+    }
+    Ok(modules)
 }
 
 /// Generate the ws_shared module.

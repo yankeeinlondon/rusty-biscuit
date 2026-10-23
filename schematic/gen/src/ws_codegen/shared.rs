@@ -530,7 +530,7 @@ pub fn generate_host_validate_bearer_header(header_name: &str) -> TokenStream {
                 Err(Self::auth_error_response(
                     tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
                     "Invalid bearer token",
-                ));
+                ))
             }
         }
     }

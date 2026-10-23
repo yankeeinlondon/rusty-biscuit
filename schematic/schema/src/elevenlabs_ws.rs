@@ -130,52 +130,82 @@ impl ElevenLabsTTSWs {
         let mut path = "/v1/text-to-speech/{voice_id}/stream-input".to_string();
         let voice_id_value = voice_id.into();
         path = path.replace("{voice_id}", urlencoding::encode(&voice_id_value).as_ref());
-        let mut query_pairs: Vec<(String, String)> = Vec::new();
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(value) = params.model_id.as_ref() {
-            query_pairs.push(("model_id".to_string(), value.to_string()));
+            query_pairs
+                .push((
+                    "model_id",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
         }
         if let Some(value) = params.language_code.as_ref() {
-            query_pairs.push(("language_code".to_string(), value.to_string()));
+            query_pairs
+                .push((
+                    "language_code",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
         }
         if let Some(value) = params.enable_logging.as_ref() {
-            query_pairs.push(("enable_logging".to_string(), value.to_string()));
+            query_pairs
+                .push((
+                    "enable_logging",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
         }
         if let Some(value) = params.enable_ssml_parsing.as_ref() {
-            query_pairs.push(("enable_ssml_parsing".to_string(), value.to_string()));
+            query_pairs
+                .push((
+                    "enable_ssml_parsing",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
         }
         if let Some(value) = params.output_format.as_ref() {
-            query_pairs.push(("output_format".to_string(), value.to_string()));
+            query_pairs
+                .push((
+                    "output_format",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
         }
         if let Some(value) = params.inactivity_timeout.as_ref() {
-            query_pairs.push(("inactivity_timeout".to_string(), value.to_string()));
+            query_pairs
+                .push((
+                    "inactivity_timeout",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
         }
         if let Some(value) = params.sync_alignment.as_ref() {
-            query_pairs.push(("sync_alignment".to_string(), value.to_string()));
+            query_pairs
+                .push((
+                    "sync_alignment",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
         }
         if let Some(value) = params.auto_mode.as_ref() {
-            query_pairs.push(("auto_mode".to_string(), value.to_string()));
+            query_pairs
+                .push((
+                    "auto_mode",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
         }
         if let Some(value) = params.apply_text_normalization.as_ref() {
             query_pairs
-                .push(("apply_text_normalization".to_string(), value.to_string()));
+                .push((
+                    "apply_text_normalization",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
         }
         if let Some(value) = params.seed.as_ref() {
-            query_pairs.push(("seed".to_string(), value.to_string()));
+            query_pairs
+                .push(("seed", urlencoding::encode(&value.to_string()).into_owned()));
         }
         if !query_pairs.is_empty() {
-            query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            query_pairs.sort_by(|a, b| a.0.cmp(b.0));
             let query = query_pairs
                 .into_iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(& k), urlencoding::encode(& v))
-                })
+                .map(|(k, v)| format!("{}={}", urlencoding::encode(k), v))
                 .collect::<Vec<_>>()
                 .join("&");
-            if path.contains('?') {
-                path.push('&');
-            } else {
-                path.push('?');
-            }
+            path.push('?');
             path.push_str(&query);
         }
         if path.contains('{') {
@@ -203,27 +233,29 @@ impl ElevenLabsTTSWs {
         let mut path = "/v1/text-to-speech/{voice_id}/multi-stream-input".to_string();
         let voice_id_value = voice_id.into();
         path = path.replace("{voice_id}", urlencoding::encode(&voice_id_value).as_ref());
-        let mut query_pairs: Vec<(String, String)> = Vec::new();
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(value) = params.model_id.as_ref() {
-            query_pairs.push(("model_id".to_string(), value.to_string()));
+            query_pairs
+                .push((
+                    "model_id",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
         }
         if let Some(value) = params.output_format.as_ref() {
-            query_pairs.push(("output_format".to_string(), value.to_string()));
+            query_pairs
+                .push((
+                    "output_format",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
         }
         if !query_pairs.is_empty() {
-            query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            query_pairs.sort_by(|a, b| a.0.cmp(b.0));
             let query = query_pairs
                 .into_iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(& k), urlencoding::encode(& v))
-                })
+                .map(|(k, v)| format!("{}={}", urlencoding::encode(k), v))
                 .collect::<Vec<_>>()
                 .join("&");
-            if path.contains('?') {
-                path.push('&');
-            } else {
-                path.push('?');
-            }
+            path.push('?');
             path.push_str(&query);
         }
         if path.contains('{') {
@@ -247,7 +279,7 @@ impl Default for ElevenLabsTTSWs {
         Self::new()
     }
 }
-///Client for the TextToSpeech endpoint.
+/// Client for the TextToSpeech endpoint.
 pub struct TextToSpeechClient {
     transport: super::ws_shared::WsTransportHandle,
     event_rx: tokio::sync::mpsc::Receiver<
@@ -481,7 +513,7 @@ impl TextToSpeechClient {
         self.transport.state()
     }
 }
-///Client for the MultiContextTextToSpeech endpoint.
+/// Client for the MultiContextTextToSpeech endpoint.
 pub struct MultiContextTextToSpeechClient {
     transport: super::ws_shared::WsTransportHandle,
     event_rx: tokio::sync::mpsc::Receiver<

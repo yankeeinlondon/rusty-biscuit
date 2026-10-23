@@ -10,6 +10,7 @@
 mod common;
 
 mod artifact_drift;
+mod asyncapi_import;
 mod definition_baseline;
 mod definition_bundles;
 mod discriminated_unions;
@@ -35,3 +36,4 @@ mod test_layout;
 mod typed_path_output;
 mod vocabulary_exports;
 mod ws_codegen;
+mod ws_validation;

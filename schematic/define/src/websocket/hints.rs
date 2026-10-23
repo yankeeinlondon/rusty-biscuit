@@ -101,7 +101,8 @@ pub struct CorrelationHints {
     pub request_id_field: String,
     /// JSON field path for the correlation ID in inbound responses.
     pub response_id_field: String,
-    /// Default timeout in seconds for correlated requests.
+    /// Default timeout in seconds for correlated requests; at least 1
+    /// (generation rejects `0`). Absent means 30.
     #[serde(default = "default_correlation_timeout")]
     pub default_timeout_secs: u64,
 }
@@ -134,14 +135,27 @@ pub struct AuthFlowHints {
     /// Schema name for the auth request message the client must send.
     pub auth_request_schema: String,
     /// Optional message name or field value indicating auth success.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_presence::non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub success_indicator: Option<String>,
     /// Optional message name or field value indicating auth failure.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_presence::non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub failure_indicator: Option<String>,
 }
 
 /// Heartbeat configuration hints for WebSocket endpoints.
+///
+/// Heartbeats are caller-managed: the generated client does not schedule
+/// them. The hints are kept as metadata and stated in the generated client's
+/// rustdoc, together with the endpoint's lifecycle `keepalive` message when
+/// one is declared.
 ///
 /// ## Examples
 ///
@@ -156,10 +170,16 @@ pub struct AuthFlowHints {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HeartbeatHints {
-    /// Interval in seconds between heartbeat messages.
+    /// Interval in seconds between heartbeat messages; at least 1
+    /// (generation rejects `0`).
     pub interval_secs: u64,
-    /// Optional timeout in seconds to wait for heartbeat response.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional timeout in seconds to wait for heartbeat response; at least
+    /// 1 when present.
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_presence::non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub timeout_secs: Option<u64>,
 }
 
@@ -243,12 +263,24 @@ impl Default for WebSocketRuntimeHints {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WebSocketEndpointHints {
     /// Correlation hints for request-response matching.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_presence::non_null_map",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub correlation: Option<CorrelationHints>,
     /// Auth flow hints for message-based authentication.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_presence::non_null_map",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub auth_flow: Option<AuthFlowHints>,
     /// Heartbeat configuration hints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_presence::non_null_map",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub heartbeat: Option<HeartbeatHints>,
 }

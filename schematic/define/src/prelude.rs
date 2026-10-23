@@ -27,7 +27,10 @@
 //!     base_url: "wss://stream.example.com".to_string(),
 //!     docs_url: None,
 //!     auth: AuthStrategy::BearerToken { header: None },
+//!     auth_policy: None,
 //!     env_auth: vec!["STREAM_KEY".to_string()],
+//!     env_mapping: None,
+//!     headers: vec![],
 //!     version: None,
 //!     endpoints: vec![],
 //!     runtime: None,
@@ -56,9 +59,9 @@ pub use crate::response::{ResponseShape, StreamEnd, StreamFraming, SuccessShape}
 pub use crate::schema::{Schema, SchemaObject};
 pub use crate::types::{Endpoint, ResolvedEndpointAuth, RestApi, RestMethod};
 pub use crate::websocket::{
-    AuthFlowHints, ConnectionLifecycle, ConnectionParam, CorrelationHints, FrameFormat,
-    HeartbeatHints, MessageDirection, MessageSchema, ParamType, RequestIdType, WebSocketApi,
-    WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
+    AuthFlowHints, ConnectionLifecycle, CorrelationHints, EndpointRole, FrameFormat,
+    HeartbeatHints, MessageDirection, MessageSchema, MessageSelector, RequestIdType,
+    WebSocketApi, WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
 };
 
 pub use crate::{DefinitionContext, DefinitionError, Registration, TypeDesc, Success, ErrorSet, EndpointBuilder, RestApiBuilder};

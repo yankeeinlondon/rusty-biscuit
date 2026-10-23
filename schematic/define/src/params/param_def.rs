@@ -56,9 +56,8 @@ pub struct ParamDef {
 
 /// Type of a parameter value.
 ///
-/// Represents the possible types for query, header, or cookie parameters.
-/// Note: This is named `QueryParamType` to avoid conflict with
-/// [`crate::websocket::ParamType`] which is used for WebSocket connection parameters.
+/// Represents the possible types for query, header, cookie, and typed path
+/// parameters of REST endpoints and WebSocket handshakes alike.
 ///
 /// ## Examples
 ///

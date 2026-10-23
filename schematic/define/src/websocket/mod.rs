@@ -1,18 +1,20 @@
 //! WebSocket API definitions.
 //!
 //! This module provides types for defining WebSocket APIs in a declarative way,
-//! parallel to the REST API types in [`crate::types`]. These definitions can be
-//! used to generate strongly-typed WebSocket client code.
+//! parallel to the REST API types in [`crate::types`]. They reuse the REST
+//! vocabulary for everything a handshake shares with an HTTP request:
+//! [`AuthStrategy`], [`AuthPolicy`], [`EnvMapping`], constant headers, and
+//! location-aware [`EndpointParams`].
 //!
 //! ## Core Types
 //!
 //! - [`WebSocketApi`] - Complete WebSocket API definition with base URL, auth, and endpoints
-//! - [`WebSocketEndpoint`] - Single WebSocket endpoint with path, parameters, and message schemas
-//! - [`ConnectionParam`] - Query/path parameter definition for WebSocket connections
-//! - [`ParamType`] - Parameter types (String, Integer, Boolean, Float)
+//! - [`WebSocketEndpoint`] - Single WebSocket endpoint with path, parameters, role, and message schemas
+//! - [`EndpointRole`] - Which side the generator emits for an endpoint (client, host, or both)
 //! - [`ConnectionLifecycle`] - Open, close, and keepalive message schemas
-//! - [`MessageSchema`] - Single message type with direction and schema
-//! - [`MessageDirection`] - Message flow direction (Client, Server, Bidirectional)
+//! - [`MessageSchema`] - Single message type with direction, schema, selectors, and response link
+//! - [`MessageSelector`] - Equality check on an inbound wire field
+//! - [`MessageDirection`] - Client-relative message direction (Client, Server, Bidirectional)
 //!
 //! ## Examples
 //!
@@ -20,7 +22,7 @@
 //!
 //! ```
 //! use schematic_define::websocket::*;
-//! use schematic_define::{AuthStrategy, Schema};
+//! use schematic_define::{AuthStrategy, EndpointParams, ParamDef, QueryParamType, Schema};
 //!
 //! let api = WebSocketApi {
 //!     name: "ElevenLabsTTS".to_string(),
@@ -28,124 +30,160 @@
 //!     base_url: "wss://api.elevenlabs.io/v1".to_string(),
 //!     docs_url: Some("https://elevenlabs.io/docs/api-reference/websockets".to_string()),
 //!     auth: AuthStrategy::ApiKey { header: "xi-api-key".to_string(), value_prefix: None },
+//!     auth_policy: None,
 //!     env_auth: vec!["ELEVEN_LABS_API_KEY".to_string()],
+//!     env_mapping: None,
+//!     headers: vec![],
 //!     version: None,
-//!     endpoints: vec![
-//!         WebSocketEndpoint {
-//!             id: "TextToSpeech".to_string(),
-//!             path: "/text-to-speech/{voice_id}/stream-input".to_string(),
-//!             description: "Stream text and receive audio chunks".to_string(),
-//!             connection_params: vec![
-//!                 ConnectionParam {
-//!                     name: "model_id".to_string(),
-//!                     param_type: ParamType::String,
-//!                     required: false,
-//!                     description: Some("Model to use for synthesis".to_string()),
-//!                 },
-//!                 ConnectionParam {
-//!                     name: "output_format".to_string(),
-//!                     param_type: ParamType::String,
-//!                     required: false,
-//!                     description: Some("Audio output format".to_string()),
-//!                 },
-//!             ],
-//!             lifecycle: ConnectionLifecycle {
-//!                 open: Some(MessageSchema {
-//!                     name: "BOS".to_string(),
-//!                     direction: MessageDirection::Client,
-//!                     schema: Schema::new("BeginOfStreamMessage"),
-//!                     description: Some("Begin-of-stream message with config".to_string()),
-//!                 }),
-//!                 close: Some(MessageSchema {
-//!                     name: "EOS".to_string(),
-//!                     direction: MessageDirection::Client,
-//!                     schema: Schema::new("EndOfStreamMessage"),
-//!                     description: Some("End-of-stream signal".to_string()),
-//!                 }),
-//!                 keepalive: None,
-//!             },
-//!             messages: vec![
-//!                 MessageSchema {
-//!                     name: "TextChunk".to_string(),
-//!                     direction: MessageDirection::Client,
-//!                     schema: Schema::new("TextChunkMessage"),
-//!                     description: Some("Text to synthesize".to_string()),
-//!                 },
-//!                 MessageSchema {
-//!                     name: "AudioChunk".to_string(),
-//!                     direction: MessageDirection::Server,
-//!                     schema: Schema::new("AudioChunkResponse"),
-//!                     description: Some("Audio data chunk".to_string()),
-//!                 },
-//!             ],
-//!             runtime: None,
+//!     endpoints: vec![WebSocketEndpoint {
+//!         id: "TextToSpeech".to_string(),
+//!         path: "/text-to-speech/{voice_id}/stream-input".to_string(),
+//!         description: "Stream text and receive audio chunks".to_string(),
+//!         params: EndpointParams {
+//!             path: vec![ParamDef::path("voice_id", QueryParamType::String)],
+//!             query: vec![ParamDef::new("model_id", QueryParamType::String).describes("Model to use")],
+//!             ..EndpointParams::default()
 //!         },
-//!     ],
+//!         lifecycle: ConnectionLifecycle {
+//!             open: Some(MessageSchema::new(
+//!                 "BOS",
+//!                 MessageDirection::Client,
+//!                 Schema::new("BeginOfStreamMessage"),
+//!             )),
+//!             close: None,
+//!             keepalive: None,
+//!         },
+//!         messages: vec![
+//!             MessageSchema::new("TextChunk", MessageDirection::Client, Schema::new("TextChunkMessage")),
+//!             MessageSchema::new("AudioChunk", MessageDirection::Server, Schema::new("AudioChunkResponse")),
+//!         ],
+//!         ..WebSocketEndpoint::default()
+//!     }],
 //!     runtime: None,
 //! };
 //!
-//! assert_eq!(api.name, "ElevenLabsTTS");
-//! assert_eq!(api.endpoints.len(), 1);
+//! assert_eq!(api.endpoints[0].role, EndpointRole::Client);
+//! assert_eq!(api.endpoints[0].params.path[0].name, "voice_id");
+//! ```
+//!
+//! Handshake parameters are REST [`ParamDef`](crate::ParamDef)s; the former
+//! WebSocket-only parameter types no longer resolve:
+//!
+//! ```compile_fail
+//! use schematic_define::websocket::ConnectionParam;
+//! ```
+//!
+//! ```compile_fail
+//! use schematic_define::websocket::ParamType;
+//! ```
+//!
+//! ```compile_fail
+//! use schematic_define::ConnectionParam;
+//! ```
+//!
+//! ```compile_fail
+//! use schematic_define::ParamType;
 //! ```
 
 mod hints;
 mod lifecycle;
-mod params;
 
 pub use hints::{
     AuthFlowHints, CorrelationHints, FrameFormat, HeartbeatHints, RequestIdType,
     WebSocketEndpointHints, WebSocketRuntimeHints,
 };
-pub use lifecycle::{ConnectionLifecycle, MessageDirection, MessageSchema};
-pub use params::{ConnectionParam, ParamType};
+pub use lifecycle::{ConnectionLifecycle, MessageDirection, MessageSchema, MessageSelector};
 
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumIter, EnumString};
 
-use crate::auth::AuthStrategy;
+use crate::auth::{AuthPolicy, AuthStrategy};
+use crate::headers::EnvMapping;
+use crate::params::EndpointParams;
+use crate::types::RestApi;
+
+/// Compiles the examples of `schematic/docs/websocket-definitions.md`.
+#[cfg(doctest)]
+#[doc = include_str!("../../../docs/websocket-definitions.md")]
+pub struct WebSocketDefinitionsDoc;
+
+/// Which side of an endpoint the generator emits.
+///
+/// Message directions stay client-relative whatever the role: `Client`
+/// messages are what a generated host receives, `Server` messages what it
+/// sends. Serialized as `client`, `host`, or `both`; an absent role is
+/// `Client`.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::websocket::EndpointRole;
+///
+/// assert_eq!(EndpointRole::default(), EndpointRole::Client);
+/// assert_eq!(serde_json::to_string(&EndpointRole::Both).unwrap(), r#""both""#);
+/// ```
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumIter,
+    EnumString,
+)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum EndpointRole {
+    /// A client that dials the endpoint.
+    #[default]
+    Client,
+    /// A host that accepts connections on the endpoint.
+    Host,
+    /// Both a client and a host.
+    Both,
+}
 
 /// A single WebSocket endpoint definition.
 ///
 /// Defines how to connect to a WebSocket endpoint, including the path,
-/// connection parameters, and message schemas.
+/// handshake parameters, generated role, and message schemas.
 ///
-/// ## Path Parameters
+/// ## Path and Query Parameters
 ///
 /// Paths support template parameters using curly braces: `/stream/{channel_id}`.
-/// These become required fields when establishing the connection.
+/// With an empty `params.path`, each placeholder is a required string;
+/// otherwise `params.path` types them and its names must equal the
+/// placeholders, as for REST endpoints. Required query parameters become
+/// connect arguments and optional ones are omitted when unset.
 ///
 /// ## Examples
 ///
 /// ```
 /// use schematic_define::websocket::{
-///     WebSocketEndpoint, ConnectionParam, ParamType, ConnectionLifecycle, MessageSchema, MessageDirection
+///     EndpointRole, MessageDirection, MessageSchema, WebSocketEndpoint,
 /// };
-/// use schematic_define::Schema;
+/// use schematic_define::{EndpointParams, QueryParamType, Schema};
 ///
 /// let endpoint = WebSocketEndpoint {
 ///     id: "StreamAudio".to_string(),
 ///     path: "/audio/{voice_id}/stream".to_string(),
 ///     description: "Stream audio synthesis".to_string(),
-///     connection_params: vec![
-///         ConnectionParam {
-///             name: "quality".to_string(),
-///             param_type: ParamType::String,
-///             required: false,
-///             description: Some("Audio quality setting".to_string()),
-///         },
-///     ],
-///     lifecycle: ConnectionLifecycle::default(),
-///     messages: vec![
-///         MessageSchema {
-///             name: "AudioData".to_string(),
-///             direction: MessageDirection::Server,
-///             schema: Schema::new("AudioDataMessage"),
-///             description: Some("Audio data chunk".to_string()),
-///         },
-///     ],
-///     runtime: None,
+///     params: EndpointParams::default()
+///         .with_query_param("quality", QueryParamType::String, false, Some("Audio quality")),
+///     messages: vec![MessageSchema::new(
+///         "AudioData",
+///         MessageDirection::Server,
+///         Schema::new("AudioDataMessage"),
+///     )],
+///     ..WebSocketEndpoint::default()
 /// };
 ///
-/// assert_eq!(endpoint.id, "StreamAudio");
+/// assert_eq!(endpoint.role, EndpointRole::Client);
 /// assert!(endpoint.path.contains("{voice_id}"));
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,20 +192,29 @@ pub struct WebSocketEndpoint {
     ///
     /// Should be PascalCase (e.g., "TextToSpeech", "StreamAudio").
     pub id: String,
-    /// Path template (e.g., "/stream/{channel_id}").
-    ///
-    /// Parameters in curly braces become required connection parameters.
+    /// Path template (e.g., "/stream/{channel_id}"), appended to the API's
+    /// `base_url`. It carries no query string and no origin of its own.
     pub path: String,
     /// Human-readable description of what this endpoint does.
     pub description: String,
-    /// Query/path parameters for establishing the connection.
-    pub connection_params: Vec<ConnectionParam>,
+    /// Handshake parameters by location: typed path placeholders and query
+    /// parameters. Header and cookie parameters are not generated for a
+    /// handshake and are rejected at generation.
+    #[serde(deserialize_with = "crate::serde_presence::map_only")]
+    pub params: EndpointParams,
+    /// Generated side of this endpoint; absent means [`EndpointRole::Client`].
+    #[serde(default)]
+    pub role: EndpointRole,
     /// Lifecycle messages (open, close, keepalive).
     pub lifecycle: ConnectionLifecycle,
     /// Regular messages that can be sent/received.
     pub messages: Vec<MessageSchema>,
     /// Optional runtime hints for code generation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_presence::non_null_map",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub runtime: Option<WebSocketEndpointHints>,
 }
 
@@ -175,13 +222,14 @@ pub struct WebSocketEndpoint {
 ///
 /// This struct captures all the information needed to generate a typed client
 /// for a WebSocket API, including the base URL, authentication strategy, and
-/// all endpoint definitions.
+/// all endpoint definitions. Authentication, environment mapping, and
+/// constant headers carry the same meaning as on [`RestApi`].
 ///
 /// ## Examples
 ///
 /// ```
-/// use schematic_define::websocket::{WebSocketApi, WebSocketEndpoint};
-/// use schematic_define::AuthStrategy;
+/// use schematic_define::websocket::WebSocketApi;
+/// use schematic_define::{AuthStrategy, EnvList, EnvMapping};
 ///
 /// let api = WebSocketApi {
 ///     name: "MyStreamingAPI".to_string(),
@@ -189,14 +237,19 @@ pub struct WebSocketEndpoint {
 ///     base_url: "wss://stream.example.com/v1".to_string(),
 ///     docs_url: Some("https://docs.example.com/websocket".to_string()),
 ///     auth: AuthStrategy::BearerToken { header: None },
+///     auth_policy: None,
 ///     env_auth: vec!["STREAM_API_KEY".to_string()],
+///     env_mapping: Some(EnvMapping {
+///         bearer_token: Some(EnvList::single("STREAM_API_KEY")),
+///         ..EnvMapping::default()
+///     }),
+///     headers: vec![("X-Client".to_string(), "schematic".to_string())],
 ///     version: None,
 ///     endpoints: vec![],
 ///     runtime: None,
 /// };
 ///
-/// assert_eq!(api.name, "MyStreamingAPI");
-/// assert!(api.base_url.starts_with("wss://"));
+/// assert_eq!(api.default_env_mapping().bearer_token.unwrap().names(), ["STREAM_API_KEY"]);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WebSocketApi {
@@ -209,19 +262,35 @@ pub struct WebSocketApi {
     pub description: String,
     /// Base URL for WebSocket connections (e.g., `wss://api.example.com/v1`).
     ///
-    /// Endpoint paths are appended to this URL when connecting.
+    /// Endpoint paths are appended to this URL when connecting; a base path
+    /// is kept as a prefix.
     pub base_url: String,
     /// Link to API documentation (optional).
     pub docs_url: Option<String>,
-    /// Authentication strategy for this API.
-    ///
-    /// Reuses [`AuthStrategy`] from the REST API types.
+    /// Handshake authentication strategy, as [`RestApi::auth`].
     pub auth: AuthStrategy,
-    /// Environment variable names for authentication credentials.
-    ///
-    /// Works the same as [`crate::RestApi::env_auth`]: a fallback chain
-    /// where the first set env var is used.
+    /// Structured authentication policy, as [`RestApi::auth_policy`]; `None`
+    /// derives one from [`Self::auth`]. See [`Self::effective_auth_policy`].
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_presence::non_null_map",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub auth_policy: Option<AuthPolicy>,
+    /// Ordered environment fallback chain, as [`RestApi::env_auth`]: used by
+    /// token and key strategies, never a Basic source.
     pub env_auth: Vec<String>,
+    /// Explicit environment mapping, as [`RestApi::env_mapping`]; `None`
+    /// derives one from `auth` and `env_auth`. See
+    /// [`Self::default_env_mapping`].
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_presence::non_null_map",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub env_mapping: Option<EnvMapping>,
+    /// Constant handshake headers, as [`RestApi::headers`].
+    pub headers: Vec<(String, String)>,
     /// Semantic version of this API definition (e.g., `"1.0.0"`).
     ///
     /// Used as the `info.version` field in exported API documents.
@@ -231,8 +300,33 @@ pub struct WebSocketApi {
     /// All endpoints defined for this API.
     pub endpoints: Vec<WebSocketEndpoint>,
     /// Optional runtime hints for code generation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_presence::non_null_map",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub runtime: Option<WebSocketRuntimeHints>,
+}
+
+impl WebSocketApi {
+    /// The authentication policy: [`Self::auth_policy`] when set, otherwise
+    /// the one [`AuthPolicy::from_auth_strategy`] derives from [`Self::auth`].
+    #[must_use]
+    pub fn effective_auth_policy(&self) -> AuthPolicy {
+        self.auth_policy
+            .clone()
+            .unwrap_or_else(|| AuthPolicy::from_auth_strategy(&self.auth))
+    }
+
+    /// The environment mapping: [`Self::env_mapping`] when set (it replaces
+    /// the derived mapping wholesale), otherwise
+    /// [`RestApi::legacy_env_mapping_for`] of `auth` and `env_auth`.
+    #[must_use]
+    pub fn default_env_mapping(&self) -> EnvMapping {
+        self.env_mapping
+            .clone()
+            .unwrap_or_else(|| RestApi::legacy_env_mapping_for(&self.auth, &self.env_auth))
+    }
 }
 
 #[cfg(test)]
@@ -242,60 +336,26 @@ mod tests {
     use std::str::FromStr;
     use strum::IntoEnumIterator;
 
-    // ========== ParamType Tests ==========
+    // ========== EndpointRole Tests ==========
 
     #[test]
-    fn param_type_display_lowercase() {
-        assert_eq!(ParamType::String.to_string(), "string");
-        assert_eq!(ParamType::Integer.to_string(), "integer");
-        assert_eq!(ParamType::Boolean.to_string(), "boolean");
-        assert_eq!(ParamType::Float.to_string(), "float");
-    }
-
-    #[test]
-    fn param_type_from_str_lowercase() {
-        assert_eq!(ParamType::from_str("string").unwrap(), ParamType::String);
-        assert_eq!(ParamType::from_str("integer").unwrap(), ParamType::Integer);
-        assert_eq!(ParamType::from_str("boolean").unwrap(), ParamType::Boolean);
-        assert_eq!(ParamType::from_str("float").unwrap(), ParamType::Float);
-    }
-
-    #[test]
-    fn param_type_from_str_invalid() {
-        assert!(ParamType::from_str("INVALID").is_err());
-        assert!(ParamType::from_str("STRING").is_err()); // Case-sensitive
-        assert!(ParamType::from_str("int").is_err());
-    }
-
-    #[test]
-    fn param_type_from_str_empty() {
-        assert!(ParamType::from_str("").is_err());
-    }
-
-    #[test]
-    fn param_type_iter_all_variants() {
-        let variants: Vec<_> = ParamType::iter().collect();
-        assert_eq!(variants.len(), 4);
-        assert!(variants.contains(&ParamType::String));
-        assert!(variants.contains(&ParamType::Integer));
-        assert!(variants.contains(&ParamType::Boolean));
-        assert!(variants.contains(&ParamType::Float));
-    }
-
-    #[test]
-    fn param_type_copy() {
-        let original = ParamType::String;
-        let copied = original; // Copy, not move
-        assert_eq!(original, copied);
-    }
-
-    #[test]
-    fn param_type_serde_roundtrip() {
-        for param_type in ParamType::iter() {
-            let serialized = serde_json::to_string(&param_type).unwrap();
-            let deserialized: ParamType = serde_json::from_str(&serialized).unwrap();
-            assert_eq!(deserialized, param_type);
+    fn endpoint_role_names_are_stable() {
+        let names: Vec<String> = EndpointRole::iter()
+            .map(|role| serde_json::to_string(&role).unwrap())
+            .collect();
+        assert_eq!(names, [r#""client""#, r#""host""#, r#""both""#]);
+        for role in EndpointRole::iter() {
+            assert_eq!(EndpointRole::from_str(&role.to_string()).unwrap(), role);
         }
+    }
+
+    #[test]
+    fn shared_parameter_types_are_serializable() {
+        fn assert_serde<T: Serialize + serde::de::DeserializeOwned>() {}
+        assert_serde::<crate::ParamDef>();
+        assert_serde::<crate::QueryParamType>();
+        assert_serde::<crate::ParamStyle>();
+        assert_serde::<EndpointParams>();
     }
 
     // ========== MessageDirection Tests ==========
@@ -360,36 +420,35 @@ mod tests {
         }
     }
 
-    // ========== ConnectionParam Tests ==========
-
-    #[test]
-    fn connection_param_serde_roundtrip() {
-        let param = ConnectionParam {
-            name: "model_id".to_string(),
-            param_type: ParamType::String,
-            required: true,
-            description: Some("The model identifier".to_string()),
-        };
-
-        let serialized = serde_json::to_string(&param).unwrap();
-        let deserialized: ConnectionParam = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized, param);
-    }
-
     // ========== MessageSchema Tests ==========
 
     #[test]
     fn message_schema_serde_roundtrip() {
-        let schema = MessageSchema {
-            name: "AudioChunk".to_string(),
-            direction: MessageDirection::Server,
-            schema: Schema::new("AudioChunkPayload"),
-            description: Some("Audio data chunk".to_string()),
-        };
+        let schema = MessageSchema::new(
+            "AudioChunk",
+            MessageDirection::Server,
+            Schema::new("AudioChunkPayload"),
+        )
+        .describe("Audio data chunk")
+        .matches("type", "audio")
+        .matches("final", "false")
+        .responds_with("Ack");
 
         let serialized = serde_json::to_string(&schema).unwrap();
         let deserialized: MessageSchema = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, schema);
+        assert_eq!(serde_json::to_string(&deserialized).unwrap(), serialized);
+    }
+
+    #[test]
+    fn message_schema_omits_undeclared_links_selectors_and_fallback() {
+        let plain = MessageSchema::new("Data", MessageDirection::Server, Schema::new("Data"));
+        let value = serde_json::to_value(&plain).unwrap();
+        for absent in ["responds_with", "selectors", "fallback"] {
+            assert!(value.get(absent).is_none(), "{absent}: {value}");
+        }
+        let fallback = serde_json::to_value(plain.fallback()).unwrap();
+        assert_eq!(fallback["fallback"], serde_json::json!(true));
     }
 
     // ========== ConnectionLifecycle Tests ==========
@@ -405,18 +464,15 @@ mod tests {
     #[test]
     fn connection_lifecycle_serde_roundtrip() {
         let lifecycle = ConnectionLifecycle {
-            open: Some(MessageSchema {
-                name: "Init".to_string(),
-                direction: MessageDirection::Client,
-                schema: Schema::new("InitMessage"),
-                description: None,
-            }),
-            close: Some(MessageSchema {
-                name: "Close".to_string(),
-                direction: MessageDirection::Client,
-                schema: Schema::new("CloseMessage"),
-                description: Some("Graceful close".to_string()),
-            }),
+            open: Some(MessageSchema::new(
+                "Init",
+                MessageDirection::Client,
+                Schema::new("InitMessage"),
+            )),
+            close: Some(
+                MessageSchema::new("Close", MessageDirection::Client, Schema::new("CloseMessage"))
+                    .describe("Graceful close"),
+            ),
             keepalive: None,
         };
 
@@ -433,7 +489,8 @@ mod tests {
         assert!(endpoint.id.is_empty());
         assert!(endpoint.path.is_empty());
         assert!(endpoint.description.is_empty());
-        assert!(endpoint.connection_params.is_empty());
+        assert_eq!(endpoint.params, EndpointParams::default());
+        assert_eq!(endpoint.role, EndpointRole::Client);
         assert!(endpoint.messages.is_empty());
     }
 
@@ -443,19 +500,22 @@ mod tests {
             id: "StreamAudio".to_string(),
             path: "/audio/{voice_id}".to_string(),
             description: "Audio streaming".to_string(),
-            connection_params: vec![ConnectionParam {
-                name: "quality".to_string(),
-                param_type: ParamType::String,
-                required: false,
-                description: None,
-            }],
+            params: EndpointParams {
+                path: vec![crate::ParamDef::path("voice_id", crate::QueryParamType::String)],
+                ..EndpointParams::default().with_query_param(
+                    "quality",
+                    crate::QueryParamType::String,
+                    false,
+                    None,
+                )
+            },
+            role: EndpointRole::Both,
             lifecycle: ConnectionLifecycle::default(),
-            messages: vec![MessageSchema {
-                name: "Data".to_string(),
-                direction: MessageDirection::Server,
-                schema: Schema::new("DataPayload"),
-                description: None,
-            }],
+            messages: vec![MessageSchema::new(
+                "Data",
+                MessageDirection::Server,
+                Schema::new("DataPayload"),
+            )],
             runtime: None,
         };
 
@@ -474,20 +534,28 @@ mod tests {
             base_url: "wss://test.example.com".to_string(),
             docs_url: Some("https://docs.example.com".to_string()),
             auth: AuthStrategy::BearerToken { header: None },
+            auth_policy: Some(AuthPolicy::from_auth_strategy(&AuthStrategy::BearerToken {
+                header: None,
+            })),
             env_auth: vec!["TEST_API_KEY".to_string()],
+            env_mapping: Some(EnvMapping {
+                bearer_token: Some(crate::EnvList::single("TEST_API_KEY")),
+                ..EnvMapping::default()
+            }),
+            headers: vec![("X-Client".to_string(), "test".to_string())],
             version: None,
             endpoints: vec![WebSocketEndpoint {
                 id: "Echo".to_string(),
                 path: "/echo".to_string(),
                 description: "Echo messages".to_string(),
-                connection_params: vec![],
+                params: EndpointParams::default(),
+                role: EndpointRole::Host,
                 lifecycle: ConnectionLifecycle::default(),
-                messages: vec![MessageSchema {
-                    name: "Message".to_string(),
-                    direction: MessageDirection::Bidirectional,
-                    schema: Schema::new("EchoMessage"),
-                    description: None,
-                }],
+                messages: vec![MessageSchema::new(
+                    "Message",
+                    MessageDirection::Bidirectional,
+                    Schema::new("EchoMessage"),
+                )],
                 runtime: None,
             }],
             runtime: None,
@@ -523,7 +591,10 @@ mod tests {
                 base_url: "wss://test.com".to_string(),
                 docs_url: None,
                 auth: auth.clone(),
+                auth_policy: None,
                 env_auth: vec![],
+                env_mapping: None,
+                headers: vec![],
                 version: None,
                 endpoints: vec![],
                 runtime: None,
@@ -706,6 +777,7 @@ mod tests {
             "docs_url": null,
             "auth": "None",
             "env_auth": [],
+            "headers": [],
             "endpoints": []
         }"#;
         let api: WebSocketApi = serde_json::from_str(json).unwrap();
@@ -718,12 +790,13 @@ mod tests {
             "id": "Echo",
             "path": "/echo",
             "description": "Echo",
-            "connection_params": [],
+            "params": {"query": [], "header": [], "cookie": []},
             "lifecycle": {},
             "messages": []
         }"#;
         let endpoint: WebSocketEndpoint = serde_json::from_str(json).unwrap();
         assert!(endpoint.runtime.is_none());
+        assert_eq!(endpoint.role, EndpointRole::Client);
     }
 
     #[test]
@@ -734,13 +807,17 @@ mod tests {
             base_url: "wss://test.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
+            env_mapping: None,
+            headers: vec![],
             version: None,
             endpoints: vec![WebSocketEndpoint {
                 id: "Echo".to_string(),
                 path: "/echo".to_string(),
                 description: "Echo".to_string(),
-                connection_params: vec![],
+                params: EndpointParams::default(),
+                role: EndpointRole::Client,
                 lifecycle: ConnectionLifecycle::default(),
                 messages: vec![],
                 runtime: Some(WebSocketEndpointHints {
@@ -760,104 +837,55 @@ mod tests {
         assert_eq!(deserialized, api);
     }
 
-    // ========== Integration Test ==========
+    // ========== Shared Vocabulary Tests ==========
+
+    fn bare_api(auth: AuthStrategy, env_auth: &[&str]) -> WebSocketApi {
+        WebSocketApi {
+            name: "Test".to_string(),
+            description: "Test".to_string(),
+            base_url: "wss://test.com".to_string(),
+            docs_url: None,
+            auth,
+            auth_policy: None,
+            env_auth: env_auth.iter().map(|name| (*name).to_string()).collect(),
+            env_mapping: None,
+            headers: vec![],
+            version: None,
+            endpoints: vec![],
+            runtime: None,
+        }
+    }
 
     #[test]
-    fn elevenlabs_tts_websocket_example() {
-        let api = WebSocketApi {
-            name: "ElevenLabsTTS".to_string(),
-            description: "ElevenLabs Text-to-Speech WebSocket API".to_string(),
-            base_url: "wss://api.elevenlabs.io/v1".to_string(),
-            docs_url: Some("https://elevenlabs.io/docs/api-reference/websockets".to_string()),
-            auth: AuthStrategy::ApiKey {
-                header: "xi-api-key".to_string(),
-                value_prefix: None,
-            },
-            env_auth: vec![
-                "ELEVEN_LABS_API_KEY".to_string(),
-                "ELEVENLABS_API_KEY".to_string(),
-            ],
-            version: None,
-            endpoints: vec![WebSocketEndpoint {
-                id: "TextToSpeech".to_string(),
-                path: "/text-to-speech/{voice_id}/stream-input".to_string(),
-                description: "Stream text and receive audio chunks in real-time".to_string(),
-                connection_params: vec![
-                    ConnectionParam {
-                        name: "model_id".to_string(),
-                        param_type: ParamType::String,
-                        required: false,
-                        description: Some("Model to use (e.g., eleven_turbo_v2)".to_string()),
-                    },
-                    ConnectionParam {
-                        name: "output_format".to_string(),
-                        param_type: ParamType::String,
-                        required: false,
-                        description: Some("Audio format (mp3_44100, pcm_16000, etc.)".to_string()),
-                    },
-                    ConnectionParam {
-                        name: "optimize_streaming_latency".to_string(),
-                        param_type: ParamType::Integer,
-                        required: false,
-                        description: Some("Latency optimization (0-4)".to_string()),
-                    },
-                ],
-                lifecycle: ConnectionLifecycle {
-                    open: Some(MessageSchema {
-                        name: "BOS".to_string(),
-                        direction: MessageDirection::Client,
-                        schema: Schema::new("BeginOfStreamMessage"),
-                        description: Some(
-                            "Begin-of-stream with voice settings and generation config".to_string(),
-                        ),
-                    }),
-                    close: Some(MessageSchema {
-                        name: "EOS".to_string(),
-                        direction: MessageDirection::Client,
-                        schema: Schema::new("EndOfStreamMessage"),
-                        description: Some(
-                            "End-of-stream signal to flush remaining audio".to_string(),
-                        ),
-                    }),
-                    keepalive: None,
-                },
-                messages: vec![
-                    MessageSchema {
-                        name: "TextChunk".to_string(),
-                        direction: MessageDirection::Client,
-                        schema: Schema::new("TextChunkMessage"),
-                        description: Some("Text chunk to synthesize".to_string()),
-                    },
-                    MessageSchema {
-                        name: "AudioChunk".to_string(),
-                        direction: MessageDirection::Server,
-                        schema: Schema::new("AudioChunkResponse"),
-                        description: Some("Base64-encoded audio data".to_string()),
-                    },
-                    MessageSchema {
-                        name: "AlignmentInfo".to_string(),
-                        direction: MessageDirection::Server,
-                        schema: Schema::new("AlignmentResponse"),
-                        description: Some("Word-level timing alignment".to_string()),
-                    },
-                ],
-                runtime: None,
-            }],
-            runtime: None,
+    fn derived_policy_and_env_mapping_follow_rest() {
+        let auth = AuthStrategy::ApiKey {
+            header: "xi-api-key".to_string(),
+            value_prefix: None,
         };
-
-        assert_eq!(api.name, "ElevenLabsTTS");
-        assert_eq!(api.endpoints.len(), 1);
-
-        let endpoint = &api.endpoints[0];
-        assert_eq!(endpoint.id, "TextToSpeech");
-        assert_eq!(endpoint.connection_params.len(), 3);
-        assert!(endpoint.lifecycle.open.is_some());
-        assert!(endpoint.lifecycle.close.is_some());
-        assert_eq!(endpoint.messages.len(), 3);
-
-        let serialized = serde_json::to_string_pretty(&api).unwrap();
-        let deserialized: WebSocketApi = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized, api);
+        let api = bare_api(auth.clone(), &["FIRST", "SECOND"]);
+        assert_eq!(api.effective_auth_policy(), AuthPolicy::from_auth_strategy(&auth));
+        assert_eq!(
+            api.default_env_mapping(),
+            RestApi::legacy_env_mapping_for(&auth, &api.env_auth)
+        );
+        let key = api.default_env_mapping().api_key.expect("api key mapping");
+        assert_eq!(key.names.names(), ["FIRST", "SECOND"]);
+        assert_eq!(key.header, "xi-api-key");
     }
+
+    #[test]
+    fn explicit_policy_and_env_mapping_replace_the_derived_ones() {
+        let mut api = bare_api(AuthStrategy::None, &["UCR_DOCK_TOKEN"]);
+        assert_eq!(api.default_env_mapping(), EnvMapping::default());
+        let mapping = EnvMapping {
+            bearer_token: Some(crate::EnvList::single("UCR_DOCK_TOKEN")),
+            ..EnvMapping::default()
+        };
+        let policy = AuthPolicy::from_auth_strategy(&AuthStrategy::BearerToken { header: None });
+        api.env_mapping = Some(mapping.clone());
+        api.auth_policy = Some(policy.clone());
+        assert_eq!(api.default_env_mapping(), mapping);
+        assert_eq!(api.effective_auth_policy(), policy);
+    }
+
 }

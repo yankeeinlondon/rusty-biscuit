@@ -5,10 +5,28 @@ mod types;
 pub use types::*;
 
 use schematic_define::websocket::{
-    ConnectionLifecycle, ConnectionParam, FrameFormat, MessageDirection, MessageSchema, ParamType,
-    RequestIdType, WebSocketApi, WebSocketEndpoint, WebSocketRuntimeHints,
+    ConnectionLifecycle, MessageDirection, MessageSchema, WebSocketApi, WebSocketEndpoint,
 };
-use schematic_define::{AuthStrategy, Schema};
+use schematic_define::{AuthStrategy, EndpointParams, EnvMapping, ParamDef, QueryParamType, Schema};
+
+fn message(name: &str, direction: MessageDirection, schema: &str, description: &str) -> MessageSchema {
+    MessageSchema::new(name, direction, Schema::new(schema)).describe(description)
+}
+
+/// The `name` and `token` query parameters both channels take.
+fn channel_params(name_description: &str, token_description: &str) -> EndpointParams {
+    EndpointParams {
+        query: vec![
+            ParamDef::new("name", QueryParamType::String)
+                .required()
+                .describes(name_description),
+            ParamDef::new("token", QueryParamType::String)
+                .secret()
+                .describes(token_description),
+        ],
+        ..EndpointParams::default()
+    }
+}
 
 /// Creates the Samsung Smart TV remote control WebSocket API definition.
 ///
@@ -17,7 +35,9 @@ use schematic_define::{AuthStrategy, Schema};
 ///
 /// Connection requires a `name` parameter (base64-encoded client name) and
 /// optionally accepts a `token` from a previously approved session to bypass
-/// the on-TV approval prompt.
+/// the on-TV approval prompt. Approval happens on the TV, not through a
+/// message challenge, and replies are matched by event name only, so the
+/// definition declares no auth flow and no request correlation.
 ///
 /// ## Examples
 ///
@@ -30,111 +50,52 @@ use schematic_define::{AuthStrategy, Schema};
 /// ```
 #[must_use]
 pub fn define_samsung_smart_tv_remote_ws_api() -> WebSocketApi {
+    use MessageDirection::{Client, Server};
     let messages = vec![
-        MessageSchema {
-            name: "RemoteControlCommand".to_string(),
-            direction: MessageDirection::Client,
-            schema: Schema::new("SamsungRemoteControlCommand"),
-            description: Some(
-                "Remote key command (method, key, action). Use `Cmd=Click` for \
-                 single presses, `Press`/`Release` for hold gestures."
-                    .to_string(),
-            ),
-        },
-        MessageSchema {
-            name: "ChannelConnectEvent".to_string(),
-            direction: MessageDirection::Server,
-            schema: Schema::new("SamsungRemoteConnectEvent"),
-            description: Some(
-                "Emitted when the channel is successfully connected and authorized. \
-                 May include a `token` for future reconnects."
-                    .to_string(),
-            ),
-        },
-        MessageSchema {
-            name: "ChannelUnauthorizedEvent".to_string(),
-            direction: MessageDirection::Server,
-            schema: Schema::new("SamsungRemoteUnauthorizedEvent"),
-            description: Some(
-                "Emitted when channel connection is unauthorized (approval needed or denied)."
-                    .to_string(),
-            ),
-        },
-        MessageSchema {
-            name: "ChannelErrorEvent".to_string(),
-            direction: MessageDirection::Server,
-            schema: Schema::new("SamsungRemoteErrorEvent"),
-            description: Some("Emitted on channel-level errors.".to_string()),
-        },
-        MessageSchema {
-            name: "ChannelEnvelope".to_string(),
-            direction: MessageDirection::Bidirectional,
-            schema: Schema::new("SamsungRemoteEnvelope"),
-            description: Some(
-                "Generic envelope with deferred `RawValue` payload. Route by \
-                 inspecting `event` or `method`, then deserialize `data` on demand."
-                    .to_string(),
-            ),
-        },
-        MessageSchema {
-            name: "AppLaunchCommand".to_string(),
-            direction: MessageDirection::Client,
-            schema: Schema::new("SamsungAppLaunchCommand"),
-            description: Some(
-                "Launch an application via `ms.channel.emit` with optional deep-link \
-                 metadata. Supports both `DEEP_LINK` and `NATIVE_LAUNCH` action types."
-                    .to_string(),
-            ),
-        },
-        MessageSchema {
-            name: "InstalledAppsCommand".to_string(),
-            direction: MessageDirection::Client,
-            schema: Schema::new("SamsungInstalledAppsCommand"),
-            description: Some(
-                "Request the list of installed applications via `ms.channel.emit`. \
-                 The TV responds with an `ed.installedApp.get` event containing the app list."
-                    .to_string(),
-            ),
-        },
+        message("RemoteControlCommand", Client, "SamsungRemoteControlCommand",
+            "Remote key command (method, key, action). Use `Cmd=Click` for \
+             single presses, `Press`/`Release` for hold gestures.")
+            .matches("method", "ms.remote.control"),
+        message("ChannelConnectEvent", Server, "SamsungRemoteConnectEvent",
+            "Emitted when the channel is successfully connected and authorized. \
+             May include a `token` for future reconnects.")
+            .matches("event", "ms.channel.connect"),
+        message("ChannelUnauthorizedEvent", Server, "SamsungRemoteUnauthorizedEvent",
+            "Emitted when channel connection is unauthorized (approval needed or denied).")
+            .matches("event", "ms.channel.unauthorized"),
+        message("ChannelErrorEvent", Server, "SamsungRemoteErrorEvent",
+            "Emitted on channel-level errors.")
+            .matches("event", "ms.error"),
+        message("ChannelEnvelope", Server, "SamsungRemoteEnvelope",
+            "Generic envelope with deferred `RawValue` payload for any other event. \
+             Route by inspecting `event` or `method`, then deserialize `data` on demand.")
+            .fallback(),
+        // App launch and installed-apps commands share `method=ms.channel.emit`
+        // and differ only in the nested `params.event`; they are outbound only,
+        // so they declare no selector.
+        message("AppLaunchCommand", Client, "SamsungAppLaunchCommand",
+            "Launch an application via `ms.channel.emit` with optional deep-link \
+             metadata. Supports both `DEEP_LINK` and `NATIVE_LAUNCH` action types."),
+        message("InstalledAppsCommand", Client, "SamsungInstalledAppsCommand",
+            "Request the list of installed applications via `ms.channel.emit`. \
+             The TV responds with an `ed.installedApp.get` event containing the app list."),
     ];
 
     let art_mode_messages = vec![
-        MessageSchema {
-            name: "ArtModeCommand".to_string(),
-            direction: MessageDirection::Client,
-            schema: Schema::new("SamsungArtModeCommand"),
-            description: Some(
-                "Art Mode command sent via `ms.channel.emit` with double-encoded \
-                 data payload. Supports brightness, artwork selection, and mode control."
-                    .to_string(),
-            ),
-        },
-        MessageSchema {
-            name: "ArtModeEvent".to_string(),
-            direction: MessageDirection::Server,
-            schema: Schema::new("SamsungArtModeEvent"),
-            description: Some(
-                "Art Mode response event. The `data` field contains a double-encoded \
-                 JSON string that must be parsed separately."
-                    .to_string(),
-            ),
-        },
-        MessageSchema {
-            name: "ChannelConnectEvent".to_string(),
-            direction: MessageDirection::Server,
-            schema: Schema::new("SamsungRemoteConnectEvent"),
-            description: Some(
-                "Emitted when the Art Mode channel is successfully connected.".to_string(),
-            ),
-        },
-        MessageSchema {
-            name: "ChannelEnvelope".to_string(),
-            direction: MessageDirection::Bidirectional,
-            schema: Schema::new("SamsungRemoteEnvelope"),
-            description: Some(
-                "Generic envelope with deferred payload for the Art Mode channel.".to_string(),
-            ),
-        },
+        message("ArtModeCommand", Client, "SamsungArtModeCommand",
+            "Art Mode command sent via `ms.channel.emit` with double-encoded \
+             data payload. Supports brightness, artwork selection, and mode control.")
+            .matches("method", "ms.channel.emit"),
+        message("ArtModeEvent", Server, "SamsungArtModeEvent",
+            "Art Mode response event. The `data` field contains a double-encoded \
+             JSON string that must be parsed separately.")
+            .matches("event", "d2d_service_message"),
+        message("ChannelConnectEvent", Server, "SamsungRemoteConnectEvent",
+            "Emitted when the Art Mode channel is successfully connected.")
+            .matches("event", "ms.channel.connect"),
+        message("ChannelEnvelope", Server, "SamsungRemoteEnvelope",
+            "Generic envelope with deferred payload for any other Art Mode event.")
+            .fallback(),
     ];
 
     let endpoints = vec![
@@ -145,28 +106,13 @@ pub fn define_samsung_smart_tv_remote_ws_api() -> WebSocketApi {
             First connection may trigger an on-TV approval prompt; approved sessions \
             provide a token for subsequent reconnects."
                 .to_string(),
-            connection_params: vec![
-                ConnectionParam {
-                    name: "name".to_string(),
-                    param_type: ParamType::String,
-                    required: true,
-                    description: Some(
-                        "Base64-encoded client name used by Samsung remote channel".to_string(),
-                    ),
-                },
-                ConnectionParam {
-                    name: "token".to_string(),
-                    param_type: ParamType::String,
-                    required: false,
-                    description: Some(
-                        "Previously approved remote token to bypass repeated on-TV prompts"
-                            .to_string(),
-                    ),
-                },
-            ],
+            params: channel_params(
+                "Base64-encoded client name used by Samsung remote channel",
+                "Previously approved remote token to bypass repeated on-TV prompts",
+            ),
             lifecycle: ConnectionLifecycle::default(),
             messages,
-            runtime: None,
+            ..WebSocketEndpoint::default()
         },
         WebSocketEndpoint {
             id: "ArtMode".to_string(),
@@ -175,27 +121,13 @@ pub fn define_samsung_smart_tv_remote_ws_api() -> WebSocketApi {
                 brightness control, and Art Mode on/off. Uses double-encoded JSON in \
                 the `data` field of `ms.channel.emit` messages."
                 .to_string(),
-            connection_params: vec![
-                ConnectionParam {
-                    name: "name".to_string(),
-                    param_type: ParamType::String,
-                    required: true,
-                    description: Some(
-                        "Base64-encoded client name for the Art Mode channel".to_string(),
-                    ),
-                },
-                ConnectionParam {
-                    name: "token".to_string(),
-                    param_type: ParamType::String,
-                    required: false,
-                    description: Some(
-                        "Previously approved token to bypass on-TV approval prompt".to_string(),
-                    ),
-                },
-            ],
+            params: channel_params(
+                "Base64-encoded client name for the Art Mode channel",
+                "Previously approved token to bypass on-TV approval prompt",
+            ),
             lifecycle: ConnectionLifecycle::default(),
             messages: art_mode_messages,
-            runtime: None,
+            ..WebSocketEndpoint::default()
         },
     ];
 
@@ -207,21 +139,19 @@ pub fn define_samsung_smart_tv_remote_ws_api() -> WebSocketApi {
             "https://developer.samsung.com/smarttv/develop/extension-libraries/smart-view-sdk/receiver-apps/debugging.html".to_string(),
         ),
         auth: AuthStrategy::None,
+        auth_policy: None,
         env_auth: vec![],
+        env_mapping: Some(EnvMapping::default()),
+        headers: vec![],
         version: None,
         endpoints,
-        runtime: Some(WebSocketRuntimeHints {
-            frame_format: FrameFormat::JsonText,
-            supports_reconnect: true,
-            request_id_type: RequestIdType::String,
-        }),
+        runtime: None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::websocket::FrameFormat;
 
     #[test]
     fn ws_api_metadata() {
@@ -234,12 +164,12 @@ mod tests {
     }
 
     #[test]
-    fn ws_api_has_runtime_hints() {
+    fn ws_api_declares_no_request_id_type_or_correlation() {
+        // No documented request/response id pairing: replies match by event
+        // name, so neither an id type nor correlation hints are declared.
         let api = define_samsung_smart_tv_remote_ws_api();
-        let hints = api.runtime.as_ref().expect("runtime hints must be set");
-        assert_eq!(hints.frame_format, FrameFormat::JsonText);
-        assert!(hints.supports_reconnect);
-        assert_eq!(hints.request_id_type, RequestIdType::String);
+        assert!(api.runtime.is_none());
+        assert!(api.endpoints.iter().all(|ep| ep.runtime.is_none()));
     }
 
     #[test]
@@ -262,23 +192,27 @@ mod tests {
     fn remote_control_has_name_and_token_params() {
         let api = define_samsung_smart_tv_remote_ws_api();
         let ep = &api.endpoints[0];
-        assert_eq!(ep.connection_params.len(), 2);
+        assert!(ep.params.path.is_empty() && ep.params.header.is_empty());
+        assert_eq!(ep.params.query.len(), 2);
 
         let name_param = ep
-            .connection_params
+            .params
+            .query
             .iter()
             .find(|p| p.name == "name")
             .expect("name param must exist");
         assert!(name_param.required);
-        assert_eq!(name_param.param_type, ParamType::String);
+        assert_eq!(name_param.param_type, QueryParamType::String);
 
         let token_param = ep
-            .connection_params
+            .params
+            .query
             .iter()
             .find(|p| p.name == "token")
             .expect("token param must exist");
         assert!(!token_param.required);
-        assert_eq!(token_param.param_type, ParamType::String);
+        assert!(token_param.secret);
+        assert_eq!(token_param.param_type, QueryParamType::String);
     }
 
     #[test]
@@ -303,7 +237,8 @@ mod tests {
         let ep = &api.endpoints[1];
         assert_eq!(ep.id, "ArtMode");
         assert_eq!(ep.path, "/api/v2/channels/com.samsung.art-app");
-        assert_eq!(ep.connection_params.len(), 2);
+        let names: Vec<&str> = ep.params.query.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["name", "token"]);
         assert_eq!(ep.messages.len(), 4);
 
         let names: Vec<&str> = ep.messages.iter().map(|m| m.name.as_str()).collect();
@@ -337,6 +272,7 @@ mod tests {
             .iter()
             .find(|m| m.name == "ChannelEnvelope")
             .unwrap();
-        assert_eq!(envelope.direction, MessageDirection::Bidirectional);
+        assert_eq!(envelope.direction, MessageDirection::Server);
+        assert!(envelope.fallback && envelope.selectors.is_none());
     }
 }

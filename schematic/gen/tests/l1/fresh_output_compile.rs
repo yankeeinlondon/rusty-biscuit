@@ -3327,3 +3327,251 @@ fn slow_query_wire_matches_pre_split_baseline() {
         "the generated clients put different request lines on the wire"
     );
 }
+
+/// A Bearer-authenticated WebSocket API whose one endpoint is host-capable
+/// (every message bidirectional), so the generator emits its host module.
+/// No shipped WebSocket definition uses `BearerToken`.
+fn bearer_ws_fixture() -> schematic_define::WebSocketApi {
+    use schematic_define::Schema;
+    use schematic_define::websocket::{
+        ConnectionLifecycle, EndpointRole, MessageDirection, MessageSchema, WebSocketApi,
+        WebSocketEndpoint,
+    };
+
+    WebSocketApi {
+        name: "BearerFixtureWs".to_string(),
+        description: "Bearer-authenticated WebSocket fixture".to_string(),
+        base_url: "ws://127.0.0.1".to_string(),
+        docs_url: None,
+        auth: AuthStrategy::BearerToken { header: None },
+        auth_policy: None,
+        env_auth: vec!["BEARER_FIXTURE_WS_TOKEN".to_string()],
+        env_mapping: None,
+        headers: vec![],
+        version: None,
+        endpoints: vec![WebSocketEndpoint {
+            id: "Stream".to_string(),
+            path: "/stream".to_string(),
+            description: "Echo stream".to_string(),
+            role: EndpointRole::Host,
+            lifecycle: ConnectionLifecycle::default(),
+            messages: vec![MessageSchema::new(
+                "Frame",
+                MessageDirection::Bidirectional,
+                Schema::new("serde_json::Value"),
+            )],
+            ..WebSocketEndpoint::default()
+        }],
+        runtime: None,
+    }
+}
+
+/// Child tests run against the generated Bearer host. The child process gets
+/// `BEARER_FIXTURE_WS_TOKEN=fixture-token`; the host reads it per upgrade.
+const BEARER_WS_HOST_TEST: &str = r##"
+use std::sync::Arc;
+
+use futures_util::{SinkExt, StreamExt};
+use schematic_schema::ws_bearer_fixture::{BearerFixtureWsHost, WsConnectionContext, WsHandler};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::{Error, Message};
+
+struct Echo;
+
+impl WsHandler for Echo {
+    fn handle_message(
+        &self,
+        message: serde_json::Value,
+        _context: WsConnectionContext,
+    ) -> impl std::future::Future<Output = Option<serde_json::Value>> + Send {
+        async move { Some(message) }
+    }
+}
+
+async fn start_host() -> std::net::SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(BearerFixtureWsHost::serve(listener, Arc::new(Echo)));
+    addr
+}
+
+/// The upgrade's HTTP status, and on success one echoed frame.
+async fn upgrade(authorization: Option<&str>) -> (u16, Option<serde_json::Value>) {
+    let addr = start_host().await;
+    let mut request = format!("ws://{addr}/stream").into_client_request().unwrap();
+    if let Some(value) = authorization {
+        request.headers_mut().insert("Authorization", value.parse().unwrap());
+    }
+    match tokio_tungstenite::connect_async(request).await {
+        Ok((mut ws, response)) => {
+            ws.send(Message::Text(r#"{"ping":1}"#.into())).await.unwrap();
+            let echoed = match ws.next().await {
+                Some(Ok(Message::Text(text))) => serde_json::from_str(text.as_ref()).unwrap(),
+                other => panic!("expected an echoed text frame, got {other:?}"),
+            };
+            (response.status().as_u16(), Some(echoed))
+        }
+        Err(Error::Http(response)) => (response.status().as_u16(), None),
+        Err(other) => panic!("unexpected handshake failure: {other}"),
+    }
+}
+
+#[tokio::test]
+async fn bearer_host_rejects_a_missing_token_with_401() {
+    assert_eq!(upgrade(None).await, (401, None));
+}
+
+#[tokio::test]
+async fn bearer_host_rejects_a_wrong_token_with_401() {
+    assert_eq!(upgrade(Some("Bearer wrong-token")).await, (401, None));
+}
+
+#[tokio::test]
+async fn bearer_host_upgrades_a_matching_token() {
+    assert_eq!(
+        upgrade(Some("Bearer fixture-token")).await,
+        (101, Some(serde_json::json!({"ping": 1})))
+    );
+}
+"##;
+
+/// A client fixture whose handshake uses every supported parameter form:
+/// a path value, a required and an optional scalar query, an exploded and a
+/// comma/pipe-delimited array.
+fn query_ws_fixture() -> schematic_define::WebSocketApi {
+    use schematic_define::Schema;
+    use schematic_define::websocket::{MessageDirection, MessageSchema, WebSocketApi, WebSocketEndpoint};
+    use schematic_define::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
+    let array = |element: QueryParamType| QueryParamType::Array(Box::new(element));
+
+    WebSocketApi {
+        name: "QueryFixtureWs".to_string(),
+        description: "Handshake parameter fixture".to_string(),
+        base_url: "ws://127.0.0.1".to_string(),
+        docs_url: None,
+        auth: AuthStrategy::None,
+        auth_policy: None,
+        env_auth: vec![],
+        env_mapping: None,
+        headers: vec![],
+        version: None,
+        endpoints: vec![WebSocketEndpoint {
+            id: "Feed".to_string(),
+            path: "/rooms/{room}/feed".to_string(),
+            description: "Feed".to_string(),
+            params: EndpointParams {
+                path: vec![ParamDef::path("room", QueryParamType::String)],
+                query: vec![
+                    ParamDef::new("mode", QueryParamType::String).required(),
+                    ParamDef::new("limit", QueryParamType::Integer),
+                    ParamDef { explode: true, ..ParamDef::new("tag", array(QueryParamType::String)) },
+                    ParamDef::new("ids", array(QueryParamType::Integer)),
+                    ParamDef {
+                        style: ParamStyle::PipeDelimited,
+                        ..ParamDef::new("flags", array(QueryParamType::Boolean))
+                    },
+                ],
+                ..EndpointParams::default()
+            },
+            messages: vec![MessageSchema::new(
+                "Frame",
+                MessageDirection::Server,
+                Schema::new("serde_json::Value"),
+            )],
+            ..WebSocketEndpoint::default()
+        }],
+        runtime: None,
+    }
+}
+
+/// Child tests: the generated client's handshake target, as the server sees it.
+const QUERY_WS_CLIENT_TEST: &str = r##"
+use schematic_schema::ws_query_fixture::{FeedConnectionParams, QueryFixtureWs};
+use schematic_schema::ws_shared::WsClientOptions;
+
+/// The request target of one handshake to a base URL with a `/base` path.
+async fn target(room: &str, params: FeedConnectionParams) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut seen = None;
+        let _ws = tokio_tungstenite::accept_hdr_async(stream, |request: &tokio_tungstenite::tungstenite::handshake::server::Request, response| {
+            seen = Some(request.uri().to_string());
+            Ok(response)
+        })
+        .await
+        .unwrap();
+        seen.unwrap()
+    });
+    let client = QueryFixtureWs::with_base_url(format!("ws://{addr}/base"));
+    let ws = client.connect_feed(room, params, WsClientOptions::default()).await.unwrap();
+    let _ = ws.close().await;
+    server.await.unwrap()
+}
+
+#[tokio::test]
+async fn path_value_is_one_encoded_segment_and_unset_options_are_omitted() {
+    let params = FeedConnectionParams { mode: "live".to_string(), limit: None, tag: None, ids: None, flags: None };
+    assert_eq!(target("a/b c?d", params).await, "/base/rooms/a%2Fb%20c%3Fd/feed?mode=live");
+}
+
+#[tokio::test]
+async fn array_values_follow_their_declared_style() {
+    let params = FeedConnectionParams {
+        mode: "a b".to_string(),
+        limit: Some(5),
+        tag: Some(vec!["x,y".to_string(), "z".to_string()]),
+        ids: Some(vec![1, 2]),
+        flags: Some(vec![true, false]),
+    };
+    assert_eq!(
+        target("r", params).await,
+        "/base/rooms/r/feed?flags=true%7Cfalse&ids=1,2&limit=5&mode=a%20b&tag=x%2Cy&tag=z"
+    );
+}
+"##;
+
+#[test]
+fn slow_ws_handshake_parameters_reach_the_server_in_their_declared_form() {
+    let lockfile = biscuit_test_harness::manifest_dir!().join("../schema/Cargo.lock");
+    let module = schematic_gen::output::ws_modules::render_ws_api_module(&query_ws_fixture())
+        .expect("the query fixture lowers");
+
+    let fresh = FreshCrate::generate(&[], Definitions::Checkout, &lockfile);
+    fresh.add_module("ws_query_fixture", &module);
+    fresh.add_test_file("query_ws_client", QUERY_WS_CLIENT_TEST);
+    let run = fresh.nextest_run(&[]);
+    run.assert_success();
+    let report = format!("{}{}", run.stdout, run.stderr);
+    for test in [
+        "path_value_is_one_encoded_segment_and_unset_options_are_omitted",
+        "array_values_follow_their_declared_style",
+    ] {
+        assert!(report.contains(test), "the child run did not report {test}:\n{report}");
+    }
+}
+
+#[test]
+fn slow_bearer_ws_host_compiles_and_checks_tokens() {
+    let lockfile = biscuit_test_harness::manifest_dir!().join("../schema/Cargo.lock");
+    let module = schematic_gen::output::ws_modules::render_ws_api_module(&bearer_ws_fixture())
+        .expect("the Bearer fixture lowers");
+    assert!(module.contains("pub struct BearerFixtureWsHost"), "{module}");
+
+    let fresh = FreshCrate::generate(&[], Definitions::Checkout, &lockfile);
+    fresh.add_module("ws_bearer_fixture", &module);
+    fresh.cargo_check().assert_success();
+
+    fresh.add_test_file("bearer_ws_host", BEARER_WS_HOST_TEST);
+    let run = fresh.nextest_run(&[("BEARER_FIXTURE_WS_TOKEN", "fixture-token")]);
+    run.assert_success();
+    let report = format!("{}{}", run.stdout, run.stderr);
+    for test in [
+        "bearer_host_rejects_a_missing_token_with_401",
+        "bearer_host_rejects_a_wrong_token_with_401",
+        "bearer_host_upgrades_a_matching_token",
+    ] {
+        assert!(report.contains(test), "the child run did not report {test}:\n{report}");
+    }
+}

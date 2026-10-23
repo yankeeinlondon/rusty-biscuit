@@ -99,7 +99,7 @@ impl Default for UnfoldedCircleDockWs {
         Self::new()
     }
 }
-///Client for the DockRoot endpoint.
+/// Client for the DockRoot endpoint.
 pub struct DockRootClient {
     transport: super::ws_shared::WsTransportHandle,
     event_rx: tokio::sync::mpsc::Receiver<
