@@ -11,7 +11,105 @@ docs_created_during_phase_1:
     - schematic/features/2026-10-20-type-constraints/spikes/s2-schemars-output.md
     - schematic/features/2026-10-20-type-constraints/spikes/s3-body-encode-reuse.md
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+    - schematic-runtime
+    - schematic-gen
+    - schematic-schema
+    - schematic-define
+    - schematic-definitions
+source_files_during_phase_2:
+    - Cargo.lock
+    - schematic/gen/src/lib.rs
+    - schematic/runtime/Cargo.toml
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/validate/mod.rs
+    - schematic/runtime/src/validate/decimal.rs
+    - schematic/runtime/src/validate/eval.rs
+    - schematic/runtime/src/validate/pattern.rs
+    - schematic/runtime/src/validate/plan.rs
+    - schematic/runtime/src/validate/violation.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/validate_decimal.rs
+    - schematic/runtime/tests/l1/validate_eval.rs
+    - schematic/runtime/tests/l1/validate_report.rs
+    - schematic/runtime/tests/fixtures/compile_fail/path_segment_holds_only_static_names.rs
+    - schematic/runtime/tests/fixtures/compile_fail/path_segment_holds_only_static_names.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/violation_holds_no_submitted_value.rs
+    - schematic/runtime/tests/fixtures/compile_fail/violation_holds_no_submitted_value.stderr
+    - schematic/schema/Cargo.lock
+    - schematic/schema/src/lib.rs
+docs_updated_during_phase_2:
+    - docs/dependencies.md
+    - schematic/docs/dependencies.md
+    - schematic/docs/runtime/README.md
+    - schematic/runtime/README.md
+docs_created_during_phase_2:
+    - schematic/docs/runtime/validation.md
+skills_files_updated_during_phase_2:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/responses.md
+source_files_during_phase_3:
+    - Cargo.lock
+    - schematic/schema/Cargo.lock
+    - schematic/define/Cargo.toml
+    - schematic/define/src/builders.rs
+    - schematic/define/src/bundle.rs
+    - schematic/define/src/constraints/check.rs
+    - schematic/define/src/constraints/mod.rs
+    - schematic/define/src/constraints/number.rs
+    - schematic/define/src/constraints/pattern.rs
+    - schematic/define/src/constraints/registered.rs
+    - schematic/define/src/lib.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/export/parameters.rs
+    - schematic/define/src/openapi/import/mappings/mod.rs
+    - schematic/define/src/openapi/import/mappings/responses.rs
+    - schematic/define/src/pagination.rs
+    - schematic/define/src/pagination/lower.rs
+    - schematic/define/src/pagination/validate.rs
+    - schematic/define/src/params/mod.rs
+    - schematic/define/src/params/param_def.rs
+    - schematic/define/src/registration.rs
+    - schematic/define/src/request.rs
+    - schematic/define/src/types.rs
+    - schematic/define/tests/builders.rs
+    - schematic/define/tests/definition_serde.rs
+    - schematic/define/tests/endpoint_literal_surface.rs
+    - schematic/define/tests/pagination_constraints.rs
+    - schematic/define/tests/registered_model_rules.rs
+    - schematic/define/tests/value_constraints.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/gen/src/codegen/api_struct/tests.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/src/codegen/pagination/tests.rs
+    - schematic/gen/src/codegen/request_structs/tests.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/tests/l1/endpoint_auth_output.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/gen/tests/l1/postman_runnable.rs
+    - schematic/gen/tests/l1/query_params_codegen.rs
+    - schematic/gen/tests/l1/typed_path_output.rs
+docs_updated_during_phase_3:
+    - docs/dependencies.md
+    - schematic/docs/dependencies.md
+    - schematic/docs/definition-builders.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/io/definition-bundles.md
+    - schematic/docs/pagination.md
+    - schematic/docs/typed-registration.md
+    - schematic/docs/websocket-definitions.md
+docs_created_during_phase_3:
+    - schematic/docs/value-constraints.md
+skills_files_updated_during_phase_3:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/define.md
+    - .claude/skills/schematic-define/schematic/pagination.md
 ---
 
 # Type constraints implementation plan
@@ -249,21 +347,21 @@ before anything depends on it. Nothing is wired into generation yet.
 
 ### Wave 4: Foundations (parallel; disjoint files)
 
-- [ ] **Decimal type**
+- [x] **Decimal type**
   - New `runtime/src/validate/decimal.rs`: parse from JSON number text,
     compare, test divisibility (`multipleOf` with positive divisor), equality
     (`1 == 1.0`), exponent-bound guard. Integrator adds the Phase 1-chosen
     dependency.
   - Tests: boundary integers beyond `u64`, `0.1` divisor against `0.3`/`0.35`,
     `1` vs `1.0` vs `1e0`, negative values, exponent over the bound.
-- [ ] **Violation types**
+- [x] **Violation types**
   - New `runtime/src/validate/violation.rs`: `Violation`, `Violations`, `Keyword`,
     `PathSegment`, deterministic ordering helpers, `Display`/`Debug` that carry
     only path, keyword, and numeric limits.
   - Tests: ordering (declaration order → object-key order → index → keyword);
     redacted map-key placeholder; compile-fail-style test that no constructor
     accepts a submitted value.
-- [ ] **Pattern cell**
+- [x] **Pattern cell**
   - New `runtime/src/validate/pattern.rs`: const-constructible `Pattern` with lazy
     `OnceLock<Regex>`, compile once, never panic, never compile per request (a
     runtime compile failure becomes an unenforced-skip with no panic, since
@@ -273,7 +371,7 @@ before anything depends on it. Nothing is wired into generation yet.
 
 ### Wave 5: Evaluator
 
-- [ ] **Plan and evaluator**
+- [x] **Plan and evaluator**
   - New `runtime/src/validate/plan.rs` and `eval.rs`: a data-only `Plan`
     (string/number/array/enum/const rules, object properties, array items, map
     values, named references for recursion, nullable wrapper) and an evaluator over
@@ -291,7 +389,7 @@ before anything depends on it. Nothing is wired into generation yet.
 
 ### Wave 6: Integration surface
 
-- [ ] **Export and ABI**
+- [x] **Export and ABI**
   - Wire `validate` into `runtime/src/lib.rs`, increment `ABI` by one (rule 7), update its doc
     comment expectations, and add `docs/runtime` page content for the module.
   - Add the `Violations` → `InvalidArgument` conversion (reason text only; no
@@ -305,7 +403,7 @@ changed yet, so no regeneration.
 
 ### Wave 7: Data model (sequential; one owner for the shared types)
 
-- [ ] **Constraint types**
+- [x] **Constraint types**
   - New `define/src/constraints.rs`: `Constraints` with the fluent builders from
     rule 9, `ConstraintNumber` stored as decimal text (lossless), item rules,
     serde with fields omitted when absent and reads-as-absent for old snapshots.
@@ -317,7 +415,7 @@ changed yet, so no regeneration.
 
 ### Wave 8: Validation and pagination lowering (parallel; disjoint files)
 
-- [ ] **Definition checks**
+- [x] **Definition checks**
   - Validate at API build and generator entry, including deserialized
     definitions: all semantic definition errors from the robustness section,
     located with API/endpoint/schema path/keyword/reason, using the existing
@@ -325,14 +423,14 @@ changed yet, so no regeneration.
   - Pattern admission (rule 10): `regex-syntax` AST walk; produce the
     admitted/rejected table as a test fixture and as docs. Integrator adds `regex`.
   - Tests per validator plus the two loader wiring checks and the control rows.
-- [ ] **Pagination lowering**
+- [x] **Pagination lowering**
   - Lower declared page-size min/max (in `define/src/pagination*`) into
     `Constraints` for the adopted parameter so OpenAPI/rustdoc show them; fail
     definition validation when parameter and strategy bounds conflict or
     disagree.
   - Tests: agreeing bounds pass; conflicting min, conflicting max, and one-sided
     declaration each fail with a located error.
-- [ ] **Registered-model rules**
+- [x] **Registered-model rules**
   - Document and test Schemars attributes on handwritten fields as the single
     source (fixture from S2), including root and nested types and unsupported
     composition detection (`oneOf`/`anyOf`/`allOf`/`not` or unresolved reference
