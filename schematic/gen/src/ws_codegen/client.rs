@@ -536,7 +536,12 @@ fn generate_connect_method(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStre
     if !ep.query_params.is_empty() {
         method_args.push(quote! { params: #params_struct_name });
     }
+    if let Some(open) = &ep.lifecycle_open {
+        let payload = parse_schema_type_tokens(&open.schema_type);
+        method_args.push(quote! { opening: #payload });
+    }
     method_args.push(quote! { options: super::ws_shared::WsClientOptions });
+    let binary = !matches!(plan.frame_format, FrameFormat::JsonText);
 
     let path_substitutions: Vec<TokenStream> = ep
         .path_params
@@ -605,23 +610,128 @@ fn generate_connect_method(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStre
         quote! { let mut path = #path.to_string(); }
     };
 
-    let description = format!(
-        "Connect to the {} endpoint.\n\n\
-         ## Errors\n\n\
+    let open_method = format_ident!("open_{}", to_snake_case(&ep.id));
+    let mut forwarded: Vec<TokenStream> = ep
+        .path_params
+        .iter()
+        .map(|param| {
+            let ident = param_ident(&param.name);
+            quote! { #ident }
+        })
+        .collect();
+    if !ep.query_params.is_empty() {
+        forwarded.push(quote! { params });
+    }
+    let opening_value = if ep.lifecycle_open.is_some() {
+        let field = match &ep.open_credential_field {
+            Some(field) => quote! { Some(#field) },
+            None => quote! { None },
+        };
+        forwarded.push(quote! { opening });
+        quote! { Some(super::ws_shared::opening_message(&opening, #field, &credential, #binary)?) }
+    } else {
+        quote! { None }
+    };
+    forwarded.push(quote! { options });
+    let correlation = match &ep.correlation {
+        CorrelationStrategy::Correlated {
+            response_id_field,
+            id_type,
+            ..
+        } => {
+            let string_ids = matches!(id_type, RequestIdType::String);
+            let server_message = format_ident!("{}ServerMessage", ep.id);
+            quote! {
+                Some(super::ws_shared::CorrelationConfig {
+                    id_field: #response_id_field,
+                    string_ids: #string_ids,
+                    selected_message: #server_message::selected_message,
+                })
+            }
+        }
+        CorrelationStrategy::None => quote! { None },
+    };
+
+    let opening_doc = ep.lifecycle_open.as_ref().map_or_else(String::new, |open| {
+        let binding = ep.open_credential_field.as_ref().map_or_else(String::new, |field| {
+            format!(
+                " Its `{field}` field is filled from the selected credential when left empty; \
+                 a different value is refused."
+            )
+        });
+        format!(
+            "\n\n`opening` is the `{}` message. It is serialized once and written first on \
+             this connection and on every reconnect, before the client is ready.{binding}",
+            open.name
+        )
+    });
+    let errors_doc = "\n\n## Errors\n\n\
          [`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a \
-         kind the API does not accept or a header, query value, or cookie of the request \
-         already carries it; [`super::ws_shared::WsError::InvalidHeader`] for a header the \
-         upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server \
-         answers the upgrade with another status, including a redirect, which is never \
-         followed.",
+         kind the API does not accept or a header, query value, cookie, or opening field \
+         already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a \
+         header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the \
+         server answers the upgrade with another status, including a redirect, which is never \
+         followed; [`super::ws_shared::WsError::OpeningWrite`]; and \
+         [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts \
+         `handshake_timeout`.";
+    let description = format!(
+        "Connect to the {} endpoint. It is ready once the upgrade and the opening message, if \
+         any, are done.{opening_doc}{errors_doc}",
         ep.id
     );
+    let with_setup = if ep.has_setup {
+        let setup_method = format_ident!("connect_{}_with_setup", to_snake_case(&ep.id));
+        let setup_type = format_ident!("{}Setup", ep.id);
+        let server_message = format_ident!("{}ServerMessage", ep.id);
+        let setup_doc = format!(
+            "Connect to the {} endpoint, running `setup` on this connection and on every \
+             reconnect before the client is ready.{opening_doc}\n\n\
+             `setup` gets a fresh [`{setup_type}`] each time, after the opening message, and \
+             performs the endpoint's challenge exchange, such as answering an authentication \
+             request; the session's `credential` is the one the handshake carried. The whole \
+             attempt is bounded by `handshake_timeout`. Returning \
+             [`super::ws_shared::WsSetupError::Rejected`] closes the client with \
+             [`super::ws_shared::WsError::SetupRejected`] and is never retried; any other \
+             error is [`super::ws_shared::WsError::Setup`] and uses the reconnect budget on a \
+             reconnect.{errors_doc}",
+            ep.id
+        );
+        quote! {
+            #[doc = #setup_doc]
+            pub async fn #setup_method<F, Fut>(
+                &self,
+                #(#method_args,)*
+                setup: F,
+            ) -> Result<#client_name, super::ws_shared::WsError>
+            where
+                F: Fn(#setup_type) -> Fut + Send + Sync + 'static,
+                Fut: std::future::Future<Output = Result<(), super::ws_shared::WsSetupError>> + Send + 'static,
+            {
+                let setup: super::ws_shared::SetupFactory = std::sync::Arc::new(move |channel| {
+                    Box::pin(setup(super::ws_shared::WsSetupSession::new(channel, #server_message::decode)))
+                });
+                self.#open_method(#(#forwarded,)* Some(setup)).await
+            }
+        }
+    } else {
+        TokenStream::new()
+    };
 
     quote! {
         #[doc = #description]
         pub async fn #method_name(
             &self,
             #(#method_args),*
+        ) -> Result<#client_name, super::ws_shared::WsError> {
+            self.#open_method(#(#forwarded,)* None).await
+        }
+
+        #with_setup
+
+        async fn #open_method(
+            &self,
+            #(#method_args,)*
+            setup: Option<super::ws_shared::SetupFactory>,
         ) -> Result<#client_name, super::ws_shared::WsError> {
             #path_binding
             #(#path_substitutions)*
@@ -645,7 +755,14 @@ fn generate_connect_method(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStre
                 &credential,
                 auth.secret_names(),
             )?;
-            #client_name::connect(handshake, options).await
+            let session = super::ws_shared::WsSession {
+                opening: #opening_value,
+                handshake,
+                setup,
+                correlation: #correlation,
+                binary: #binary,
+            };
+            #client_name::connect(session, options).await
         }
     }
 }
@@ -777,13 +894,16 @@ fn generate_endpoint_client(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
     let client_message = format_ident!("{}ClientMessage", ep.id);
     let server_message = format_ident!("{}ServerMessage", ep.id);
 
-    let constructor_extra_fields = if has_correlation {
-        quote! {
-            request_timeout: options.request_timeout,
-            max_pending: options.max_pending_requests,
-        }
+    let (capture_options, constructor_extra_fields) = if has_correlation {
+        (
+            quote! {
+                let request_timeout = options.request_timeout;
+                let max_pending = options.max_pending_requests;
+            },
+            quote! { request_timeout, max_pending, },
+        )
     } else {
-        TokenStream::new()
+        (TokenStream::new(), TokenStream::new())
     };
 
     let extra_fields = if has_correlation {
@@ -795,51 +915,26 @@ fn generate_endpoint_client(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
         TokenStream::new()
     };
 
-    let reader_message_handler = if let CorrelationStrategy::Correlated {
-        ref response_id_field,
-        id_type,
-        ..
-    } = ep.correlation
-    {
-        let string_ids = matches!(id_type, RequestIdType::String);
-        quote! {
-            Ok(frame) => {
-                if let Some(frame) = super::ws_shared::answer_pending(
-                    &pending_for_supervisor,
-                    frame,
-                    #response_id_field,
-                    #string_ids,
-                    #server_message::selected_message,
-                ) {
-                    let _ = event_tx.send(Ok(frame)).await;
-                }
-            }
-        }
-    } else {
-        quote! {
-            Ok(frame) => {
-                let _ = event_tx.send(Ok(frame)).await;
-            }
-        }
-    };
-
-    let pending_cleanup = if has_correlation {
-        quote! {
-            // Dropping each reply wakes its caller with `Disconnected`.
-            super::ws_shared::fail_pending(&pending_for_supervisor);
-        }
-    } else {
-        TokenStream::new()
-    };
-    let pending_for_supervisor_decl = if has_correlation {
-        quote! { let pending_for_supervisor = pending.clone(); }
-    } else {
-        TokenStream::new()
-    };
-
     let client_docs = endpoint_client_docs(ep);
 
+    let setup_alias = if ep.has_setup {
+        let setup_type = format_ident!("{}Setup", ep.id);
+        let doc = format!(
+            "The setup session of the {} endpoint, passed to the callback of `connect_{}_with_setup`.",
+            ep.id,
+            to_snake_case(&ep.id)
+        );
+        quote! {
+            #[doc = #doc]
+            pub type #setup_type = super::ws_shared::WsSetupSession<#client_message, #server_message>;
+        }
+    } else {
+        TokenStream::new()
+    };
+
     quote! {
+        #setup_alias
+
         #(#[doc = #client_docs])*
         pub struct #client_name {
             transport: super::ws_shared::WsTransportHandle,
@@ -851,165 +946,14 @@ fn generate_endpoint_client(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
         }
 
         impl #client_name {
-            /// Connect to the endpoint.
+            /// Makes the explicit connect's attempt and starts the supervisor.
             pub(crate) async fn connect(
-                handshake: super::ws_shared::WsHandshake,
+                session: super::ws_shared::WsSession,
                 options: super::ws_shared::WsClientOptions,
             ) -> Result<Self, super::ws_shared::WsError> {
-                let ws_stream = handshake.dial(&options).await?;
-                let auth_method = handshake.auth_method().clone();
-
-                let _receive_timeout = options.receive_timeout;
-                // TODO: Enforce receive_timeout as an idle inbound timeout in the supervisor loop.
-
-                let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(options.outbound_capacity);
-                let (event_tx, event_rx) = tokio::sync::mpsc::channel(options.inbound_capacity);
-                let (state_tx, state_rx) = tokio::sync::watch::channel(super::ws_shared::WsConnectionState::Connecting);
-                let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
-                let pending = super::ws_shared::PendingRequests::default();
-
-                let options_for_supervisor = options.clone();
-                #pending_for_supervisor_decl
-
-                let supervisor_handle = tokio::spawn(async move {
-                    use futures_util::{SinkExt, StreamExt};
-                    use tokio_tungstenite::tungstenite::Message;
-
-                    let mut active_stream = Some(ws_stream);
-                    let reconnect_policy = options_for_supervisor.reconnect.clone();
-                    let mut reconnect_attempt: u32 = 0;
-                    let mut manual_close = false;
-
-                    loop {
-                        let stream = if let Some(stream) = active_stream.take() {
-                            reconnect_attempt = 0;
-                            stream
-                        } else {
-                            let Some(policy) = reconnect_policy.as_ref() else {
-                                let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
-                                break;
-                            };
-
-                            if let Some(max_attempts) = policy.max_attempts
-                                && reconnect_attempt >= max_attempts
-                            {
-                                let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
-                                break;
-                            }
-
-                            let _ = state_tx.send(super::ws_shared::WsConnectionState::Connecting);
-                            let delay = super::ws_shared::reconnect_delay(policy, reconnect_attempt);
-                            tokio::time::sleep(delay).await;
-
-                            // The credential selected by the explicit connect is reused.
-                            match handshake.dial(&options_for_supervisor).await {
-                                Ok(stream) => {
-                                    reconnect_attempt = reconnect_attempt.saturating_add(1);
-                                    stream
-                                }
-                                Err(err) => {
-                                    // A rejected credential or a redirect would be refused again.
-                                    let terminal = err.is_terminal_handshake_rejection();
-                                    let _ = event_tx.send(Err(err)).await;
-                                    if terminal {
-                                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
-                                        break;
-                                    }
-                                    reconnect_attempt = reconnect_attempt.saturating_add(1);
-                                    continue;
-                                }
-                            }
-                        };
-
-                        let (mut write, mut read) = stream.split();
-                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
-
-                        loop {
-                            tokio::select! {
-                                cmd = writer_rx.recv() => {
-                                    match cmd {
-                                        Some(super::ws_shared::WriterCommand::SendText(text)) => {
-                                            if write.send(Message::Text(text.into())).await.is_err() {
-                                                break;
-                                            }
-                                        }
-                                        Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
-                                            if write.send(Message::Binary(data.into())).await.is_err() {
-                                                break;
-                                            }
-                                        }
-                                        Some(super::ws_shared::WriterCommand::Close) => {
-                                            manual_close = true;
-                                            let _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
-                                            let _ = write.close().await;
-                                            break;
-                                        }
-                                        None => {
-                                            manual_close = true;
-                                            let _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
-                                            let _ = write.close().await;
-                                            break;
-                                        }
-                                    }
-                                }
-                                msg_result = read.next() => {
-                                    match msg_result {
-                                        Some(Ok(Message::Text(text))) => {
-                                            let raw = super::ws_shared::WsRawFrame::Text(text.to_string());
-                                            match super::ws_shared::WsInboundFrame::parse(raw) {
-                                                #reader_message_handler
-                                                Err(e) => {
-                                                    let _ = event_tx.send(Err(e)).await;
-                                                }
-                                            }
-                                        }
-                                        Some(Ok(Message::Binary(data))) => {
-                                            let raw = super::ws_shared::WsRawFrame::Binary(data.to_vec());
-                                            match super::ws_shared::WsInboundFrame::parse(raw) {
-                                                #reader_message_handler
-                                                Err(e) => {
-                                                    let _ = event_tx.send(Err(e)).await;
-                                                }
-                                            }
-                                        }
-                                        Some(Ok(Message::Close(_))) => break,
-                                        Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
-                                        Some(Err(e)) => {
-                                            let _ = event_tx.send(Err(super::ws_shared::WsError::Transport(e))).await;
-                                            break;
-                                        }
-                                        None => break,
-                                    }
-                                }
-                            }
-                        }
-
-                        #pending_cleanup
-
-                        if !manual_close {
-                            // Commands queued for the lost connection are dropped, never
-                            // written to its replacement.
-                            manual_close = super::ws_shared::discard_queued(&mut writer_rx);
-                        }
-
-                        if manual_close {
-                            let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
-                            break;
-                        }
-
-                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
-                        active_stream = None;
-                    }
-                });
-
-                let transport = super::ws_shared::WsTransportHandle {
-                    writer_tx,
-                    state_rx,
-                    supervisor_handle,
-                    next_id,
-                    pending,
-                };
-
+                let auth_method = session.handshake.auth_method().clone();
+                #capture_options
+                let (transport, event_rx) = super::ws_shared::connect_session(session, options).await?;
                 Ok(Self {
                     transport,
                     event_rx,
@@ -1017,7 +961,6 @@ fn generate_endpoint_client(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
                     #constructor_extra_fields
                 })
             }
-
             /// Where the handshake credential came from. It names the source
             /// selected when connecting, not proof that the server accepted it.
             pub fn auth_method(&self) -> &schematic_runtime::AuthMethod {
@@ -1025,6 +968,12 @@ fn generate_endpoint_client(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
             }
 
             /// Sends one message; it is written as its payload alone.
+            ///
+            /// ## Errors
+            ///
+            /// [`super::ws_shared::WsError::Disconnected`] at once while the
+            /// connection is not ready; nothing is queued for a later
+            /// connection.
             pub async fn send(
                 &self,
                 message: #client_message,
@@ -1045,11 +994,7 @@ fn generate_endpoint_client(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
                 message: &M,
             ) -> Result<(), super::ws_shared::WsError> {
                 let command = #encode_command;
-                self.transport
-                    .writer_tx
-                    .send(command)
-                    .await
-                    .map_err(|_| super::ws_shared::WsError::Disconnected)
+                self.transport.send(command).await
             }
 
             #(#lifecycle_helpers)*
@@ -1096,13 +1041,13 @@ fn generate_endpoint_client(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
                 )
             }
 
-            /// Initiate a graceful close.
+            /// Closes the client and waits until it is `Closed`. A ready
+            /// connection gets a Close frame; a reconnect in progress
+            /// (backoff, upgrade, or setup) is abandoned. Nothing redials
+            /// afterwards, and pending requests fail with `Disconnected`.
             pub async fn close(&self) -> Result<(), super::ws_shared::WsError> {
-                self.transport
-                    .writer_tx
-                    .send(super::ws_shared::WriterCommand::Close)
-                    .await
-                    .map_err(|_| super::ws_shared::WsError::Disconnected)
+                self.transport.close().await;
+                Ok(())
             }
 
             /// Returns the current connection state.
@@ -1198,11 +1143,10 @@ fn generate_lifecycle_helper(method: &LifecycleMessagePlan, kind: &str) -> Token
 }
 
 fn generate_lifecycle_helpers(ep: &EndpointPlan) -> Vec<TokenStream> {
+    // The open message has no helper: connect takes its payload and sends
+    // it on every connection, so a helper could only send it a second time.
     let mut methods = Vec::new();
 
-    if let Some(ref open) = ep.lifecycle_open {
-        methods.push(generate_lifecycle_helper(open, "open"));
-    }
     if let Some(ref close) = ep.lifecycle_close {
         methods.push(generate_lifecycle_helper(close, "close"));
     }
@@ -1245,6 +1189,8 @@ mod tests {
                 bidirectional_messages: vec![],
                 messages: vec![],
                 lifecycle_open: None,
+                open_credential_field: None,
+                has_setup: false,
                 lifecycle_close: None,
                 lifecycle_keepalive: None,
                 has_lifecycle_open: false,

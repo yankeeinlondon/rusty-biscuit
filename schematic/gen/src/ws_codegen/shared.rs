@@ -2,12 +2,15 @@
 //!
 //! Generates `ws_shared.rs` containing `WsError`, `WsClientOptions`,
 //! `ReconnectPolicy`, `WsConnectionState`, `WsTransportHandle`, the
-//! `WsHandshake` a client dials and redials with, the pending-request table
-//! of correlated requests, the inbound frame types the typed message enums
-//! decode from, and `WsEventStream`.
+//! `WsHandshake` a client dials and redials with, the connection supervisor
+//! and its setup session, the pending-request table of correlated requests,
+//! the inbound frame types the typed message enums decode from, and
+//! `WsEventStream`.
 
 use proc_macro2::TokenStream;
 use quote::quote;
+
+use super::supervisor::generate_supervisor;
 
 /// Generate the complete `ws_shared` module token stream.
 pub fn generate_ws_shared_module() -> TokenStream {
@@ -21,6 +24,7 @@ pub fn generate_ws_shared_module() -> TokenStream {
     let writer_command = generate_writer_command();
     let handshake = generate_handshake();
     let correlation = generate_correlation();
+    let supervisor = generate_supervisor();
 
     quote! {
         //! Shared WebSocket runtime types.
@@ -48,6 +52,7 @@ pub fn generate_ws_shared_module() -> TokenStream {
         #transport_handle
         #handshake
         #correlation
+        #supervisor
         #frames
         #event_stream
     }
@@ -98,17 +103,32 @@ fn generate_ws_error() -> TokenStream {
             #[error("Serialization error: {0}")]
             Serde(#[from] serde_json::Error),
 
-            /// Authentication failed.
-            #[error("Authentication failed: {0}")]
-            AuthRejected(String),
+            /// The setup callback rejected the session, for example a
+            /// refused authentication message. Terminal: the client closes
+            /// and nothing is retried.
+            #[error("Setup rejected: {0}")]
+            SetupRejected(String),
 
-            /// Authentication timed out.
-            #[error("Authentication timed out")]
-            AuthTimeout,
+            /// The setup callback failed in a way a new connection may not
+            /// repeat. It counts as one failed attempt.
+            #[error("Setup failed: {0}")]
+            Setup(String),
 
-            /// WebSocket handshake timed out.
-            #[error("Handshake timed out after {0}s")]
-            HandshakeTimeout(u64),
+            /// The opening message could not be written. It counts as one
+            /// failed attempt.
+            #[error("Could not write the opening message: {0}")]
+            OpeningWrite(String),
+
+            /// One connection attempt (upgrade, opening message, and setup)
+            /// did not finish within `WsClientOptions::handshake_timeout`.
+            #[error("Connection attempt timed out after {0:?}")]
+            HandshakeTimeout(std::time::Duration),
+
+            /// No inbound frame of any kind arrived for
+            /// `WsClientOptions::receive_timeout`; the connection is treated
+            /// as lost.
+            #[error("No inbound frame for {0:?}")]
+            ReceiveTimeout(std::time::Duration),
 
             /// Request timed out waiting for a correlated response.
             #[error("Request timed out after {0}s")]
@@ -168,6 +188,14 @@ fn generate_ws_error() -> TokenStream {
                 matches!(self, Self::HandshakeRejected { status, .. } if matches!(status, 401 | 403 | 300..=399))
             }
 
+            /// Whether a failed attempt ends the client instead of using the
+            /// reconnect budget: a terminal handshake rejection or a setup
+            /// rejection.
+            #[must_use]
+            pub fn is_terminal(&self) -> bool {
+                self.is_terminal_handshake_rejection() || matches!(self, Self::SetupRejected(_))
+            }
+
             /// The redacted `Location` of a rejected handshake, if it sent one.
             #[must_use]
             pub fn location(&self) -> Option<&str> {
@@ -198,9 +226,14 @@ fn generate_ws_client_options() -> TokenStream {
         /// Options for configuring a WebSocket client connection.
         #[derive(Debug, Clone)]
         pub struct WsClientOptions {
-            /// Timeout for the WebSocket handshake.
+            /// Bound on one connection attempt: the upgrade, the opening
+            /// message, and the setup callback together. The explicit connect
+            /// makes one attempt; each reconnect gets the full bound again.
             pub handshake_timeout: std::time::Duration,
-            /// Timeout for receiving any message.
+            /// Inbound idle limit once a connection is ready: this long
+            /// without a frame of any kind, pings and pongs included, loses
+            /// the connection with [`WsError::ReceiveTimeout`]. Outbound
+            /// traffic does not reset it. `None` never times out.
             pub receive_timeout: Option<std::time::Duration>,
             /// Default timeout for correlated request-response calls.
             pub request_timeout: std::time::Duration,
@@ -350,7 +383,9 @@ fn generate_reconnect_policy() -> TokenStream {
             pub multiplier: f64,
             /// Random jitter ratio (0.0 to 1.0).
             pub jitter: f64,
-            /// Maximum number of reconnect attempts (None = unlimited).
+            /// Consecutive failed reconnect attempts allowed before the
+            /// client closes; a connection that completes setup resets the
+            /// count. `Some(0)` never reconnects, `None` is unlimited.
             pub max_attempts: Option<u32>,
         }
 
@@ -377,7 +412,7 @@ fn generate_ws_connection_state() -> TokenStream {
             Disconnected,
             /// Establishing connection.
             Connecting,
-            /// Performing authentication.
+            /// Upgraded; sending the opening message or running setup.
             Authenticating,
             /// Connected and ready for messages.
             Ready,
@@ -404,7 +439,7 @@ fn generate_ws_connection_state() -> TokenStream {
 
 fn generate_writer_command() -> TokenStream {
     quote! {
-        /// Internal command sent to the writer task.
+        /// A frame queued for the supervisor to write.
         #[derive(Debug)]
         #[allow(dead_code)]
         pub(crate) enum WriterCommand {
@@ -412,23 +447,36 @@ fn generate_writer_command() -> TokenStream {
             SendText(String),
             /// Send a binary message.
             SendBinary(Vec<u8>),
-            /// Initiate graceful close.
-            Close,
+        }
+
+        impl WriterCommand {
+            fn into_message(self) -> tokio_tungstenite::tungstenite::Message {
+                match self {
+                    Self::SendText(text) => tokio_tungstenite::tungstenite::Message::Text(text.into()),
+                    Self::SendBinary(data) => tokio_tungstenite::tungstenite::Message::Binary(data.into()),
+                }
+            }
         }
     }
 }
 
 fn generate_ws_transport_handle() -> TokenStream {
     quote! {
-        /// Handle to an active WebSocket connection's transport tasks.
+        /// Handle to an active WebSocket connection's supervisor task.
         ///
         /// Provides channels for sending messages and observing connection state.
-        /// Dropping this handle signals the transport tasks to shut down.
+        /// Dropping this handle stops the supervisor at once; nothing redials.
         pub struct WsTransportHandle {
-            /// Channel for sending commands to the writer task.
-            pub(crate) writer_tx: mpsc::Sender<WriterCommand>,
+            /// Frames for the supervisor to write, each tagged with the
+            /// connection it was sent on.
+            pub(crate) writer_tx: mpsc::Sender<(u64, WriterCommand)>,
+            /// The number of the current connection; a reconnect that
+            /// becomes ready increments it before publishing `Ready`.
+            pub(crate) connection: Arc<AtomicU64>,
             /// Connection state watcher.
             pub(crate) state_rx: watch::Receiver<WsConnectionState>,
+            /// Set to ask the supervisor for a graceful close.
+            pub(crate) shutdown: watch::Sender<bool>,
             /// Supervisor task join handle.
             pub(crate) supervisor_handle: JoinHandle<()>,
             /// Monotonic request ID generator.
@@ -446,6 +494,40 @@ fn generate_ws_transport_handle() -> TokenStream {
             /// Returns a cloned watch receiver for connection state changes.
             pub fn state_watcher(&self) -> watch::Receiver<WsConnectionState> {
                 self.state_rx.clone()
+            }
+
+            /// Queues `command` for the current connection, waiting while the
+            /// outbound queue is full.
+            ///
+            /// ## Errors
+            ///
+            /// [`WsError::Disconnected`] unless the connection is ready both
+            /// when called and once the queue has room: a message is never
+            /// held for a later connection. A command queued just before a
+            /// loss is dropped by the supervisor, never written to the
+            /// replacement.
+            pub(crate) async fn send(&self, command: WriterCommand) -> Result<(), WsError> {
+                use std::sync::atomic::Ordering;
+                // Read the connection before the state: a reconnect bumps the
+                // number before it publishes `Ready`.
+                let connection = self.connection.load(Ordering::SeqCst);
+                if self.state() != WsConnectionState::Ready {
+                    return Err(WsError::Disconnected);
+                }
+                let permit = self.writer_tx.reserve().await.map_err(|_| WsError::Disconnected)?;
+                if self.connection.load(Ordering::SeqCst) != connection || self.state() != WsConnectionState::Ready {
+                    return Err(WsError::Disconnected);
+                }
+                permit.send((connection, command));
+                Ok(())
+            }
+
+            /// Asks the supervisor to close and waits until it has: during a
+            /// reconnect backoff, dial, or setup the attempt is abandoned.
+            pub(crate) async fn close(&self) {
+                self.shutdown.send_replace(true);
+                let mut state = self.state_rx.clone();
+                let _ = state.wait_for(|state| *state == WsConnectionState::Closed).await;
             }
         }
 
@@ -500,7 +582,7 @@ fn generate_handshake() -> TokenStream {
         pub struct WsHandshake {
             url: String,
             headers: tokio_tungstenite::tungstenite::http::HeaderMap,
-            auth_method: schematic_runtime::AuthMethod,
+            credential: schematic_runtime::HandshakeCredential,
             secrets: schematic_runtime::SecretNames,
         }
 
@@ -553,14 +635,20 @@ fn generate_handshake() -> TokenStream {
                 Ok(Self {
                     url: url.as_str().to_string(),
                     headers: map,
-                    auth_method: credential.auth_method().clone(),
+                    credential: credential.clone(),
                     secrets,
                 })
             }
 
             /// Where the placed credential came from.
             pub(crate) fn auth_method(&self) -> &schematic_runtime::AuthMethod {
-                &self.auth_method
+                self.credential.auth_method()
+            }
+
+            /// The selected credential, for an opening field or a setup
+            /// message that carries it too.
+            pub(crate) fn credential(&self) -> &schematic_runtime::HandshakeCredential {
+                &self.credential
             }
 
             /// The URL with secret query values redacted.
@@ -569,22 +657,15 @@ fn generate_handshake() -> TokenStream {
                 self.secrets.redact_url_reference(&self.url).as_str().to_string()
             }
 
-            /// Performs the upgrade within `options.handshake_timeout`.
+            /// Performs the upgrade; the caller bounds it with the attempt's
+            /// timeout.
             ///
             /// ## Errors
             ///
-            /// [`WsError::HandshakeTimeout`], [`WsError::HandshakeRejected`]
-            /// for any non-101 answer (a redirect is not followed), and
-            /// [`WsError::Handshake`] for every other failure.
-            pub(crate) async fn dial(
-                &self,
-                options: &WsClientOptions,
-            ) -> Result<
-                tokio_tungstenite::WebSocketStream<
-                    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-                >,
-                WsError,
-            > {
+            /// [`WsError::HandshakeRejected`] for any non-101 answer (a
+            /// redirect is not followed), and [`WsError::Handshake`] for
+            /// every other failure.
+            pub(crate) async fn dial(&self, options: &WsClientOptions) -> Result<WsStream, WsError> {
                 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
                 let mut request = self
@@ -600,10 +681,9 @@ fn generate_handshake() -> TokenStream {
                     options.websocket_config,
                     options.disable_nagle,
                 );
-                match tokio::time::timeout(options.handshake_timeout, connect).await {
-                    Err(_) => Err(WsError::HandshakeTimeout(options.handshake_timeout.as_secs())),
-                    Ok(Err(error)) => Err(self.handshake_error(error)),
-                    Ok(Ok((stream, _))) => Ok(stream),
+                match connect.await {
+                    Err(error) => Err(self.handshake_error(error)),
+                    Ok((stream, _)) => Ok(stream),
                 }
             }
 
@@ -634,7 +714,7 @@ fn generate_handshake() -> TokenStream {
                 f.debug_struct("WsHandshake")
                     .field("url", &self.redacted_url())
                     .field("headers", &self.headers.keys().map(|name| name.as_str()).collect::<Vec<_>>())
-                    .field("auth_method", &self.auth_method)
+                    .field("auth_method", self.auth_method())
                     .finish()
             }
         }
@@ -749,11 +829,11 @@ fn generate_correlation() -> TokenStream {
         }
 
         /// Drops the commands queued for a lost connection. Returns `true`
-        /// when one of them was a close, or the client is gone.
-        pub(crate) fn discard_queued(writer_rx: &mut mpsc::Receiver<WriterCommand>) -> bool {
+        /// when the client is gone.
+        pub(crate) fn discard_queued(writer_rx: &mut mpsc::Receiver<(u64, WriterCommand)>) -> bool {
             loop {
                 match writer_rx.try_recv() {
-                    Ok(WriterCommand::Close) | Err(mpsc::error::TryRecvError::Disconnected) => return true,
+                    Err(mpsc::error::TryRecvError::Disconnected) => return true,
                     Ok(_) => {}
                     Err(mpsc::error::TryRecvError::Empty) => return false,
                 }

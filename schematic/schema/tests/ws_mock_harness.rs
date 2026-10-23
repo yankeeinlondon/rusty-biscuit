@@ -264,3 +264,85 @@ async fn an_armed_failing_stream_fails_the_next_write() {
     }
     assert_eq!(server.frames(), [(0, Message::Text("before".into()))]);
 }
+
+/// The payload of heartbeat ping number `n`.
+fn ping_payload(n: u64) -> Vec<u8> {
+    n.to_be_bytes().to_vec()
+}
+
+#[tokio::test]
+async fn a_heartbeat_pings_until_released_and_records_the_pongs() {
+    let until = Barrier::new();
+    let server = MockWsServer::start(vec![Script::Accept(vec![
+        Step::Heartbeat { every: Duration::from_millis(100), until: until.clone(), read: true },
+        Step::text("after"),
+    ])])
+    .await;
+    let mut ws = connect(&server.ws_origin()).await.unwrap();
+
+    // Reading lets tungstenite answer each ping.
+    let mut pings = Vec::new();
+    tokio::select! {
+        () = server.wait_for_pongs(3, WAIT) => {}
+        () = async {
+            while let Some(Ok(message)) = ws.next().await {
+                if let Message::Ping(payload) = message {
+                    pings.push(payload.to_vec());
+                }
+            }
+        } => panic!("the client stream ended during the heartbeat"),
+    }
+    until.release();
+    let after = tokio::time::timeout(WAIT, async {
+        loop {
+            match ws.next().await.unwrap().unwrap() {
+                Message::Ping(payload) => pings.push(payload.to_vec()),
+                other => return other,
+            }
+        }
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(after, Message::Text("after".into()), "release ends the heartbeat step");
+    let pongs = server.pongs();
+    assert!(pongs.len() >= 3, "{pongs:?}");
+    for (n, (connection, payload)) in pongs.iter().enumerate() {
+        assert_eq!(*connection, 0);
+        assert_eq!(*payload, ping_payload(n as u64 + 1), "pongs echo the pings in order");
+    }
+    assert_eq!(pings[..3], [ping_payload(1), ping_payload(2), ping_payload(3)]);
+}
+
+#[tokio::test]
+async fn a_heartbeat_without_read_leaves_client_frames_unread() {
+    let until = Barrier::new();
+    let server = MockWsServer::start(vec![Script::Accept(vec![
+        Step::Heartbeat { every: Duration::from_millis(100), until: until.clone(), read: false },
+        Step::Receive(1),
+    ])])
+    .await;
+    let mut ws = connect(&server.ws_origin()).await.unwrap();
+    ws.send(Message::Text("early".into())).await.unwrap();
+
+    let mut pings = 0;
+    let read = tokio::time::timeout(WAIT, async {
+        while pings < 3 {
+            if let Message::Ping(_) = ws.next().await.unwrap().unwrap() {
+                pings += 1;
+            }
+        }
+    })
+    .await;
+    assert!(read.is_ok(), "pings keep arriving while the server does not read");
+    assert!(server.frames().is_empty(), "nothing is read during the heartbeat");
+    assert!(server.pongs().is_empty(), "pongs are recorded only with `read`");
+
+    until.release();
+    // Keep reading so the client's pending pongs and the server's reads proceed.
+    tokio::select! {
+        () = server.wait_for_frames(1, WAIT) => {}
+        () = async { while let Some(Ok(_)) = ws.next().await {} } => {}
+    }
+    assert_eq!(server.frames(), [(0, Message::Text("early".into()))]);
+}

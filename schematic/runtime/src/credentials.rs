@@ -79,6 +79,14 @@ impl Credential {
         }
     }
 
+    /// The key or token; `None` for a Basic pair.
+    fn single_secret(&self) -> Option<&str> {
+        match &self.0 {
+            Secret::AccessToken(secret) | Secret::ApiKey(secret) => Some(secret),
+            Secret::Basic { .. } => None,
+        }
+    }
+
     /// The method this credential is for.
     pub fn kind(&self) -> CredentialKind {
         match self.0 {
@@ -365,16 +373,22 @@ impl AuthConfig {
     }
 
     fn resolve_env(&self) -> Option<Resolved> {
+        self.resolve_env_secret().map(|(resolved, _)| resolved)
+    }
+
+    /// [`resolve_env`](Self::resolve_env) with the single secret it read:
+    /// the key or token, or `None` for a Basic pair.
+    fn resolve_env_secret(&self) -> Option<(Resolved, Option<String>)> {
         let env = self.env.as_ref()?;
         let (password_var, password) = first_non_empty(&env.vars)?;
-        let value = match &env.placement {
+        let (value, secret) = match &env.placement {
             CredentialPlacement::Basic => {
                 let (_, username) = first_non_empty(&env.username_vars)?;
-                basic_value(&username, &password)
+                (basic_value(&username, &password), None)
             }
-            placement => Credential::api_key(password).wire_value(placement),
+            placement => (Credential::api_key(password.clone()).wire_value(placement), Some(password)),
         };
-        Some(Resolved::sent(&env.placement, value, AuthMethod::EnvVar(password_var)))
+        Some((Resolved::sent(&env.placement, value, AuthMethod::EnvVar(password_var)), secret))
     }
 }
 
@@ -399,12 +413,18 @@ impl AuthConfig {
         let (credential, auth, level) = match (per_call, client) {
             (Some(credential), _) => (credential, AuthMethod::PerCall, "per-call"),
             (None, Some(credential)) => (credential, AuthMethod::ClientLevel, "client"),
-            (None, None) => return Ok(HandshakeCredential(self.resolve_env().unwrap_or_else(Resolved::anonymous))),
+            (None, None) => {
+                let (resolved, secret) = self.resolve_env_secret().unwrap_or_else(|| (Resolved::anonymous(), None));
+                return Ok(HandshakeCredential { resolved, secret });
+            }
         };
         let placement = self.placement_for(credential.kind()).ok_or_else(|| {
             InvalidArgument::new(format!("the API does not accept a {level} {} credential", credential.kind()))
         })?;
-        Ok(HandshakeCredential(Resolved::sent(placement, credential.wire_value(placement), auth)))
+        Ok(HandshakeCredential {
+            resolved: Resolved::sent(placement, credential.wire_value(placement), auth),
+            secret: credential.single_secret().map(str::to_string),
+        })
     }
 
     /// The names whose values redaction hides for this API: the built-in
@@ -418,13 +438,26 @@ impl AuthConfig {
 /// [`AuthConfig::select_handshake`]: a placement and its wire value, or
 /// none. `Debug` shows the placement and source, never the value.
 #[derive(Clone)]
-pub struct HandshakeCredential(Resolved);
+pub struct HandshakeCredential {
+    resolved: Resolved,
+    /// The key or token before placement; `None` for a Basic pair or none.
+    secret: Option<String>,
+}
 
 impl HandshakeCredential {
     /// Where the credential came from; [`AuthMethod::Anonymous`] when none
     /// was selected.
     pub fn auth_method(&self) -> &AuthMethod {
-        &self.0.auth
+        &self.resolved.auth
+    }
+
+    /// The selected key or token itself, without the prefix or scheme its
+    /// placement adds, for a protocol that also carries the credential in a
+    /// message after the handshake. `None` when nothing was selected or the
+    /// selection is a Basic pair.
+    #[must_use]
+    pub fn expose_secret(&self) -> Option<&str> {
+        self.secret.as_deref()
     }
 
     /// Writes the credential where its placement sends it: a header, a
@@ -438,7 +471,7 @@ impl HandshakeCredential {
     /// sources are refused, never both sent), or the value is not a valid
     /// header value.
     pub fn apply(&self, url: &mut Url, headers: &mut HeaderMap) -> Result<(), InvalidArgument> {
-        match &self.0.sent {
+        match &self.resolved.sent {
             Some((placement, value)) => crate::client::place_credential(url, headers, placement, value),
             None => Ok(()),
         }
@@ -448,8 +481,8 @@ impl HandshakeCredential {
 impl fmt::Debug for HandshakeCredential {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HandshakeCredential")
-            .field("placement", &self.0.sent.as_ref().map(|(placement, _)| placement))
-            .field("auth", &self.0.auth)
+            .field("placement", &self.resolved.sent.as_ref().map(|(placement, _)| placement))
+            .field("auth", &self.resolved.auth)
             .finish()
     }
 }

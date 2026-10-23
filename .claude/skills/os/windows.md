@@ -309,6 +309,17 @@ Measured with `wt remove`'s own `ReadDirectoryChangesW` adapter
   Take the type from `FILE_NOTIFY_EXTENDED_INFORMATION.FileAttributes`
   (`ReadDirectoryChangesExW`, NTFS only) instead.
 
+## A refused loopback connect takes about 2 seconds
+
+On macOS and Linux, connecting to a closed `127.0.0.1` port fails with
+`ECONNREFUSED` at once. Windows answers the RST by retrying the SYN, and
+reports `WSAECONNREFUSED` only after about 2 s. A test that dials a "just
+freed" port to get a refusal therefore races any timeout of 2 s or less, and
+on Windows sees the timeout instead of the refusal (schematic-schema's
+`query_secret_is_absent_from_every_dial_error` got `HandshakeTimeout(2s)`).
+Give such a dial a budget well past 2 s (10 s costs nothing, since the
+refusal ends it), or assert on a live listener that rejects instead.
+
 ## The `windows-latest` leg
 
 Leg size, timing, and excluded `#![cfg(unix)]` binaries are in

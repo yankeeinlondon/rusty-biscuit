@@ -381,8 +381,15 @@ async fn query_secret_is_absent_from_every_dial_error() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.local_addr().unwrap().port()
     };
+    // Windows retries the SYN for about 2 s before reporting a refused
+    // loopback connect, so the attempt needs a budget well past that.
     let refused = SamsungSmartTvRemoteWs::with_base_url(format!("ws://127.0.0.1:{closed_port}"))
-        .connect_remote_control(samsung_params(), options())
+        .connect_remote_control(
+            samsung_params(),
+            WsClientOptions::builder()
+                .handshake_timeout(Duration::from_secs(10))
+                .build(),
+        )
         .await
         .err()
         .expect("nothing listens on the port");

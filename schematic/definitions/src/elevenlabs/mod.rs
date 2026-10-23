@@ -257,6 +257,8 @@ pub fn define_elevenlabs_websocket_api() -> schematic_define::WebSocketApi {
                     close: Some(message("EOS", MessageDirection::Client, "TtsCloseMessage",
                         "End-of-stream signal")),
                     keepalive: None,
+                    // The begin-of-stream message may also carry the API key.
+                    open_credential_field: Some("xi-api-key".to_string()),
                 },
                 // One inbound message: no selector is needed to choose it.
                 messages: vec![
@@ -285,6 +287,7 @@ pub fn define_elevenlabs_websocket_api() -> schematic_define::WebSocketApi {
                     close: Some(message("CloseSocket", MessageDirection::Client,
                         "MultiContextCloseSocketMessage", "Close the entire socket")),
                     keepalive: None,
+                    open_credential_field: None,
                 },
                 messages: vec![
                     message("TextChunk", MessageDirection::Client, "MultiContextTextMessage",

@@ -82,6 +82,13 @@ pub enum Step {
     Close,
     /// Drop the TCP connection without a close frame.
     Drop,
+    /// Send a ping every `every` (the first at once) until `until` is
+    /// released. Ping `n` (from 1) carries `n` as eight big-endian bytes.
+    /// With `read`, frames are read meanwhile: pongs are recorded
+    /// ([`MockWsServer::pongs`]) and data frames as [`Step::Receive`]
+    /// records them. Without it nothing is read, so a peer's writes back
+    /// up once the transport buffers fill.
+    Heartbeat { every: Duration, until: Barrier, read: bool },
 }
 
 impl Step {
@@ -157,6 +164,7 @@ struct Record {
     connections: usize,
     requests: Vec<RecordedRequest>,
     frames: Vec<(usize, Message)>,
+    pongs: Vec<(usize, Vec<u8>)>,
 }
 
 struct Shared {
@@ -236,6 +244,12 @@ impl MockWsServer {
         self.shared.record.lock().unwrap().frames.clone()
     }
 
+    /// Pong payloads [`Step::Heartbeat`] received so far, with their
+    /// connection index.
+    pub fn pongs(&self) -> Vec<(usize, Vec<u8>)> {
+        self.shared.record.lock().unwrap().pongs.clone()
+    }
+
     /// Waits until `ready` holds for the record, or panics after `within`.
     async fn wait_until(&self, within: Duration, what: &str, ready: impl Fn(&Record) -> bool) {
         let mut changed = self.shared.changed.subscribe();
@@ -269,6 +283,12 @@ impl MockWsServer {
     /// Waits for at least `count` recorded frames.
     pub async fn wait_for_frames(&self, count: usize, within: Duration) {
         self.wait_until(within, &format!("{count} frame(s)"), |r| r.frames.len() >= count)
+            .await;
+    }
+
+    /// Waits for at least `count` recorded pongs.
+    pub async fn wait_for_pongs(&self, count: usize, within: Duration) {
+        self.wait_until(within, &format!("{count} pong(s)"), |r| r.pongs.len() >= count)
             .await;
     }
 
@@ -403,10 +423,56 @@ async fn run_script(stream: TcpStream, index: usize, shared: &Shared, script: Sc
                 return;
             }
             Step::Drop => return,
+            Step::Heartbeat { every, until, read } => {
+                if !heartbeat(&mut ws, index, shared, every, &until, read).await {
+                    return;
+                }
+            }
         }
     }
 
     while let Some(Ok(_)) = ws.next().await {}
+}
+
+/// Runs [`Step::Heartbeat`]; `false` once the connection has ended.
+async fn heartbeat<S>(
+    ws: &mut tokio_tungstenite::WebSocketStream<S>,
+    index: usize,
+    shared: &Shared,
+    every: Duration,
+    until: &Barrier,
+    read: bool,
+) -> bool
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let stop = until.wait();
+    tokio::pin!(stop);
+    let mut ticker = tokio::time::interval(every);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut sent: u64 = 0;
+    loop {
+        tokio::select! {
+            () = &mut stop => return true,
+            _ = ticker.tick() => {
+                sent += 1;
+                let payload = sent.to_be_bytes().to_vec();
+                if ws.send(Message::Ping(payload.into())).await.is_err() {
+                    return false;
+                }
+            }
+            message = ws.next(), if read => match message {
+                Some(Ok(Message::Pong(payload))) => {
+                    shared.update(|record| record.pongs.push((index, payload.to_vec())));
+                }
+                Some(Ok(message @ (Message::Text(_) | Message::Binary(_)))) => {
+                    shared.update(|record| record.frames.push((index, message)));
+                }
+                Some(Ok(_)) => {}
+                Some(Err(_)) | None => return false,
+            },
+        }
+    }
 }
 
 fn rejection_response(status: u16, headers: &[(String, String)]) -> ErrorResponse {

@@ -256,7 +256,7 @@ fn correlated_clients_use_options_request_timeout() {
     let code = tokens.to_string();
 
     assert!(
-        code.contains("request_timeout : options . request_timeout"),
+        code.contains("let request_timeout = options . request_timeout"),
         "Expected request timeout to come from options"
     );
     assert!(
@@ -840,4 +840,57 @@ fn core_requests_are_typed_per_declared_pair() {
         names,
         ["request_request_envelope", "request_auth", "request_ping", "request_version", "request_system", "request_value"]
     );
+}
+
+/// R3: connect takes the typed opening payload, binds its declared credential
+/// field, and no helper can send the opening message a second time.
+#[test]
+fn elevenlabs_connect_takes_the_opening_payload_and_binds_its_credential_field() {
+    let plan = lower_to_plan(&define_elevenlabs_websocket_api()).unwrap();
+    let code = generate_ws_client_module(&plan).to_string();
+    assert!(code.contains("opening : TtsInitMessage"), "{code}");
+    assert!(code.contains("opening : MultiContextInitMessage"), "{code}");
+    assert!(
+        code.contains("opening_message (& opening , Some (\"xi-api-key\")"),
+        "the text-to-speech opening binds `xi-api-key`: {code}"
+    );
+    assert!(
+        code.contains("opening_message (& opening , None"),
+        "the multi-context opening binds nothing: {code}"
+    );
+    assert!(!code.contains("fn send_bos"), "no explicit opening helper: {code}");
+    assert!(!code.contains("fn send_init_context"), "no explicit opening helper: {code}");
+    assert!(code.contains("fn send_eos"), "close helpers remain: {code}");
+}
+
+/// R3: an endpoint with a challenge flow gets a setup connect; one without
+/// does not.
+#[test]
+fn only_challenge_flow_endpoints_get_a_setup_connect() {
+    let core = lower_to_plan(&define_unfolded_circle_core_ws_api()).unwrap();
+    let code = generate_ws_client_module(&core).to_string();
+    assert!(code.contains("pub async fn connect_core_ws_with_setup"), "{code}");
+    assert!(
+        code.contains("pub type CoreWsSetup = super :: ws_shared :: WsSetupSession < CoreWsClientMessage , CoreWsServerMessage >"),
+        "{code}"
+    );
+
+    let samsung = lower_to_plan(&define_samsung_smart_tv_remote_ws_api()).unwrap();
+    let code = generate_ws_client_module(&samsung).to_string();
+    assert!(!code.contains("_with_setup"), "{code}");
+    assert!(!code.contains("WsSetupSession"), "{code}");
+}
+
+/// R8: the receive timeout is enforced by the shared supervisor, so the
+/// endpoint clients carry no placeholder for it.
+#[test]
+fn the_receive_timeout_is_enforced_in_the_shared_supervisor() {
+    let shared = generate_ws_shared_module().to_string();
+    assert!(shared.contains("ReceiveTimeout"), "{shared}");
+    assert!(shared.contains("idle_expired"), "{shared}");
+    for api in [define_unfolded_circle_core_ws_api(), define_elevenlabs_websocket_api()] {
+        let code = generate_ws_client_module(&lower_to_plan(&api).unwrap()).to_string();
+        assert!(!code.contains("_receive_timeout"), "{code}");
+        assert!(!code.contains("TODO"), "{code}");
+    }
 }

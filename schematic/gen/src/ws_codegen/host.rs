@@ -776,6 +776,8 @@ mod tests {
                 bidirectional_messages: vec!["Msg".to_string()],
                 messages: vec![],
                 lifecycle_open: None,
+                open_credential_field: None,
+                has_setup: false,
                 lifecycle_close: None,
                 lifecycle_keepalive: None,
                 has_lifecycle_open: false,

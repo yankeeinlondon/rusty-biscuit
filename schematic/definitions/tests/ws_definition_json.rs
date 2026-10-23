@@ -335,3 +335,48 @@ fn every_shipped_definition_round_trips_twice_without_loss() {
         assert_eq!(first, second, "{}", api.name);
     }
 }
+
+/// `lifecycle.open_credential_field`, the opening payload field bound to the
+/// handshake credential. Its own control adds an open message with the
+/// binding to the Dock document; each cell edits that one field.
+#[test]
+fn the_open_credential_field_has_one_outcome_per_shape() {
+    const FIELD: &str = "/endpoints/0/lifecycle/open_credential_field";
+    let with_binding = |replacement: Option<Value>| {
+        let mut value = control();
+        let lifecycle = &mut value["endpoints"][0]["lifecycle"];
+        lifecycle["open"] = json!({
+            "name": "Init",
+            "direction": "client",
+            "schema": serde_json::to_value(schematic_define::Schema::new("InitMessage")).unwrap(),
+            "description": null,
+        });
+        let (parent, key) = FIELD.rsplit_once('/').unwrap();
+        let map = value.pointer_mut(parent).unwrap().as_object_mut().unwrap();
+        if let Some(replacement) = replacement {
+            map.insert(key.to_string(), replacement);
+        }
+        load(&serde_json::to_string(&value).unwrap())
+    };
+    let field = |api: WebSocketApi| api.endpoints[0].lifecycle.open_credential_field.clone();
+
+    // Control: the declared field is read exactly and survives a round trip.
+    let control_api = with_binding(Some(json!("xi-api-key"))).expect("control loads");
+    assert_eq!(field(control_api.clone()).as_deref(), Some("xi-api-key"));
+    let again: WebSocketApi = load(&serde_json::to_string(&control_api).unwrap()).unwrap();
+    assert_eq!(again, control_api);
+
+    // Absent binds nothing and is not written back.
+    let absent = with_binding(None).expect("absent loads");
+    assert_eq!(field(absent.clone()), None);
+    let written = serde_json::to_value(&absent).unwrap();
+    assert!(written.pointer(FIELD).is_none(), "{written}");
+
+    // Explicit null and wrong types never read as absent.
+    for shape in [Value::Null, json!(1), json!(true), json!([]), json!({}), json!(["xi-api-key"])] {
+        assert!(with_binding(Some(shape.clone())).is_err(), "{shape} must not load");
+    }
+
+    // Empty loads as declared; generation rejects it (`ws_codegen::plan` tests).
+    assert_eq!(field(with_binding(Some(json!(""))).expect("empty loads")).as_deref(), Some(""));
+}

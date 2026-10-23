@@ -227,6 +227,12 @@ pub struct EndpointPlan {
     /// response link, in declaration order.
     pub messages: Vec<MessageSchema>,
     pub lifecycle_open: Option<LifecycleMessagePlan>,
+    /// The wire field of the open payload filled from, and checked against,
+    /// the handshake credential.
+    pub open_credential_field: Option<String>,
+    /// Whether the endpoint declares a challenge flow, so its client takes a
+    /// setup callback that runs before every connection is ready.
+    pub has_setup: bool,
     pub lifecycle_close: Option<LifecycleMessagePlan>,
     pub lifecycle_keepalive: Option<LifecycleMessagePlan>,
     pub has_lifecycle_open: bool,
@@ -830,6 +836,17 @@ fn lower_query_param(
 /// non-empty, and every declared duration is at least one second.
 fn validate_endpoint_fields(endpoint: &WebSocketEndpoint, diagnostics: &mut Vec<WsDiagnostic>) {
     let base = format!("endpoints/{}", endpoint.id);
+    match endpoint.lifecycle.open_credential_field.as_deref() {
+        Some("") => diagnostics.push(WsDiagnostic::error(
+            format!("{base}/lifecycle/open_credential_field"),
+            "open_credential_field names no field",
+        )),
+        Some(_) if endpoint.lifecycle.open.is_none() => diagnostics.push(WsDiagnostic::error(
+            format!("{base}/lifecycle/open_credential_field"),
+            "open_credential_field binds a field of the open message, and the endpoint declares none",
+        )),
+        _ => {}
+    }
     for message in &endpoint.messages {
         let at = format!("{base}/messages/{}", message.name);
         if message.responds_with.as_deref() == Some("") {
@@ -955,6 +972,8 @@ pub fn lower_to_plan(api: &WebSocketApi) -> Result<WsRuntimePlan, WsLoweringErro
                 bidirectional_messages,
                 messages: ep.messages.clone(),
                 lifecycle_open: lifecycle_to_plan(ep.lifecycle.open.as_ref()),
+                open_credential_field: ep.lifecycle.open_credential_field.clone(),
+                has_setup: ep.runtime.as_ref().is_some_and(|runtime| runtime.auth_flow.is_some()),
                 lifecycle_close: lifecycle_to_plan(ep.lifecycle.close.as_ref()),
                 lifecycle_keepalive: lifecycle_to_plan(ep.lifecycle.keepalive.as_ref()),
                 has_lifecycle_open: ep.lifecycle.open.is_some(),
@@ -965,11 +984,6 @@ pub fn lower_to_plan(api: &WebSocketApi) -> Result<WsRuntimePlan, WsLoweringErro
             }
         })
         .collect();
-
-    diagnostics.push(WsDiagnostic::info(
-        "ws_runtime/options",
-        "TODO: WsClientOptions.receive_timeout is not yet enforced by generated runtime.",
-    ));
 
     if diagnostics.iter().any(|d| d.severity == WsSeverity::Error) {
         return Err(WsLoweringError {
@@ -1538,6 +1552,60 @@ mod tests {
             .filter(|d| d.severity == WsSeverity::Error)
             .map(|d| d.path.clone())
             .collect()
+    }
+
+    #[test]
+    fn an_open_credential_field_binds_a_declared_open_message() {
+        let mut api = minimal_api();
+        api.endpoints[0].lifecycle = ConnectionLifecycle {
+            open: Some(MessageSchema::new("Init", MessageDirection::Client, Schema::new("InitMessage"))),
+            open_credential_field: Some("api-key".to_string()),
+            ..ConnectionLifecycle::default()
+        };
+        let plan = lower_to_plan(&api).expect("a bound open message lowers");
+        assert_eq!(plan.endpoints[0].open_credential_field.as_deref(), Some("api-key"));
+        assert!(plan.diagnostics.is_empty(), "{:?}", plan.diagnostics);
+
+        api.endpoints[0].lifecycle.open_credential_field = Some(String::new());
+        assert_eq!(errors_of(&api), ["endpoints/Echo/lifecycle/open_credential_field"]);
+
+        api.endpoints[0].lifecycle = ConnectionLifecycle {
+            open_credential_field: Some("api-key".to_string()),
+            ..ConnectionLifecycle::default()
+        };
+        let lowering = lower_to_plan(&api).expect_err("a field without an open message");
+        assert!(
+            lowering.diagnostics.iter().any(|d| d.path == "endpoints/Echo/lifecycle/open_credential_field"
+                && d.message.contains("declares none")),
+            "{:?}",
+            lowering.diagnostics
+        );
+    }
+
+    #[test]
+    fn only_an_endpoint_with_a_challenge_flow_takes_a_setup_callback() {
+        let mut api = minimal_api();
+        assert!(!lower_to_plan(&api).unwrap().endpoints[0].has_setup);
+        api.endpoints[0].runtime = Some(WebSocketEndpointHints {
+            auth_flow: Some(AuthFlowHints {
+                challenge_message: "auth_required".to_string(),
+                auth_request_schema: "AuthMessage".to_string(),
+                success_indicator: None,
+                failure_indicator: None,
+            }),
+            ..WebSocketEndpointHints::default()
+        });
+        assert!(lower_to_plan(&api).unwrap().endpoints[0].has_setup);
+    }
+
+    #[test]
+    fn no_info_note_reports_an_unenforced_receive_timeout() {
+        let plan = lower_to_plan(&minimal_api()).unwrap();
+        assert!(
+            plan.diagnostics.iter().all(|d| !d.message.contains("receive_timeout")),
+            "{:?}",
+            plan.diagnostics
+        );
     }
 
     /// An endpoint of role `role` whose messages are `messages`.

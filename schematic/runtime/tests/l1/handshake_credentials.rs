@@ -167,3 +167,52 @@ fn the_selection_debug_and_secret_names_never_show_the_value() {
     assert!(!redacted.as_str().contains(SENTINEL), "{}", redacted.as_str());
     assert!(redacted.as_str().contains("mode=live"));
 }
+
+#[test]
+fn the_exposed_secret_is_the_selected_key_or_token_without_its_placement() {
+    let var = "SCHEMATIC_HS_TEST_EXPOSE";
+    let _env = EnvGuard::set_safe(var, "env-key");
+    let prefixed = CredentialPlacement::ApiKeyHeader {
+        header: "API-KEY".to_string(),
+        prefix: Some("Key ".to_string()),
+    };
+    let config = AuthConfig::none()
+        .accept(prefixed.clone())
+        .env_fallback(EnvFallback::new(prefixed, [var]));
+    let secret = |per_call: Option<&Credential>, client: Option<&Credential>| {
+        config
+            .select_handshake(per_call, client)
+            .expect("selects")
+            .expose_secret()
+            .map(str::to_string)
+    };
+    // The placed header carries the prefix; the exposed secret does not.
+    assert_eq!(secret(Some(&Credential::api_key("per-call")), None).as_deref(), Some("per-call"));
+    assert_eq!(secret(None, Some(&Credential::api_key("client"))).as_deref(), Some("client"));
+    assert_eq!(secret(None, None).as_deref(), Some("env-key"));
+
+    let _unset = EnvGuard::remove_safe(var);
+    assert_eq!(secret(None, None), None, "anonymous exposes nothing");
+
+    let bearer = AuthConfig::none().accept(CredentialPlacement::Bearer { header: None });
+    let selected = bearer.select_handshake(None, Some(&Credential::access_token("t1"))).unwrap();
+    assert_eq!(selected.expose_secret(), Some("t1"), "no `Bearer ` scheme");
+
+    let basic = AuthConfig::none().accept(CredentialPlacement::Basic);
+    let selected = basic.select_handshake(Some(&Credential::basic("user", "pass")), None).unwrap();
+    assert_eq!(selected.expose_secret(), None, "a Basic pair has no single secret");
+    assert!(!format!("{selected:?}").contains("pass"));
+}
+
+#[test]
+fn a_basic_pair_from_the_environment_exposes_no_secret() {
+    let (user, pass) = ("SCHEMATIC_HS_TEST_EXPOSE_USER", "SCHEMATIC_HS_TEST_EXPOSE_PASS");
+    let _user = EnvGuard::set_safe(user, "env-user");
+    let _pass = EnvGuard::set_safe(pass, "env-pass");
+    let config = AuthConfig::none()
+        .accept(CredentialPlacement::Basic)
+        .env_fallback(EnvFallback::new(CredentialPlacement::Basic, [pass]).username_vars([user]));
+    let selected = config.select_handshake(None, None).unwrap();
+    assert_eq!(selected.auth_method(), &AuthMethod::EnvVar(pass.to_string()));
+    assert_eq!(selected.expose_secret(), None);
+}

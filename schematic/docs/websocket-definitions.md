@@ -307,7 +307,13 @@ assert_eq!(core.auth_method(), &schematic_runtime::AuthMethod::ClientLevel);
   for reconnecting are kept privately.
 - **TLS:** `wss://` uses the platform's trusted roots. There is no option to
   accept an invalid certificate; the REST runtime's
-  `danger_accept_invalid_certificates` configures its HTTP client only.
+  `danger_accept_invalid_certificates` configures its HTTP client only. A
+  device that presents a self-signed certificate (for example a Samsung TV
+  on `wss://…:8002`) therefore fails the dial with `WsError::Handshake`.
+- **Cleartext:** a `ws://` base URL, as the Unfolded Circle Core and Dock
+  definitions use for devices on the local network, connects without TLS.
+  Any credential in the handshake or the setup exchange crosses the network
+  unencrypted; the client sends it as declared and emits no warning.
 
 `header(name, value)` adds a header to every handshake, replacing a constant
 header of the same name.
@@ -352,8 +358,10 @@ Each endpoint `Live` gets two enums, `LiveServerMessage` (what the server
 sends) and `LiveClientMessage` (what the client sends). A variant is named
 after its message and holds the payload type its `Schema` names; a
 `Bidirectional` message is a variant of both. Lifecycle messages are not
-variants: they keep their own `send_*` helpers. A direction with no messages
-is an empty enum and still compiles.
+variants: the close and keepalive messages keep their own `send_*` helpers,
+and the open message is a `connect_*` argument (see
+[Connecting, setup, and recovery](#connecting-setup-and-recovery)). A
+direction with no messages is an empty enum and still compiles.
 
 An enum serializes as its payload alone, with no variant tag, and only
 derives `Debug`. It implements `Serialize` where the endpoint sends that
@@ -426,6 +434,131 @@ impl WsHandler for Chat {
 - The hub's typed `send_to_connection`, `broadcast`, and
   `broadcast_to_subscribers` reach only connections of the message's
   endpoint; the `_value` variants send JSON to any connection.
+
+## Connecting, setup, and recovery
+
+A generated client is **ready** only when the WebSocket upgrade, the
+endpoint's opening message, and its setup callback have all finished. The
+same steps run again, in the same order, on every reconnect.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Connecting: connect_*
+    Connecting --> Authenticating: upgrade accepted
+    Authenticating --> Ready: opening written, setup succeeded
+    Ready --> Disconnected: connection lost or receive timeout
+    Disconnected --> Connecting: after backoff, budget left
+    Connecting --> Disconnected: attempt failed
+    Authenticating --> Disconnected: opening write or setup failed
+    Connecting --> Closed: 401, 403, or redirect on a reconnect
+    Authenticating --> Closed: setup rejected
+    Disconnected --> Closed: no policy or budget spent
+    Ready --> Closing: close()
+    Closing --> Closed
+    Closed --> [*]
+```
+
+`state()` reports these states (`Authenticating` covers the opening message
+and setup). `close()` and dropping the client end every state without a
+reconnect.
+
+### The opening message
+
+An endpoint that declares `lifecycle.open` takes its payload as a `connect_*`
+argument. It is serialized once and written first on every connection; there
+is no separate helper that could send it twice.
+
+```rust,ignore
+let tts = api
+    .connect_text_to_speech("voice-id", params, TtsInitMessage::default(), WsClientOptions::default())
+    .await?;
+```
+
+When the opening payload also carries the API key, declare that wire field
+as `lifecycle.open_credential_field` (ElevenLabs: `xi-api-key`). The client
+fills it from the credential selected for the handshake when the payload
+leaves it absent, null, or empty, keeps an equal value, and refuses a
+different value with `WsError::InvalidCredential` before dialing, so the
+payload never becomes a second credential source. With no credential
+selected, a value the caller wrote is sent as given. A binding without an
+`open` message, or an empty field name, is a generation error.
+
+### Setup callbacks for challenge flows
+
+An endpoint that declares `AuthFlowHints` also gets
+`connect_{endpoint}_with_setup`, taking an async callback that receives a
+typed `{Endpoint}Setup` session after the opening message:
+
+```rust,ignore
+let core = api
+    .connect_core_ws_with_setup(WsClientOptions::default(), |mut session: CoreWsSetup| async move {
+        let CoreWsServerMessage::AuthRequired(_) = session.next_message().await? else {
+            return Err(WsSetupError::Transient("expected auth_required".into()));
+        };
+        let token = session.credential().expose_secret().unwrap_or_default().to_string();
+        session.send(CoreWsClientMessage::Auth(auth_message(token))).await?;
+        match session.next_value().await? {
+            reply if reply["code"] == 200 => Ok(()),
+            _ => Err(WsSetupError::Rejected("authentication refused".into())),
+        }
+    })
+    .await?;
+```
+
+- The callback runs on the initial connection and on every reconnect,
+  before `Ready`. Frames it does not read are delivered as events afterwards.
+- `session.credential()` is the credential the handshake carried; its
+  `Debug` is redacted, and `expose_secret()` returns the key or token.
+- `WsSetupError::Rejected` is terminal: the connect fails with
+  `WsError::SetupRejected`, or a running client closes, with no other
+  credential or anonymous fallback. Every other setup error is
+  `WsError::Setup` and counts as a failed attempt.
+- A session is valid only during its attempt. Kept beyond it (for example
+  moved into a spawned task), every operation returns
+  `WsSetupError::SessionInvalid`, and the connection is already dropped.
+
+### Timeouts
+
+| Option | Bounds | On expiry |
+| --- | --- | --- |
+| `handshake_timeout` | One attempt: upgrade, opening write, and setup together. The explicit connect makes one attempt; each reconnect gets the full bound again, with no deadline carried over. | `WsError::HandshakeTimeout` |
+| `receive_timeout` | Inbound silence once ready: no frame of any kind, pings and pongs included. Outbound traffic does not reset it. `None` never times out. | `WsError::ReceiveTimeout` event, then the reconnect policy |
+| `request_timeout` | One correlated request. | `WsError::RequestTimeout` |
+
+The client answers server pings and flushes the pong at once, so a server
+that pings keeps an idle connection alive.
+
+### Reconnecting
+
+`WsClientOptions.reconnect` is `None` by default: a lost connection closes
+the client. With a `ReconnectPolicy`, the client redials after
+`reconnect_delay` backoff and reuses the handshake, credential, opening
+payload, and setup callback of the explicit connect.
+
+- `max_attempts` counts **consecutive** failed redials. A redial that
+  completes setup resets the count, so a connection that drops five times
+  and reconnects each time stays alive with `Some(2)`, while two refused
+  redials in a row close it. `Some(0)` never redials; `None` has no limit.
+- A 401, 403, or redirect on a redial, and a setup rejection, close the
+  client at once. Other failures (a refused or stalled dial, another HTTP
+  status, an opening write or setup failure) are delivered as `Err` events
+  and use the budget.
+- On a loss, `Ready` clears at once, pending requests fail with
+  `WsError::Disconnected`, and queued messages are dropped: only the
+  opening message and setup are repeated, never an application message.
+  `send` while not ready returns `WsError::Disconnected` immediately.
+- When the client closes, its last error event is delivered before
+  `next_event` returns `None`.
+
+### Backpressure
+
+The outbound and inbound queues are bounded (`outbound_capacity`,
+`inbound_capacity`). A `send` waits while the outbound queue is full. When
+the inbound queue is full the client stops reading until the consumer takes
+an event; meanwhile `close()`, state changes, pending-request wakeups, writes,
+and the receive timeout keep working. Time spent not reading counts as
+silence for `receive_timeout`, and a transient error raised while an event is
+already waiting for queue space is dropped (`state()` still shows it).
 
 ## The JSON form
 

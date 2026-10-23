@@ -561,14 +561,50 @@ impl UnfoldedCircleCoreWs {
         self.headers.push((name.into(), value.into()));
         self
     }
-    /**Connect to the CoreWs endpoint.
+    /**Connect to the CoreWs endpoint. It is ready once the upgrade and the opening message, if any, are done.
 
 ## Errors
 
-[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, or cookie of the request already carries it; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed.*/
+[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
     pub async fn connect_core_ws(
         &self,
         options: super::ws_shared::WsClientOptions,
+    ) -> Result<CoreWsClient, super::ws_shared::WsError> {
+        self.open_core_ws(options, None).await
+    }
+    /**Connect to the CoreWs endpoint, running `setup` on this connection and on every reconnect before the client is ready.
+
+`setup` gets a fresh [`CoreWsSetup`] each time, after the opening message, and performs the endpoint's challenge exchange, such as answering an authentication request; the session's `credential` is the one the handshake carried. The whole attempt is bounded by `handshake_timeout`. Returning [`super::ws_shared::WsSetupError::Rejected`] closes the client with [`super::ws_shared::WsError::SetupRejected`] and is never retried; any other error is [`super::ws_shared::WsError::Setup`] and uses the reconnect budget on a reconnect.
+
+## Errors
+
+[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
+    pub async fn connect_core_ws_with_setup<F, Fut>(
+        &self,
+        options: super::ws_shared::WsClientOptions,
+        setup: F,
+    ) -> Result<CoreWsClient, super::ws_shared::WsError>
+    where
+        F: Fn(CoreWsSetup) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<(), super::ws_shared::WsSetupError>>
+            + Send + 'static,
+    {
+        let setup: super::ws_shared::SetupFactory = std::sync::Arc::new(move |channel| {
+            Box::pin(
+                setup(
+                    super::ws_shared::WsSetupSession::new(
+                        channel,
+                        CoreWsServerMessage::decode,
+                    ),
+                ),
+            )
+        });
+        self.open_core_ws(options, Some(setup)).await
+    }
+    async fn open_core_ws(
+        &self,
+        options: super::ws_shared::WsClientOptions,
+        setup: Option<super::ws_shared::SetupFactory>,
     ) -> Result<CoreWsClient, super::ws_shared::WsError> {
         let path = "/ws".to_string();
         if path.contains('{') {
@@ -591,16 +627,63 @@ impl UnfoldedCircleCoreWs {
             &credential,
             auth.secret_names(),
         )?;
-        CoreWsClient::connect(handshake, options).await
+        let session = super::ws_shared::WsSession {
+            opening: None,
+            handshake,
+            setup,
+            correlation: Some(super::ws_shared::CorrelationConfig {
+                id_field: "req_id",
+                string_ids: false,
+                selected_message: CoreWsServerMessage::selected_message,
+            }),
+            binary: false,
+        };
+        CoreWsClient::connect(session, options).await
     }
-    /**Connect to the CoreIntegrations endpoint.
+    /**Connect to the CoreIntegrations endpoint. It is ready once the upgrade and the opening message, if any, are done.
 
 ## Errors
 
-[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, or cookie of the request already carries it; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed.*/
+[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
     pub async fn connect_core_integrations(
         &self,
         options: super::ws_shared::WsClientOptions,
+    ) -> Result<CoreIntegrationsClient, super::ws_shared::WsError> {
+        self.open_core_integrations(options, None).await
+    }
+    /**Connect to the CoreIntegrations endpoint, running `setup` on this connection and on every reconnect before the client is ready.
+
+`setup` gets a fresh [`CoreIntegrationsSetup`] each time, after the opening message, and performs the endpoint's challenge exchange, such as answering an authentication request; the session's `credential` is the one the handshake carried. The whole attempt is bounded by `handshake_timeout`. Returning [`super::ws_shared::WsSetupError::Rejected`] closes the client with [`super::ws_shared::WsError::SetupRejected`] and is never retried; any other error is [`super::ws_shared::WsError::Setup`] and uses the reconnect budget on a reconnect.
+
+## Errors
+
+[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
+    pub async fn connect_core_integrations_with_setup<F, Fut>(
+        &self,
+        options: super::ws_shared::WsClientOptions,
+        setup: F,
+    ) -> Result<CoreIntegrationsClient, super::ws_shared::WsError>
+    where
+        F: Fn(CoreIntegrationsSetup) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<(), super::ws_shared::WsSetupError>>
+            + Send + 'static,
+    {
+        let setup: super::ws_shared::SetupFactory = std::sync::Arc::new(move |channel| {
+            Box::pin(
+                setup(
+                    super::ws_shared::WsSetupSession::new(
+                        channel,
+                        CoreIntegrationsServerMessage::decode,
+                    ),
+                ),
+            )
+        });
+        self.open_core_integrations(options, Some(setup)).await
+    }
+    async fn open_core_integrations(
+        &self,
+        options: super::ws_shared::WsClientOptions,
+        setup: Option<super::ws_shared::SetupFactory>,
     ) -> Result<CoreIntegrationsClient, super::ws_shared::WsError> {
         let path = "/intg".to_string();
         if path.contains('{') {
@@ -623,16 +706,63 @@ impl UnfoldedCircleCoreWs {
             &credential,
             auth.secret_names(),
         )?;
-        CoreIntegrationsClient::connect(handshake, options).await
+        let session = super::ws_shared::WsSession {
+            opening: None,
+            handshake,
+            setup,
+            correlation: Some(super::ws_shared::CorrelationConfig {
+                id_field: "req_id",
+                string_ids: false,
+                selected_message: CoreIntegrationsServerMessage::selected_message,
+            }),
+            binary: false,
+        };
+        CoreIntegrationsClient::connect(session, options).await
     }
-    /**Connect to the CoreProfiles endpoint.
+    /**Connect to the CoreProfiles endpoint. It is ready once the upgrade and the opening message, if any, are done.
 
 ## Errors
 
-[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, or cookie of the request already carries it; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed.*/
+[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
     pub async fn connect_core_profiles(
         &self,
         options: super::ws_shared::WsClientOptions,
+    ) -> Result<CoreProfilesClient, super::ws_shared::WsError> {
+        self.open_core_profiles(options, None).await
+    }
+    /**Connect to the CoreProfiles endpoint, running `setup` on this connection and on every reconnect before the client is ready.
+
+`setup` gets a fresh [`CoreProfilesSetup`] each time, after the opening message, and performs the endpoint's challenge exchange, such as answering an authentication request; the session's `credential` is the one the handshake carried. The whole attempt is bounded by `handshake_timeout`. Returning [`super::ws_shared::WsSetupError::Rejected`] closes the client with [`super::ws_shared::WsError::SetupRejected`] and is never retried; any other error is [`super::ws_shared::WsError::Setup`] and uses the reconnect budget on a reconnect.
+
+## Errors
+
+[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
+    pub async fn connect_core_profiles_with_setup<F, Fut>(
+        &self,
+        options: super::ws_shared::WsClientOptions,
+        setup: F,
+    ) -> Result<CoreProfilesClient, super::ws_shared::WsError>
+    where
+        F: Fn(CoreProfilesSetup) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<(), super::ws_shared::WsSetupError>>
+            + Send + 'static,
+    {
+        let setup: super::ws_shared::SetupFactory = std::sync::Arc::new(move |channel| {
+            Box::pin(
+                setup(
+                    super::ws_shared::WsSetupSession::new(
+                        channel,
+                        CoreProfilesServerMessage::decode,
+                    ),
+                ),
+            )
+        });
+        self.open_core_profiles(options, Some(setup)).await
+    }
+    async fn open_core_profiles(
+        &self,
+        options: super::ws_shared::WsClientOptions,
+        setup: Option<super::ws_shared::SetupFactory>,
     ) -> Result<CoreProfilesClient, super::ws_shared::WsError> {
         let path = "/profiles".to_string();
         if path.contains('{') {
@@ -655,16 +785,63 @@ impl UnfoldedCircleCoreWs {
             &credential,
             auth.secret_names(),
         )?;
-        CoreProfilesClient::connect(handshake, options).await
+        let session = super::ws_shared::WsSession {
+            opening: None,
+            handshake,
+            setup,
+            correlation: Some(super::ws_shared::CorrelationConfig {
+                id_field: "req_id",
+                string_ids: false,
+                selected_message: CoreProfilesServerMessage::selected_message,
+            }),
+            binary: false,
+        };
+        CoreProfilesClient::connect(session, options).await
     }
-    /**Connect to the CoreEvents endpoint.
+    /**Connect to the CoreEvents endpoint. It is ready once the upgrade and the opening message, if any, are done.
 
 ## Errors
 
-[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, or cookie of the request already carries it; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed.*/
+[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
     pub async fn connect_core_events(
         &self,
         options: super::ws_shared::WsClientOptions,
+    ) -> Result<CoreEventsClient, super::ws_shared::WsError> {
+        self.open_core_events(options, None).await
+    }
+    /**Connect to the CoreEvents endpoint, running `setup` on this connection and on every reconnect before the client is ready.
+
+`setup` gets a fresh [`CoreEventsSetup`] each time, after the opening message, and performs the endpoint's challenge exchange, such as answering an authentication request; the session's `credential` is the one the handshake carried. The whole attempt is bounded by `handshake_timeout`. Returning [`super::ws_shared::WsSetupError::Rejected`] closes the client with [`super::ws_shared::WsError::SetupRejected`] and is never retried; any other error is [`super::ws_shared::WsError::Setup`] and uses the reconnect budget on a reconnect.
+
+## Errors
+
+[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
+    pub async fn connect_core_events_with_setup<F, Fut>(
+        &self,
+        options: super::ws_shared::WsClientOptions,
+        setup: F,
+    ) -> Result<CoreEventsClient, super::ws_shared::WsError>
+    where
+        F: Fn(CoreEventsSetup) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<(), super::ws_shared::WsSetupError>>
+            + Send + 'static,
+    {
+        let setup: super::ws_shared::SetupFactory = std::sync::Arc::new(move |channel| {
+            Box::pin(
+                setup(
+                    super::ws_shared::WsSetupSession::new(
+                        channel,
+                        CoreEventsServerMessage::decode,
+                    ),
+                ),
+            )
+        });
+        self.open_core_events(options, Some(setup)).await
+    }
+    async fn open_core_events(
+        &self,
+        options: super::ws_shared::WsClientOptions,
+        setup: Option<super::ws_shared::SetupFactory>,
     ) -> Result<CoreEventsClient, super::ws_shared::WsError> {
         let path = "/events".to_string();
         if path.contains('{') {
@@ -687,7 +864,18 @@ impl UnfoldedCircleCoreWs {
             &credential,
             auth.secret_names(),
         )?;
-        CoreEventsClient::connect(handshake, options).await
+        let session = super::ws_shared::WsSession {
+            opening: None,
+            handshake,
+            setup,
+            correlation: Some(super::ws_shared::CorrelationConfig {
+                id_field: "req_id",
+                string_ids: false,
+                selected_message: CoreEventsServerMessage::selected_message,
+            }),
+            binary: false,
+        };
+        CoreEventsClient::connect(session, options).await
     }
 }
 impl Default for UnfoldedCircleCoreWs {
@@ -695,6 +883,11 @@ impl Default for UnfoldedCircleCoreWs {
         Self::new()
     }
 }
+///The setup session of the CoreWs endpoint, passed to the callback of `connect_core_ws_with_setup`.
+pub type CoreWsSetup = super::ws_shared::WsSetupSession<
+    CoreWsClientMessage,
+    CoreWsServerMessage,
+>;
 /// Client for the CoreWs endpoint.
 pub struct CoreWsClient {
     transport: super::ws_shared::WsTransportHandle,
@@ -706,135 +899,22 @@ pub struct CoreWsClient {
     max_pending: usize,
 }
 impl CoreWsClient {
-    /// Connect to the endpoint.
+    /// Makes the explicit connect's attempt and starts the supervisor.
     pub(crate) async fn connect(
-        handshake: super::ws_shared::WsHandshake,
+        session: super::ws_shared::WsSession,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<Self, super::ws_shared::WsError> {
-        let ws_stream = handshake.dial(&options).await?;
-        let auth_method = handshake.auth_method().clone();
-        let _receive_timeout = options.receive_timeout;
-        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
-            options.outbound_capacity,
-        );
-        let (event_tx, event_rx) = tokio::sync::mpsc::channel(options.inbound_capacity);
-        let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Connecting,
-        );
-        let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
-        let pending = super::ws_shared::PendingRequests::default();
-        let options_for_supervisor = options.clone();
-        let pending_for_supervisor = pending.clone();
-        let supervisor_handle = tokio::spawn(async move {
-            use futures_util::{SinkExt, StreamExt};
-            use tokio_tungstenite::tungstenite::Message;
-            let mut active_stream = Some(ws_stream);
-            let reconnect_policy = options_for_supervisor.reconnect.clone();
-            let mut reconnect_attempt: u32 = 0;
-            let mut manual_close = false;
-            loop {
-                let stream = if let Some(stream) = active_stream.take() {
-                    reconnect_attempt = 0;
-                    stream
-                } else {
-                    let Some(policy) = reconnect_policy.as_ref() else {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
-                        break;
-                    };
-                    if let Some(max_attempts) = policy.max_attempts
-                        && reconnect_attempt >= max_attempts
-                    {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
-                        break;
-                    }
-                    let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Connecting);
-                    let delay = super::ws_shared::reconnect_delay(
-                        policy,
-                        reconnect_attempt,
-                    );
-                    tokio::time::sleep(delay).await;
-                    match handshake.dial(&options_for_supervisor).await {
-                        Ok(stream) => {
-                            reconnect_attempt = reconnect_attempt.saturating_add(1);
-                            stream
-                        }
-                        Err(err) => {
-                            let terminal = err.is_terminal_handshake_rejection();
-                            let _ = event_tx.send(Err(err)).await;
-                            if terminal {
-                                let _ = state_tx
-                                    .send(super::ws_shared::WsConnectionState::Closed);
-                                break;
-                            }
-                            reconnect_attempt = reconnect_attempt.saturating_add(1);
-                            continue;
-                        }
-                    }
-                };
-                let (mut write, mut read) = stream.split();
-                let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
-                loop {
-                    tokio::select! {
-                        cmd = writer_rx.recv() => { match cmd {
-                        Some(super::ws_shared::WriterCommand::SendText(text)) => { if
-                        write.send(Message::Text(text.into())). await .is_err() { break;
-                        } } Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
-                        if write.send(Message::Binary(data.into())). await .is_err() {
-                        break; } } Some(super::ws_shared::WriterCommand::Close) => {
-                        manual_close = true; let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Closing); let _ =
-                        write.close(). await; break; } None => { manual_close = true; let
-                        _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
-                        let _ = write.close(). await; break; } } } msg_result = read
-                        .next() => { match msg_result { Some(Ok(Message::Text(text))) =>
-                        { let raw = super::ws_shared::WsRawFrame::Text(text.to_string());
-                        match super::ws_shared::WsInboundFrame::parse(raw) { Ok(frame) =>
-                        { if let Some(frame) = super::ws_shared::answer_pending(&
-                        pending_for_supervisor, frame, "req_id", false,
-                        CoreWsServerMessage::selected_message,) { let _ = event_tx
-                        .send(Ok(frame)). await; } } Err(e) => { let _ = event_tx
-                        .send(Err(e)). await; } } } Some(Ok(Message::Binary(data))) => {
-                        let raw = super::ws_shared::WsRawFrame::Binary(data.to_vec());
-                        match super::ws_shared::WsInboundFrame::parse(raw) { Ok(frame) =>
-                        { if let Some(frame) = super::ws_shared::answer_pending(&
-                        pending_for_supervisor, frame, "req_id", false,
-                        CoreWsServerMessage::selected_message,) { let _ = event_tx
-                        .send(Ok(frame)). await; } } Err(e) => { let _ = event_tx
-                        .send(Err(e)). await; } } } Some(Ok(Message::Close(_))) => break,
-                        Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) |
-                        Some(Ok(Message::Frame(_))) => {} Some(Err(e)) => { let _ =
-                        event_tx.send(Err(super::ws_shared::WsError::Transport(e))).
-                        await; break; } None => break, } }
-                    }
-                }
-                super::ws_shared::fail_pending(&pending_for_supervisor);
-                if !manual_close {
-                    manual_close = super::ws_shared::discard_queued(&mut writer_rx);
-                }
-                if manual_close {
-                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
-                    break;
-                }
-                let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
-                active_stream = None;
-            }
-        });
-        let transport = super::ws_shared::WsTransportHandle {
-            writer_tx,
-            state_rx,
-            supervisor_handle,
-            next_id,
-            pending,
-        };
+        let auth_method = session.handshake.auth_method().clone();
+        let request_timeout = options.request_timeout;
+        let max_pending = options.max_pending_requests;
+        let (transport, event_rx) = super::ws_shared::connect_session(session, options)
+            .await?;
         Ok(Self {
             transport,
             event_rx,
             auth_method,
-            request_timeout: options.request_timeout,
-            max_pending: options.max_pending_requests,
+            request_timeout,
+            max_pending,
         })
     }
     /// Where the handshake credential came from. It names the source
@@ -843,6 +923,12 @@ impl CoreWsClient {
         &self.auth_method
     }
     /// Sends one message; it is written as its payload alone.
+    ///
+    /// ## Errors
+    ///
+    /// [`super::ws_shared::WsError::Disconnected`] at once while the
+    /// connection is not ready; nothing is queued for a later
+    /// connection.
     pub async fn send(
         &self,
         message: CoreWsClientMessage,
@@ -863,11 +949,7 @@ impl CoreWsClient {
         let command = super::ws_shared::WriterCommand::SendText(
             serde_json::to_string(message)?,
         );
-        self.transport
-            .writer_tx
-            .send(command)
-            .await
-            .map_err(|_| super::ws_shared::WsError::Disconnected)
+        self.transport.send(command).await
     }
     /// Receives the next inbound message, decoded as the message its
     /// selectors name.
@@ -911,13 +993,13 @@ impl CoreWsClient {
             self.transport,
         )
     }
-    /// Initiate a graceful close.
+    /// Closes the client and waits until it is `Closed`. A ready
+    /// connection gets a Close frame; a reconnect in progress
+    /// (backoff, upgrade, or setup) is abandoned. Nothing redials
+    /// afterwards, and pending requests fail with `Disconnected`.
     pub async fn close(&self) -> Result<(), super::ws_shared::WsError> {
-        self.transport
-            .writer_tx
-            .send(super::ws_shared::WriterCommand::Close)
-            .await
-            .map_err(|_| super::ws_shared::WsError::Disconnected)
+        self.transport.close().await;
+        Ok(())
     }
     /// Returns the current connection state.
     pub fn state(&self) -> super::ws_shared::WsConnectionState {
@@ -1049,6 +1131,11 @@ The request id is allocated by the client and written over any id the payload ca
         }
     }
 }
+///The setup session of the CoreIntegrations endpoint, passed to the callback of `connect_core_integrations_with_setup`.
+pub type CoreIntegrationsSetup = super::ws_shared::WsSetupSession<
+    CoreIntegrationsClientMessage,
+    CoreIntegrationsServerMessage,
+>;
 /// Client for the CoreIntegrations endpoint.
 pub struct CoreIntegrationsClient {
     transport: super::ws_shared::WsTransportHandle,
@@ -1060,135 +1147,22 @@ pub struct CoreIntegrationsClient {
     max_pending: usize,
 }
 impl CoreIntegrationsClient {
-    /// Connect to the endpoint.
+    /// Makes the explicit connect's attempt and starts the supervisor.
     pub(crate) async fn connect(
-        handshake: super::ws_shared::WsHandshake,
+        session: super::ws_shared::WsSession,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<Self, super::ws_shared::WsError> {
-        let ws_stream = handshake.dial(&options).await?;
-        let auth_method = handshake.auth_method().clone();
-        let _receive_timeout = options.receive_timeout;
-        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
-            options.outbound_capacity,
-        );
-        let (event_tx, event_rx) = tokio::sync::mpsc::channel(options.inbound_capacity);
-        let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Connecting,
-        );
-        let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
-        let pending = super::ws_shared::PendingRequests::default();
-        let options_for_supervisor = options.clone();
-        let pending_for_supervisor = pending.clone();
-        let supervisor_handle = tokio::spawn(async move {
-            use futures_util::{SinkExt, StreamExt};
-            use tokio_tungstenite::tungstenite::Message;
-            let mut active_stream = Some(ws_stream);
-            let reconnect_policy = options_for_supervisor.reconnect.clone();
-            let mut reconnect_attempt: u32 = 0;
-            let mut manual_close = false;
-            loop {
-                let stream = if let Some(stream) = active_stream.take() {
-                    reconnect_attempt = 0;
-                    stream
-                } else {
-                    let Some(policy) = reconnect_policy.as_ref() else {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
-                        break;
-                    };
-                    if let Some(max_attempts) = policy.max_attempts
-                        && reconnect_attempt >= max_attempts
-                    {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
-                        break;
-                    }
-                    let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Connecting);
-                    let delay = super::ws_shared::reconnect_delay(
-                        policy,
-                        reconnect_attempt,
-                    );
-                    tokio::time::sleep(delay).await;
-                    match handshake.dial(&options_for_supervisor).await {
-                        Ok(stream) => {
-                            reconnect_attempt = reconnect_attempt.saturating_add(1);
-                            stream
-                        }
-                        Err(err) => {
-                            let terminal = err.is_terminal_handshake_rejection();
-                            let _ = event_tx.send(Err(err)).await;
-                            if terminal {
-                                let _ = state_tx
-                                    .send(super::ws_shared::WsConnectionState::Closed);
-                                break;
-                            }
-                            reconnect_attempt = reconnect_attempt.saturating_add(1);
-                            continue;
-                        }
-                    }
-                };
-                let (mut write, mut read) = stream.split();
-                let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
-                loop {
-                    tokio::select! {
-                        cmd = writer_rx.recv() => { match cmd {
-                        Some(super::ws_shared::WriterCommand::SendText(text)) => { if
-                        write.send(Message::Text(text.into())). await .is_err() { break;
-                        } } Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
-                        if write.send(Message::Binary(data.into())). await .is_err() {
-                        break; } } Some(super::ws_shared::WriterCommand::Close) => {
-                        manual_close = true; let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Closing); let _ =
-                        write.close(). await; break; } None => { manual_close = true; let
-                        _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
-                        let _ = write.close(). await; break; } } } msg_result = read
-                        .next() => { match msg_result { Some(Ok(Message::Text(text))) =>
-                        { let raw = super::ws_shared::WsRawFrame::Text(text.to_string());
-                        match super::ws_shared::WsInboundFrame::parse(raw) { Ok(frame) =>
-                        { if let Some(frame) = super::ws_shared::answer_pending(&
-                        pending_for_supervisor, frame, "req_id", false,
-                        CoreIntegrationsServerMessage::selected_message,) { let _ =
-                        event_tx.send(Ok(frame)). await; } } Err(e) => { let _ = event_tx
-                        .send(Err(e)). await; } } } Some(Ok(Message::Binary(data))) => {
-                        let raw = super::ws_shared::WsRawFrame::Binary(data.to_vec());
-                        match super::ws_shared::WsInboundFrame::parse(raw) { Ok(frame) =>
-                        { if let Some(frame) = super::ws_shared::answer_pending(&
-                        pending_for_supervisor, frame, "req_id", false,
-                        CoreIntegrationsServerMessage::selected_message,) { let _ =
-                        event_tx.send(Ok(frame)). await; } } Err(e) => { let _ = event_tx
-                        .send(Err(e)). await; } } } Some(Ok(Message::Close(_))) => break,
-                        Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) |
-                        Some(Ok(Message::Frame(_))) => {} Some(Err(e)) => { let _ =
-                        event_tx.send(Err(super::ws_shared::WsError::Transport(e))).
-                        await; break; } None => break, } }
-                    }
-                }
-                super::ws_shared::fail_pending(&pending_for_supervisor);
-                if !manual_close {
-                    manual_close = super::ws_shared::discard_queued(&mut writer_rx);
-                }
-                if manual_close {
-                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
-                    break;
-                }
-                let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
-                active_stream = None;
-            }
-        });
-        let transport = super::ws_shared::WsTransportHandle {
-            writer_tx,
-            state_rx,
-            supervisor_handle,
-            next_id,
-            pending,
-        };
+        let auth_method = session.handshake.auth_method().clone();
+        let request_timeout = options.request_timeout;
+        let max_pending = options.max_pending_requests;
+        let (transport, event_rx) = super::ws_shared::connect_session(session, options)
+            .await?;
         Ok(Self {
             transport,
             event_rx,
             auth_method,
-            request_timeout: options.request_timeout,
-            max_pending: options.max_pending_requests,
+            request_timeout,
+            max_pending,
         })
     }
     /// Where the handshake credential came from. It names the source
@@ -1197,6 +1171,12 @@ impl CoreIntegrationsClient {
         &self.auth_method
     }
     /// Sends one message; it is written as its payload alone.
+    ///
+    /// ## Errors
+    ///
+    /// [`super::ws_shared::WsError::Disconnected`] at once while the
+    /// connection is not ready; nothing is queued for a later
+    /// connection.
     pub async fn send(
         &self,
         message: CoreIntegrationsClientMessage,
@@ -1217,11 +1197,7 @@ impl CoreIntegrationsClient {
         let command = super::ws_shared::WriterCommand::SendText(
             serde_json::to_string(message)?,
         );
-        self.transport
-            .writer_tx
-            .send(command)
-            .await
-            .map_err(|_| super::ws_shared::WsError::Disconnected)
+        self.transport.send(command).await
     }
     /// Receives the next inbound message, decoded as the message its
     /// selectors name.
@@ -1267,13 +1243,13 @@ impl CoreIntegrationsClient {
             self.transport,
         )
     }
-    /// Initiate a graceful close.
+    /// Closes the client and waits until it is `Closed`. A ready
+    /// connection gets a Close frame; a reconnect in progress
+    /// (backoff, upgrade, or setup) is abandoned. Nothing redials
+    /// afterwards, and pending requests fail with `Disconnected`.
     pub async fn close(&self) -> Result<(), super::ws_shared::WsError> {
-        self.transport
-            .writer_tx
-            .send(super::ws_shared::WriterCommand::Close)
-            .await
-            .map_err(|_| super::ws_shared::WsError::Disconnected)
+        self.transport.close().await;
+        Ok(())
     }
     /// Returns the current connection state.
     pub fn state(&self) -> super::ws_shared::WsConnectionState {
@@ -1405,6 +1381,11 @@ The request id is allocated by the client and written over any id the payload ca
         }
     }
 }
+///The setup session of the CoreProfiles endpoint, passed to the callback of `connect_core_profiles_with_setup`.
+pub type CoreProfilesSetup = super::ws_shared::WsSetupSession<
+    CoreProfilesClientMessage,
+    CoreProfilesServerMessage,
+>;
 /// Client for the CoreProfiles endpoint.
 pub struct CoreProfilesClient {
     transport: super::ws_shared::WsTransportHandle,
@@ -1416,135 +1397,22 @@ pub struct CoreProfilesClient {
     max_pending: usize,
 }
 impl CoreProfilesClient {
-    /// Connect to the endpoint.
+    /// Makes the explicit connect's attempt and starts the supervisor.
     pub(crate) async fn connect(
-        handshake: super::ws_shared::WsHandshake,
+        session: super::ws_shared::WsSession,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<Self, super::ws_shared::WsError> {
-        let ws_stream = handshake.dial(&options).await?;
-        let auth_method = handshake.auth_method().clone();
-        let _receive_timeout = options.receive_timeout;
-        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
-            options.outbound_capacity,
-        );
-        let (event_tx, event_rx) = tokio::sync::mpsc::channel(options.inbound_capacity);
-        let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Connecting,
-        );
-        let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
-        let pending = super::ws_shared::PendingRequests::default();
-        let options_for_supervisor = options.clone();
-        let pending_for_supervisor = pending.clone();
-        let supervisor_handle = tokio::spawn(async move {
-            use futures_util::{SinkExt, StreamExt};
-            use tokio_tungstenite::tungstenite::Message;
-            let mut active_stream = Some(ws_stream);
-            let reconnect_policy = options_for_supervisor.reconnect.clone();
-            let mut reconnect_attempt: u32 = 0;
-            let mut manual_close = false;
-            loop {
-                let stream = if let Some(stream) = active_stream.take() {
-                    reconnect_attempt = 0;
-                    stream
-                } else {
-                    let Some(policy) = reconnect_policy.as_ref() else {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
-                        break;
-                    };
-                    if let Some(max_attempts) = policy.max_attempts
-                        && reconnect_attempt >= max_attempts
-                    {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
-                        break;
-                    }
-                    let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Connecting);
-                    let delay = super::ws_shared::reconnect_delay(
-                        policy,
-                        reconnect_attempt,
-                    );
-                    tokio::time::sleep(delay).await;
-                    match handshake.dial(&options_for_supervisor).await {
-                        Ok(stream) => {
-                            reconnect_attempt = reconnect_attempt.saturating_add(1);
-                            stream
-                        }
-                        Err(err) => {
-                            let terminal = err.is_terminal_handshake_rejection();
-                            let _ = event_tx.send(Err(err)).await;
-                            if terminal {
-                                let _ = state_tx
-                                    .send(super::ws_shared::WsConnectionState::Closed);
-                                break;
-                            }
-                            reconnect_attempt = reconnect_attempt.saturating_add(1);
-                            continue;
-                        }
-                    }
-                };
-                let (mut write, mut read) = stream.split();
-                let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
-                loop {
-                    tokio::select! {
-                        cmd = writer_rx.recv() => { match cmd {
-                        Some(super::ws_shared::WriterCommand::SendText(text)) => { if
-                        write.send(Message::Text(text.into())). await .is_err() { break;
-                        } } Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
-                        if write.send(Message::Binary(data.into())). await .is_err() {
-                        break; } } Some(super::ws_shared::WriterCommand::Close) => {
-                        manual_close = true; let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Closing); let _ =
-                        write.close(). await; break; } None => { manual_close = true; let
-                        _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
-                        let _ = write.close(). await; break; } } } msg_result = read
-                        .next() => { match msg_result { Some(Ok(Message::Text(text))) =>
-                        { let raw = super::ws_shared::WsRawFrame::Text(text.to_string());
-                        match super::ws_shared::WsInboundFrame::parse(raw) { Ok(frame) =>
-                        { if let Some(frame) = super::ws_shared::answer_pending(&
-                        pending_for_supervisor, frame, "req_id", false,
-                        CoreProfilesServerMessage::selected_message,) { let _ = event_tx
-                        .send(Ok(frame)). await; } } Err(e) => { let _ = event_tx
-                        .send(Err(e)). await; } } } Some(Ok(Message::Binary(data))) => {
-                        let raw = super::ws_shared::WsRawFrame::Binary(data.to_vec());
-                        match super::ws_shared::WsInboundFrame::parse(raw) { Ok(frame) =>
-                        { if let Some(frame) = super::ws_shared::answer_pending(&
-                        pending_for_supervisor, frame, "req_id", false,
-                        CoreProfilesServerMessage::selected_message,) { let _ = event_tx
-                        .send(Ok(frame)). await; } } Err(e) => { let _ = event_tx
-                        .send(Err(e)). await; } } } Some(Ok(Message::Close(_))) => break,
-                        Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) |
-                        Some(Ok(Message::Frame(_))) => {} Some(Err(e)) => { let _ =
-                        event_tx.send(Err(super::ws_shared::WsError::Transport(e))).
-                        await; break; } None => break, } }
-                    }
-                }
-                super::ws_shared::fail_pending(&pending_for_supervisor);
-                if !manual_close {
-                    manual_close = super::ws_shared::discard_queued(&mut writer_rx);
-                }
-                if manual_close {
-                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
-                    break;
-                }
-                let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
-                active_stream = None;
-            }
-        });
-        let transport = super::ws_shared::WsTransportHandle {
-            writer_tx,
-            state_rx,
-            supervisor_handle,
-            next_id,
-            pending,
-        };
+        let auth_method = session.handshake.auth_method().clone();
+        let request_timeout = options.request_timeout;
+        let max_pending = options.max_pending_requests;
+        let (transport, event_rx) = super::ws_shared::connect_session(session, options)
+            .await?;
         Ok(Self {
             transport,
             event_rx,
             auth_method,
-            request_timeout: options.request_timeout,
-            max_pending: options.max_pending_requests,
+            request_timeout,
+            max_pending,
         })
     }
     /// Where the handshake credential came from. It names the source
@@ -1553,6 +1421,12 @@ impl CoreProfilesClient {
         &self.auth_method
     }
     /// Sends one message; it is written as its payload alone.
+    ///
+    /// ## Errors
+    ///
+    /// [`super::ws_shared::WsError::Disconnected`] at once while the
+    /// connection is not ready; nothing is queued for a later
+    /// connection.
     pub async fn send(
         &self,
         message: CoreProfilesClientMessage,
@@ -1573,11 +1447,7 @@ impl CoreProfilesClient {
         let command = super::ws_shared::WriterCommand::SendText(
             serde_json::to_string(message)?,
         );
-        self.transport
-            .writer_tx
-            .send(command)
-            .await
-            .map_err(|_| super::ws_shared::WsError::Disconnected)
+        self.transport.send(command).await
     }
     /// Receives the next inbound message, decoded as the message its
     /// selectors name.
@@ -1621,13 +1491,13 @@ impl CoreProfilesClient {
             self.transport,
         )
     }
-    /// Initiate a graceful close.
+    /// Closes the client and waits until it is `Closed`. A ready
+    /// connection gets a Close frame; a reconnect in progress
+    /// (backoff, upgrade, or setup) is abandoned. Nothing redials
+    /// afterwards, and pending requests fail with `Disconnected`.
     pub async fn close(&self) -> Result<(), super::ws_shared::WsError> {
-        self.transport
-            .writer_tx
-            .send(super::ws_shared::WriterCommand::Close)
-            .await
-            .map_err(|_| super::ws_shared::WsError::Disconnected)
+        self.transport.close().await;
+        Ok(())
     }
     /// Returns the current connection state.
     pub fn state(&self) -> super::ws_shared::WsConnectionState {
@@ -1759,6 +1629,11 @@ The request id is allocated by the client and written over any id the payload ca
         }
     }
 }
+///The setup session of the CoreEvents endpoint, passed to the callback of `connect_core_events_with_setup`.
+pub type CoreEventsSetup = super::ws_shared::WsSetupSession<
+    CoreEventsClientMessage,
+    CoreEventsServerMessage,
+>;
 /// Client for the CoreEvents endpoint.
 pub struct CoreEventsClient {
     transport: super::ws_shared::WsTransportHandle,
@@ -1770,135 +1645,22 @@ pub struct CoreEventsClient {
     max_pending: usize,
 }
 impl CoreEventsClient {
-    /// Connect to the endpoint.
+    /// Makes the explicit connect's attempt and starts the supervisor.
     pub(crate) async fn connect(
-        handshake: super::ws_shared::WsHandshake,
+        session: super::ws_shared::WsSession,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<Self, super::ws_shared::WsError> {
-        let ws_stream = handshake.dial(&options).await?;
-        let auth_method = handshake.auth_method().clone();
-        let _receive_timeout = options.receive_timeout;
-        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
-            options.outbound_capacity,
-        );
-        let (event_tx, event_rx) = tokio::sync::mpsc::channel(options.inbound_capacity);
-        let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Connecting,
-        );
-        let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
-        let pending = super::ws_shared::PendingRequests::default();
-        let options_for_supervisor = options.clone();
-        let pending_for_supervisor = pending.clone();
-        let supervisor_handle = tokio::spawn(async move {
-            use futures_util::{SinkExt, StreamExt};
-            use tokio_tungstenite::tungstenite::Message;
-            let mut active_stream = Some(ws_stream);
-            let reconnect_policy = options_for_supervisor.reconnect.clone();
-            let mut reconnect_attempt: u32 = 0;
-            let mut manual_close = false;
-            loop {
-                let stream = if let Some(stream) = active_stream.take() {
-                    reconnect_attempt = 0;
-                    stream
-                } else {
-                    let Some(policy) = reconnect_policy.as_ref() else {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
-                        break;
-                    };
-                    if let Some(max_attempts) = policy.max_attempts
-                        && reconnect_attempt >= max_attempts
-                    {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
-                        break;
-                    }
-                    let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Connecting);
-                    let delay = super::ws_shared::reconnect_delay(
-                        policy,
-                        reconnect_attempt,
-                    );
-                    tokio::time::sleep(delay).await;
-                    match handshake.dial(&options_for_supervisor).await {
-                        Ok(stream) => {
-                            reconnect_attempt = reconnect_attempt.saturating_add(1);
-                            stream
-                        }
-                        Err(err) => {
-                            let terminal = err.is_terminal_handshake_rejection();
-                            let _ = event_tx.send(Err(err)).await;
-                            if terminal {
-                                let _ = state_tx
-                                    .send(super::ws_shared::WsConnectionState::Closed);
-                                break;
-                            }
-                            reconnect_attempt = reconnect_attempt.saturating_add(1);
-                            continue;
-                        }
-                    }
-                };
-                let (mut write, mut read) = stream.split();
-                let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
-                loop {
-                    tokio::select! {
-                        cmd = writer_rx.recv() => { match cmd {
-                        Some(super::ws_shared::WriterCommand::SendText(text)) => { if
-                        write.send(Message::Text(text.into())). await .is_err() { break;
-                        } } Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
-                        if write.send(Message::Binary(data.into())). await .is_err() {
-                        break; } } Some(super::ws_shared::WriterCommand::Close) => {
-                        manual_close = true; let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Closing); let _ =
-                        write.close(). await; break; } None => { manual_close = true; let
-                        _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
-                        let _ = write.close(). await; break; } } } msg_result = read
-                        .next() => { match msg_result { Some(Ok(Message::Text(text))) =>
-                        { let raw = super::ws_shared::WsRawFrame::Text(text.to_string());
-                        match super::ws_shared::WsInboundFrame::parse(raw) { Ok(frame) =>
-                        { if let Some(frame) = super::ws_shared::answer_pending(&
-                        pending_for_supervisor, frame, "req_id", false,
-                        CoreEventsServerMessage::selected_message,) { let _ = event_tx
-                        .send(Ok(frame)). await; } } Err(e) => { let _ = event_tx
-                        .send(Err(e)). await; } } } Some(Ok(Message::Binary(data))) => {
-                        let raw = super::ws_shared::WsRawFrame::Binary(data.to_vec());
-                        match super::ws_shared::WsInboundFrame::parse(raw) { Ok(frame) =>
-                        { if let Some(frame) = super::ws_shared::answer_pending(&
-                        pending_for_supervisor, frame, "req_id", false,
-                        CoreEventsServerMessage::selected_message,) { let _ = event_tx
-                        .send(Ok(frame)). await; } } Err(e) => { let _ = event_tx
-                        .send(Err(e)). await; } } } Some(Ok(Message::Close(_))) => break,
-                        Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) |
-                        Some(Ok(Message::Frame(_))) => {} Some(Err(e)) => { let _ =
-                        event_tx.send(Err(super::ws_shared::WsError::Transport(e))).
-                        await; break; } None => break, } }
-                    }
-                }
-                super::ws_shared::fail_pending(&pending_for_supervisor);
-                if !manual_close {
-                    manual_close = super::ws_shared::discard_queued(&mut writer_rx);
-                }
-                if manual_close {
-                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
-                    break;
-                }
-                let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
-                active_stream = None;
-            }
-        });
-        let transport = super::ws_shared::WsTransportHandle {
-            writer_tx,
-            state_rx,
-            supervisor_handle,
-            next_id,
-            pending,
-        };
+        let auth_method = session.handshake.auth_method().clone();
+        let request_timeout = options.request_timeout;
+        let max_pending = options.max_pending_requests;
+        let (transport, event_rx) = super::ws_shared::connect_session(session, options)
+            .await?;
         Ok(Self {
             transport,
             event_rx,
             auth_method,
-            request_timeout: options.request_timeout,
-            max_pending: options.max_pending_requests,
+            request_timeout,
+            max_pending,
         })
     }
     /// Where the handshake credential came from. It names the source
@@ -1907,6 +1669,12 @@ impl CoreEventsClient {
         &self.auth_method
     }
     /// Sends one message; it is written as its payload alone.
+    ///
+    /// ## Errors
+    ///
+    /// [`super::ws_shared::WsError::Disconnected`] at once while the
+    /// connection is not ready; nothing is queued for a later
+    /// connection.
     pub async fn send(
         &self,
         message: CoreEventsClientMessage,
@@ -1927,11 +1695,7 @@ impl CoreEventsClient {
         let command = super::ws_shared::WriterCommand::SendText(
             serde_json::to_string(message)?,
         );
-        self.transport
-            .writer_tx
-            .send(command)
-            .await
-            .map_err(|_| super::ws_shared::WsError::Disconnected)
+        self.transport.send(command).await
     }
     /// Receives the next inbound message, decoded as the message its
     /// selectors name.
@@ -1975,13 +1739,13 @@ impl CoreEventsClient {
             self.transport,
         )
     }
-    /// Initiate a graceful close.
+    /// Closes the client and waits until it is `Closed`. A ready
+    /// connection gets a Close frame; a reconnect in progress
+    /// (backoff, upgrade, or setup) is abandoned. Nothing redials
+    /// afterwards, and pending requests fail with `Disconnected`.
     pub async fn close(&self) -> Result<(), super::ws_shared::WsError> {
-        self.transport
-            .writer_tx
-            .send(super::ws_shared::WriterCommand::Close)
-            .await
-            .map_err(|_| super::ws_shared::WsError::Disconnected)
+        self.transport.close().await;
+        Ok(())
     }
     /// Returns the current connection state.
     pub fn state(&self) -> super::ws_shared::WsConnectionState {

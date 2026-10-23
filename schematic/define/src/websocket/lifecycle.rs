@@ -210,15 +210,30 @@ impl MessageSchema {
 ///     ),
 ///     close: None,
 ///     keepalive: None,
+///     open_credential_field: None,
 /// };
 /// assert!(lifecycle.open.is_some());
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectionLifecycle {
-    /// Message to send when connection is established.
+    /// Message a generated client sends first on every connection, the
+    /// initial one and each reconnect, before reporting it ready. The
+    /// caller supplies its payload once, when connecting.
     pub open: Option<MessageSchema>,
     /// Message to send before closing the connection.
     pub close: Option<MessageSchema>,
     /// Message for keepalive/heartbeat (if required by the API).
     pub keepalive: Option<MessageSchema>,
+    /// The top-level wire field of the `open` payload that carries the API
+    /// key or token. A generated client fills it from the credential it
+    /// selected for the handshake when the payload leaves it empty, and
+    /// refuses a payload whose value differs, so the payload is never a
+    /// second credential source. `None` binds no field; nothing is inferred
+    /// from the payload's shape.
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_presence::non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub open_credential_field: Option<String>,
 }

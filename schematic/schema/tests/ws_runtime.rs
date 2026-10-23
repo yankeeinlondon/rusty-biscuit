@@ -9,8 +9,9 @@ use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use schematic_schema::elevenlabs_ws::{
-    ElevenLabsTTSWs, MultiContextTextToSpeechConnectionParams, MultiContextTextToSpeechServerMessage,
-    TextToSpeechConnectionParams, TextToSpeechServerMessage,
+    ElevenLabsTTSWs, MultiContextInitMessage, MultiContextTextToSpeechConnectionParams,
+    MultiContextTextToSpeechServerMessage, TextToSpeechConnectionParams, TextToSpeechServerMessage,
+    TtsInitMessage,
 };
 use schematic_schema::samsung_smart_tv_remote_ws::{
     ArtModeConnectionParams, ArtModeServerMessage, RemoteControlConnectionParams,
@@ -76,7 +77,7 @@ async fn ws_connect_substitutes_path_and_query_params() {
     };
 
     let ws = client
-        .connect_text_to_speech("voice 42", params, WsClientOptions::default())
+        .connect_text_to_speech("voice 42", params, TtsInitMessage::default(), WsClientOptions::default())
         .await
         .unwrap();
     let _ = ws.close().await;
@@ -272,7 +273,12 @@ async fn elevenlabs_handshake_encodes_one_path_segment_and_omits_unset_queries()
     let client = ElevenLabsTTSWs::with_base_url(format!("{}/proxy", server.ws_origin()));
 
     client
-        .connect_text_to_speech("a/b c?d", TextToSpeechConnectionParams::default(), WsClientOptions::default())
+        .connect_text_to_speech(
+            "a/b c?d",
+            TextToSpeechConnectionParams::default(),
+            TtsInitMessage::default(),
+            WsClientOptions::default(),
+        )
         .await
         .unwrap()
         .close()
@@ -284,7 +290,7 @@ async fn elevenlabs_handshake_encodes_one_path_segment_and_omits_unset_queries()
         ..Default::default()
     };
     client
-        .connect_text_to_speech("v", params, WsClientOptions::default())
+        .connect_text_to_speech("v", params, TtsInitMessage::default(), WsClientOptions::default())
         .await
         .unwrap()
         .close()
@@ -787,7 +793,12 @@ async fn elevenlabs_text_to_speech_decodes_every_server_message_variant() {
     let mut client = ElevenLabsTTSWs::with_base_url(server.ws_origin());
     client = client.api_key("test-key");
     let mut ws = client
-        .connect_text_to_speech("voice", TextToSpeechConnectionParams::default(), WsClientOptions::default())
+        .connect_text_to_speech(
+            "voice",
+            TextToSpeechConnectionParams::default(),
+            TtsInitMessage::default(),
+            WsClientOptions::default(),
+        )
         .await
         .unwrap();
 
@@ -819,6 +830,12 @@ async fn elevenlabs_multi_context_decodes_every_server_message_variant() {
         .connect_multi_context_text_to_speech(
             "voice",
             MultiContextTextToSpeechConnectionParams::default(),
+            MultiContextInitMessage {
+                text: " ".to_string(),
+                context_id: "context_1".to_string(),
+                voice_settings: None,
+                generation_config: None,
+            },
             WsClientOptions::default(),
         )
         .await

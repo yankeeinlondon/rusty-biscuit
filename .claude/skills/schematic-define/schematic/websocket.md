@@ -29,6 +29,12 @@
 - **Challenge flows** are `AuthFlowHints`, never prose. Heartbeats are
   caller-managed `HeartbeatHints`, documented in the client rustdoc, no
   warning. Durations must be ≥ 1 s.
+- **Opening message.** `lifecycle.open` is a `connect_*` argument, sent
+  first on every connection (no `send_{open}` helper). If its payload also
+  carries the API key, bind the wire field with
+  `lifecycle.open_credential_field` (ElevenLabs `xi-api-key`): filled from
+  the handshake credential when absent/null/empty, conflict →
+  `InvalidCredential`. Never infer it from the payload shape.
 - Build messages with `MessageSchema::new(name, direction, schema)
   .describe(..)`; build endpoints with `..WebSocketEndpoint::default()`.
 
@@ -38,7 +44,8 @@ Errors at a definition path (`endpoints/{id}/…`): path not starting with
 `/`, own origin, or embedded `?`/`#`; path param without placeholder (or
 placeholder missing from a non-empty `params.path`); non-`simple`/optional
 path param; duplicate/enum/JSON/unsupported-style query param; empty
-`responds_with`, selector field, auth-flow name/indicator; zero timeout or
+`responds_with`, selector field, auth-flow name/indicator,
+`open_credential_field` (also an Error without `lifecycle.open`); zero timeout or
 interval; a message name that is not an identifier or repeats; `raw_binary`
 /`mixed` frame format. Per direction the role **receives** (client: `Server`
 +`Bidirectional`; host: `Client`+`Bidirectional`): >1 fallback, fallback
@@ -49,7 +56,7 @@ message, naming no message / a client message, without endpoint hints, or
 on a request named `Value`. Warnings: hints with no link, hints on a
 `Host`-only endpoint, a declared `string` id type nothing consumes.
 
-## Generated surface (`ws_codegen/{client,host,shared}.rs`)
+## Generated surface (`ws_codegen/{client,host,shared,supervisor}.rs`)
 
 - `{Ep}ServerMessage` / `{Ep}ClientMessage`: `Debug` only; payload-only
   `Serialize` where the endpoint sends that direction, `decode(WsInboundFrame)`
@@ -75,6 +82,24 @@ on a request named `Value`. Warnings: hints with no link, hints on a
   `secret_names()`); redirects never followed; 401/403/3xx on a redial
   closes. Caller headers may not name the credential header or an upgrade
   header. No `schematic_define::Headers` in WS output; no WS TLS opt-out.
+  A self-signed `wss://` cert (Samsung TV :8002) fails as `WsError::Handshake`;
+  `ws://` (UC Core/Dock) is cleartext and never warned about.
+- Supervisor (`supervisor.rs` → `ws_shared::connect_session`, shared by every
+  endpoint client): connect = ONE inline attempt (dial → opening write →
+  setup) under `handshake_timeout`, then a spawned supervisor. `Ready` only
+  after setup. `AuthFlowHints` endpoints also get
+  `connect_{ep}_with_setup(.., setup: Fn({Ep}Setup) -> Fut)`;
+  `{Ep}Setup = WsSetupSession<ClientMsg, ServerMsg>` (slot + revocation
+  watch; invalid after its attempt; `credential().expose_secret()`).
+  `WsSetupError::Rejected` → `WsError::SetupRejected`, terminal; other →
+  `WsError::Setup`. `max_attempts` = consecutive failed redials, reset on a
+  completed setup. `receive_timeout` = inbound idle (any frame) after
+  setup → `ReceiveTimeout` event + reconnect policy. Pongs flushed on ping.
+  Full event queue: one held event, reading paused, everything else
+  (close, timer, writes, state) keeps running. `send` while not `Ready` →
+  `Disconnected`; `close()` waits for `Closed`. Tests:
+  `schema/tests/ws_session.rs`, `ws_idle.rs`; CI-visible: the fresh-output
+  WS session test in `gen/tests/l1/fresh_output_compile.rs`.
 - Host (`Host`/`Both`): `{Api}EventHub`, `HostOutbound` (typed fan-out per
   endpoint), `WsConnectionContext::credential_verified()`, `WsHandler` with
   `handle_message`/`on_authenticated` (per-endpoint

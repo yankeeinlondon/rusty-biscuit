@@ -197,20 +197,35 @@ fn a_lowering_error_reaches_the_shared_format_and_blocks_the_rust_output() {
 
 #[test]
 fn info_notes_stay_out_of_the_shared_diagnostics() {
-    let validation = validate_ws_apis(&[fixture_api("wss://example.test", "/stream")]);
-    assert!(validation.diagnostics.is_empty());
+    // Auth messages with a handshake credential and no `AuthFlowHints` are an
+    // info note, not a diagnostic.
+    let mut api = fixture_api("wss://example.test", "/stream");
+    api.auth = AuthStrategy::ApiKey { header: "X-Key".to_string(), value_prefix: None };
+    api.endpoints[0].messages = vec![
+        MessageSchema::new("Auth", MessageDirection::Client, Schema::new("serde_json::Value")),
+        MessageSchema::new("Frame", MessageDirection::Server, Schema::new("serde_json::Value")),
+    ];
+    let validation = validate_ws_apis(&[api]);
+    assert!(validation.diagnostics.is_empty(), "{:?}", validation.diagnostics);
     assert_eq!(
         validation.notes,
         [
             "severity=info api=FixtureWs feature=websocket-definition output=rust: \
-             ws_runtime/options: TODO: WsClientOptions.receive_timeout is not yet enforced by \
-             generated runtime."
+             auth: Auth messages detected; using header-based auth. Add AuthFlowHints for \
+             message-based auth flow."
         ]
     );
 }
 
 #[test]
-fn the_validate_command_prints_info_notes_only_when_verbose() {
+fn receive_timeout_is_enforced_so_no_shipped_api_has_a_note_about_it() {
+    let validation = validate_ws_apis(&[fixture_api("wss://example.test", "/stream")]);
+    assert!(validation.diagnostics.is_empty());
+    assert!(validation.notes.is_empty(), "{:?}", validation.notes);
+}
+
+#[test]
+fn the_validate_command_keeps_info_notes_out_of_its_default_output() {
     let run = |verbose: bool| {
         let mut command = std::process::Command::new(biscuit_test_harness::bin_exe!("schematic-gen"));
         if verbose {
@@ -227,12 +242,9 @@ fn the_validate_command_prints_info_notes_only_when_verbose() {
 
     let quiet = run(false);
     assert!(!quiet.contains("severity=info"), "{quiet}");
+    // No shipped WebSocket definition produces an info note any more, so the
+    // verbose run is checked only for the absence of the retired
+    // receive-timeout reminder.
     let verbose = run(true);
-    assert!(
-        verbose.contains(
-            "severity=info api=UnfoldedCircleCoreWs feature=websocket-definition output=rust: \
-             ws_runtime/options: TODO"
-        ),
-        "{verbose}"
-    );
+    assert!(!verbose.contains("receive_timeout"), "{verbose}");
 }

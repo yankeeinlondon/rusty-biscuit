@@ -273,6 +273,12 @@ the header, query parameter, or cookie the credential would use, is an
 `AuthConfig::secret_names()` gives the redaction set for the handshake's
 error text. The selection is made once; a caller that reconnects reuses it.
 
+A protocol that also carries the credential in a message after the upgrade
+(an opening payload field, or an answer to an authentication challenge)
+reads it with `HandshakeCredential::expose_secret()`: the selected key or
+token without the prefix or `Bearer ` scheme its placement adds, or `None`
+for an anonymous selection or a Basic pair. `Debug` never shows it.
+
 ## OAuth
 
 The runtime does not run OAuth flows. Obtain a token with `schematic-oauth`

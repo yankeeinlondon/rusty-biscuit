@@ -70,7 +70,7 @@ use std::time::Duration;
 
 use schematic_schema::elevenlabs_ws::{
     ElevenLabsTTSWs, TextToSpeechClientMessage, TextToSpeechConnectionParams,
-    TextToSpeechServerMessage, TtsTextMessage,
+    TextToSpeechServerMessage, TtsInitMessage, TtsTextMessage,
 };
 use schematic_schema::ws_shared::WsClientOptions;
 
@@ -90,8 +90,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .disable_nagle(true)
         .build();
 
+    // The opening message is sent first on every connection, reconnects
+    // included; its `xi-api-key` is filled from the selected key.
     let mut ws = api
-        .connect_text_to_speech("voice_id_here", params, options)
+        .connect_text_to_speech("voice_id_here", params, TtsInitMessage::default(), options)
         .await?;
 
     // Messages are typed per endpoint; `send_value` takes raw JSON instead.
@@ -118,7 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [Import OpenAPI](docs/io/import-openapi.md), [export OpenAPI](docs/io/export-openapi.md), or [export Postman](docs/io/export-postman.md).
 - [Save a definition as a self-contained bundle](docs/io/definition-bundles.md) and export from the file alone.
 - [Understand generated requests](docs/generation/request-side.md), [validation](docs/generation/validation.md), and [partial generation](docs/generation/partial-generation.md).
-- [Define a WebSocket API](docs/websocket-definitions.md), including [its handshake credential](docs/websocket-definitions.md#the-handshake-credential) and [request/response correlation](docs/websocket-definitions.md#linking-a-request-to-its-response).
+- [Define a WebSocket API](docs/websocket-definitions.md), including [its handshake credential](docs/websocket-definitions.md#the-handshake-credential), [request/response correlation](docs/websocket-definitions.md#linking-a-request-to-its-response), and [setup, timeouts, and reconnecting](docs/websocket-definitions.md#connecting-setup-and-recovery).
 
 ## License
 

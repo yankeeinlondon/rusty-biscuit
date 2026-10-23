@@ -483,6 +483,8 @@ The message starts with where in the definition the finding is:
     receives), or declared on an endpoint without `runtime.correlation`
     hints; and a linked request named `Value`, whose method would be
     `request_value`
+  - a `lifecycle.open_credential_field` that is empty or set on an endpoint
+    without a `lifecycle.open` message
 
   See [WebSocket definitions](../websocket-definitions.md) for the rules
   behind each one
@@ -497,9 +499,10 @@ The message starts with where in the definition the finding is:
   [WARN] severity=warning api=Example endpoint=Live feature=websocket-definition output=rust: endpoints/Live/runtime/correlation: correlation hints are declared, but no message links a response with responds_with
   ```
 
-- **info** notes, such as the reminder that `receive_timeout` is not yet
-  enforced, have no severity in the shared format; they print only in a
-  verbose run (`-v`), labeled `[INFO]` and `severity=info`
+- **info** notes, such as auth messages declared on an API with a
+  handshake credential but without `AuthFlowHints`, have no severity in the
+  shared format; they print only in a verbose run (`-v`), labeled `[INFO]`
+  and `severity=info`
 
 From code, `output::ws_modules::validate_ws_apis` returns the diagnostics and
 the info notes for any WebSocket definitions, and

@@ -4405,6 +4405,7 @@ fn ws_child_test_lists_name_every_child_test() {
     assert_eq!(child_tests(TYPED_WS_CLIENT_TEST), TYPED_WS_CLIENT_TESTS);
     assert_eq!(child_tests(CHAT_WS_HOST_TEST), CHAT_WS_HOST_TESTS);
     assert_eq!(child_tests(CREDENTIAL_WS_CLIENT_TEST), CREDENTIAL_WS_CLIENT_TESTS);
+    assert_eq!(child_tests(SESSION_WS_CLIENT_TEST), SESSION_WS_CLIENT_TESTS);
 }
 
 /// R10 and R14 in one fresh crate: typed clients (selection, decode errors,
@@ -5012,6 +5013,349 @@ fn slow_ws_handshake_credentials_and_correlated_requests_run() {
     run.assert_success();
     let report = format!("{}{}", run.stdout, run.stderr);
     for test in CREDENTIAL_WS_CLIENT_TESTS {
+        assert!(report.contains(test), "the child run did not report {test}:\n{report}");
+    }
+}
+
+/// The opening payload of `SessionFixtureWs`, added to the fresh crate as
+/// `src/ws_session_payloads.rs`. Its key field is optional and renamed, so
+/// the bound wire field is `api-key`.
+const WS_SESSION_PAYLOADS: &str = r#"
+#[derive(Debug, serde::Serialize)]
+pub struct Hello {
+    pub mode: String,
+    #[serde(rename = "api-key", skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+}
+"#;
+
+/// An API key header and one `Feed` endpoint whose opening `Hello` binds
+/// its `api-key` field to the handshake credential and whose auth flow
+/// hints generate a setup connect.
+fn session_ws_fixture() -> schematic_define::WebSocketApi {
+    use schematic_define::Schema;
+    use schematic_define::websocket::{
+        AuthFlowHints, ConnectionLifecycle, EndpointRole, MessageDirection, MessageSchema,
+        WebSocketEndpointHints,
+    };
+    let mut feed = ws_fixture_endpoint("Feed", "/feed", EndpointRole::Client, vec![MessageSchema::new(
+        "Frame",
+        MessageDirection::Server,
+        Schema::new("serde_json::Value"),
+    )]);
+    feed.lifecycle = ConnectionLifecycle {
+        open: Some(MessageSchema::new(
+            "Hello",
+            MessageDirection::Client,
+            Schema::with_path("Hello", "crate::ws_session_payloads"),
+        )),
+        close: None,
+        keepalive: None,
+        open_credential_field: Some("api-key".into()),
+    };
+    feed.runtime = Some(WebSocketEndpointHints {
+        auth_flow: Some(AuthFlowHints {
+            challenge_message: "Frame".to_string(),
+            auth_request_schema: "serde_json::Value".to_string(),
+            success_indicator: None,
+            failure_indicator: None,
+        }),
+        ..WebSocketEndpointHints::default()
+    });
+    ws_fixture_api(
+        "SessionFixtureWs",
+        AuthStrategy::ApiKey { header: "X-Session-Key".to_string(), value_prefix: None },
+        &[],
+        vec![feed],
+    )
+}
+
+/// Child tests of a generated client's session setup and recovery: the
+/// opening message, the setup callback, the reconnect budget, and the
+/// receive timeout, against loopback tokio-tungstenite servers on port 0.
+const SESSION_WS_CLIENT_TEST: &str = r##"
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use futures_util::{SinkExt, StreamExt};
+use schematic_schema::ws_session_fixture::{FeedClient, FeedSetup, SessionFixtureWs};
+use schematic_schema::ws_session_payloads::Hello;
+use schematic_schema::ws_shared::{
+    ReconnectPolicy, WsClientOptions, WsConnectionState, WsError, WsSetupError,
+};
+use serde_json::{Value, json};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
+use tokio_tungstenite::tungstenite::http;
+
+type Peer = WebSocketStream<TcpStream>;
+
+/// A bound on a hang, never a synchronization.
+const WAIT: Duration = Duration::from_secs(5);
+
+/// How long a listener stays unconnected to show that nothing dialed it.
+const QUIET: Duration = Duration::from_millis(300);
+
+const KEY: &str = "session-key";
+
+async fn within<F: std::future::Future>(future: F) -> F::Output {
+    tokio::time::timeout(WAIT, future).await.expect("timed out")
+}
+
+fn hello() -> Hello {
+    Hello { mode: "fast".to_string(), api_key: None }
+}
+
+/// A loopback listener and a client of it holding [`KEY`].
+async fn bind() -> (TcpListener, SessionFixtureWs) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    (listener, SessionFixtureWs::with_base_url(url).api_key(KEY))
+}
+
+fn options(max_attempts: Option<u32>) -> WsClientOptions {
+    WsClientOptions::builder()
+        .reconnect(Some(ReconnectPolicy {
+            initial_backoff: Duration::from_millis(20),
+            max_backoff: Duration::from_millis(20),
+            multiplier: 1.0,
+            jitter: 0.0,
+            max_attempts,
+        }))
+        .build()
+}
+
+/// A setup callback that only counts its runs.
+fn counting(runs: &Arc<AtomicUsize>) -> impl Fn(FeedSetup) -> std::future::Ready<Result<(), WsSetupError>> + Send + Sync + 'static {
+    let runs = Arc::clone(runs);
+    move |_session| {
+        runs.fetch_add(1, Ordering::SeqCst);
+        std::future::ready(Ok(()))
+    }
+}
+
+async fn received(peer: &mut Peer) -> Value {
+    loop {
+        match within(peer.next()).await.expect("the connection is open").unwrap() {
+            Message::Text(text) => return serde_json::from_str(text.as_str()).unwrap(),
+            _ => continue,
+        }
+    }
+}
+
+async fn send(peer: &mut Peer, frame: Value) {
+    peer.send(Message::Text(frame.to_string().into())).await.unwrap();
+}
+
+/// Accepts the next upgrade and checks its key header and that its first
+/// frame is the opening message with the key filled in.
+async fn accept_opened(listener: &TcpListener) -> Peer {
+    let (stream, _) = within(listener.accept()).await.unwrap();
+    let mut key = None;
+    let mut peer = within(tokio_tungstenite::accept_hdr_async(stream, |request: &Request, response: Response| {
+        key = request.headers().get("x-session-key").map(|value| value.to_str().unwrap().to_string());
+        Ok(response)
+    }))
+    .await
+    .unwrap();
+    assert_eq!(key.as_deref(), Some(KEY));
+    assert_eq!(received(&mut peer).await, json!({"mode": "fast", "api-key": KEY}));
+    peer
+}
+
+/// Answers the next upgrade with 503.
+async fn refuse(listener: &TcpListener) {
+    let (stream, _) = within(listener.accept()).await.unwrap();
+    let _ = tokio_tungstenite::accept_hdr_async(stream, |_: &Request, _: Response| {
+        Err::<Response, ErrorResponse>(http::Response::builder().status(503).body(None).unwrap())
+    })
+    .await;
+}
+
+/// Closes the connection from the server, which the client redials. A
+/// Close frame loses the connection without an error event.
+async fn drop_connection(mut peer: Peer) {
+    let _ = peer.close(None).await;
+}
+
+async fn next_value(client: &mut FeedClient) -> Value {
+    within(client.next_value_event()).await.expect("the connection is open").expect("a data frame")
+}
+
+async fn assert_not_dialed(listener: &TcpListener) {
+    assert!(tokio::time::timeout(QUIET, listener.accept()).await.is_err(), "the listener was dialed");
+}
+
+#[tokio::test]
+async fn the_opening_frame_comes_first_on_the_initial_connection_and_on_a_redial() {
+    let (listener, api) = bind().await;
+    let (client, peer) = tokio::join!(within(api.connect_feed(hello(), options(None))), accept_opened(&listener));
+    let mut client = client.unwrap();
+    drop_connection(peer).await;
+    let mut peer = accept_opened(&listener).await;
+    send(&mut peer, json!({"after": "redial"})).await;
+    assert_eq!(next_value(&mut client).await, json!({"after": "redial"}));
+    within(client.close()).await.unwrap();
+    assert_eq!(client.state(), WsConnectionState::Closed);
+}
+
+#[tokio::test]
+async fn an_opening_key_that_differs_from_the_credential_fails_the_connect_before_dialing() {
+    let (listener, api) = bind().await;
+    let opening = Hello { mode: "fast".to_string(), api_key: Some("other-key".to_string()) };
+    match within(api.connect_feed(opening, options(None))).await.err() {
+        Some(WsError::InvalidCredential(reason)) => {
+            assert!(!reason.contains("other-key") && !reason.contains(KEY), "{reason}");
+        }
+        other => panic!("expected InvalidCredential, got {other:?}"),
+    }
+    assert_not_dialed(&listener).await;
+}
+
+#[tokio::test]
+async fn setup_runs_with_the_handshake_key_before_ready_on_the_initial_connection_and_on_a_redial() {
+    let (listener, api) = bind().await;
+    let runs = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&runs);
+    let setup = move |mut session: FeedSetup| {
+        let runs = Arc::clone(&counted);
+        async move {
+            let key = session.credential().expose_secret().map(str::to_string);
+            session.send_value(json!({"setup": key})).await?;
+            if session.next_value().await? != json!({"ack": true}) {
+                return Err(WsSetupError::Transient("no ack".to_string()));
+            }
+            runs.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    };
+    let server = async {
+        let mut peer = accept_opened(&listener).await;
+        assert_eq!(received(&mut peer).await, json!({"setup": KEY}));
+        send(&mut peer, json!({"ack": true})).await;
+        peer
+    };
+    let (client, peer) = tokio::join!(within(api.connect_feed_with_setup(hello(), options(None), setup)), server);
+    let mut client = client.unwrap();
+    assert_eq!(runs.load(Ordering::SeqCst), 1);
+    assert_eq!(client.state(), WsConnectionState::Ready);
+
+    drop_connection(peer).await;
+    let mut peer = accept_opened(&listener).await;
+    assert_eq!(received(&mut peer).await, json!({"setup": KEY}));
+    // The redial's setup is waiting for its ack.
+    assert_eq!(client.state(), WsConnectionState::Authenticating);
+    assert_eq!(runs.load(Ordering::SeqCst), 1);
+    send(&mut peer, json!({"ack": true})).await;
+    send(&mut peer, json!({"after": "setup"})).await;
+    assert_eq!(next_value(&mut client).await, json!({"after": "setup"}));
+    assert_eq!(runs.load(Ordering::SeqCst), 2);
+    assert_eq!(client.state(), WsConnectionState::Ready);
+    within(client.close()).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_rejected_setup_fails_the_connect_with_setup_rejected_after_one_connection() {
+    let (listener, api) = bind().await;
+    let setup = |_session: FeedSetup| async { Err::<(), _>(WsSetupError::Rejected("denied".to_string())) };
+    let (result, _peer) =
+        tokio::join!(within(api.connect_feed_with_setup(hello(), options(None), setup)), accept_opened(&listener));
+    match result.err() {
+        Some(WsError::SetupRejected(reason)) => assert_eq!(reason, "denied"),
+        other => panic!("expected SetupRejected, got {other:?}"),
+    }
+    assert_not_dialed(&listener).await;
+}
+
+#[tokio::test]
+async fn the_reconnect_budget_counts_consecutive_failed_redials_and_resets_after_each_setup() {
+    let (listener, api) = bind().await;
+    let runs = Arc::new(AtomicUsize::new(0));
+    let (client, mut peer) = tokio::join!(
+        within(api.connect_feed_with_setup(hello(), options(Some(1)), counting(&runs))),
+        accept_opened(&listener)
+    );
+    let mut client = client.unwrap();
+    // Three redials in a row, each completing setup, within a budget of one.
+    for redial in 1..=3 {
+        drop_connection(peer).await;
+        peer = accept_opened(&listener).await;
+        send(&mut peer, json!({"redial": redial})).await;
+        assert_eq!(next_value(&mut client).await, json!({"redial": redial}));
+        assert_eq!(client.state(), WsConnectionState::Ready);
+        assert_eq!(runs.load(Ordering::SeqCst), redial + 1);
+    }
+
+    drop_connection(peer).await;
+    refuse(&listener).await;
+    match within(client.next_value_event()).await {
+        Some(Err(WsError::HandshakeRejected { status: 503, .. })) => {}
+        other => panic!("expected the refused redial, got {other:?}"),
+    }
+    assert!(within(client.next_value_event()).await.is_none(), "the event stream ends");
+    assert_eq!(client.state(), WsConnectionState::Closed);
+    assert_eq!(runs.load(Ordering::SeqCst), 4);
+    assert_not_dialed(&listener).await;
+}
+
+#[tokio::test]
+async fn a_silent_server_times_out_the_receive_and_the_client_redials() {
+    let (listener, api) = bind().await;
+    let runs = Arc::new(AtomicUsize::new(0));
+    let limit = Duration::from_millis(300);
+    let options = WsClientOptions { receive_timeout: Some(limit), ..options(None) };
+    let (client, _silent) = tokio::join!(
+        within(api.connect_feed_with_setup(hello(), options, counting(&runs))),
+        accept_opened(&listener)
+    );
+    let mut client = client.unwrap();
+    match within(client.next_value_event()).await {
+        Some(Err(WsError::ReceiveTimeout(after))) => assert_eq!(after, limit),
+        other => panic!("expected ReceiveTimeout, got {other:?}"),
+    }
+    let mut peer = accept_opened(&listener).await;
+    send(&mut peer, json!({"after": "timeout"})).await;
+    assert_eq!(next_value(&mut client).await, json!({"after": "timeout"}));
+    assert_eq!(runs.load(Ordering::SeqCst), 2);
+    assert_eq!(client.state(), WsConnectionState::Ready);
+    within(client.close()).await.unwrap();
+}
+"##;
+
+/// The child tests [`SESSION_WS_CLIENT_TEST`] must report.
+const SESSION_WS_CLIENT_TESTS: &[&str] = &[
+    "the_opening_frame_comes_first_on_the_initial_connection_and_on_a_redial",
+    "an_opening_key_that_differs_from_the_credential_fails_the_connect_before_dialing",
+    "setup_runs_with_the_handshake_key_before_ready_on_the_initial_connection_and_on_a_redial",
+    "a_rejected_setup_fails_the_connect_with_setup_rejected_after_one_connection",
+    "the_reconnect_budget_counts_consecutive_failed_redials_and_resets_after_each_setup",
+    "a_silent_server_times_out_the_receive_and_the_client_redials",
+];
+
+/// Session setup and recovery through a generated client: the opening
+/// message bound to the handshake key, the setup callback on every
+/// connection, the consecutive-failure reconnect budget, and the receive
+/// timeout.
+#[test]
+fn slow_ws_session_setup_and_recovery_run() {
+    let lockfile = biscuit_test_harness::manifest_dir!().join("../schema/Cargo.lock");
+    let session = schematic_gen::output::ws_modules::render_ws_api_module(&session_ws_fixture())
+        .unwrap_or_else(|error| panic!("SessionFixtureWs lowers: {error}"));
+    assert!(session.contains("pub async fn connect_feed_with_setup<"), "{session}");
+    assert!(session.contains("pub type FeedSetup"), "{session}");
+
+    let fresh = FreshCrate::generate(&[], Definitions::Checkout, &lockfile);
+    fresh.add_module("ws_session_payloads", WS_SESSION_PAYLOADS);
+    fresh.add_module("ws_session_fixture", &session);
+    fresh.add_test_file("session_ws_client", SESSION_WS_CLIENT_TEST);
+
+    let run = fresh.nextest_run(&[]);
+    run.assert_success();
+    let report = format!("{}{}", run.stdout, run.stderr);
+    for test in SESSION_WS_CLIENT_TESTS {
         assert!(report.contains(test), "the child run did not report {test}:\n{report}");
     }
 }

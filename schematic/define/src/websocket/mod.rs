@@ -52,6 +52,7 @@
 //!             )),
 //!             close: None,
 //!             keepalive: None,
+//!             open_credential_field: None,
 //!         },
 //!         messages: vec![
 //!             MessageSchema::new("TextChunk", MessageDirection::Client, Schema::new("TextChunkMessage")),
@@ -474,6 +475,7 @@ mod tests {
                     .describe("Graceful close"),
             ),
             keepalive: None,
+            open_credential_field: None,
         };
 
         let serialized = serde_json::to_string(&lifecycle).unwrap();

@@ -290,10 +290,15 @@ fn a_referenced_separable_union_generates_a_multi_shape_success() {
 
     schematic_gen::output::generate_and_write(&api, &src_dir, false).unwrap();
 
-    let module = std::fs::read_dir(&src_dir).unwrap().map(|entry| entry.unwrap().path())
-        .find(|path| path.extension().is_some_and(|ext| ext == "rs") && !["lib.rs", "shared.rs", "prelude.rs"].iter().any(|name| path.ends_with(name)))
-        .expect("the API module");
-    let flat: String = std::fs::read_to_string(&module).unwrap().split_whitespace().collect();
+    // The run also writes the shipped WebSocket modules, and `read_dir` order
+    // differs by filesystem, so exclude those and require one candidate.
+    let candidates: Vec<_> = std::fs::read_dir(&src_dir).unwrap().map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "rs")
+            && !["lib.rs", "shared.rs", "prelude.rs", "ws_shared.rs"].iter().any(|name| path.ends_with(name))
+            && !path.file_stem().is_some_and(|stem| stem.to_string_lossy().ends_with("_ws")))
+        .collect();
+    let [module] = candidates.as_slice() else { panic!("expected one API module, found {candidates:?}") };
+    let flat: String = std::fs::read_to_string(module).unwrap().split_whitespace().collect();
     assert!(flat.contains("typeSuccess=GetReplyResponse;"), "{flat}");
     assert!(flat.contains("typeDecoder=schematic_runtime::Shapes<GetReplyResponse>;"), "{flat}");
     assert!(flat.contains("Directory(Directory)") && flat.contains("File(File)"), "{flat}");
