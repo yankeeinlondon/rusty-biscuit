@@ -111,10 +111,10 @@ types:
 
         # Cleanup formatting rules (`md clean`, DMLS formatting). Defaults are
         # runtime rule defaults, never written into frontmatter; the runtime
-        # validator (`markdown::cleanup::rules`) is authoritative. Booleans and
-        # `default-language` are literal unions rather than `boolean`/`string`
-        # so schema coercion cannot accept a quoted `"true"` or a number that
-        # cleanup rejects.
+        # validator (`markdown::cleanup::rules`) is authoritative. It binds
+        # each value against these declarations through the same conversion
+        # engine as schema validation (so `"80"` reads as `80`), which keeps
+        # validation and cleanup in agreement.
         markdown:
             frontmatter:
                 - "literal(true; default(true)) -> Apply non-destructive frontmatter repairs (the default)."

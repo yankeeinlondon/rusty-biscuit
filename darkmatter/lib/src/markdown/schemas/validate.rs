@@ -259,6 +259,12 @@ impl ValidatorCache {
         self.validator_for_hashed(schema, digest, base_dir, context)
     }
 
+    /// The content hash of a shared schema, computed once per allocation
+    /// (see [`Self::validator_for_shared`]).
+    pub(crate) fn shared_schema_hash(&self, schema: &Arc<Value>) -> u64 {
+        self.shared_schema_digest(schema).hash
+    }
+
     fn shared_schema_digest(&self, schema: &Arc<Value>) -> SchemaDigest {
         let pointer = Arc::as_ptr(schema);
         {
@@ -318,7 +324,9 @@ impl ValidatorCache {
         self.structural_validator_hashed(schema, schema_content_hash(schema))
     }
 
-    fn structural_validator_hashed(&self, schema: &Value, content: u64) -> Result<Arc<Validator>, SchemaError> {
+    /// [`Self::structural_validator_for`] for a schema whose content hash is
+    /// known.
+    pub(crate) fn structural_validator_hashed(&self, schema: &Value, content: u64) -> Result<Arc<Validator>, SchemaError> {
         let key = canonical_hash(content, None, None, &JudgedIn::Syntax);
         if let Some(hit) = self.lookup(&key, &JudgedIn::Syntax) {
             return Ok(hit);
@@ -512,6 +520,10 @@ fn build_validator_with(schema: &Value, file_values: &FileValues) -> Result<Vali
         .with_keyword(
             format::DARKMATTER_URL_SCHEME_KEYWORD,
             format::url_scheme_keyword_factory,
+        )
+        .with_keyword(
+            format::DARKMATTER_INTEGER_KEYWORD,
+            format::integer_keyword_factory,
         )
         .with_keyword(
             format::DARKMATTER_TYPE_DEFINITION_KEYWORD,
@@ -737,27 +749,6 @@ fn datetime_format_message(err: &jsonschema::ValidationError<'_>) -> Option<Stri
     Some(format!("{} is not {noun}", err.instance()))
 }
 
-/// Adds the admission reason to a number type error whose value is numeric
-/// text that cannot become a number (`"9007199254740993"`): coercion leaves
-/// such text unconverted, so the type check is where it fails. `None` for
-/// every other error.
-fn inadmissible_number_message(err: &jsonschema::ValidationError<'_>) -> Option<String> {
-    let ValidationErrorKind::Type { kind } = err.kind() else {
-        return None;
-    };
-    let expects_number = match kind {
-        TypeKind::Single(ty) => matches!(ty, JsonType::Number | JsonType::Integer),
-        TypeKind::Multiple(types) => types.contains(JsonType::Number) || types.contains(JsonType::Integer),
-    };
-    let text = err.instance().as_str()?.to_owned();
-    match crate::markdown::numeric::admit_number_text(&text) {
-        Err(crate::markdown::numeric::NumberTextError::Admission(reason)) if expects_number => {
-            Some(format!("{err}: the number {reason}"))
-        }
-        _ => None,
-    }
-}
-
 /// `true` when `err` is the "expected null" type error contributed by the
 /// `{ "type": "null" }` arm of an optional-property wrapper against a non-null
 /// value.
@@ -787,9 +778,7 @@ fn build_problem(
     let (message, file_reference) = match darkmatter_file_reference_outcome(err, anchors) {
         Some((message, diagnostic)) => (message, Some(diagnostic)),
         None => (
-            datetime_format_message(err)
-                .or_else(|| inadmissible_number_message(err))
-                .unwrap_or_else(|| err.to_string()),
+            datetime_format_message(err).unwrap_or_else(|| err.to_string()),
             None,
         ),
     };
@@ -1466,7 +1455,7 @@ fn default_capacity() -> usize {
 /// is more than adequate (repo convention — [`biscuit_hash`]).
 /// Hash of a schema's content: identical `Value`s serialize to identical
 /// bytes, so equal schemas share a hash.
-fn schema_content_hash(schema: &Value) -> u64 {
+pub(super) fn schema_content_hash(schema: &Value) -> u64 {
     biscuit_hash::xx_hash_bytes(&serde_json::to_vec(schema).expect("schema serialises to JSON"))
 }
 

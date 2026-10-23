@@ -1871,7 +1871,6 @@ mod tests {
         let expected = std::collections::BTreeMap::from([
             ("env.yaml".to_string(), "ready"),
             ("err.yaml".to_string(), "error"),
-            ("expression-functions.yaml".to_string(), "inactive"),
             ("schema-definition.yaml".to_string(), "inactive"),
         ]);
         let state = OverlayState::default();

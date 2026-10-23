@@ -28,7 +28,7 @@ no separate list of function rows in the CLI to update.
 | Report content | Where its descriptions come from |
 |---|---|
 | Context variables | The embedded base schema's `ctx` definitions, with presentation groups supplied in Rust. |
-| Expression functions | The authored `expression-functions.yaml` catalog. |
+| Expression functions | The function catalog `darkmatter/schemas/partials/functions.yaml`. |
 | Expression language rules | Rust descriptor catalogs for operators, truthiness, access rules, and parse modes. |
 | Side effects | The `EFFECT_DESCRIPTORS` catalog in Rust. |
 

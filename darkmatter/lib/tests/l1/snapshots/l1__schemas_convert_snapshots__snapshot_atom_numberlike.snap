@@ -13,15 +13,11 @@ expression: "convert_atom(\"numberlike\")"
           "type": "null"
         },
         {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "string",
-              "pattern": "^-?\\d+(\\.\\d+)?$"
-            }
-          ]
+          "type": [
+            "number",
+            "string"
+          ],
+          "format": "darkmatter-numberlike"
         }
       ]
     }

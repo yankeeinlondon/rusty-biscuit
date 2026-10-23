@@ -1632,10 +1632,10 @@ mod tests {
         let as_csv = expressions::function_descriptor("as_csv").unwrap();
         let markdown = interpolation_hover_markdown("as_csv(items)", 2, no_frontmatter, no_schema);
         assert!(markdown.contains(&expressions::format_function_block(as_csv)));
-        // A pre-existing function; its fallible typed signature carries `| error`.
-        let markdown = interpolation_hover_markdown("length(items)", 3, no_frontmatter, no_schema);
-        let length = expressions::function_descriptor("length").unwrap();
-        assert!(markdown.contains(&length.typed_signature()));
+        // A fallible function's typed signature carries `| error`.
+        let markdown = interpolation_hover_markdown("recent_commits(3)", 3, no_frontmatter, no_schema);
+        let recent = expressions::function_descriptor("recent_commits").unwrap();
+        assert!(markdown.contains(&recent.typed_signature()));
         assert!(markdown.contains("| error"));
         // The two serializers hover with the same catalog-backed block.
         for name in ["as_json", "as_json5"] {
@@ -1653,6 +1653,17 @@ mod tests {
         let markdown = interpolation_hover_markdown("mystery(items)", 3, no_frontmatter, no_schema);
         assert!(markdown.starts_with("**Expression**"));
         assert!(!markdown.contains("**`mystery"));
+    }
+
+    /// Criterion 57: a call spelled with a registered alias, in any case,
+    /// hovers with its canonical's catalog block.
+    #[test]
+    fn function_call_hover_resolves_an_alias() {
+        let block = expressions::format_function_overloads_block(expressions::function_overloads("is_string"));
+        for source in ["isString(x)", "isstring(x)", "IS_STRING(x)"] {
+            let markdown = interpolation_hover_markdown(source, 2, no_frontmatter, no_schema);
+            assert!(markdown.contains(&block), "`{source}` hover: {markdown}");
+        }
     }
 
     #[test]
@@ -1867,11 +1878,11 @@ mod tests {
             );
         }
         // At least one fallible function's `detail` carries the `| error` suffix.
-        let length = candidates
+        let recent = candidates
             .iter()
-            .find(|candidate| candidate.new_text == "length")
+            .find(|candidate| candidate.new_text == "recent_commits")
             .unwrap();
-        assert!(length.detail.as_deref().unwrap().ends_with("| error"));
+        assert!(recent.detail.as_deref().unwrap().ends_with("| error"));
     }
 
     #[test]
@@ -1882,9 +1893,16 @@ mod tests {
         assert!(candidates
             .iter()
             .any(|candidate| candidate.label == "title" && candidate.kind == CompletionItemKind::FIELD));
-        // Case-sensitive: an uppercase partial matches nothing.
+        // Case-sensitive: an uppercase partial matches no key, `ctx.*`
+        // variable, or canonical name. Only a function alias matches without
+        // regard to case, as dispatch does (`Ti` reaches `titlecase`), and it
+        // offers the canonical.
         assert!(interpolation_candidates("CTX.", &keys).is_empty());
-        assert!(interpolation_candidates("Ti", &keys).is_empty());
+        let upper = interpolation_candidates("Ti", &keys);
+        assert!(!upper.is_empty());
+        assert!(upper
+            .iter()
+            .all(|candidate| candidate.kind == CompletionItemKind::FUNCTION && candidate.new_text == "title_case"));
     }
 
     #[test]

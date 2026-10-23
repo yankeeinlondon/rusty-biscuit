@@ -1690,7 +1690,7 @@ fn authored_icmp_probes(markdown: &Markdown, options: &crate::markdown::compose:
                     icmp: authority.clone(),
                     ..ResolutionContext::new(options.source_file_resolution_context())
                 };
-                let _ = super::super::expression::functions::dispatch_fs(name, &literals, &context);
+                let _ = super::super::expression::functions::call_function(name, &literals, Some(&context));
             }
         });
     }

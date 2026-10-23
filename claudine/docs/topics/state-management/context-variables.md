@@ -131,12 +131,12 @@ The invocation directory and the root document's identity (`cwd`, `self`,
 
 **Variable and function pairs.** Expression functions are evaluated lazily, at
 call time. When a context variable and a function share a name they share one
-definition and one output format: the variable is the eager snapshot and the
-function is the lazy, parameterized form. `ctx.recent_commits` holds the last
-10 commits captured at the start of the run; `recent_commits(count)` walks the
-newest `count` commits when the call is reached. Both are projected from one
-descriptor entry, so `claudine context` and `claudine context --expressions`
-cannot drift.
+output format: the variable is the eager snapshot and the function is the lazy,
+parameterized form. `ctx.recent_commits` holds the last 10 commits captured at
+the start of the run; `recent_commits(count)` walks the newest `count` commits
+when the call is reached. Each is described in its own catalog, and each
+description names the other, so `claudine context` shows the variable and
+`claudine context --expressions` shows the function.
 
 Under Claudine, `current` is a Darkmatter reserved root served by the
 invocation's refresh capability: a key that capability does not

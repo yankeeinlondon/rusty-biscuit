@@ -1,0 +1,14 @@
+$schema:
+    n: number(required)
+    maybe: number
+    zip: string
+    flag: string
+    values: number[]
+    meta: "{ level: number }"
+    codes: numberlike[]
+    toggles: boolish[]
+    nested: "{ zip: numberlike, on: boolish }"
+    pair: "tuple([string, number, boolean?])"
+    dict: "{ <string>: number }"
+    either: "number | boolean"
+    config: json

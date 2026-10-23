@@ -66,9 +66,9 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     SchemaTypeDescriptor {
         keyword: "numberlike",
         aliases: &[],
-        description: "A number, or a string that can be coerced to a number during compose.",
+        description: "A number, or text that reads as a number; kept exactly as written (`\"02134\"` stays text).",
         accepted_constraints: &["eager", "default", "required", "generated"],
-        json_schema_effect: "anyOf: [ { \"type\": \"number\" }, { \"type\": \"string\", \"pattern\": \"^-?\\d+(\\.\\d+)?$\" } ]",
+        json_schema_effect: "{ \"type\": [\"number\", \"string\"], \"format\": \"darkmatter-numberlike\" }",
         type_options: &[],
     },
     SchemaTypeDescriptor {
@@ -82,9 +82,9 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     SchemaTypeDescriptor {
         keyword: "boolish",
         aliases: &[],
-        description: "A boolean, or a `true` / `false` string that can be coerced during compose.",
+        description: "A boolean, or a boolean word (`yes`, `On`, `0`, any case); kept exactly as written.",
         accepted_constraints: &["eager", "default", "required", "generated"],
-        json_schema_effect: "anyOf: [ { \"type\": \"boolean\" }, { \"enum\": [\"true\", \"false\", \"True\", \"False\", \"TRUE\", \"FALSE\"] } ]",
+        json_schema_effect: "{ \"type\": [\"boolean\", \"string\"], \"format\": \"darkmatter-boolish\" }",
         type_options: &[],
     },
     SchemaTypeDescriptor {
@@ -324,7 +324,7 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         target_types: "number",
         argument_arity: "0",
         description: "Restrict to integer values.",
-        json_schema_effect: "type is `integer` instead of `number`",
+        json_schema_effect: "type is `integer` instead of `number`, plus `x-darkmatter-integer` (magnitude below 2^64)",
     },
     // ── string ─────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
@@ -535,38 +535,43 @@ pub fn inline_object_rule_descriptors() -> &'static [InlineObjectRuleDescriptor]
 pub const COERCION_RULE_DESCRIPTORS: &[CoercionRuleDescriptor] = &[
     CoercionRuleDescriptor {
         name: "Booleans",
-        rule: "`true` and `false`, in any case, become real booleans.",
-        description: "When the schema expects `boolean` or `boolish`, common string forms are converted for you.",
+        rule: "Boolean words become real booleans: `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`, any case.",
+        description: "When the schema expects `boolean`, text such as `\"Yes\"` is converted; `boolish` accepts the same words but keeps them as written.",
     },
     CoercionRuleDescriptor {
         name: "Numbers",
-        rule: "Numeric strings become real numbers.",
-        description: "When the schema expects `number` or `numberlike`, strings such as `42` or `3.14` are converted for you.",
+        rule: "Numeric text becomes a real number; a whole number must be held exactly.",
+        description: "When the schema expects `number`, text such as `\" 4 \"`, `\"+4\"`, `\"1e3\"`, or `\"1_000\"` is converted; `\"9007199254740993\"` is rejected. `numberlike` accepts the same text but keeps it as written.",
+    },
+    CoercionRuleDescriptor {
+        name: "Text",
+        rule: "Numbers and booleans become text where text is expected.",
+        description: "`version: 1.2` against `string` becomes `\"1.2\"`; enums and literals compare the converted text.",
+    },
+    CoercionRuleDescriptor {
+        name: "JSON and YAML",
+        rule: "A native value becomes JSON or YAML text; text is validated and kept.",
+        description: "A mapping given to `json` is written as JSON in its authored key order; `null` is never serialized.",
     },
     CoercionRuleDescriptor {
         name: "Nested values",
-        rule: "Coercion recurses into inline objects and arrays of inline objects.",
-        description: "Nested fields get the same boolean and number treatment as top-level fields.",
+        rule: "Conversion follows the declared structure at every depth.",
+        description: "Lists, tuples, inline objects, unions, and pattern-key values inside them get the same rules as top-level fields.",
     },
     CoercionRuleDescriptor {
-        name: "Clear union match",
-        rule: "Exactly one union arm must match after coercion.",
-        description: "Darkmatter only commits a coerced union value when the result is unambiguous.",
+        name: "Unions",
+        rule: "A value an option already accepts is kept; otherwise the one reachable option wins.",
+        description: "When several options are reachable, a number beats a boolean and JSON beats YAML; any other tie is an error naming each reading. Option order never matters.",
     },
     CoercionRuleDescriptor {
-        name: "No union match",
-        rule: "The original value is kept.",
-        description: "If no union arm matches, validation reports the problem without guessing a conversion.",
-    },
-    CoercionRuleDescriptor {
-        name: "Ambiguous union match",
-        rule: "The original value is kept.",
-        description: "If more than one union arm matches, Darkmatter leaves the value alone instead of choosing for you.",
+        name: "Failed conversion",
+        rule: "The original value is kept and validation reports why.",
+        description: "Constraints are never repaired: `\"2.5\"` against `number(integer)` is an error, not `2`.",
     },
     CoercionRuleDescriptor {
         name: "Shell-expanded values",
         rule: "Values containing `$(...)` are deferred until shell expansion has run.",
-        description: "Darkmatter waits to coerce values that are not final yet.",
+        description: "Darkmatter waits to convert values that are not final yet.",
     },
 ];
 

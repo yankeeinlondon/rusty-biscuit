@@ -184,30 +184,24 @@ fn shipped_catalog_describes_predict_conflicts_exactly() {
     assert_eq!(matches.len(), 1);
     let descriptor = matches[0];
     assert_eq!(descriptor.category, "Git");
-    assert_eq!(descriptor.order, 1);
+    // Order within a category is alphabetical by name, counting overloads.
+    let earlier = descriptors
+        .iter()
+        .filter(|other| other.category == "Git" && other.name < descriptor.name)
+        .count();
+    assert_eq!(descriptor.order, earlier + 1);
     assert_eq!(
         descriptor.typed_signature(),
-        "predict_conflicts(branch: string) -> string[] | error"
+        "predict_conflicts(branch: string | null) -> string[] | null | error"
     );
     assert_eq!(
         descriptor.description,
-        "Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch."
+        "Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch; null passes through."
     );
     let example = descriptor.example.as_ref().expect("catalog example");
     assert_eq!(example.invocation, "predict_conflicts(\"feature/example\")");
-    assert_eq!(example.result, "src/config.rs");
-
-    let authored: serde_yaml_ng::Value = serde_yaml_ng::from_str(include_str!(
-        "../../../docs/schemas/expression-functions.yaml"
-    ))
-    .expect("shipped catalog parses as YAML");
-    let authored_function = authored["functions"]
-        .as_sequence()
-        .expect("functions sequence")
-        .iter()
-        .find(|function| function["name"].as_str() == Some("predict_conflicts"))
-        .expect("authored predict_conflicts entry");
-    assert_eq!(authored_function["order"].as_i64(), Some(90));
+    // The result is the authored literal text.
+    assert_eq!(example.result, "[\"src/config.rs\"]");
 }
 
 #[test]
@@ -268,12 +262,14 @@ fn argument_contract_covers_null_native_types_and_empty_boundaries() {
         Value::Null
     );
 
-    for expression in [
-        "predict_conflicts(true)",
-        "predict_conflicts(7)",
+    // Ledger row 63: a boolean or number converts to its text and names a
+    // (here missing) local branch.
+    for (expression, branch) in [
+        ("predict_conflicts(true)", "true"),
+        ("predict_conflicts(7)", "7"),
     ] {
         let error = evaluate_at(fixture.path(), expression).unwrap_err();
-        assert!(error.contains("expected string"), "{expression}: {error}");
+        assert!(error.contains(&format!("local branch {branch:?}")), "{expression}: {error}");
     }
 
     for expression in [
@@ -286,7 +282,7 @@ fn argument_contract_covers_null_native_types_and_empty_boundaries() {
 
     for expression in ["predict_conflicts()", "predict_conflicts(\"main\", \"incoming\")"] {
         let error = evaluate_at(fixture.path(), expression).unwrap_err();
-        assert!(error.contains("requires 1 argument"), "{expression}: {error}");
+        assert!(error.contains("predict_conflicts: no signature takes"), "{expression}: {error}");
     }
 }
 

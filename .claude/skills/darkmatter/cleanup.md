@@ -39,10 +39,12 @@ The user-facing record is the area's `docs/` tree.
   (document), DMLS `formatting.markdown` (workspace), and the style parser's
   registration. Read values into `Leaf<T>` (absent, null, value); never
   through `#[serde(default)]` options. `resolve` picks each rule
-  independently: CLI, document, workspace, runtime default. The baseline
-  schema's booleans are literal unions so schema coercion cannot accept a
-  quoted value the validator rejects; `base_schema_end_to_end` pins that
-  agreement.
+  independently: CLI, document, workspace, runtime default. A document's
+  values are first bound through the conversion engine against the shipped
+  `style.yaml` declarations (`bind_document_rules`, `RULE_SHAPES`), exactly
+  as schema validation holds them (`"80"` is `80`); `.dmls.toml` and editor
+  settings are read as written. `base_schema_end_to_end` and DMLS
+  `style_markdown_parity` pin the agreement.
 - `markdown::cleanup::frontmatter::repair_frontmatter` is the raw-source repair
   both consumers call. Its schema configuration is a lazy closure, so absent or
   empty frontmatter never builds a context. Clean diagnostics

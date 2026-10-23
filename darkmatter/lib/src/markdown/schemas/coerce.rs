@@ -1,1155 +1,539 @@
-//! Schema-driven frontmatter type coercion.
+//! Frontmatter conversion against a compiled or raw JSON Schema, through the
+//! one conversion core ([`crate::markdown::coercion`]).
 //!
-//! When a frontmatter value is *trivially* the wrong JSON type but
-//! unambiguously convertible to the type a property's compiled JSON Schema
-//! declares (e.g. the string `"true"` against a `boolean` field), Darkmatter
-//! coerces the stored value to the declared type instead of failing
-//! validation. Coercion is driven entirely by walking the merged compiled
-//! JSON Schema (`EffectiveSchema::json_schema`) — the same shapes
-//! [`super::simplified::convert`] emits — so it covers inline `$schema`,
-//! baseline-merged fields, raw JSON Schema, and root unions through one path.
+//! The schema is translated into a [`Shape`] by
+//! [`super::json_shape::shape_from_json_schema`]; the core alone decides
+//! whether each value is kept, converted, or rejected. The complete schema
+//! stays authoritative:
 //!
-//! [`coerce_frontmatter`] is the single source of truth, used by both the
-//! library validation path and the compose write-back. It is pure: it builds a
-//! coerced copy and never mutates its inputs.
+//! - an instance the schema already accepts is kept as it is;
+//! - a converted candidate is committed when the complete schema accepts it,
+//!   unmodeled keywords included (with the shell-pending allowance below);
+//! - otherwise each top-level property is its own value: a property whose
+//!   conversion succeeds, and on which the complete schema then reports no
+//!   problem, is committed, while a failing property stays as written and a
+//!   missing required one stays missing (presence is the validator's verdict,
+//!   not conversion's). A value is never written back partially. A root
+//!   union keeps the whole-document rule, since choosing its arm needs the
+//!   whole document.
 //!
-//! See `darkmatter/features/2026-05-28-schema-coercion/design.md` for the
-//! recognizer table and union algorithm this implements.
+//! Compose's pre-shell pass passes the top-level keys whose values are still
+//! composition-pending (`$(...)`, an unresolved `{{ ... }}`). The core treats
+//! such a value as matching whatever its key declares, and a candidate whose
+//! only remaining problems are on pending keys is still committed, so resolved
+//! siblings convert now and the pending values are judged after expansion.
+//!
+//! Every entry point is pure: it builds a converted copy and never mutates its
+//! inputs. The rules were decided in `2026-10-28-schema-enhancements` ("The
+//! Coercion Engine", "Raw JSON Schema Conversion Boundaries").
 
-use std::collections::HashSet;
-use std::sync::{Arc, LazyLock};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 
 use jsonschema::Validator;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
-use super::format::{
-    DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD, DARKMATTER_TYPE_ANNOTATION,
-    DARKMATTER_TYPE_DEFINITION_KEYWORD, DARKMATTER_YAML_FORMAT,
-};
-use super::simplified::SimplifiedType;
-use super::simplified::convert::{BOOLISH_VALUES, NUMBERLIKE_PATTERN};
+use super::json_shape::shape_from_json_schema;
 use super::validate::{self, ValidatorCache, error_top_level_key};
+use super::ValidationProblem;
+use crate::markdown::coercion::{
+    Additional, BindOptions, Bound, ConversionError, Defer, FailureReason, ObjectShape, PathSegment, PatternSlot,
+    PropertySlot, Shape, TupleShape, TupleSlot, ValueFailure, bind_with,
+};
 
-/// Process-wide cache of the throwaway per-arm validators coercion compiles when
-/// probing which union arm a value belongs to (F6). Compiling a `jsonschema`
-/// `Validator` is milliseconds of work, and a single compose re-probes the same
-/// arm schemas repeatedly (once per root-union commit, once per property-union
-/// property, across every re-validation pass). These validators are pure
-/// structural type checks built with no file-reference anchors — exactly the
-/// `build_structural_validator(_)` shape — so a cache keyed on the arm schema
-/// JSON alone (via [`ValidatorCache`], whose default fallback is `None`) returns
-/// a byte-identical validator on a hit. It is deliberately separate from the
-/// effective-schema validator cache so the many small arm schemas do not churn
-/// that cache's LRU budget.
-static COERCION_VALIDATOR_CACHE: LazyLock<ValidatorCache> = LazyLock::new(ValidatorCache::new);
+/// Process-wide cache of the structural validators conversion compiles to
+/// judge candidates. Kept apart from the effective-schema validator cache so
+/// the many small root-union arm schemas do not churn its LRU budget.
+static CONVERSION_VALIDATOR_CACHE: LazyLock<ValidatorCache> = LazyLock::new(ValidatorCache::new);
 
-/// Returns a cached validator for `schema`, compiled with no file-reference
-/// anchors (the coercion probe shape). Equivalent to
-/// `build_structural_validator(schema)` on a cache miss.
-fn coercion_validator(schema: &Value) -> Option<Arc<Validator>> {
-    COERCION_VALIDATOR_CACHE.structural_validator_for(schema).ok()
+/// How many conversion plans the plan cache holds before it starts over.
+const PLAN_CACHE_CAPACITY: usize = 64;
+
+static PLAN_CACHE: LazyLock<Mutex<HashMap<u64, Arc<ConversionPlan>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// What conversion derives from one schema: its translated shape, that shape
+/// with nothing required, and its structural validator. A schema's content
+/// is hashed once to find its plan; an [`super::EffectiveSchema`] keeps its
+/// plan, so repeated validations of large schemas never hash them again.
+pub(crate) struct ConversionPlan {
+    /// The schema's content hash, the key of its structural validator.
+    key: u64,
+    shape: OnceLock<Shape>,
+    relaxed: OnceLock<Shape>,
+    validator: OnceLock<Option<Arc<Validator>>>,
 }
 
-/// The conversion a recognized property schema asks for.
-///
-/// Not `Eq`: [`CoercionTarget::LiteralConst`] carries a `serde_json::Value`,
-/// which is only `PartialEq` (floats break total equality).
-#[derive(Debug, Clone, PartialEq)]
-pub enum CoercionTarget {
-    /// A string in the boolish set → a real boolean.
-    ToBoolean,
-    /// A numeric string → a real number.
-    ToNumber,
-    /// A scalar (number or boolean) → its canonical string form.
-    ToString,
-    /// A native (mapping/sequence/scalar) value → its YAML string
-    /// serialization, for a `yaml` content-format field (Feature D). A value
-    /// that is already a string (or null) is left untouched so the `format`
-    /// validator checks it directly.
-    ToYamlString,
-    /// A native value → its strict-JSON string serialization, for a `json`
-    /// content-format field (Feature D). A value already a string (or null) is
-    /// left untouched.
-    ToJsonString,
-    /// An array whose elements coerce by the inner target.
-    Array(Box<CoercionTarget>),
-    /// An inline object fragment: recurse into the named properties. Each
-    /// property's value is coerced by the corresponding target; properties
-    /// not listed are left untouched.
-    ///
-    /// The schema shape is `{"type":"object","properties":{...},
-    /// "additionalProperties":false}` — the form `convert::inline_object_fragment`
-    /// emits. The opaque `object` keyword (no `properties`) is outside the
-    /// matrix and yields `None` from `coercion_target`.
-    Object(Vec<(String, CoercionTarget)>),
-    /// A `literal(x)` const fragment (`{"const": <value>}`) carrying its typed
-    /// value. A non-string const reuses the boolish/numberlike conversion but
-    /// only commits the coerced value when it equals the const — so an equality
-    /// failure (`'3'` against `literal(2)`) never writes back an invalid value.
-    /// String consts never coerce, so they never reach a `LiteralConst` target
-    /// ([`literal_const_target`] yields `None` for them).
-    LiteralConst(Value),
-    /// The arms of an array's item union (`items: {"anyOf": [...]}`, the
-    /// lowering of a `U[]` reference to a union-typed named type). Each item is
-    /// coerced by the property-union rule independently: the coerced item is
-    /// committed only when exactly one arm's candidate validates.
-    ///
-    /// Produced only for `items`; a property-level union is handled by
-    /// [`coerce_object`] directly, so [`coercion_target`] still yields `None`
-    /// for a generic `anyOf` outside an array.
-    ItemUnion(Vec<Value>),
+impl ConversionPlan {
+    /// The plan for `schema`, built once per distinct schema content.
+    pub(crate) fn for_schema(schema: &Value) -> Arc<Self> {
+        Self::for_hashed(validate::schema_content_hash(schema))
+    }
+
+    /// [`Self::for_schema`] for a schema whose content hash `key` is known.
+    /// Each part is derived on first use, from the same schema.
+    pub(crate) fn for_hashed(key: u64) -> Arc<Self> {
+        if let Some(plan) = PLAN_CACHE.lock().expect("plan cache poisoned").get(&key) {
+            return plan.clone();
+        }
+        let plan = Arc::new(Self {
+            key,
+            shape: OnceLock::new(),
+            relaxed: OnceLock::new(),
+            validator: OnceLock::new(),
+        });
+        let mut cache = PLAN_CACHE.lock().expect("plan cache poisoned");
+        if cache.len() >= PLAN_CACHE_CAPACITY {
+            cache.clear();
+        }
+        cache.insert(key, plan.clone());
+        plan
+    }
+
+    fn shape(&self, schema: &Value) -> &Shape {
+        self.shape.get_or_init(|| shape_from_json_schema(schema))
+    }
+
+    fn relaxed(&self, schema: &Value) -> &Shape {
+        self.relaxed.get_or_init(|| relax_presence(self.shape(schema)))
+    }
+
+    fn validator(&self, schema: &Value) -> Option<&Validator> {
+        self.validator
+            .get_or_init(|| CONVERSION_VALIDATOR_CACHE.structural_validator_hashed(schema, self.key).ok())
+            .as_deref()
+    }
 }
 
-/// Result of coercing a whole instance against a schema.
+impl std::fmt::Debug for ConversionPlan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConversionPlan").finish_non_exhaustive()
+    }
+}
+
+fn structural_validator(schema: &Value) -> Option<Arc<Validator>> {
+    CONVERSION_VALIDATOR_CACHE.structural_validator_for(schema).ok()
+}
+
+/// Result of converting a whole instance against a schema.
 #[derive(Debug, Clone)]
 pub struct CoercionOutcome {
-    /// The coerced instance (a clone when nothing changed).
+    /// The converted instance (a clone when nothing changed).
     pub value: Value,
-    /// Whether any value was actually converted.
+    /// Whether any value was converted.
     pub changed: bool,
 }
 
-/// If `schema` is one of Darkmatter's optional-property wrappers, returns the
-/// typed inner arm. Two shapes are recognized:
-///
-/// - `{"anyOf":[{"type":"null"}, <typed>]}` (2 arms) — every optional scalar,
-///   array, inline object, boolish/numberlike, and property-level union.
-/// - `{"anyOf":[{"type":"null"}, {"const":""}, <file-typed>]}` (3 arms) —
-///   optional scalar `file` preserving the legacy empty-string sentinel.
-///
-/// The recognizer is exact and only matches the wrappers
-/// [`super::simplified::convert`] emits; unrelated `anyOf` schemas return
-/// `None`.
-pub(super) fn unwrap_nullable_arm(schema: &Value) -> Option<&Value> {
-    let obj = schema.as_object()?;
-    let arms = obj.get("anyOf").and_then(Value::as_array)?;
-
-    // 2-arm form: null + typed.
-    if arms.len() == 2 && arms[0].get("type").and_then(Value::as_str) == Some("null") {
-        return Some(&arms[1]);
-    }
-
-    // 3-arm form: null + empty const + file-typed.
-    if arms.len() == 3
-        && arms[0].get("type").and_then(Value::as_str) == Some("null")
-        && arms[1].get("const").and_then(Value::as_str) == Some("")
-    {
-        return Some(&arms[2]);
-    }
-
-    None
-}
-
-/// Maps a single property's JSON Schema fragment to its coercion target, or
-/// `None` when the fragment is outside the coercion matrix.
-///
-/// Only the specific shapes [`super::simplified::convert`] emits are
-/// recognized; anything else (opaque `object`, `any`, bare enums, multi-type
-/// `type` arrays, generic unions not matching boolish/numberlike) yields
-/// `None` and is left to the validator untouched.
-///
-/// Inline object fragments (`{"type":"object","properties":{...},
-/// "additionalProperties":false}`) are recognized and yield
-/// [`CoercionTarget::Object`] so the coercion engine can recurse into
-/// recognized named properties while leaving opaque siblings untouched.
-///
-/// Per-arm coercion for property-level unions is handled by
-/// [`coerce_object`], which calls `coerce_property_union` directly when it
-/// encounters an `anyOf` at a property position. The specific boolish /
-/// numberlike shapes are matched here first. An array whose `items` is any
-/// other `anyOf` yields [`CoercionTarget::ItemUnion`], which applies the same
-/// per-arm rule to each item.
-pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
-    // Darkmatter optional properties wrap the typed fragment in a nullable
-    // `anyOf`. Look through the wrapper so non-null values are coerced against
-    // the real typed schema; `null` itself is left untouched by `coerce_value`.
-    if let Some(inner) = unwrap_nullable_arm(property_schema) {
-        return coercion_target(inner);
-    }
-
-    let obj = property_schema.as_object()?;
-
-    if obj.contains_key(DARKMATTER_TYPE_DEFINITION_KEYWORD)
-        || obj.contains_key(DARKMATTER_SCHEMA_KEYWORD)
-    {
-        return None;
-    }
-
-    // A `literal(x)` fragment is a bare `{"const": <value>}` with no `type`
-    // key. A non-string const reuses the scalar conversions with an equality
-    // guard; a string const never coerces (yields `None`).
-    if let Some(constant) = obj.get("const") {
-        return literal_const_target(constant);
-    }
-
-    // `anyOf` shapes (boolish / numberlike) are checked before single `type`
-    // because the boolish/numberlike fragments have no top-level `type` key.
-    if let Some(arms) = obj.get("anyOf").and_then(Value::as_array) {
-        return target_from_any_of(arms);
-    }
-
-    // A multi-type `type` array (e.g. `["string","null"]`) is outside the
-    // matrix: only a single string `type` is recognized.
-    let ty = obj.get("type")?.as_str()?;
-    match ty {
-        "boolean" => Some(CoercionTarget::ToBoolean),
-        "number" | "integer" => Some(CoercionTarget::ToNumber),
-        // A `string` carrying a content-format seam (Feature D) serializes a
-        // native value to that format's string form; every other string type
-        // (including `file`, `email`, `url` formats) keeps the plain
-        // scalar→string coercion.
-        // An `alphanumeric` value must already be a YAML string: a native
-        // number or boolean is a type mismatch, never converted text. The
-        // lowering's type annotation names the type.
-        "string"
-            if obj.get(DARKMATTER_TYPE_ANNOTATION).and_then(Value::as_str)
-                == Some(SimplifiedType::Alphanumeric.as_keyword()) =>
-        {
-            None
-        }
-        "string" => match obj.get("format").and_then(Value::as_str) {
-            Some(DARKMATTER_YAML_FORMAT) => Some(CoercionTarget::ToYamlString),
-            Some(DARKMATTER_JSON_FORMAT) => Some(CoercionTarget::ToJsonString),
-            _ => Some(CoercionTarget::ToString),
-        },
-        "array" => {
-            let items = obj.get("items")?;
-            // Boolish/numberlike items lower to an `anyOf` too, so the specific
-            // recognizer must win before a generic item union is assumed.
-            let inner = coercion_target(items).or_else(|| item_union_target(items))?;
-            Some(CoercionTarget::Array(Box::new(inner)))
-        }
-        "object" => inline_object_target(obj),
-        // `unknown` (`{}`, no `type`) and anything else fall outside the
-        // matrix, so their native values are preserved.
-        _ => None,
-    }
-}
-
-/// Recognizes a genuine item union (`items: {"anyOf": [...]}` that
-/// [`coercion_target`] did not match as boolish/numberlike) as
-/// [`CoercionTarget::ItemUnion`]. Item unions never carry a `null` arm.
-fn item_union_target(items: &Value) -> Option<CoercionTarget> {
-    let arms = items.get("anyOf").and_then(Value::as_array)?;
-    Some(CoercionTarget::ItemUnion(arms.clone()))
-}
-
-/// Builds an [`CoercionTarget::Object`] from the inline object fragment's
-/// recognized `properties` entries. An opaque `object` (no `properties` field)
-/// is not an inline object and yields `None`.
-fn inline_object_target(obj: &Map<String, Value>) -> Option<CoercionTarget> {
-    let props = obj.get("properties").and_then(Value::as_object)?;
-    if props.is_empty() {
-        // An empty inline object (`{}`) carries no coercions; recognising
-        // it as `Object([])` would be a no-op pass-through, so yield `None`
-        // to keep the matrix narrow.
-        return None;
-    }
-    let mut inner = Vec::with_capacity(props.len());
-    for (k, v) in props {
-        if let Some(target) = coercion_target(v) {
-            inner.push((k.clone(), target));
+impl CoercionOutcome {
+    fn unchanged(instance: &Value) -> Self {
+        Self {
+            value: instance.clone(),
+            changed: false,
         }
     }
-    (!inner.is_empty()).then_some(CoercionTarget::Object(inner))
 }
 
-/// Recognizes the two `anyOf` shapes Darkmatter emits, matching them *exactly*
-/// so unrelated property unions are never coerced.
-///
-/// - **boolish**: one arm is `{"type":"boolean"}` and one arm is an `"enum"`
-///   whose members are exactly [`BOOLISH_VALUES`] → [`CoercionTarget::ToBoolean`].
-/// - **numberlike**: one arm is `{"type":"number"}` and one arm is
-///   `{"type":"string"}` whose `"pattern"` equals [`NUMBERLIKE_PATTERN`] →
-///   [`CoercionTarget::ToNumber`].
-///
-/// The exact `enum`/`pattern` match is the correctness boundary: a raw JSON
-/// Schema union such as `{"anyOf":[{"type":"boolean"},{"enum":["auto"]}]}` or
-/// `{"anyOf":[{"type":"number"},{"type":"string","pattern":"^[A-Z]+$"}]}` is
-/// *not* something Darkmatter emits, so it yields `None` and is left for the
-/// strict validator to accept or reject untouched.
-fn target_from_any_of(arms: &[Value]) -> Option<CoercionTarget> {
-    let has_type = |t: &str| {
-        arms.iter()
-            .any(|a| a.get("type").and_then(Value::as_str) == Some(t))
+/// What converting one instance produced.
+enum Conversion {
+    /// The schema accepts the instance as it is, or the core kept it.
+    Kept,
+    /// A candidate the complete schema accepts.
+    Converted(Value),
+    /// The core found a converted reading the complete schema rejects.
+    Rejected,
+    /// The core could not bind the instance.
+    Failed(ConversionError),
+    /// The schema does not compile; its validator reports why.
+    Unavailable,
+}
+
+fn convert(plan: &ConversionPlan, schema: &Value, instance: &Value, pending: &HashSet<String>) -> Conversion {
+    let Some(validator) = plan.validator(schema) else {
+        return Conversion::Unavailable;
     };
-    let has_boolish_enum_arm = arms.iter().any(|a| {
-        a.get("enum")
-            .and_then(Value::as_array)
-            .is_some_and(|members| is_boolish_enum(members))
-    });
-    let has_numberlike_string_arm = arms.iter().any(|a| {
-        a.get("type").and_then(Value::as_str) == Some("string")
-            && a.get("pattern").and_then(Value::as_str) == Some(NUMBERLIKE_PATTERN)
-    });
-
-    if has_type("boolean") && has_boolish_enum_arm {
-        Some(CoercionTarget::ToBoolean)
-    } else if has_type("number") && has_numberlike_string_arm {
-        Some(CoercionTarget::ToNumber)
-    } else {
-        None
+    if validator.is_valid(instance) {
+        return Conversion::Kept;
+    }
+    let shape = plan.shape(schema);
+    // `Defer` is a `'static` trait object, so the predicate owns its keys.
+    let owned = pending.clone();
+    let defer = move |path: &[PathSegment], _: &Value| is_pending(path, &owned);
+    let options = BindOptions {
+        defer: (!pending.is_empty()).then_some(&defer as &Defer),
+        ..BindOptions::default()
+    };
+    match bind_with(shape, instance, &options) {
+        Ok(Bound::Kept(_)) => Conversion::Kept,
+        Ok(Bound::Converted(candidate)) => {
+            if accepts(schema, validator, &candidate, pending) {
+                Conversion::Converted(candidate)
+            } else {
+                match property_wise(schema, validator, instance, &candidate, pending) {
+                    Some(committed) => Conversion::Converted(committed),
+                    None => Conversion::Rejected,
+                }
+            }
+        }
+        Err(error) => match partial_copy(plan, schema, instance, &error, pending)
+            .and_then(|candidate| property_wise(schema, validator, instance, &candidate, pending))
+        {
+            Some(committed) => Conversion::Converted(committed),
+            None => Conversion::Failed(error),
+        },
     }
 }
 
-/// Maps a `literal(x)` const value to its coercion target.
-///
-/// A numeric or boolean const reuses the numberlike/boolish scalar conversion
-/// (with the equality guard applied in [`coerce_to_literal`]); a string const
-/// (or any other JSON type) never coerces and yields `None`, so a value already
-/// holding the exact string is left for the strict `const` validator.
-fn literal_const_target(constant: &Value) -> Option<CoercionTarget> {
-    match constant {
-        Value::Number(_) | Value::Bool(_) => Some(CoercionTarget::LiteralConst(constant.clone())),
-        _ => None,
-    }
-}
-
-/// True when an `anyOf` `enum` arm's members are *exactly* the full boolish
-/// spelling set ([`BOOLISH_VALUES`]), order-independent and with no missing or
-/// extra members. This is precisely the shape
-/// [`super::simplified::convert::boolish_fragment`] emits, so the recognizer
-/// matches only Darkmatter's own boolish fragment. Any subset (e.g. `["true"]`
-/// or `["true","false"]`), any superset, or any non-boolish member fails the
-/// match and is left untouched for the strict validator.
-///
-/// Subsets must be rejected: a raw JSON Schema such as
-/// `{"anyOf":[{"type":"boolean"},{"enum":["true"]}]}` is *not* Darkmatter's
-/// shape, and with instance `"false"` strict validation must fail (string, and
-/// `"false"` is not in `["true"]`). Recognizing the subset would coerce
-/// `"false"` → `false` and falsely validate it against the boolean arm.
-fn is_boolish_enum(members: &[Value]) -> bool {
-    members.len() == BOOLISH_VALUES.len()
-        && BOOLISH_VALUES
-            .iter()
-            .all(|expected| members.iter().any(|m| m.as_str() == Some(*expected)))
-}
-
-/// Builds a coerced copy of `instance` against `json_schema` and reports
-/// whether anything changed. Pure: never mutates inputs.
-///
-/// For a root `anyOf` union, each arm is tried in index order: a per-arm
-/// coerced candidate is built and strict-validated, and the first arm whose
-/// candidate validates is committed. If no arm validates, the instance is
-/// returned unchanged so the existing union error reporting runs.
-pub fn coerce_frontmatter(json_schema: &Value, instance: &Value) -> CoercionOutcome {
-    coerce_frontmatter_with_pending(json_schema, instance, &HashSet::new())
-}
-
-/// Like [`coerce_frontmatter`], but for the compose pre-shell stage where some
-/// top-level keys still hold `$(...)` shell expressions and so cannot yet be
-/// coerced or validated to their declared types.
-///
-/// For a root `anyOf` union, an arm is committed when its coerced candidate
-/// either fully validates *or* the only remaining validation problems are
-/// attributable to keys in `shell_pending` — whose real type is resolved at
-/// post-shell re-validation. This lets non-shell fields in the winning arm
-/// (e.g. a boolish `flag: "false"`) still coerce and be written back even when a
-/// sibling shell-pending typed field (e.g. `n: "$(echo 1)"`) keeps the raw
-/// candidate from validating. Non-shell coercions are unaffected: a non-union
-/// schema ignores `shell_pending` (its per-property pass already skips
-/// uncoercible values), and an empty set reduces this to [`coerce_frontmatter`].
-pub fn coerce_frontmatter_with_pending(
-    json_schema: &Value,
+/// The top-level properties of `candidate` that converted cleanly: each
+/// converted property is kept only when the complete schema reports no
+/// problem on it, and every other property stays as written. `None` for a
+/// root union, a non-object instance, or when nothing converted cleanly.
+fn property_wise(
+    schema: &Value,
+    validator: &Validator,
     instance: &Value,
-    shell_pending: &HashSet<String>,
-) -> CoercionOutcome {
-    if let Some(arms) = json_schema.get("anyOf").and_then(Value::as_array) {
-        return coerce_root_union(arms, instance, shell_pending);
+    candidate: &Value,
+    pending: &HashSet<String>,
+) -> Option<Value> {
+    if schema.get("anyOf").is_some() || schema.get("oneOf").is_some() {
+        return None;
     }
-    coerce_object(json_schema, instance)
-}
-
-/// Root-union pass: commit the first arm whose coerced candidate is accepted.
-fn coerce_root_union(
-    arms: &[Value],
-    instance: &Value,
-    shell_pending: &HashSet<String>,
-) -> CoercionOutcome {
-    for arm in arms {
-        let candidate = coerce_object(arm, instance).value;
-        let wrapped = validate::wrap_arm_as_root_schema(arm);
-        // A schema that fails to build cannot be a valid arm; skip it. The
-        // surrounding validator already surfaces build failures elsewhere.
-        let Some(validator) = coercion_validator(&wrapped) else {
-            continue;
-        };
-        if arm_accepts(&validator, &candidate, shell_pending) {
-            let changed = &candidate != instance;
-            return CoercionOutcome {
-                value: candidate,
-                changed,
-            };
+    let (Value::Object(original), Value::Object(converted)) = (instance, candidate) else {
+        return None;
+    };
+    let troubled: HashSet<String> = validator
+        .iter_errors(candidate)
+        .filter_map(|error| error_top_level_key(&error))
+        .collect();
+    let mut committed = original.clone();
+    let mut changed = false;
+    for (key, value) in converted {
+        if original.get(key) != Some(value) && !troubled.contains(key) && !pending.contains(key) {
+            committed.insert(key.clone(), value.clone());
+            changed = true;
         }
     }
-    CoercionOutcome {
-        value: instance.clone(),
-        changed: false,
-    }
+    changed.then_some(Value::Object(committed))
 }
 
-/// Whether a root-union arm's coerced candidate is good enough to commit.
-///
-/// A fully valid candidate is always accepted. Otherwise — only when
-/// `shell_pending` is non-empty — the arm is still accepted if every residual
-/// validation problem points at a pending `$(...)` top-level key. Those keys
-/// are re-validated and coerced after shell expansion, so deferring them here
-/// is sound; a problem on any non-pending key (including a missing required
-/// discriminator) rejects the arm so a genuinely wrong arm is never committed.
-fn arm_accepts(validator: &Validator, candidate: &Value, shell_pending: &HashSet<String>) -> bool {
+fn is_pending(path: &[PathSegment], pending: &HashSet<String>) -> bool {
+    matches!(path, [PathSegment::Key(key)] if pending.contains(key))
+}
+
+/// Whether the complete schema accepts a converted candidate: fully, or, when
+/// keys are pending, with every remaining problem on a pending key. A root
+/// union is judged arm by arm, since its own failure names no key.
+fn accepts(schema: &Value, validator: &Validator, candidate: &Value, pending: &HashSet<String>) -> bool {
     if validator.is_valid(candidate) {
         return true;
     }
-    if shell_pending.is_empty() {
+    if pending.is_empty() {
         return false;
     }
+    match schema.get("anyOf").and_then(Value::as_array) {
+        Some(arms) => arms.iter().any(|arm| {
+            structural_validator(&validate::wrap_arm_as_root_schema(arm))
+                .is_some_and(|arm_validator| only_pending_problems(&arm_validator, candidate, pending))
+        }),
+        None => only_pending_problems(validator, candidate, pending),
+    }
+}
+
+fn only_pending_problems(validator: &Validator, candidate: &Value, pending: &HashSet<String>) -> bool {
     let mut saw_problem = false;
-    for err in validator.iter_errors(candidate) {
+    for error in validator.iter_errors(candidate) {
         saw_problem = true;
-        match error_top_level_key(&err) {
-            Some(key) if shell_pending.contains(&key) => {}
+        match error_top_level_key(&error) {
+            Some(key) if pending.contains(&key) => {}
             _ => return false,
         }
     }
     saw_problem
 }
 
-/// Non-union object pass: coerce each instance property that the schema
-/// declares with a recognized target. Properties absent from the schema or
-/// instance, or with no recognized target, are untouched.
-///
-/// For each declared property:
-/// 1. [`coercion_target`] is consulted first. It recognises the single-type
-///    forms (`string`, `boolean`, …) plus the specific boolish / numberlike
-///    `anyOf` shapes — and inline object fragments with recursable
-///    properties (Phase 2). When it returns a target, that target is used.
-/// 2. If `coercion_target` returns `None` but the property schema is an
-///    `anyOf` of multiple arms, [`coerce_property_union`] is tried: each
-///    arm gets a coerced candidate, the candidate is validated against the
-///    arm, and the original value is replaced only when exactly one arm's
-///    candidate validates. The spec's "no guessing" rule (zero or multiple
-///    matches leave the value untouched) is enforced there.
-fn coerce_object(schema: &Value, instance: &Value) -> CoercionOutcome {
-    let (Some(props), Some(obj)) = (
-        schema.get("properties").and_then(Value::as_object),
-        instance.as_object(),
-    ) else {
-        return CoercionOutcome {
-            value: instance.clone(),
-            changed: false,
-        };
-    };
+/// Converts `instance` against `json_schema`; see the module docs for when a
+/// conversion is committed. Pure: never mutates its inputs.
+pub fn coerce_frontmatter(json_schema: &Value, instance: &Value) -> CoercionOutcome {
+    coerce_frontmatter_with_pending(json_schema, instance, &HashSet::new())
+}
 
-    let mut out: Map<String, Value> = obj.clone();
-    let mut changed = false;
-    for (name, value) in obj {
-        let Some(prop_schema) = props.get(name) else {
-            continue;
-        };
-        let effective_schema = unwrap_nullable_arm(prop_schema).unwrap_or(prop_schema);
+/// Like [`coerce_frontmatter`], for compose's pre-shell stage, where the
+/// top-level keys in `shell_pending` still hold composition-pending values.
+/// Those values are kept as they are, and a candidate whose only remaining
+/// problems are on those keys is committed. An empty set reduces this to
+/// [`coerce_frontmatter`].
+pub fn coerce_frontmatter_with_pending(
+    json_schema: &Value,
+    instance: &Value,
+    shell_pending: &HashSet<String>,
+) -> CoercionOutcome {
+    coerce_with_plan(&ConversionPlan::for_schema(json_schema), json_schema, instance, shell_pending)
+}
 
-        // 1. Specific shape: single-type, inline object, or boolish/numberlike
-        //    anyOf. `coercion_target` returns a single coherent target so the
-        //    per-arm pass below is unnecessary.
-        if let Some(target) = coercion_target(effective_schema) {
-            if let Some(coerced) = coerce_value(&target, value) {
-                out.insert(name.clone(), coerced);
-                changed = true;
-            }
-            continue;
-        }
-        // 2. Property-level union with per-arm coercion. Only reached when the
-        //    `anyOf` is not a boolish / numberlike / specific-shape match.
-        if let Some(arm_schemas) = effective_schema.get("anyOf").and_then(Value::as_array)
-            && let Some(coerced) = coerce_property_union(arm_schemas, value)
-        {
-            out.insert(name.clone(), coerced);
-            changed = true;
-        }
-    }
-
-    CoercionOutcome {
-        value: Value::Object(out),
-        changed,
+/// [`coerce_frontmatter_with_pending`] with the schema's plan already found.
+pub(crate) fn coerce_with_plan(
+    plan: &ConversionPlan,
+    json_schema: &Value,
+    instance: &Value,
+    shell_pending: &HashSet<String>,
+) -> CoercionOutcome {
+    match convert(plan, json_schema, instance, shell_pending) {
+        Conversion::Converted(value) => CoercionOutcome { value, changed: true },
+        _ => CoercionOutcome::unchanged(instance),
     }
 }
 
-/// Per-arm coercion for a union schema, at a property position or for one
-/// array item ([`CoercionTarget::ItemUnion`]).
-///
-/// For each arm:
-/// 1. Compute the arm's [`CoercionTarget`] via [`coercion_target`].
-/// 2. Build a candidate value by applying the target (or, if the arm is
-///    outside the matrix, fall back to the original value).
-/// 3. Validate the candidate against the arm schema.
-///
-/// The candidate is committed only when **exactly one** arm's candidate
-/// validates — preserving the spec's "no guessing" rule for ambiguous
-/// unions (multiple matching arms) and zero-match unions (no arm can
-/// accept the value). An arm whose validator fails to compile is skipped
-/// without affecting the outcome. Like [`coerce_value`], it returns `None`
-/// when the committed candidate equals `value`, so an already-valid value is
-/// not reported as changed.
-fn coerce_property_union(arms: &[Value], value: &Value) -> Option<Value> {
-    let candidates: Vec<(&Value, Option<Value>)> = arms
-        .iter()
-        .map(|arm| (arm, coercion_target(arm).and_then(|target| coerce_value(&target, value))))
-        .collect();
-    // An unchanged candidate is never committed, so when no arm changes the
-    // value there is nothing to decide, and no arm needs validating.
-    if candidates.iter().all(|(_, candidate)| candidate.is_none()) {
-        return None;
-    }
-    let mut valid_candidates: Vec<Value> = Vec::new();
-    for (arm, candidate) in candidates {
-        let candidate = candidate.unwrap_or_else(|| value.clone());
-        let Some(validator) = coercion_validator(arm) else {
-            continue;
-        };
-        if validator.is_valid(&candidate) {
-            valid_candidates.push(candidate);
-        }
-    }
-    if valid_candidates.len() == 1 {
-        valid_candidates.pop().filter(|candidate| candidate != value)
-    } else {
-        None
-    }
-}
-
-/// Coerces a single value against a single property schema, returning a coerced
-/// copy (or a clone when nothing coerces). Pure: never mutates the input.
-///
-/// Mirrors the per-arm coercion [`coerce_property_union`] applies, but for a lone
-/// value/schema pair rather than a property inside an object — e.g. an
-/// `example(...)` artifact's `returns` against its annotated target, where the
-/// schema describes the value directly (`{"type":"string","format":"darkmatter-yaml"}`)
-/// instead of an object with `properties`. A schema outside the coercion matrix
-/// (or an already-correctly-typed value) yields a plain clone, so this is safe to
-/// run before a strict validator.
+/// Converts a lone value against a schema that describes the value itself
+/// (an `example(...)` artifact's `returns` against its annotated target). A
+/// clone of `value` when nothing converts.
 pub fn coerce_value_against_schema(schema: &Value, value: &Value) -> Value {
-    match coercion_target(schema) {
-        Some(target) => coerce_value(&target, value).unwrap_or_else(|| value.clone()),
-        None => value.clone(),
-    }
+    coerce_frontmatter(schema, value).value
 }
 
-/// Applies a scalar/array/object coercion target to one value.
+/// The working copy validation reports on: the committed conversion when one
+/// exists, otherwise every conversion that succeeds on its own, with each
+/// failing value left as written so the report names only real failures.
 ///
-/// Returns `Some(replacement)` when the value was converted, `None` to leave it
-/// untouched. The scalar rules only fire on a *mismatched* JSON type, so an
-/// already-correctly-typed value yields `None` (this is what makes coercion
-/// idempotent).
-fn coerce_value(target: &CoercionTarget, value: &Value) -> Option<Value> {
-    match target {
-        CoercionTarget::ToBoolean => coerce_to_boolean(value),
-        CoercionTarget::ToNumber => coerce_to_number(value),
-        CoercionTarget::ToString => coerce_to_string(value),
-        CoercionTarget::ToYamlString => coerce_to_yaml_string(value),
-        CoercionTarget::ToJsonString => coerce_to_json_string(value),
-        CoercionTarget::Array(inner) => coerce_array(inner, value),
-        CoercionTarget::Object(props) => coerce_inline_object(props, value),
-        CoercionTarget::LiteralConst(constant) => coerce_to_literal(constant, value),
-        CoercionTarget::ItemUnion(arms) => coerce_property_union(arms, value),
+/// Never written back anywhere; compose writes back only what
+/// [`coerce_frontmatter_with_pending`] commits.
+#[cfg(test)]
+pub(super) fn validation_copy(json_schema: &Value, instance: &Value) -> Value {
+    validation_copy_with_plan(&ConversionPlan::for_schema(json_schema), json_schema, instance)
+}
+
+/// [`validation_copy`] with the schema's plan already found.
+pub(super) fn validation_copy_with_plan(plan: &ConversionPlan, json_schema: &Value, instance: &Value) -> Value {
+    match convert(plan, json_schema, instance, &HashSet::new()) {
+        Conversion::Converted(value) => value,
+        Conversion::Failed(error) => {
+            partial_copy(plan, json_schema, instance, &error, &HashSet::new()).unwrap_or_else(|| instance.clone())
+        }
+        Conversion::Kept | Conversion::Rejected | Conversion::Unavailable => instance.clone(),
     }
 }
 
-/// Coerces a value toward a `literal(x)` const, committing the coerced value
-/// **only** when it equals the const. Reuses the boolish/numberlike scalar
-/// conversion selected by the const's JSON type; a value that coerces to a
-/// different scalar (an equality failure, e.g. `'3'` against `literal(2)`) is
-/// left untouched so no invalid value is written back. String consts never
-/// reach here ([`literal_const_target`] rejects them).
-fn coerce_to_literal(constant: &Value, value: &Value) -> Option<Value> {
-    let coerced = match constant {
-        Value::Number(_) => coerce_to_number(value)?,
-        Value::Bool(_) => coerce_to_boolean(value)?,
-        _ => return None,
-    };
-    (&coerced == constant).then_some(coerced)
-}
+/// How many times [`partial_copy`] sets newly failing values aside before it
+/// gives up.
+const PARTIAL_COPY_ROUNDS: usize = 4;
 
-fn coerce_to_boolean(value: &Value) -> Option<Value> {
-    let Value::String(s) = value else {
-        return None;
-    };
-    if !BOOLISH_VALUES.contains(&s.as_str()) {
-        return None;
+/// Binds again with every failing value treated as already matching and with
+/// presence relaxed, so the values that do convert can be reported converted.
+fn partial_copy(
+    plan: &ConversionPlan,
+    json_schema: &Value,
+    instance: &Value,
+    error: &ConversionError,
+    pending: &HashSet<String>,
+) -> Option<Value> {
+    let relaxed = plan.relaxed(json_schema);
+    let mut failing: Vec<Vec<PathSegment>> = failing_paths(&error.failures);
+    for _ in 0..PARTIAL_COPY_ROUNDS {
+        let set_aside = failing.clone();
+        let pending = pending.clone();
+        let defer = move |path: &[PathSegment], _: &Value| {
+            is_pending(path, &pending) || set_aside.iter().any(|failed| failed == path)
+        };
+        let options = BindOptions {
+            defer: Some(&defer),
+            ..BindOptions::default()
+        };
+        match bind_with(relaxed, instance, &options) {
+            Ok(bound) => return Some(bound.into_value()),
+            Err(again) => {
+                // Only the root's complete-schema assertion is left: its
+                // converted reading is the copy, and the caller judges each
+                // property of it against the complete schema.
+                if let [ValueFailure {
+                    path,
+                    converted: Some(candidate),
+                    reason: FailureReason::AssertionFailed { .. },
+                    ..
+                }] = again.failures.as_slice()
+                    && path.is_empty()
+                {
+                    return Some(candidate.clone());
+                }
+                let more: Vec<_> = failing_paths(&again.failures)
+                    .into_iter()
+                    .filter(|path| !failing.contains(path))
+                    .collect();
+                if more.is_empty() {
+                    return None;
+                }
+                failing.extend(more);
+            }
+        }
     }
-    // The boolish set is exactly the `true`/`false` spellings, so a non-`true`
-    // member is necessarily a `false` spelling.
-    Some(Value::Bool(s.eq_ignore_ascii_case("true")))
+    None
 }
 
-fn coerce_to_number(value: &Value) -> Option<Value> {
-    let Value::String(s) = value else {
-        return None;
+/// The deepest paths at which a present value failed, looking inside union
+/// options: setting a union aside whole would keep every element under it
+/// unconverted, when only one element failed.
+fn failing_paths(failures: &[ValueFailure]) -> Vec<Vec<PathSegment>> {
+    let mut flat = Vec::new();
+    flatten_failures(failures, &mut flat);
+    let deeper = |path: &[PathSegment]| {
+        flat.iter()
+            .any(|other| other.path.len() > path.len() && other.path.starts_with(path))
     };
-    if !is_numberlike(s) {
-        return None;
+    let mut paths: Vec<Vec<PathSegment>> = Vec::new();
+    for failure in &flat {
+        if failure.received.is_some() && !deeper(&failure.path) && !paths.contains(&failure.path) {
+            paths.push(failure.path.clone());
+        }
     }
-    // Admission rejects a value no `f64` holds exactly (`"9007199254740993"`,
-    // `"99999999999999999999"`); it stays text, and validation reports the
-    // type error with the admission reason. An admitted value is stored the
-    // way serde_json reads the bare literal, so `"2.0"` stays a float.
-    crate::markdown::numeric::admit_number_text(s).ok()?;
-    serde_json::from_str::<serde_json::Number>(s)
-        .ok()
-        .map(Value::Number)
+    paths
 }
 
-fn coerce_to_string(value: &Value) -> Option<Value> {
-    match value {
-        Value::Number(n) => Some(Value::String(n.to_string())),
-        Value::Bool(b) => Some(Value::String(b.to_string())),
+/// A copy of `shape` in which nothing is required, so a missing value does
+/// not keep its siblings from converting.
+fn relax_presence(shape: &Shape) -> Shape {
+    match shape {
+        Shape::Array(array) => {
+            let mut array = array.clone();
+            array.items = Box::new(relax_presence(&array.items));
+            Shape::Array(array)
+        }
+        Shape::Tuple(tuple) => Shape::Tuple(TupleShape {
+            prefix: tuple
+                .prefix
+                .iter()
+                .map(|slot| TupleSlot {
+                    shape: relax_presence(&slot.shape),
+                    optional: true,
+                })
+                .collect(),
+            rest: tuple.rest.as_ref().map(|rest| Box::new(relax_presence(rest))),
+        }),
+        Shape::Object(object) => Shape::Object(ObjectShape {
+            properties: object
+                .properties
+                .iter()
+                .map(|property| PropertySlot {
+                    name: property.name.clone(),
+                    shape: relax_presence(&property.shape),
+                    required: false,
+                })
+                .collect(),
+            patterns: object
+                .patterns
+                .iter()
+                .map(|pattern| PatternSlot {
+                    matcher: pattern.matcher.clone(),
+                    shape: relax_presence(&pattern.shape),
+                })
+                .collect(),
+            pattern_scope: object.pattern_scope,
+            additional: match &object.additional {
+                Additional::Shape(inner) => Additional::Shape(Box::new(relax_presence(inner))),
+                other => other.clone(),
+            },
+            min_properties: object.min_properties,
+            max_properties: object.max_properties,
+        }),
+        Shape::Union(options) => Shape::Union(options.iter().map(relax_presence).collect()),
+        Shape::Assert(inner, assertion) => Shape::Assert(Box::new(relax_presence(inner)), assertion.clone()),
+        other => other.clone(),
+    }
+}
+
+/// Adds the core's reason to each problem whose value a conversion was
+/// attempted on and failed (`"9007199254740993"` against `number`: "the
+/// number cannot be represented exactly"), so the report says why the text
+/// did not convert rather than only that its type is wrong.
+pub(super) fn annotate_problems(
+    plan: &ConversionPlan,
+    json_schema: &Value,
+    instance: &Value,
+    problems: &mut [ValidationProblem],
+) {
+    if problems.is_empty() {
+        return;
+    }
+    let Err(error) = bind_with(plan.shape(json_schema), instance, &BindOptions::default()) else {
+        return;
+    };
+    let mut failures = Vec::new();
+    flatten_failures(&error.failures, &mut failures);
+    let mut reasons: Vec<(String, String)> = Vec::new();
+    for failure in failures {
+        if let Some(reason) = conversion_reason(failure) {
+            let entry = (pointer(&failure.path), reason);
+            if !reasons.contains(&entry) {
+                reasons.push(entry);
+            }
+        }
+    }
+    for problem in problems {
+        let matching: Vec<&str> = reasons
+            .iter()
+            .filter(|(path, _)| *path == problem.path)
+            .map(|(_, reason)| reason.as_str())
+            .collect();
+        if !matching.is_empty() {
+            problem.message = format!("{}: {}", problem.message, matching.join("; "));
+        }
+    }
+}
+
+/// Every failure, looking through a union whose only non-`null` option
+/// failed (an optional property is its type or `null`), so that option's own
+/// reason is the one reported. A union with several real options keeps its
+/// own failure: no single option's reason explains it.
+fn flatten_failures<'f>(failures: &'f [ValueFailure], out: &mut Vec<&'f ValueFailure>) {
+    for failure in failures {
+        let only_typed_option = match &failure.reason {
+            FailureReason::NoOptionAccepts { options } => {
+                let mut typed = options.iter().filter(|option| option.expected != "null");
+                match (typed.next(), typed.next()) {
+                    (Some(only), None) => Some(only),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        match only_typed_option {
+            Some(option) => flatten_failures(&option.failures, out),
+            None => out.push(failure),
+        }
+    }
+}
+
+/// The reason text for a failure that a conversion attempt explains; `None`
+/// when the plain type or constraint error already says everything.
+fn conversion_reason(failure: &ValueFailure) -> Option<String> {
+    match &failure.reason {
+        FailureReason::NumberNotAdmitted(reason) => Some(format!("the number {reason}")),
+        FailureReason::ConstraintNotMet(constraint) => failure
+            .converted
+            .as_ref()
+            .map(|converted| format!("converted to {converted}, which fails {constraint}")),
+        FailureReason::AssertionFailed { description } => failure
+            .converted
+            .as_ref()
+            .map(|converted| format!("converted to {converted}, which fails {description}")),
+        reason @ (FailureReason::AmbiguousUnion { .. } | FailureReason::ConflictingDeclarations { .. }) => {
+            Some(reason.to_string())
+        }
         _ => None,
     }
 }
 
-/// Serializes a native value to a YAML string for a `yaml` content-format
-/// field. Values that are already a string (the `format` validator checks them
-/// directly) or `null` (the optional-property "absent" sentinel) are left
-/// untouched. Serialization of a `serde_json::Value` never fails in practice;
-/// on the theoretical failure the value is left untouched so the `type: string`
-/// check surfaces a validation error rather than silently passing.
-fn coerce_to_yaml_string(value: &Value) -> Option<Value> {
-    if value.is_string() || value.is_null() {
-        return None;
-    }
-    let yaml = serde_yaml_ng::to_string(value).ok()?;
-    // Trim the single trailing newline serde_yaml_ng appends so the written-back
-    // scalar stays tidy; interior newlines (multi-line mappings) are preserved.
-    Some(Value::String(yaml.trim_end_matches('\n').to_string()))
-}
-
-/// Serializes a native value to a strict-JSON string for a `json` content-format
-/// field. Mirrors [`coerce_to_yaml_string`]'s string/null passthrough.
-fn coerce_to_json_string(value: &Value) -> Option<Value> {
-    if value.is_string() || value.is_null() {
-        return None;
-    }
-    let json = serde_json::to_string(value).ok()?;
-    Some(Value::String(json))
-}
-
-fn coerce_array(inner: &CoercionTarget, value: &Value) -> Option<Value> {
-    let Value::Array(items) = value else {
-        return None;
-    };
-    let mut out = Vec::with_capacity(items.len());
-    let mut changed = false;
-    for item in items {
-        match coerce_value(inner, item) {
-            Some(coerced) => {
-                out.push(coerced);
-                changed = true;
-            }
-            None => out.push(item.clone()),
-        }
-    }
-    changed.then_some(Value::Array(out))
-}
-
-/// Recursively coerces the named properties of an inline object value.
-///
-/// Only the properties listed in `props` are inspected; properties in
-/// `value` that the schema does not declare are passed through untouched.
-/// The returned value is `Some(coerced_object)` only when at least one
-/// listed property was actually converted — this keeps the recursion
-/// idempotent and lets the caller set [`CoercionOutcome::changed`] cheaply.
-fn coerce_inline_object(
-    props: &[(String, CoercionTarget)],
-    value: &Value,
-) -> Option<Value> {
-    let Value::Object(obj) = value else {
-        return None;
-    };
-    let mut out = obj.clone();
-    let mut changed = false;
-    for (name, inner_target) in props {
-        let Some(field) = obj.get(name) else {
-            continue;
-        };
-        if let Some(coerced) = coerce_value(inner_target, field) {
-            out.insert(name.clone(), coerced);
-            changed = true;
-        }
-    }
-    changed.then_some(Value::Object(out))
-}
-
-/// Mirrors `^-?\d+(\.\d+)?$` exactly without compiling a runtime regex: an
-/// optional leading `-`, one or more digits, and an optional `.` followed by
-/// one or more digits.
-fn is_numberlike(s: &str) -> bool {
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    if bytes.first() == Some(&b'-') {
-        i = 1;
-    }
-    let int_start = i;
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        i += 1;
-    }
-    if i == int_start {
-        return false; // no integer digits
-    }
-    if i == bytes.len() {
-        return true; // integer form
-    }
-    if bytes[i] != b'.' {
-        return false;
-    }
-    i += 1;
-    let frac_start = i;
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        i += 1;
-    }
-    i > frac_start && i == bytes.len()
+fn pointer(path: &[PathSegment]) -> String {
+    path.iter()
+        .map(|segment| match segment {
+            PathSegment::Index(index) => format!("/{index}"),
+            PathSegment::Key(key) => format!("/{}", key.replace('~', "~0").replace('/', "~1")),
+        })
+        .collect()
 }
 
 #[cfg(test)]
-// `3.14` appears as a plain decimal-string fixture, not as an approximation of
-// `PI`; the `approx_constant` lint is a false positive here.
-#[allow(clippy::approx_constant)]
 mod tests {
-    use super::*;
     use serde_json::json;
 
-    // ── coercion_target recognizer ──────────────────────────────────────
-
-    #[test]
-    fn recognizes_boolean() {
-        assert_eq!(
-            coercion_target(&json!({"type": "boolean"})),
-            Some(CoercionTarget::ToBoolean)
-        );
-    }
-
-    #[test]
-    fn recognizes_boolish_any_of() {
-        let frag = json!({
-            "anyOf": [
-                {"type": "boolean"},
-                {"enum": ["true", "false", "True", "False", "TRUE", "FALSE"]}
-            ]
-        });
-        assert_eq!(coercion_target(&frag), Some(CoercionTarget::ToBoolean));
-    }
-
-    #[test]
-    fn recognizes_number_and_integer() {
-        assert_eq!(
-            coercion_target(&json!({"type": "number"})),
-            Some(CoercionTarget::ToNumber)
-        );
-        assert_eq!(
-            coercion_target(&json!({"type": "integer"})),
-            Some(CoercionTarget::ToNumber)
-        );
-    }
-
-    #[test]
-    fn recognizes_numberlike_any_of() {
-        let frag = json!({
-            "anyOf": [
-                {"type": "number"},
-                {"type": "string", "pattern": r"^-?\d+(\.\d+)?$"}
-            ]
-        });
-        assert_eq!(coercion_target(&frag), Some(CoercionTarget::ToNumber));
-    }
-
-    #[test]
-    fn recognizes_string_with_and_without_constraints() {
-        assert_eq!(
-            coercion_target(&json!({"type": "string"})),
-            Some(CoercionTarget::ToString)
-        );
-        assert_eq!(
-            coercion_target(&json!({"type": "string", "format": "email"})),
-            Some(CoercionTarget::ToString)
-        );
-        assert_eq!(
-            coercion_target(&json!({"type": "string", "pattern": "x", "minLength": 1})),
-            Some(CoercionTarget::ToString)
-        );
-    }
-
-    #[test]
-    fn recognizes_typed_array() {
-        let frag = json!({"type": "array", "items": {"type": "boolean"}});
-        assert_eq!(
-            coercion_target(&frag),
-            Some(CoercionTarget::Array(Box::new(CoercionTarget::ToBoolean)))
-        );
-    }
-
-    #[test]
-    fn boolish_items_stay_boolean_and_other_item_unions_are_item_unions() {
-        let boolish = json!({"type": "array", "items": {"anyOf": [
-            {"type": "boolean"},
-            {"enum": ["true", "false", "True", "False", "TRUE", "FALSE"]}
-        ]}});
-        assert_eq!(
-            coercion_target(&boolish),
-            Some(CoercionTarget::Array(Box::new(CoercionTarget::ToBoolean)))
-        );
-
-        let arms = vec![json!({"type": "number"}), json!({"type": "string"})];
-        let union = json!({"type": "array", "items": {"anyOf": arms.clone()}});
-        assert_eq!(
-            coercion_target(&union),
-            Some(CoercionTarget::Array(Box::new(CoercionTarget::ItemUnion(arms))))
-        );
-    }
-
-    #[test]
-    fn array_with_unrecognized_items_is_none() {
-        let frag = json!({"type": "array", "items": {"type": "object"}});
-        assert_eq!(coercion_target(&frag), None);
-    }
-
-    #[test]
-    fn object_any_bare_enum_and_multitype_are_none() {
-        assert_eq!(coercion_target(&json!({"type": "object"})), None);
-        assert_eq!(coercion_target(&json!({})), None);
-        assert_eq!(coercion_target(&json!({"enum": ["a", "b"]})), None);
-        assert_eq!(coercion_target(&json!({"type": ["string", "null"]})), None);
-    }
-
-    #[test]
-    fn generic_string_number_union_is_none() {
-        // No `pattern` on the string arm → not numberlike → left untouched.
-        let frag = json!({"anyOf": [{"type": "number"}, {"type": "string"}]});
-        assert_eq!(coercion_target(&frag), None);
-    }
-
-    #[test]
-    fn unrelated_boolean_enum_union_is_none() {
-        // A raw JSON Schema union of `boolean` with an arbitrary enum is NOT the
-        // boolish shape Darkmatter emits — the enum members are not the boolish
-        // spellings — so it must yield `None` and never coerce `"true"` → true.
-        let frag = json!({"anyOf": [{"type": "boolean"}, {"enum": ["auto"]}]});
-        assert_eq!(coercion_target(&frag), None);
-        // A superset enum (boolish spellings plus extras) is also not exact.
-        let superset = json!({
-            "anyOf": [
-                {"type": "boolean"},
-                {"enum": ["true", "false", "True", "False", "TRUE", "FALSE", "maybe"]}
-            ]
-        });
-        assert_eq!(coercion_target(&superset), None);
-    }
-
-    #[test]
-    fn boolish_subset_enum_union_is_none() {
-        // A boolish *subset* enum is NOT the full six-spelling shape
-        // `boolish_fragment` emits. Recognizing it would coerce a value like
-        // `"false"` against `{"anyOf":[{"type":"boolean"},{"enum":["true"]}]}`
-        // into `false` and falsely validate it against the boolean arm, even
-        // though strict validation should reject the string `"false"`.
-        let single = json!({"anyOf": [{"type": "boolean"}, {"enum": ["true"]}]});
-        assert_eq!(coercion_target(&single), None);
-        let pair = json!({"anyOf": [{"type": "boolean"}, {"enum": ["true", "false"]}]});
-        assert_eq!(coercion_target(&pair), None);
-    }
-
-    #[test]
-    fn unrelated_number_string_pattern_union_is_none() {
-        // A number/string union whose string arm carries a *different* pattern
-        // is not the numberlike shape; coercing `"42"` here would defeat the
-        // string arm's intentional `^[A-Z]+$` rejection of digits.
-        let frag = json!({
-            "anyOf": [{"type": "number"}, {"type": "string", "pattern": "^[A-Z]+$"}]
-        });
-        assert_eq!(coercion_target(&frag), None);
-    }
-
-    // ── literal const recognizer & coercion (Phase 4) ───────────────────
-
-    #[test]
-    fn recognizes_number_and_boolean_const() {
-        match coercion_target(&json!({"const": 2})) {
-            Some(CoercionTarget::LiteralConst(v)) => assert_eq!(v, json!(2)),
-            other => panic!("expected LiteralConst(2), got {other:?}"),
-        }
-        match coercion_target(&json!({"const": false})) {
-            Some(CoercionTarget::LiteralConst(v)) => assert_eq!(v, json!(false)),
-            other => panic!("expected LiteralConst(false), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn string_const_is_not_a_coercion_target() {
-        // A string literal never coerces, so its const yields no target.
-        assert_eq!(coercion_target(&json!({"const": "spec"})), None);
-    }
-
-    #[test]
-    fn number_const_coerces_matching_string_only() {
-        // `'2'` matches literal(2) → coerces to number 2.
-        assert_eq!(
-            coerce_value(&CoercionTarget::LiteralConst(json!(2)), &json!("2")),
-            Some(json!(2))
-        );
-        // `'3'` coerces to number 3 which does not equal const 2 → untouched
-        // (write-back only on a validating value).
-        assert_eq!(
-            coerce_value(&CoercionTarget::LiteralConst(json!(2)), &json!("3")),
-            None
-        );
-        // Non-numberlike string → untouched.
-        assert_eq!(
-            coerce_value(&CoercionTarget::LiteralConst(json!(2)), &json!("two")),
-            None
-        );
-    }
-
-    #[test]
-    fn boolean_const_coerces_matching_spelling_only() {
-        assert_eq!(
-            coerce_value(&CoercionTarget::LiteralConst(json!(false)), &json!("false")),
-            Some(json!(false))
-        );
-        // `'true'` coerces to `true` which is not the const `false` → untouched.
-        assert_eq!(
-            coerce_value(&CoercionTarget::LiteralConst(json!(false)), &json!("true")),
-            None
-        );
-    }
-
-    #[test]
-    fn literal_const_object_pass_and_array_form() {
-        // Optional literal wraps the const in a nullable `anyOf`; the object
-        // pass looks through the wrapper and coerces the string form.
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "version": {"anyOf": [{"type": "null"}, {"const": 2}]},
-                "modes": {"anyOf": [
-                    {"type": "null"},
-                    {"type": "array", "items": {"const": 3}}
-                ]}
-            }
-        });
-        let instance = json!({ "version": "2", "modes": ["3", "4"] });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(outcome.changed);
-        assert_eq!(outcome.value["version"], json!(2));
-        // `'3'` equals the item const → number 3; `'4'` does not → left as-is.
-        assert_eq!(outcome.value["modes"], json!([3, "4"]));
-    }
-
-    // ── scalar coercion: boolean ────────────────────────────────────────
-
-    #[test]
-    fn string_to_boolean_all_spellings() {
-        for (s, expected) in [
-            ("true", true),
-            ("True", true),
-            ("TRUE", true),
-            ("false", false),
-            ("False", false),
-            ("FALSE", false),
-        ] {
-            assert_eq!(
-                coerce_to_boolean(&json!(s)),
-                Some(Value::Bool(expected)),
-                "spelling {s}"
-            );
-        }
-    }
-
-    #[test]
-    fn ambiguous_strings_not_coerced_to_boolean() {
-        for s in ["yes", "no", "on", "off", "1", "0"] {
-            assert_eq!(coerce_to_boolean(&json!(s)), None, "value {s}");
-        }
-    }
-
-    #[test]
-    fn non_string_not_coerced_to_boolean() {
-        assert_eq!(coerce_to_boolean(&json!(1)), None);
-        assert_eq!(coerce_to_boolean(&json!(true)), None);
-        assert_eq!(coerce_to_boolean(&json!(null)), None);
-        assert_eq!(coerce_to_boolean(&json!([1])), None);
-    }
-
-    // ── scalar coercion: number ─────────────────────────────────────────
-
-    #[test]
-    // `3.14` is decimal-coercion test data, not an approximation of π.
-    #[allow(clippy::approx_constant)]
-    fn string_to_number_integer_and_decimal() {
-        assert_eq!(coerce_to_number(&json!("42")), Some(json!(42)));
-        assert_eq!(coerce_to_number(&json!("-7")), Some(json!(-7)));
-        assert_eq!(coerce_to_number(&json!("3.14")), Some(json!(3.14)));
-        assert_eq!(coerce_to_number(&json!("-0.5")), Some(json!(-0.5)));
-    }
-
-    #[test]
-    // `3.14` is decimal-coercion test data, not an approximation of π.
-    #[allow(clippy::approx_constant)]
-    fn decimal_string_against_integer_field_still_produces_float() {
-        // The engine just produces the number; the integer check runs later.
-        assert_eq!(coerce_to_number(&json!("3.14")), Some(json!(3.14)));
-    }
-
-    #[test]
-    fn non_numeric_string_not_coerced_to_number() {
-        for s in ["abc", "1.2.3", "", "-", ".5", "5.", "1e3", " 1", "1 "] {
-            assert_eq!(coerce_to_number(&json!(s)), None, "value {s:?}");
-        }
-    }
-
-    #[test]
-    fn non_string_not_coerced_to_number() {
-        assert_eq!(coerce_to_number(&json!(42)), None);
-        assert_eq!(coerce_to_number(&json!(null)), None);
-        assert_eq!(coerce_to_number(&json!([1])), None);
-    }
-
-    #[test]
-    // `3.14` is decimal-coercion test data, not an approximation of π.
-    #[allow(clippy::approx_constant)]
-    fn large_integral_strings_are_admitted_before_coercion() {
-        // An exact whole value keeps serde_json's storage (`2^63` is a u64);
-        // a value no `f64` holds exactly is left as text.
-        assert_eq!(
-            coerce_to_number(&json!("9223372036854775808")), // 2^63
-            Some(json!(9_223_372_036_854_775_808_u64))
-        );
-        assert_eq!(coerce_to_number(&json!("9007199254740992")), Some(json!(9_007_199_254_740_992_u64)));
-        for inexact in ["9007199254740993", "-9007199254740993", "9007199254740993.0", "9223372036854775807", "99999999999999999999"] {
-            assert_eq!(coerce_to_number(&json!(inexact)), None, "{inexact}");
-        }
-        assert_eq!(coerce_to_number(&json!("3.14")), Some(json!(3.14)));
-    }
-
-    // ── scalar coercion: string ─────────────────────────────────────────
-
-    #[test]
-    // `3.14` is float-to-string test data, not an approximation of π.
-    #[allow(clippy::approx_constant)]
-    fn number_and_boolean_to_string() {
-        assert_eq!(coerce_to_string(&json!(42)), Some(json!("42")));
-        assert_eq!(coerce_to_string(&json!(3.14)), Some(json!("3.14")));
-        assert_eq!(coerce_to_string(&json!(true)), Some(json!("true")));
-        assert_eq!(coerce_to_string(&json!(false)), Some(json!("false")));
-    }
-
-    #[test]
-    fn string_null_array_object_not_coerced_to_string() {
-        assert_eq!(coerce_to_string(&json!("hi")), None);
-        assert_eq!(coerce_to_string(&json!(null)), None);
-        assert_eq!(coerce_to_string(&json!([1])), None);
-        assert_eq!(coerce_to_string(&json!({"a": 1})), None);
-    }
-
-    // ── out-of-matrix object/string never coerced ───────────────────────
-
-    #[test]
-    fn string_to_object_and_object_to_string_untouched() {
-        // string field holding an object → ToString leaves object untouched.
-        assert_eq!(coerce_value(&CoercionTarget::ToString, &json!({"a": 1})), None);
-        // object field is not a recognized target at all (covered above), and a
-        // string value has no scalar target that would touch it.
-        assert_eq!(coerce_value(&CoercionTarget::ToString, &json!("text")), None);
-    }
-
-    // ── typed arrays ────────────────────────────────────────────────────
-
-    #[test]
-    fn boolean_array_coerces_element_wise() {
-        let target = CoercionTarget::Array(Box::new(CoercionTarget::ToBoolean));
-        assert_eq!(
-            coerce_value(&target, &json!(["true", "false"])),
-            Some(json!([true, false]))
-        );
-    }
-
-    #[test]
-    fn mixed_array_leaves_uncoercible_element() {
-        let target = CoercionTarget::Array(Box::new(CoercionTarget::ToBoolean));
-        // "nope" is not boolish → kept as the string; "true" → real boolean.
-        assert_eq!(
-            coerce_value(&target, &json!(["true", "nope"])),
-            Some(json!([true, "nope"]))
-        );
-    }
-
-    #[test]
-    fn array_with_no_coercible_elements_is_untouched() {
-        let target = CoercionTarget::Array(Box::new(CoercionTarget::ToBoolean));
-        assert_eq!(coerce_value(&target, &json!(["nope", "maybe"])), None);
-        assert_eq!(coerce_value(&target, &json!("not-an-array")), None);
-    }
-
-    // ── non-union object pass ───────────────────────────────────────────
-
-    #[test]
-    fn object_pass_coerces_declared_props_and_tracks_changed() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "flag": {"type": "boolean"},
-                "count": {"type": "number"},
-                "label": {"type": "string"},
-                "opaque": {"type": "object"}
-            }
-        });
-        let instance = json!({
-            "flag": "true",
-            "count": "42",
-            "label": 7,
-            "opaque": {"k": "v"},      // skipped at the coercion_target guard: object is not a recognized target
-            "undeclared": "left-alone" // not in schema
-        });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(outcome.changed);
-        assert_eq!(outcome.value["flag"], json!(true));
-        assert_eq!(outcome.value["count"], json!(42));
-        assert_eq!(outcome.value["label"], json!("7"));
-        assert_eq!(outcome.value["opaque"], json!({"k": "v"}));
-        assert_eq!(outcome.value["undeclared"], json!("left-alone"));
-    }
-
-    #[test]
-    fn object_pass_reports_unchanged_when_nothing_coerces() {
-        let schema = json!({
-            "type": "object",
-            "properties": { "flag": {"type": "boolean"} }
-        });
-        let instance = json!({ "flag": true, "other": "x" });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(!outcome.changed);
-        assert_eq!(outcome.value, instance);
-    }
-
-    #[test]
-    fn boolish_normalizes_and_numberlike_normalizes() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "flag": {"anyOf": [
-                    {"type": "boolean"},
-                    {"enum": ["true", "false", "True", "False", "TRUE", "FALSE"]}
-                ]},
-                "n": {"anyOf": [{"type": "number"}, {"type": "string", "pattern": r"^-?\d+(\.\d+)?$"}]}
-            }
-        });
-        let instance = json!({ "flag": "true", "n": "42" });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert_eq!(outcome.value["flag"], json!(true));
-        assert_eq!(outcome.value["n"], json!(42));
-    }
-
-    // ── root union ──────────────────────────────────────────────────────
+    use super::*;
 
     fn implement_like_union() -> Value {
-        // Mirrors prompts/implement.md: three arms typing the has_* trio as
-        // boolean, each with a different required string discriminator.
         json!({
             "anyOf": [
                 {
@@ -1158,8 +542,7 @@ mod tests {
                     "properties": {
                         "kind": {"type": "string"},
                         "has_spec": {"type": "boolean"},
-                        "has_plan": {"type": "boolean"},
-                        "has_review": {"type": "boolean"}
+                        "has_plan": {"type": "boolean"}
                     },
                     "required": ["kind"]
                 },
@@ -1168,956 +551,125 @@ mod tests {
                     "additionalProperties": true,
                     "properties": { "other": {"type": "string"} },
                     "required": ["other"]
+                }
+            ]
+        })
+    }
+
+    fn pending_union() -> Value {
+        json!({
+            "anyOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "kind": {"type": "string"},
+                        "n": {"type": "number"},
+                        "flag": {"type": "boolean"}
+                    },
+                    "required": ["kind"]
                 },
                 {
                     "type": "object",
                     "additionalProperties": true,
-                    "properties": { "third": {"type": "string"} },
-                    "required": ["third"]
+                    "properties": { "other": {"type": "string"} },
+                    "required": ["other"]
                 }
             ]
         })
     }
 
     #[test]
-    fn root_union_commits_first_validating_arm_coercions() {
-        let schema = implement_like_union();
-        let instance = json!({
-            "kind": "implement",
-            "has_spec": "true",
-            "has_plan": "false",
-            "has_review": "false"
-        });
-        let outcome = coerce_frontmatter(&schema, &instance);
+    fn root_union_commits_the_one_reachable_arm() {
+        let instance = json!({ "kind": "implement", "has_spec": "true", "has_plan": "no" });
+        let outcome = coerce_frontmatter(&implement_like_union(), &instance);
         assert!(outcome.changed);
-        assert_eq!(outcome.value["has_spec"], json!(true));
-        assert_eq!(outcome.value["has_plan"], json!(false));
-        assert_eq!(outcome.value["has_review"], json!(false));
+        assert_eq!(outcome.value, json!({ "kind": "implement", "has_spec": true, "has_plan": false }));
     }
 
     #[test]
-    fn root_union_commits_arm_when_only_pending_keys_block_it() {
-        // An arm declaring both a shell-pending number (`n`) and a non-shell
-        // boolean (`flag`). With `n` deferred via `shell_pending`, the arm is
-        // committed and `flag` coerces; `n` keeps its literal `$(...)` form.
-        let schema = json!({
-            "anyOf": [
-                {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "properties": {
-                        "kind": {"type": "string"},
-                        "n": {"type": "number"},
-                        "flag": {"type": "boolean"}
-                    },
-                    "required": ["kind"]
-                },
-                {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "properties": { "other": {"type": "string"} },
-                    "required": ["other"]
-                }
-            ]
-        });
+    fn root_union_commits_when_only_pending_keys_remain() {
         let instance = json!({ "kind": "implement", "n": "$(echo 1)", "flag": "false" });
         let pending: HashSet<String> = ["n".to_string()].into_iter().collect();
-        let outcome = coerce_frontmatter_with_pending(&schema, &instance, &pending);
+        let outcome = coerce_frontmatter_with_pending(&pending_union(), &instance, &pending);
         assert!(outcome.changed);
         assert_eq!(outcome.value["flag"], json!(false));
         assert_eq!(outcome.value["n"], json!("$(echo 1)"));
     }
 
     #[test]
-    fn root_union_without_pending_set_still_requires_full_validation() {
-        // Same shape, but no key is marked pending: `n: "$(echo 1)"` is a string
-        // against a `number` arm, so no arm fully validates and the instance is
-        // returned unchanged (the existing union error reporting then runs).
-        let schema = json!({
-            "anyOf": [
-                {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "properties": {
-                        "kind": {"type": "string"},
-                        "n": {"type": "number"},
-                        "flag": {"type": "boolean"}
-                    },
-                    "required": ["kind"]
-                }
-            ]
-        });
+    fn without_pending_keys_a_pending_value_blocks_the_commit() {
         let instance = json!({ "kind": "implement", "n": "$(echo 1)", "flag": "false" });
-        let outcome = coerce_frontmatter(&schema, &instance);
+        let outcome = coerce_frontmatter(&pending_union(), &instance);
         assert!(!outcome.changed);
         assert_eq!(outcome.value, instance);
     }
 
     #[test]
-    fn root_union_pending_does_not_mask_non_pending_failure() {
-        // `flag` is non-pending and holds an uncoercible array, so even though
-        // `n` is pending the arm has a residual non-pending problem on `/flag`
-        // and must not be committed.
-        let schema = json!({
-            "anyOf": [
-                {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "properties": {
-                        "kind": {"type": "string"},
-                        "n": {"type": "number"},
-                        "flag": {"type": "boolean"}
-                    },
-                    "required": ["kind"]
-                }
-            ]
-        });
+    fn pending_keys_do_not_mask_another_failure() {
         let instance = json!({ "kind": "implement", "n": "$(echo 1)", "flag": [1, 2] });
         let pending: HashSet<String> = ["n".to_string()].into_iter().collect();
-        let outcome = coerce_frontmatter_with_pending(&schema, &instance, &pending);
+        let outcome = coerce_frontmatter_with_pending(&pending_union(), &instance, &pending);
         assert!(!outcome.changed);
         assert_eq!(outcome.value, instance);
     }
 
     #[test]
-    fn root_union_returns_unchanged_when_no_arm_validates() {
-        let schema = implement_like_union();
-        // Missing every arm's required discriminator → no arm validates.
-        let instance = json!({ "has_spec": "true" });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(!outcome.changed);
-        assert_eq!(outcome.value, instance);
-    }
-
-    // ── idempotence ─────────────────────────────────────────────────────
-
-    #[test]
-    fn coercion_is_idempotent() {
+    fn a_failing_property_keeps_its_siblings_conversions() {
         let schema = json!({
             "type": "object",
-            "properties": {
-                "flag": {"type": "boolean"},
-                "count": {"type": "number"},
-                "tags": {"type": "array", "items": {"type": "boolean"}}
-            }
+            "properties": { "count": {"type": "number"}, "flag": {"type": "boolean"} },
+            "required": ["title"]
         });
-        let instance = json!({ "flag": "true", "count": "42", "tags": ["true", "false"] });
+        let instance = json!({ "count": "3", "flag": "maybe" });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(outcome.changed);
+        assert_eq!(outcome.value, json!({ "count": 3, "flag": "maybe" }));
+        // The validation copy still converts what converts on its own.
+        assert_eq!(validation_copy(&schema, &instance), json!({ "count": 3, "flag": "maybe" }));
+    }
 
-        let first = coerce_frontmatter(&schema, &instance);
-        assert!(first.changed);
+    #[test]
+    fn validation_copy_relaxes_a_missing_required_value() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "count": {"type": "number"}, "title": {"type": "string"} },
+            "required": ["title"]
+        });
+        assert_eq!(validation_copy(&schema, &json!({ "count": "3" })), json!({ "count": 3 }));
+    }
 
+    #[test]
+    fn a_valid_instance_is_kept_and_conversion_is_idempotent() {
+        let schema = json!({ "type": "object", "properties": { "flag": {"type": "boolean"} } });
+        let first = coerce_frontmatter(&schema, &json!({ "flag": "On" }));
+        assert_eq!(first.value, json!({ "flag": true }));
         let second = coerce_frontmatter(&schema, &first.value);
-        assert!(!second.changed, "second run should be a no-op");
-        assert_eq!(first.value, second.value);
+        assert!(!second.changed);
     }
 
     #[test]
-    fn null_array_object_untouched_against_scalar_targets() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "a": {"type": "boolean"},
-                "b": {"type": "number"},
-                "c": {"type": "string"}
-            }
-        });
-        let instance = json!({ "a": null, "b": [1, 2], "c": {"k": "v"} });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(!outcome.changed);
-        assert_eq!(outcome.value, instance);
-    }
-
-    // ── Inline object coercion (Phase 2) ────────────────────────────────
-
-    #[test]
-    fn recognizes_inline_object_fragment() {
-        // The shape `convert::inline_object_fragment` emits:
-        // `{"type":"object","properties":{...},"additionalProperties":false}`.
-        let frag = json!({
-            "type": "object",
-            "properties": {
-                "enabled": {"type": "boolean"},
-                "retries": {"type": "number"}
-            },
-            "additionalProperties": false
-        });
-        match coercion_target(&frag) {
-            Some(CoercionTarget::Object(props)) => {
-                assert_eq!(props.len(), 2);
-                assert!(props.iter().any(|(k, t)| k == "enabled" && *t == CoercionTarget::ToBoolean));
-                assert!(props.iter().any(|(k, t)| k == "retries" && *t == CoercionTarget::ToNumber));
-            }
-            other => panic!("expected Object, got {other:?}"),
-        }
+    fn a_candidate_the_complete_schema_rejects_is_not_committed() {
+        let schema = json!({ "type": "object", "properties": { "n": {"oneOf": [{"type": "number"}, {"type": "integer"}]} } });
+        let instance = json!({ "n": "3" });
+        assert!(!coerce_frontmatter(&schema, &instance).changed);
     }
 
     #[test]
-    fn opaque_object_without_properties_is_not_recognised() {
-        // The opaque `object` keyword (no `properties`) is outside the
-        // matrix — coercion must not recurse into it.
-        assert_eq!(coercion_target(&json!({"type": "object"})), None);
+    fn lone_value_serializes_into_content_text() {
+        let schema = json!({ "type": "string", "format": "darkmatter-json" });
+        assert_eq!(coerce_value_against_schema(&schema, &json!({ "a": 1 })), json!("{\"a\":1}"));
+        assert_eq!(coerce_value_against_schema(&schema, &json!(null)), json!(null));
     }
 
     #[test]
-    fn inline_object_with_unrecognized_property_keeps_recognized_targets() {
-        let frag = json!({
-            "type": "object",
-            "properties": {
-                "ok": {"type": "boolean"},
-                "weird": {"type": "object"} // opaque nested object, not in matrix
-            },
-            "additionalProperties": false
-        });
-        assert_eq!(
-            coercion_target(&frag),
-            Some(CoercionTarget::Object(vec![(
-                "ok".to_string(),
-                CoercionTarget::ToBoolean
-            )]))
-        );
-    }
-
-    #[test]
-    fn inline_object_value_coerces_declared_properties() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "properties": {
-                        "enabled": {"type": "boolean"},
-                        "retries": {"type": "number"}
-                    },
-                    "additionalProperties": false
-                }
-            }
-        });
-        let instance = json!({
-            "config": {
-                "enabled": "true",
-                "retries": "3",
-                "untouched": "x"
-            }
-        });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(outcome.changed);
-        assert_eq!(outcome.value["config"]["enabled"], json!(true));
-        assert_eq!(outcome.value["config"]["retries"], json!(3));
-        // Properties not declared by the schema are left untouched.
-        assert_eq!(outcome.value["config"]["untouched"], json!("x"));
-    }
-
-    #[test]
-    fn inline_object_value_coerces_mixed_recognized_and_opaque_properties() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "properties": {
-                        "enabled": {"type": "boolean"},
-                        "metadata": {"type": "object"}
-                    },
-                    "additionalProperties": false
-                }
-            }
-        });
-        let instance = json!({
-            "config": {
-                "enabled": "true",
-                "metadata": { "source": "user" }
-            }
-        });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(outcome.changed);
-        assert_eq!(outcome.value["config"]["enabled"], json!(true));
-        assert_eq!(
-            outcome.value["config"]["metadata"],
-            json!({ "source": "user" })
-        );
-    }
-
-    #[test]
-    fn inline_object_value_with_no_coercible_fields_unchanged() {
-        // Every nested property is already the right type — no coercion
-        // happens, and the function reports `changed: false`.
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "properties": {
-                        "enabled": {"type": "boolean"},
-                        "label": {"type": "string"}
-                    },
-                    "additionalProperties": false
-                }
-            }
-        });
-        let instance = json!({
-            "config": {
-                "enabled": true,
-                "label": "ready"
-            }
-        });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(!outcome.changed);
-        assert_eq!(outcome.value, instance);
-    }
-
-    #[test]
-    fn inline_object_value_must_be_object_to_recurse() {
-        // The inline object fragment expects an object value; any other
-        // JSON type is left alone and the validator handles it.
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "properties": {
-                        "enabled": {"type": "boolean"}
-                    },
-                    "additionalProperties": false
-                }
-            }
-        });
-        let instance = json!({ "config": "not-an-object" });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(!outcome.changed);
-        assert_eq!(outcome.value, instance);
-    }
-
-    #[test]
-    fn array_of_inline_objects_coerces_per_item() {
-        // `{ enabled: boolean }[]` produces an array target whose inner
-        // target is `Object([("enabled", ToBoolean)])`. Each item's
-        // `enabled` is coerced independently.
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "authors": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "active": {"type": "boolean"},
-                            "score": {"type": "number"}
-                        },
-                        "additionalProperties": false
-                    }
-                }
-            }
-        });
-        let instance = json!({
-            "authors": [
-                { "active": "true", "score": "4.5" },
-                { "active": "false", "score": "-1" }
-            ]
-        });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(outcome.changed);
-        assert_eq!(outcome.value["authors"][0]["active"], json!(true));
-        assert_eq!(outcome.value["authors"][0]["score"], json!(4.5));
-        assert_eq!(outcome.value["authors"][1]["active"], json!(false));
-        assert_eq!(outcome.value["authors"][1]["score"], json!(-1));
-    }
-
-    #[test]
-    fn array_of_inline_objects_coerces_mixed_recognized_and_opaque_properties() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "authors": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "active": {"type": "boolean"},
-                            "metadata": {"type": "object"}
-                        },
-                        "additionalProperties": false
-                    }
-                }
-            }
-        });
-        let instance = json!({
-            "authors": [
-                { "active": "true", "metadata": { "role": "admin" } },
-                { "active": "false", "metadata": { "role": "reader" } }
-            ]
-        });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(outcome.changed);
-        assert_eq!(outcome.value["authors"][0]["active"], json!(true));
-        assert_eq!(outcome.value["authors"][1]["active"], json!(false));
-        assert_eq!(
-            outcome.value["authors"][0]["metadata"],
-            json!({ "role": "admin" })
-        );
-    }
-
-    // ── Per-arm coercion for property-level unions (Phase 2) ───────────
-
-    #[test]
-    fn per_arm_coercion_commits_unambiguous_inline_object_arm() {
-        // Schema: an inline object arm + a string arm. The value is an
-        // object with a numeric string for `count`; only the inline
-        // object arm's coerced candidate validates.
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "metadata": {
-                    "anyOf": [
-                        {
-                            "type": "object",
-                            "properties": {
-                                "key": {"type": "string"},
-                                "count": {"type": "number"}
-                            },
-                            "additionalProperties": false
-                        },
-                        {"type": "string"}
-                    ]
-                }
-            }
-        });
-        let instance = json!({
-            "metadata": { "key": "visits", "count": "42" }
-        });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(outcome.changed);
-        assert_eq!(outcome.value["metadata"]["key"], json!("visits"));
-        assert_eq!(outcome.value["metadata"]["count"], json!(42));
-    }
-
-    #[test]
-    fn per_arm_coercion_handles_inline_object_arm_with_opaque_sibling() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "metadata": {
-                    "anyOf": [
-                        {
-                            "type": "object",
-                            "properties": {
-                                "kind": {"const": "config"},
-                                "enabled": {"type": "boolean"},
-                                "details": {"type": "object"}
-                            },
-                            "required": ["kind", "enabled", "details"],
-                            "additionalProperties": false
-                        },
-                        {"type": "string"}
-                    ]
-                }
-            }
-        });
-        let instance = json!({
-            "metadata": {
-                "kind": "config",
-                "enabled": "true",
-                "details": { "source": "user" }
-            }
-        });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(outcome.changed);
-        assert_eq!(outcome.value["metadata"]["enabled"], json!(true));
-        assert_eq!(outcome.value["metadata"]["kind"], json!("config"));
-        assert_eq!(
-            outcome.value["metadata"]["details"],
-            json!({ "source": "user" })
-        );
-    }
-
-    #[test]
-    fn per_arm_coercion_leaves_zero_match_value_untouched() {
-        // An array value is not coercible into the inline object arm
-        // (it's not an object) and not coercible into the string arm
-        // (it's not a scalar). Per-arm coercion produces no candidate,
-        // so the original value is left for the validator to reject.
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "metadata": {
-                    "anyOf": [
-                        {
-                            "type": "object",
-                            "properties": {
-                                "key": {"type": "string"},
-                                "count": {"type": "number"}
-                            },
-                            "additionalProperties": false
-                        },
-                        {"type": "string"}
-                    ]
-                }
-            }
-        });
-        let instance = json!({ "metadata": ["a", "b"] });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(!outcome.changed);
-        assert_eq!(outcome.value, instance);
-    }
-
-    #[test]
-    fn per_arm_coercion_leaves_ambiguous_value_untouched() {
-        // `"42"` is itself a string and matches the string arm directly;
-        // `"42"` also coerces to `42` and matches the number arm. Two
-        // arms validate after coercion, so the value is left alone
-        // (no guessing).
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "count": {
-                    "anyOf": [
-                        {"type": "number"},
-                        {"type": "string"}
-                    ]
-                }
-            }
-        });
-        let instance = json!({ "count": "42" });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(!outcome.changed);
-        assert_eq!(outcome.value, instance);
-    }
-
-    // ── Nullable wrapper recognition (Phase 2) ───────────────────────────
-
-    #[test]
-    fn nullable_wrapper_string_yields_to_string() {
-        assert_eq!(
-            coercion_target(&json!({"anyOf": [{"type": "null"}, {"type": "string"}]})),
-            Some(CoercionTarget::ToString)
-        );
-    }
-
-    #[test]
-    fn nullable_wrapper_number_yields_to_number() {
-        assert_eq!(
-            coercion_target(&json!({"anyOf": [{"type": "null"}, {"type": "number"}]})),
-            Some(CoercionTarget::ToNumber)
-        );
-    }
-
-    #[test]
-    fn nullable_wrapper_boolean_yields_to_boolean() {
-        assert_eq!(
-            coercion_target(&json!({"anyOf": [{"type": "null"}, {"type": "boolean"}]})),
-            Some(CoercionTarget::ToBoolean)
-        );
-    }
-
-    #[test]
-    fn nullable_wrapper_file_yields_to_string() {
-        // Bare optional `file` lowers to the lazy `darkmatter-file-reference`
-        // inside the 3-arm nullable wrapper; coercion only cares that the file
-        // arm is a string, so the result is `ToString` regardless of which
-        // file format the arm carries.
-        let frag = json!({
-            "anyOf": [
-                {"type": "null"},
-                {"const": ""},
-                {"type": "string", "format": "darkmatter-file-reference"}
-            ]
-        });
-        assert_eq!(coercion_target(&frag), Some(CoercionTarget::ToString));
-    }
-
-    #[test]
-    fn nullable_wrapper_array_yields_array_target() {
-        let frag = json!({
-            "anyOf": [
-                {"type": "null"},
-                {"type": "array", "items": {"type": "boolean"}}
-            ]
-        });
-        assert_eq!(
-            coercion_target(&frag),
-            Some(CoercionTarget::Array(Box::new(CoercionTarget::ToBoolean)))
-        );
-    }
-
-    #[test]
-    fn nullable_wrapper_inline_object_yields_object_target() {
-        let frag = json!({
-            "anyOf": [
-                {"type": "null"},
-                {
-                    "type": "object",
-                    "properties": {"enabled": {"type": "boolean"}},
-                    "additionalProperties": false
-                }
-            ]
-        });
-        match coercion_target(&frag) {
-            Some(CoercionTarget::Object(props)) => {
-                assert_eq!(props, vec![("enabled".to_string(), CoercionTarget::ToBoolean)]);
-            }
-            other => panic!("expected Object target, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn nullable_wrapper_boolish_yields_to_boolean() {
-        let frag = json!({
-            "anyOf": [
-                {"type": "null"},
-                {
-                    "anyOf": [
-                        {"type": "boolean"},
-                        {"enum": ["true", "false", "True", "False", "TRUE", "FALSE"]}
-                    ]
-                }
-            ]
-        });
-        assert_eq!(coercion_target(&frag), Some(CoercionTarget::ToBoolean));
-    }
-
-    #[test]
-    fn nullable_wrapper_numberlike_yields_to_number() {
-        let frag = json!({
-            "anyOf": [
-                {"type": "null"},
-                {
-                    "anyOf": [
-                        {"type": "number"},
-                        {"type": "string", "pattern": r"^-?\d+(\.\d+)?$"}
-                    ]
-                }
-            ]
-        });
-        assert_eq!(coercion_target(&frag), Some(CoercionTarget::ToNumber));
-    }
-
-    #[test]
-    fn nullable_wrapper_unrelated_union_is_none() {
-        let unrelated = json!({"anyOf": [{"type": "null"}, {"type": "object"}]});
-        assert_eq!(coercion_target(&unrelated), None);
-    }
-
-    #[test]
-    fn optional_scalar_coerces_through_null_wrapper_and_preserves_null() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "s": {"anyOf": [{"type": "null"}, {"type": "string"}]},
-                "n": {"anyOf": [{"type": "null"}, {"type": "number"}]},
-                "b": {"anyOf": [{"type": "null"}, {"type": "boolean"}]}
-            }
-        });
-        let instance = json!({ "s": 7, "n": "42", "b": "true", "missing": null });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(outcome.changed);
-        assert_eq!(outcome.value["s"], json!("7"));
-        assert_eq!(outcome.value["n"], json!(42));
-        assert_eq!(outcome.value["b"], json!(true));
-        assert_eq!(outcome.value["missing"], Value::Null);
-    }
-
-    #[test]
-    fn optional_string_null_is_preserved_unchanged() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "opt": {"anyOf": [{"type": "null"}, {"type": "string"}]}
-            }
-        });
-        let instance = json!({ "opt": null });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(!outcome.changed);
-        assert_eq!(outcome.value, instance);
-    }
-
-    #[test]
-    fn optional_file_null_and_empty_are_preserved() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "file": {
-                    "anyOf": [
-                        {"type": "null"},
-                        {"const": ""},
-                        {"type": "string", "format": "darkmatter-file-reference"}
-                    ]
-                }
-            }
-        });
-        let null_instance = json!({ "file": null });
-        let outcome = coerce_frontmatter(&schema, &null_instance);
-        assert!(!outcome.changed);
-        assert_eq!(outcome.value, null_instance);
-
-        let empty_instance = json!({ "file": "" });
-        let outcome2 = coerce_frontmatter(&schema, &empty_instance);
-        assert!(!outcome2.changed);
-        assert_eq!(outcome2.value, empty_instance);
-    }
-
-    #[test]
-    fn optional_boolish_and_numberlike_coerce_through_null_wrapper() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "flag": {
-                    "anyOf": [
-                        {"type": "null"},
-                        {
-                            "anyOf": [
-                                {"type": "boolean"},
-                                {"enum": ["true", "false", "True", "False", "TRUE", "FALSE"]}
-                            ]
-                        }
-                    ]
-                },
-                "n": {
-                    "anyOf": [
-                        {"type": "null"},
-                        {
-                            "anyOf": [
-                                {"type": "number"},
-                                {"type": "string", "pattern": r"^-?\d+(\.\d+)?$"}
-                            ]
-                        }
-                    ]
-                }
-            }
-        });
-        let instance = json!({ "flag": "false", "n": "99" });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(outcome.changed);
-        assert_eq!(outcome.value["flag"], json!(false));
-        assert_eq!(outcome.value["n"], json!(99));
-    }
-
-    #[test]
-    fn optional_array_coerces_element_wise_and_preserves_null() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "tags": {
-                    "anyOf": [
-                        {"type": "null"},
-                        {"type": "array", "items": {"type": "boolean"}}
-                    ]
-                }
-            }
-        });
-        let instance = json!({ "tags": ["true", "false"] });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(outcome.changed);
-        assert_eq!(outcome.value["tags"], json!([true, false]));
-
-        let null_instance = json!({ "tags": null });
-        let outcome2 = coerce_frontmatter(&schema, &null_instance);
-        assert!(!outcome2.changed);
-        assert_eq!(outcome2.value, null_instance);
-    }
-
-    #[test]
-    fn optional_inline_object_coerces_properties_and_preserves_null() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "config": {
-                    "anyOf": [
-                        {"type": "null"},
-                        {
-                            "type": "object",
-                            "properties": {
-                                "enabled": {"type": "boolean"},
-                                "retries": {"type": "number"}
-                            },
-                            "additionalProperties": false
-                        }
-                    ]
-                }
-            }
-        });
-        let instance = json!({ "config": { "enabled": "true", "retries": "3" } });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(outcome.changed);
-        assert_eq!(outcome.value["config"]["enabled"], json!(true));
-        assert_eq!(outcome.value["config"]["retries"], json!(3));
-
-        let null_instance = json!({ "config": null });
-        let outcome2 = coerce_frontmatter(&schema, &null_instance);
-        assert!(!outcome2.changed);
-        assert_eq!(outcome2.value, null_instance);
-    }
-
-    #[test]
-    fn optional_property_level_union_runs_per_arm_coercion() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "count": {
-                    "anyOf": [
-                        {"type": "null"},
-                        {"anyOf": [{"type": "number"}, {"type": "string"}]}
-                    ]
-                }
-            }
-        });
-
-        let ambiguous = json!({ "count": "42" });
-        let outcome = coerce_frontmatter(&schema, &ambiguous);
-        assert!(!outcome.changed);
-        assert_eq!(outcome.value, ambiguous);
-
-        let unambiguous = json!({ "count": true });
-        let outcome2 = coerce_frontmatter(&schema, &unambiguous);
-        assert!(outcome2.changed);
-        assert_eq!(outcome2.value["count"], json!("true"));
-
-        let null_instance = json!({ "count": null });
-        let outcome3 = coerce_frontmatter(&schema, &null_instance);
-        assert!(!outcome3.changed);
-        assert_eq!(outcome3.value, null_instance);
-    }
-
-    // ── Content-format string types (Feature D, Phase 5) ────────────────
-
-    #[test]
-    fn recognizes_yaml_and_json_content_formats() {
-        assert_eq!(
-            coercion_target(&json!({"type": "string", "format": "darkmatter-yaml"})),
-            Some(CoercionTarget::ToYamlString)
-        );
-        assert_eq!(
-            coercion_target(&json!({"type": "string", "format": "darkmatter-json"})),
-            Some(CoercionTarget::ToJsonString)
-        );
-        // A string with any other (or no) format keeps the plain ToString
-        // coercion so `file`/`email`/`url` fields are unaffected.
-        assert_eq!(
-            coercion_target(&json!({"type": "string", "format": "email"})),
-            Some(CoercionTarget::ToString)
-        );
-    }
-
-    #[test]
-    fn yaml_string_and_null_are_left_untouched() {
-        // An already-string value flows straight to the `format` validator; a
-        // null value is the optional-property "absent" sentinel.
-        assert_eq!(coerce_to_yaml_string(&json!("title: Foo")), None);
-        assert_eq!(coerce_to_yaml_string(&Value::Null), None);
-        assert_eq!(coerce_to_json_string(&json!("{}")), None);
-        assert_eq!(coerce_to_json_string(&Value::Null), None);
-    }
-
-    #[test]
-    fn native_mapping_coerces_to_yaml_and_json_strings() {
-        let mapping = json!({ "title": "Foo", "tags": ["a", "b"] });
-        let yaml = coerce_to_yaml_string(&mapping).expect("yaml coercion");
-        // The serialized string round-trips through a YAML parse.
-        assert!(serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml.as_str().unwrap()).is_ok());
-        assert!(!yaml.as_str().unwrap().ends_with('\n'), "trailing newline trimmed");
-
-        let jsonv = coerce_to_json_string(&mapping).expect("json coercion");
-        // Compare by re-parse rather than exact bytes: serde_json map ordering
-        // depends on build features.
-        let reparsed: Value = serde_json::from_str(jsonv.as_str().unwrap()).expect("valid json");
-        assert_eq!(reparsed, mapping);
-    }
-
-    #[test]
-    fn native_sequence_coerces_to_content_format_string() {
-        let seq = json!([1, 2, 3]);
-        let yaml = coerce_to_yaml_string(&seq).expect("yaml coercion");
-        assert!(serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml.as_str().unwrap()).is_ok());
-        assert_eq!(coerce_to_json_string(&seq), Some(json!("[1,2,3]")));
-    }
-
-    #[test]
-    fn native_scalar_coerces_to_content_format_string() {
-        // Numbers and booleans serialize to their format-string form.
-        assert_eq!(coerce_to_json_string(&json!(42)), Some(json!("42")));
-        assert_eq!(coerce_to_json_string(&json!(true)), Some(json!("true")));
-        let yaml = coerce_to_yaml_string(&json!(42)).expect("yaml coercion");
-        assert!(serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml.as_str().unwrap()).is_ok());
-    }
-
-    #[test]
-    fn content_format_coercion_is_idempotent() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "frontmatter": {"type": "string", "format": "darkmatter-yaml"}
-            }
-        });
-        let instance = json!({ "frontmatter": { "title": "Foo" } });
-        let first = coerce_frontmatter(&schema, &instance);
-        assert!(first.changed);
-        let second = coerce_frontmatter(&schema, &first.value);
-        assert!(!second.changed, "second run should be a no-op");
-        assert_eq!(first.value, second.value);
-    }
-
-    #[test]
-    fn coerce_value_against_schema_serializes_native_values() {
-        // A lone value/schema pair (an example artifact's `returns` against its
-        // annotated target) serializes a native mapping/sequence to the format's
-        // string form, so a `type: string` validator then accepts it.
-        let yaml_target = json!({ "type": "string", "format": "darkmatter-yaml" });
-        let mapping = coerce_value_against_schema(&yaml_target, &json!({ "title": "Foo" }));
-        assert!(mapping.is_string(), "native mapping must coerce to a yaml string");
-
-        let json_target = json!({ "type": "string", "format": "darkmatter-json" });
-        assert_eq!(
-            coerce_value_against_schema(&json_target, &json!([1, 2, 3])),
-            json!("[1,2,3]")
-        );
-    }
-
-    #[test]
-    fn coerce_value_against_schema_passes_through_string_and_out_of_matrix() {
-        // An already-string value is returned unchanged (no double-encode), and a
-        // schema outside the coercion matrix (opaque `object`) yields a plain clone.
-        let yaml_target = json!({ "type": "string", "format": "darkmatter-yaml" });
-        assert_eq!(
-            coerce_value_against_schema(&yaml_target, &json!("title: Foo")),
-            json!("title: Foo")
-        );
-        let opaque = json!({ "type": "object" });
-        let value = json!({ "k": "v" });
-        assert_eq!(coerce_value_against_schema(&opaque, &value), value);
-    }
-
-    #[test]
-    fn native_content_format_object_pass_coerces_and_is_non_mutating() {
-        // The object pass serializes a native mapping for a `yaml` field on a
-        // fresh copy; the caller's instance is never mutated.
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "frontmatter": {"type": "string", "format": "darkmatter-yaml"}
-            }
-        });
-        let instance = json!({ "frontmatter": { "title": "Foo" } });
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(outcome.changed);
-        assert!(outcome.value["frontmatter"].is_string());
-        // Non-mutating: the original instance still holds the native mapping.
-        assert_eq!(instance, json!({ "frontmatter": { "title": "Foo" } }));
-    }
-
-    #[test]
-    fn semantic_keyword_fragments_are_explicit_no_ops() {
-        for keyword in [
-            "x-darkmatter-type-definition",
-            "x-darkmatter-schema",
-        ] {
-            let mut scalar = serde_json::Map::new();
-            scalar.insert("type".into(), json!(["string", "object", "array"]));
-            scalar.insert(keyword.into(), Value::Bool(true));
-            let scalar = Value::Object(scalar);
-            assert_eq!(coercion_target(&scalar), None);
-
-            let array = json!({ "type": "array", "items": scalar });
-            assert_eq!(coercion_target(&array), None);
-            let instance = json!(["string", { "title": "string(required)" }]);
-            assert_eq!(coerce_value_against_schema(&array, &instance), instance);
-        }
+    fn annotation_names_the_admission_reason() {
+        let schema = json!({ "type": "object", "properties": { "n": {"type": "number"} } });
+        let instance = json!({ "n": "9007199254740993" });
+        let validator = structural_validator(&schema).expect("validator");
+        let mut problems = validate::collect_problems(&validator, &instance, &validate::PositionMap::new());
+        annotate_problems(&ConversionPlan::for_schema(&schema), &schema, &instance, &mut problems);
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].message.contains("the number cannot be represented exactly"), "{}", problems[0].message);
     }
 }

@@ -44,9 +44,7 @@ const INVENTORY: &[(&str, &str, Coverage)] = &[
     ("TestLookup", "markdown/compose/expression/mod.rs", Coverage::Fixture),
     ("Nothing", "markdown/compose/expression/absence.rs", Coverage::Fixture),
     ("FixtureLookup", "markdown/compose/expression/semantics.rs", Coverage::Fixture),
-    ("FsLookup", "markdown/compose/expression/catalog/mod.rs", Coverage::Fixture),
-    ("FixtureLookup", "markdown/compose/expression/catalog/mod.rs", Coverage::Fixture),
-    ("MapLookup", "markdown/compose/expression/catalog/mod.rs", Coverage::Fixture),
+    ("FixtureLookup", "markdown/compose/expression/catalog/tests.rs", Coverage::Fixture),
 ];
 
 /// Every `impl … EvaluationLookup for <Type>` outside a comment, as

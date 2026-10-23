@@ -241,6 +241,7 @@ types:
         is_yesterday_utc: expression-function-verb
         join: expression-function-verb
         kebab_case: expression-function-verb
+        keys: expression-function-verb
         last: expression-function-verb
         length: expression-function-verb
         link: expression-function-verb
@@ -273,9 +274,11 @@ types:
         starts_with: expression-function-verb
         terminal: expression-function-verb
         title_case: expression-function-verb
+        trim: expression-function-verb
         try_frontmatter: expression-function-verb
         upper: expression-function-verb
         validate_schema: expression-function-verb
+        values: expression-function-verb
         without_date: expression-function-verb
         $constraints:
             min-keys: 1
@@ -391,6 +394,7 @@ types:
         is_yesterday_utc: expression-function-verb
         join: expression-function-verb
         kebab_case: expression-function-verb
+        keys: expression-function-verb
         last: expression-function-verb
         length: expression-function-verb
         link: expression-function-verb
@@ -423,9 +427,11 @@ types:
         starts_with: expression-function-verb
         terminal: expression-function-verb
         title_case: expression-function-verb
+        trim: expression-function-verb
         try_frontmatter: expression-function-verb
         upper: expression-function-verb
         validate_schema: expression-function-verb
+        values: expression-function-verb
         without_date: expression-function-verb
         when: "expression -> run the bundle only when this condition holds"
         no_error: "boolean -> keep the stack running when one of these actions fails"
@@ -539,6 +545,7 @@ types:
         is_yesterday_utc: expression-function-verb
         join: expression-function-verb
         kebab_case: expression-function-verb
+        keys: expression-function-verb
         last: expression-function-verb
         length: expression-function-verb
         link: expression-function-verb
@@ -571,9 +578,11 @@ types:
         starts_with: expression-function-verb
         terminal: expression-function-verb
         title_case: expression-function-verb
+        trim: expression-function-verb
         try_frontmatter: expression-function-verb
         upper: expression-function-verb
         validate_schema: expression-function-verb
+        values: expression-function-verb
         without_date: expression-function-verb
         when: "expression -> run the bundle only when this condition holds"
         no_error: "boolean -> keep the stack running when one of these actions fails"

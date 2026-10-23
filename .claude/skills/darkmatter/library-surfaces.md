@@ -34,19 +34,27 @@ behavior.
 - Expression descriptors are typed catalogs used by both library callers and
   CLI documentation. Add a function once in the registry and keep parsing,
   evaluation, descriptors, and completion aligned.
-- Author functions in `docs/schemas/expression-functions.yaml` and `ctx.*` in
-  the `context` type of `schemas/partials/context-variables.yaml`. The function registry
+- Author functions in `schemas/partials/functions.yaml` (a tagged SimplifiedSchema
+  file: `categories:` plus one `function(...)` type, or a list of them for
+  overloads, per `types:` entry) and `ctx.*` in the `context` type of
+  `schemas/partials/context-variables.yaml`. The loader in
+  `expression/catalog/mod.rs` embeds the file and its
+  `function-examples/*.yaml` files with `include_str!`; a new file-form
+  example must be added to its `EXAMPLE_FILES` table. The function registry
   panics at load when a cataloged function has no runtime binding, so every
   catalog entry needs a `FunctionBinding` in the same change.
-- Catalog-only parameter types refine `string`: `ip-address` (IPv4, IPv6, or a
-  scoped `fe80::1%en0` literal; no DNS) and `agentic-cli` (the closed enum from
-  `expression/functions/agentic_cli_generated.rs`). Inline `enum(...)`
-  parameters stay rejected. Returns may add `literals: [...]` and
-  `nullable: true`; the typed signature renders `value | "literal" | null | error`.
-- R29 pairs: a function marked `pair: true` shares its name with a `ctx.*`
-  variable and authors no `description`, `returns.type`, or `returns.array`.
-  The parser copies all three from the variable, and
-  `ExpressionFunctionDescriptor::pair` names it. `recent_commits` is the first pair.
+- Consumers read `expression_function_catalog()` (categories in list order,
+  descriptors in documentation order: category, then canonical name, then
+  authored overload) or `function_descriptors(name)`, which resolves aliases
+  and case like dispatch. List canonicals only; never re-sort by a field or
+  keep a second signature list.
+- Non-function `types:` entries are named helper types that signatures use:
+  `ip-address` (IPv4, IPv6, or a scoped `fe80::1%en0` literal; no DNS),
+  `agentic-cli` (an `enum(...)` that a test pins to
+  `expression/functions/agentic_cli_generated.rs`), and `recent-commits` (the
+  return of `recent_commits(count)`; `ctx.recent_commits` still declares its
+  own `string[]`, and the two descriptions name each other). Typed signatures
+  show the helper's name, not its expansion.
 - `agentic_cli_generated.rs` is written by `claudine-gen generate` from
   `claudine/docs/providers.yaml`. Never hand-edit it; `claudine-gen check` and
   its nextest drift test fail on a stale table. It stores `AiCli` variant

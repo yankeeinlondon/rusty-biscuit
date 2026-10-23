@@ -147,6 +147,9 @@ pub(crate) struct Judged {
     pub(crate) properties: BTreeSet<String>,
     /// The validation verdict.
     pub(crate) report: ValidationReport,
+    /// The frontmatter as the validated document holds it: converted by the
+    /// one conversion engine, as Claudine's preparation reads it.
+    pub(crate) held: Value,
 }
 
 impl Discovered {
@@ -212,11 +215,16 @@ impl Discovered {
                 advisories: Vec::new(),
             },
         };
+        let held = match &effective {
+            Some(effective) => effective.coerce_frontmatter_with_pending(&data, &Default::default()).value,
+            None => data,
+        };
         Ok(Judged {
             claudine,
             inline,
             properties,
             report,
+            held,
         })
     }
 }
@@ -1344,7 +1352,10 @@ fn forbidden_cancelled_items_are_well_formed_start_actions() {
 }
 
 /// The schema and the lifecycle parser agree on every `break` and `prep`
-/// shape in a `start` stack: what one accepts, the other accepts. An explicit
+/// shape in a `start` stack: what one accepts, the other accepts. The parser
+/// reads the frontmatter the validated document holds, after the conversion
+/// engine (`code: '2'` is `2` to it), exactly as Claudine's preparation
+/// does. An explicit
 /// `null` on an optional key reads as absent to the schema, so `prep: null`
 /// is the parser's alone to reject (its unit tests cover it).
 #[test]
@@ -1360,10 +1371,11 @@ fn break_and_prep_shapes_agree_between_schema_and_parser() {
         ("[{break: {code: 256}}]", false),
         ("[{break: {code: -1}}]", false),
         ("[{break: {code: 1.5}}]", false),
-        ("[{break: {code: '2'}}]", false),
+        ("[{break: {code: '2'}}]", true),
+        ("[{break: {code: 'two'}}]", false),
         ("[{break: {reason: [a]}}]", false),
         ("[{break: {exit: 2}}]", false),
-        ("[{break: 5}]", false),
+        ("[{break: 5}]", true),
         ("[{prep: '@a.md'}, {info: after}]", true),
         ("[{prep: {target: '@a.md', with: {}}}]", true),
         ("[{prep: {target: '@a.md', with: {stage: all}, no_error: true}}]", true),
@@ -1378,17 +1390,16 @@ fn break_and_prep_shapes_agree_between_schema_and_parser() {
     let discovered = repo.discover().expect("the shipped bundle loads");
     for (index, (items, valid)) in SHAPES.iter().enumerate() {
         let path = repo.write_document(&format!("directive-{index}.md"), &format!("---\nstart: {items}\n---\n"));
-        let report = discovered
+        let judged = discovered
             .judge(
                 &path,
                 include_str!("../../../schemas/claudine.yaml"),
                 include_str!("../../../schemas/inline-compose.yaml"),
             )
-            .expect("judged")
-            .report;
-        assert_eq!(report.valid, *valid, "schema verdict for `start: {items}`: {:?}", problems(&report));
-        let markdown = Markdown::try_from(path.as_path()).expect("document loads");
-        let parsed = parse_lifecycle_config(&frontmatter_json(&markdown), &path);
+            .expect("judged");
+        let report = &judged.report;
+        assert_eq!(report.valid, *valid, "schema verdict for `start: {items}`: {:?}", problems(report));
+        let parsed = parse_lifecycle_config(&judged.held, &path);
         assert_eq!(parsed.is_ok(), *valid, "parser verdict for `start: {items}`: {parsed:?}");
     }
 }

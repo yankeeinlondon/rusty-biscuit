@@ -5,6 +5,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::effects::EffectSafety;
 use darkmatter::markdown::compose::context::ContextValueType;
+use darkmatter::markdown::compose::expression::{ExpressionFunctionDescriptor, FunctionExample};
 use darkmatter::markdown::schemas::SimplifiedType;
 
 use crate::commands::context_render::inline_code_text;
@@ -96,6 +97,49 @@ pub(super) fn format_example(example: Option<&darkmatter::catalog::Example>, ter
         }
         None => String::new(),
     }
+}
+
+/// Renders every example of one function overload for the `Example` cell, one
+/// line each, in authored order: inline examples as `call ⇒ result` (a
+/// display-only one followed by its reason), then file-form examples as the
+/// file's invocation and its returns in JSON spelling, so a multi-line or
+/// tab-separated result stays on one visible line.
+pub(super) fn format_function_examples(
+    descriptor: &ExpressionFunctionDescriptor,
+    term: &Terminal,
+) -> String {
+    descriptor
+        .examples
+        .iter()
+        .map(|example| {
+            let line = match example {
+                FunctionExample::Call {
+                    call,
+                    result,
+                    display_only: None,
+                    ..
+                } => format!("{call} ⇒ {result}"),
+                FunctionExample::Call {
+                    call,
+                    result,
+                    display_only: Some(reason),
+                    ..
+                } => format!("{call} ⇒ {result} (display only: {reason})"),
+                FunctionExample::File {
+                    path,
+                    invocation,
+                    returns,
+                    ..
+                } => {
+                    let returns =
+                        serde_json::to_string(returns).expect("a string serializes to JSON");
+                    format!("{invocation} ⇒ {returns} (from {path})")
+                }
+            };
+            inline_code_text(&line.replace('\t', r"\t"), term)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Compact example formatter for side-effect capabilities.

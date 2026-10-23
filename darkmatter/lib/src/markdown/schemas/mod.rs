@@ -65,6 +65,7 @@ pub mod example;
 pub mod file_match;
 pub mod format;
 mod frontmatter_shape;
+mod json_shape;
 mod phase;
 mod reference;
 pub mod resolve;
@@ -74,8 +75,9 @@ pub mod simplified;
 pub mod triggers;
 pub mod validate;
 mod positions;
-mod embedded;
+pub(crate) mod embedded;
 
+use std::sync::OnceLock;
 use std::{
     collections::{BTreeSet, HashSet},
     path::{Path, PathBuf},
@@ -108,6 +110,7 @@ pub use detect::{
 };
 pub use discriminant::select_literal_discriminant_arm;
 pub use errors::SchemaError;
+pub use json_shape::shape_from_json_schema;
 pub use frontmatter_shape::{
     FrontmatterExpressionValue, effective_property_shape, expression_atom,
     frontmatter_expression_values, nested_property_shape, property_def_at_path,
@@ -657,6 +660,7 @@ impl DarkmatterSchemas {
             caller_origins: self.cache.caller_origins().clone(),
             dependencies,
             advisories,
+            conversion: OnceLock::new(),
         }))
     }
 
@@ -895,9 +899,44 @@ pub struct EffectiveSchema {
     /// Non-fatal findings produced while resolving the effective schema's
     /// referenced files, sorted and deduplicated by semantic kind and path.
     advisories: Vec<SchemaAdvisory>,
+    /// The conversion plan for [`Self::json_schema`], found on first use.
+    conversion: OnceLock<Arc<coerce::ConversionPlan>>,
 }
 
 impl EffectiveSchema {
+    /// The conversion plan for [`Self::json_schema`].
+    fn conversion(&self) -> &coerce::ConversionPlan {
+        self.conversion.get_or_init(|| {
+            coerce::ConversionPlan::for_hashed(SHARED_VALIDATOR_CACHE.shared_schema_hash(&self.json_schema))
+        })
+    }
+
+    /// Converts `instance` against [`Self::json_schema`] as
+    /// [`coerce::coerce_frontmatter_with_pending`] does, reusing this
+    /// schema's conversion plan.
+    pub fn coerce_frontmatter_with_pending(
+        &self,
+        instance: &Value,
+        composition_pending: &HashSet<String>,
+    ) -> coerce::CoercionOutcome {
+        if self.accepts_as_is(instance) {
+            return coerce::CoercionOutcome {
+                value: instance.clone(),
+                changed: false,
+            };
+        }
+        coerce::coerce_with_plan(self.conversion(), &self.json_schema, instance, composition_pending)
+    }
+
+    /// Whether this schema's own compiled validators accept `instance`
+    /// unchanged: such a value is kept, so conversion needs nothing else.
+    fn accepts_as_is(&self, instance: &Value) -> bool {
+        match &self.validators {
+            CompiledValidators::Object(validator) => validator.is_valid(instance),
+            CompiledValidators::RootUnion(arms) => arms.iter().any(|arm| arm.is_valid(instance)),
+        }
+    }
+
     /// Whether this schema declares the top-level frontmatter property `name`:
     /// a `properties` key, a matching `patternProperties` pattern, or either
     /// of those in any root-union, `allOf`, or `if`/`then`/`else` arm
@@ -966,9 +1005,12 @@ impl EffectiveSchema {
     /// attributed to the closest-matching arm and carry the corresponding
     /// `arm_index`.
     ///
-    /// The instance is type-coerced against the schema (see
-    /// [`coerce::coerce_frontmatter`]) on a working copy before validation, so
-    /// the report reflects post-coercion validity. No input is mutated —
+    /// The instance is converted against the schema by the conversion core
+    /// (see [`coerce::coerce_frontmatter`]) on a working copy before
+    /// validation, so the report reflects post-conversion validity. When some
+    /// value cannot convert, every other value that converts on its own is
+    /// still converted in the working copy, so the report names only the
+    /// values that fail, each with the core's reason. No input is mutated —
     /// eager-`file` values are left in their raw caller-supplied form. To
     /// rewrite them to their resolved document-relative paths, call
     /// [`Self::normalize_frontmatter`] explicitly on an already-valid
@@ -978,8 +1020,12 @@ impl EffectiveSchema {
         frontmatter: &Value,
         positions: &PositionMap,
     ) -> ValidationReport {
-        let coerced = coerce::coerce_frontmatter(&self.json_schema, frontmatter);
-        self.validate_instance(&coerced.value, positions)
+        let working_copy = if self.accepts_as_is(frontmatter) {
+            frontmatter.clone()
+        } else {
+            coerce::validation_copy_with_plan(self.conversion(), &self.json_schema, frontmatter)
+        };
+        self.validate_instance(&working_copy, positions)
     }
 
     /// Validates a working frontmatter instance at a runtime schema phase.
@@ -1036,6 +1082,7 @@ impl EffectiveSchema {
             caller_origins: self.caller_origins.clone(),
             dependencies: self.dependencies.clone(),
             advisories: self.advisories.clone(),
+            conversion: OnceLock::new(),
         };
         Ok(match phase {
             SchemaPhase::Launch => projected.validate_with_positions(frontmatter, positions),
@@ -1117,6 +1164,7 @@ impl EffectiveSchema {
                 )
             }
         };
+        coerce::annotate_problems(self.conversion(), &self.json_schema, instance, &mut problems);
         // Enrich each problem with its declared property description (Decision
         // #2). Whitespace-only descriptions (#8) and descriptions identical to
         // the rendered message (#9) are suppressed so the output stays additive.
@@ -2242,8 +2290,8 @@ mod claudine_compat_tests {
     }
 
     #[test]
-    fn ambiguous_string_still_reports_type_problem() {
-        let md = md_with_schema("$schema:\n  flag: boolean(required)\nflag: \"yes\"\n");
+    fn non_boolean_word_still_reports_type_problem() {
+        let md = md_with_schema("$schema:\n  flag: boolean(required)\nflag: \"maybe\"\n");
         let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
         let report = api.validate(&md).unwrap();
         assert!(!report.valid);

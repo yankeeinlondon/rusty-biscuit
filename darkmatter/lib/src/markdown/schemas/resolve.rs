@@ -733,8 +733,9 @@ fn parse_yaml_referenced_file(
     request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
-    let text = std::str::from_utf8(bytes).map_err(|_| SchemaError::AmbiguousReferenced {
+    let text = std::str::from_utf8(bytes).map_err(|error| SchemaError::SchemaDocument {
         path: path.to_path_buf(),
+        message: format!("not UTF-8 text: {error}"),
     })?;
     if let Some(document) = parse_standalone_schema_document(text, path)? {
         return match document.declaration {
@@ -755,16 +756,17 @@ fn parse_yaml_referenced_file(
     }
 
     // Treat the file's contents as a raw JSON Schema serialized in YAML.
+    // A duplicate key, trailing content, or a second document is a located
+    // syntax error in the file, not an unrecognizable schema.
     let yaml: YamlValue = crate::markdown::numeric::load_admitted_yaml(text).map_err(|error| {
-        if crate::markdown::numeric::is_yaml_admission_error(&error) {
-            SchemaError::SchemaDocument {
-                path: path.to_path_buf(),
-                message: error.to_string(),
-            }
+        let message = if crate::markdown::numeric::is_yaml_admission_error(&error) {
+            error.to_string()
         } else {
-            SchemaError::AmbiguousReferenced {
-                path: path.to_path_buf(),
-            }
+            format!("not valid YAML: {error}")
+        };
+        SchemaError::SchemaDocument {
+            path: path.to_path_buf(),
+            message,
         }
     })?;
     let advisories = missing_simplified_envelope_advisory(&yaml, path)
@@ -1157,22 +1159,25 @@ fn resolve_standalone_root_union(
 
 /// ## Errors
 ///
-/// [`SchemaError::AmbiguousReferenced`] when the bytes are not a JSON object,
-/// including a number too large for `f64` (`1e400`), and
-/// [`SchemaError::SchemaDocument`] when a number's written value cannot be
-/// admitted (an inexact whole number or an underflow), naming its JSON
-/// Pointer, line, and column.
+/// [`SchemaError::SchemaDocument`], naming the line and column, when the
+/// bytes are not one strict JSON value: invalid syntax, trailing content, a
+/// duplicate key, a number too large for `f64` (`1e400`), or a number whose
+/// written value cannot be admitted (an inexact whole number or an
+/// underflow, which also names its JSON Pointer).
+/// [`SchemaError::AmbiguousReferenced`] when the value is not an object.
 fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, SchemaError> {
-    let value: Value =
-        serde_json::from_slice(bytes).map_err(|_| SchemaError::AmbiguousReferenced {
-            path: path.to_path_buf(),
-        })?;
-    if let Ok(text) = std::str::from_utf8(bytes) {
-        crate::markdown::numeric::admit_json_text_numbers(text).map_err(|error| SchemaError::SchemaDocument {
-            path: path.to_path_buf(),
-            message: error.to_string(),
-        })?;
+    let document_error = |message: String| SchemaError::SchemaDocument {
+        path: path.to_path_buf(),
+        message,
+    };
+    let text = std::str::from_utf8(bytes).map_err(|error| document_error(format!("not UTF-8 text: {error}")))?;
+    if let Some(message) =
+        crate::markdown::coercion::content_error(crate::markdown::coercion::ContentFormat::Json, text)
+    {
+        return Err(document_error(message));
     }
+    let value: Value = serde_json::from_str(text).map_err(|error| document_error(format!("invalid JSON: {error}")))?;
+    crate::markdown::numeric::admit_json_text_numbers(text).map_err(|error| document_error(error.to_string()))?;
     if !value.is_object() {
         return Err(SchemaError::AmbiguousReferenced {
             path: path.to_path_buf(),

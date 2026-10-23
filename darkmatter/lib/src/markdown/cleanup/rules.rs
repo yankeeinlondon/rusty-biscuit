@@ -1,7 +1,11 @@
 //! The `style.markdown` formatting rules: their values, validation, and
 //! precedence.
 //!
-//! This module is the single validator for rule values. The document reader
+//! This module is the single validator for rule values. A document's values
+//! are first bound through the conversion engine against each rule's type in
+//! the shipped `style.yaml` partial, exactly as schema validation holds them
+//! ([`bind_document_rules`]); workspace and editor settings are read as
+//! written. The document reader
 //! ([`document_rules`]), DMLS's `formatting.markdown` reader
 //! ([`rules_from_json`]), and the `style:` parser's registration all delegate
 //! here, so a value is accepted or rejected the same way everywhere.
@@ -17,7 +21,13 @@
 use biscuit_file::{SourceSpan, YamlPathSegment, locate_yaml_key, locate_yaml_value, serde_yaml_ng};
 use serde_json::{Map, Value};
 
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
 use super::diagnostic::CleanDiagnostic;
+use crate::markdown::coercion::{self, Shape};
+use crate::markdown::compose::expression::call_binding::{NoNamedTypes, shape_from_property_def};
+use crate::markdown::schemas::simplified::parse_property_definition;
 use crate::markdown::literal_token::holds_pending_syntax;
 
 /// The width `fixed-width: true` stands for.
@@ -399,13 +409,31 @@ pub fn rules_from_json(value: &Value) -> Result<MarkdownRuleOverrides, Vec<RuleE
     if errors.is_empty() { Ok(overrides) } else { Err(errors) }
 }
 
-/// Validates one rule's value without recording it; `null` is valid.
+/// Validates one rule's value as a document holds it, without recording
+/// it; `null` is valid. The value is first bound through the conversion
+/// engine, as [`bind_document_rules`] does.
 ///
 /// ## Errors
 ///
 /// Why `value` is not a valid value for `name`, or that `name` is unknown.
 pub fn validate_rule(name: &str, value: &Value) -> Result<(), String> {
-    read_leaf(&mut MarkdownRuleOverrides::default(), name, value)
+    read_leaf(&mut MarkdownRuleOverrides::default(), name, &bind_rule_value(name, value))
+}
+
+/// A document's `style.markdown` mapping with each known rule's value bound
+/// through the conversion engine to its declared type, exactly as schema
+/// validation holds it (`"80"` → `80`). Frontmatter readers call this before
+/// [`rules_from_json`]; workspace and editor settings are read as written.
+pub fn bind_document_rules(value: &Value) -> Value {
+    match value {
+        Value::Object(rules) => Value::Object(
+            rules
+                .iter()
+                .map(|(name, leaf)| (name.clone(), bind_rule_value(name, leaf)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
 }
 
 fn read_leaf(overrides: &mut MarkdownRuleOverrides, name: &str, value: &Value) -> Result<(), String> {
@@ -430,6 +458,41 @@ fn read_leaf(overrides: &mut MarkdownRuleOverrides, name: &str, value: &Value) -
         }
     }
     Ok(())
+}
+
+/// Each rule's declared type, from the shipped `style.yaml` partial that
+/// schema validation also reads.
+static RULE_SHAPES: LazyLock<HashMap<String, Shape>> = LazyLock::new(|| {
+    let document = crate::markdown::schemas::embedded::find(
+        crate::markdown::schemas::embedded::SHIPPED,
+        "darkmatter/schemas/partials/style.yaml",
+    )
+    .expect("the style partial is embedded");
+    let yaml: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(document.text).expect("the embedded style partial is YAML");
+    let rules = yaml["types"]["style"]["markdown"]
+        .as_mapping()
+        .expect("the style partial declares `style.markdown`");
+    rules
+        .iter()
+        .map(|(name, definition)| {
+            let name = name.as_str().expect("rule names are strings");
+            let def = parse_property_definition(name, definition).expect("rule declarations parse");
+            let shape = shape_from_property_def(&def, &NoNamedTypes).expect("rule declarations translate");
+            (name.to_string(), shape)
+        })
+        .collect()
+});
+
+/// The value a rule holds once the conversion engine has bound it to the
+/// rule's declared type (`"80"` → `80`), as schema validation holds it, so
+/// validation and every rule reader agree. A value that does not bind is
+/// returned unchanged for the rule reader to reject with its own message.
+fn bind_rule_value(name: &str, value: &Value) -> Value {
+    match RULE_SHAPES.get(name).map(|shape| coercion::bind(shape, value)) {
+        Some(Ok(bound)) => bound.into_value(),
+        _ => value.clone(),
+    }
 }
 
 fn leaf<T>(value: &Value, read: fn(&Value) -> Result<T, String>) -> Result<Leaf<T>, String> {
@@ -633,7 +696,8 @@ pub fn document_rules(
                 continue;
             }
         };
-        if let Err(message) = validate_rule(name, &converted) {
+        let converted = bind_rule_value(name, &converted);
+        if let Err(message) = read_leaf(&mut MarkdownRuleOverrides::default(), name, &converted) {
             let span = if RULE_NAMES.contains(&name) {
                 at_value(&leaf_path)
             } else {

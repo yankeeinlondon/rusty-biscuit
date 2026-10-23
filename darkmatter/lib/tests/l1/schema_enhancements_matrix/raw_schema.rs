@@ -13,10 +13,14 @@
 //! The numeric-token cells edit the control's text instead, since a decoded
 //! value has already lost the written spelling they test.
 //!
-//! Absent here, because a pending ruling or a later task decides them:
-//! duplicate keys in `.json` (R3; last-wins today), `enum: []` and
-//! `prefixItems: []` (R7), and conversion controls (Wave 3 Conversion core
-//! and Wave 4 Schema adapter).
+//! Whole-document cells (trailing content, a second value or document, a
+//! duplicate key in either format — ruling R3 for `.json`) fail as a located
+//! `SchemaError::SchemaDocument`. `enum: []` and `prefixItems: []` follow the
+//! Draft 2020-12 meta-schema (R7) and are covered by the keyword rows.
+//!
+//! The conversion controls bind a text or number value through one keyword
+//! each and assert the converted value the complete schema accepts, or the
+//! conversion the complete schema rejects.
 
 use std::path::Path;
 
@@ -134,7 +138,9 @@ const ROWS: &[Row] = &[
     row("definitions", Keywords, "/definitions", "ref_definitions: Word1", false, Unresolved, SCHEMA_MAP),
     row("$ref", Keywords, "/properties/ref_defs/$ref", "ref_defs: 0", false, Flips, STRING),
     row("$anchor", Keywords, "/$defs/flagged/$anchor", "anchored: 5", false, Unresolved, ANCHOR),
-    row("$id", Keywords, "/$defs/identified/$id", "identified: 5", false, Unresolved, STRING),
+    // A list never converts to text, so this stays invalid; `5` itself now
+    // converts to `"5"` (see `conversion_controls`).
+    row("$id", Keywords, "/$defs/identified/$id", "identified: [5]", false, Unresolved, STRING),
     row("$dynamicRef", Keywords, "/properties/dynamic/$dynamicRef", "dynamic: word", false, Flips, STRING),
     row("$dynamicAnchor", Keywords, "/$defs/dynamic/$dynamicAnchor", "dynamic: word", false, Unresolved, ANCHOR),
     // `$vocabulary` only takes effect in a meta-schema, which no loader can
@@ -410,7 +416,7 @@ fn run_cell(dir: &Path, format: Format, index: &mut usize, text: &str, instance:
 
 /// Walks every row against the two controls of one format, then the
 /// whole-document cells, which are the same for every keyword.
-fn walk(format: Format, detected: &str, keywords: &str, whole_document: &[(&str, String)]) {
+fn walk(format: Format, detected: &str, keywords: &str, whole_document: &[(&str, String, &str)]) {
     let workspace = tempfile::tempdir().expect("matrix workspace");
     let dir = workspace.path();
     let mut index = 0;
@@ -461,9 +467,12 @@ fn walk(format: Format, detected: &str, keywords: &str, whole_document: &[(&str,
         }
     }
 
-    for (label, text) in whole_document {
-        if let Ok(valid) = run_cell(dir, format, &mut index, text, "count: 1") {
-            failures.push(format!("{label}: expected a load error, got valid={valid}\n--- schema ---\n{text}"));
+    for (label, text, detail) in whole_document {
+        match run_cell(dir, format, &mut index, text, "count: 1") {
+            Err(SchemaError::SchemaDocument { message, .. }) if message.contains(detail) => {}
+            other => failures.push(format!(
+                "{label}: expected a SchemaDocument error naming {detail:?}, got {other:?}\n--- schema ---\n{text}"
+            )),
         }
     }
     assert!(failures.is_empty(), "{} cell(s) failed:\n\n{}", failures.len(), failures.join("\n\n"));
@@ -473,12 +482,23 @@ fn walk(format: Format, detected: &str, keywords: &str, whole_document: &[(&str,
 fn raw_json_schema_keyword_matrix() {
     let detected = include_str!("../../fixtures/schema_enhancements_matrix/detected.schema.json");
     let keywords = include_str!("../../fixtures/schema_enhancements_matrix/keywords.schema.json");
-    // The error class is `AmbiguousReferenced` with no detail today; the Wave
-    // 4 Schema adapter owns it, so only the failure is asserted.
     let whole_document = [
-        ("trailing garbage", format!("{detected}]")),
-        ("second value", format!("{detected}{{}}")),
+        ("trailing garbage", format!("{detected}]"), "trailing characters at line 85 column 1"),
+        ("second value", format!("{detected}{{}}"), "trailing characters at line 85 column 1"),
+        (
+            "duplicate root key",
+            detected.replacen("\n  \"type\": \"object\"\n", "\n  \"type\": \"object\",\n  \"type\": \"object\"\n", 1),
+            "duplicate key \"type\" at line 84",
+        ),
+        (
+            "duplicate nested key",
+            detected.replacen("\"type\": \"null\"\n", "\"type\": \"null\",\n          \"type\": \"null\"\n", 1),
+            "duplicate key \"type\" at line 9 column 16",
+        ),
     ];
+    for (label, text, _) in &whole_document[2..] {
+        assert_ne!(text, detected, "{label}: the duplicate edit must change the control");
+    }
     walk(Format::Json, detected, keywords, &whole_document);
 }
 
@@ -486,12 +506,16 @@ fn raw_json_schema_keyword_matrix() {
 fn raw_yaml_schema_keyword_matrix() {
     let detected = include_str!("../../fixtures/schema_enhancements_matrix/detected.schema.yaml");
     let keywords = include_str!("../../fixtures/schema_enhancements_matrix/keywords.schema.yaml");
-    // As for JSON, the reported class is `AmbiguousReferenced` today and the
-    // Wave 4 Schema adapter owns it.
+    // serde_yaml_ng locates the syntax error but not the second document or
+    // the duplicate key; each message still names its problem.
     let whole_document = [
-        ("trailing garbage", format!("{detected}]\n")),
-        ("second document", format!("{detected}---\ntype: object\n")),
-        ("duplicate root key", detected.replacen("\ntype: object\n", "\ntype: object\ntype: object\n", 1)),
+        ("trailing garbage", format!("{detected}]\n"), "at line"),
+        ("second document", format!("{detected}---\ntype: object\n"), "more than one document"),
+        (
+            "duplicate root key",
+            detected.replacen("\ntype: object\n", "\ntype: object\ntype: object\n", 1),
+            "duplicate entry with key \"type\"",
+        ),
     ];
     assert_ne!(whole_document[2].1, detected, "the duplicate edit must change the control");
     walk(Format::Yaml, detected, keywords, &whole_document);
@@ -560,11 +584,14 @@ fn raw_json_schema_numeric_token_matrix() {
     walk_numeric_tokens(Format::Json, keywords, &cells);
 
     // `serde_json` itself rejects an overflowing token before admission runs;
-    // the load still fails, as an unrecognized schema.
+    // the located load error stands for "not finite" (author decision).
     let workspace = tempfile::tempdir().expect("matrix workspace");
     let overflow = keywords.replacen("\"maximum\": 5", "\"maximum\": 1e400", 1);
     let result = run_cell(workspace.path(), Format::Json, &mut 0, &overflow, "maximum: 7");
-    assert!(matches!(result, Err(SchemaError::AmbiguousReferenced { .. })), "{result:?}");
+    assert!(
+        matches!(&result, Err(SchemaError::SchemaDocument { message, .. }) if message.contains("out of range")),
+        "{result:?}"
+    );
 }
 
 #[test]
@@ -586,4 +613,112 @@ fn raw_yaml_schema_numeric_token_matrix() {
         numeric("const quoted 2^53 + 1", "const: a", "const: '9007199254740993'", None),
     ];
     walk_numeric_tokens(Format::Yaml, keywords, &cells);
+}
+
+/// One conversion through one keyword of a control fixture.
+struct ConversionCell {
+    keyword: &'static str,
+    fixture: Fixture,
+    /// The frontmatter instance, one property.
+    instance: &'static str,
+    /// `Some(value)`: the instance validates and converts to `value` at its
+    /// property; `None`: the complete schema rejects the instance.
+    converts_to: Option<&'static str>,
+}
+
+const fn converts(keyword: &'static str, fixture: Fixture, instance: &'static str, to: &'static str) -> ConversionCell {
+    ConversionCell { keyword, fixture, instance, converts_to: Some(to) }
+}
+
+const fn rejected(keyword: &'static str, fixture: Fixture, instance: &'static str) -> ConversionCell {
+    ConversionCell { keyword, fixture, instance, converts_to: None }
+}
+
+const CONVERSION_CELLS: &[ConversionCell] = &[
+    converts("properties", Detected, "count: '7'", "7"),
+    converts("type", Detected, "active: 'yes'", "true"),
+    converts("anyOf", Detected, "rating: '2.5'", "2.5"),
+    converts("items", Detected, "scores: ['1', '2']", "[1, 2]"),
+    converts("$ref / $defs", Keywords, "ref_defs: '3'", "3"),
+    converts("$anchor", Keywords, "anchored: 'On'", "true"),
+    converts("$id", Keywords, "identified: 5", "\"5\""),
+    converts("patternProperties", Keywords, "pattern_props: {n_a: '4'}", "{\"n_a\": 4}"),
+    converts("additionalProperties", Keywords, "additional: {x: '4'}", "{\"x\": 4}"),
+    converts("prefixItems", Keywords, "prefix: ['4']", "[4]"),
+    // A typeless `multipleOf` constrains only numbers: text passes unchanged.
+    converts("multipleOf", Keywords, "multiple_of: '3'", "\"3\""),
+    // `5` becomes `"5"`, which the referenced pattern still rejects.
+    rejected("definitions", Keywords, "ref_definitions: 5"),
+    // `"5"` reads as `5` under both alternatives, so exactly-one fails.
+    rejected("oneOf", Keywords, "one_of: '5'"),
+    // `$dynamicRef` is validation-only: the text stays text and fails.
+    rejected("$dynamicRef", Keywords, "dynamic: '4'"),
+];
+
+/// Writes `schema` and binds each cell's instance through the public
+/// validation result and the effective schema's conversion.
+fn walk_conversions(format: Format, detected: &str, keywords: &str) {
+    use darkmatter::markdown::{Markdown, compose::ComposeSource, schemas::DarkmatterSchemas};
+
+    let workspace = tempfile::tempdir().expect("matrix workspace");
+    let dir = workspace.path();
+    for (name, text) in [("detected", detected), ("keywords", keywords)] {
+        std::fs::write(dir.join(format!("{name}.{}", format.extension())), text).expect("write control");
+    }
+    let mut failures = Vec::new();
+    for cell in CONVERSION_CELLS {
+        let name = match cell.fixture {
+            Detected => "detected",
+            Keywords => "keywords",
+        };
+        let frontmatter = format!("$schema: ./{name}.{}\n{}", format.extension(), cell.instance);
+        let report = validate_document(dir, &frontmatter).expect("the control loads");
+        let markdown = Markdown::from(format!("---\n{frontmatter}\n---\nBody\n"))
+            .with_source(ComposeSource::File(dir.join("document.md")));
+        let effective = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir))
+            .effective_for(&markdown)
+            .expect("the control loads")
+            .expect("a schema applies");
+        let instance = serde_json::to_value(markdown.frontmatter().as_map()).expect("frontmatter JSON");
+        let outcome = darkmatter::markdown::schemas::coerce::coerce_frontmatter(&effective.json_schema, &instance);
+        let property = cell.instance.split(':').next().expect("property");
+        match cell.converts_to {
+            Some(expected) => {
+                let expected: Value = serde_json::from_str(expected).expect("expected JSON");
+                if !report.valid || outcome.value[property] != expected {
+                    failures.push(format!(
+                        "{}: expected {expected}, got valid={} value {} ({:?})",
+                        cell.keyword, report.valid, outcome.value[property], report.problems
+                    ));
+                }
+            }
+            None => {
+                if report.valid || outcome.changed {
+                    failures.push(format!(
+                        "{}: expected a rejection with the input unchanged, got valid={} changed={}",
+                        cell.keyword, report.valid, outcome.changed
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} cell(s) failed:\n\n{}", failures.len(), failures.join("\n\n"));
+}
+
+#[test]
+fn raw_json_schema_conversion_controls() {
+    walk_conversions(
+        Format::Json,
+        include_str!("../../fixtures/schema_enhancements_matrix/detected.schema.json"),
+        include_str!("../../fixtures/schema_enhancements_matrix/keywords.schema.json"),
+    );
+}
+
+#[test]
+fn raw_yaml_schema_conversion_controls() {
+    walk_conversions(
+        Format::Yaml,
+        include_str!("../../fixtures/schema_enhancements_matrix/detected.schema.yaml"),
+        include_str!("../../fixtures/schema_enhancements_matrix/keywords.schema.yaml"),
+    );
 }

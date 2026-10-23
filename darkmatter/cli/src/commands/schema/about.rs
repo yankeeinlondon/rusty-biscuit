@@ -20,7 +20,7 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::compose::context::context_variable_descriptors;
-use darkmatter::markdown::compose::expression::expression_function_descriptors;
+use darkmatter::markdown::compose::expression::expression_function_catalog;
 use darkmatter::markdown::highlighting::CodeBlockMode;
 use darkmatter::markdown::highlighting::ColorMode as MarkdownColorMode;
 use darkmatter::markdown::Markdown;
@@ -489,24 +489,18 @@ fn context_catalog_markdown() -> String {
     out
 }
 
-/// Renders the typed expression-function signatures as a Markdown reference.
-///
-/// Function categories are not contiguous in the catalog, so this groups by
-/// category in first-appearance order and orders each group by the descriptor's
-/// intra-category `order`.
+/// Renders the typed expression-function signatures as a Markdown reference:
+/// categories in the catalog's `categories:` list order, functions
+/// alphabetical within each, every overload on its own line.
 fn expression_function_signatures_markdown() -> String {
-    let descriptors = expression_function_descriptors();
-    let mut categories: Vec<&str> = Vec::new();
-    for descriptor in descriptors {
-        if !categories.contains(&descriptor.category) {
-            categories.push(descriptor.category);
-        }
-    }
+    let catalog = expression_function_catalog();
     let mut out = String::new();
-    for category in categories {
-        out.push_str(&format!("\n**{}**\n\n", escape_markdown(category)));
-        let mut group: Vec<_> = descriptors.iter().filter(|d| d.category == category).collect();
-        group.sort_by_key(|d| d.order);
+    for category in catalog.categories {
+        let mut group = catalog.descriptors.iter().filter(|d| d.category == category.name).peekable();
+        if group.peek().is_none() {
+            continue;
+        }
+        out.push_str(&format!("\n**{}**\n\n", escape_markdown(category.name)));
         for descriptor in group {
             out.push_str(&format!(
                 "- `{}` — {}\n",
@@ -855,17 +849,48 @@ mod tests {
     fn expression_function_signatures_render_typed_list_formatters() {
         let signatures = expression_function_signatures_markdown();
         assert!(
-            signatures.contains("as_csv(list: any[]) -> string | error"),
+            signatures.contains("as_csv(list: unknown[] | null) -> string | null"),
             "missing typed as_csv signature:\n{signatures}"
         );
         assert!(
-            signatures.contains("link(target: file, desc: string) -> string | error"),
+            signatures.contains("link(target: file | null, desc: string | null) -> string | null | error"),
             "missing authored link overload:\n{signatures}"
         );
         assert!(
-            signatures.contains("ensure_leading(var: any, prefix: any) -> string | error"),
+            signatures.contains(
+                "ensure_leading(var: string | number | null, prefix: string | number | null) -> string | number | null"
+            ),
             "missing authored string signature:\n{signatures}"
         );
+    }
+
+    /// Categories follow the catalog's `categories:` list and functions are
+    /// alphabetical within each, overloads together.
+    #[test]
+    fn expression_function_signatures_follow_category_list_and_alphabetical_order() {
+        let signatures = expression_function_signatures_markdown();
+        let headings: Vec<&str> = signatures
+            .lines()
+            .filter_map(|line| line.strip_prefix("**")?.strip_suffix("**"))
+            .collect();
+        let listed: Vec<&str> = expression_function_catalog()
+            .categories
+            .iter()
+            .map(|category| category.name)
+            .filter(|name| headings.contains(name))
+            .collect();
+        assert_eq!(headings, listed);
+
+        for group in signatures.split("\n**").skip(1) {
+            let names: Vec<&str> = group
+                .lines()
+                .filter_map(|line| line.strip_prefix("- `"))
+                .map(|line| line.split('(').next().unwrap_or(line))
+                .collect();
+            let mut sorted = names.clone();
+            sorted.sort_unstable();
+            assert_eq!(names, sorted, "{group}");
+        }
     }
 
     #[test]

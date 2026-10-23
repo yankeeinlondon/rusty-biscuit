@@ -1,37 +1,36 @@
-//! Built-in helper functions and registrations for the Darkmatter expression evaluator.
+//! Built-in expression functions: the registry that joins each function's
+//! handler to its catalog signatures, and the one dispatch entry,
+//! [`call_function`], that binds a call before any handler runs.
 //!
-//! This module groups the type predicates, math helpers, collection helpers,
-//! string predicates and mutations, and date validators added in the
-//! expression-syntax expansion. Functions here all take fully-evaluated
-//! `serde_json::Value` arguments and follow the spec's null-propagation /
-//! type-mismatch contract: a `Value::Null` argument propagates through the
-//! call as `Value::Null`, while a value of the wrong domain returns an
-//! evaluator error.
+//! Every call runs in two steps. The call binder
+//! ([`super::call_binding`]) binds the evaluated arguments to the function's
+//! catalog overloads (a binding failure is [`ExpressionError::Call`] and the
+//! handler is never entered); the handler then computes with the bound values,
+//! and its successful result is checked against the selected overload's
+//! return type without conversion.
 
-use chrono::{Datelike, Duration, Local, Months, NaiveDate, NaiveDateTime, Utc};
+use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, Utc};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
-use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::TerminalRenderable;
-
 use super::{
     ExpressionError, FileRefFailure, FileReferenceDiagnostic, json_number, make_portable_relative_in_context,
-    scalar_string, to_number, to_number_coerce,
+    scalar_string,
 };
 use super::resolve_ctx::{
     ResolutionContext, is_remote_url, normalize_path_arg, resolve_document_file_ref,
     resolve_document_file_ref_shape, resolve_document_file_ref_target,
 };
 use crate::markdown::Markdown;
+use crate::markdown::coercion::ValueKind;
+use crate::markdown::numeric::{self, NumberTextError};
 use crate::markdown::schemas::DarkmatterSchemas;
 
 mod agentic_cli;
 pub(in crate::markdown::compose) mod agentic_cli_generated;
-mod args;
 mod cicd;
 mod collections;
 mod composition;
@@ -49,12 +48,16 @@ mod shell;
 mod skills;
 mod strings;
 mod terminal;
+#[cfg(any(test, feature = "effects-instrumentation"))]
+pub mod test_hooks;
 
-use args::require_args;
-use super::catalog::{ExpressionFunctionDescriptor, ParamType, expression_function_catalog, expression_function_descriptors};
+use super::call_binding::{self, BoundCall, CallBindingError, FunctionRegistration, RegistrationError};
+use super::catalog::{FunctionCatalog, expression_function_catalog};
 
-type PureFn = fn(&[Value]) -> Result<Value, String>;
-type ContextFn = fn(&[Value], &ResolutionContext) -> Result<Value, ExpressionError>;
+/// A handler that computes from bound arguments alone.
+pub(crate) type PureFn = fn(&BoundCall<'_>) -> Result<Value, String>;
+/// A handler that also reads the document resolution context.
+pub(crate) type ContextFn = fn(&BoundCall<'_>, &ResolutionContext) -> Result<Value, ExpressionError>;
 
 #[derive(Clone, Copy)]
 enum FunctionHandler {
@@ -74,122 +77,74 @@ struct FunctionBinding {
     canonical: &'static str,
     aliases: &'static [&'static str],
     evaluation: EvaluationMode,
+    /// `None` only for a lazy function, which the evaluator computes.
     handler: Option<FunctionHandler>,
+    /// Registered source exclusions (`reject_sources`): parameter name and the
+    /// original value kinds it refuses before any conversion.
+    rejects: &'static [(&'static str, &'static [ValueKind])],
+    /// Registered numeric recovery: `(subject, fallback)` parameter names.
+    recovery: Option<(&'static str, &'static str)>,
 }
 
-#[cfg(test)]
-mod registration_tests {
-    use std::collections::HashSet;
-
-    use serde_json::Value;
-
-    use super::{EvaluationMode, FunctionHandler, bindings, dispatch, dispatch_fs};
-    use crate::markdown::compose::expression::ResolutionContext;
-
-    #[test]
-    fn registration_names_aliases_and_signatures_are_unique() {
-        let bindings: Vec<_> = bindings().collect();
-        let canonicals: HashSet<_> = bindings.iter().map(|r| r.canonical).collect();
-        assert_eq!(canonicals.len(), bindings.len());
-
-        let mut all_names = canonicals;
-        let mut signatures = HashSet::new();
-        for binding in bindings {
-            for alias in binding.aliases {
-                assert!(all_names.insert(*alias), "duplicate expression alias: {alias}");
-            }
-            for descriptor in crate::markdown::compose::expression::catalog::expression_function_descriptors()
-                .iter().filter(|descriptor| descriptor.signature.split('(').next() == Some(binding.canonical))
-            {
-                assert_eq!(
-                    descriptor.signature.split('(').next(),
-                    Some(binding.canonical)
-                );
-                assert!(
-                    signatures.insert(descriptor.signature),
-                    "duplicate expression signature: {}",
-                    descriptor.signature
-                );
-            }
+impl FunctionBinding {
+    const fn new(
+        canonical: &'static str,
+        aliases: &'static [&'static str],
+        evaluation: EvaluationMode,
+        handler: Option<FunctionHandler>,
+    ) -> Self {
+        Self {
+            canonical,
+            aliases,
+            evaluation,
+            handler,
+            rejects: &[],
+            recovery: None,
         }
     }
 
-    #[test]
-    fn catalog_and_runtime_bindings_have_bidirectional_canonical_parity() {
-        let catalog: HashSet<_> = super::expression_function_catalog()
-            .functions.iter().map(|function| function.name.as_str()).collect();
-        let runtime: HashSet<_> = bindings().map(|binding| binding.canonical).collect();
-        assert_eq!(catalog, runtime);
-        assert!(super::validate_registry().is_ok());
+    const fn pure(canonical: &'static str, aliases: &'static [&'static str], handler: PureFn) -> Self {
+        Self::new(canonical, aliases, EvaluationMode::Pure, Some(FunctionHandler::Pure(handler)))
     }
 
-    #[test]
-    fn exactly_is_null_and_is_empty_are_absence_predicates_with_their_aliases() {
-        let marked: HashSet<_> = bindings()
-            .filter(|binding| super::is_absence_predicate(binding.canonical))
-            .map(|binding| binding.canonical)
-            .collect();
-        assert_eq!(marked, HashSet::from(["is_null", "is_empty"]));
-        for alias in ["isnull", "isempty", "IS_NULL", "isEmpty"] {
-            assert!(super::is_absence_predicate(alias), "{alias}");
-        }
-        for other in ["is_string", "trim", "length", "or", "is_nul", ""] {
-            assert!(!super::is_absence_predicate(other), "{other}");
-        }
+    const fn context(canonical: &'static str, aliases: &'static [&'static str], handler: ContextFn) -> Self {
+        Self::new(canonical, aliases, EvaluationMode::Context, Some(FunctionHandler::Context(handler)))
     }
 
-    #[test]
-    fn alias_canonical_collisions_are_rejected() {
-        let fixtures = [("alpha", &["beta"][..]), ("beta", &[][..])];
-        assert_eq!(
-            super::validate_name_uniqueness(fixtures),
-            Err(super::RegistryError::NameCollision("beta".to_string()))
-        );
+    const fn lazy(canonical: &'static str) -> Self {
+        Self::new(canonical, &[], EvaluationMode::Lazy, None)
     }
 
-    #[test]
-    fn handler_kinds_dispatch_through_their_intended_paths() {
-        let context = ResolutionContext::default();
-        for binding in bindings() {
-            match binding.evaluation {
-                EvaluationMode::Pure => {
-                    assert!(matches!(binding.handler, Some(FunctionHandler::Pure(_))));
-                    let arity = super::joined_bindings().iter().find(|entry| entry.binding.canonical == binding.canonical).unwrap().descriptors[0].parameters.iter().filter(|parameter| !parameter.optional && !parameter.variadic).count();
-                    let args = vec![Value::Null; arity];
-                    assert!(dispatch(binding.canonical, &args).is_some());
-                    assert!(dispatch_fs(binding.canonical, &args, &context).is_none());
-                }
-                EvaluationMode::Context => {
-                    assert!(matches!(binding.handler, Some(FunctionHandler::Context(_))));
-                    let arity = super::joined_bindings().iter().find(|entry| entry.binding.canonical == binding.canonical).unwrap().descriptors[0].parameters.iter().filter(|parameter| !parameter.optional && !parameter.variadic).count();
-                    let args = vec![Value::Null; arity];
-                    assert!(dispatch(binding.canonical, &args).is_none());
-                    assert!(dispatch_fs(binding.canonical, &args, &context).is_some());
-                }
-                EvaluationMode::Lazy => {
-                    assert!(binding.handler.is_none());
-                    assert!(dispatch(binding.canonical, &[Value::Bool(true)]).is_none());
-                    assert!(dispatch_fs(binding.canonical, &[], &context).is_none());
-                }
-            }
+    const fn rejecting(self, rejects: &'static [(&'static str, &'static [ValueKind])]) -> Self {
+        Self { rejects, ..self }
+    }
+
+    const fn recovering(self, subject: &'static str, fallback: &'static str) -> Self {
+        Self {
+            recovery: Some((subject, fallback)),
+            ..self
         }
     }
 }
 
-const LAZY_BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding {
-        canonical: "and",
-        aliases: &[],
-        evaluation: EvaluationMode::Lazy,
-        handler: None,
-    },
-    FunctionBinding {
-        canonical: "or",
-        aliases: &[],
-        evaluation: EvaluationMode::Lazy,
-        handler: None,
-    },
-];
+/// How a lazy function ends early. Which operand value stops evaluation is
+/// the evaluator's domain logic (truthiness); this only names the side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShortCircuit {
+    /// Stop at the first falsy operand and return `false` (`and`).
+    OnFalsy,
+    /// Stop at the first truthy operand and return `true` (`or`).
+    OnTruthy,
+}
+
+const LAZY_BINDINGS: &[FunctionBinding] = &[FunctionBinding::lazy("and"), FunctionBinding::lazy("or")];
+
+fn short_circuit(canonical: &str) -> ShortCircuit {
+    match canonical {
+        "or" => ShortCircuit::OnTruthy,
+        _ => ShortCircuit::OnFalsy,
+    }
+}
 
 const BINDING_GROUPS: &[&[FunctionBinding]] = &[
     predicates::ABSENCE_PREDICATES,
@@ -216,18 +171,32 @@ fn bindings() -> impl Iterator<Item = &'static FunctionBinding> {
     BINDING_GROUPS.iter().flat_map(|group| group.iter())
 }
 
-struct JoinedBinding {
-    binding: &'static FunctionBinding,
-    descriptors: Vec<&'static ExpressionFunctionDescriptor>,
+/// The canonical name an alias registers, for a lowercased `name`; `None`
+/// when `name` is not an alias. Reads only the static binding tables, so the
+/// catalog can resolve aliases without building the registry.
+pub(crate) fn alias_canonical(name: &str) -> Option<&'static str> {
+    bindings().find(|binding| binding.aliases.contains(&name)).map(|binding| binding.canonical)
 }
 
-#[derive(Debug, PartialEq, Eq)]
+/// The aliases registered for `canonical`; empty for an unregistered name.
+pub(crate) fn registered_aliases(canonical: &str) -> &'static [&'static str] {
+    bindings().find(|binding| binding.canonical == canonical).map_or(&[], |binding| binding.aliases)
+}
+
+/// A binding joined to its catalog overloads, compiled once.
+struct JoinedBinding {
+    binding: &'static FunctionBinding,
+    registration: FunctionRegistration,
+}
+
+#[derive(Debug, PartialEq)]
 enum RegistryError {
     DuplicateBinding(String),
     CatalogWithoutBinding(String),
     BindingWithoutCatalog(String),
     NameCollision(String),
     InvalidHandler(String),
+    Registration(RegistrationError),
 }
 
 impl fmt::Display for RegistryError {
@@ -238,50 +207,77 @@ impl fmt::Display for RegistryError {
             Self::BindingWithoutCatalog(name) => ("runtime binding has no catalog function", name),
             Self::NameCollision(name) => ("expression canonical/alias name collision", name),
             Self::InvalidHandler(name) => ("runtime binding has an invalid evaluation/handler pairing", name),
+            Self::Registration(error) => return write!(formatter, "function registration failed: {error}"),
         };
         write!(formatter, "{kind}: {name}")
     }
 }
 
-fn validate_registry() -> Result<Vec<JoinedBinding>, RegistryError> {
-    let catalog = expression_function_catalog();
-    let descriptors = expression_function_descriptors();
-    let catalog_names: HashSet<&str> = catalog.functions.iter().map(|function| function.name.as_str()).collect();
-    let mut binding_by_name = HashMap::new();
-    validate_name_uniqueness(bindings().map(|binding| (binding.canonical, binding.aliases)))?;
+/// The registry joined to `catalog`.
+struct Registry {
+    entries: Vec<JoinedBinding>,
+}
 
+fn build_registry(catalog: &FunctionCatalog) -> Result<Registry, RegistryError> {
+    validate_name_uniqueness(bindings().map(|binding| (binding.canonical, binding.aliases)))?;
+    let mut seen = HashSet::new();
     for binding in bindings() {
-        if binding_by_name.insert(binding.canonical, binding).is_some() {
+        if !seen.insert(binding.canonical) {
             return Err(RegistryError::DuplicateBinding(binding.canonical.to_string()));
         }
         let valid_handler = matches!(
             (binding.evaluation, binding.handler),
-            (EvaluationMode::Pure, Some(FunctionHandler::Pure(_)))
-                | (EvaluationMode::Context, Some(FunctionHandler::Context(_)))
-                | (EvaluationMode::Lazy, None)
+            (EvaluationMode::Pure, Some(FunctionHandler::Pure(_))) | (
+                EvaluationMode::Context,
+                Some(FunctionHandler::Context(_))
+            ) | (EvaluationMode::Lazy, None)
         );
         if !valid_handler {
             return Err(RegistryError::InvalidHandler(binding.canonical.to_string()));
         }
     }
-
-    for name in &catalog_names {
-        if !binding_by_name.contains_key(name) {
-            return Err(RegistryError::CatalogWithoutBinding((*name).to_string()));
-        }
-    }
-    for name in binding_by_name.keys() {
-        if !catalog_names.contains(name) {
-            return Err(RegistryError::BindingWithoutCatalog((*name).to_string()));
+    for descriptor in catalog.descriptors {
+        if !seen.contains(descriptor.name) {
+            return Err(RegistryError::CatalogWithoutBinding(descriptor.name.to_string()));
         }
     }
 
-    Ok(bindings().map(|binding| JoinedBinding {
-        binding,
-        descriptors: descriptors.iter().filter(|descriptor| {
-            descriptor.signature.split('(').next() == Some(binding.canonical)
-        }).collect(),
-    }).collect())
+    let resolver = catalog.type_resolver();
+    let mut entries = Vec::new();
+    for binding in bindings() {
+        let overloads: Vec<_> = catalog
+            .descriptors
+            .iter()
+            .filter(|descriptor| descriptor.name == binding.canonical)
+            .map(|descriptor| descriptor.function_type.clone())
+            .collect();
+        if overloads.is_empty() {
+            return Err(RegistryError::BindingWithoutCatalog(binding.canonical.to_string()));
+        }
+        let registration = compile_binding(binding, overloads, &resolver)?;
+        entries.push(JoinedBinding { binding, registration });
+    }
+    Ok(Registry { entries })
+}
+
+/// Compiles one binding's overloads with its registered rules; a rule
+/// naming a parameter the catalog does not declare fails the registry.
+fn compile_binding(
+    binding: &FunctionBinding,
+    overloads: Vec<crate::markdown::schemas::simplified::FunctionType>,
+    resolver: &dyn call_binding::TypeResolver,
+) -> Result<FunctionRegistration, RegistryError> {
+    let mut builder = FunctionRegistration::builder_from_types(binding.canonical, overloads);
+    if binding.evaluation == EvaluationMode::Lazy {
+        builder = builder.evaluation(call_binding::EvaluationMode::Lazy);
+    }
+    for (parameter, kinds) in binding.rejects {
+        builder = builder.reject_sources(*parameter, kinds);
+    }
+    if let Some((subject, fallback)) = binding.recovery {
+        builder = builder.numeric_recovery(subject, fallback);
+    }
+    builder.build_with(resolver).map_err(RegistryError::Registration)
 }
 
 fn validate_name_uniqueness<'a>(
@@ -301,63 +297,32 @@ fn validate_name_uniqueness<'a>(
     Ok(())
 }
 
-fn joined_bindings() -> &'static [JoinedBinding] {
-    static REGISTRY: LazyLock<Vec<JoinedBinding>> = LazyLock::new(|| {
-        validate_registry().unwrap_or_else(|error| panic!("invalid embedded expression-function registry: {error}"))
+fn registry() -> &'static Registry {
+    static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
+        build_registry(expression_function_catalog())
+            .unwrap_or_else(|error| panic!("invalid embedded expression-function registry: {error}"))
     });
     &REGISTRY
 }
 
-fn accepts_arity(descriptor: &ExpressionFunctionDescriptor, arity: usize) -> bool {
-    accepts_parameter_arity(descriptor.parameters, arity)
+fn joined_bindings() -> &'static [JoinedBinding] {
+    &registry().entries
 }
 
-fn accepts_parameter_arity(parameters: &[ParamType], arity: usize) -> bool {
-    let minimum = parameters
+/// The registry entry `name` dispatches to: lowercased, then by canonical
+/// name or alias.
+fn find_binding(name: &str) -> Option<&'static JoinedBinding> {
+    let name = name.to_ascii_lowercase();
+    joined_bindings()
         .iter()
-        .filter(|parameter| !parameter.optional && !parameter.variadic)
-        .count();
-    let variadic = parameters.iter().any(|parameter| parameter.variadic);
-    arity >= minimum && (variadic || arity <= parameters.len())
+        .find(|entry| entry.binding.canonical == name || entry.binding.aliases.contains(&name.as_str()))
 }
 
-/// Builds the registry-produced arity error for a binding whose overloads all
-/// reject `args.len()`.
-///
-/// Aggregates the lower bound, upper bound, and variadic flag across every
-/// overload descriptor so the message names the full acceptable window rather
-/// than a single overload's shape. The wording keeps the `"requires … argument"`
-/// shape that downstream `is_arity_error` detection and `enrich_arity_error`
-/// appending depend on.
-fn arity_error_message(name: &str, descriptors: &[&ExpressionFunctionDescriptor]) -> String {
-    let minimum = descriptors
-        .iter()
-        .map(|descriptor| {
-            descriptor
-                .parameters
-                .iter()
-                .filter(|parameter| !parameter.optional && !parameter.variadic)
-                .count()
-        })
-        .min()
-        .unwrap_or(0);
-    let variadic = descriptors
-        .iter()
-        .any(|descriptor| descriptor.parameters.iter().any(|parameter| parameter.variadic));
-    let maximum = descriptors.iter().map(|descriptor| descriptor.parameters.len()).max();
-    if variadic {
-        format!(
-            "{name}() requires at least {minimum} argument{}",
-            if minimum == 1 { "" } else { "s" }
-        )
-    } else if maximum == Some(minimum) {
-        format!(
-            "{name}() requires {minimum} argument{}",
-            if minimum == 1 { "" } else { "s" }
-        )
-    } else {
-        format!("{name}() requires {minimum} to {} arguments", maximum.unwrap_or(minimum))
-    }
+/// The compiled registration of the built-in function `name` names
+/// (canonical or alias, any case).
+#[cfg(test)]
+fn function_registration(name: &str) -> Option<&'static FunctionRegistration> {
+    find_binding(name).map(|entry| &entry.registration)
 }
 
 /// Parsed components of an indexed filename stem.
@@ -556,661 +521,27 @@ pub fn is_empty(value: &Value) -> bool {
     }
 }
 
-fn any_null(args: &[Value]) -> bool {
-    args.iter().any(Value::is_null)
+/// A value the binder guarantees for a pure handler (a required parameter,
+/// or a declared type the accessor reads). `Err` only when a handler and its
+/// catalog signature disagree, so a defect surfaces as a domain error rather
+/// than a panic.
+fn bound<T>(value: Option<T>, name: &str, index: usize) -> Result<T, String> {
+    value.ok_or_else(|| format!("{name}() argument {} did not bind to the type its handler reads", index + 1))
 }
 
-fn require_number(name: &str, value: &Value) -> Result<f64, String> {
-    match value {
-        Value::Number(n) => n
-            .as_f64()
-            .ok_or_else(|| format!("{name}() received an unrepresentable number")),
-        _ => Err(format!("{name}() requires numeric arguments")),
-    }
-}
-
-fn require_string<'a>(name: &str, value: &'a Value) -> Result<&'a str, String> {
-    match value {
-        Value::String(s) => Ok(s.as_str()),
-        _ => Err(format!("{name}() requires string arguments")),
-    }
-}
-
-fn require_array<'a>(name: &str, value: &'a Value) -> Result<&'a Vec<Value>, String> {
-    match value {
-        Value::Array(items) => Ok(items),
-        _ => Err(format!("{name}() requires an array argument")),
-    }
-}
-
-/// Type predicates from the spec.
-pub fn is_string(args: &[Value]) -> Result<Value, String> {
-    require_args("is_string", args, 1)?;
-    Ok(Value::Bool(matches!(args[0], Value::String(_))))
-}
-
-pub fn is_number(args: &[Value]) -> Result<Value, String> {
-    require_args("is_number", args, 1)?;
-    Ok(Value::Bool(matches!(args[0], Value::Number(_))))
-}
-
-pub fn is_array(args: &[Value]) -> Result<Value, String> {
-    require_args("is_array", args, 1)?;
-    Ok(Value::Bool(matches!(args[0], Value::Array(_))))
-}
-
-pub fn is_null(args: &[Value]) -> Result<Value, String> {
-    require_args("is_null", args, 1)?;
-    Ok(Value::Bool(matches!(args[0], Value::Null)))
-}
-
-pub fn is_object(args: &[Value]) -> Result<Value, String> {
-    require_args("is_object", args, 1)?;
-    Ok(Value::Bool(matches!(args[0], Value::Object(_))))
-}
-
-pub fn is_empty_fn(args: &[Value]) -> Result<Value, String> {
-    require_args("is_empty", args, 1)?;
-    Ok(Value::Bool(is_empty(&args[0])))
-}
-
-/// `is_positive(val)` — `true` only when `to_number(val) > 0`.
-pub fn is_positive(args: &[Value]) -> Result<Value, String> {
-    require_args("is_positive", args, 1)?;
-    match to_number(&args[0]) {
-        Some(n) => Ok(Value::Bool(n > 0.0)),
-        None => Err("is_positive() cannot coerce argument to a number".to_string()),
-    }
-}
-
-/// `is_negative(val)` — `true` only when `to_number(val) < 0`.
-pub fn is_negative(args: &[Value]) -> Result<Value, String> {
-    require_args("is_negative", args, 1)?;
-    match to_number(&args[0]) {
-        Some(n) => Ok(Value::Bool(n < 0.0)),
-        None => Err("is_negative() cannot coerce argument to a number".to_string()),
-    }
-}
-
-/// `is_integer(val)` — inspecting predicate; `true` only for JSON numbers with
-/// no fractional component. Never errors and does not null-propagate.
-pub fn is_integer(args: &[Value]) -> Result<Value, String> {
-    require_args("is_integer", args, 1)?;
-    let ok = match &args[0] {
-        Value::Number(n) => n
-            .as_f64()
-            .map(|f| f.is_finite() && f.fract() == 0.0)
-            .unwrap_or(false),
-        _ => false,
+/// The numeric value of a bound `numberlike` (delivered as sent: a number,
+/// or numeric text) or of a selected `number` fallback. Text goes through
+/// the one canonical numeric-text parser the engine uses, so `number()` and
+/// `round()` agree with binding on every spelling.
+fn numberlike_value(value: &Value, name: &str) -> Result<f64, String> {
+    let admitted = match value {
+        Value::Number(number) => numeric::admit_json_number(number).map_err(NumberTextError::Admission),
+        Value::String(text) => numeric::admit_number_text(text),
+        _ => Err(NumberTextError::NotANumber),
     };
-    Ok(Value::Bool(ok))
+    admitted.map_err(|reason| format!("{name}() received a value that is not numeric ({reason}): {value}"))
 }
 
-/// `min(a, b)`.
-pub fn min_fn(args: &[Value]) -> Result<Value, String> {
-    require_args("min", args, 2)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let a = require_number("min", &args[0])?;
-    let b = require_number("min", &args[1])?;
-    json_number(a.min(b))
-}
-
-/// `max(a, b)`.
-pub fn max_fn(args: &[Value]) -> Result<Value, String> {
-    require_args("max", args, 2)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let a = require_number("max", &args[0])?;
-    let b = require_number("max", &args[1])?;
-    json_number(a.max(b))
-}
-
-/// `abs(x)`.
-pub fn abs_fn(args: &[Value]) -> Result<Value, String> {
-    require_args("abs", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let x = require_number("abs", &args[0])?;
-    json_number(x.abs())
-}
-
-/// `first(x)` returns the first element of an array (or null when empty).
-pub fn first_fn(args: &[Value]) -> Result<Value, String> {
-    require_args("first", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let items = require_array("first", &args[0])?;
-    Ok(items.first().cloned().unwrap_or(Value::Null))
-}
-
-/// `last(x)` returns the last element of an array (or null when empty).
-pub fn last_fn(args: &[Value]) -> Result<Value, String> {
-    require_args("last", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let items = require_array("last", &args[0])?;
-    Ok(items.last().cloned().unwrap_or(Value::Null))
-}
-
-/// `starts_with(x, find)` — case-sensitive prefix test.
-pub fn starts_with(args: &[Value]) -> Result<Value, String> {
-    require_args("starts_with", args, 2)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let haystack = require_string("starts_with", &args[0])?;
-    let needle = require_string("starts_with", &args[1])?;
-    Ok(Value::Bool(haystack.starts_with(needle)))
-}
-
-/// `ends_with(x, find)` — case-sensitive suffix test.
-pub fn ends_with(args: &[Value]) -> Result<Value, String> {
-    require_args("ends_with", args, 2)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let haystack = require_string("ends_with", &args[0])?;
-    let needle = require_string("ends_with", &args[1])?;
-    Ok(Value::Bool(haystack.ends_with(needle)))
-}
-
-fn string_mutation<F>(name: &str, args: &[Value], f: F) -> Result<Value, String>
-where
-    F: Fn(&str) -> String,
-{
-    require_args(name, args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let s = require_string(name, &args[0])?;
-    Ok(Value::String(f(s)))
-}
-
-pub fn lower(args: &[Value]) -> Result<Value, String> {
-    string_mutation("lower", args, |s| s.to_lowercase())
-}
-
-pub fn upper(args: &[Value]) -> Result<Value, String> {
-    string_mutation("upper", args, |s| s.to_uppercase())
-}
-
-pub fn capitalize(args: &[Value]) -> Result<Value, String> {
-    string_mutation("capitalize", args, |s| {
-        let mut chars = s.chars();
-        match chars.next() {
-            Some(first) => first.to_uppercase().chain(chars).collect(),
-            None => String::new(),
-        }
-    })
-}
-
-/// Splits a string into "words" suitable for case-conversion. Words are
-/// runs of letters or digits, with boundaries at any non-alphanumeric
-/// character or transitions like `aB` (camel boundary) and `IDFoo`
-/// (acronym boundary). The output is lowercase tokens.
-fn split_words(input: &str) -> Vec<String> {
-    let mut words: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let chars: Vec<char> = input.chars().collect();
-
-    let flush = |current: &mut String, words: &mut Vec<String>| {
-        if !current.is_empty() {
-            words.push(current.to_lowercase());
-            current.clear();
-        }
-    };
-
-    for i in 0..chars.len() {
-        let c = chars[i];
-        if !c.is_alphanumeric() {
-            flush(&mut current, &mut words);
-            continue;
-        }
-
-        if !current.is_empty() {
-            let prev = chars[i - 1];
-            // Word boundaries:
-            // - lower→Upper transition (e.g., "fooBar" → "foo|Bar")
-            // - digit↔letter transition (e.g., "v2foo" → "v|2|foo")
-            // - acronym boundary: "FOOBar" → "FOO|Bar"
-            let lower_to_upper = prev.is_lowercase() && c.is_uppercase();
-            let alpha_digit_flip = prev.is_alphabetic() != c.is_alphabetic();
-            let acronym_break = prev.is_uppercase()
-                && c.is_uppercase()
-                && i + 1 < chars.len()
-                && chars[i + 1].is_lowercase();
-            if lower_to_upper || alpha_digit_flip || acronym_break {
-                flush(&mut current, &mut words);
-            }
-        }
-        current.push(c);
-    }
-    flush(&mut current, &mut words);
-    words
-}
-
-pub fn kebab_case(args: &[Value]) -> Result<Value, String> {
-    string_mutation("kebab_case", args, |s| split_words(s).join("-"))
-}
-
-pub fn snake_case(args: &[Value]) -> Result<Value, String> {
-    string_mutation("snake_case", args, |s| split_words(s).join("_"))
-}
-
-pub fn camel_case(args: &[Value]) -> Result<Value, String> {
-    string_mutation("camel_case", args, |s| {
-        let words = split_words(s);
-        let mut iter = words.into_iter();
-        let mut out = String::new();
-        if let Some(first) = iter.next() {
-            out.push_str(&first);
-        }
-        for word in iter {
-            let mut chars = word.chars();
-            if let Some(c) = chars.next() {
-                out.extend(c.to_uppercase());
-                out.extend(chars);
-            }
-        }
-        out
-    })
-}
-
-pub fn pascal_case(args: &[Value]) -> Result<Value, String> {
-    string_mutation("pascal_case", args, |s| {
-        let mut out = String::new();
-        for word in split_words(s) {
-            let mut chars = word.chars();
-            if let Some(c) = chars.next() {
-                out.extend(c.to_uppercase());
-                out.extend(chars);
-            }
-        }
-        out
-    })
-}
-
-pub fn title_case(args: &[Value]) -> Result<Value, String> {
-    string_mutation("title_case", args, |s| {
-        let mut parts: Vec<String> = Vec::new();
-        for word in split_words(s) {
-            let mut chars = word.chars();
-            if let Some(c) = chars.next() {
-                let mut buf: String = c.to_uppercase().collect();
-                buf.extend(chars);
-                parts.push(buf);
-            }
-        }
-        parts.join(" ")
-    })
-}
-
-/// `without_date(string)` — removes strict `YYYY-MM-DD` substrings that parse
-/// as real calendar dates. Null-propagates; non-string arguments error.
-pub fn without_date(args: &[Value]) -> Result<Value, String> {
-    require_args("without_date", args, 1)?;
-    if args[0].is_null() {
-        return Ok(Value::Null);
-    }
-    let s = require_string("without_date", &args[0])?;
-    Ok(Value::String(remove_date_substrings(s)))
-}
-
-/// Whether a scalar JSON value is usable as a string/number operand for
-/// `ensure_leading` / `ensure_trailing`. Arrays, objects, and booleans are
-/// rejected; strings and numbers are accepted.
-fn ensure_operand(value: &Value) -> Result<String, String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::Number(_) => Ok(scalar_string(value)),
-        Value::Bool(_) => Err("ensure_leading() does not accept boolean arguments".to_string()),
-        Value::Array(_) | Value::Object(_) => {
-            Err("ensure_leading() does not accept array or object arguments".to_string())
-        }
-        Value::Null => Ok(String::new()),
-    }
-}
-
-/// Returns `true` when `s` parses as a finite number.
-fn is_numberlike_string(s: &str) -> bool {
-    s.parse::<f64>().map(|f| f.is_finite()).unwrap_or(false)
-}
-
-/// Builds a numeric result from concatenated decimal string forms, falling
-/// back to a string when the value is not representable as JSON number.
-fn ensure_numeric_concat(concatenated: &str) -> Result<Value, String> {
-    if let Some(n) = concatenated.parse::<f64>().ok().filter(|f| f.is_finite())
-        && let Ok(v) = json_number(n)
-    {
-        return Ok(v);
-    }
-    Ok(Value::String(concatenated.to_string()))
-}
-
-/// `ensure_leading(var, prefix)` — ensures the string form of `var` starts
-/// with the string form of `prefix`. Preserves the original JSON type when
-/// already prefixed; returns a JSON number when `var` is a number and the
-/// result is representable.
-pub fn ensure_leading(args: &[Value]) -> Result<Value, String> {
-    require_args("ensure_leading", args, 2)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let var = &args[0];
-    let prefix = &args[1];
-    if matches!(var, Value::Bool(_) | Value::Array(_) | Value::Object(_))
-        || matches!(prefix, Value::Bool(_) | Value::Array(_) | Value::Object(_))
-    {
-        return Err("ensure_leading() arguments must be strings or numbers".to_string());
-    }
-    let var_str = ensure_operand(var)?;
-    let prefix_str = ensure_operand(prefix)?;
-    if var_str.starts_with(&prefix_str) {
-        return Ok(var.clone());
-    }
-    let combined = format!("{prefix_str}{var_str}");
-    if matches!(var, Value::Number(_))
-        && (matches!(prefix, Value::Number(_)) || is_numberlike_string(&prefix_str))
-    {
-        ensure_numeric_concat(&combined)
-    } else {
-        Ok(Value::String(combined))
-    }
-}
-
-/// `ensure_trailing(var, postfix)` — ensures the string form of `var` ends
-/// with the string form of `postfix`. Same type-preservation rules as
-/// [`ensure_leading`].
-pub fn ensure_trailing(args: &[Value]) -> Result<Value, String> {
-    require_args("ensure_trailing", args, 2)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let var = &args[0];
-    let postfix = &args[1];
-    if matches!(var, Value::Bool(_) | Value::Array(_) | Value::Object(_))
-        || matches!(postfix, Value::Bool(_) | Value::Array(_) | Value::Object(_))
-    {
-        return Err("ensure_trailing() arguments must be strings or numbers".to_string());
-    }
-    let var_str = ensure_operand(var)?;
-    let postfix_str = ensure_operand(postfix)?;
-    if var_str.ends_with(&postfix_str) {
-        return Ok(var.clone());
-    }
-    let combined = format!("{var_str}{postfix_str}");
-    if matches!(var, Value::Number(_))
-        && (matches!(postfix, Value::Number(_)) || is_numberlike_string(&postfix_str))
-    {
-        ensure_numeric_concat(&combined)
-    } else {
-        Ok(Value::String(combined))
-    }
-}
-
-/// `replace(x, find, replacement)` — replaces **every** non-overlapping
-/// occurrence of the literal substring `find` in `x` with `replacement`.
-///
-/// An empty `find` is a no-op that returns `x` unchanged, deliberately
-/// rejecting `str::replace`'s boundary-insertion behavior. Matching is literal
-/// (never regex) and case-sensitive. Null-propagates; non-string arguments
-/// error.
-pub fn replace(args: &[Value]) -> Result<Value, String> {
-    require_args("replace", args, 3)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let x = require_string("replace", &args[0])?;
-    let find = require_string("replace", &args[1])?;
-    let replacement = require_string("replace", &args[2])?;
-    if find.is_empty() {
-        return Ok(Value::String(x.to_string()));
-    }
-    Ok(Value::String(x.replace(find, replacement)))
-}
-
-/// `replace_first(x, find, replacement)` — replaces only the **first**
-/// (leftmost) occurrence of the literal substring `find`.
-///
-/// Same empty-`find` no-op, literal-matching, case-sensitivity, and
-/// null-propagation contract as [`replace`].
-pub fn replace_first(args: &[Value]) -> Result<Value, String> {
-    require_args("replace_first", args, 3)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let x = require_string("replace_first", &args[0])?;
-    let find = require_string("replace_first", &args[1])?;
-    let replacement = require_string("replace_first", &args[2])?;
-    if find.is_empty() {
-        return Ok(Value::String(x.to_string()));
-    }
-    Ok(Value::String(x.replacen(find, replacement, 1)))
-}
-
-/// `replace_last(x, find, replacement)` — replaces only the **last**
-/// (rightmost) occurrence of the literal substring `find`.
-///
-/// Same empty-`find` no-op, literal-matching, case-sensitivity, and
-/// null-propagation contract as [`replace`]. `str::rfind` returns the match's
-/// start byte index on a UTF-8 char boundary, so slicing at it is safe.
-pub fn replace_last(args: &[Value]) -> Result<Value, String> {
-    require_args("replace_last", args, 3)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let x = require_string("replace_last", &args[0])?;
-    let find = require_string("replace_last", &args[1])?;
-    let replacement = require_string("replace_last", &args[2])?;
-    if find.is_empty() {
-        return Ok(Value::String(x.to_string()));
-    }
-    match x.rfind(find) {
-        Some(pos) => {
-            let mut out =
-                String::with_capacity(x.len() - find.len() + replacement.len());
-            out.push_str(&x[..pos]);
-            out.push_str(replacement);
-            out.push_str(&x[pos + find.len()..]);
-            Ok(Value::String(out))
-        }
-        None => Ok(Value::String(x.to_string())),
-    }
-}
-
-/// `terminal(string)` — renders Prose markup to a terminal string with
-/// deterministic, non-interactive terminal settings.
-pub fn terminal(args: &[Value]) -> Result<Value, String> {
-    require_args("terminal", args, 1)?;
-    if args[0].is_null() {
-        return Ok(Value::Null);
-    }
-    let s = require_string("terminal", &args[0])?;
-    Ok(Value::String(Prose::new(s).render_optimistic(None)))
-}
-
-// ── List formatting ─────────────────────────────────────────────────
-//
-// Each function takes a list (`Value::Array`) and renders it to a string. A
-// `null` argument propagates as `Value::Null`; a non-array argument is a type
-// error (`… requires an array argument`). The flat joiners render each
-// top-level element via [`scalar_string`]; the Markdown-list renderers recurse
-// into nested arrays and object-array shapes (`depends_on` / `used_by`).
-
-/// Renders each top-level element of `items` to its scalar string form.
-fn list_element_strings(items: &[Value]) -> Vec<String> {
-    items.iter().map(scalar_string).collect()
-}
-
-/// Shared body for the flat joiners: null-propagate, require an array, join.
-fn join_list(name: &str, args: &[Value], sep: &str) -> Result<Value, String> {
-    require_args(name, args, 1)?;
-    if args[0].is_null() {
-        return Ok(Value::Null);
-    }
-    let items = require_array(name, &args[0])?;
-    Ok(Value::String(list_element_strings(items).join(sep)))
-}
-
-/// `as_line_separated(list)` — newline-joined, one element per line.
-pub fn as_line_separated(args: &[Value]) -> Result<Value, String> {
-    join_list("as_line_separated", args, "\n")
-}
-
-/// `as_csv(list)` — comma-separated. Uses `", "` so it reproduces the historical
-/// pre-rendered CSV form of the collapsed `ctx.*` variables byte-for-byte.
-pub fn as_csv(args: &[Value]) -> Result<Value, String> {
-    join_list("as_csv", args, ", ")
-}
-
-/// `as_tsv(list)` — tab-separated.
-pub fn as_tsv(args: &[Value]) -> Result<Value, String> {
-    join_list("as_tsv", args, "\t")
-}
-
-/// `as_space_separated(list)` — space-separated.
-pub fn as_space_separated(args: &[Value]) -> Result<Value, String> {
-    join_list("as_space_separated", args, " ")
-}
-
-/// Shared body for the two serializers: null-propagate, require an array,
-/// serialize the whole value.
-///
-/// Unlike [`join_list`], an empty list keeps its container and renders `[]`.
-fn serialize_list(
-    name: &str,
-    args: &[Value],
-    render: fn(&Value) -> String,
-) -> Result<Value, String> {
-    require_args(name, args, 1)?;
-    if args[0].is_null() {
-        return Ok(Value::Null);
-    }
-    require_array(name, &args[0])?;
-    Ok(Value::String(render(&args[0])))
-}
-
-/// `as_json(list)` — compact JSON; the explicit spelling of the default
-/// bare-array rendering, and byte-identical to it for every array.
-pub fn as_json(args: &[Value]) -> Result<Value, String> {
-    serialize_list("as_json", args, scalar_string)
-}
-
-/// `as_json5(list)` — compact single-line JSON5.
-///
-/// Delegates to `biscuit-file`, the repository's JSON5 authority, so the
-/// quoting and unquoted-key rules stay in one place.
-pub fn as_json5(args: &[Value]) -> Result<Value, String> {
-    serialize_list("as_json5", args, biscuit_file::json5::to_json5_compact)
-}
-
-/// Indentation for a Markdown-list nesting level (two spaces per level).
-fn list_indent(depth: usize) -> String {
-    "  ".repeat(depth)
-}
-
-/// The bullet marker for the `n`-th item at a level.
-fn list_marker(ordered: bool, n: usize) -> String {
-    if ordered {
-        format!("{n}.")
-    } else {
-        "-".to_string()
-    }
-}
-
-/// Renders one object element as a bullet plus recursive sublists.
-///
-/// Scalar-valued fields form the bullet label (joined by a space, in key order);
-/// array- and object-valued fields become indented sublists. This models the
-/// `depends_on` / `used_by` object-array shape — `{ package, dependencies }`
-/// renders `package` as the bullet and each dependency as a sub-bullet — without
-/// any hard-coded field names.
-fn render_object_item(
-    map: &serde_json::Map<String, Value>,
-    ordered: bool,
-    depth: usize,
-    n: usize,
-    out: &mut Vec<String>,
-) {
-    let mut label_parts = Vec::new();
-    let mut containers = Vec::new();
-    for (_key, value) in map {
-        match value {
-            Value::Array(_) | Value::Object(_) => containers.push(value),
-            scalar => label_parts.push(scalar_string(scalar)),
-        }
-    }
-    out.push(format!(
-        "{}{} {}",
-        list_indent(depth),
-        list_marker(ordered, n),
-        label_parts.join(" ")
-    ));
-    for container in containers {
-        match container {
-            Value::Array(children) => render_list_level(children, ordered, depth + 1, out),
-            Value::Object(child) => render_object_item(child, ordered, depth + 1, 1, out),
-            _ => {}
-        }
-    }
-}
-
-/// Recursively renders the items at one nesting level into `out`.
-///
-/// A scalar element becomes a bullet; an object element delegates to
-/// [`render_object_item`]; an array element renders its contents as an indented
-/// sublist one level deeper (auto-nesting — nesting is a property of the data,
-/// not a separate function).
-fn render_list_level(items: &[Value], ordered: bool, depth: usize, out: &mut Vec<String>) {
-    let mut counter = 0usize;
-    for item in items {
-        match item {
-            Value::Array(children) => render_list_level(children, ordered, depth + 1, out),
-            Value::Object(map) => {
-                counter += 1;
-                render_object_item(map, ordered, depth, counter, out);
-            }
-            scalar => {
-                counter += 1;
-                out.push(format!(
-                    "{}{} {}",
-                    list_indent(depth),
-                    list_marker(ordered, counter),
-                    scalar_string(scalar)
-                ));
-            }
-        }
-    }
-}
-
-/// Shared body for the Markdown-list renderers.
-fn render_markdown_list(name: &str, args: &[Value], ordered: bool) -> Result<Value, String> {
-    require_args(name, args, 1)?;
-    if args[0].is_null() {
-        return Ok(Value::Null);
-    }
-    let items = require_array(name, &args[0])?;
-    let mut lines = Vec::new();
-    render_list_level(items, ordered, 0, &mut lines);
-    Ok(Value::String(lines.join("\n")))
-}
-
-/// `as_unordered_list(list)` — Markdown unordered list with recursive
-/// auto-nesting of nested arrays and object-array shapes.
-pub fn as_unordered_list(args: &[Value]) -> Result<Value, String> {
-    render_markdown_list("as_unordered_list", args, false)
-}
-
-/// `as_ordered_list(list)` — Markdown ordered list with recursive auto-nesting.
-pub fn as_ordered_list(args: &[Value]) -> Result<Value, String> {
-    render_markdown_list("as_ordered_list", args, true)
-}
 
 /// Parses a strict ISO date `YYYY-MM-DD`.
 pub fn parse_iso_date(s: &str) -> Option<NaiveDate> {
@@ -1264,97 +595,6 @@ fn parse_iso_datetime_to_date(s: &str, assume_utc: bool) -> Option<NaiveDate> {
         .map(|naive| naive.date())
 }
 
-/// English ordinal suffix for a day-of-month (1..=31). 11/12/13 are "th".
-fn ordinal_suffix(day: u32) -> &'static str {
-    match (day % 100, day % 10) {
-        (11..=13, _) => "th",
-        (_, 1) => "st",
-        (_, 2) => "nd",
-        (_, 3) => "rd",
-        _ => "th",
-    }
-}
-
-/// Joins non-empty parts with a single space (used for the optional year).
-fn join_nonempty(parts: &[String]) -> String {
-    parts
-        .iter()
-        .filter(|p| !p.is_empty())
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Reformats an ISO date/datetime string into a named human format.
-///
-/// Supported formats (canonical name plus aliases): `"MMMM Do"`/`short`,
-/// `"MMMM Do [YYYY]"`/`short-optional`, `"MMMM Do YYYY"`, `"D MMMM [YYYY]"`,
-/// `"D MMMM YYYY"`, and `"ddd, MMMM Do, YYYY"`/`long`. The `[YYYY]` token
-/// includes the year only when it differs from the current year.
-pub fn date_fn(args: &[Value]) -> Result<Value, String> {
-    require_args("date", args, 2)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let iso = require_string("date", &args[0])?;
-    let fmt = require_string("date", &args[1])?;
-    let parsed = parse_date_or_datetime(iso, false)
-        .ok_or_else(|| format!("date() invalid ISO date or datetime: {iso:?}"))?;
-
-    let month = parsed.format("%B").to_string(); // "July"
-    let dow = parsed.format("%a").to_string(); // "Mon"
-    let day = parsed.day();
-    let day_ord = format!("{day}{}", ordinal_suffix(day));
-    let year = parsed.year();
-    let current_year = Local::now().year();
-    // Year token honoring the `[YYYY]` optional-year extension.
-    let opt_year = if year == current_year {
-        String::new()
-    } else {
-        year.to_string()
-    };
-
-    let out = match fmt {
-        "MMMM Do" | "short" => format!("{month} {day_ord}"),
-        "MMMM Do [YYYY]" | "short-optional" => {
-            join_nonempty(&[format!("{month} {day_ord}"), opt_year])
-        }
-        "MMMM Do YYYY" => format!("{month} {day_ord} {year}"),
-        "D MMMM [YYYY]" => join_nonempty(&[format!("{day} {month}"), opt_year]),
-        "D MMMM YYYY" => format!("{day} {month} {year}"),
-        "ddd, MMMM Do, YYYY" | "long" => format!("{dow}, {month} {day_ord}, {year}"),
-        other => return Err(format!("date() unknown format: {other:?}")),
-    };
-    Ok(Value::String(out))
-}
-
-/// `is_date(x)` — strict `YYYY-MM-DD` validator. Strings only.
-pub fn is_date(args: &[Value]) -> Result<Value, String> {
-    require_args("is_date", args, 1)?;
-    let ok = matches!(&args[0], Value::String(s) if parse_iso_date(s).is_some());
-    Ok(Value::Bool(ok))
-}
-
-/// `is_date_utc(x)` — same as `is_date` (the format itself is timezone-agnostic).
-pub fn is_date_utc(args: &[Value]) -> Result<Value, String> {
-    require_args("is_date_utc", args, 1)?;
-    let ok = matches!(&args[0], Value::String(s) if parse_iso_date(s).is_some());
-    Ok(Value::Bool(ok))
-}
-
-/// `is_date_time(x)` — strict ISO datetime validator. Strings only.
-pub fn is_datetime(args: &[Value]) -> Result<Value, String> {
-    require_args("is_date_time", args, 1)?;
-    let ok = matches!(&args[0], Value::String(s) if parse_iso_datetime(s));
-    Ok(Value::Bool(ok))
-}
-
-/// `is_date_time_utc(x)` — same parse contract as `is_date_time`.
-pub fn is_datetime_utc(args: &[Value]) -> Result<Value, String> {
-    require_args("is_date_time_utc", args, 1)?;
-    let ok = matches!(&args[0], Value::String(s) if parse_iso_datetime(s));
-    Ok(Value::Bool(ok))
-}
 
 /// Pure helper for relative date predicates with an injectable reference
 /// date and an explicit timezone hint for naive datetime interpretation.
@@ -1405,1500 +645,10 @@ pub fn is_this_year_with(value: &Value, today: NaiveDate, assume_utc: bool) -> b
         .unwrap_or(false)
 }
 
-fn today_local() -> NaiveDate {
-    Local::now().date_naive()
-}
 
-fn today_utc() -> NaiveDate {
-    Utc::now().date_naive()
-}
+mod fs;
+pub use fs::*;
 
-pub fn is_today(args: &[Value]) -> Result<Value, String> {
-    require_args("is_today", args, 1)?;
-    Ok(Value::Bool(is_today_with(&args[0], today_local(), false)))
-}
-
-pub fn is_today_utc(args: &[Value]) -> Result<Value, String> {
-    require_args("is_today_utc", args, 1)?;
-    Ok(Value::Bool(is_today_with(&args[0], today_utc(), true)))
-}
-
-pub fn is_yesterday(args: &[Value]) -> Result<Value, String> {
-    require_args("is_yesterday", args, 1)?;
-    Ok(Value::Bool(is_yesterday_with(
-        &args[0],
-        today_local(),
-        false,
-    )))
-}
-
-pub fn is_yesterday_utc(args: &[Value]) -> Result<Value, String> {
-    require_args("is_yesterday_utc", args, 1)?;
-    Ok(Value::Bool(is_yesterday_with(&args[0], today_utc(), true)))
-}
-
-pub fn is_tomorrow(args: &[Value]) -> Result<Value, String> {
-    require_args("is_tomorrow", args, 1)?;
-    Ok(Value::Bool(is_tomorrow_with(
-        &args[0],
-        today_local(),
-        false,
-    )))
-}
-
-pub fn is_tomorrow_utc(args: &[Value]) -> Result<Value, String> {
-    require_args("is_tomorrow_utc", args, 1)?;
-    Ok(Value::Bool(is_tomorrow_with(&args[0], today_utc(), true)))
-}
-
-pub fn is_this_month(args: &[Value]) -> Result<Value, String> {
-    require_args("is_this_month", args, 1)?;
-    Ok(Value::Bool(is_this_month_with(
-        &args[0],
-        today_local(),
-        false,
-    )))
-}
-
-pub fn is_this_month_utc(args: &[Value]) -> Result<Value, String> {
-    require_args("is_this_month_utc", args, 1)?;
-    Ok(Value::Bool(is_this_month_with(&args[0], today_utc(), true)))
-}
-
-pub fn is_this_year(args: &[Value]) -> Result<Value, String> {
-    require_args("is_this_year", args, 1)?;
-    Ok(Value::Bool(is_this_year_with(
-        &args[0],
-        today_local(),
-        false,
-    )))
-}
-
-pub fn is_this_year_utc(args: &[Value]) -> Result<Value, String> {
-    require_args("is_this_year_utc", args, 1)?;
-    Ok(Value::Bool(is_this_year_with(&args[0], today_utc(), true)))
-}
-
-/// Constructs an [`ExpressionError::Other`] for `function` with `message`.
-fn expression_other(function: &'static str, message: String) -> ExpressionError {
-    ExpressionError::Other {
-        function: function.to_string(),
-        message,
-    }
-}
-
-fn require_args_expr(
-    function: &'static str,
-    args: &[Value],
-    expected: usize,
-) -> Result<(), ExpressionError> {
-    require_args(function, args, expected).map_err(|message| expression_other(function, message))
-}
-
-fn require_string_expr<'a>(
-    function: &'static str,
-    value: &'a Value,
-) -> Result<&'a str, ExpressionError> {
-    require_string(function, value).map_err(|message| expression_other(function, message))
-}
-
-fn file_reference_error(
-    function: &'static str,
-    raw: &str,
-    ctx: &ResolutionContext,
-    kind: FileRefFailure,
-    source: Option<biscuit_file::FileReferenceError>,
-) -> ExpressionError {
-    let caller = ctx.active_caller_file_provenance.as_ref().map(|provenance| {
-        Arc::new(super::CallerFileDiagnosticProvenance {
-            property: provenance.property.clone(),
-            origin: provenance.origin.clone(),
-            candidate: provenance.candidate.clone(),
-            candidate_provenance: provenance.candidate_provenance,
-        })
-    });
-    let (reference, cwd) = ctx
-        .active_caller_file_provenance
-        .as_ref()
-        .map(|provenance| (provenance.reference.clone(), provenance.origin.cwd().to_path_buf()))
-        .unwrap_or_else(|| (raw.to_string(), ctx.cwd.clone()));
-    ExpressionError::FileReference(FileReferenceDiagnostic {
-        function,
-        reference,
-        kind,
-        cwd,
-        fallback_dir: ctx.file_ref_fallback_dir.clone(),
-        source: source.map(Arc::new),
-        caller,
-    })
-}
-
-fn resolve_arg(
-    function: &'static str,
-    raw: &str,
-    ctx: &ResolutionContext,
-) -> Result<Option<PathBuf>, ExpressionError> {
-    let file_ref = parse_file_ref(function, raw, ctx)?;
-    // Per D2 there is no launch-area fallback for a nested-document
-    // reference — only repository and authoring-document candidates participate.
-    resolve_document_file_ref(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
-    .map_err(|e| {
-        file_reference_error(
-            function,
-            raw,
-            ctx,
-            FileRefFailure::classify(&e),
-            Some(e),
-        )
-    })
-}
-
-fn parse_file_ref(
-    function: &'static str,
-    raw: &str,
-    ctx: &ResolutionContext,
-) -> Result<biscuit_file::FileReference, ExpressionError> {
-    biscuit_file::FileReference::new(&normalize_path_arg(raw)).map_err(|e| {
-        file_reference_error(function, raw, ctx, FileRefFailure::classify(&e), Some(e))
-    })
-}
-
-fn reject_remote_url(function: &'static str, raw: &str) -> Result<(), ExpressionError> {
-    if is_remote_url(raw) {
-        return Err(expression_other(
-            function,
-            format!("{function}() does not accept HTTP(S) URLs"),
-        ));
-    }
-    Ok(())
-}
-
-/// `absolute(file) -> file` — the absolute path a reference names.
-///
-/// An existing file returns its matched path. A missing local target returns
-/// the resolver's first candidate for it, lexically normalized: the path a
-/// later write to that reference would create. `absolute` therefore does not
-/// prove existence; [`file_exists_fn`] does. The result uses the platform's
-/// native separators.
-///
-/// ## Examples
-///
-/// With the document in `/r/prompts` inside repository `/r`:
-///
-/// - `absolute("notes.md")` → `/r/prompts/notes.md` when that file exists,
-///   else `/r/notes.md` when only the repository copy exists.
-/// - `absolute("./sub/new.md")` with no such file → `/r/prompts/sub/new.md`.
-///
-/// ## Errors
-///
-/// - An HTTP(S) URL is rejected without being fetched.
-/// - A recursive (`%`) reference with no match is a `not_found` file-reference
-///   error: its candidates are search directories, not a file path.
-/// - An invalid reference, a tree escape, a missing home/vault/repository
-///   anchor, or a candidate probe I/O failure is a typed file-reference error.
-pub fn absolute_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("absolute", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let raw = require_string_expr("absolute", &args[0])?;
-    reject_remote_url("absolute", raw)?;
-    let file_ref = parse_file_ref("absolute", raw, ctx)?;
-    let typed = |e: biscuit_file::FileReferenceError| {
-        file_reference_error("absolute", raw, ctx, FileRefFailure::classify(&e), Some(e))
-    };
-    let path = if file_ref.class().recursive {
-        resolve_document_file_ref(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
-            .map_err(typed)?
-            .ok_or_else(|| {
-                file_reference_error("absolute", raw, ctx, FileRefFailure::NotFound, None)
-            })?
-    } else {
-        resolve_document_file_ref_target(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
-            .map_err(typed)?
-    };
-    Ok(Value::String(path.to_string_lossy().to_string()))
-}
-
-/// `file_exists(value: any) -> bool` — whether a reference names an existing
-/// file.
-///
-/// A well-formed reference with no matching regular file (including one that
-/// names a directory) is `false`, and so is `null`: an optional reference that
-/// was never supplied names no file. The argument is inspected, never
-/// converted: a number, boolean, array, or object is `false`, so `42` does not
-/// name a file called `42`. Only text can be `true`, which is what lets a
-/// `file_exists(x)` guard prove `x` a present string.
-///
-/// ## Errors
-///
-/// A failure to answer is never reported as absence. An invalid reference, a
-/// tree escape, a missing home/vault/repository anchor, and a candidate probe
-/// I/O failure (a permission error, for example) are typed file-reference
-/// errors. An HTTP(S) URL is `true` once fetched; a denied or failed fetch is
-/// an error, and so is any URL in a local-only context (no remote runtime).
-pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("file_exists", args, 1)?;
-    let Value::String(raw) = &args[0] else {
-        return Ok(Value::Bool(false));
-    };
-    let raw = raw.as_str();
-    if is_remote_url(raw) {
-        return match ctx.fetch_remote_text(raw) {
-            Ok(Some(_)) => Ok(Value::Bool(true)),
-            Ok(None) => Err(expression_other("file_exists", format!(
-                "file_exists() cannot read remote URL {raw:?}: this resolution \
-                 context is local-only (no remote runtime)"
-            ))),
-            Err(message) => Err(expression_other("file_exists", message)),
-        };
-    }
-    Ok(Value::Bool(resolve_arg("file_exists", raw, ctx)?.is_some()))
-}
-
-/// `has_command(cmd) -> bool` — pure existence/executability probe for a host
-/// command. Reports whether `cmd` is on `PATH` or is an existing executable
-/// path; it **never executes** the command. No argument shape produces an
-/// error beyond the arity guard: a null, non-string, or empty argument reads
-/// as `false`.
-///
-/// Only two input shapes can probe: a bare name (`PATH` search) and an
-/// absolute path (exists + executable, delegated to `which`). Any other
-/// path-shaped input — `./mytool`, `bin/mytool`, `~/bin/mytool`, or a Windows
-/// drive-relative `C:mytool` — reads as `false`: it is neither tilde-expanded
-/// nor resolved against the resolution context or the process CWD.
-pub fn has_command_fn(args: &[Value], _ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("has_command", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Bool(false));
-    }
-    let raw = match require_string("has_command", &args[0]) {
-        Ok(s) => s,
-        Err(_) => return Ok(Value::Bool(false)),
-    };
-    if raw.is_empty() {
-        return Ok(Value::Bool(false));
-    }
-    // `which::which` resolves relative paths against the process CWD, which
-    // would make document truth depend on where the composer was launched —
-    // reject them before probing. The multi-component test mirrors `which`'s
-    // own separator detection and also catches Windows drive-relative inputs
-    // (`C:mytool` parses as Prefix + Normal but is not absolute).
-    let path = std::path::Path::new(raw);
-    if !path.is_absolute() && path.components().count() > 1 {
-        return Ok(Value::Bool(false));
-    }
-    Ok(Value::Bool(which::which(raw).is_ok()))
-}
-
-/// `relative(file) -> file | Error::InvalidFilePath`
-///
-/// The returned path uses forward slashes so it can be persisted in Markdown
-/// without platform-dependent text drift.
-pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("relative", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let raw = require_string_expr("relative", &args[0])?;
-    let abs = match resolve_arg("relative", raw, ctx)? {
-        Some(p) => p,
-        None => {
-            return Err(file_reference_error(
-                "relative",
-                raw,
-                ctx,
-                FileRefFailure::NotFound,
-                None,
-            ));
-        }
-    };
-    Ok(Value::String(make_portable_relative_in_context(
-        &abs,
-        &ctx.cwd,
-        &ctx.file_resolution_context,
-    )))
-}
-
-/// Resolves a filepath argument through the shared FS-path rules.
-///
-/// Rejects HTTP(S) URLs. Otherwise delegates entirely to `FileReference`
-/// classification and its ordered candidate plan (D1/D3): an existing target
-/// resolves to its matched path, and a missing target takes the plan's first
-/// candidate as its shape. Path-component functions thus operate on missing
-/// files and directories without a private prefix grammar or an existence
-/// probe.
-fn resolve_path_arg(
-    name: &'static str,
-    value: &Value,
-    ctx: &ResolutionContext,
-) -> Result<PathBuf, ExpressionError> {
-    resolve_anchored_path_arg(name, value, ctx).map(|shape| shape.path)
-}
-
-/// [`resolve_path_arg`] plus whether the authored reference was absolute, for
-/// the functions that return a path built from their input.
-fn resolve_anchored_path_arg(
-    name: &'static str,
-    value: &Value,
-    ctx: &ResolutionContext,
-) -> Result<PathShape, ExpressionError> {
-    let raw = require_string_expr(name, value)?;
-    resolve_anchored_path_shape(name, raw, ctx)
-}
-
-/// Resolves a raw path string to an absolute path shape.
-///
-/// See [`resolve_path_arg`]. Exposed separately so `join()` can validate its
-/// computed result without constructing a temporary [`Value`]. Both existing
-/// and missing targets are shaped by the shared
-/// [`resolve_document_file_ref_shape`], so a shape can never disagree with an
-/// execution-time resolution on classification, candidate order, or
-/// document-first anchoring.
-fn resolve_path_shape(
-    name: &'static str,
-    raw: &str,
-    ctx: &ResolutionContext,
-) -> Result<PathBuf, ExpressionError> {
-    resolve_anchored_path_shape(name, raw, ctx).map(|shape| shape.path)
-}
-
-/// A resolved path shape and whether its authored reference was absolute.
-struct PathShape {
-    path: PathBuf,
-    absolute_input: bool,
-}
-
-fn resolve_anchored_path_shape(
-    name: &'static str,
-    raw: &str,
-    ctx: &ResolutionContext,
-) -> Result<PathShape, ExpressionError> {
-    reject_remote_url(name, raw)?;
-    let file_ref = parse_file_ref(name, raw, ctx)?;
-    // The shared shaper builds the same candidate plan execution probes
-    // (document-first for implicit references), so a missing target's shape
-    // is the first shared candidate rather than a source-first join.
-    let path = resolve_document_file_ref_shape(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
-        .map_err(|e| file_reference_error(name, raw, ctx, FileRefFailure::classify(&e), Some(e)))?;
-    Ok(PathShape {
-        path,
-        absolute_input: file_ref.class().kind == biscuit_file::FileReferenceKind::Absolute,
-    })
-}
-
-/// Renders a path a function built from its input.
-///
-/// An absolute input keeps its absolute anchor, in portable spelling. Its
-/// repository- or document-relative display form would be re-resolved
-/// document-directory first by a later reader and could name a different
-/// file. Any other input keeps the display form ([`path_display_components`]).
-fn render_built_path(path: &Path, absolute_input: bool, ctx: &ResolutionContext) -> String {
-    if absolute_input {
-        biscuit_file::to_portable_string(path)
-    } else {
-        make_portable_relative_in_context(path, &ctx.cwd, &ctx.file_resolution_context)
-    }
-}
-
-/// Parses a stem against the indexed grammar, returning the base name, parsed
-/// index, and the original zero-padding width of the index.
-fn indexed_stem_info(stem: &str) -> Option<(String, u64, usize)> {
-    let last_hyphen = stem.rfind('-')?;
-    if last_hyphen == 0 {
-        return None;
-    }
-    if stem.as_bytes().get(last_hyphen - 1) == Some(&b'-') {
-        return None;
-    }
-    let base = &stem[..last_hyphen];
-    let digits = &stem[last_hyphen + 1..];
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    let width = digits.len();
-    let index = digits.parse::<u64>().ok()?;
-    Some((base.to_string(), index, width))
-}
-
-/// Formats an indexed stem, preserving the original zero-padding width.
-fn format_indexed_stem(base: &str, index: u64, width: usize) -> String {
-    format!("{base}-{index:0>width$}")
-}
-
-/// Splits a resolved path into its display directory components and basename.
-///
-/// The display shape follows the same `relative(file)` policy used elsewhere:
-/// repo-root relative, base-dir relative, `~`-aliased, or absolute. Components
-/// are returned with `/` separators in mind.
-fn path_display_components(
-    path: &Path,
-    base_dir: &Path,
-    request_context: &biscuit_file::FileResolutionContext,
-) -> (Vec<String>, String) {
-    let rel = make_portable_relative_in_context(path, base_dir, request_context);
-    let trimmed = rel.strip_prefix('/').unwrap_or(&rel).to_string();
-    match trimmed.rfind('/') {
-        Some(pos) => {
-            let dir_part = &trimmed[..pos];
-            let dirs = if dir_part.is_empty() {
-                Vec::new()
-            } else {
-                dir_part.split('/').map(|s| s.to_string()).collect()
-            };
-            (dirs, trimmed[pos + 1..].to_string())
-        }
-        None => (Vec::new(), trimmed),
-    }
-}
-
-/// `is_indexed_file(file) -> bool` — true when the filename stem matches the
-/// indexed grammar (`base-NNN`).
-pub fn is_indexed_file_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("is_indexed_file", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let path = resolve_path_arg("is_indexed_file", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
-    let stem = file_stem(&base);
-    Ok(Value::Bool(parse_indexed_stem(&stem).is_some()))
-}
-
-/// `file_index(file) -> number` — the parsed index, or `-1` when non-indexed.
-pub fn file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("file_index", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let path = resolve_path_arg("file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
-    let stem = file_stem(&base);
-    let index = parse_indexed_stem(&stem)
-        .map(|i| i.index as i64)
-        .unwrap_or(-1);
-    Ok(Value::Number(index.into()))
-}
-
-/// `increment_file_index(file) -> string` — bumps the numeric suffix, starting
-/// at `2` for non-indexed files. Preserves zero-padding width for indexed stems.
-///
-/// The input is resolved first (an existing file, else its first candidate)
-/// and only the filename changes, so the result sits in the resolved parent
-/// directory. An absolute input returns an absolute path; any other input
-/// returns its display form.
-pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("increment_file_index", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let PathShape { path, absolute_input } =
-        resolve_anchored_path_arg("increment_file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
-    let ext = file_extension(&base);
-    let stem = file_stem(&base);
-    let new_stem = if let Some((base_name, index, width)) = indexed_stem_info(&stem) {
-        let next = index.saturating_add(1);
-        format_indexed_stem(&base_name, next, width)
-    } else {
-        format!("{stem}-2")
-    };
-    let new_base = if ext.is_empty() {
-        new_stem
-    } else {
-        format!("{new_stem}.{ext}")
-    };
-    let out = path
-        .parent()
-        .map(|p| p.join(&new_base))
-        .unwrap_or_else(|| PathBuf::from(&new_base));
-    Ok(Value::String(render_built_path(&out, absolute_input, ctx)))
-}
-
-/// `decrement_file_index(file) -> string` — decrements the numeric suffix,
-/// clamped at `0`. Non-indexed files start at `0` and preserve no padding.
-///
-/// Resolves its input and renders its result as [`increment_file_index_fn`]
-/// does.
-pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("decrement_file_index", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let PathShape { path, absolute_input } =
-        resolve_anchored_path_arg("decrement_file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
-    let ext = file_extension(&base);
-    let stem = file_stem(&base);
-    let new_stem = if let Some((base_name, index, width)) = indexed_stem_info(&stem) {
-        let next = index.saturating_sub(1);
-        format_indexed_stem(&base_name, next, width)
-    } else {
-        format!("{stem}-0")
-    };
-    let new_base = if ext.is_empty() {
-        new_stem
-    } else {
-        format!("{new_stem}.{ext}")
-    };
-    let out = path
-        .parent()
-        .map(|p| p.join(&new_base))
-        .unwrap_or_else(|| PathBuf::from(&new_base));
-    Ok(Value::String(render_built_path(&out, absolute_input, ctx)))
-}
-
-#[derive(Clone, Copy)]
-enum IndexEndpoint {
-    First,
-    Last,
-}
-
-fn find_index_endpoint(
-    name: &'static str,
-    args: &[Value],
-    ctx: &ResolutionContext,
-    endpoint: IndexEndpoint,
-) -> Result<Value, ExpressionError> {
-    require_args_expr(name, args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let PathShape {
-        path: input,
-        absolute_input,
-    } = resolve_anchored_path_arg(name, &args[0], ctx)?;
-    let Some(parent) = input.parent() else {
-        return Ok(Value::String(render_built_path(&input, absolute_input, ctx)));
-    };
-    let filename = input
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let input_stem = file_stem(&filename);
-    let input_extension = file_extension(&filename);
-    let family_base = indexed_stem_info(&input_stem)
-        .map(|(base, _, _)| base)
-        .unwrap_or(input_stem);
-
-    let entries = match std::fs::read_dir(parent) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(Value::String(render_built_path(&input, absolute_input, ctx)));
-        }
-        Err(error) => {
-            return Err(expression_other(
-                name,
-                format!("failed to scan {}: {error}", parent.display()),
-            ));
-        }
-    };
-    let mut candidates = Vec::<(Option<u64>, String)>::new();
-    for entry in entries {
-        let entry = entry.map_err(|error| {
-            expression_other(name, format!("failed to read {}: {error}", parent.display()))
-        })?;
-        let actual_name = entry.file_name().to_string_lossy().into_owned();
-        if file_extension(&actual_name) != input_extension {
-            continue;
-        }
-        let stem = file_stem(&actual_name);
-        let ordinal = if stem == family_base {
-            None
-        } else if let Some((base, index, _)) = indexed_stem_info(&stem) {
-            if base != family_base {
-                continue;
-            }
-            Some(index)
-        } else {
-            continue;
-        };
-        candidates.push((ordinal, actual_name));
-    }
-    candidates.sort();
-    let selected = match endpoint {
-        IndexEndpoint::First => candidates.first(),
-        IndexEndpoint::Last => candidates.last(),
-    };
-    let chosen = selected
-        .map(|(_, filename)| parent.join(filename))
-        .unwrap_or(input);
-    Ok(Value::String(render_built_path(&chosen, absolute_input, ctx)))
-}
-
-/// Returns the lowest-indexed existing member of a file's index family,
-/// scanning the input's resolved parent directory. With no member present the
-/// input itself is returned. An absolute input returns an absolute path; any
-/// other input returns its display form.
-pub fn find_first_index_fn(
-    args: &[Value],
-    ctx: &ResolutionContext,
-) -> Result<Value, ExpressionError> {
-    find_index_endpoint("find_first_index", args, ctx, IndexEndpoint::First)
-}
-
-/// Returns the highest-indexed existing member of a file's index family,
-/// resolved and rendered as [`find_first_index_fn`] is.
-pub fn find_last_index_fn(
-    args: &[Value],
-    ctx: &ResolutionContext,
-) -> Result<Value, ExpressionError> {
-    find_index_endpoint("find_last_index", args, ctx, IndexEndpoint::Last)
-}
-
-/// `basename(file) -> string` — the final path component including extension.
-pub fn basename_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("basename", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let path = resolve_path_arg("basename", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
-    Ok(Value::String(base))
-}
-
-/// `basename_without_index(file) -> string` — removes an indexed suffix from
-/// the stem. Non-indexed basenames pass through unchanged.
-pub fn basename_without_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("basename_without_index", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let path = resolve_path_arg("basename_without_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
-    let stem = file_stem(&base);
-    let ext = file_extension(&base);
-    let unindexed = match indexed_stem_info(&stem) {
-        Some((base_name, _, _)) => base_name,
-        None => stem,
-    };
-    let out = if ext.is_empty() {
-        unindexed
-    } else {
-        format!("{unindexed}.{ext}")
-    };
-    Ok(Value::String(out))
-}
-
-/// `dirname(file) -> string` — the directory portion of a path.
-///
-/// An absolute input returns its absolute parent (portable spelling), even
-/// inside the repository or the document directory, so a schema-materialized
-/// caller value can derive a sibling path (`dirname(absolute(spec)) +
-/// '/review-1.md'`) that stays beside it instead of being re-resolved against
-/// the document. Any other input returns the directory portion of its display
-/// path (`dirname("sub/x.md")` is `sub`).
-pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("dirname", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let PathShape { path, absolute_input } = resolve_anchored_path_arg("dirname", &args[0], ctx)?;
-    // A path outside every projection root (repository, base directory, home)
-    // has no relative display form; its absolute parent is the only anchor
-    // that still resolves when another file name is appended to it.
-    let projected = make_portable_relative_in_context(
-        &path,
-        &ctx.cwd,
-        &ctx.file_resolution_context,
-    );
-    if absolute_input || Path::new(&projected).is_absolute() {
-        return Ok(Value::String(
-            path.parent()
-                .map(biscuit_file::to_portable_string)
-                .unwrap_or_default(),
-        ));
-    }
-    let (dirs, _) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
-    Ok(Value::String(if dirs.is_empty() {
-        String::new()
-    } else {
-        dirs.join("/")
-    }))
-}
-
-/// `ext(file) -> string` — the final extension without the leading dot, or an
-/// empty string when there is none.
-pub fn ext_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("ext", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let path = resolve_path_arg("ext", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
-    Ok(Value::String(file_extension(&base)))
-}
-
-/// `parent_dir(file) -> string` — the directory segment immediately above the
-/// basename, or an empty string when there is none.
-pub fn parent_dir_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("parent_dir", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let path = resolve_path_arg("parent_dir", &args[0], ctx)?;
-    let (dirs, _) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
-    Ok(Value::String(dirs.last().cloned().unwrap_or_default()))
-}
-
-/// `file_trailing(file) -> string` — the last directory segment plus the
-/// basename, or just the basename when there is no directory.
-pub fn file_trailing_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("file_trailing", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let path = resolve_path_arg("file_trailing", &args[0], ctx)?;
-    let (dirs, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
-    Ok(Value::String(match dirs.last() {
-        Some(d) => format!("{d}/{base}"),
-        None => base,
-    }))
-}
-
-/// `dir_leading(file) -> string` — the directory path before the last segment,
-/// or an empty string when there is no leading directory.
-pub fn dir_leading_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("dir_leading", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let path = resolve_path_arg("dir_leading", &args[0], ctx)?;
-    let (dirs, _) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
-    Ok(Value::String(if dirs.len() <= 1 {
-        String::new()
-    } else {
-        dirs[..dirs.len() - 1].join("/")
-    }))
-}
-
-/// `join(left, right) -> string` — joins two path strings, normalizing leading
-/// and duplicate separators. Validates the result through the shared FS-path
-/// rules and rejects HTTP(S) arguments.
-pub fn join_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("join", args, 2)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let left_raw = require_string_expr("join", &args[0])?;
-    let right_raw = require_string_expr("join", &args[1])?;
-    if is_remote_url(left_raw) || is_remote_url(right_raw) {
-        return Err(expression_other(
-            "join",
-            "join() does not accept HTTP(S) URLs".to_string(),
-        ));
-    }
-    let left = resolve_path_arg("join", &args[0], ctx)?;
-    let right = right_raw.trim_start_matches(['/', '\\']);
-    let joined = left.join(right);
-    let joined_str = joined.to_string_lossy().to_string();
-    let validated = resolve_path_shape("join", &joined_str, ctx)?;
-    Ok(Value::String(
-        make_portable_relative_in_context(
-            &validated,
-            &ctx.cwd,
-            &ctx.file_resolution_context,
-        ),
-    ))
-}
-
-/// Backslash-escapes the characters CommonMark treats as active in link text.
-///
-/// The backslash itself is escaped first, and is not optional: the two-argument
-/// `link(target, desc)` takes its description straight from the caller, who can
-/// supply a literal `\`. CommonMark honors a backslash before ASCII punctuation
-/// inside link text, so an unescaped `\\server\share\[x]` would lose separators
-/// and reopen the very bracket escaping this function performs.
-///
-/// The one-argument arm cannot reach that case: its description and its
-/// destination project the same path, so a description that fell back to a
-/// native spelling implies `portable_destination` already rejected the
-/// destination.
-///
-/// Whitespace is preserved. The sibling
-/// [`collapse_and_escape`](escape::collapse_and_escape) collapses it
-/// deliberately, which is right for provider prose and wrong for a path.
-fn escape_link_text(text: &str) -> String {
-    text.replace('\\', "\\\\")
-        .replace('[', "\\[")
-        .replace(']', "\\]")
-}
-
-/// Returns `true` when a link destination needs angle-bracket wrapping to stay
-/// CommonMark-safe.
-fn destination_needs_wrapping(dest: &str) -> bool {
-    dest.chars().any(|c| {
-        c.is_ascii_control()
-            || c == ' '
-            || c == '\t'
-            || c == '('
-            || c == ')'
-            || c == '<'
-            || c == '>'
-    })
-}
-
-/// Formats a Markdown inline link `[text](destination)` with text and
-/// destination escaping.
-fn format_markdown_link(text: &str, destination: &str) -> String {
-    format!("[{}]({})", escape_link_text(text), markdown_destination(destination))
-}
-
-/// Formats a Markdown inline link whose text is one code span.
-///
-/// The label is fenced by [`renderable::markdown::code_span`] and is otherwise
-/// literal: `[`, `]`, and `\` are not escaped, because a code span binds
-/// tighter than link brackets and gives backslashes no meaning. An empty label
-/// yields `[](destination)`, the same as `link(target, "")`.
-fn format_markdown_code_link(text: &str, destination: &str) -> String {
-    format!(
-        "[{}]({})",
-        renderable::markdown::code_span(text),
-        markdown_destination(destination)
-    )
-}
-
-/// Spells a link destination, wrapping it in angle brackets when CommonMark
-/// would otherwise end or split it.
-fn markdown_destination(destination: &str) -> String {
-    if destination_needs_wrapping(destination) {
-        let inner = destination.replace('<', "\\<").replace('>', "\\>");
-        format!("<{inner}>")
-    } else {
-        destination.to_string()
-    }
-}
-
-/// Renders a resolved local path as a `link()`-family destination.
-///
-/// ## Errors
-///
-/// [`ExpressionError`] when the path has no faithful portable spelling (a
-/// Windows UNC, device, or unreducible verbatim path). `link()` has no
-/// compose-report warning channel, and falling back to the raw argument is not
-/// an option: it may be a magic (`@`), repository (`&`/`^`), or source-relative
-/// reference that
-/// names a different file once the composed document moves.
-fn portable_destination(function: &'static str, path: &Path) -> Result<String, ExpressionError> {
-    biscuit_file::try_portable_string(path).ok_or_else(|| {
-        expression_other(
-            function,
-            format!(
-                "{function}() cannot render {} as a Markdown destination: no faithful portable spelling exists, and CommonMark would consume the backslash escapes in its native form.",
-                path.display()
-            ),
-        )
-    })
-}
-
-/// The raw label and destination shared by `link()` and `code_link()`, before
-/// either spells the label as Markdown.
-struct LinkParts {
-    label: String,
-    destination: String,
-}
-
-/// Resolves the `link(file)` / `link(target, desc)` argument shapes for
-/// `function`, which names the caller in every error.
-///
-/// Returns `Ok(None)` when a null argument propagates to a null result.
-fn resolve_link_parts(
-    function: &'static str,
-    args: &[Value],
-    ctx: &ResolutionContext,
-) -> Result<Option<LinkParts>, ExpressionError> {
-    match args.len() {
-        1 => {
-            if args[0].is_null() {
-                return Ok(None);
-            }
-            let raw = require_string_expr(function, &args[0])?;
-            if is_remote_url(raw) {
-                return Err(expression_other(
-                    function,
-                    format!(
-                        "{function}() one-argument form does not accept HTTP(S) URLs; use {function}(target, desc)"
-                    ),
-                ));
-            }
-            let path = resolve_path_arg(function, &args[0], ctx)?;
-            let label = make_portable_relative_in_context(
-                &path,
-                &ctx.cwd,
-                &ctx.file_resolution_context,
-            );
-            let destination = portable_destination(function, &path)?;
-            Ok(Some(LinkParts { label, destination }))
-        }
-        2 => {
-            if any_null(args) {
-                return Ok(None);
-            }
-            let target_raw = require_string_expr(function, &args[0])?;
-            let label = require_string_expr(function, &args[1])?.to_string();
-            let destination = if is_remote_url(target_raw) {
-                url::Url::parse(target_raw).map_err(|e| {
-                    expression_other(
-                        function,
-                        format!("{function}() invalid URL {target_raw:?}: {e}"),
-                    )
-                })?;
-                target_raw.to_string()
-            } else {
-                let path = resolve_path_arg(function, &args[0], ctx)?;
-                portable_destination(function, &path)?
-            };
-            Ok(Some(LinkParts { label, destination }))
-        }
-        _ => Err(expression_other(
-            function,
-            format!("{function}() requires 1 or 2 arguments"),
-        )),
-    }
-}
-
-/// `link(file)` / `link(target, desc)` — emits a Markdown inline link.
-///
-/// - One argument: resolves a local file and uses `relative(file)` as the link
-///   text and the resolved absolute path as the destination. HTTP(S) URLs are
-///   rejected because a description is required.
-/// - Two arguments: `target` may be a local file reference or an HTTP(S) URL;
-///   `desc` must be a string and is used as the link text.
-pub fn link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    Ok(resolve_link_parts("link", args, ctx)?.map_or(Value::Null, |parts| {
-        Value::String(format_markdown_link(&parts.label, &parts.destination))
-    }))
-}
-
-/// `code_link(file)` / `code_link(target, desc)` — emits a Markdown inline link
-/// whose text is inline code, such as `` [`plans/foo.md`](/abs/plans/foo.md) ``.
-///
-/// Arguments, null handling, destinations, and errors are `link()`'s; only the
-/// label differs (see [`format_markdown_code_link`]).
-pub fn code_link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    Ok(resolve_link_parts("code_link", args, ctx)?.map_or(Value::Null, |parts| {
-        Value::String(format_markdown_code_link(&parts.label, &parts.destination))
-    }))
-}
-
-/// Validates that a skill name is a single basename component.
-fn validate_skill_name(name: &str) -> bool {
-    let path = Path::new(name);
-    let mut components = path.components();
-    matches!(components.next(), Some(std::path::Component::Normal(_)))
-        && components.next().is_none()
-}
-
-/// Checks whether a direct child directory named `name` exists under any root.
-fn skill_exists_in_roots(roots: &[PathBuf], name: &str) -> bool {
-    roots.iter().any(|root| root.join(name).is_dir())
-}
-
-/// `has_skill(name)` — `true` when a direct child directory named `name` exists
-/// in any user-scoped or local-scoped skill root for the executing agent.
-pub fn has_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("has_skill", args, 1)?;
-    if args[0].is_null() {
-        return Ok(Value::Null);
-    }
-    let name = require_string_expr("has_skill", &args[0])?;
-    // `ctx.area` is `""` at a monorepo root, so no skill is the answer, not an error.
-    if name.is_empty() {
-        return Ok(Value::Bool(false));
-    }
-    if !validate_skill_name(name) {
-        return Err(expression_other(
-            "has_skill",
-            "has_skill() skill name must be a basename without path separators".to_string(),
-        ));
-    }
-    let agent = ctx.agent();
-    let home_dir = ctx.home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let local_root = ctx
-        .file_resolution_context
-        .repository_root()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ctx.cwd.clone());
-    let roots = SkillRoots::new(home_dir, local_root).roots_for_agent(&agent);
-    Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
-}
-
-/// `has_local_skill(name)` — `true` when a direct child directory named `name`
-/// exists in any local-scoped skill root for the executing agent.
-pub fn has_local_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("has_local_skill", args, 1)?;
-    if args[0].is_null() {
-        return Ok(Value::Null);
-    }
-    let name = require_string_expr("has_local_skill", &args[0])?;
-    // `ctx.area` is `""` at a monorepo root, so no skill is the answer, not an error.
-    if name.is_empty() {
-        return Ok(Value::Bool(false));
-    }
-    if !validate_skill_name(name) {
-        return Err(expression_other(
-            "has_local_skill",
-            "has_local_skill() skill name must be a basename without path separators"
-                .to_string(),
-        ));
-    }
-    let agent = ctx.agent();
-    let local_root = ctx
-        .file_resolution_context
-        .repository_root()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ctx.cwd.clone());
-    let roots = SkillRoots::new(PathBuf::from("."), local_root).local_roots_for_agent(&agent);
-    Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
-}
-
-/// Loads a Markdown file via the resolution context. `Err` if the path is
-/// invalid or unreadable.
-fn load_markdown(
-    raw: &str,
-    ctx: &ResolutionContext,
-    fname: &'static str,
-) -> Result<Markdown, ExpressionError> {
-    // HTTP(S) arguments read from the run's remote-fetch cache instead of disk,
-    // mirroring how `::file`/`::code` directives resolve remote targets.
-    if is_remote_url(raw) {
-        return match ctx
-            .fetch_remote_text(raw)
-            .map_err(|message| expression_other(fname, message))?
-        {
-            Some(body) => Markdown::try_from_content(body).map_err(|e| {
-                expression_other(fname, format!("{fname}() failed to parse {raw:?}: {e}"))
-            }),
-            None => Err(file_reference_error(
-                fname,
-                raw,
-                ctx,
-                FileRefFailure::RemoteNotEnabled,
-                None,
-            )),
-        };
-    }
-    let path = resolve_arg(fname, raw, ctx)?.ok_or_else(|| {
-        file_reference_error(fname, raw, ctx, FileRefFailure::NotFound, None)
-    })?;
-    // A reference that resolved but cannot be read (permissions, a race delete)
-    // is still a file-reference failure: surface it through the shared
-    // diagnostic carrying the typed `Io` cause, not an opaque `Other` string, so
-    // it renders identically to a missing reference and `frontmatter()` /
-    // `markdown_title()` / siblings all inherit the same report.
-    let content = std::fs::read_to_string(&path).map_err(|e| {
-        file_reference_error(
-            fname,
-            raw,
-            ctx,
-            FileRefFailure::NotFound,
-            Some(biscuit_file::FileReferenceError::Io {
-                path: path.clone(),
-                source: e,
-            }),
-        )
-    })?;
-    Markdown::try_from_content(content)
-        .map_err(|e| expression_other(fname, format!("{fname}() failed to parse {raw:?}: {e}")))
-}
-
-/// `frontmatter(file)` → object; `frontmatter(file, prop)` → value | null.
-pub fn frontmatter_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    if args.is_empty() || args.len() > 2 {
-        return Err(expression_other(
-            "frontmatter",
-            "frontmatter() requires 1 or 2 arguments".to_string(),
-        ));
-    }
-    if matches!(args.first(), Some(Value::Null)) {
-        return Ok(Value::Null);
-    }
-    let raw = require_string_expr("frontmatter", &args[0])?;
-    let md = load_markdown(raw, ctx, "frontmatter")?;
-    let map = md.frontmatter().as_map();
-    if args.len() == 1 {
-        let obj: serde_json::Map<String, Value> =
-            map.iter().map(|(k, v)| (k.clone(), stored_value(v))).collect();
-        return Ok(Value::Object(obj));
-    }
-    let prop = require_string_expr("frontmatter", &args[1])?;
-    Ok(map.get(prop).map(stored_value).unwrap_or(Value::Null))
-}
-
-/// `try_frontmatter(file) -> { error, ok, value }` — `frontmatter(file)` as a
-/// value instead of a failure.
-///
-/// A file that reads and parses gives `{ ok: true, value: <frontmatter>,
-/// error: null }`. A file that is missing, unreadable, or whose frontmatter
-/// does not parse (invalid YAML, a duplicate key) gives `{ ok: false, value:
-/// null, error: <message> }`, so a document can report the problem instead of
-/// failing its composition. Parsing is `frontmatter()`'s: an opening fence
-/// that never closes is body text, which reads as empty frontmatter.
-pub fn try_frontmatter_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("try_frontmatter", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let raw = require_string_expr("try_frontmatter", &args[0])?;
-    let (ok, value, error) = match load_markdown(raw, ctx, "try_frontmatter") {
-        Ok(md) => {
-            let object: serde_json::Map<String, Value> = md
-                .frontmatter()
-                .as_map()
-                .iter()
-                .map(|(key, value)| (key.clone(), stored_value(value)))
-                .collect();
-            (true, Value::Object(object), Value::Null)
-        }
-        Err(error) => (false, Value::Null, Value::String(error.to_string())),
-    };
-    let mut outcome = serde_json::Map::new();
-    outcome.insert("error".to_string(), error);
-    outcome.insert("ok".to_string(), Value::Bool(ok));
-    outcome.insert("value".to_string(), value);
-    Ok(Value::Object(outcome))
-}
-
-/// `find_files(pattern) -> file[] | Error` — every file a glob reference
-/// matches, as absolute portable paths in native order.
-///
-/// The pattern is a [`GlobReference`](biscuit_file::GlobReference) authored
-/// in this document: its prefix (`&`, `^`, `@`, `~`, `./`, bare, …) picks the
-/// roots single-file resolution uses for that sigil, and the result merges
-/// every root's matches, most local root first, then shallowest, then
-/// component-wise. A bare pattern searches the document's folder, then the
-/// repository root. `*` stays within one segment and `**` crosses segments;
-/// a pattern without a wildcard names one path under each root. No hidden,
-/// ignored, or underscore filter applies, so a `&**/…` walk from the
-/// repository root also visits build output.
-///
-/// Directory symlinks are not followed. A file symlink a bare, `./`, or `../`
-/// pattern matches whose target leaves the file tree is left out and reported
-/// as a [`GLOB_SKIPPED_SYMLINK_CODE`](crate::markdown::compose::ComposeWarning::GLOB_SKIPPED_SYMLINK_CODE)
-/// warning. A `null` pattern lists nothing; a pattern that cannot be parsed or
-/// rooted is an [`ExpressionError::GlobReference`].
-pub fn find_files_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("find_files", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Array(Vec::new()));
-    }
-    let raw = require_string_expr("find_files", &args[0])?;
-    let glob_error = |source| ExpressionError::GlobReference {
-        function: "find_files",
-        source: Arc::new(source),
-    };
-    // A URL keeps its `//`, so the glob reference rejects it as remote.
-    let pattern = if is_remote_url(raw) { raw.to_string() } else { normalize_path_arg(raw) };
-    let globs = biscuit_file::GlobReference::new([pattern]).map_err(glob_error)?;
-    let listing = globs.list_files(&ctx.file_context()).map_err(glob_error)?;
-    ctx.glob_warnings.record("interpolation", &listing);
-    Ok(Value::Array(
-        listing
-            .matches
-            .iter()
-            .map(|path| Value::String(biscuit_file::to_portable_string(path)))
-            .collect(),
-    ))
-}
-
-/// A value read from another document's frontmatter, with stored literal
-/// tokens decoded to the text they hold. The result is expression output, so
-/// it is data either way; a malformed token stays raw, as every other reader
-/// keeps it, rather than failing the reading expression.
-fn stored_value(value: &Value) -> Value {
-    crate::markdown::literal_token::decode_literal_tokens(value)
-        .unwrap_or_else(|_| value.clone())
-}
-
-/// `markdown_body_empty(file) -> bool | Error` — body has only whitespace.
-pub fn markdown_body_empty_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("markdown_body_empty", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let raw = require_string_expr("markdown_body_empty", &args[0])?;
-    let md = load_markdown(raw, ctx, "markdown_body_empty")?;
-    Ok(Value::Bool(md.content().trim().is_empty()))
-}
-
-/// `markdown_title(file) -> string | null | Error` — frontmatter `title`,
-/// else first H1. Multiple H1s: first wins, warning to STDERR.
-pub fn markdown_title_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    require_args_expr("markdown_title", args, 1)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let raw = require_string_expr("markdown_title", &args[0])?;
-    let md = load_markdown(raw, ctx, "markdown_title")?;
-    if let Some(Value::String(t)) = md.frontmatter().as_map().get("title").map(stored_value) {
-        return Ok(Value::String(t));
-    }
-    let h1s: Vec<String> = md
-        .content()
-        .lines()
-        .filter_map(|l| l.strip_prefix("# ").map(|t| t.trim().to_string()))
-        .collect();
-    match h1s.as_slice() {
-        [] => Ok(Value::Null),
-        [single] => Ok(Value::String(single.clone())),
-        [first, ..] => {
-            eprintln!("markdown_title(): multiple H1 headings in {raw:?}; using the first");
-            Ok(Value::String(first.clone()))
-        }
-    }
-}
-
-/// `validate_schema(file)` / `validate_schema(file, obj)` -> bool | Error.
-/// Returns `true` when the document declares no `$schema`.
-///
-/// ## Notes
-///
-/// The two-argument form is accepted but currently validates the referenced
-/// document itself rather than the supplied object; validating an arbitrary
-/// object against the document's schema requires a dedicated
-/// [`DarkmatterSchemas`] entry point that does not yet exist.
-pub fn validate_schema_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    if args.is_empty() || args.len() > 2 {
-        return Err(expression_other(
-            "validate_schema",
-            "validate_schema() requires 1 or 2 arguments".to_string(),
-        ));
-    }
-    if matches!(args.first(), Some(Value::Null)) {
-        return Ok(Value::Null);
-    }
-    let raw = require_string_expr("validate_schema", &args[0])?;
-    let md = load_markdown(raw, ctx, "validate_schema")?;
-    // No `$schema` → always valid (per spec).
-    if !md.frontmatter().as_map().contains_key("$schema") {
-        return Ok(Value::Bool(true));
-    }
-    let schemas = DarkmatterSchemas::new(ctx.file_context());
-    let report = schemas
-        .validate(&md)
-        .map_err(|e| expression_other(
-            "validate_schema",
-            format!("validate_schema() error for {raw:?}: {e}"),
-        ))?;
-    Ok(Value::Bool(report.valid))
-}
-
-/// `has_key(obj, key)` → bool. Eagerly-evaluated form of the core operator.
-pub fn has_key_fn(args: &[Value]) -> Result<Value, String> {
-    if args.len() < 2 {
-        return Err("has_key() requires 2 arguments".to_string());
-    }
-    let key = scalar_string(&args[1]);
-    let has = args[0]
-        .as_object()
-        .map(|obj| obj.contains_key(&key))
-        .unwrap_or(false);
-    Ok(Value::Bool(has))
-}
-
-/// `contains(haystack, needle)` → bool over arrays, objects, or strings.
-pub fn contains_fn(args: &[Value]) -> Result<Value, String> {
-    if args.len() < 2 {
-        return Err("contains() requires 2 arguments".to_string());
-    }
-    let needle = &args[1];
-    let found = match &args[0] {
-        Value::Array(values) => values
-            .iter()
-            .any(|value| scalar_string(value) == scalar_string(needle)),
-        Value::Object(values) => values
-            .values()
-            .any(|value| scalar_string(value) == scalar_string(needle)),
-        Value::String(value) => value.contains(&scalar_string(needle)),
-        value => scalar_string(value).contains(&scalar_string(needle)),
-    };
-    Ok(Value::Bool(found))
-}
-
-/// `length(x)` → count of chars / array items / object keys.
-pub fn length_fn(args: &[Value]) -> Result<Value, String> {
-    if args.is_empty() {
-        return Err("length() requires 1 argument".to_string());
-    }
-    let len = match &args[0] {
-        Value::String(s) => s.chars().count(),
-        Value::Array(arr) => arr.len(),
-        Value::Object(obj) => obj.len(),
-        Value::Number(n) => n.to_string().chars().count(),
-        Value::Bool(_) | Value::Null => 0,
-    };
-    Ok(Value::Number(serde_json::Number::from(len)))
-}
-
-/// `number(x, [default])` → numeric conversion with optional fallback.
-pub fn number_fn(args: &[Value]) -> Result<Value, String> {
-    if args.is_empty() {
-        return Err("number() requires at least 1 argument".to_string());
-    }
-    let default = if args.len() > 1 {
-        to_number_coerce(&args[1])
-    } else {
-        0.0
-    };
-    let number = to_number(&args[0]).unwrap_or(default);
-    let json = if number.fract() == 0.0 {
-        serde_json::Number::from(number as i64)
-    } else {
-        serde_json::Number::from_f64(number)
-            .ok_or_else(|| "Unable to represent number".to_string())?
-    };
-    Ok(Value::Number(json))
-}
-
-/// `round(x, [default])` → nearest integer with optional fallback.
-pub fn round_fn(args: &[Value]) -> Result<Value, String> {
-    if args.is_empty() {
-        return Err("round() requires at least 1 argument".to_string());
-    }
-    let default = if args.len() > 1 {
-        to_number_coerce(&args[1])
-    } else {
-        0.0
-    };
-    let number = to_number(&args[0]).unwrap_or(default).round() as i64;
-    Ok(Value::Number(serde_json::Number::from(number)))
-}
-
-// ── Date arithmetic ─────────────────────────────────────────────────
-//
-// `date_delta`/`older_than`/`newer_than` share the signature
-// `(date1, date2, diff)` where `diff` is a duration string (`14d`, `2mo`,
-// `1 hour`). They differ only in direction: `date_delta` is magnitude-only
-// (are the two dates at least `diff` apart?), `older_than` asks whether `date1`
-// precedes `date2` by at least `diff`, `newer_than` the reverse. The threshold
-// is inclusive (`>=`). Month/year components are calendar-aware (chrono
-// `Months`); day-and-smaller components are fixed `Duration`s. Date args parse
-// through the module's `parse_date_or_datetime` (date granularity, local) like
-// the relative validators, then anchor at midnight so a sub-day `diff` still
-// compares meaningfully.
-
-/// A parsed `diff` duration: a calendar-month component plus a fixed span.
-struct DurationSpec {
-    months: u32,
-    fixed: Duration,
-}
-
-/// Parses a single-term duration string like `14d`, `2mo`, or `1 hour`.
-///
-/// Grammar: a non-negative integer count, optional whitespace, then a
-/// case-insensitive unit. `mo`/`month(s)` are months and `y`/`year(s)` are
-/// years (both calendar-aware); `m`/`min`/`minute(s)` are minutes — so the
-/// bare `m` always means minutes, never months.
-fn parse_duration_spec(s: &str) -> Result<DurationSpec, String> {
-    let trimmed = s.trim();
-    let digits_end = trimmed
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(trimmed.len());
-    if digits_end == 0 {
-        return Err(format!("expected a leading number in {trimmed:?}"));
-    }
-    let count: i64 = trimmed[..digits_end]
-        .parse()
-        .map_err(|_| format!("invalid count in {trimmed:?}"))?;
-    let unit = trimmed[digits_end..].trim().to_ascii_lowercase();
-    let (months, fixed): (i64, Duration) = match unit.as_str() {
-        "s" | "sec" | "secs" | "second" | "seconds" => (0, Duration::seconds(count)),
-        "m" | "min" | "mins" | "minute" | "minutes" => (0, Duration::minutes(count)),
-        "h" | "hr" | "hrs" | "hour" | "hours" => (0, Duration::hours(count)),
-        "d" | "day" | "days" => (0, Duration::days(count)),
-        "w" | "wk" | "wks" | "week" | "weeks" => (0, Duration::weeks(count)),
-        "mo" | "mos" | "month" | "months" => (count, Duration::zero()),
-        "y" | "yr" | "yrs" | "year" | "years" => (
-            count
-                .checked_mul(12)
-                .ok_or_else(|| format!("duration overflow in {trimmed:?}"))?,
-            Duration::zero(),
-        ),
-        "" => return Err(format!("missing unit in {trimmed:?}")),
-        other => return Err(format!("unknown duration unit {other:?}")),
-    };
-    let months =
-        u32::try_from(months).map_err(|_| format!("duration must be non-negative: {trimmed:?}"))?;
-    Ok(DurationSpec { months, fixed })
-}
-
-/// Adds a parsed duration to a base instant (calendar months first, then the
-/// fixed span). Returns `None` on overflow.
-fn add_duration_spec(base: NaiveDateTime, spec: &DurationSpec) -> Option<NaiveDateTime> {
-    base.checked_add_months(Months::new(spec.months))?
-        .checked_add_signed(spec.fixed)
-}
-
-/// Parses a date/datetime arg to a midnight-anchored `NaiveDateTime`.
-fn date_arg_to_instant(name: &str, s: &str) -> Result<NaiveDateTime, String> {
-    parse_date_or_datetime(s, false)
-        .and_then(|date| date.and_hms_opt(0, 0, 0))
-        .ok_or_else(|| format!("{name}() invalid ISO date or datetime: {s:?}"))
-}
-
-/// Shared front-half for the date-arithmetic functions: three string args →
-/// two midnight-anchored instants + a parsed duration.
-fn two_dates_and_duration(
-    name: &str,
-    args: &[Value],
-) -> Result<(NaiveDateTime, NaiveDateTime, DurationSpec), String> {
-    let dt1 = date_arg_to_instant(name, require_string(name, &args[0])?)?;
-    let dt2 = date_arg_to_instant(name, require_string(name, &args[1])?)?;
-    let diff = require_string(name, &args[2])?;
-    let spec = parse_duration_spec(diff)
-        .map_err(|reason| format!("{name}() invalid duration {diff:?}: {reason}"))?;
-    Ok((dt1, dt2, spec))
-}
-
-/// `date_delta(date1, date2, diff)` — true when the two dates are at least
-/// `diff` apart, regardless of order.
-pub fn date_delta(args: &[Value]) -> Result<Value, String> {
-    require_args("date_delta", args, 3)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let (a, b, spec) = two_dates_and_duration("date_delta", args)?;
-    let (earlier, later) = if a <= b { (a, b) } else { (b, a) };
-    let threshold = add_duration_spec(earlier, &spec)
-        .ok_or_else(|| "date_delta() duration arithmetic overflowed".to_string())?;
-    Ok(Value::Bool(later >= threshold))
-}
-
-/// `older_than(date1, date2, diff)` — true when `date1` is at least `diff`
-/// older (earlier) than `date2`.
-pub fn older_than(args: &[Value]) -> Result<Value, String> {
-    require_args("older_than", args, 3)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let (d1, d2, spec) = two_dates_and_duration("older_than", args)?;
-    let threshold = add_duration_spec(d1, &spec)
-        .ok_or_else(|| "older_than() duration arithmetic overflowed".to_string())?;
-    Ok(Value::Bool(d2 >= threshold))
-}
-
-/// `newer_than(date1, date2, diff)` — true when `date1` is at least `diff`
-/// newer (later) than `date2`.
-pub fn newer_than(args: &[Value]) -> Result<Value, String> {
-    require_args("newer_than", args, 3)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let (d1, d2, spec) = two_dates_and_duration("newer_than", args)?;
-    let threshold = add_duration_spec(d2, &spec)
-        .ok_or_else(|| "newer_than() duration arithmetic overflowed".to_string())?;
-    Ok(Value::Bool(d1 >= threshold))
-}
-
-
-/// Logical short-circuit operators handled directly in `evaluate_function`
-/// (they evaluate their arguments lazily and so cannot live in the pure
-/// `&[Value]` table). Listed here so the dispatchable-name enumeration stays
-/// complete; `lazy_operators_are_dispatchable` proves each one resolves.
-#[cfg(test)]
-pub(crate) fn lazy_operator_names() -> impl Iterator<Item = &'static str> {
-    LAZY_BINDINGS.iter().map(|binding| binding.canonical)
-}
 
 /// Whether `name` resolves, as a canonical name or alias, to an absence
 /// predicate (`is_null`, `is_empty`). Case-insensitive, like dispatch.
@@ -2912,166 +662,186 @@ pub(crate) fn is_absence_predicate(name: &str) -> bool {
     })
 }
 
-/// The canonical registry name the evaluator dispatches `name` to, matched
-/// exactly as `evaluate_function` matches it: lowercased, then by canonical
-/// name or alias. `None` for an unregistered name.
+/// The canonical registry name the evaluator dispatches `name` to:
+/// lowercased, then by canonical name or alias. `None` for an unregistered
+/// name.
 pub(crate) fn canonical_function_name(name: &str) -> Option<&'static str> {
-    let name = name.to_ascii_lowercase();
-    joined_bindings()
-        .iter()
-        .find(|entry| entry.binding.canonical == name || entry.binding.aliases.contains(&name.as_str()))
-        .map(|entry| entry.binding.canonical)
+    find_binding(name).map(|entry| entry.binding.canonical)
 }
 
-/// Whether `canonical` is a registered binding that accepts `arity`
-/// arguments, by the same descriptors the evaluator's arity check reads.
+/// Whether `canonical` is a registered function with an overload that takes
+/// `arity` arguments.
 pub(crate) fn accepts_call_arity(canonical: &str, arity: usize) -> bool {
     joined_bindings()
         .iter()
         .find(|entry| entry.binding.canonical == canonical)
-        .is_some_and(|entry| entry.descriptors.iter().any(|descriptor| accepts_arity(descriptor, arity)))
+        .is_some_and(|entry| entry.registration.overloads().iter().any(|signature| signature.accepts_count(arity)))
 }
 
-/// Whether the evaluator dispatches `name`, matched exactly as
-/// `evaluate_function` matches it: lowercased, then by canonical name or alias.
+/// Whether the evaluator dispatches `name`: lowercased, then by canonical
+/// name or alias.
 pub(crate) fn is_dispatchable(name: &str) -> bool {
-    let name = name.to_ascii_lowercase();
-    joined_bindings().iter().any(|entry| {
-        entry.binding.canonical == name || entry.binding.aliases.contains(&name.as_str())
-    })
+    #[cfg(any(test, feature = "effects-instrumentation"))]
+    if test_hooks::lookup(&name.to_ascii_lowercase()).is_some() {
+        return true;
+    }
+    find_binding(name).is_some()
 }
 
-/// Returns every canonical function name the evaluator can dispatch.
-///
-/// This is the authoritative runtime surface: the lazy operators plus the two
-/// dispatch tables that [`dispatch`]/[`dispatch_fs`] actually consult.
+/// Every canonical function name the evaluator can dispatch.
 pub fn dispatchable_canonical_names() -> Vec<&'static str> {
     joined_bindings().iter().map(|entry| entry.binding.canonical).collect()
 }
 
-/// Returns every canonical callable signature the evaluator dispatches,
-/// including each overload and optional/variadic arity.
+/// Whether `name` is a built-in that reads the document resolution context
+/// (its first argument is evaluated as a caller file argument).
+pub(crate) fn is_context_function(name: &str) -> bool {
+    #[cfg(any(test, feature = "effects-instrumentation"))]
+    if test_hooks::lookup(&name.to_ascii_lowercase()).is_some() {
+        return false;
+    }
+    find_binding(name).is_some_and(|entry| entry.binding.evaluation == EvaluationMode::Context)
+}
+
+/// The registration and short-circuit side of the lazy function `name`
+/// names; `None` for an eager or unknown name.
+pub(crate) fn lazy_function(name: &str) -> Option<(&'static FunctionRegistration, ShortCircuit)> {
+    #[cfg(any(test, feature = "effects-instrumentation"))]
+    if test_hooks::lookup(&name.to_ascii_lowercase()).is_some() {
+        return None;
+    }
+    let entry = find_binding(name)?;
+    (entry.binding.evaluation == EvaluationMode::Lazy)
+        .then(|| (&entry.registration, short_circuit(entry.binding.canonical)))
+}
+
+fn call_error(error: CallBindingError) -> ExpressionError {
+    ExpressionError::Call(Box::new(error))
+}
+
+/// Calls the eager function `name` with evaluated arguments.
 ///
-/// This is the authoritative runtime signature surface: the lazy operators plus
-/// the per-registration [`PureFunction::signatures`]/[`FsFunction::signatures`].
-/// The expression descriptor catalog is checked for exact set equality against
-/// it, so overload metadata and dispatch always come from the same registration.
-pub fn dispatchable_signatures() -> Vec<&'static str> {
-    joined_bindings().iter()
-        .flat_map(|entry| entry.descriptors.iter().map(|descriptor| descriptor.signature))
-        .collect()
-}
-
-pub(crate) enum LazyArityEligibility {
-    Eligible,
-    Ineligible(String),
-}
-
-/// Resolves a lazy binding and checks its authored overload shapes without
-/// evaluating any call arguments.
-pub(crate) fn lazy_arity_eligibility(
-    name: &str,
-    arity: usize,
-) -> Option<LazyArityEligibility> {
-    joined_bindings().iter().find_map(|entry| {
-        let binding = entry.binding;
-        if binding.evaluation != EvaluationMode::Lazy
-            || (binding.canonical != name && !binding.aliases.contains(&name))
-        {
-            return None;
-        }
-        Some(if entry
-            .descriptors
-            .iter()
-            .any(|descriptor| accepts_arity(descriptor, arity))
-        {
-            LazyArityEligibility::Eligible
-        } else {
-            LazyArityEligibility::Ineligible(arity_error_message(
-                binding.canonical,
-                &entry.descriptors,
-            ))
-        })
-    })
-}
-
-/// Context-aware dispatch for filesystem, document, and repository functions.
+/// Resolves `name` (lowercased; canonical or alias; a thread's test function
+/// first), binds the arguments to its overloads, enters the handler, and
+/// checks a successful result against the selected overload's return type.
+/// A context function without `ctx` fails before anything binds.
 ///
 /// ## Returns
 ///
-/// `Some(result)` for context-aware registrations, or `None` for any other
-/// name (the caller then falls through to [`dispatch`]).
-pub fn dispatch_fs(
+/// `None` only for an unknown name.
+///
+/// ## Errors
+///
+/// [`ExpressionError::Call`] when the call does not bind (the handler is
+/// never entered) or the handler's result breaks its declared return type;
+/// a pure handler's domain failure as [`ExpressionError::Other`]; a context
+/// handler's own error as returned.
+pub(crate) fn call_function(
     name: &str,
     args: &[Value],
-    ctx: &ResolutionContext,
+    ctx: Option<&ResolutionContext>,
 ) -> Option<Result<Value, ExpressionError>> {
-    for entry in joined_bindings() {
-        let binding = entry.binding;
-        if (binding.canonical == name || binding.aliases.contains(&name))
-            && binding.evaluation == EvaluationMode::Context
-            && let Some(FunctionHandler::Context(handler)) = binding.handler
-        {
-            let eligible = entry.descriptors.iter()
-                .find(|descriptor| accepts_arity(descriptor, args.len()));
-            return Some(match eligible {
-                Some(_) => handler(args, ctx),
-                None => Err(ExpressionError::Other {
+    let name = name.to_ascii_lowercase();
+    #[cfg(any(test, feature = "effects-instrumentation"))]
+    if let Some(function) = test_hooks::lookup(&name) {
+        return Some(test_hooks::call(&function, &name, args));
+    }
+    let entry = find_binding(&name)?;
+    Some(call_entry(entry, &name, args, ctx))
+}
+
+fn call_entry(
+    entry: &JoinedBinding,
+    name: &str,
+    args: &[Value],
+    ctx: Option<&ResolutionContext>,
+) -> Result<Value, ExpressionError> {
+    let canonical = entry.binding.canonical;
+    let Some(handler) = entry.binding.handler else {
+        return Err(ExpressionError::Other {
+            function: name.to_string(),
+            message: format!("{canonical}() evaluates its arguments lazily and is called only by the evaluator"),
+        });
+    };
+    let context = match handler {
+        FunctionHandler::Context(_) => match ctx {
+            Some(context) => Some(context),
+            // An opt-out or test lookup with no document surface; recoverable,
+            // so it does not read as an unknown symbol.
+            None => {
+                return Err(ExpressionError::Other {
                     function: name.to_string(),
-                    message: arity_error_message(binding.canonical, &entry.descriptors),
-                }),
-            });
+                    message: format!(
+                        "Filesystem function '{name}' requires a document resolution context, which is unavailable here"
+                    ),
+                });
+            }
+        },
+        FunctionHandler::Pure(_) => None,
+    };
+    let registration = &entry.registration;
+    let call = registration.bind_call(args).map_err(call_error)?;
+    #[cfg(any(test, feature = "effects-instrumentation"))]
+    test_hooks::record_entry(canonical);
+    let domain = |message: String| ExpressionError::Other {
+        function: name.to_string(),
+        message,
+    };
+    let value = match (handler, context) {
+        (FunctionHandler::Pure(handler), _) => handler(&call).map_err(domain)?,
+        (FunctionHandler::Context(handler), Some(context)) => handler(&call, context)?,
+        (FunctionHandler::Context(_), None) => {
+            unreachable!("a context handler without a context returned above")
         }
-    }
-    None
+    };
+    registration.check_return(&call, &value).map_err(call_error)?;
+    Ok(value)
 }
 
-/// Returns `true` when `name` matches a canonical name or alias in
-/// the context-aware registration set.
-///
-/// Lets the evaluator distinguish a known context-aware function that fell
-/// through dispatch only because no document resolution context was available
-/// from a genuinely unrecognized symbol.
-pub fn is_fs_function(name: &str) -> bool {
-    joined_bindings().iter().any(|entry| {
-        entry.binding.evaluation == EvaluationMode::Context
-            && (entry.binding.canonical == name || entry.binding.aliases.contains(&name))
-    })
-}
-
-/// Dispatches an evaluated function call against the pure helper library.
-///
-/// Returns `Some(result)` when the name matches a pure registration,
-/// or `None` to let the outer dispatcher report `Unknown function: ...`.
-pub fn dispatch(name: &str, args: &[Value]) -> Option<Result<Value, String>> {
-    for entry in joined_bindings() {
-        let binding = entry.binding;
-        if (binding.canonical == name || binding.aliases.contains(&name))
-            && binding.evaluation == EvaluationMode::Pure
-            && let Some(FunctionHandler::Pure(handler)) = binding.handler
-        {
-            let eligible = entry.descriptors.iter()
-                .find(|descriptor| accepts_arity(descriptor, args.len()));
-            return Some(match eligible {
-                Some(_) => handler(args),
-                None => Err(arity_error_message(binding.canonical, &entry.descriptors)),
-            });
-        }
-    }
-    None
-}
-
+/// Unit tests of the pure handlers, each through the one dispatch entry
+/// ([`call_function`]) so every call binds against its catalog signature
+/// first. An expectation that flipped in the one-pass migration cites its
+/// behavior-ledger row.
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::compose::expression::call_binding::CallErrorKind;
     use serde_json::json;
 
-    fn v(value: Value) -> Vec<Value> {
-        vec![value]
+    /// A pure call through the one dispatch entry, without a context.
+    fn call(name: &str, args: &[Value]) -> Result<Value, ExpressionError> {
+        call_function(name, args, None).unwrap_or_else(|| panic!("{name} is not registered"))
     }
 
-    fn vv(a: Value, b: Value) -> Vec<Value> {
-        vec![a, b]
+    fn ok(name: &str, args: &[Value]) -> Value {
+        call(name, args).unwrap_or_else(|error| panic!("{name}({args:?}) failed: {error}"))
+    }
+
+    fn text(name: &str, args: &[Value]) -> String {
+        match ok(name, args) {
+            Value::String(text) => text,
+            other => panic!("{name}: expected text, got {other:?}"),
+        }
+    }
+
+    /// Asserts the call fails to bind with `kind` (the handler never runs).
+    fn binding_error(name: &str, args: &[Value], kind: CallErrorKind) {
+        match call(name, args) {
+            Err(ExpressionError::Call(error)) => assert_eq!(error.kind(), kind, "{name}({args:?}): {error}"),
+            other => panic!("{name}({args:?}): expected a {kind:?} binding error, got {other:?}"),
+        }
+    }
+
+    fn type_error(name: &str, args: &[Value]) {
+        binding_error(name, args, CallErrorKind::Type);
+    }
+
+    /// Asserts a domain failure: the call bound and the handler's work failed.
+    fn domain_error(name: &str, args: &[Value]) {
+        match call(name, args) {
+            Err(ExpressionError::Other { .. }) => {}
+            other => panic!("{name}({args:?}): expected a domain error, got {other:?}"),
+        }
     }
 
     mod fn_date_arithmetic {
@@ -3084,186 +854,157 @@ mod tests {
         #[test]
         fn date_delta_is_direction_neutral() {
             // 19 days apart, either order → ≥ 14d.
-            assert_eq!(date_delta(&args3("2024-06-01", "2024-06-20", "14d")).unwrap(), json!(true));
-            assert_eq!(date_delta(&args3("2024-06-20", "2024-06-01", "14d")).unwrap(), json!(true));
-            // 5 days apart → not ≥ 14d.
-            assert_eq!(date_delta(&args3("2024-06-01", "2024-06-06", "14d")).unwrap(), json!(false));
+            assert_eq!(ok("date_delta", &args3("2024-06-01", "2024-06-20", "14d")), json!(true));
+            assert_eq!(ok("date_delta", &args3("2024-06-20", "2024-06-01", "14d")), json!(true));
+            assert_eq!(ok("date_delta", &args3("2024-06-01", "2024-06-06", "14d")), json!(false));
         }
 
         #[test]
         fn threshold_is_inclusive() {
-            // Exactly 14 days apart is "at least 14d".
-            assert_eq!(date_delta(&args3("2024-06-01", "2024-06-15", "14d")).unwrap(), json!(true));
-            assert_eq!(date_delta(&args3("2024-06-01", "2024-06-14", "14d")).unwrap(), json!(false));
+            assert_eq!(ok("date_delta", &args3("2024-06-01", "2024-06-15", "14d")), json!(true));
+            assert_eq!(ok("date_delta", &args3("2024-06-01", "2024-06-14", "14d")), json!(false));
         }
 
         #[test]
         fn older_than_and_newer_than_are_directional() {
-            // 2024-06-01 is 19 days older (earlier) than 2024-06-20.
-            assert_eq!(older_than(&args3("2024-06-01", "2024-06-20", "14d")).unwrap(), json!(true));
-            assert_eq!(older_than(&args3("2024-06-20", "2024-06-01", "14d")).unwrap(), json!(false));
-            // 2024-06-20 is 19 days newer (later) than 2024-06-01.
-            assert_eq!(newer_than(&args3("2024-06-20", "2024-06-01", "14d")).unwrap(), json!(true));
-            assert_eq!(newer_than(&args3("2024-06-01", "2024-06-20", "14d")).unwrap(), json!(false));
+            assert_eq!(ok("older_than", &args3("2024-06-01", "2024-06-20", "14d")), json!(true));
+            assert_eq!(ok("older_than", &args3("2024-06-20", "2024-06-01", "14d")), json!(false));
+            assert_eq!(ok("newer_than", &args3("2024-06-20", "2024-06-01", "14d")), json!(true));
+            assert_eq!(ok("newer_than", &args3("2024-06-01", "2024-06-20", "14d")), json!(false));
         }
 
         #[test]
         fn months_and_years_are_calendar_aware() {
             // Jan 15 → Mar 15 is exactly 2 calendar months (spanning short Feb),
             // which a fixed 60-day threshold would misjudge.
-            assert_eq!(older_than(&args3("2024-01-15", "2024-03-15", "2mo")).unwrap(), json!(true));
-            assert_eq!(older_than(&args3("2024-01-15", "2024-03-14", "2mo")).unwrap(), json!(false));
-            // Years fold to 12 months each.
-            assert_eq!(older_than(&args3("2022-06-01", "2024-06-01", "2y")).unwrap(), json!(true));
+            assert_eq!(ok("older_than", &args3("2024-01-15", "2024-03-15", "2mo")), json!(true));
+            assert_eq!(ok("older_than", &args3("2024-01-15", "2024-03-14", "2mo")), json!(false));
+            assert_eq!(ok("older_than", &args3("2022-06-01", "2024-06-01", "2y")), json!(true));
         }
 
         #[test]
         fn duration_units_and_word_forms_parse() {
-            // 2024-06-01 .. 2024-08-01 is 61 days, ≥ every 14-day-ish threshold.
             for diff in ["14d", "14 days", "2w", "336h", "2mo", "2 months"] {
-                assert_eq!(
-                    date_delta(&args3("2024-06-01", "2024-08-01", diff)).unwrap(),
-                    json!(true),
-                    "diff {diff:?}"
-                );
+                assert_eq!(ok("date_delta", &args3("2024-06-01", "2024-08-01", diff)), json!(true), "diff {diff:?}");
             }
             // Bare `m` is minutes, not months: two same-day instants are 0 apart.
-            assert_eq!(date_delta(&args3("2024-06-01", "2024-06-01", "5m")).unwrap(), json!(false));
+            assert_eq!(ok("date_delta", &args3("2024-06-01", "2024-06-01", "5m")), json!(false));
         }
 
         #[test]
         fn datetime_args_reduce_to_date() {
-            assert_eq!(
-                date_delta(&args3("2024-06-01T09:00:00", "2024-06-20T23:00:00", "14d")).unwrap(),
-                json!(true)
-            );
+            assert_eq!(ok("date_delta", &args3("2024-06-01T09:00:00", "2024-06-20T23:00:00", "14d")), json!(true));
+            // Every naive spelling the `datetime` type admits has a date.
+            assert_eq!(ok("date_delta", &args3("2024-06-01 09:00", "2024-06-20T23:00", "14d")), json!(true));
+        }
+
+        /// Ledger rows 60–62: null is a type error (comparison family), not
+        /// propagated; a number converts to text and fails the date check.
+        #[test]
+        fn null_and_malformed_input_are_type_errors_before_the_handler() {
+            type_error("date_delta", &[json!(null), json!("2024-06-20"), json!("14d")]);
+            type_error("date_delta", &[json!(5), json!("2024-06-20"), json!("14d")]);
+            type_error("date_delta", &args3("not-a-date", "2024-06-20", "14d"));
+            type_error("date_delta", &args3("2024-06-01", "2024-06-20", "3 fortnights"));
+            binding_error("date_delta", &[json!("2024-06-01"), json!("2024-06-20")], CallErrorKind::Arity);
         }
 
         #[test]
-        fn null_propagates_and_bad_input_errors() {
-            assert_eq!(
-                date_delta(&[json!(null), json!("2024-06-20"), json!("14d")]).unwrap(),
-                json!(null)
-            );
-            // Non-string date arg → type-mismatch error.
-            assert!(date_delta(&[json!(5), json!("2024-06-20"), json!("14d")]).is_err());
-            // Unparseable date and unknown duration unit both error.
-            assert!(date_delta(&args3("not-a-date", "2024-06-20", "14d")).is_err());
-            assert!(date_delta(&args3("2024-06-01", "2024-06-20", "3 fortnights")).is_err());
-            // Wrong arity errors.
-            assert!(date_delta(&vv(json!("2024-06-01"), json!("2024-06-20"))).is_err());
+        fn an_overflowing_duration_is_a_domain_error() {
+            domain_error("date_delta", &args3("2024-06-01", "2024-06-20", "99999999999999999d"));
         }
     }
 
     mod fn_list_formatting {
         use super::*;
 
-        fn s(value: &Value) -> String {
-            match value {
-                Value::String(text) => text.clone(),
-                other => panic!("expected a string result, got {other:?}"),
-            }
+        fn list(value: Value) -> Vec<Value> {
+            vec![value]
         }
 
         #[test]
         fn flat_joiners_render_scalar_elements() {
-            let list = v(json!(["a", "b", "c"]));
-            assert_eq!(s(&as_line_separated(&list).unwrap()), "a\nb\nc");
-            assert_eq!(s(&as_csv(&list).unwrap()), "a, b, c");
-            assert_eq!(s(&as_tsv(&list).unwrap()), "a\tb\tc");
-            assert_eq!(s(&as_space_separated(&list).unwrap()), "a b c");
+            let items = list(json!(["a", "b", "c"]));
+            assert_eq!(text("as_line_separated", &items), "a\nb\nc");
+            assert_eq!(text("as_csv", &items), "a, b, c");
+            assert_eq!(text("as_tsv", &items), "a\tb\tc");
+            assert_eq!(text("as_space_separated", &items), "a b c");
         }
 
         #[test]
         fn tsv_uses_tabs_only_between_elements() {
-            assert_eq!(s(&as_tsv(&v(json!([]))).unwrap()), "");
-            assert_eq!(s(&as_tsv(&v(json!(["a"]))).unwrap()), "a");
-            assert_eq!(s(&as_tsv(&v(json!(["a", "b"]))).unwrap()), "a\tb");
+            assert_eq!(text("as_tsv", &list(json!([]))), "");
+            assert_eq!(text("as_tsv", &list(json!(["a"]))), "a");
+            assert_eq!(text("as_tsv", &list(json!(["a", "b"]))), "a\tb");
         }
 
         #[test]
         fn mixed_scalar_types_render_via_scalar_string() {
-            let list = v(json!(["a", 2, true, null]));
+            let items = list(json!(["a", 2, true, null]));
             // `null` renders as an empty element; a number drops its `.0`.
-            assert_eq!(s(&as_csv(&list).unwrap()), "a, 2, true, ");
-            assert_eq!(s(&as_space_separated(&list).unwrap()), "a 2 true ");
+            assert_eq!(text("as_csv", &items), "a, 2, true, ");
+            assert_eq!(text("as_space_separated", &items), "a 2 true ");
         }
 
         #[test]
         fn empty_array_renders_empty_string() {
-            let empty = v(json!([]));
-            assert_eq!(s(&as_line_separated(&empty).unwrap()), "");
-            assert_eq!(s(&as_csv(&empty).unwrap()), "");
-            assert_eq!(s(&as_unordered_list(&empty).unwrap()), "");
-            assert_eq!(s(&as_ordered_list(&empty).unwrap()), "");
+            let empty = list(json!([]));
+            for name in ["as_line_separated", "as_csv", "as_unordered_list", "as_ordered_list"] {
+                assert_eq!(text(name, &empty), "", "{name}");
+            }
         }
 
         #[test]
         fn null_argument_propagates() {
-            assert_eq!(as_csv(&v(json!(null))).unwrap(), json!(null));
-            assert_eq!(as_unordered_list(&v(json!(null))).unwrap(), json!(null));
+            for name in ["as_csv", "as_unordered_list", "as_json", "as_json5"] {
+                assert_eq!(ok(name, &list(json!(null))), json!(null), "{name}");
+            }
         }
 
+        /// A list parameter never wraps a scalar, so a non-list is a type
+        /// error at binding rather than the handler's own check.
         #[test]
         fn non_array_argument_is_a_type_error() {
-            let err = as_csv(&v(json!("scalar"))).unwrap_err();
-            assert!(err.contains("array argument"), "unexpected error: {err}");
-            let err = as_unordered_list(&v(json!(42))).unwrap_err();
-            assert!(err.contains("array argument"), "unexpected error: {err}");
+            type_error("as_csv", &list(json!("scalar")));
+            type_error("as_unordered_list", &list(json!(42)));
+            type_error("as_json", &list(json!("scalar")));
+            type_error("as_json5", &list(json!({ "a": 1 })));
+            binding_error("as_json", &[], CallErrorKind::Arity);
+            binding_error("as_json5", &[json!([]), json!([])], CallErrorKind::Arity);
         }
 
         #[test]
-        fn unordered_list_renders_flat_scalars() {
-            let list = v(json!(["1", "2", "3"]));
-            assert_eq!(s(&as_unordered_list(&list).unwrap()), "- 1\n- 2\n- 3");
-        }
-
-        #[test]
-        fn ordered_list_renders_flat_scalars() {
-            let list = v(json!(["a", "b", "c"]));
-            assert_eq!(s(&as_ordered_list(&list).unwrap()), "1. a\n2. b\n3. c");
+        fn markdown_lists_render_flat_scalars() {
+            assert_eq!(text("as_unordered_list", &list(json!(["1", "2", "3"]))), "- 1\n- 2\n- 3");
+            assert_eq!(text("as_ordered_list", &list(json!(["a", "b", "c"]))), "1. a\n2. b\n3. c");
         }
 
         #[test]
         fn nested_arrays_auto_nest_as_sublists() {
-            let list = v(json!(["first", ["a", "b"], "second"]));
-            assert_eq!(
-                s(&as_ordered_list(&list).unwrap()),
-                "1. first\n  1. a\n  2. b\n2. second"
-            );
-            assert_eq!(
-                s(&as_unordered_list(&list).unwrap()),
-                "- first\n  - a\n  - b\n- second"
-            );
+            let items = list(json!(["first", ["a", "b"], "second"]));
+            assert_eq!(text("as_ordered_list", &items), "1. first\n  1. a\n  2. b\n2. second");
+            assert_eq!(text("as_unordered_list", &items), "- first\n  - a\n  - b\n- second");
+            let deep = list(json!(["a", ["b", ["c", "d"]]]));
+            assert_eq!(text("as_unordered_list", &deep), "- a\n  - b\n    - c\n    - d");
         }
 
         #[test]
         fn object_array_dependency_shape_renders_as_nested_bullets() {
-            let list = v(json!([
+            let items = list(json!([
                 { "package": "darkmatter", "dependencies": ["biscuit-terminal", "renderable"] },
                 { "package": "renderable", "dependencies": [] },
             ]));
             assert_eq!(
-                s(&as_unordered_list(&list).unwrap()),
+                text("as_unordered_list", &items),
                 "- darkmatter\n  - biscuit-terminal\n  - renderable\n- renderable"
             );
         }
 
-        #[test]
-        fn deeply_nested_arrays_recurse() {
-            let list = v(json!(["a", ["b", ["c", "d"]]]));
-            assert_eq!(
-                s(&as_unordered_list(&list).unwrap()),
-                "- a\n  - b\n    - c\n    - d"
-            );
-        }
-
         /// `as_csv` on a one-item list yields the element alone, with no
-        /// separator and no brackets — the property that makes it the right
-        /// migration for a prose list that is usually a single package.
+        /// separator and no brackets.
         #[test]
         fn csv_of_a_one_item_array_is_bare_text() {
-            assert_eq!(s(&as_csv(&v(json!(["darkmatter"]))).unwrap()), "darkmatter");
+            assert_eq!(text("as_csv", &list(json!(["darkmatter"]))), "darkmatter");
         }
 
         /// Sample arrays covering the shapes the two serializers must handle,
@@ -3285,49 +1026,42 @@ mod tests {
         #[test]
         fn as_json_matches_bare_array_rendering_for_every_shape() {
             for shape in json_shapes() {
-                assert_eq!(
-                    s(&as_json(&v(shape.clone())).unwrap()),
-                    scalar_string(&shape),
-                    "as_json disagreed with the bare-array rendering of {shape}"
-                );
+                assert_eq!(text("as_json", &list(shape.clone())), scalar_string(&shape), "{shape}");
             }
         }
 
         #[test]
         fn as_json_renders_compact_json() {
-            assert_eq!(s(&as_json(&v(json!(["a", 2, true]))).unwrap()), r#"["a",2,true]"#);
+            assert_eq!(text("as_json", &list(json!(["a", 2, true]))), r#"["a",2,true]"#);
             assert_eq!(
-                s(&as_json(&v(json!([r#"say "hi""#, "a\\b", "x\ny"]))).unwrap()),
+                text("as_json", &list(json!([r#"say "hi""#, "a\\b", "x\ny"]))),
                 r#"["say \"hi\"","a\\b","x\ny"]"#
             );
-            assert_eq!(s(&as_json(&v(json!(["日本語 🍪"]))).unwrap()), r#"["日本語 🍪"]"#);
+            assert_eq!(text("as_json", &list(json!(["日本語 🍪"]))), r#"["日本語 🍪"]"#);
         }
 
         #[test]
         fn as_json5_renders_compact_json5() {
-            assert_eq!(s(&as_json5(&v(json!(["a", 2, true]))).unwrap()), "['a', 2, true]");
+            assert_eq!(text("as_json5", &list(json!(["a", 2, true]))), "['a', 2, true]");
             assert_eq!(
-                s(&as_json5(&v(json!([r#"say "hi""#, "a\\b", "x\ny"]))).unwrap()),
+                text("as_json5", &list(json!([r#"say "hi""#, "a\\b", "x\ny"]))),
                 r#"['say "hi"', 'a\\b', 'x\ny']"#
             );
-            assert_eq!(s(&as_json5(&v(json!(["日本語 🍪"]))).unwrap()), "['日本語 🍪']");
+            assert_eq!(text("as_json5", &list(json!(["日本語 🍪"]))), "['日本語 🍪']");
         }
 
         /// Unquoted keys and single-quoted strings are the `biscuit-file`
         /// formatter's idiom; a key needing quotes keeps them.
         #[test]
         fn as_json5_uses_the_formatter_object_idiom() {
-            let list = v(json!([{ "package": "darkmatter", "dev deps": ["renderable"] }]));
-            assert_eq!(
-                s(&as_json5(&list).unwrap()),
-                "[{package: 'darkmatter', 'dev deps': ['renderable']}]"
-            );
+            let items = list(json!([{ "package": "darkmatter", "dev deps": ["renderable"] }]));
+            assert_eq!(text("as_json5", &items), "[{package: 'darkmatter', 'dev deps': ['renderable']}]");
         }
 
         #[test]
         fn as_json5_output_parses_back_to_the_original_value() {
             for shape in json_shapes() {
-                let rendered = s(&as_json5(&v(shape.clone())).unwrap());
+                let rendered = text("as_json5", &list(shape.clone()));
                 let parsed = biscuit_file::Json5::from_str(&rendered)
                     .unwrap_or_else(|e| panic!("`{rendered}` should parse as JSON5: {e}"));
                 assert_eq!(parsed.value(), &shape, "round trip changed {shape}");
@@ -3335,112 +1069,113 @@ mod tests {
         }
 
         /// The joiners collapse an empty list to the empty string; the two
-        /// serializers keep the container instead, so the explicit spelling of
-        /// the bare-array default agrees with it on every input.
+        /// serializers keep the container instead, without a final newline.
         #[test]
         fn json_serializers_preserve_the_empty_container() {
-            let empty = v(json!([]));
-            assert_eq!(s(&as_json(&empty).unwrap()), "[]");
-            assert_eq!(s(&as_json5(&empty).unwrap()), "[]");
-        }
-
-        #[test]
-        fn json_serializers_end_without_a_newline() {
-            let list = v(json!(["a"]));
-            assert!(!s(&as_json(&list).unwrap()).ends_with('\n'));
-            assert!(!s(&as_json5(&list).unwrap()).ends_with('\n'));
-        }
-
-        #[test]
-        fn json_serializers_follow_the_family_argument_conventions() {
-            assert_eq!(as_json(&v(json!(null))).unwrap(), json!(null));
-            assert_eq!(as_json5(&v(json!(null))).unwrap(), json!(null));
-
-            for err in [
-                as_json(&v(json!("scalar"))).unwrap_err(),
-                as_json5(&v(json!({ "a": 1 }))).unwrap_err(),
-            ] {
-                assert!(err.contains("array argument"), "unexpected error: {err}");
-            }
-
-            assert!(as_json(&[]).is_err());
-            assert!(as_json5(&vv(json!([]), json!([]))).is_err());
+            assert_eq!(text("as_json", &list(json!([]))), "[]");
+            assert_eq!(text("as_json5", &list(json!([]))), "[]");
+            assert!(!text("as_json", &list(json!(["a"]))).ends_with('\n'));
+            assert!(!text("as_json5", &list(json!(["a"]))).ends_with('\n'));
         }
 
         #[test]
         fn json_serializers_dispatch_by_canonical_name_and_alias() {
-            let call = |name: &str| dispatch(name, &v(json!(["a", 1]))).unwrap().unwrap();
-            assert_eq!(call("as_json"), json!(r#"["a",1]"#));
-            assert_eq!(call("asjson"), json!(r#"["a",1]"#));
-            assert_eq!(call("as_json5"), json!("['a', 1]"));
-            assert_eq!(call("asjson5"), json!("['a', 1]"));
+            let items = list(json!(["a", 1]));
+            assert_eq!(ok("as_json", &items), json!(r#"["a",1]"#));
+            assert_eq!(ok("asjson", &items), json!(r#"["a",1]"#));
+            assert_eq!(ok("as_json5", &items), json!("['a', 1]"));
+            assert_eq!(ok("asjson5", &items), json!("['a', 1]"));
         }
     }
 
     mod fn_type_predicates {
         use super::*;
 
-        #[test]
-        fn is_string_true_for_strings_only() {
-            assert_eq!(is_string(&v(json!("hi"))).unwrap(), json!(true));
-            assert_eq!(is_string(&v(json!(""))).unwrap(), json!(true));
-            assert_eq!(is_string(&v(json!(0))).unwrap(), json!(false));
-            assert_eq!(is_string(&v(json!(null))).unwrap(), json!(false));
-            assert_eq!(is_string(&v(json!([]))).unwrap(), json!(false));
-            assert_eq!(is_string(&v(json!({}))).unwrap(), json!(false));
-            assert_eq!(is_string(&v(json!(true))).unwrap(), json!(false));
+        fn check(name: &str, cases: &[(Value, bool)]) {
+            for (value, expected) in cases {
+                assert_eq!(ok(name, std::slice::from_ref(value)), json!(expected), "{name}({value})");
+            }
         }
 
         #[test]
-        fn is_number_true_for_numbers_only() {
-            assert_eq!(is_number(&v(json!(0))).unwrap(), json!(true));
-            assert_eq!(is_number(&v(json!(1.5))).unwrap(), json!(true));
-            assert_eq!(is_number(&v(json!("1"))).unwrap(), json!(false));
-            assert_eq!(is_number(&v(json!(true))).unwrap(), json!(false));
-            assert_eq!(is_number(&v(json!(null))).unwrap(), json!(false));
+        fn type_predicates_inspect_the_original_value() {
+            check(
+                "is_string",
+                &[(json!("hi"), true), (json!(""), true), (json!(0), false), (json!(null), false), (json!([]), false)],
+            );
+            check(
+                "is_number",
+                &[(json!(0), true), (json!(1.5), true), (json!("1"), false), (json!(true), false), (json!(null), false)],
+            );
+            check("is_array", &[(json!([]), true), (json!([1, 2]), true), (json!({}), false), (json!("a"), false)]);
+            check("is_object", &[(json!({}), true), (json!({"a": 1}), true), (json!([]), false), (json!("a"), false)]);
+            check("is_null", &[(json!(null), true), (json!(""), false), (json!(0), false), (json!(false), false)]);
         }
 
         #[test]
-        fn is_array_true_for_arrays_only() {
-            assert_eq!(is_array(&v(json!([]))).unwrap(), json!(true));
-            assert_eq!(is_array(&v(json!([1, 2]))).unwrap(), json!(true));
-            assert_eq!(is_array(&v(json!({}))).unwrap(), json!(false));
-            assert_eq!(is_array(&v(json!("a"))).unwrap(), json!(false));
+        fn is_empty_is_true_for_null_and_empty_containers_only() {
+            check(
+                "is_empty",
+                &[
+                    (json!(null), true),
+                    (json!(""), true),
+                    (json!([]), true),
+                    (json!({}), true),
+                    (json!(0), false),
+                    (json!(0.0), false),
+                    (json!(false), false),
+                    (json!("a"), false),
+                    (json!([0]), false),
+                    (json!({"a": 1}), false),
+                ],
+            );
         }
 
         #[test]
-        fn is_null_true_for_null_only() {
-            assert_eq!(is_null(&v(json!(null))).unwrap(), json!(true));
-            assert_eq!(is_null(&v(json!(""))).unwrap(), json!(false));
-            assert_eq!(is_null(&v(json!(0))).unwrap(), json!(false));
-            assert_eq!(is_null(&v(json!(false))).unwrap(), json!(false));
+        fn is_integer_inspects_numbers_only() {
+            check(
+                "is_integer",
+                &[
+                    (json!(1), true),
+                    (json!(1.0), true),
+                    (json!(0), true),
+                    (json!(-42), true),
+                    (json!(1.5), false),
+                    (json!(0.1), false),
+                    (json!(null), false),
+                    (json!("123"), false),
+                    (json!(true), false),
+                    (json!([1]), false),
+                ],
+            );
         }
 
         #[test]
-        fn is_object_true_for_objects_only() {
-            assert_eq!(is_object(&v(json!({}))).unwrap(), json!(true));
-            assert_eq!(is_object(&v(json!({"a": 1}))).unwrap(), json!(true));
-            assert_eq!(is_object(&v(json!([]))).unwrap(), json!(false));
-            assert_eq!(is_object(&v(json!("a"))).unwrap(), json!(false));
+        fn sign_predicates_compare_a_bound_number() {
+            check("is_positive", &[(json!(1), true), (json!(1.5), true), (json!("0.5"), true), (json!(0), false)]);
+            check("is_positive", &[(json!(-1), false), (json!("-0.5"), false), (json!(" 4 "), true), (json!("1_000"), true)]);
+            check("is_negative", &[(json!(-1), true), (json!("-0.5"), true), (json!(0), false), (json!(1), false)]);
+        }
+
+        /// Ledger rows 7–8: null is `false` (predicate family; was an error),
+        /// and a boolean is a type error (was read as 1/0).
+        #[test]
+        fn sign_predicates_answer_false_for_null_and_reject_booleans() {
+            check("is_positive", &[(json!(null), false)]);
+            check("is_negative", &[(json!(null), false)]);
+            for name in ["is_positive", "is_negative"] {
+                type_error(name, &[json!(true)]);
+                type_error(name, &[json!("nope")]);
+                type_error(name, &[json!([1, 2])]);
+            }
         }
 
         #[test]
-        fn is_empty_true_for_null_empty_string_empty_array_empty_object() {
-            assert_eq!(is_empty_fn(&v(json!(null))).unwrap(), json!(true));
-            assert_eq!(is_empty_fn(&v(json!(""))).unwrap(), json!(true));
-            assert_eq!(is_empty_fn(&v(json!([]))).unwrap(), json!(true));
-            assert_eq!(is_empty_fn(&v(json!({}))).unwrap(), json!(true));
-        }
-
-        #[test]
-        fn is_empty_false_for_numbers_booleans_and_non_empty_containers() {
-            assert_eq!(is_empty_fn(&v(json!(0))).unwrap(), json!(false));
-            assert_eq!(is_empty_fn(&v(json!(0.0))).unwrap(), json!(false));
-            assert_eq!(is_empty_fn(&v(json!(false))).unwrap(), json!(false));
-            assert_eq!(is_empty_fn(&v(json!(true))).unwrap(), json!(false));
-            assert_eq!(is_empty_fn(&v(json!("a"))).unwrap(), json!(false));
-            assert_eq!(is_empty_fn(&v(json!([0]))).unwrap(), json!(false));
-            assert_eq!(is_empty_fn(&v(json!({"a": 1}))).unwrap(), json!(false));
+        fn predicates_dispatch_by_alias_and_check_arity() {
+            assert_eq!(ok("isnegative", &[json!(-1)]), json!(true));
+            assert_eq!(ok("isinteger", &[json!(42)]), json!(true));
+            binding_error("is_positive", &[], CallErrorKind::Arity);
+            binding_error("is_positive", &[json!(1), json!(2)], CallErrorKind::Arity);
         }
     }
 
@@ -3449,44 +1184,32 @@ mod tests {
 
         #[test]
         fn min_max_abs_basic() {
-            assert_eq!(min_fn(&vv(json!(2), json!(5))).unwrap(), json!(2));
-            assert_eq!(max_fn(&vv(json!(2), json!(5))).unwrap(), json!(5));
-            assert_eq!(abs_fn(&v(json!(-3))).unwrap(), json!(3));
-            assert_eq!(abs_fn(&v(json!(3.5))).unwrap(), json!(3.5));
+            assert_eq!(ok("min", &[json!(2), json!(5)]), json!(2));
+            assert_eq!(ok("max", &[json!(2), json!(5)]), json!(5));
+            assert_eq!(ok("abs", &[json!(-3)]), json!(3));
+            assert_eq!(ok("abs", &[json!(3.5)]), json!(3.5));
         }
 
+        /// Ledger rows 10–12: numeric text converts at binding.
         #[test]
-        fn math_null_propagates() {
-            assert_eq!(min_fn(&vv(json!(null), json!(5))).unwrap(), json!(null));
-            assert_eq!(max_fn(&vv(json!(2), json!(null))).unwrap(), json!(null));
-            assert_eq!(abs_fn(&v(json!(null))).unwrap(), json!(null));
+        fn numeric_text_converts() {
+            assert_eq!(ok("min", &[json!("4"), json!(5)]), json!(4));
+            assert_eq!(ok("max", &[json!(" 4 "), json!("1_000")]), json!(1000));
+            assert_eq!(ok("abs", &[json!("-3.5")]), json!(3.5));
         }
 
+        /// Ledger rows 10–12: null is a type error (arithmetic family; it
+        /// propagated before), as are booleans and non-numeric text.
         #[test]
-        fn math_type_mismatch_errors() {
-            let err = min_fn(&vv(json!("foo"), json!(5))).unwrap_err();
-            assert!(err.contains("min"));
-            let err = max_fn(&vv(json!([]), json!(5))).unwrap_err();
-            assert!(err.contains("max"));
-            let err = abs_fn(&v(json!("nope"))).unwrap_err();
-            assert!(err.contains("abs"));
-        }
-
-        #[test]
-        fn math_with_boolean_returns_error() {
-            let err = min_fn(&vv(json!(true), json!(5))).unwrap_err();
-            assert!(err.contains("min"), "got: {err}");
-            let err = max_fn(&vv(json!(false), json!(5))).unwrap_err();
-            assert!(err.contains("max"), "got: {err}");
-            let err = abs_fn(&v(json!(true))).unwrap_err();
-            assert!(err.contains("abs"), "got: {err}");
-        }
-
-        #[test]
-        fn math_with_null_propagates() {
-            assert_eq!(min_fn(&vv(json!(null), json!(5))).unwrap(), json!(null));
-            assert_eq!(max_fn(&vv(json!(2), json!(null))).unwrap(), json!(null));
-            assert_eq!(abs_fn(&v(json!(null))).unwrap(), json!(null));
+        fn null_booleans_and_non_numbers_are_type_errors() {
+            type_error("min", &[json!(null), json!(5)]);
+            type_error("max", &[json!(2), json!(null)]);
+            type_error("abs", &[json!(null)]);
+            type_error("min", &[json!(true), json!(5)]);
+            type_error("max", &[json!(false), json!(5)]);
+            type_error("abs", &[json!(true)]);
+            type_error("min", &[json!("foo"), json!(5)]);
+            type_error("max", &[json!([]), json!(5)]);
         }
     }
 
@@ -3494,40 +1217,115 @@ mod tests {
         use super::*;
 
         #[test]
-        fn first_last_basic() {
-            assert_eq!(first_fn(&v(json!([1, 2, 3]))).unwrap(), json!(1));
-            assert_eq!(last_fn(&v(json!([1, 2, 3]))).unwrap(), json!(3));
+        fn first_last_basic_empty_and_null() {
+            assert_eq!(ok("first", &[json!([1, 2, 3])]), json!(1));
+            assert_eq!(ok("last", &[json!([1, 2, 3])]), json!(3));
+            for name in ["first", "last"] {
+                assert_eq!(ok(name, &[json!([])]), json!(null), "{name}");
+                assert_eq!(ok(name, &[json!(null)]), json!(null), "{name}");
+            }
         }
 
         #[test]
-        fn first_last_empty_returns_null() {
-            assert_eq!(first_fn(&v(json!([]))).unwrap(), json!(null));
-            assert_eq!(last_fn(&v(json!([]))).unwrap(), json!(null));
-        }
-
-        #[test]
-        fn first_last_null_propagates() {
-            assert_eq!(first_fn(&v(json!(null))).unwrap(), json!(null));
-            assert_eq!(last_fn(&v(json!(null))).unwrap(), json!(null));
-        }
-
-        #[test]
-        fn first_last_type_mismatch_errors() {
-            assert!(first_fn(&v(json!("hi"))).is_err());
-            assert!(last_fn(&v(json!({"a": 1}))).is_err());
+        fn first_last_reject_non_lists_at_binding() {
+            type_error("first", &[json!("hi")]);
+            type_error("last", &[json!({"a": 1})]);
         }
 
         #[test]
         fn last_preserves_typed_element() {
-            // The Sequence Plus `outputs` array has shape `(string | string[])[]`:
-            // a parallel group pushes a nested array. `last(outputs)` must return
-            // that element with its type intact, not a stringified form.
-            let outputs = json!(["one", ["a", "b"]]);
-            assert_eq!(last_fn(&v(outputs)).unwrap(), json!(["a", "b"]));
+            // `last(outputs)` over `(string | string[])[]` returns the nested
+            // array with its type intact, not a stringified form.
+            assert_eq!(ok("last", &[json!(["one", ["a", "b"]])]), json!(["a", "b"]));
+            assert_eq!(ok("last", &[json!(["x", {"k": 1}])]), json!({"k": 1}));
+        }
 
-            // An object element is likewise returned whole.
-            let mixed = json!(["x", {"k": 1}]);
-            assert_eq!(last_fn(&v(mixed)).unwrap(), json!({"k": 1}));
+        /// Ledger row 16: a null object or key is `false`; a non-object `obj`
+        /// is a type error (was `false`); a number key converts to text.
+        #[test]
+        fn has_key_follows_the_ledger() {
+            assert_eq!(ok("has_key", &[json!({"a": 1}), json!("a")]), json!(true));
+            assert_eq!(ok("haskey", &[json!({"a": 1}), json!("b")]), json!(false));
+            assert_eq!(ok("has_key", &[json!({"1": 1}), json!(1)]), json!(true));
+            assert_eq!(ok("has_key", &[json!(null), json!("a")]), json!(false));
+            assert_eq!(ok("has_key", &[json!({"a": 1}), json!(null)]), json!(false));
+            type_error("has_key", &[json!("x"), json!("a")]);
+            type_error("has_key", &[json!([]), json!("a")]);
+            type_error("has_key", &[json!({"a": 1}), json!(["a"])]);
+        }
+
+        #[test]
+        fn contains_compares_rendered_text() {
+            assert_eq!(ok("contains", &[json!("hello"), json!("ell")]), json!(true));
+            assert_eq!(ok("contains", &[json!("Hello"), json!("hel")]), json!(false));
+            assert_eq!(ok("contains", &[json!([4]), json!("4")]), json!(true));
+            assert_eq!(ok("contains", &[json!(["a", [1]]), json!([1])]), json!(true));
+            assert_eq!(ok("contains", &[json!({"a": "x"}), json!("a")]), json!(false));
+            assert_eq!(ok("contains", &[json!({"a": "x"}), json!("x")]), json!(true));
+            // A null needle renders as empty text; a null haystack is false.
+            assert_eq!(ok("contains", &[json!("abc"), json!(null)]), json!(true));
+            assert_eq!(ok("contains", &[json!(null), json!("a")]), json!(false));
+            // A numeric haystack converts to the string option.
+            assert_eq!(ok("contains", &[json!(2026), json!(20)]), json!(true));
+        }
+
+        /// Ledger row 18: booleans and null are type errors (were `0`).
+        #[test]
+        fn length_counts_and_rejects_booleans_and_null() {
+            assert_eq!(ok("length", &[json!("Hello 🌍")]), json!(7));
+            assert_eq!(ok("length", &[json!([1, 2, 3])]), json!(3));
+            assert_eq!(ok("length", &[json!({"a": 1, "b": 2})]), json!(2));
+            assert_eq!(ok("length", &[json!(2.5)]), json!(3));
+            assert_eq!(ok("length", &[json!(12345)]), json!(5));
+            assert_eq!(ok("length", &[json!("")]), json!(0));
+            type_error("length", &[json!(true)]);
+            type_error("length", &[json!(null)]);
+        }
+
+        #[test]
+        fn keys_and_values_keep_insertion_order() {
+            assert_eq!(ok("keys", &[json!({"b": 1, "a": [2]})]), json!(["b", "a"]));
+            assert_eq!(ok("values", &[json!({"b": 1, "a": [2]})]), json!([1, [2]]));
+            assert_eq!(ok("keys", &[json!(null)]), json!([]));
+            assert_eq!(ok("values", &[json!(null)]), json!([]));
+        }
+    }
+
+    mod fn_number_and_round {
+        use super::*;
+
+        /// Ledger row 19 and charter M12–M13.
+        #[test]
+        fn number_reads_numberlike_and_recovers_through_the_fallback() {
+            assert_eq!(ok("number", &[json!("4")]), json!(4));
+            assert_eq!(ok("number", &[json!(" 4 ")]), json!(4));
+            assert_eq!(ok("number", &[json!("+4")]), json!(4));
+            assert_eq!(ok("number", &[json!("1_000")]), json!(1000));
+            assert_eq!(ok("number", &[json!("2.5")]), json!(2.5));
+            assert_eq!(ok("number", &[json!(42)]), json!(42));
+            for subject in [json!("pear"), json!(null), json!(true), json!([]), json!("9007199254740993")] {
+                assert_eq!(ok("number", &[subject.clone(), json!(7)]), json!(7), "{subject}");
+            }
+            assert_eq!(ok("number", &[json!("pear"), json!("7")]), json!(7));
+            type_error("number", &[json!("pear")]);
+            type_error("number", &[json!("4"), json!("x")]);
+            binding_error("number", &[], CallErrorKind::Arity);
+        }
+
+        /// Ledger row 13 and charter M14: half away from zero; the fallback
+        /// is rounded too.
+        #[test]
+        fn round_rounds_half_away_from_zero() {
+            assert_eq!(ok("round", &[json!(3.7)]), json!(4));
+            assert_eq!(ok("round", &[json!("3.7")]), json!(4));
+            assert_eq!(ok("round", &[json!(-2.5)]), json!(-3));
+            assert_eq!(ok("round", &[json!(4.5)]), json!(5));
+            assert_eq!(ok("round", &[json!("pear"), json!(2.7)]), json!(3));
+            assert_eq!(ok("round", &[json!("pear"), json!("2.7")]), json!(3));
+            assert_eq!(ok("round", &[json!(9_007_199_254_740_992_u64)]), json!(9_007_199_254_740_992_u64));
+            type_error("round", &[json!("pear")]);
+            type_error("round", &[json!(null)]);
+            type_error("round", &[json!(true)]);
         }
     }
 
@@ -3535,283 +1333,223 @@ mod tests {
         use super::*;
 
         #[test]
-        fn startswith_endswith_basic() {
-            assert_eq!(
-                starts_with(&vv(json!("foobar"), json!("foo"))).unwrap(),
-                json!(true)
-            );
-            assert_eq!(
-                starts_with(&vv(json!("foobar"), json!("bar"))).unwrap(),
-                json!(false)
-            );
-            assert_eq!(
-                ends_with(&vv(json!("foobar"), json!("bar"))).unwrap(),
-                json!(true)
-            );
-            assert_eq!(
-                ends_with(&vv(json!("foobar"), json!("foo"))).unwrap(),
-                json!(false)
-            );
+        fn starts_with_ends_with_are_case_sensitive() {
+            assert_eq!(ok("starts_with", &[json!("foobar"), json!("foo")]), json!(true));
+            assert_eq!(ok("starts_with", &[json!("foobar"), json!("bar")]), json!(false));
+            assert_eq!(ok("ends_with", &[json!("foobar"), json!("bar")]), json!(true));
+            assert_eq!(ok("ends_with", &[json!("foobar"), json!("foo")]), json!(false));
+            assert_eq!(ok("startswith", &[json!("Foobar"), json!("foo")]), json!(false));
         }
 
+        /// Ledger rows 28–29: null is `false` (was `null`); numbers convert
+        /// to text (were type errors).
         #[test]
-        fn startswith_case_sensitive() {
-            assert_eq!(
-                starts_with(&vv(json!("Foobar"), json!("foo"))).unwrap(),
-                json!(false)
-            );
-        }
-
-        #[test]
-        fn startswith_endswith_null_propagates() {
-            assert_eq!(
-                starts_with(&vv(json!(null), json!("foo"))).unwrap(),
-                json!(null)
-            );
-            assert_eq!(
-                ends_with(&vv(json!("hi"), json!(null))).unwrap(),
-                json!(null)
-            );
-        }
-
-        #[test]
-        fn startswith_endswith_type_mismatch_errors() {
-            assert!(starts_with(&vv(json!(5), json!("foo"))).is_err());
-            assert!(ends_with(&vv(json!("hi"), json!(5))).is_err());
+        fn null_is_false_and_numbers_convert() {
+            assert_eq!(ok("starts_with", &[json!(null), json!("foo")]), json!(false));
+            assert_eq!(ok("ends_with", &[json!("hi"), json!(null)]), json!(false));
+            assert_eq!(ok("starts_with", &[json!(2026), json!(20)]), json!(true));
+            assert_eq!(ok("ends_with", &[json!(true), json!("ue")]), json!(true));
+            type_error("starts_with", &[json!(["a"]), json!("a")]);
         }
     }
 
     mod fn_string_mutations {
         use super::*;
 
+        fn one(name: &str, value: &str) -> String {
+            text(name, &[json!(value)])
+        }
+
         #[test]
         fn lower_upper_capitalize() {
-            assert_eq!(lower(&v(json!("FoO"))).unwrap(), json!("foo"));
-            assert_eq!(upper(&v(json!("FoO"))).unwrap(), json!("FOO"));
-            assert_eq!(capitalize(&v(json!("hello"))).unwrap(), json!("Hello"));
-            assert_eq!(capitalize(&v(json!(""))).unwrap(), json!(""));
+            assert_eq!(one("lower", "FoO"), "foo");
+            assert_eq!(one("upper", "FoO"), "FOO");
+            assert_eq!(one("capitalize", "hello"), "Hello");
+            assert_eq!(one("capitalize", ""), "");
         }
 
         #[test]
-        fn case_conversions_handle_whitespace_and_punctuation() {
-            assert_eq!(
-                kebab_case(&v(json!("Hello World!"))).unwrap(),
-                json!("hello-world")
-            );
-            assert_eq!(
-                snake_case(&v(json!("Hello World!"))).unwrap(),
-                json!("hello_world")
-            );
-            assert_eq!(
-                camel_case(&v(json!("hello world"))).unwrap(),
-                json!("helloWorld")
-            );
-            assert_eq!(
-                pascal_case(&v(json!("hello world"))).unwrap(),
-                json!("HelloWorld")
-            );
-            assert_eq!(
-                title_case(&v(json!("hello world"))).unwrap(),
-                json!("Hello World")
-            );
+        fn case_conversions() {
+            assert_eq!(one("kebab_case", "Hello World!"), "hello-world");
+            assert_eq!(one("snake_case", "Hello World!"), "hello_world");
+            assert_eq!(one("camel_case", "hello world"), "helloWorld");
+            assert_eq!(one("pascal_case", "hello world"), "HelloWorld");
+            assert_eq!(one("title_case", "hello world"), "Hello World");
+            assert_eq!(one("kebab_case", "foo_bar-baz"), "foo-bar-baz");
+            assert_eq!(one("snake_case", "fooBarBaz"), "foo_bar_baz");
+            assert_eq!(one("camel_case", "foo-bar_baz"), "fooBarBaz");
+            assert_eq!(one("pascal_case", "foo-bar_baz"), "FooBarBaz");
+            assert_eq!(one("snake_case", "XMLHttpRequest"), "xml_http_request");
+            assert_eq!(one("kebab_case", "XMLHttpRequest"), "xml-http-request");
+            for name in ["kebab_case", "snake_case", "camel_case", "pascal_case", "title_case"] {
+                assert_eq!(one(name, ""), "", "{name}");
+            }
+        }
+
+        const TRANSFORMS: [&str; 10] = [
+            "lower",
+            "upper",
+            "capitalize",
+            "kebab_case",
+            "snake_case",
+            "camel_case",
+            "pascal_case",
+            "title_case",
+            "trim",
+            "without_date",
+        ];
+
+        #[test]
+        fn transforms_pass_null_through() {
+            for name in TRANSFORMS {
+                assert_eq!(ok(name, &[json!(null)]), json!(null), "{name}");
+            }
+        }
+
+        /// Ledger rows 30–38 (widening only): numbers and booleans convert
+        /// to text; lists still do not.
+        #[test]
+        fn transforms_convert_numbers_and_booleans_to_text() {
+            assert_eq!(text("upper", &[json!(2026)]), "2026");
+            assert_eq!(text("lower", &[json!(5)]), "5");
+            assert_eq!(text("upper", &[json!(true)]), "TRUE");
+            assert_eq!(text("without_date", &[json!(123)]), "123");
+            for name in TRANSFORMS {
+                type_error(name, &[json!([])]);
+            }
         }
 
         #[test]
-        fn case_conversions_handle_existing_separators() {
-            assert_eq!(
-                kebab_case(&v(json!("foo_bar-baz"))).unwrap(),
-                json!("foo-bar-baz")
-            );
-            assert_eq!(
-                snake_case(&v(json!("fooBarBaz"))).unwrap(),
-                json!("foo_bar_baz")
-            );
-            assert_eq!(
-                camel_case(&v(json!("foo-bar_baz"))).unwrap(),
-                json!("fooBarBaz")
-            );
-            assert_eq!(
-                pascal_case(&v(json!("foo-bar_baz"))).unwrap(),
-                json!("FooBarBaz")
-            );
+        fn trim_removes_surrounding_whitespace() {
+            assert_eq!(one("trim", "  a b  "), "a b");
         }
 
         #[test]
-        fn case_conversions_handle_acronyms() {
-            assert_eq!(
-                snake_case(&v(json!("XMLHttpRequest"))).unwrap(),
-                json!("xml_http_request")
-            );
-            assert_eq!(
-                kebab_case(&v(json!("XMLHttpRequest"))).unwrap(),
-                json!("xml-http-request")
-            );
+        fn without_date_removes_valid_dates_and_preserves_invalid() {
+            assert_eq!(one("without_date", "plan 2026-06-15 review"), "plan  review");
+            assert_eq!(one("without_date", "invalid 2026-02-30 stays"), "invalid 2026-02-30 stays");
+            assert_eq!(one("without_date", "meeting 2026-06-15T10:30:00 here"), "meeting T10:30:00 here");
+            assert_eq!(one("withoutdate", "x 2026-06-15, y"), "x , y");
         }
 
-        #[test]
-        fn case_conversions_empty_string() {
-            assert_eq!(kebab_case(&v(json!(""))).unwrap(), json!(""));
-            assert_eq!(snake_case(&v(json!(""))).unwrap(), json!(""));
-            assert_eq!(camel_case(&v(json!(""))).unwrap(), json!(""));
-            assert_eq!(pascal_case(&v(json!(""))).unwrap(), json!(""));
-            assert_eq!(title_case(&v(json!(""))).unwrap(), json!(""));
-        }
-
-        #[test]
-        fn mutations_null_propagates() {
-            assert_eq!(lower(&v(json!(null))).unwrap(), json!(null));
-            assert_eq!(upper(&v(json!(null))).unwrap(), json!(null));
-            assert_eq!(capitalize(&v(json!(null))).unwrap(), json!(null));
-            assert_eq!(kebab_case(&v(json!(null))).unwrap(), json!(null));
-            assert_eq!(snake_case(&v(json!(null))).unwrap(), json!(null));
-            assert_eq!(camel_case(&v(json!(null))).unwrap(), json!(null));
-            assert_eq!(pascal_case(&v(json!(null))).unwrap(), json!(null));
-            assert_eq!(title_case(&v(json!(null))).unwrap(), json!(null));
-        }
-
-        #[test]
-        fn mutations_type_mismatch_errors() {
-            assert!(lower(&v(json!(5))).is_err());
-            assert!(upper(&v(json!(true))).is_err());
-            assert!(kebab_case(&v(json!([]))).is_err());
-        }
-
-        fn vvv(a: Value, b: Value, c: Value) -> Vec<Value> {
-            vec![a, b, c]
+        fn three(name: &str, x: Value, find: Value, replacement: Value) -> Value {
+            ok(name, &[x, find, replacement])
         }
 
         #[test]
         fn replace_core_behavior() {
-            assert_eq!(
-                replace(&vvv(json!("a.b.c"), json!("."), json!("/"))).unwrap(),
-                json!("a/b/c")
-            );
-            assert_eq!(
-                replace_first(&vvv(json!("a.b.c"), json!("."), json!("/"))).unwrap(),
-                json!("a/b.c")
-            );
-            assert_eq!(
-                replace_last(&vvv(json!("a.b.c"), json!("."), json!("/"))).unwrap(),
-                json!("a.b/c")
-            );
-            assert_eq!(
-                replace(&vvv(json!("aaa"), json!("a"), json!("bb"))).unwrap(),
-                json!("bbbbbb")
-            );
-            assert_eq!(
-                replace_first(&vvv(json!("foofoo"), json!("foo"), json!("bar"))).unwrap(),
-                json!("barfoo")
-            );
-            assert_eq!(
-                replace_last(&vvv(json!("foofoo"), json!("foo"), json!("bar"))).unwrap(),
-                json!("foobar")
-            );
+            assert_eq!(three("replace", json!("a.b.c"), json!("."), json!("/")), json!("a/b/c"));
+            assert_eq!(three("replace_first", json!("a.b.c"), json!("."), json!("/")), json!("a/b.c"));
+            assert_eq!(three("replacefirst", json!("a.b.c"), json!("."), json!("/")), json!("a/b.c"));
+            assert_eq!(three("replace_last", json!("a.b.c"), json!("."), json!("/")), json!("a.b/c"));
+            assert_eq!(three("replacelast", json!("a.b.c"), json!("."), json!("/")), json!("a.b/c"));
+            assert_eq!(three("replace", json!("aaa"), json!("a"), json!("bb")), json!("bbbbbb"));
+            assert_eq!(three("replace_first", json!("foofoo"), json!("foo"), json!("bar")), json!("barfoo"));
+            assert_eq!(three("replace_last", json!("foofoo"), json!("foo"), json!("bar")), json!("foobar"));
         }
 
         #[test]
-        fn replace_empty_find_is_noop() {
-            assert_eq!(
-                replace(&vvv(json!("abc"), json!(""), json!("X"))).unwrap(),
-                json!("abc")
-            );
-            assert_eq!(
-                replace_first(&vvv(json!("abc"), json!(""), json!("X"))).unwrap(),
-                json!("abc")
-            );
-            assert_eq!(
-                replace_last(&vvv(json!("abc"), json!(""), json!("X"))).unwrap(),
-                json!("abc")
-            );
-        }
-
-        #[test]
-        fn replace_no_match_is_noop() {
-            assert_eq!(
-                replace(&vvv(json!("hello"), json!("z"), json!("Q"))).unwrap(),
-                json!("hello")
-            );
-            assert_eq!(
-                replace_first(&vvv(json!("hello"), json!("z"), json!("Q"))).unwrap(),
-                json!("hello")
-            );
-            assert_eq!(
-                replace_last(&vvv(json!("hello"), json!("z"), json!("Q"))).unwrap(),
-                json!("hello")
-            );
+        fn replace_empty_find_and_no_match_are_noops() {
+            for name in ["replace", "replace_first", "replace_last"] {
+                assert_eq!(three(name, json!("abc"), json!(""), json!("X")), json!("abc"), "{name}");
+                assert_eq!(three(name, json!("hello"), json!("z"), json!("Q")), json!("hello"), "{name}");
+            }
         }
 
         #[test]
         fn replace_is_case_sensitive_and_literal() {
-            // Only the lowercase run matches — matching is case-sensitive.
-            assert_eq!(
-                replace(&vvv(json!("ABCabc"), json!("abc"), json!("X"))).unwrap(),
-                json!("ABCX")
-            );
-            // `find` is a literal substring; regex-special characters carry no
-            // special meaning.
-            assert_eq!(
-                replace(&vvv(json!("a.b(c)"), json!("."), json!("*"))).unwrap(),
-                json!("a*b(c)")
-            );
-            assert_eq!(
-                replace(&vvv(json!("a(b)(c)"), json!("("), json!("["))).unwrap(),
-                json!("a[b)[c)")
-            );
-            assert_eq!(
-                replace_last(&vvv(json!("a.b.c"), json!("."), json!("[.]"))).unwrap(),
-                json!("a.b[.]c")
-            );
+            assert_eq!(three("replace", json!("ABCabc"), json!("abc"), json!("X")), json!("ABCX"));
+            assert_eq!(three("replace", json!("a.b(c)"), json!("."), json!("*")), json!("a*b(c)"));
+            assert_eq!(three("replace", json!("a(b)(c)"), json!("("), json!("[")), json!("a[b)[c)"));
+            assert_eq!(three("replace_last", json!("a.b.c"), json!("."), json!("[.]")), json!("a.b[.]c"));
+        }
+
+        /// Ledger rows 41–43: null passes through in every position; numbers
+        /// and booleans convert to text (were type errors).
+        #[test]
+        fn replace_passes_null_through_and_converts_scalars() {
+            for name in ["replace", "replace_first", "replace_last"] {
+                assert_eq!(three(name, json!(null), json!("."), json!("/")), json!(null), "{name}");
+                assert_eq!(three(name, json!("a.b"), json!(null), json!("/")), json!(null), "{name}");
+                assert_eq!(three(name, json!("a.b"), json!("."), json!(null)), json!(null), "{name}");
+                assert_eq!(three(name, json!(1.5), json!("."), json!(true)), json!("1true5"), "{name}");
+                type_error(name, &[json!("a"), json!(["."]), json!("/")]);
+                binding_error(name, &[json!("a"), json!(".")], CallErrorKind::Arity);
+                binding_error(name, &[json!("a"), json!("."), json!("/"), json!("extra")], CallErrorKind::Arity);
+            }
+        }
+    }
+
+    mod fn_ensure_affix {
+        use super::*;
+
+        fn two(name: &str, var: Value, affix: Value) -> Value {
+            ok(name, &[var, affix])
         }
 
         #[test]
-        fn replace_null_propagates_in_every_position() {
-            for f in [replace, replace_first, replace_last] {
-                assert_eq!(
-                    f(&vvv(json!(null), json!("."), json!("/"))).unwrap(),
-                    json!(null)
-                );
-                assert_eq!(
-                    f(&vvv(json!("a.b"), json!(null), json!("/"))).unwrap(),
-                    json!(null)
-                );
-                assert_eq!(
-                    f(&vvv(json!("a.b"), json!("."), json!(null))).unwrap(),
-                    json!(null)
-                );
+        fn ensure_leading_examples() {
+            assert_eq!(two("ensure_leading", json!("foobar"), json!("foo")), json!("foobar"));
+            assert_eq!(two("ensure_leading", json!("bar"), json!("foo")), json!("foobar"));
+            assert_eq!(two("ensure_leading", json!(123), json!(4)), json!(4123));
+            assert_eq!(two("ensure_leading", json!(123), json!("4")), json!(4123));
+            assert_eq!(two("ensure_leading", json!("123"), json!(4)), json!("4123"));
+            assert_eq!(two("ensure_leading", json!(123), json!("x")), json!("x123"));
+        }
+
+        #[test]
+        fn ensure_leading_preserves_number_type_when_already_prefixed() {
+            assert_eq!(two("ensure_leading", json!(123), json!("12")), json!(123));
+            assert_eq!(two("ensure_leading", json!(123), json!(12)), json!(123));
+        }
+
+        #[test]
+        fn ensure_trailing_examples() {
+            assert_eq!(two("ensure_trailing", json!("foobar"), json!("bar")), json!("foobar"));
+            assert_eq!(two("ensure_trailing", json!("foo"), json!("bar")), json!("foobar"));
+            assert_eq!(two("ensure_trailing", json!(123), json!(4)), json!(1234));
+            assert_eq!(two("ensuretrailing", json!("123"), json!(4)), json!("1234"));
+        }
+
+        #[test]
+        fn null_passes_through() {
+            for name in ["ensure_leading", "ensure_trailing"] {
+                assert_eq!(two(name, json!(null), json!("foo")), json!(null), "{name}");
+                assert_eq!(two(name, json!("bar"), json!(null)), json!(null), "{name}");
             }
         }
 
+        /// Ledger rows 39–40: a boolean selects the string option and becomes
+        /// its text (was rejected); lists and objects stay type errors.
         #[test]
-        fn replace_type_mismatch_errors_in_every_position() {
-            for f in [replace, replace_first, replace_last] {
-                assert!(f(&vvv(json!(5), json!("."), json!("/"))).is_err());
-                assert!(f(&vvv(json!("a"), json!(1), json!("/"))).is_err());
-                assert!(f(&vvv(json!("a"), json!("."), json!(true))).is_err());
-            }
+        fn booleans_become_text_and_containers_are_type_errors() {
+            assert_eq!(two("ensure_leading", json!(true), json!("is-")), json!("is-true"));
+            assert_eq!(two("ensure_trailing", json!("foo"), json!(false)), json!("foofalse"));
+            type_error("ensure_leading", &[json!([1]), json!("foo")]);
+            type_error("ensure_leading", &[json!("bar"), json!({"a": 1})]);
+            type_error("ensure_trailing", &[json!([]), json!("bar")]);
+            binding_error("ensure_leading", &[json!("a")], CallErrorKind::Arity);
         }
+    }
+
+    mod fn_terminal {
+        use super::*;
 
         #[test]
-        fn replace_arity_errors() {
-            for f in [replace, replace_first, replace_last] {
-                assert!(f(&vv(json!("a"), json!("."))).is_err());
-                assert!(
-                    f(&[json!("a"), json!("."), json!("/"), json!("extra")]).is_err()
-                );
-            }
+        fn terminal_renders_bold_markup() {
+            let out = text("terminal", &[json!("<bold>x</bold>")]);
+            assert!(out.contains("\x1b[1m"), "expected bold SGR sequence in {out:?}");
+            assert!(out.contains('x'), "expected literal x in {out:?}");
+            assert_eq!(text("terminal", &[json!("hello world")]), "hello world");
         }
 
+        /// Ledger row 44: null passes through; a number converts to text.
         #[test]
-        fn replace_dispatches_by_canonical_name_and_alias() {
-            let call = |name: &str| {
-                dispatch(name, &vvv(json!("a.b.c"), json!("."), json!("/")))
-                    .unwrap()
-                    .unwrap()
-            };
-            assert_eq!(call("replace"), json!("a/b/c"));
-            assert_eq!(call("replace_first"), json!("a/b.c"));
-            assert_eq!(call("replacefirst"), json!("a/b.c"));
-            assert_eq!(call("replace_last"), json!("a.b/c"));
-            assert_eq!(call("replacelast"), json!("a.b/c"));
+        fn terminal_passes_null_through_and_converts_numbers() {
+            assert_eq!(ok("terminal", &[json!(null)]), json!(null));
+            assert_eq!(text("terminal", &[json!(123)]), "123");
+            type_error("terminal", &[json!([1, 2])]);
+            binding_error("terminal", &[], CallErrorKind::Arity);
         }
     }
 
@@ -3819,529 +1557,79 @@ mod tests {
         use super::*;
 
         #[test]
-        fn ordinal_suffix_covers_teens_and_units() {
-            assert_eq!(ordinal_suffix(1), "st");
-            assert_eq!(ordinal_suffix(2), "nd");
-            assert_eq!(ordinal_suffix(3), "rd");
-            assert_eq!(ordinal_suffix(4), "th");
-            assert_eq!(ordinal_suffix(11), "th");
-            assert_eq!(ordinal_suffix(12), "th");
-            assert_eq!(ordinal_suffix(13), "th");
-            assert_eq!(ordinal_suffix(21), "st");
-            assert_eq!(ordinal_suffix(22), "nd");
-            assert_eq!(ordinal_suffix(23), "rd");
-        }
-
-        #[test]
         fn date_formats_known_patterns() {
-            let d = |iso: &str, fmt: &str| date_fn(&[json!(iso), json!(fmt)]).unwrap();
-            assert_eq!(d("2026-07-12", "MMMM Do"), json!("July 12th"));
-            assert_eq!(d("2026-07-12", "short"), json!("July 12th"));
-            assert_eq!(d("2026-07-12", "MMMM Do YYYY"), json!("July 12th 2026"));
-            assert_eq!(d("2021-07-12", "D MMMM YYYY"), json!("12 July 2021"));
-            assert_eq!(d("2021-07-12", "long"), json!("Mon, July 12th, 2021"));
+            let d = |iso: &str, fmt: &str| text("date", &[json!(iso), json!(fmt)]);
+            assert_eq!(d("2026-07-12", "MMMM Do"), "July 12th");
+            assert_eq!(d("2026-07-12", "short"), "July 12th");
+            assert_eq!(d("2026-07-12", "MMMM Do YYYY"), "July 12th 2026");
+            assert_eq!(d("2021-07-12", "D MMMM YYYY"), "12 July 2021");
+            assert_eq!(d("2021-07-12", "long"), "Mon, July 12th, 2021");
+            assert_eq!(d("2021-07-12T08:30:00Z", "long"), "Mon, July 12th, 2021");
+            assert_eq!(d("2021-07-12 08:30", "D MMMM YYYY"), "12 July 2021");
             // [YYYY] optional-year extension: omit year when it equals the current year.
-            let current_year = Local::now().format("%Y").to_string();
-            let same_year = format!("{current_year}-07-12");
-            assert_eq!(
-                date_fn(&[json!(same_year), json!("MMMM Do [YYYY]")]).unwrap(),
-                json!("July 12th")
-            );
-            assert_eq!(
-                date_fn(&[json!("1999-07-12"), json!("MMMM Do [YYYY]")]).unwrap(),
-                json!("July 12th 1999")
-            );
+            let same_year = format!("{}-07-12", Local::now().format("%Y"));
+            assert_eq!(d(&same_year, "MMMM Do [YYYY]"), "July 12th");
+            assert_eq!(d("1999-07-12", "MMMM Do [YYYY]"), "July 12th 1999");
+        }
+
+        /// The refined `iso` and `fmt` types reject malformed input at
+        /// binding, before the handler parses anything.
+        #[test]
+        fn invalid_iso_and_unknown_formats_are_type_errors() {
+            type_error("date", &[json!("not-a-date"), json!("short")]);
+            type_error("date", &[json!("2026-07-12"), json!("nope")]);
         }
 
         #[test]
-        fn date_errors_on_invalid_iso() {
-            let err = date_fn(&[json!("not-a-date"), json!("short")]);
-            assert!(err.is_err(), "expected error for invalid ISO input");
-        }
-
-        #[test]
-        fn date_errors_on_unknown_format() {
-            let err = date_fn(&[json!("2026-07-12"), json!("nope")]);
-            assert!(err.is_err(), "expected error for unknown format token");
-        }
-
-        #[test]
-        fn date_null_propagates() {
-            assert_eq!(date_fn(&[json!(null), json!("short")]).unwrap(), json!(null));
-        }
-
-        #[test]
-        fn date_dispatches_by_name() {
-            let result = dispatch("date", &[json!("2021-07-12"), json!("long")]);
-            assert_eq!(result.unwrap().unwrap(), json!("Mon, July 12th, 2021"));
+        fn date_passes_null_through() {
+            assert_eq!(ok("date", &[json!(null), json!("short")]), json!(null));
+            assert_eq!(ok("date", &[json!("2026-07-12"), json!(null)]), json!(null));
         }
     }
 
-    mod fn_filesystem {
+    mod fn_date_validators {
         use super::*;
 
         #[test]
-        fn dispatch_fs_returns_none_for_non_fs_names() {
-            let ctx = ResolutionContext::at(std::path::PathBuf::from("."));
-            assert!(dispatch_fs("lower", &[json!("x")], &ctx).is_none());
-        }
-
-        #[test]
-        fn dirname_renamed_without_dir_alias() {
-            // A relative context directory fails resolution validation.
-            let dir = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::at(dir.path().to_path_buf());
-            assert_eq!(
-                dispatch_fs("dirname", &[json!("sub/note.md")], &ctx)
-                    .unwrap()
-                    .unwrap(),
-                json!("sub")
-            );
-            assert!(dispatch_fs("dir", &[json!("sub/note.md")], &ctx).is_none());
-        }
-
-        #[test]
-        fn absolute_and_file_exists_resolve_relative_to_base_dir() {
-            let dir = tempfile::TempDir::new().unwrap();
-            std::fs::write(dir.path().join("a.md"), "# A\n").unwrap();
-            let ctx = ResolutionContext::at(dir.path().to_path_buf());
-
-            let abs = absolute_fn(&[json!("a.md")], &ctx).unwrap();
-            assert_eq!(
-                abs,
-                json!(dir.path().join("a.md").to_string_lossy().to_string())
-            );
-
-            assert_eq!(file_exists_fn(&[json!("a.md")], &ctx).unwrap(), json!(true));
-            assert_eq!(
-                file_exists_fn(&[json!("missing.md")], &ctx).unwrap(),
-                json!(false)
-            );
-            // An invalid reference is an error, never a missing file.
-            assert!(matches!(
-                file_exists_fn(&[json!("\0bad")], &ctx),
-                Err(ExpressionError::FileReference(_))
-            ));
-        }
-
-        #[test]
-        fn absolute_repository_scoped_reference_uses_package_before_repository() {
-            let repo = tempfile::TempDir::new().unwrap();
-            let package_area = repo.path().join("darkmatter");
-            let base_dir = package_area.join("docs");
-            std::fs::create_dir_all(&base_dir).unwrap();
-            std::fs::write(repo.path().join("shared.md"), "repository decoy").unwrap();
-            std::fs::write(package_area.join("shared.md"), "package").unwrap();
-            let catalog = biscuit_file::RepositoryScopeCatalog::new(
-                repo.path(),
-                vec![package_area.clone()],
-                vec![package_area.clone()],
-                biscuit_file::PackageAreaFallback::FirstComponent,
-            )
-            .unwrap();
-            let snapshot = biscuit_file::FileResolutionContext::new(&base_dir)
-                .with_repository_scope_catalog(catalog);
-            let mut ctx = ResolutionContext::at(base_dir)
-                .with_repository_root(repo.path())
-                .with_package_area(&package_area);
-            ctx.file_resolution_context = snapshot;
-
-            assert_eq!(
-                absolute_fn(&[json!("^shared.md")], &ctx).unwrap(),
-                json!(package_area.join("shared.md").to_string_lossy().to_string()),
-            );
-        }
-
-        #[test]
-        #[serial_test::serial]
-        fn file_exists_does_not_consult_launch_area_fallback_or_process_cwd() {
-            // Per D2 the launch-area fallback is not a resolution input for a
-            // reference authored inside a document. A file present only under the
-            // configured fallback (and not under base_dir) reads as missing, and
-            // the ambient process CWD is likewise never consulted.
-            let launch_dir = tempfile::TempDir::new().unwrap();
-            std::fs::write(launch_dir.path().join("plan.md"), "# Plan\n").unwrap();
-            // base_dir deliberately lacks plan.md.
-            let base_dir = tempfile::TempDir::new().unwrap();
-            // An unrelated directory the process is chdir'd into: plan.md is NOT
-            // here either.
-            let unrelated_dir = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::at(base_dir.path().to_path_buf())
-                .with_file_ref_fallback_dir(launch_dir.path().to_path_buf());
-
-            let original = std::env::current_dir().unwrap();
-            std::env::set_current_dir(unrelated_dir.path()).unwrap();
-            let found = file_exists_fn(&[json!("plan.md")], &ctx);
-            std::env::set_current_dir(&original).unwrap();
-
-            assert_eq!(found.unwrap(), json!(false));
-        }
-
-        #[test]
-        #[serial_test::serial]
-        fn file_exists_without_fallback_ignores_process_cwd() {
-            // With no explicit fallback, resolution stays document-relative and
-            // does NOT consult the mutated ambient CWD — the legacy fallback is
-            // gone. A file present only under the process CWD reads as missing.
-            let cwd_dir = tempfile::TempDir::new().unwrap();
-            std::fs::write(cwd_dir.path().join("ambient.md"), "# Ambient\n").unwrap();
-            let base_dir = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::at(base_dir.path().to_path_buf());
-
-            let original = std::env::current_dir().unwrap();
-            std::env::set_current_dir(cwd_dir.path()).unwrap();
-            let found = file_exists_fn(&[json!("ambient.md")], &ctx);
-            std::env::set_current_dir(&original).unwrap();
-
-            assert_eq!(found.unwrap(), json!(false));
-        }
-
-        #[test]
-        fn relative_returns_repo_or_cwd_relative_path() {
-            let dir = tempfile::TempDir::new().unwrap();
-            std::fs::create_dir_all(dir.path().join("sub")).unwrap();
-            std::fs::write(dir.path().join("sub/a.md"), "# A\n").unwrap();
-            let ctx = ResolutionContext::at(dir.path().to_path_buf());
-            let rel = relative_fn(&[json!("sub/a.md")], &ctx).unwrap();
-            assert_eq!(rel, json!("sub/a.md"));
-        }
-
-        #[test]
-        fn frontmatter_reads_whole_map_and_single_prop() {
-            let dir = tempfile::TempDir::new().unwrap();
-            std::fs::write(
-                dir.path().join("d.md"),
-                "---\ntitle: Hi\nstatus: draft\n---\nBody\n",
-            )
-            .unwrap();
-            let ctx = ResolutionContext::at(dir.path().to_path_buf());
-
-            let whole = frontmatter_fn(&[json!("d.md")], &ctx).unwrap();
-            assert_eq!(whole["title"], json!("Hi"));
-
-            let one = frontmatter_fn(&[json!("d.md"), json!("status")], &ctx).unwrap();
-            assert_eq!(one, json!("draft"));
-
-            // Missing prop → null (not error).
-            let missing = frontmatter_fn(&[json!("d.md"), json!("nope")], &ctx).unwrap();
-            assert_eq!(missing, Value::Null);
-
-            // Invalid filepath → error.
-            assert!(frontmatter_fn(&[json!("does-not-exist.md")], &ctx).is_err());
-        }
-
-        #[test]
-        #[cfg(unix)]
-        fn load_markdown_unreadable_file_yields_typed_file_reference() {
-            use std::os::unix::fs::PermissionsExt;
-            // A reference that resolves to a real file but cannot be read
-            // (permission denied) must surface through the shared FileReference
-            // diagnostic carrying the typed `Io` cause — not an opaque `Other`
-            // string — so it renders like any other invalid reference (finding #4).
-            let dir = tempfile::TempDir::new().unwrap();
-            let path = dir.path().join("locked.md");
-            std::fs::write(&path, "---\ntitle: T\n---\n").unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
-
-            // Running as root bypasses the permission bits — skip rather than flake.
-            if std::fs::read_to_string(&path).is_ok() {
-                return;
+        fn is_date_accepts_strict_iso_dates_only() {
+            for name in ["is_date", "is_date_utc", "isdate"] {
+                assert_eq!(ok(name, &[json!("2024-06-15")]), json!(true), "{name}");
             }
-            let ctx = ResolutionContext::at(dir.path().to_path_buf());
-
-            match frontmatter_fn(&[json!("locked.md")], &ctx).unwrap_err() {
-                ExpressionError::FileReference(diagnostic) => {
-                    assert_eq!(diagnostic.function, "frontmatter");
-                    assert!(
-                        diagnostic.source.is_some(),
-                        "the typed Io cause must be preserved"
-                    );
-                }
-                other => panic!("expected a FileReference diagnostic, got: {other:?}"),
+            for value in [json!("2024/06/15"), json!("06-15-2024"), json!("2024-13-01"), json!("2024-06-15T00:00:00")] {
+                assert_eq!(ok("is_date", std::slice::from_ref(&value)), json!(false), "{value}");
+            }
+            for value in [json!(null), json!(20240615), json!(true)] {
+                assert_eq!(ok("is_date", std::slice::from_ref(&value)), json!(false), "{value}");
+                assert_eq!(ok("is_date_utc", std::slice::from_ref(&value)), json!(false), "{value}");
             }
         }
 
         #[test]
-        fn markdown_body_empty_and_title() {
-            let dir = tempfile::TempDir::new().unwrap();
-            std::fs::write(dir.path().join("empty.md"), "---\ntitle: T\n---\n\n   \n").unwrap();
-            std::fs::write(dir.path().join("full.md"), "---\n---\n# Heading\n\nWords\n").unwrap();
-            std::fs::write(dir.path().join("fm_title.md"), "---\ntitle: FM\n---\n# H1\n").unwrap();
-            let ctx = ResolutionContext::at(dir.path().to_path_buf());
-
-            assert_eq!(
-                markdown_body_empty_fn(&[json!("empty.md")], &ctx).unwrap(),
-                json!(true)
-            );
-            assert_eq!(
-                markdown_body_empty_fn(&[json!("full.md")], &ctx).unwrap(),
-                json!(false)
-            );
-            // Frontmatter title wins over H1.
-            assert_eq!(
-                markdown_title_fn(&[json!("fm_title.md")], &ctx).unwrap(),
-                json!("FM")
-            );
-            // No frontmatter title → first H1.
-            assert_eq!(
-                markdown_title_fn(&[json!("full.md")], &ctx).unwrap(),
-                json!("Heading")
-            );
-        }
-
-        #[test]
-        fn validate_schema_true_when_no_schema_property() {
-            let dir = tempfile::TempDir::new().unwrap();
-            std::fs::write(dir.path().join("plain.md"), "---\ntitle: T\n---\nBody\n").unwrap();
-            let ctx = ResolutionContext::at(dir.path().to_path_buf());
-            assert_eq!(
-                validate_schema_fn(&[json!("plain.md")], &ctx).unwrap(),
-                json!(true)
-            );
-        }
-
-        // A near-universal shell binary, chosen per-OS so the PATH probe also
-        // exercises Windows `PATHEXT` extension resolution (`cmd` → `cmd.exe`).
-        #[cfg(windows)]
-        const PROBE_BINARY: &str = "cmd";
-        #[cfg(not(windows))]
-        const PROBE_BINARY: &str = "sh";
-
-        #[test]
-        fn has_command_found_on_path_returns_true() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            // Guard behind an independent probe so a minimal CI image lacking
-            // the binary skips the positive assertion instead of failing.
-            if which::which(PROBE_BINARY).is_ok() {
-                assert_eq!(
-                    has_command_fn(&[json!(PROBE_BINARY)], &ctx).unwrap(),
-                    json!(true)
-                );
+        fn is_date_time_accepts_iso_datetimes_only() {
+            for value in ["2024-06-15T12:30:00", "2024-06-15T12:30:00Z", "2024-06-15T12:30:00+02:00", "2024-06-15T12:30:00.123"] {
+                assert_eq!(ok("is_date_time", &[json!(value)]), json!(true), "{value}");
+            }
+            assert_eq!(ok("is_date_time_utc", &[json!("2024-06-15T12:30:00Z")]), json!(true));
+            for value in [json!("2024-06-15"), json!("nope"), json!(null), json!(123)] {
+                assert_eq!(ok("is_datetime", std::slice::from_ref(&value)), json!(false), "{value}");
             }
         }
 
         #[test]
-        fn has_command_missing_returns_false() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            assert_eq!(
-                has_command_fn(&[json!("definitely-not-a-real-bin-zzz")], &ctx).unwrap(),
-                json!(false)
-            );
-        }
-
-        #[test]
-        fn has_command_non_string_and_empty_read_as_false() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            for arg in [
-                json!(null),
-                json!(42),
-                json!([]),
-                json!({"a": 1}),
-                json!(true),
-                json!(""),
-            ] {
-                assert_eq!(
-                    has_command_fn(std::slice::from_ref(&arg), &ctx).unwrap(),
-                    json!(false),
-                    "arg: {arg}"
-                );
+        fn relative_validators_read_the_wall_clock() {
+            let today = Local::now().date_naive();
+            let iso = |date: NaiveDate| json!(date.format("%Y-%m-%d").to_string());
+            assert_eq!(ok("is_today", &[iso(today)]), json!(true));
+            assert_eq!(ok("is_yesterday", &[iso(today.pred_opt().unwrap())]), json!(true));
+            assert_eq!(ok("is_tomorrow", &[iso(today.succ_opt().unwrap())]), json!(true));
+            assert_eq!(ok("is_this_month", &[iso(today)]), json!(true));
+            assert_eq!(ok("is_this_year", &[iso(today)]), json!(true));
+            let utc_today = Utc::now().date_naive();
+            assert_eq!(ok("is_today_utc", &[iso(utc_today)]), json!(true));
+            for name in ["is_today", "is_yesterday_utc", "is_tomorrow_utc", "is_this_month_utc", "is_this_year_utc"] {
+                assert_eq!(ok(name, &[json!(null)]), json!(false), "{name}");
+                assert_eq!(ok(name, &[json!(20240615)]), json!(false), "{name}");
             }
-        }
-
-        #[test]
-        fn has_command_absolute_path_to_missing_returns_false() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            let missing = std::env::temp_dir().join("definitely-not-a-real-zzz-bin");
-            assert_eq!(
-                has_command_fn(&[json!(missing.to_string_lossy().to_string())], &ctx).unwrap(),
-                json!(false)
-            );
-        }
-
-        #[test]
-        #[cfg(unix)]
-        fn has_command_absolute_path_to_executable_returns_true() {
-            use std::os::unix::fs::PermissionsExt;
-            let dir = tempfile::TempDir::new().unwrap();
-            let path = dir.path().join("tool");
-            std::fs::write(&path, "#!/bin/sh\n").unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-            let ctx = ResolutionContext::at(dir.path().to_path_buf());
-            assert_eq!(
-                has_command_fn(&[json!(path.to_string_lossy().to_string())], &ctx).unwrap(),
-                json!(true)
-            );
-        }
-
-        #[test]
-        #[cfg(unix)]
-        fn has_command_absolute_path_to_non_executable_returns_false() {
-            use std::os::unix::fs::PermissionsExt;
-            let dir = tempfile::TempDir::new().unwrap();
-            let path = dir.path().join("data.txt");
-            std::fs::write(&path, "not executable\n").unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-            let ctx = ResolutionContext::at(dir.path().to_path_buf());
-            assert_eq!(
-                has_command_fn(&[json!(path.to_string_lossy().to_string())], &ctx).unwrap(),
-                json!(false)
-            );
-        }
-
-        #[test]
-        fn has_command_directory_returns_false() {
-            let dir = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::at(dir.path().to_path_buf());
-            assert_eq!(
-                has_command_fn(&[json!(dir.path().to_string_lossy().to_string())], &ctx).unwrap(),
-                json!(false)
-            );
-        }
-
-        #[test]
-        fn has_command_tilde_is_not_expanded() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            assert_eq!(
-                has_command_fn(&[json!("~/bin/x")], &ctx).unwrap(),
-                json!(false)
-            );
-        }
-
-        #[test]
-        fn has_command_relative_path_is_not_resolved() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            assert_eq!(
-                has_command_fn(&[json!("./mytool")], &ctx).unwrap(),
-                json!(false)
-            );
-            assert_eq!(
-                has_command_fn(&[json!("bin/mytool")], &ctx).unwrap(),
-                json!(false)
-            );
-        }
-
-        #[test]
-        #[serial_test::serial]
-        fn has_command_relative_path_ignores_existing_cwd_executable() {
-            // Regression: `which::which` resolves relative paths against the
-            // process CWD, so a real executable at `./mytool` used to read as
-            // `true`. The spec pins relative paths to `false` regardless of
-            // what exists under the CWD.
-            #[cfg(windows)]
-            const TOOL: &str = "mytool.bat";
-            #[cfg(not(windows))]
-            const TOOL: &str = "mytool";
-
-            let dir = tempfile::TempDir::new().unwrap();
-            std::fs::create_dir(dir.path().join("bin")).unwrap();
-            for rel in [TOOL, &format!("bin/{TOOL}")] {
-                let path = dir.path().join(rel);
-                std::fs::write(&path, "#!/bin/sh\n").unwrap();
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    std::fs::set_permissions(
-                        &path,
-                        std::fs::Permissions::from_mode(0o755),
-                    )
-                    .unwrap();
-                }
-            }
-            let ctx = ResolutionContext::at(dir.path().to_path_buf());
-
-            let original = std::env::current_dir().unwrap();
-            std::env::set_current_dir(dir.path()).unwrap();
-            let dot_relative = has_command_fn(&[json!(format!("./{TOOL}"))], &ctx);
-            let bare_relative = has_command_fn(&[json!(format!("bin/{TOOL}"))], &ctx);
-            std::env::set_current_dir(&original).unwrap();
-
-            assert_eq!(dot_relative.unwrap(), json!(false));
-            assert_eq!(bare_relative.unwrap(), json!(false));
-        }
-
-        #[test]
-        fn has_command_requires_exactly_one_arg() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            assert!(has_command_fn(&[], &ctx).is_err());
-            assert!(has_command_fn(&[json!("sh"), json!("extra")], &ctx).is_err());
-        }
-
-        #[test]
-        fn has_command_dispatches_by_canonical_and_alias() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            assert_eq!(
-                dispatch_fs("has_command", &[json!("definitely-not-a-real-bin-zzz")], &ctx)
-                    .unwrap()
-                    .unwrap(),
-                json!(false)
-            );
-            assert_eq!(
-                dispatch_fs("hascommand", &[json!("definitely-not-a-real-bin-zzz")], &ctx)
-                    .unwrap()
-                    .unwrap(),
-                json!(false)
-            );
-        }
-    }
-
-    mod fn_isdate_strict {
-        use super::*;
-
-        #[test]
-        fn isdate_accepts_iso_dates() {
-            assert_eq!(is_date(&v(json!("2024-06-15"))).unwrap(), json!(true));
-            assert_eq!(is_date_utc(&v(json!("2024-06-15"))).unwrap(), json!(true));
-        }
-
-        #[test]
-        fn isdate_rejects_bad_formats() {
-            assert_eq!(is_date(&v(json!("2024/06/15"))).unwrap(), json!(false));
-            assert_eq!(is_date(&v(json!("06-15-2024"))).unwrap(), json!(false));
-            assert_eq!(is_date(&v(json!("2024-13-01"))).unwrap(), json!(false));
-            assert_eq!(
-                is_date(&v(json!("2024-06-15T00:00:00"))).unwrap(),
-                json!(false)
-            );
-        }
-
-        #[test]
-        fn isdate_rejects_non_strings_including_null() {
-            assert_eq!(is_date(&v(json!(null))).unwrap(), json!(false));
-            assert_eq!(is_date(&v(json!(20240615))).unwrap(), json!(false));
-            assert_eq!(is_date(&v(json!(true))).unwrap(), json!(false));
-            assert_eq!(is_date_utc(&v(json!(null))).unwrap(), json!(false));
-        }
-
-        #[test]
-        fn isdatetime_accepts_iso_datetimes() {
-            assert_eq!(
-                is_datetime(&v(json!("2024-06-15T12:30:00"))).unwrap(),
-                json!(true)
-            );
-            assert_eq!(
-                is_datetime(&v(json!("2024-06-15T12:30:00Z"))).unwrap(),
-                json!(true)
-            );
-            assert_eq!(
-                is_datetime(&v(json!("2024-06-15T12:30:00+02:00"))).unwrap(),
-                json!(true)
-            );
-            assert_eq!(
-                is_datetime(&v(json!("2024-06-15T12:30:00.123"))).unwrap(),
-                json!(true)
-            );
-            assert_eq!(
-                is_datetime_utc(&v(json!("2024-06-15T12:30:00Z"))).unwrap(),
-                json!(true)
-            );
-        }
-
-        #[test]
-        fn isdatetime_rejects_invalid_inputs() {
-            assert_eq!(is_datetime(&v(json!("2024-06-15"))).unwrap(), json!(false));
-            assert_eq!(is_datetime(&v(json!("nope"))).unwrap(), json!(false));
-            assert_eq!(is_datetime(&v(json!(null))).unwrap(), json!(false));
-            assert_eq!(is_datetime(&v(json!(123))).unwrap(), json!(false));
         }
     }
 
@@ -4357,1297 +1645,37 @@ mod tests {
         fn istoday_with_matches_today_date() {
             assert!(is_today_with(&json!("2024-06-15"), TODAY, false));
             assert!(!is_today_with(&json!("2024-06-14"), TODAY, false));
-        }
-
-        #[test]
-        fn istoday_with_accepts_datetime_strings() {
             assert!(is_today_with(&json!("2024-06-15T08:00:00"), TODAY, false));
             assert!(is_today_with(&json!("2024-06-15T08:00:00Z"), TODAY, true));
-        }
-
-        #[test]
-        fn istoday_with_rejects_non_strings_and_invalid() {
             assert!(!is_today_with(&json!(null), TODAY, false));
             assert!(!is_today_with(&json!(20240615), TODAY, false));
             assert!(!is_today_with(&json!("not-a-date"), TODAY, false));
         }
 
         #[test]
-        fn isyesterday_with_matches_prev_day() {
+        fn relative_helpers_match_their_windows() {
             assert!(is_yesterday_with(&json!("2024-06-14"), TODAY, false));
             assert!(!is_yesterday_with(&json!("2024-06-15"), TODAY, false));
-            assert!(!is_yesterday_with(&json!(null), TODAY, false));
-        }
-
-        #[test]
-        fn istomorrow_with_matches_next_day() {
             assert!(is_tomorrow_with(&json!("2024-06-16"), TODAY, false));
             assert!(!is_tomorrow_with(&json!("2024-06-15"), TODAY, false));
-        }
-
-        #[test]
-        fn isthismonth_with_matches_same_month_year() {
             assert!(is_this_month_with(&json!("2024-06-01"), TODAY, false));
-            assert!(is_this_month_with(&json!("2024-06-30"), TODAY, false));
             assert!(!is_this_month_with(&json!("2024-07-01"), TODAY, false));
             assert!(!is_this_month_with(&json!("2023-06-15"), TODAY, false));
-        }
-
-        #[test]
-        fn isthisyear_with_matches_same_year() {
-            assert!(is_this_year_with(&json!("2024-01-01"), TODAY, false));
             assert!(is_this_year_with(&json!("2024-12-31"), TODAY, false));
             assert!(!is_this_year_with(&json!("2023-12-31"), TODAY, false));
         }
 
         #[test]
         fn relative_validators_accept_datetime_strings() {
-            // "today" datetime in UTC.
             assert!(is_today_with(&json!("2024-06-15T23:59:00Z"), TODAY, true));
-            // Datetime carrying an explicit offset that lands on a
-            // different UTC date when assume_utc=true.
-            assert!(is_today_with(
-                &json!("2024-06-16T01:00:00+03:00"),
-                TODAY,
-                true
-            ));
-        }
-    }
-
-    mod fn_phase3 {
-        use super::*;
-
-        #[test]
-        fn is_positive_true_for_positive_numbers_and_strings() {
-            assert_eq!(is_positive(&v(json!(1))).unwrap(), json!(true));
-            assert_eq!(is_positive(&v(json!(1.5))).unwrap(), json!(true));
-            assert_eq!(is_positive(&v(json!("0.5"))).unwrap(), json!(true));
-            assert_eq!(is_positive(&v(json!(true))).unwrap(), json!(true));
-        }
-
-        #[test]
-        fn is_positive_false_for_zero_and_negative() {
-            assert_eq!(is_positive(&v(json!(0))).unwrap(), json!(false));
-            assert_eq!(is_positive(&v(json!(0.0))).unwrap(), json!(false));
-            assert_eq!(is_positive(&v(json!(-1))).unwrap(), json!(false));
-            assert_eq!(is_positive(&v(json!("-0.5"))).unwrap(), json!(false));
-            assert_eq!(is_positive(&v(json!(false))).unwrap(), json!(false));
-        }
-
-        #[test]
-        fn is_positive_errors_for_null_and_non_numeric() {
-            assert!(is_positive(&v(json!(null))).is_err());
-            assert!(is_positive(&v(json!("nope"))).is_err());
-            assert!(is_positive(&v(json!([1, 2]))).is_err());
-        }
-
-        #[test]
-        fn is_negative_true_for_negative_numbers_and_strings() {
-            assert_eq!(is_negative(&v(json!(-1))).unwrap(), json!(true));
-            assert_eq!(is_negative(&v(json!(-1.5))).unwrap(), json!(true));
-            assert_eq!(is_negative(&v(json!("-0.5"))).unwrap(), json!(true));
-        }
-
-        #[test]
-        fn is_negative_false_for_zero_and_positive() {
-            assert_eq!(is_negative(&v(json!(0))).unwrap(), json!(false));
-            assert_eq!(is_negative(&v(json!(0.0))).unwrap(), json!(false));
-            assert_eq!(is_negative(&v(json!(1))).unwrap(), json!(false));
-            assert_eq!(is_negative(&v(json!(true))).unwrap(), json!(false));
-        }
-
-        #[test]
-        fn is_negative_errors_for_null_and_non_numeric() {
-            assert!(is_negative(&v(json!(null))).is_err());
-            assert!(is_negative(&v(json!("nope"))).is_err());
-            assert!(is_negative(&v(json!({"a": 1}))).is_err());
-        }
-
-        #[test]
-        fn is_integer_never_errors_or_null_propagates() {
-            assert_eq!(is_integer(&v(json!(null))).unwrap(), json!(false));
-            assert_eq!(is_integer(&v(json!("123"))).unwrap(), json!(false));
-            assert_eq!(is_integer(&v(json!(true))).unwrap(), json!(false));
-            assert_eq!(is_integer(&v(json!([1]))).unwrap(), json!(false));
-            assert_eq!(is_integer(&v(json!({"a": 1}))).unwrap(), json!(false));
-        }
-
-        #[test]
-        fn is_integer_true_for_whole_numbers() {
-            assert_eq!(is_integer(&v(json!(1))).unwrap(), json!(true));
-            assert_eq!(is_integer(&v(json!(1.0))).unwrap(), json!(true));
-            assert_eq!(is_integer(&v(json!(0))).unwrap(), json!(true));
-            assert_eq!(is_integer(&v(json!(-42))).unwrap(), json!(true));
-        }
-
-        #[test]
-        fn is_integer_false_for_fractional_numbers() {
-            assert_eq!(is_integer(&v(json!(1.5))).unwrap(), json!(false));
-            assert_eq!(is_integer(&v(json!(0.1))).unwrap(), json!(false));
-        }
-
-        #[test]
-        fn without_date_removes_valid_dates_and_preserves_invalid() {
-            assert_eq!(
-                without_date(&v(json!("plan 2026-06-15 review"))).unwrap(),
-                json!("plan  review")
-            );
-            assert_eq!(
-                without_date(&v(json!("invalid 2026-02-30 stays"))).unwrap(),
-                json!("invalid 2026-02-30 stays")
-            );
-            assert_eq!(
-                without_date(&v(json!("meeting 2026-06-15T10:30:00 here"))).unwrap(),
-                json!("meeting T10:30:00 here")
-            );
-            assert_eq!(
-                without_date(&v(json!("x 2026-06-15, y"))).unwrap(),
-                json!("x , y")
-            );
-        }
-
-        #[test]
-        fn without_date_null_propagates_and_type_mismatch_errors() {
-            assert_eq!(without_date(&v(json!(null))).unwrap(), json!(null));
-            assert!(without_date(&v(json!(123))).is_err());
-            assert!(without_date(&v(json!([1, 2]))).is_err());
-        }
-
-        #[test]
-        fn ensure_leading_examples() {
-            assert_eq!(
-                ensure_leading(&vv(json!("foobar"), json!("foo"))).unwrap(),
-                json!("foobar")
-            );
-            assert_eq!(
-                ensure_leading(&vv(json!("bar"), json!("foo"))).unwrap(),
-                json!("foobar")
-            );
-            assert_eq!(
-                ensure_leading(&vv(json!(123), json!(4))).unwrap(),
-                json!(4123)
-            );
-            assert_eq!(
-                ensure_leading(&vv(json!("123"), json!(4))).unwrap(),
-                json!("4123")
-            );
-        }
-
-        #[test]
-        fn ensure_leading_preserves_number_type_when_already_prefixed() {
-            assert_eq!(
-                ensure_leading(&vv(json!(123), json!("12"))).unwrap(),
-                json!(123)
-            );
-            assert_eq!(
-                ensure_leading(&vv(json!(123), json!(12))).unwrap(),
-                json!(123)
-            );
-        }
-
-        #[test]
-        fn ensure_leading_null_propagates() {
-            assert_eq!(
-                ensure_leading(&vv(json!(null), json!("foo"))).unwrap(),
-                json!(null)
-            );
-            assert_eq!(
-                ensure_leading(&vv(json!("bar"), json!(null))).unwrap(),
-                json!(null)
-            );
-        }
-
-        #[test]
-        fn ensure_leading_rejects_booleans_arrays_objects() {
-            assert!(ensure_leading(&vv(json!(true), json!("foo"))).is_err());
-            assert!(ensure_leading(&vv(json!("bar"), json!(true))).is_err());
-            assert!(ensure_leading(&vv(json!([1]), json!("foo"))).is_err());
-            assert!(ensure_leading(&vv(json!("bar"), json!({"a": 1}))).is_err());
-        }
-
-        #[test]
-        fn ensure_trailing_examples() {
-            assert_eq!(
-                ensure_trailing(&vv(json!("foobar"), json!("bar"))).unwrap(),
-                json!("foobar")
-            );
-            assert_eq!(
-                ensure_trailing(&vv(json!("foo"), json!("bar"))).unwrap(),
-                json!("foobar")
-            );
-            assert_eq!(
-                ensure_trailing(&vv(json!(123), json!(4))).unwrap(),
-                json!(1234)
-            );
-            assert_eq!(
-                ensure_trailing(&vv(json!("123"), json!(4))).unwrap(),
-                json!("1234")
-            );
-        }
-
-        #[test]
-        fn ensure_trailing_null_propagates_and_type_mismatch() {
-            assert_eq!(
-                ensure_trailing(&vv(json!(null), json!("bar"))).unwrap(),
-                json!(null)
-            );
-            assert!(ensure_trailing(&vv(json!("foo"), json!(false))).is_err());
-            assert!(ensure_trailing(&vv(json!([]), json!("bar"))).is_err());
-        }
-
-        #[test]
-        fn terminal_renders_bold_markup() {
-            let out = terminal(&v(json!("<bold>x</bold>"))).unwrap();
-            let s = out.as_str().unwrap();
-            assert!(s.contains("\x1b[1m"), "expected bold SGR sequence in {s:?}");
-            assert!(s.contains('x'), "expected literal x in {s:?}");
-        }
-
-        #[test]
-        fn terminal_literal_text_passes_through() {
-            let out = terminal(&v(json!("hello world"))).unwrap();
-            assert_eq!(out, json!("hello world"));
-        }
-
-        #[test]
-        fn terminal_null_propagates_and_type_mismatch_errors() {
-            assert_eq!(terminal(&v(json!(null))).unwrap(), json!(null));
-            assert!(terminal(&v(json!(123))).is_err());
-            assert!(terminal(&v(json!([1, 2]))).is_err());
-        }
-
-        #[test]
-        fn phase3_functions_dispatch_by_name() {
-            assert_eq!(dispatch("is_positive", &[json!(5)]).unwrap().unwrap(), json!(true));
-            assert_eq!(dispatch("isnegative", &[json!(-1)]).unwrap().unwrap(), json!(true));
-            assert_eq!(dispatch("isinteger", &[json!(42)]).unwrap().unwrap(), json!(true));
-            assert_eq!(
-                dispatch("without_date", &[json!("2026-06-15x")]).unwrap().unwrap(),
-                json!("x")
-            );
-            assert_eq!(
-                dispatch("replace", &[json!("a.b.c"), json!("."), json!("/")])
-                    .unwrap()
-                    .unwrap(),
-                json!("a/b/c")
-            );
-            assert_eq!(
-                dispatch("replacefirst", &[json!("a.b.c"), json!("."), json!("/")])
-                    .unwrap()
-                    .unwrap(),
-                json!("a/b.c")
-            );
-            assert_eq!(
-                dispatch("replacelast", &[json!("a.b.c"), json!("."), json!("/")])
-                    .unwrap()
-                    .unwrap(),
-                json!("a.b/c")
-            );
-            assert_eq!(
-                dispatch("ensure_leading", &[json!("bar"), json!("foo")])
-                    .unwrap()
-                    .unwrap(),
-                json!("foobar")
-            );
-            assert_eq!(
-                dispatch("ensuretrailing", &[json!("foo"), json!("bar")])
-                    .unwrap()
-                    .unwrap(),
-                json!("foobar")
-            );
-            assert!(dispatch("terminal", &[json!("<bold>x</bold>")]).unwrap().is_ok());
-        }
-
-        #[test]
-        fn phase3_functions_require_correct_arity() {
-            assert!(is_positive(&[]).is_err());
-            assert!(is_positive(&[json!(1), json!(2)]).is_err());
-            assert!(without_date(&[]).is_err());
-            assert!(without_date(&[json!("a"), json!("b")]).is_err());
-            assert!(ensure_leading(&[json!("a")]).is_err());
-            assert!(ensure_leading(&[json!("a"), json!("b"), json!("c")]).is_err());
-            assert!(terminal(&[]).is_err());
-        }
-    }
-
-    mod fn_phase4 {
-        use super::*;
-
-        fn ctx_with_temp_dir() -> (tempfile::TempDir, ResolutionContext) {
-            let dir = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::at(dir.path().to_path_buf());
-            (dir, ctx)
-        }
-
-        #[test]
-        fn is_indexed_file_detects_indexed_stems() {
-            let (dir, ctx) = ctx_with_temp_dir();
-            std::fs::write(dir.path().join("review-1.md"), "x").unwrap();
-            std::fs::write(dir.path().join("review.md"), "x").unwrap();
-            std::fs::write(dir.path().join("review_1.md"), "x").unwrap();
-
-            assert_eq!(is_indexed_file_fn(&[json!("review-1.md")], &ctx).unwrap(), json!(true));
-            assert_eq!(is_indexed_file_fn(&[json!("review-100.md")], &ctx).unwrap(), json!(true));
-            assert_eq!(is_indexed_file_fn(&[json!("review-001.md")], &ctx).unwrap(), json!(true));
-            assert_eq!(is_indexed_file_fn(&[json!("review.md")], &ctx).unwrap(), json!(false));
-            assert_eq!(is_indexed_file_fn(&[json!("review_1.md")], &ctx).unwrap(), json!(false));
-            assert_eq!(is_indexed_file_fn(&[json!("review1.md")], &ctx).unwrap(), json!(false));
-        }
-
-        #[test]
-        fn file_index_parses_or_negative_one() {
-            let (dir, ctx) = ctx_with_temp_dir();
-            std::fs::write(dir.path().join("review-42.md"), "x").unwrap();
-            std::fs::write(dir.path().join("review.md"), "x").unwrap();
-
-            assert_eq!(file_index_fn(&[json!("review-42.md")], &ctx).unwrap(), json!(42));
-            assert_eq!(file_index_fn(&[json!("review.md")], &ctx).unwrap(), json!(-1));
-        }
-
-        #[test]
-        fn increment_file_index_preserves_zero_padding() {
-            let (dir, ctx) = ctx_with_temp_dir();
-            std::fs::write(dir.path().join("review-1.md"), "x").unwrap();
-            std::fs::write(dir.path().join("review-001.md"), "x").unwrap();
-            std::fs::write(dir.path().join("review.md"), "x").unwrap();
-
-            assert_eq!(
-                increment_file_index_fn(&[json!("review-1.md")], &ctx).unwrap(),
-                json!("review-2.md")
-            );
-            assert_eq!(
-                increment_file_index_fn(&[json!("review-001.md")], &ctx).unwrap(),
-                json!("review-002.md")
-            );
-            assert_eq!(
-                increment_file_index_fn(&[json!("review.md")], &ctx).unwrap(),
-                json!("review-2.md")
-            );
-        }
-
-        #[test]
-        fn decrement_file_index_clamps_at_zero() {
-            let (dir, ctx) = ctx_with_temp_dir();
-            std::fs::write(dir.path().join("review-001.md"), "x").unwrap();
-            std::fs::write(dir.path().join("review-0.md"), "x").unwrap();
-            std::fs::write(dir.path().join("review.md"), "x").unwrap();
-
-            assert_eq!(
-                decrement_file_index_fn(&[json!("review-001.md")], &ctx).unwrap(),
-                json!("review-000.md")
-            );
-            assert_eq!(
-                decrement_file_index_fn(&[json!("review-0.md")], &ctx).unwrap(),
-                json!("review-0.md")
-            );
-            assert_eq!(
-                decrement_file_index_fn(&[json!("review.md")], &ctx).unwrap(),
-                json!("review-0.md")
-            );
-        }
-
-        #[test]
-        fn indexed_functions_null_propagate_and_reject_remote() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-
-            assert_eq!(is_indexed_file_fn(&[json!(null)], &ctx).unwrap(), json!(null));
-            assert_eq!(file_index_fn(&[json!(null)], &ctx).unwrap(), json!(null));
-            assert_eq!(
-                increment_file_index_fn(&[json!(null)], &ctx).unwrap(),
-                json!(null)
-            );
-
-            let err = is_indexed_file_fn(&[json!("https://example.com/doc.md")], &ctx)
-                .unwrap_err();
-            assert!(err.contains("HTTP(S)"), "got: {err}");
-        }
-
-        #[test]
-        fn indexed_functions_require_arity() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            assert!(is_indexed_file_fn(&[], &ctx).is_err());
-            assert!(is_indexed_file_fn(&[json!("a"), json!("b")], &ctx).is_err());
-            assert!(file_index_fn(&[], &ctx).is_err());
-            assert!(increment_file_index_fn(&[json!("a"), json!("b")], &ctx).is_err());
-        }
-
-        #[test]
-        fn path_components_split_display_path() {
-            let (dir, ctx) = ctx_with_temp_dir();
-            std::fs::create_dir_all(dir.path().join("foo/bar/baz")).unwrap();
-            std::fs::write(dir.path().join("foo/bar/baz/test.md"), "x").unwrap();
-            std::fs::write(dir.path().join("foo/review-1.md"), "x").unwrap();
-            std::fs::write(dir.path().join("no-ext"), "x").unwrap();
-
-            assert_eq!(basename_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(), json!("test.md"));
-            assert_eq!(
-                basename_without_index_fn(&[json!("foo/review-1.md")], &ctx).unwrap(),
-                json!("review.md")
-            );
-            assert_eq!(dirname_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(), json!("foo/bar/baz"));
-            assert_eq!(ext_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(), json!("md"));
-            assert_eq!(ext_fn(&[json!("no-ext")], &ctx).unwrap(), json!(""));
-            assert_eq!(
-                parent_dir_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(),
-                json!("baz")
-            );
-            assert_eq!(
-                file_trailing_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(),
-                json!("baz/test.md")
-            );
-            assert_eq!(
-                dir_leading_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(),
-                json!("foo/bar")
-            );
-        }
-
-        #[test]
-        fn path_components_handle_bare_basename() {
-            let (dir, ctx) = ctx_with_temp_dir();
-            std::fs::write(dir.path().join("test.md"), "x").unwrap();
-
-            assert_eq!(basename_fn(&[json!("test.md")], &ctx).unwrap(), json!("test.md"));
-            assert_eq!(dirname_fn(&[json!("test.md")], &ctx).unwrap(), json!(""));
-            assert_eq!(parent_dir_fn(&[json!("test.md")], &ctx).unwrap(), json!(""));
-            assert_eq!(file_trailing_fn(&[json!("test.md")], &ctx).unwrap(), json!("test.md"));
-            assert_eq!(dir_leading_fn(&[json!("test.md")], &ctx).unwrap(), json!(""));
-        }
-
-        #[test]
-        fn join_normalizes_separators_and_resolves() {
-            let (dir, ctx) = ctx_with_temp_dir();
-            std::fs::create_dir_all(dir.path().join("foo/bar")).unwrap();
-            std::fs::write(dir.path().join("foo/bar/baz.md"), "x").unwrap();
-
-            assert_eq!(
-                join_fn(&[json!("foo/bar/"), json!("/baz.md")], &ctx).unwrap(),
-                json!("foo/bar/baz.md")
-            );
-            assert_eq!(
-                join_fn(&[json!("foo/bar"), json!("baz/bax.md")], &ctx).unwrap(),
-                json!("foo/bar/baz/bax.md")
-            );
-            assert_eq!(
-                join_fn(&[json!("foo//bar//"), json!("//baz.md")], &ctx).unwrap(),
-                json!("foo/bar/baz.md")
-            );
-        }
-
-        #[test]
-        fn join_rejects_http_and_null_propagates() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-
-            assert_eq!(join_fn(&[json!(null), json!("b")], &ctx).unwrap(), json!(null));
-            let err = join_fn(&[json!("https://example.com"), json!("b")], &ctx).unwrap_err();
-            assert!(err.contains("HTTP(S)"), "got: {err}");
-            let err = join_fn(&[json!("a"), json!("https://example.com/b")], &ctx).unwrap_err();
-            assert!(err.contains("HTTP(S)"), "got: {err}");
-        }
-
-        #[test]
-        fn join_requires_strings_and_correct_arity() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            assert!(join_fn(&[], &ctx).is_err());
-            assert!(join_fn(&[json!("a")], &ctx).is_err());
-            assert!(join_fn(&[json!(123), json!("b")], &ctx).is_err());
-            assert!(join_fn(&[json!("a"), json!([])], &ctx).is_err());
-        }
-
-        /// A missing implicit bare reference is shaped from the document CWD
-        /// first. The explicit `./` form pins to the same source directory.
-        #[test]
-        fn missing_implicit_path_shape_is_document_cwd_first() {
-            let repo = tempfile::TempDir::new().unwrap();
-            std::fs::create_dir_all(repo.path().join(".git")).unwrap();
-            let base = repo.path().join("prompts");
-            std::fs::create_dir_all(&base).unwrap();
-            let ctx = ResolutionContext::at(base.clone())
-                .with_repository_root(repo.path().to_path_buf());
-
-            // Implicit bare miss → document-CWD candidate.
-            let implicit = resolve_path_shape("dirname", "sub/missing.md", &ctx).unwrap();
-            assert_eq!(implicit, base.join("sub/missing.md"));
-
-            // Explicit `./` miss → source-directory candidate only.
-            let explicit = resolve_path_shape("dirname", "./sub/missing.md", &ctx).unwrap();
-            assert_eq!(explicit, base.join("./sub/missing.md"));
-        }
-
-        #[test]
-        fn path_functions_do_not_require_existence() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-
-            assert_eq!(basename_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(), json!("missing.md"));
-            assert_eq!(dirname_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(), json!("foo/bar"));
-            assert_eq!(
-                increment_file_index_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(),
-                json!("foo/bar/missing-2.md")
-            );
-        }
-
-        #[test]
-        fn path_functions_dispatch_by_name() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            assert_eq!(
-                dispatch_fs("is_indexed_file", &[json!("foo-1.md")], &ctx)
-                    .unwrap()
-                    .unwrap(),
-                json!(true)
-            );
-            assert_eq!(
-                dispatch_fs("file_index", &[json!("foo-7.md")], &ctx).unwrap().unwrap(),
-                json!(7)
-            );
-            assert_eq!(
-                dispatch_fs("basename", &[json!("foo/bar.md")], &ctx).unwrap().unwrap(),
-                json!("bar.md")
-            );
-            assert_eq!(
-                dispatch_fs("dirname", &[json!("foo/bar.md")], &ctx).unwrap().unwrap(),
-                json!("foo")
-            );
-            assert_eq!(
-                dispatch_fs("join", &[json!("foo"), json!("bar.md")], &ctx)
-                    .unwrap()
-                    .unwrap(),
-                json!("foo/bar.md")
-            );
-        }
-    }
-
-    mod fn_phase5 {
-        use super::*;
-
-        fn ctx_with_temp_dir() -> (tempfile::TempDir, ResolutionContext) {
-            let dir = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::at(dir.path().to_path_buf());
-            (dir, ctx)
-        }
-
-        #[test]
-        fn link_one_arg_uses_relative_text_and_absolute_destination() {
-            let (dir, ctx) = ctx_with_temp_dir();
-            std::fs::create_dir_all(dir.path().join("foo/bar")).unwrap();
-            std::fs::write(dir.path().join("foo/bar/baz.md"), "x").unwrap();
-
-            let result = link_fn(&[json!("foo/bar/baz.md")], &ctx)
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .to_string();
-            assert!(result.starts_with("[foo/bar/baz.md]("));
-            assert!(result.contains("/foo/bar/baz.md)"));
-        }
-
-        #[test]
-        fn link_two_arg_file_uses_provided_description() {
-            let (dir, ctx) = ctx_with_temp_dir();
-            std::fs::write(dir.path().join("doc.md"), "x").unwrap();
-
-            let result = link_fn(&[json!("doc.md"), json!("My Doc")], &ctx)
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .to_string();
-            assert_eq!(
-                result,
-                format!(
-                    "[My Doc]({})",
-                    biscuit_file::to_portable_string(&dir.path().join("doc.md"))
-                )
-            );
-        }
-
-        #[test]
-        fn link_two_arg_https_emits_url_destination() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            let result = link_fn(
-                &[
-                    json!("https://example.com/page"),
-                    json!("Example"),
-                ],
-                &ctx,
-            )
-            .unwrap();
-            assert_eq!(result, json!("[Example](https://example.com/page)"));
-        }
-
-        #[test]
-        fn link_escapes_brackets_in_text() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            let result = link_fn(
-                &[
-                    json!("https://example.com"),
-                    json!("click [here]"),
-                ],
-                &ctx,
-            )
-            .unwrap();
-            assert_eq!(
-                result,
-                json!("[click \\[here\\]](https://example.com)")
-            );
-        }
-
-        #[test]
-        fn link_wraps_destination_with_spaces_and_parens() {
-            let (dir, ctx) = ctx_with_temp_dir();
-            std::fs::write(dir.path().join("my doc (v1).md"), "x").unwrap();
-
-            let result = link_fn(
-                &[
-                    json!("my doc (v1).md"),
-                    json!("spaces"),
-                ],
-                &ctx,
-            )
-            .unwrap()
-            .as_str()
-            .unwrap()
-            .to_string();
-            assert!(
-                result.starts_with("[spaces](<"),
-                "expected angle-bracket wrapping for destination with spaces, got {result:?}"
-            );
-            assert!(result.ends_with(">)"));
-        }
-
-        /// Returns the visible text of the single link in `markdown`.
-        fn link_label(markdown: &str) -> String {
-            use pulldown_cmark::{Event, Parser, Tag, TagEnd};
-
-            let mut label = String::new();
-            let mut inside = false;
-            for event in Parser::new(markdown) {
-                match event {
-                    Event::Start(Tag::Link { .. }) => inside = true,
-                    Event::End(TagEnd::Link) => inside = false,
-                    Event::Text(text) if inside => label.push_str(&text),
-                    _ => {}
-                }
-            }
-            label
-        }
-
-        /// A label carrying a native Windows spelling must survive a CommonMark
-        /// round-trip character for character.
-        ///
-        /// `make_portable_relative_in_context` falls back to the native
-        /// spelling when no faithful portable one exists, so a `link()`
-        /// description can contain literal backslashes. CommonMark honors a
-        /// backslash before ASCII punctuation inside link text, so escaping
-        /// only `[` and `]` would silently delete the separators — and the
-        /// leading `\\` would arrive as a single `\`.
-        #[test]
-        fn native_fallback_label_round_trips_through_commonmark() {
-            let label = r"\\server\share\notes\[draft].md";
-
-            let rendered = format_markdown_link(label, "C:/repo/notes.md");
-
-            assert_eq!(link_label(&rendered), label);
-        }
-
-        /// Both local-destination arms refuse a path with no faithful portable
-        /// spelling rather than emitting Markdown that parses back as a
-        /// different destination.
-        ///
-        /// Windows-only: off Windows every path portabilizes, so there is no
-        /// decline to simulate.
-        #[cfg(windows)]
-        #[test]
-        fn link_local_destination_arms_reject_declined_paths() {
-            // A literal `.` component under a verbatim prefix is a real
-            // directory name, so `dunce` refuses to reduce the prefix and the
-            // path has no portable spelling.
-            let ctx = ResolutionContext::at(std::path::PathBuf::from(r"\\?\C:\repo\.\docs"));
-
-            let one_arg = link_fn(&[json!("sibling.md")], &ctx).unwrap_err();
-            assert!(
-                one_arg.contains("no faithful portable spelling"),
-                "got: {one_arg}"
-            );
-
-            let two_arg = link_fn(&[json!("sibling.md"), json!("Sibling")], &ctx).unwrap_err();
-            assert!(
-                two_arg.contains("no faithful portable spelling"),
-                "got: {two_arg}"
-            );
-        }
-
-        #[test]
-        fn link_one_arg_rejects_remote_url() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            let err = link_fn(
-                &[json!("https://example.com/doc.md")],
-                &ctx,
-            )
-            .unwrap_err();
-            assert!(err.contains("HTTP(S)"), "got: {err}");
-        }
-
-        #[test]
-        fn basename_rejects_uppercase_scheme_urls() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-
-            let err = basename_fn(&[json!("HTTPS://example.com/doc.md")], &ctx)
-                .unwrap_err();
-            assert!(err.contains("HTTP(S)"), "got: {err}");
-            let err = basename_fn(&[json!("hTtPs://example.com/doc.md")], &ctx)
-                .unwrap_err();
-            assert!(err.contains("HTTP(S)"), "got: {err}");
-        }
-
-        #[test]
-        fn join_rejects_uppercase_scheme_urls() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-
-            let err = join_fn(&[json!("HTTPS://example.com"), json!("b")], &ctx)
-                .unwrap_err();
-            assert!(err.contains("HTTP(S)"), "got: {err}");
-            let err = join_fn(&[json!("a"), json!("HTTP://example.com/b")], &ctx)
-                .unwrap_err();
-            assert!(err.contains("HTTP(S)"), "got: {err}");
-        }
-
-        #[test]
-        fn link_one_arg_rejects_uppercase_scheme_urls() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            let err = link_fn(&[json!("HTTPS://example.com/doc.md")], &ctx).unwrap_err();
-            assert!(err.contains("HTTP(S)"), "got: {err}");
-        }
-
-        #[test]
-        fn link_two_arg_accepts_uppercase_scheme_urls() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-
-            let result = link_fn(
-                &[json!("HTTPS://example.com/page"), json!("Example")],
-                &ctx,
-            )
-            .unwrap();
-            assert_eq!(result, json!("[Example](HTTPS://example.com/page)"));
-            let result = link_fn(
-                &[json!("hTtP://example.com/page"), json!("Example")],
-                &ctx,
-            )
-            .unwrap();
-            assert_eq!(result, json!("[Example](hTtP://example.com/page)"));
-        }
-
-        #[test]
-        fn link_null_propagates_and_arity_errors() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            assert_eq!(
-                link_fn(&[json!(null), json!("desc")], &ctx).unwrap(),
-                json!(null)
-            );
-            assert_eq!(
-                link_fn(&[json!("https://example.com"), json!(null)], &ctx).unwrap(),
-                json!(null)
-            );
-            assert!(link_fn(&[], &ctx).is_err());
-            assert!(link_fn(&[json!("a"), json!("b"), json!("c")], &ctx).is_err());
-        }
-
-        #[test]
-        fn link_type_mismatch_errors() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            assert!(link_fn(&[json!(123)], &ctx).is_err());
-            assert!(link_fn(&[json!("a"), json!(123)], &ctx).is_err());
-        }
-
-        /// Returns the visible text, code spans included, of the single link
-        /// in `markdown`, and whether that text came from exactly one code span.
-        fn link_code_label(markdown: &str) -> (String, bool) {
-            use pulldown_cmark::{Event, Parser, Tag, TagEnd};
-
-            let mut label = String::new();
-            let mut code_spans = 0;
-            let mut other_text = false;
-            let mut inside = false;
-            for event in Parser::new(markdown) {
-                match event {
-                    Event::Start(Tag::Link { .. }) => inside = true,
-                    Event::End(TagEnd::Link) => inside = false,
-                    Event::Code(code) if inside => {
-                        code_spans += 1;
-                        label.push_str(&code);
-                    }
-                    Event::Text(text) if inside => {
-                        other_text = true;
-                        label.push_str(&text);
-                    }
-                    _ => {}
-                }
-            }
-            (label, code_spans == 1 && !other_text)
-        }
-
-        fn code_link(args: &[Value], ctx: &ResolutionContext) -> String {
-            code_link_fn(args, ctx).unwrap().as_str().unwrap().to_string()
-        }
-
-        /// Splits `[label](destination)` at the `](` that ends the label.
-        fn split_link(markdown: &str) -> (&str, &str) {
-            let index = markdown.rfind("](").expect("a Markdown link");
-            (&markdown[1..index], &markdown[index + 2..markdown.len() - 1])
-        }
-
-        #[test]
-        fn code_link_one_arg_matches_link_destination_with_a_code_label() {
-            let (dir, ctx) = ctx_with_temp_dir();
-            std::fs::create_dir_all(dir.path().join("plans")).unwrap();
-            std::fs::write(dir.path().join("plans/foo.md"), "x").unwrap();
-            std::fs::write(dir.path().join("my doc (v1).md"), "x").unwrap();
-
-            for file in ["plans/foo.md", "my doc (v1).md"] {
-                let plain = link_fn(&[json!(file)], &ctx).unwrap();
-                let plain = plain.as_str().unwrap();
-                let code = code_link(&[json!(file)], &ctx);
-
-                let (plain_label, plain_dest) = split_link(plain);
-                let (code_label, code_dest) = split_link(&code);
-                assert_eq!(code_dest, plain_dest, "same destination spelling and quoting");
-                assert_eq!(code_label, format!("`{plain_label}`"));
-                assert_eq!(link_code_label(&code), (file.to_string(), true), "{code}");
-            }
-            assert_eq!(
-                code_link(&[json!("plans/foo.md")], &ctx),
-                format!(
-                    "[`plans/foo.md`]({})",
-                    biscuit_file::to_portable_string(&dir.path().join("plans/foo.md"))
-                )
-            );
-        }
-
-        #[test]
-        fn code_link_two_arg_file_and_url_destinations_match_link() {
-            let (dir, ctx) = ctx_with_temp_dir();
-            std::fs::write(dir.path().join("doc.md"), "x").unwrap();
-
-            for target in ["doc.md", "https://example.com/page", "HTTPS://example.com/page"] {
-                let plain = link_fn(&[json!(target), json!("md hash")], &ctx).unwrap();
-                let code = code_link(&[json!(target), json!("md hash")], &ctx);
-                assert_eq!(split_link(&code).1, split_link(plain.as_str().unwrap()).1);
-                assert_eq!(split_link(&code).0, "`md hash`");
-            }
-        }
-
-        #[test]
-        fn code_link_keeps_brackets_unescaped_inside_the_code_span() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            let url = json!("https://example.com");
-
-            let rendered = code_link(&[url.clone(), json!("a]b")], &ctx);
-            assert_eq!(rendered, "[`a]b`](https://example.com)");
-            assert_eq!(link_code_label(&rendered), ("a]b".to_string(), true));
-
-            let rendered = code_link(&[url, json!("click [here]")], &ctx);
-            assert_eq!(rendered, "[`click [here]`](https://example.com)");
-            assert_eq!(link_code_label(&rendered), ("click [here]".to_string(), true));
-        }
-
-        #[test]
-        fn code_link_emits_backslashes_as_is() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            let rendered = code_link(&[json!("https://example.com"), json!(r"a\_b")], &ctx);
-            assert_eq!(rendered, r"[`a\_b`](https://example.com)");
-            assert_eq!(link_code_label(&rendered), (r"a\_b".to_string(), true));
-        }
-
-        #[test]
-        fn code_link_fences_backticks_and_pads_edges() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            let url = json!("https://example.com");
-            for (label, expected) in [
-                ("a`b", "[``a`b``](https://example.com)"),
-                ("``x``", "[``` ``x`` ```](https://example.com)"),
-                ("`a`", "[`` `a` ``](https://example.com)"),
-                (" a ", "[`  a  `](https://example.com)"),
-            ] {
-                let rendered = code_link(&[url.clone(), json!(label)], &ctx);
-                assert_eq!(rendered, expected, "{label:?}");
-                assert_eq!(link_code_label(&rendered), (label.to_string(), true), "{label:?}");
-            }
-        }
-
-        #[test]
-        fn code_link_turns_line_endings_into_spaces() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            for label in ["one\ntwo", "one\r\ntwo", "one\rtwo"] {
-                let rendered = code_link(&[json!("https://example.com"), json!(label)], &ctx);
-                assert_eq!(rendered, "[`one two`](https://example.com)", "{label:?}");
-            }
-        }
-
-        #[test]
-        fn code_link_empty_label_is_an_ordinary_empty_link() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            let rendered = code_link(&[json!("https://example.com"), json!("")], &ctx);
-            assert_eq!(rendered, "[](https://example.com)");
-            assert_eq!(
-                link_fn(&[json!("https://example.com"), json!("")], &ctx).unwrap(),
-                json!(rendered)
-            );
-        }
-
-        #[test]
-        fn code_link_null_propagates_like_link() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            for args in [
-                vec![json!(null)],
-                vec![json!(null), json!("desc")],
-                vec![json!("https://example.com"), json!(null)],
-            ] {
-                assert_eq!(code_link_fn(&args, &ctx).unwrap(), json!(null), "{args:?}");
-                assert_eq!(link_fn(&args, &ctx).unwrap(), json!(null), "{args:?}");
-            }
-        }
-
-        /// Each failure carries `link()`'s cause under the name the caller
-        /// invoked, and `link()`'s own error text is unchanged.
-        #[test]
-        fn code_link_errors_name_code_link_with_the_link_cause() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            let cases: [(Vec<Value>, &str); 6] = [
-                (vec![json!("https://example.com/doc.md")], "one-argument form does not accept HTTP(S) URLs"),
-                (vec![], "requires 1 or 2 arguments"),
-                (vec![json!("a"), json!("b"), json!("c")], "requires 1 or 2 arguments"),
-                // Neither parses as a URL, so both fail as file paths.
-                (vec![json!("http://[::1"), json!("x")], "invalid file path"),
-                (vec![json!("https://exa mple.com"), json!("x")], ""),
-                (vec![json!(123)], ""),
-            ];
-            for (args, cause) in cases {
-                let link_err = link_fn(&args, &ctx).unwrap_err();
-                let code_err = code_link_fn(&args, &ctx).unwrap_err();
-                let function = match &code_err {
-                    ExpressionError::Other { function, .. } => Some(function.as_str()),
-                    ExpressionError::FileReference(diagnostic) => Some(diagnostic.function),
-                    _ => None,
-                };
-                assert!(matches!(function, None | Some("code_link")), "{code_err:?}");
-                assert!(code_err.to_string().contains(cause), "{code_err}");
-                assert!(link_err.to_string().contains(cause), "{link_err}");
-                assert_eq!(
-                    code_err.to_string(),
-                    link_err.to_string().replace("link(", "code_link("),
-                    "{args:?}"
-                );
-            }
-            assert_eq!(
-                link_fn(&[json!("https://example.com/doc.md")], &ctx).unwrap_err().to_string(),
-                "link(): link() one-argument form does not accept HTTP(S) URLs; use link(target, desc)"
-            );
-            assert!(code_link_fn(&[json!("a"), json!(123)], &ctx).is_err());
-        }
-
-        #[test]
-        fn code_link_is_dispatched_by_name_and_alias() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            let args = [json!("https://example.com"), json!("md hash")];
-            for name in ["code_link", "codelink"] {
-                assert_eq!(
-                    dispatch_fs(name, &args, &ctx).unwrap().unwrap(),
-                    json!("[`md hash`](https://example.com)"),
-                    "{name}"
-                );
-            }
-        }
-
-        #[test]
-        fn has_skill_finds_user_and_local_roots() {
-            let home = tempfile::TempDir::new().unwrap();
-            let local = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::at(local.path().to_path_buf())
-                .with_home_dir(home.path().to_path_buf())
-                .with_ctx_value("agent", json!("claude"));
-
-            std::fs::create_dir_all(home.path().join(".claude/skills/user-skill")).unwrap();
-            std::fs::create_dir_all(local.path().join(".claude/skills/local-skill")).unwrap();
-
-            assert_eq!(
-                has_skill_fn(&[json!("user-skill")], &ctx).unwrap(),
-                json!(true)
-            );
-            assert_eq!(
-                has_skill_fn(&[json!("local-skill")], &ctx).unwrap(),
-                json!(true)
-            );
-        }
-
-        #[test]
-        fn skill_lookup_reuses_request_snapshot_roots() {
-            let request_repo = tempfile::TempDir::new().unwrap();
-            let nested_repo = tempfile::TempDir::new().unwrap();
-            std::fs::create_dir_all(request_repo.path().join(".claude/skills/captured")).unwrap();
-            std::fs::create_dir_all(nested_repo.path().join(".git")).unwrap();
-            let snapshot = biscuit_file::FileResolutionContext::new(request_repo.path())
-                .with_repository_root(request_repo.path())
-                .without_home_dir();
-            let mut ctx = ResolutionContext::at(nested_repo.path().to_path_buf())
-                .with_ctx_value("agent", json!("claude"));
-            ctx.file_resolution_context = snapshot;
-
-            assert_eq!(ctx.home_dir(), None);
-            assert_eq!(
-                has_local_skill_fn(&[json!("captured")], &ctx).unwrap(),
-                json!(true),
-            );
-        }
-
-        #[test]
-        fn has_skill_finds_cross_agent_local_roots() {
-            // Local-scoped roots are shared across all recognized agents: a skill
-            // placed in any agent's local directory is discoverable by any other
-            // recognized agent via both `has_skill` and `has_local_skill`.
-            let home = tempfile::TempDir::new().unwrap();
-            let local = tempfile::TempDir::new().unwrap();
-
-            std::fs::create_dir_all(local.path().join(".opencode/skill/cross-skill")).unwrap();
-            std::fs::create_dir_all(local.path().join(".claude/skills/cross-skill")).unwrap();
-
-            let claude_ctx = ResolutionContext::at(local.path().to_path_buf())
-                .with_home_dir(home.path().to_path_buf())
-                .with_ctx_value("agent", json!("claude"));
-            assert_eq!(
-                has_skill_fn(&[json!("cross-skill")], &claude_ctx).unwrap(),
-                json!(true)
-            );
-            assert_eq!(
-                has_local_skill_fn(&[json!("cross-skill")], &claude_ctx).unwrap(),
-                json!(true)
-            );
-
-            let opencode_ctx = ResolutionContext::at(local.path().to_path_buf())
-                .with_home_dir(home.path().to_path_buf())
-                .with_ctx_value("agent", json!("opencode"));
-            assert_eq!(
-                has_skill_fn(&[json!("cross-skill")], &opencode_ctx).unwrap(),
-                json!(true)
-            );
-            assert_eq!(
-                has_local_skill_fn(&[json!("cross-skill")], &opencode_ctx).unwrap(),
-                json!(true)
-            );
-        }
-
-        #[test]
-        fn has_local_skill_excludes_user_roots() {
-            let home = tempfile::TempDir::new().unwrap();
-            let local = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::at(local.path().to_path_buf())
-                .with_home_dir(home.path().to_path_buf())
-                .with_ctx_value("agent", json!("claude"));
-
-            std::fs::create_dir_all(home.path().join(".claude/skills/user-only")).unwrap();
-            std::fs::create_dir_all(local.path().join(".claude/skills/local-only")).unwrap();
-
-            assert_eq!(
-                has_local_skill_fn(&[json!("user-only")], &ctx).unwrap(),
-                json!(false)
-            );
-            assert_eq!(
-                has_local_skill_fn(&[json!("local-only")], &ctx).unwrap(),
-                json!(true)
-            );
-        }
-
-        #[test]
-        fn has_skill_uses_env_agent_when_ctx_not_set() {
-            let local = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::at(local.path().to_path_buf())
-                .with_home_dir(local.path().to_path_buf());
-
-            // Unknown agent: only .agents/skills and .codex/skills are searched.
-            std::fs::create_dir_all(local.path().join(".agents/skills/env-skill")).unwrap();
-
-            assert_eq!(
-                has_skill_fn(&[json!("env-skill")], &ctx).unwrap(),
-                json!(true)
-            );
-        }
-
-        #[test]
-        fn has_skill_rejects_path_separators_and_dotdot() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            assert!(has_skill_fn(&[json!("foo/bar")], &ctx).is_err());
-            assert!(has_skill_fn(&[json!("..")], &ctx).is_err());
-            assert!(has_skill_fn(&[json!(".")], &ctx).is_err());
-        }
-
-        #[test]
-        fn has_skill_empty_name_returns_false() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            assert_eq!(has_skill_fn(&[json!("")], &ctx).unwrap(), json!(false));
-            assert_eq!(
-                has_local_skill_fn(&[json!("")], &ctx).unwrap(),
-                json!(false)
-            );
-        }
-
-        #[test]
-        fn has_skill_nested_directory_does_not_count() {
-            let local = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::at(local.path().to_path_buf())
-                .with_home_dir(local.path().to_path_buf())
-                .with_ctx_value("agent", json!("claude"));
-
-            std::fs::create_dir_all(local.path().join(".claude/skills/parent/nested")).unwrap();
-
-            assert_eq!(
-                has_skill_fn(&[json!("parent")], &ctx).unwrap(),
-                json!(true)
-            );
-            assert_eq!(
-                has_skill_fn(&[json!("nested")], &ctx).unwrap(),
-                json!(false)
-            );
-        }
-
-        #[test]
-        fn has_skill_missing_root_returns_false() {
-            let local = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::at(local.path().to_path_buf())
-                .with_home_dir(local.path().to_path_buf())
-                .with_ctx_value("agent", json!("claude"));
-
-            assert_eq!(
-                has_skill_fn(&[json!("missing")], &ctx).unwrap(),
-                json!(false)
-            );
-        }
-
-        #[test]
-        fn has_skill_null_propagates_and_arity_errors() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            assert_eq!(
-                has_skill_fn(&[json!(null)], &ctx).unwrap(),
-                json!(null)
-            );
-            assert_eq!(
-                has_local_skill_fn(&[json!(null)], &ctx).unwrap(),
-                json!(null)
-            );
-            assert!(has_skill_fn(&[], &ctx).is_err());
-            assert!(has_skill_fn(&[json!("a"), json!("b")], &ctx).is_err());
-        }
-
-        #[test]
-        fn phase5_functions_dispatch_by_name() {
-            let ctx = ResolutionContext::at(std::env::temp_dir());
-            assert_eq!(
-                dispatch_fs("link", &[json!("https://example.com"), json!("x")], &ctx)
-                    .unwrap()
-                    .unwrap(),
-                json!("[x](https://example.com)")
-            );
-            assert_eq!(
-                dispatch_fs("hasskill", &[json!("missing")], &ctx)
-                    .unwrap()
-                    .unwrap(),
-                json!(false)
-            );
-            assert_eq!(
-                dispatch_fs("haslocalskill", &[json!("missing")], &ctx)
-                    .unwrap()
-                    .unwrap(),
-                json!(false)
-            );
+            // An explicit offset that lands on a different UTC date.
+            assert!(is_today_with(&json!("2024-06-16T01:00:00+03:00"), TODAY, true));
         }
     }
 }
 
 #[cfg(test)]
-mod fn_remote_tests {
-    use super::*;
-    use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
-    use biscuit_file::file_reference::fetch::FetchPolicy;
-    use serde_json::json;
-    use std::time::Duration;
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    /// Builds a context whose remote-fetch runtime has already fetched `url`.
-    async fn ready_ctx(url: &str, allow: bool) -> ResolutionContext {
-        let policy = if allow {
-            FetchPolicy::deny_all().allow_host("127.0.0.1")
-        } else {
-            FetchPolicy::deny_all()
-        };
-        let rt = RemoteFetchRuntime::with_policy(policy);
-        rt.register_and_fetch(url::Url::parse(url).unwrap());
-        // Allow the eager fetch task to settle before reading point-of-use.
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        ResolutionContext {
-            remote_fetch: Some(rt),
-            ..ResolutionContext::at(std::path::PathBuf::from("."))
-        }
-    }
-
-    #[tokio::test]
-    async fn frontmatter_title_and_exists_read_remote_url() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/doc.md"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                "---\ntitle: Remote Title\nstatus: draft\n---\n# H1\n\nBody\n",
-            ))
-            .mount(&server)
-            .await;
-        let url = format!("{}/doc.md", server.uri());
-        let ctx = ready_ctx(&url, true).await;
-
-        assert_eq!(
-            frontmatter_fn(&[json!(url.clone()), json!("status")], &ctx).unwrap(),
-            json!("draft")
-        );
-        assert_eq!(
-            markdown_title_fn(&[json!(url.clone())], &ctx).unwrap(),
-            json!("Remote Title")
-        );
-        assert_eq!(
-            markdown_body_empty_fn(&[json!(url.clone())], &ctx).unwrap(),
-            json!(false)
-        );
-        assert_eq!(file_exists_fn(&[json!(url)], &ctx).unwrap(), json!(true));
-    }
-
-    #[tokio::test]
-    async fn file_exists_errors_for_policy_denied_remote() {
-        let server = MockServer::start().await;
-        // No mock mounted and a deny-all policy: the fetch never reaches the
-        // network. A denial says nothing about existence, so it is an error.
-        let url = format!("{}/blocked.md", server.uri());
-        let ctx = ready_ctx(&url, false).await;
-        let err = file_exists_fn(&[json!(url)], &ctx)
-            .expect_err("a denied remote read must not read as a missing file");
-        assert!(err.contains("denied"), "unexpected message: {err}");
-    }
-
-    #[test]
-    fn file_exists_remote_url_fails_loudly_in_local_only_context() {
-        // Frontmatter's resolution context carries no remote runtime, so a
-        // remote URL argument is unreadable and must error rather than
-        // silently reporting the URL as absent (Decision B).
-        let ctx = ResolutionContext::at(std::path::PathBuf::from("."));
-        let err = file_exists_fn(&[json!("https://example.com/doc.md")], &ctx)
-            .expect_err("local-only remote URL must fail loudly");
-        assert!(err.contains("local-only"), "unexpected message: {err}");
-    }
-
-    #[test]
-    fn load_markdown_remote_url_fails_loudly_in_local_only_context() {
-        // The document-reading functions share the same local-only contract.
-        let ctx = ResolutionContext::at(std::path::PathBuf::from("."));
-        let err = markdown_title_fn(&[json!("https://example.com/doc.md")], &ctx)
-            .expect_err("local-only remote URL must fail loudly");
-        assert!(
-            err.contains("remote reads are not enabled"),
-            "unexpected message: {err}"
-        );
-    }
-}
+mod fs_tests;
 
 #[cfg(test)]
 mod phase1_helpers {
@@ -5833,209 +1861,171 @@ mod phase1_helpers {
 }
 
 #[cfg(test)]
-mod arity_gating_tests {
-    use super::*;
-    use crate::markdown::compose::expression::catalog::DataType;
-    use crate::markdown::compose::expression::ResolutionContext;
-    use serde_json::json;
+mod registration_tests {
+    use std::collections::HashSet;
 
-    fn is_arity_message(message: &str) -> bool {
-        let lower = message.to_lowercase();
-        lower.contains("requires") && lower.contains("argument")
-    }
+    use serde_json::{Value, json};
 
-    #[test]
-    fn pure_fixed_arity_accepts_exact_count() {
-        assert_eq!(
-            dispatch("is_positive", &[json!(5)]).unwrap().unwrap(),
-            json!(true)
-        );
-    }
+    use super::{EvaluationMode, FunctionHandler, bindings, call_function, joined_bindings, registry};
+    use crate::markdown::compose::expression::call_binding::CallErrorKind;
+    use crate::markdown::compose::expression::catalog::expression_function_descriptors;
+    use crate::markdown::compose::expression::{ExpressionError, ResolutionContext};
 
     #[test]
-    fn pure_fixed_arity_rejects_below_minimum() {
-        let result = dispatch("is_positive", &[])
-            .expect("a recognized function must return Some, not None");
-        let message = result.expect_err("zero arguments must be rejected");
-        assert!(message.contains("is_positive"), "{message}");
-        assert!(is_arity_message(&message), "{message}");
-    }
-
-    #[test]
-    fn pure_fixed_arity_rejects_above_maximum() {
-        let result = dispatch("is_positive", &[json!(1), json!(2)])
-            .expect("a recognized function must return Some, not None");
-        let message = result.expect_err("two arguments must be rejected");
-        assert!(message.contains("is_positive"), "{message}");
-        assert!(is_arity_message(&message), "{message}");
-    }
-
-    #[test]
-    fn pure_optional_range_accepts_minimum() {
-        assert_eq!(
-            dispatch("round", &[json!(3.7)]).unwrap().unwrap(),
-            json!(4)
-        );
-    }
-
-    #[test]
-    fn pure_optional_range_accepts_maximum() {
-        assert!(
-            dispatch("round", &[json!(3.7), json!(0)])
-                .unwrap()
-                .is_ok(),
-            "round at its maximum arity must reach the handler"
-        );
-    }
-
-    #[test]
-    fn pure_optional_range_rejects_below_minimum() {
-        let result = dispatch("round", &[])
-            .expect("a recognized function must return Some, not None");
-        let message = result.expect_err("zero arguments must be rejected");
-        assert!(is_arity_message(&message), "{message}");
-    }
-
-    #[test]
-    fn pure_optional_range_rejects_above_maximum() {
-        let result = dispatch("round", &[json!(1), json!(2), json!(3)])
-            .expect("a recognized function must return Some, not None");
-        let message = result.expect_err("three arguments must be rejected");
-        assert!(is_arity_message(&message), "{message}");
-    }
-
-    #[test]
-    fn context_fixed_arity_accepts_exact_count() {
-        // The default context's empty `cwd` is relative, which resolution
-        // validation rejects.
-        let dir = tempfile::TempDir::new().unwrap();
-        let ctx = ResolutionContext::at(dir.path().to_path_buf());
-        assert_eq!(
-            dispatch_fs("basename", &[json!("foo/bar.md")], &ctx)
-                .unwrap()
-                .unwrap(),
-            json!("bar.md")
-        );
-    }
-
-    #[test]
-    fn context_fixed_arity_rejects_below_minimum() {
-        let ctx = ResolutionContext::default();
-        let result = dispatch_fs("basename", &[], &ctx)
-            .expect("a recognized function must return Some, not None");
-        let ExpressionError::Other { function, message } =
-            result.expect_err("zero arguments must be rejected")
-        else {
-            panic!("registry arity error must be ExpressionError::Other");
-        };
-        assert_eq!(function, "basename");
-        assert!(is_arity_message(&message), "{message}");
-    }
-
-    #[test]
-    fn context_fixed_arity_rejects_above_maximum() {
-        let ctx = ResolutionContext::default();
-        let result = dispatch_fs("basename", &[json!("a"), json!("b")], &ctx)
-            .expect("a recognized function must return Some, not None");
-        let message = result.expect_err("two arguments must be rejected").to_string();
-        assert!(is_arity_message(&message), "{message}");
-    }
-
-    #[test]
-    fn overloaded_context_range_reports_min_to_max_window() {
-        let ctx = ResolutionContext::default();
-        let result = dispatch_fs("link", &[], &ctx)
-            .expect("a recognized function must return Some, not None");
-        let message = result.expect_err("zero arguments must be rejected").to_string();
-        assert!(
-            message.contains("1 to 2 arguments"),
-            "overloaded range must name the full window: {message}"
-        );
-        assert!(is_arity_message(&message), "{message}");
-    }
-
-    #[test]
-    fn overloaded_context_range_rejects_above_max() {
-        let ctx = ResolutionContext::default();
-        let result = dispatch_fs(
-            "link",
-            &[json!("a"), json!("b"), json!("c")],
-            &ctx,
-        )
-        .expect("a recognized function must return Some, not None");
-        let message = result.expect_err("three arguments must be rejected").to_string();
-        assert!(is_arity_message(&message), "{message}");
-    }
-
-    #[test]
-    fn ineligible_arity_returns_some_err_not_none() {
-        // The outer evaluator treats `None` as "Unknown function" (authoring
-        // fatal). A recognized function at an ineligible arity must surface as
-        // `Some(Err(..))` so it is never mistaken for an unknown symbol.
-        assert!(dispatch("is_positive", &[]).is_some());
-        let ctx = ResolutionContext::default();
-        assert!(dispatch_fs("basename", &[], &ctx).is_some());
-    }
-
-    #[test]
-    fn unrecognized_function_still_returns_none() {
-        assert!(dispatch("definitely_not_a_real_function", &[]).is_none());
-        let ctx = ResolutionContext::default();
-        assert!(dispatch_fs("definitely_not_a_real_function", &[], &ctx).is_none());
-    }
-
-    #[test]
-    fn variadic_bound_message_uses_at_least_form() {
-        let variadic_descriptors: Vec<&ExpressionFunctionDescriptor> =
-            expression_function_descriptors()
-                .iter()
-                .filter(|descriptor| {
-                    descriptor.signature.split('(').next() == Some("and")
-                })
-                .collect();
-        assert!(!variadic_descriptors.is_empty());
-        let message = arity_error_message("and", &variadic_descriptors);
-        assert!(message.contains("and()"), "{message}");
-        assert!(message.contains("at least"), "{message}");
-        assert!(is_arity_message(&message), "{message}");
-    }
-
-    #[test]
-    fn authored_parameter_shapes_determine_arity_independently_of_lazy_catalog_entries() {
-        let fixed = [ParamType::val(DataType::Any), ParamType::val(DataType::Any)];
-        assert!(!accepts_parameter_arity(&fixed, 1));
-        assert!(accepts_parameter_arity(&fixed, 2));
-        assert!(!accepts_parameter_arity(&fixed, 3));
-
-        let optional = [
-            ParamType::val(DataType::Any),
-            ParamType::optional(DataType::Any),
-        ];
-        assert!(accepts_parameter_arity(&optional, 1));
-        assert!(accepts_parameter_arity(&optional, 2));
-        assert!(!accepts_parameter_arity(&optional, 3));
-
-        let variadic = [
-            ParamType::val(DataType::Any),
-            ParamType::variadic(DataType::Any),
-        ];
-        assert!(!accepts_parameter_arity(&variadic, 0));
-        assert!(accepts_parameter_arity(&variadic, 1));
-        assert!(accepts_parameter_arity(&variadic, 4));
-    }
-
-    #[test]
-    fn lazy_registry_query_uses_joined_authored_descriptors() {
-        for name in ["and", "or"] {
-            assert!(matches!(
-                lazy_arity_eligibility(name, 0),
-                Some(LazyArityEligibility::Eligible)
-            ));
-            assert!(matches!(
-                lazy_arity_eligibility(name, 3),
-                Some(LazyArityEligibility::Eligible)
-            ));
+    fn registration_names_and_aliases_are_unique() {
+        let bindings: Vec<_> = bindings().collect();
+        let canonicals: HashSet<_> = bindings.iter().map(|binding| binding.canonical).collect();
+        assert_eq!(canonicals.len(), bindings.len());
+        let mut all_names = canonicals;
+        for binding in bindings {
+            for alias in binding.aliases {
+                assert!(all_names.insert(*alias), "duplicate expression alias: {alias}");
+            }
         }
-        assert!(lazy_arity_eligibility("not_lazy", 0).is_none());
+    }
+
+    /// The registry builds from the embedded catalog, and every catalog
+    /// function has a binding and every binding a catalog function.
+    #[test]
+    fn catalog_and_runtime_bindings_have_bidirectional_canonical_parity() {
+        let catalog: HashSet<_> = expression_function_descriptors().iter().map(|descriptor| descriptor.name).collect();
+        let runtime: HashSet<_> = bindings().map(|binding| binding.canonical).collect();
+        assert_eq!(catalog, runtime);
+        assert_eq!(joined_bindings().len(), runtime.len());
+    }
+
+    /// Every registration compiles exactly the catalog's overloads for its
+    /// function, in authored order.
+    #[test]
+    fn each_registration_compiles_its_catalog_overloads() {
+        for entry in joined_bindings() {
+            let descriptors: Vec<_> = expression_function_descriptors()
+                .iter()
+                .filter(|descriptor| descriptor.name == entry.binding.canonical)
+                .collect();
+            assert_eq!(entry.registration.overloads().len(), descriptors.len(), "{}", entry.binding.canonical);
+            for (index, descriptor) in descriptors.iter().enumerate() {
+                assert_eq!(descriptor.overload, index);
+            }
+        }
+    }
+
+    /// `length` excludes booleans and `number`/`round` recover through their
+    /// fallback; a rule the catalog cannot carry fails the registry instead.
+    #[test]
+    fn every_registered_rule_applies() {
+        assert!(!registry().entries.is_empty());
+        let length = super::function_registration("length").unwrap();
+        assert!(!length.overloads()[0].parameters()[0].excluded_sources().is_empty());
+        for name in ["number", "round"] {
+            assert!(super::function_registration(name).unwrap().numeric_recovery().is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn exactly_is_null_and_is_empty_are_absence_predicates_with_their_aliases() {
+        let marked: HashSet<_> = bindings()
+            .filter(|binding| super::is_absence_predicate(binding.canonical))
+            .map(|binding| binding.canonical)
+            .collect();
+        assert_eq!(marked, HashSet::from(["is_null", "is_empty"]));
+        for alias in ["isnull", "isempty", "IS_NULL", "isEmpty"] {
+            assert!(super::is_absence_predicate(alias), "{alias}");
+        }
+        for other in ["is_string", "trim", "length", "or", "is_nul", ""] {
+            assert!(!super::is_absence_predicate(other), "{other}");
+        }
+    }
+
+    #[test]
+    fn alias_canonical_collisions_are_rejected() {
+        let fixtures = [("alpha", &["beta"][..]), ("beta", &[][..])];
+        assert_eq!(
+            super::validate_name_uniqueness(fixtures),
+            Err(super::RegistryError::NameCollision("beta".to_string()))
+        );
+    }
+
+    #[test]
+    fn evaluation_modes_pair_with_their_handler_kinds() {
+        for binding in bindings() {
+            let paired = match binding.evaluation {
+                EvaluationMode::Pure => {
+                    matches!(binding.handler, Some(FunctionHandler::Pure(_)))
+                }
+                EvaluationMode::Context => matches!(
+                    binding.handler,
+                    Some(FunctionHandler::Context(_))
+                ),
+                EvaluationMode::Lazy => binding.handler.is_none(),
+            };
+            assert!(paired, "{}", binding.canonical);
+            assert_eq!(super::lazy_function(binding.canonical).is_some(), binding.evaluation == EvaluationMode::Lazy);
+            assert_eq!(super::is_context_function(binding.canonical), binding.evaluation == EvaluationMode::Context);
+        }
+    }
+
+    #[test]
+    fn unknown_names_are_not_dispatched() {
+        assert!(call_function("definitely_not_a_real_function", &[], None).is_none());
+        let context = ResolutionContext::default();
+        assert!(call_function("definitely_not_a_real_function", &[], Some(&context)).is_none());
+    }
+
+    /// A known context function without a context fails before binding, as a
+    /// recoverable error rather than an unknown symbol.
+    #[test]
+    fn a_context_function_without_a_context_is_a_recoverable_error() {
+        let error = call_function("basename", &[json!("a.md")], None).unwrap().unwrap_err();
+        assert!(matches!(error, ExpressionError::Other { .. }), "{error:?}");
+        assert!(error.to_string().contains("requires a document resolution context"), "{error}");
+    }
+
+    /// Arity is the binder's: a recognized function at a count no overload
+    /// takes is a typed arity error, never `None`.
+    #[test]
+    fn a_count_no_overload_takes_is_a_typed_arity_error() {
+        let context = ResolutionContext::default();
+        for (name, args) in [
+            ("is_positive", vec![]),
+            ("is_positive", vec![json!(1), json!(2)]),
+            ("basename", vec![]),
+            ("link", vec![json!("a"), json!("b"), json!("c")]),
+        ] {
+            let error = call_function(name, &args, Some(&context)).expect("a known function").unwrap_err();
+            let ExpressionError::Call(error) = &error else {
+                panic!("{name}: expected a call error, got {error:?}");
+            };
+            assert_eq!(error.kind(), CallErrorKind::Arity, "{name}: {error}");
+        }
+    }
+
+    #[test]
+    fn calls_resolve_aliases_and_case() {
+        assert_eq!(call_function("IsString", &[json!("x")], None).unwrap().unwrap(), Value::Bool(true));
+    }
+
+    #[test]
+    fn trim_keys_and_values_compute_from_bound_arguments() {
+        let registration = |signature: &str| {
+            crate::markdown::compose::expression::call_binding::FunctionRegistration::builder("f", signature)
+                .build()
+                .unwrap()
+        };
+        let trim = registration("function(parameters(text: string | null); returns(string | null))");
+        let args = [json!("  a b  ")];
+        assert_eq!(super::strings::trim_fn(&trim.bind_call(&args).unwrap()), Ok(json!("a b")));
+        let args = [Value::Null];
+        assert_eq!(super::strings::trim_fn(&trim.bind_call(&args).unwrap()), Ok(Value::Null));
+
+        let object = registration("function(parameters(obj: object | null); returns(any[]))");
+        let args = [json!({"b": 1, "a": [2]})];
+        let bound = object.bind_call(&args).unwrap();
+        assert_eq!(super::collections::keys_fn(&bound), Ok(json!(["b", "a"])));
+        assert_eq!(super::collections::values_fn(&bound), Ok(json!([1, [2]])));
+        let args = [Value::Null];
+        let bound = object.bind_call(&args).unwrap();
+        assert_eq!(super::collections::keys_fn(&bound), Ok(json!([])));
+        assert_eq!(super::collections::values_fn(&bound), Ok(json!([])));
     }
 }

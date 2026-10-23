@@ -48,6 +48,7 @@ mod compose_perf;
 mod compose_refs_and_missing;
 mod compose_remote_caching;
 mod compose_schema;
+mod compose_schema_enhancements;
 mod compose_schema_file_rewrite;
 mod compose_scope_matrix;
 mod compose_shell;

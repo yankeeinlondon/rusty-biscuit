@@ -1007,7 +1007,7 @@ fn no_error_flag_is_accepted_on_every_action_category() {
             {
                 "set_frontmatter": { "file": "@a.md", "prop": "x", "value": "y", "no_error": true },
             },
-            { "length": { "x": "hello", "no_error": true } },
+            { "length": { "val": "hello", "no_error": true } },
         ],
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();

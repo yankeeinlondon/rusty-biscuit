@@ -195,10 +195,12 @@ fn every_suppression_row_warns_exactly_where_evaluation_reads_an_unhandled_root(
         // Registered aliases resolve through the same function catalog.
         ("{{ isnull(x) }}", "true", &[]),
         ("{{ isEmpty(x) }}", "true", &[]),
-        // Nested: the predicate no longer directly guards the read. The spec
-        // writes `is_empty(trim(x))`, but `trim` is not a catalog function.
+        // Nested: the predicate no longer directly guards the read.
+        ("{{ is_empty(trim(x)) }}", "true", &["x"]),
         ("{{ is_empty(lower(x)) }}", "true", &["x"]),
-        ("{{ length(x) }}", "0", &["x"]),
+        // A text transform passes a missing value through as null (ledger
+        // row 31); `length(x)` would now be a type error (row 18).
+        ("{{ upper(x) }}", "", &["x"]),
         // A chain that is itself a primary handles every operand.
         ("{{ x || y || \"d\" }}", "d", &[]),
         // "Direct" only: a comparison in the condition is an ordinary operand.

@@ -257,7 +257,7 @@ pub fn is_lifecycle_control_verb(verb: &str) -> bool {
 fn is_known_expression_function_verb(verb: &str) -> bool {
     expression_function_descriptors()
         .iter()
-        .any(|d| parsed_verb_of(d.signature) == Some(verb))
+        .any(|d| d.name == verb)
 }
 
 /// Extract the verb name from a raw descriptor signature string.
@@ -316,11 +316,7 @@ pub fn all_lifecycle_verbs() -> Vec<&'static str> {
             verbs.push(verb);
         }
     }
-    for desc in expression_function_descriptors() {
-        if let Some(verb) = parsed_verb_of(desc.signature) {
-            verbs.push(verb);
-        }
-    }
+    verbs.extend(expression_function_descriptors().iter().map(|desc| desc.name));
     verbs.sort_unstable();
     verbs.dedup();
     verbs

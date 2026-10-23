@@ -439,8 +439,9 @@ fn base_schema_ctx_is_darkmatter_owned_generated_context() {
 
 /// The baseline's `style.markdown` declarations agree with the runtime rule
 /// validator (`markdown::cleanup::rules`) on every legal and illegal shape,
-/// so DMLS validation and cleanup never disagree about a setting. Quoted
-/// numerals are not coerced into rule values.
+/// so DMLS validation and cleanup never disagree about a setting. Both bind
+/// a value through the one conversion engine first, so `"80"` is `80` and
+/// `5` is `"5"` to each of them.
 #[test]
 fn base_style_markdown_schema_agrees_with_the_rule_validator() {
     let control = "style:\n  markdown:\n    frontmatter: false\n    table-layout: false\n    \
@@ -458,15 +459,15 @@ fn base_style_markdown_schema_agrees_with_the_rule_validator() {
         ("fixed-width", "0", false),
         ("fixed-width", "1001", false),
         ("fixed-width", "80.5", false),
-        ("fixed-width", "\"80\"", false),
+        ("fixed-width", "\"80\"", true),
         ("fixed-width", "[80]", false),
         ("indentation", "preserve", true),
         ("indentation", "4", true),
         ("indentation", "8", true),
         ("indentation", "3", false),
-        ("indentation", "\"4\"", false),
+        ("indentation", "\"4\"", true),
         ("indentation", "\"\"", false),
-        ("unwrap", "\"true\"", false),
+        ("unwrap", "\"true\"", true),
         ("unwrap", "[true]", false),
         ("list-item-padding", "none", true),
         ("list-item-padding", "two", false),
@@ -476,10 +477,10 @@ fn base_style_markdown_schema_agrees_with_the_rule_validator() {
         ("default-language", "plain", true),
         ("default-language", "[sh]", false),
         ("default-language", "{}", false),
-        ("default-language", "5", false),
+        ("default-language", "5", true),
         ("list-item-padding", "1", false),
-        ("list-padding", "\"false\"", false),
-        ("fixed-width", "\"true\"", false),
+        ("list-padding", "\"false\"", true),
+        ("fixed-width", "\"true\"", true),
         ("bogus-rule", "true", false),
     ];
     let mut disagreements = Vec::new();

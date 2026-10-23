@@ -181,6 +181,7 @@ types:
         is_yesterday_utc: expression-function-verb@darkmatter:lifecycle
         join: expression-function-verb@darkmatter:lifecycle
         kebab_case: expression-function-verb@darkmatter:lifecycle
+        keys: expression-function-verb@darkmatter:lifecycle
         last: expression-function-verb@darkmatter:lifecycle
         length: expression-function-verb@darkmatter:lifecycle
         link: expression-function-verb@darkmatter:lifecycle
@@ -213,9 +214,11 @@ types:
         starts_with: expression-function-verb@darkmatter:lifecycle
         terminal: expression-function-verb@darkmatter:lifecycle
         title_case: expression-function-verb@darkmatter:lifecycle
+        trim: expression-function-verb@darkmatter:lifecycle
         try_frontmatter: expression-function-verb@darkmatter:lifecycle
         upper: expression-function-verb@darkmatter:lifecycle
         validate_schema: expression-function-verb@darkmatter:lifecycle
+        values: expression-function-verb@darkmatter:lifecycle
         without_date: expression-function-verb@darkmatter:lifecycle
         $constraints:
             min-keys: 1
@@ -331,6 +334,7 @@ types:
         is_yesterday_utc: expression-function-verb@darkmatter:lifecycle
         join: expression-function-verb@darkmatter:lifecycle
         kebab_case: expression-function-verb@darkmatter:lifecycle
+        keys: expression-function-verb@darkmatter:lifecycle
         last: expression-function-verb@darkmatter:lifecycle
         length: expression-function-verb@darkmatter:lifecycle
         link: expression-function-verb@darkmatter:lifecycle
@@ -363,9 +367,11 @@ types:
         starts_with: expression-function-verb@darkmatter:lifecycle
         terminal: expression-function-verb@darkmatter:lifecycle
         title_case: expression-function-verb@darkmatter:lifecycle
+        trim: expression-function-verb@darkmatter:lifecycle
         try_frontmatter: expression-function-verb@darkmatter:lifecycle
         upper: expression-function-verb@darkmatter:lifecycle
         validate_schema: expression-function-verb@darkmatter:lifecycle
+        values: expression-function-verb@darkmatter:lifecycle
         without_date: expression-function-verb@darkmatter:lifecycle
         when: "expression -> run the bundle only when this condition holds"
         no_error: "boolean -> keep the stack running when one of these actions fails"
@@ -479,6 +485,7 @@ types:
         is_yesterday_utc: expression-function-verb@darkmatter:lifecycle
         join: expression-function-verb@darkmatter:lifecycle
         kebab_case: expression-function-verb@darkmatter:lifecycle
+        keys: expression-function-verb@darkmatter:lifecycle
         last: expression-function-verb@darkmatter:lifecycle
         length: expression-function-verb@darkmatter:lifecycle
         link: expression-function-verb@darkmatter:lifecycle
@@ -511,9 +518,11 @@ types:
         starts_with: expression-function-verb@darkmatter:lifecycle
         terminal: expression-function-verb@darkmatter:lifecycle
         title_case: expression-function-verb@darkmatter:lifecycle
+        trim: expression-function-verb@darkmatter:lifecycle
         try_frontmatter: expression-function-verb@darkmatter:lifecycle
         upper: expression-function-verb@darkmatter:lifecycle
         validate_schema: expression-function-verb@darkmatter:lifecycle
+        values: expression-function-verb@darkmatter:lifecycle
         without_date: expression-function-verb@darkmatter:lifecycle
         when: "expression -> run the bundle only when this condition holds"
         no_error: "boolean -> keep the stack running when one of these actions fails"
@@ -628,6 +637,7 @@ types:
         is_yesterday_utc: expression-function-verb@darkmatter:lifecycle
         join: expression-function-verb@darkmatter:lifecycle
         kebab_case: expression-function-verb@darkmatter:lifecycle
+        keys: expression-function-verb@darkmatter:lifecycle
         last: expression-function-verb@darkmatter:lifecycle
         length: expression-function-verb@darkmatter:lifecycle
         link: expression-function-verb@darkmatter:lifecycle
@@ -660,9 +670,11 @@ types:
         starts_with: expression-function-verb@darkmatter:lifecycle
         terminal: expression-function-verb@darkmatter:lifecycle
         title_case: expression-function-verb@darkmatter:lifecycle
+        trim: expression-function-verb@darkmatter:lifecycle
         try_frontmatter: expression-function-verb@darkmatter:lifecycle
         upper: expression-function-verb@darkmatter:lifecycle
         validate_schema: expression-function-verb@darkmatter:lifecycle
+        values: expression-function-verb@darkmatter:lifecycle
         without_date: expression-function-verb@darkmatter:lifecycle
         when: "expression -> run the bundle only when this condition holds"
         no_error: "boolean -> keep the stack running when one of these actions fails"

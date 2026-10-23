@@ -397,30 +397,66 @@ fn compose_frontmatter_serializes_string_reverse_coercion() {
 }
 
 #[test]
-fn compose_frontmatter_serializes_boolish_normalization() {
+fn compose_frontmatter_keeps_boolish_as_written() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
-    // `boolish` accepts the `True` spelling and normalizes it to a real bool.
+    // `boolish` validates the `True` spelling and keeps it exactly as written.
     let doc = write_file(
         tmp,
         "boolish.md",
         "---\n$schema:\n  flag: boolish\nflag: \"True\"\n---\nBody\n",
     );
     let fm = composed_frontmatter(&process, &doc);
-    assert_eq!(fm.get("flag"), Some(&serde_json::json!(true)));
+    assert_eq!(fm.get("flag"), Some(&serde_json::json!("True")));
 }
 
 #[test]
-fn compose_frontmatter_serializes_numberlike_normalization() {
+fn compose_frontmatter_keeps_numberlike_as_written() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
     let doc = write_file(
         tmp,
         "numberlike.md",
-        "---\n$schema:\n  n: numberlike\nn: \"42\"\n---\nBody\n",
+        "---\n$schema:\n  n: numberlike\nn: \"042\"\n---\nBody\n",
     );
     let fm = composed_frontmatter(&process, &doc);
-    assert_eq!(fm.get("n"), Some(&serde_json::json!(42)));
+    assert_eq!(fm.get("n"), Some(&serde_json::json!("042")));
+}
+
+/// The conversion engine through the real binary: lenient number text and a
+/// boolean word convert and are written into the composed frontmatter.
+#[test]
+fn compose_frontmatter_writes_engine_conversions() {
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let doc = write_file(
+        tmp,
+        "engine.md",
+        "---\n$schema:\n  n: number\n  draft: boolean\n  tags: '(boolean | number)[]'\n\
+         n: \"1_000\"\ndraft: \"On\"\ntags: [\"2\", \"yes\"]\n---\nBody\n",
+    );
+    let fm = composed_frontmatter(&process, &doc);
+    assert_eq!(fm.get("n"), Some(&serde_json::json!(1000)));
+    assert_eq!(fm.get("draft"), Some(&serde_json::json!(true)));
+    assert_eq!(fm.get("tags"), Some(&serde_json::json!([2, true])));
+}
+
+/// A value the engine cannot convert fails composition with the engine's
+/// reason, and the source document is left as written.
+#[test]
+fn compose_reports_the_engine_reason_for_a_failed_conversion() {
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let source = "---\n$schema:\n  n: number\n  flag: boolean\nn: \"9007199254740993\"\nflag: \"yes\"\n---\nBody\n";
+    let doc = write_file(tmp, "inexact.md", source);
+    let assert = process.command().args(["compose", "--frontmatter"]).arg(&doc).assert().failure();
+    // The rendered block wraps long lines; compare its words.
+    let stderr = darkmatter::testing::strip_ansi_codes(&String::from_utf8_lossy(&assert.get_output().stderr))
+        .replace('┃', " ");
+    let words = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(words.contains("the number cannot be represented exactly"), "{stderr}");
+    assert!(!words.contains("flag"), "only the failing value is reported: {stderr}");
+    assert_eq!(read_to_string(&doc), source);
 }
 
 #[test]

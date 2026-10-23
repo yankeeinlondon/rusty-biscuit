@@ -110,9 +110,11 @@ fn find_files_input_matrix() {
     assert_eq!(value(d, "find_files('&area/fixes/none.md')").unwrap(), json!([]));
     // Explicit null: empty.
     assert_eq!(value(d, "find_files(null)").unwrap(), json!([]));
+    // Ledger row 80 (`pattern: string | null`): a number is its text pattern.
+    assert_eq!(value(d, "find_files(3)").unwrap(), json!([]));
     // Wrong type, missing argument, invalid glob, a `%` reference, a URL: errors.
     for (expression, fragment) in [
-        ("find_files(3)", "find_files"),
+        ("find_files([3])", "find_files"),
         ("find_files()", "find_files"),
         ("find_files('&area/[')", "`&area/[` is not a valid glob"),
         ("find_files('%&spec.md')", "cannot use the `%` recursive modifier"),
@@ -206,5 +208,7 @@ fn try_frontmatter_reports_a_failure_as_a_value() {
         json!({"error": null, "ok": true, "value": {}})
     );
     assert_eq!(value(d, "try_frontmatter(null)").unwrap(), Value::Null);
-    assert!(value(d, "try_frontmatter(3)").is_err());
+    // A number is its text path (here a missing file); a list does not bind.
+    assert_eq!(value(d, "try_frontmatter(3)").unwrap()["ok"], json!(false));
+    assert!(value(d, "try_frontmatter([3])").is_err());
 }

@@ -480,11 +480,11 @@ fn context_expressions_includes_every_function() {
     assert_one_row_each("expression report", &expected, &actual);
 }
 
-/// `code_link()` lists both overloads once each in the Filesystem group,
-/// directly after `link()`'s two rows, with no list of its own: the rows come
-/// from darkmatter's catalog descriptors.
+/// `code_link()` and `link()` list both overloads once each, in authored
+/// order, in the alphabetical Filesystem group: the rows come from
+/// darkmatter's catalog descriptors.
 #[test]
-fn context_expressions_lists_code_link_beside_link_in_the_filesystem_group() {
+fn context_expressions_lists_code_link_and_link_overloads_in_the_filesystem_group() {
     let assert = repository_fixture()
         .command()
         .env("COLUMNS", "200")
@@ -514,18 +514,55 @@ fn context_expressions_lists_code_link_beside_link_in_the_filesystem_group() {
         .collect();
     assert_eq!(
         signatures,
-        ["link(file)", "link(target, desc)", "code_link(file)", "code_link(target, desc)"],
+        ["code_link(file)", "code_link(target, desc)", "link(file)", "link(target, desc)"],
         "Filesystem group:\n{group}"
     );
     assert!(
-        group.contains("Creates a Markdown link whose text is inline"),
+        group.contains("Creates a Markdown link"),
         "the catalog description must render; group:\n{group}"
     );
 }
 
+/// Criterion 39: the Functions section lists categories in the catalog's
+/// `categories:` order and functions alphabetically within each, every
+/// overload once under its canonical name. The snapshot pins the headings and
+/// the signature column only, so a reworded description or example does not
+/// churn it; a reordering, an added or removed overload, or an alias row does.
+#[test]
+fn context_expressions_function_order_snapshot() {
+    let assert = repository_fixture()
+        .command()
+        .env("COLUMNS", "200")
+        .args(["context", "--expressions"])
+        .assert()
+        .success();
+    let stdout = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stdout));
+
+    let lines: Vec<&str> = stdout.lines().collect();
+    let start = lines
+        .iter()
+        .position(|line| line.trim() == "Functions")
+        .unwrap_or_else(|| panic!("expected a Functions section; got:\n{stdout}"));
+    let mut outline = String::new();
+    for line in &lines[start + 1..] {
+        if line.contains('│') {
+            let cell = first_column_cells(line);
+            if let Some(signature) = cell.first().filter(|cell| cell.as_str() != "Function") {
+                outline.push_str(&format!("  {signature}\n"));
+            }
+        } else if !line.is_empty() && !line.starts_with(' ') && !line.contains('─') {
+            outline.push_str(&format!("{}\n", line.trim()));
+        }
+    }
+    assert!(stdout.contains('⇒'), "function examples render as `call ⇒ result`");
+    insta::assert_snapshot!(outline);
+}
+
 /// More-context AC1 and AC26: every added variable appears in `claudine
 /// context` and every added function in `claudine context --expressions`, and
-/// the `recent_commits` pair renders once on each side from one catalog entry.
+/// `recent_commits` renders once on each side. The function returns the
+/// catalog's shared `recent-commits` type, and each description names the
+/// other.
 #[test]
 fn context_reports_list_more_context_names_and_the_recent_commits_pair_once() {
     let variables = context_first_column_cells(&["context"]);
@@ -555,12 +592,10 @@ fn context_reports_list_more_context_names_and_the_recent_commits_pair_once() {
         .iter()
         .find(|descriptor| descriptor.name == "recent_commits")
         .unwrap();
-    let function = darkmatter::markdown::compose::expression::expression_function_descriptors()
-        .iter()
-        .find(|descriptor| descriptor.signature == "recent_commits(count)")
-        .unwrap();
-    assert_eq!(function.pair, Some("recent_commits"));
-    assert_eq!(function.description, variable.description);
+    let function = &darkmatter::markdown::compose::expression::function_descriptors("recent_commits")[0];
+    assert_eq!(function.returns, "recent-commits");
+    assert!(function.description.contains("`ctx.recent_commits`"), "{}", function.description);
+    assert!(variable.description.contains("`recent_commits(count)`"), "{}", variable.description);
 }
 
 /// Side-effects report must render exactly one row per side-effect descriptor

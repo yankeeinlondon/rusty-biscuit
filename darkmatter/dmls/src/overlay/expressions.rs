@@ -15,6 +15,7 @@ use darkmatter::markdown::compose::expression::{
     Availability, BinaryOp, BindingError, ExpressionError, ExpressionFinder, ExpressionFunctionDescriptor, ExpressionLintKind,
     ParseError,
     ParseMode, SpannedExpr, SpannedExprKind, expression_function_descriptors,
+    function_descriptors as catalog_function_overloads,
     BindingView, ReservedRootDescriptor, RootMembers, ScopedType, Shape, TypeScope, branch_scope,
     identifier_prefix_start, is_whole_value_span, lint_expression, parse_condition_spanned,
     parse_spanned, reserved_root_descriptors, static_variable_reads, validate_expression,
@@ -624,18 +625,17 @@ pub fn function_descriptors() -> &'static [ExpressionFunctionDescriptor] {
     expression_function_descriptors()
 }
 
-/// The expression-function descriptor whose bare name (the leading identifier
-/// of its `signature`) is `name`, if any. Overloads share a bare name; the
-/// first catalog entry wins, matching the pre-descriptor lookup order.
-pub fn function_descriptor(name: &str) -> Option<&'static ExpressionFunctionDescriptor> {
-    expression_function_descriptors()
-        .iter()
-        .find(|descriptor| function_name(descriptor.signature) == name)
+/// Every overload of the function `name` names, resolved by Darkmatter the way
+/// dispatch resolves it: case-insensitive, by canonical name or registered
+/// alias (`isString` finds `is_string`). Empty for an unknown name.
+pub fn function_overloads(name: &str) -> &'static [ExpressionFunctionDescriptor] {
+    catalog_function_overloads(name)
 }
 
-/// The bare function name — the leading identifier of a catalog `signature`.
-fn function_name(signature: &str) -> &str {
-    signature.split('(').next().unwrap_or(signature)
+/// The first overload of the function `name` names (see
+/// [`function_overloads`]), if any.
+pub fn function_descriptor(name: &str) -> Option<&'static ExpressionFunctionDescriptor> {
+    function_overloads(name).first()
 }
 
 /// Whether `name` (a `ctx.NAME` tail) is a known context variable.
@@ -683,12 +683,20 @@ pub fn format_ctx_hover_block(descriptor: &ContextVariableDescriptor) -> String 
 /// only the (response-boundary–resolved) link: a completion popup is a
 /// one-line surface, not a reference table.
 pub fn format_function_block(descriptor: &ExpressionFunctionDescriptor) -> String {
-    let mut block = format!(
-        "**`{}`**\n\n{}",
-        descriptor.typed_signature(),
-        descriptor.description
-    );
-    if let Some(vocabulary) = query_vocabulary_block(function_name(descriptor.signature)) {
+    format_function_overloads_block(std::slice::from_ref(descriptor))
+}
+
+/// [`format_function_block`] for every overload of one function: each
+/// overload's typed signature and description, in catalog order, then the
+/// query vocabulary once. One overload renders exactly as
+/// [`format_function_block`].
+pub fn format_function_overloads_block(overloads: &[ExpressionFunctionDescriptor]) -> String {
+    let mut block = overloads
+        .iter()
+        .map(|descriptor| format!("**`{}`**\n\n{}", descriptor.typed_signature(), descriptor.description))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if let Some(vocabulary) = overloads.first().and_then(|descriptor| query_vocabulary_block(descriptor.name)) {
         block.push_str("\n\n");
         block.push_str(vocabulary);
     }
@@ -838,12 +846,17 @@ pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<
         }
     }
 
+    // A function is offered under its canonical name only, once per overload.
+    // Typing a registered alias (`isStr` for `isstring`, matched
+    // case-insensitively as dispatch matches it) offers the canonical too.
+    let alias_partial = partial.to_ascii_lowercase();
     for descriptor in function_descriptors() {
-        let signature = descriptor.signature;
-        let name = function_name(signature);
-        if name.starts_with(partial) {
+        let name = descriptor.name;
+        let alias_matches = !partial.is_empty()
+            && descriptor.aliases.iter().any(|alias| alias.starts_with(&alias_partial));
+        if name.starts_with(partial) || alias_matches {
             items.push(ExprCompletion {
-                label: signature.to_string(),
+                label: descriptor.signature.to_string(),
                 insert_text: name.to_string(),
                 kind: ExprCompletionKind::Function,
                 detail: Some(descriptor.typed_signature()),
@@ -1111,11 +1124,12 @@ fn hover_markdown_from(
     };
 
     // D5: a cursor on a known function-name identifier wins.
-    if let Some(name) = function_call_at(&expr, expression, expr_offset)
-        && let Some(descriptor) = function_descriptor(name)
-    {
-        value.push_str(&format!("\n\n{}", format_function_block(descriptor)));
-        return value;
+    if let Some(name) = function_call_at(&expr, expression, expr_offset) {
+        let overloads = function_overloads(name);
+        if !overloads.is_empty() {
+            value.push_str(&format!("\n\n{}", format_function_overloads_block(overloads)));
+            return value;
+        }
     }
 
     // Resolve the identifier against the sub-expression under the cursor (e.g.
@@ -1780,21 +1794,61 @@ mod tests {
     #[test]
     fn test_function_descriptor_returns_typed_signature() {
         let length = function_descriptor("length").expect("`length` is a known function");
-        assert_eq!(function_name(length.signature), "length");
+        assert_eq!(length.name, "length");
         // Thin wrapper agrees with the descriptor lookup.
         assert_eq!(function_description("length"), Some(length.description));
         assert!(function_descriptor("definitely_not_a_function").is_none());
         assert!(function_description("definitely_not_a_function").is_none());
     }
 
+    /// Criterion 57: a registered alias, in any case, resolves to its
+    /// canonical's overloads exactly as dispatch resolves it, and typing an
+    /// alias completes the canonical; no alias is ever listed as a function.
+    #[test]
+    fn an_alias_resolves_and_completes_as_its_canonical() {
+        let canonical = function_overloads("is_string");
+        assert!(!canonical.is_empty());
+        assert!(canonical[0].aliases.contains(&"isstring"), "{:?}", canonical[0].aliases);
+        for spelling in ["isString", "isstring", "IS_STRING"] {
+            assert_eq!(function_overloads(spelling), canonical, "`{spelling}`");
+        }
+
+        let offered: Vec<_> = completion_candidates("isStr", &[])
+            .into_iter()
+            .filter(|candidate| candidate.kind == ExprCompletionKind::Function)
+            .collect();
+        assert_eq!(offered.len(), canonical.len(), "{offered:#?}");
+        assert!(offered.iter().all(|candidate| candidate.insert_text == "is_string"), "{offered:#?}");
+
+        let functions: Vec<_> = completion_candidates("", &[])
+            .into_iter()
+            .filter(|candidate| candidate.kind == ExprCompletionKind::Function)
+            .collect();
+        assert_eq!(functions.len(), expression_function_descriptors().len());
+        assert!(functions.iter().all(|candidate| candidate.insert_text != "isstring"));
+    }
+
+    /// Every overload of a function hovers together, in catalog order.
+    #[test]
+    fn overloads_hover_together() {
+        let overloads = function_overloads("code_link");
+        assert_eq!(overloads.len(), 2);
+        let block = format_function_overloads_block(overloads);
+        let first = block.find(&overloads[0].typed_signature()).expect("first overload");
+        let second = block.find(&overloads[1].typed_signature()).expect("second overload");
+        assert!(first < second, "{block}");
+        assert_eq!(format_function_overloads_block(&overloads[..1]), format_function_block(&overloads[0]));
+    }
+
     #[test]
     fn test_function_descriptor_fallible_signature_has_error_suffix() {
-        // `length` is fallible, so its typed signature carries the
+        // `recent_commits` is fallible, so its typed signature carries the
         // `| error` union suffix that the untyped `signature` lacks.
-        let length = function_descriptor("length").expect("`length` is a known function");
-        assert!(length.signature.contains("length("));
-        assert!(!length.signature.contains("| error"));
-        assert!(length.typed_signature().ends_with("| error"));
+        let recent = function_descriptor("recent_commits").expect("`recent_commits` is a known function");
+        assert!(recent.fallible);
+        assert!(recent.signature.contains("recent_commits("));
+        assert!(!recent.signature.contains("| error"));
+        assert!(recent.typed_signature().ends_with("| error"));
     }
 
     #[test]
@@ -1812,7 +1866,7 @@ mod tests {
 
         let vendor = function_descriptor("remote_vendor").unwrap();
         let typed = vendor.typed_signature();
-        assert!(typed.contains("enum(\"\", github, gitlab, gitea, forgejo"));
+        assert!(typed.contains("enum('',github,gitlab,gitea,forgejo"), "{typed}");
         assert!(typed.ends_with("| error"));
     }
 
@@ -1833,7 +1887,7 @@ mod tests {
         }
 
         for descriptor in function_descriptors() {
-            let name = function_name(descriptor.signature);
+            let name = descriptor.name;
             let candidate = candidates
                 .iter()
                 .find(|candidate| {
@@ -2003,10 +2057,12 @@ mod tests {
                 "`{name}` hover block must link to the query vocabulary: {block}"
             );
 
-            // D4 completion documentation.
+            // D4 completion documentation, on the query overload (the
+            // `count` overload takes no query).
+            let query = format!("{name}(query)");
             let documented = candidates
                 .iter()
-                .filter(|candidate| function_name(&candidate.label) == name)
+                .filter(|candidate| candidate.label == query)
                 .collect::<Vec<_>>();
             assert!(!documented.is_empty(), "`{name}` must reach completion");
             for candidate in documented {
@@ -2084,11 +2140,11 @@ mod tests {
 
     #[test]
     fn test_format_function_block_carries_typed_signature_and_description() {
-        let length = function_descriptor("length").expect("`length` is a known function");
-        let block = format_function_block(length);
-        assert!(block.contains(&length.typed_signature()));
+        let recent = function_descriptor("recent_commits").expect("`recent_commits` is a known function");
+        let block = format_function_block(recent);
+        assert!(block.contains(&recent.typed_signature()));
         assert!(block.contains("| error"));
-        assert!(block.contains(length.description));
+        assert!(block.contains(recent.description));
     }
 
     /// More-context plan 4.7: every added `ctx.*` variable and function is
@@ -2108,15 +2164,27 @@ mod tests {
         }
 
         for (expression, name, typed) in [
-            ("recent_commits(3)", "recent_commits", "recent_commits(count: number(integer)) -> string[] | error"),
+            (
+                "recent_commits(3)",
+                "recent_commits",
+                "recent_commits(count: number(integer;min(1))) -> recent-commits | error",
+            ),
             (
                 "ping_under(\"10.0.0.1\", 50)",
                 "ping_under",
-                "ping_under(address: ip-address, timeout: number, [attempts: number(integer)]) -> boolean | \"unstable\" | null | error",
+                "ping_under(address: ip-address, timeout: number, [attempts: number(integer;min(1);max(100))]) -> boolean | enum(unstable) | null | error",
             ),
-            ("has_agentic_cli(\"kimi_code\")", "has_agentic_cli", "\"kimi-code\""),
-            ("as_markdown(\"x\")", "as_markdown", "as_markdown(content: string) -> string | error"),
-            ("has_binary(\"sh\")", "has_binary", "has_binary(name_or_path: string) -> boolean"),
+            (
+                "has_agentic_cli(\"kimi_code\")",
+                "has_agentic_cli",
+                "has_agentic_cli(agent: agentic-cli | null) -> boolean | error",
+            ),
+            (
+                "as_markdown(\"x\")",
+                "as_markdown",
+                "as_markdown(content: string | null) -> string | null | error",
+            ),
+            ("has_binary(\"sh\")", "has_binary", "has_binary(name_or_path: string | null) -> boolean"),
         ] {
             assert!(
                 candidates.iter().any(|candidate| candidate.insert_text == name
@@ -2129,7 +2197,9 @@ mod tests {
         }
 
         let recent = ctx_descriptor("recent_commits").unwrap();
-        assert_eq!(function_descriptor("recent_commits").unwrap().description, recent.description);
+        // The function and the variable describe each other.
+        assert!(function_descriptor("recent_commits").unwrap().description.contains("`ctx.recent_commits`"));
+        assert!(recent.description.contains("`recent_commits(count)`"));
     }
 
     #[test]

@@ -128,23 +128,12 @@ impl DeferredCapabilities {
             }
             if expression_function_descriptors()
                 .iter()
-                .any(|descriptor| descriptor_name(descriptor) == name)
+                .any(|descriptor| descriptor.name == name)
             {
                 self.functions.insert(name.to_string());
             }
         }
     }
-}
-
-/// The bare function name of a descriptor whose display key is its signature.
-fn descriptor_name(
-    descriptor: &crate::markdown::compose::expression::ExpressionFunctionDescriptor,
-) -> &str {
-    descriptor
-        .signature
-        .split_once('(')
-        .map(|(name, _)| name)
-        .unwrap_or(descriptor.signature)
 }
 
 /// Whether the identifier at `start` is a root and not a trailing path segment.

@@ -169,7 +169,7 @@ fn alphanumeric_never_coerces_numbers_or_booleans() {
     assert_eq!(coerced["items"], json!(["a", 12]));
     assert_eq!(coerced["flag"], json!(true));
     // Other arms keep their own conversions: only `string` turns `3` into
-    // text, so it is the one valid candidate.
+    // text, so it is the one reachable option.
     assert_eq!(coerced["either"], json!("3"));
     assert_eq!(coerced["choice"], json!(7));
 

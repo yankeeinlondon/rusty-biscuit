@@ -14,7 +14,8 @@ expression: "convert_atom(\"number(integer; min(0))\")"
         },
         {
           "minimum": 0,
-          "type": "integer"
+          "type": "integer",
+          "x-darkmatter-integer": true
         }
       ]
     }

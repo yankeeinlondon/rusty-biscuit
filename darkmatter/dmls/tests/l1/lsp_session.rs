@@ -2755,14 +2755,15 @@ fn function_completion_shape() {
         .find(|item| item["textEdit"]["newText"] == json!("length"))
         .expect("`len` offers `length` with bare-name insertion");
 
-    // D4: untyped signature label, typed-signature detail (fallible → `| error`),
-    // eager Markdown documentation, bare-name insertion.
+    // D4: untyped signature label, typed-signature detail (`| error` exactly
+    // when fallible), eager Markdown documentation, bare-name insertion.
     let descriptor = expressions::function_descriptor("length").unwrap();
     assert_eq!(length["label"], json!(descriptor.signature));
     assert_eq!(length["detail"], json!(descriptor.typed_signature()));
-    assert!(
+    assert_eq!(
         length["detail"].as_str().unwrap().ends_with("| error"),
-        "fallible typed signature must carry `| error`: {length:?}"
+        descriptor.fallible,
+        "typed signature carries `| error` exactly when fallible: {length:?}"
     );
     assert_eq!(length["documentation"]["kind"], json!("markdown"));
     assert_eq!(
@@ -3034,13 +3035,14 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
             .iter()
             .map(|descriptor| descriptor.signature)
             .collect::<Vec<_>>(),
+        // Alphabetical within the category, overloads in authored order.
         [
-            "predict_conflicts(branch)",
             "branch_exists_on_remote()",
             "branch_exists_on_remote(branch)",
             "branch_exists_on_remote(branch, remote)",
-            "remote_vendor([remote])",
+            "predict_conflicts(branch)",
             "recent_commits(count)",
+            "remote_vendor([remote])",
         ],
         "the shipped Git function signature set changed"
     );
@@ -6385,11 +6387,8 @@ fn vocabulary_link_resolves_from_a_document_outside_the_topic_directory() {
     let items = items.as_array().expect("completion array");
     let documented: Vec<&Value> = items
         .iter()
-        .filter(|item| {
-            item["label"]
-                .as_str()
-                .is_some_and(|label| label.starts_with("pr_list("))
-        })
+        // The query overload links its vocabulary; `pr_list(count)` takes none.
+        .filter(|item| item["label"] == json!("pr_list(query)"))
         .collect();
     assert!(
         !documented.is_empty(),

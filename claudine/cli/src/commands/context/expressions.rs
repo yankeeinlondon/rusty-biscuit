@@ -17,7 +17,7 @@ use crate::commands::context_render::{
 };
 use crate::log;
 
-use super::format::format_example;
+use super::format::{format_example, format_function_examples};
 
 /// Whether the metadata reports should render their optional `Example` column at
 /// `term`'s width.
@@ -54,7 +54,8 @@ pub(super) fn render_expression_table(
     // distribution. See `example_column_floor`.
     let example_strings: Vec<String> =
         rows.iter().map(|(_, _, example)| example.to_string()).collect();
-    let example_width = example_column_floor(example_strings.iter().map(String::as_str));
+    let example_width =
+        example_column_floor(example_strings.iter().flat_map(|example| example.lines()));
 
     render_table_resilient(term, |layout| {
         let mut first = report_column(first_header.clone());
@@ -326,7 +327,7 @@ pub(super) fn render_expressions_functions(term: &Terminal) {
                 (
                     inline_code_text(func.signature, term).into(),
                     inline_code_text(func.description, term).into(),
-                    format_example(func.example.as_ref(), term).into(),
+                    format_function_examples(func, term).into(),
                 )
             })
             .collect();

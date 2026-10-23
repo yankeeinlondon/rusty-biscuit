@@ -30,6 +30,7 @@
 pub mod block;
 pub mod cleanup;
 pub mod code_block;
+pub mod coercion;
 pub mod compose;
 pub mod delta;
 pub mod dsl;

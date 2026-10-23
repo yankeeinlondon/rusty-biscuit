@@ -753,7 +753,7 @@ stricter than the general [early-binding](#binding-time-early-vs-late) rule:
 | reads `ctx` or `env` | yes, from the values the document captured | `say: "done on {{ ctx.branch }}"` |
 | combines those with operators, indexing, `\|\|` fallbacks, or `? :` | yes | `say: "{{ fm.name \|\| 'the job' }} finished"` |
 | reads `err`, `timing`, `current`, `loop`, or `group` (or any global added later) | no | `say: "took {{ timing.total_ms }} ms"` |
-| contains **any** function call, even in a branch that would not run | no | `say: "done at {{ date() }}"` |
+| contains **any** function call, even in a branch that would not run | no | `say: "done at {{ date(ctx.today, 'long') }}"` |
 | contains a shell expansion (`$( … )` or a backtick) | no | ``say: "on $(hostname)"`` |
 | resolves to empty or whitespace-only text | no | `say: "{{ fm.missing }}"` |
 

@@ -74,7 +74,7 @@ pub(crate) mod rewrite;
 // Re-export core expression types from the expression module for backward
 // compatibility. The canonical location is now `compose::expression`.
 pub use super::expression::{
-    ArityBound, ComparisonOp, Expr, ExpressionError, ExpressionFinder, ExpressionLocation,
+    ComparisonOp, Expr, ExpressionError, ExpressionFinder, ExpressionLocation,
     FileRefFailure, FileReferenceDiagnostic, Lexer, LexerError, ParseError, ParseMode, Parser,
     Token, parse, parse_condition,
 };

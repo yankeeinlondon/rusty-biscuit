@@ -67,6 +67,7 @@
 pub(crate) mod absence;
 pub mod ast;
 pub mod binding;
+pub mod call_binding;
 pub mod catalog;
 pub mod ctx;
 pub(crate) mod equality;
@@ -90,17 +91,23 @@ pub use binding::{
     GlobalDeclaration, HostGlobals, LazyProvider, ResolvedBinding, RootClass, RuntimeBinding, ScopeId,
     UnavailabilityReason, UnavailableBinding, is_reserved_namespace,
 };
-pub use catalog::{
-    expression_function_descriptors, generate_expression_function_table, reserved_root_descriptors,
-    DataType, ExpressionFunctionDescriptor, ParamRefinement, ParamType, ReservedRootDescriptor,
-    ReturnType, ReturnValueType, RootEvaluation, RootMembers,
+pub use call_binding::{
+    BoundArgs, BoundCall, CallBindingError, CallErrorKind, CompiledSignature, EvaluationMode, FunctionRegistration,
+    LazyCall, RegistrationError,
 };
+pub use catalog::{
+    CatalogCategory, ExpressionFunctionDescriptor, FunctionCatalog, FunctionExample, FunctionParameterDescriptor,
+    ReservedRootDescriptor, RootEvaluation, RootMembers, expression_function_catalog, expression_function_descriptors,
+    function_descriptors, generate_expression_function_table, reserved_root_descriptors,
+};
+#[cfg(any(test, feature = "effects-instrumentation"))]
+pub use functions::test_hooks as function_test_hooks;
 pub use ctx::CtxLookup;
 pub use fm_namespace::{
     FRONTMATTER_ROOT, FmPath, fm_namespace_path, resolve_fm_namespace_in_object,
 };
 pub use error::{
-    ArityBound, CallerFileDiagnosticProvenance, ExpressionError, FileRefFailure,
+    CallerFileDiagnosticProvenance, ExpressionError, FileRefFailure,
     FileReferenceDiagnostic, ProviderFailureKind,
 };
 pub use file_suggestions::{collect_sibling_candidates, suggest_sibling_files};
@@ -130,7 +137,7 @@ use serde_json::Value;
 
 use crate::markdown::numeric::{self, NumberTextError, NumericAdmissionError};
 
-use crate::catalog::{describe, describe_for_error, suggest, Described};
+use crate::catalog::{describe_for_error, suggest};
 
 /// A value read as an arithmetic operand.
 enum ArithmeticOperand {
@@ -750,21 +757,6 @@ fn evaluate_member(base: &Value, name: &str) -> Value {
 /// never resolve and would otherwise leak its literal `{{ … }}` text downstream.
 pub(crate) const UNKNOWN_FUNCTION_PREFIX: &str = "Unknown function:";
 
-/// Whether an evaluator error message is an arity (wrong-argument-count) error.
-///
-/// Arity errors read "… requires N argument(s)" / "… requires 1 or 2 arguments"
-/// / "… requires at least 1 argument". Type errors also contain "requires …
-/// argument" but name the rejected domain ("numeric"/"string"/"array"), so
-/// those are excluded.
-fn is_arity_error(message: &str) -> bool {
-    let m = message.to_lowercase();
-    m.contains("requires")
-        && m.contains("argument")
-        && !m.contains("numeric")
-        && !m.contains("string argument")
-        && !m.contains("array argument")
-}
-
 /// Returns a plain-text error for an unrecognized function name, with a fuzzy
 /// did-you-mean suggestion when one exists.
 pub(crate) fn unknown_function_error(name: &str) -> ExpressionError {
@@ -782,33 +774,6 @@ pub(crate) fn unknown_function_error(name: &str) -> ExpressionError {
     }
 }
 
-/// Appends the matched function descriptor's signature, description, and example
-/// to an arity error message.
-fn enrich_arity_error(name: &str, message: &str) -> String {
-    let signature = expression_function_descriptors()
-        .iter()
-        .find(|d| d.key().starts_with(&format!("{name}(")) || d.key() == name)
-        .map(|d| d.key());
-    match signature {
-        Some(sig) if let Some(descriptor) = describe(expression_function_descriptors(), sig) => {
-            format!("{message}\n\nExpected:\n  {}", describe_for_error(descriptor))
-        }
-        _ => message.to_string(),
-    }
-}
-
-fn classify_function_error(function: &str, message: String) -> ExpressionError {
-    let message = if is_arity_error(&message) {
-        enrich_arity_error(function, &message)
-    } else {
-        message
-    };
-    ExpressionError::Other {
-        function: function.to_string(),
-        message,
-    }
-}
-
 fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
     name: &str,
     args: &[Expr],
@@ -818,119 +783,79 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
 ) -> Result<Value, ExpressionError> {
     let argument = scope.call_argument(name);
     let name = name.to_ascii_lowercase();
-    match name.as_str() {
-        // `and`/`or` short-circuit, so they must evaluate their arguments
-        // lazily and stay here rather than in the eagerly-evaluated registries.
-        "and" => {
-            match functions::lazy_arity_eligibility("and", args.len()) {
-                Some(functions::LazyArityEligibility::Eligible) => {}
-                Some(functions::LazyArityEligibility::Ineligible(message)) => {
-                    return Err(classify_function_error("and", message));
-                }
-                None => return Err(unknown_function_error("and")),
-            }
-            // Each operand reads under the earlier operands' true facts.
-            let mut facts = argument.facts();
-            for arg in args {
-                let value = evaluate_expr(arg, lookup, argument.with_facts(&facts), observer)?;
-                if !is_truthy(&value) {
-                    return Ok(Value::Bool(false));
-                }
-                if O::OBSERVES {
-                    facts = facts.assume(arg, scope::Polarity::True);
-                }
-            }
-            Ok(Value::Bool(true))
-        }
-        "or" => {
-            match functions::lazy_arity_eligibility("or", args.len()) {
-                Some(functions::LazyArityEligibility::Eligible) => {}
-                Some(functions::LazyArityEligibility::Ineligible(message)) => {
-                    return Err(classify_function_error("or", message));
-                }
-                None => return Err(unknown_function_error("or")),
-            }
-            // Each operand reads under the earlier operands' false facts.
-            let mut facts = argument.facts();
-            for arg in args {
-                let value = evaluate_expr(arg, lookup, argument.with_facts(&facts), observer)?;
-                if is_truthy(&value) {
-                    return Ok(Value::Bool(true));
-                }
-                if O::OBSERVES {
-                    facts = facts.assume(arg, scope::Polarity::False);
-                }
-            }
-            Ok(Value::Bool(false))
-        }
-        // Every other function evaluates its arguments eagerly and resolves
-        // through the authoritative dispatch tables in `functions`.
-        other => {
-            let mut caller_occurrence = None;
-            let evaluated: Vec<Value> = if functions::is_fs_function(other) {
-                let mut values = Vec::with_capacity(args.len());
-                for (index, arg) in args.iter().enumerate() {
-                    if index == 0 {
-                        let (value, occurrence) = evaluate_caller_file_argument(arg, lookup, argument, observer)?;
-                        values.push(value);
-                        caller_occurrence = occurrence;
-                    } else {
-                        values.push(evaluate_expr(arg, lookup, argument, observer)?);
-                    }
-                }
-                values
+    if let Some((registration, short_circuit)) = functions::lazy_function(&name) {
+        return evaluate_lazy_function(registration, short_circuit, args, lookup, argument, observer);
+    }
+    let mut caller_occurrence = None;
+    let evaluated: Vec<Value> = if functions::is_context_function(&name) {
+        let mut values = Vec::with_capacity(args.len());
+        for (index, arg) in args.iter().enumerate() {
+            if index == 0 {
+                let (value, occurrence) = evaluate_caller_file_argument(arg, lookup, argument, observer)?;
+                values.push(value);
+                caller_occurrence = occurrence;
             } else {
-                args.iter()
-                    .map(|arg| evaluate_expr(arg, lookup, argument, observer))
-                    .collect::<Result<_, _>>()?
-            };
-            // Prefer the borrowed context (Finding 12) so a read-side function
-            // dispatched here does not deep-clone the lookup's context; only
-            // fall back to the owned clone for lookups that expose only the
-            // owned accessor.
-            let mut ctx = lookup
-                .resolution_context_ref()
-                .map(std::borrow::Cow::Borrowed)
-                .or_else(|| lookup.resolution_context().map(std::borrow::Cow::Owned));
-            if let Some(context) = ctx.as_ref()
-                && let Some(occurrence) = caller_occurrence
-                && let Some(provenance) = context.caller_file_provenance.get(&occurrence).cloned()
-            {
-                let mut selected = context.as_ref().clone();
-                selected.active_caller_file_provenance = Some(provenance);
-                ctx = Some(std::borrow::Cow::Owned(selected));
+                values.push(evaluate_expr(arg, lookup, argument, observer)?);
             }
-            if let Some(ctx) = ctx
-                && let Some(result) = functions::dispatch_fs(other, &evaluated, &ctx)
-            {
-                return result.map_err(|error| match error {
-                    ExpressionError::Other { function, message } if is_arity_error(&message) => {
-                        ExpressionError::Other {
-                            function,
-                            message: enrich_arity_error(other, &message),
-                        }
-                    }
-                    other => other,
-                });
-            }
-            if let Some(result) = functions::dispatch(other, &evaluated) {
-                return result.map_err(|message| classify_function_error(other, message));
-            }
-            // A known filesystem function reaches here only because the lookup
-            // returned no resolution context — an opt-out or test lookup, not a
-            // real document surface (all of which now supply one). Keep it
-            // recoverable so it doesn't read as an unknown symbol.
-            if functions::is_fs_function(other) {
-                return Err(ExpressionError::Other {
-                    function: other.to_string(),
-                    message: format!(
-                        "Filesystem function '{name}' requires a document resolution context, which is unavailable here"
-                    ),
-                });
-            }
-            Err(unknown_function_error(other))
+        }
+        values
+    } else {
+        args.iter()
+            .map(|arg| evaluate_expr(arg, lookup, argument, observer))
+            .collect::<Result<_, _>>()?
+    };
+    // Prefer the borrowed context (Finding 12) so a read-side function
+    // dispatched here does not deep-clone the lookup's context; only fall back
+    // to the owned clone for lookups that expose only the owned accessor.
+    let mut ctx = lookup
+        .resolution_context_ref()
+        .map(std::borrow::Cow::Borrowed)
+        .or_else(|| lookup.resolution_context().map(std::borrow::Cow::Owned));
+    if let Some(context) = ctx.as_ref()
+        && let Some(occurrence) = caller_occurrence
+        && let Some(provenance) = context.caller_file_provenance.get(&occurrence).cloned()
+    {
+        let mut selected = context.as_ref().clone();
+        selected.active_caller_file_provenance = Some(provenance);
+        ctx = Some(std::borrow::Cow::Owned(selected));
+    }
+    match functions::call_function(&name, &evaluated, ctx.as_deref()) {
+        Some(result) => result,
+        None => Err(unknown_function_error(&name)),
+    }
+}
+
+/// Evaluates a lazy function's operands one at a time, binding each as it is
+/// evaluated; an operand after the short-circuit is never evaluated or bound.
+fn evaluate_lazy_function<L: EvaluationLookup, O: MissingRootObserver>(
+    registration: &call_binding::FunctionRegistration,
+    short_circuit: functions::ShortCircuit,
+    args: &[Expr],
+    lookup: &L,
+    argument: AbsenceScope<'_>,
+    observer: &mut O,
+) -> Result<Value, ExpressionError> {
+    let call_error = |error| ExpressionError::Call(Box::new(error));
+    registration.check_arity(args.len()).map_err(call_error)?;
+    let mut call = registration.lazy_call().expect("a lazy registration starts a lazy call");
+    let (stop_on_truthy, polarity) = match short_circuit {
+        functions::ShortCircuit::OnFalsy => (false, scope::Polarity::True),
+        functions::ShortCircuit::OnTruthy => (true, scope::Polarity::False),
+    };
+    // Each operand reads under the facts the earlier operands established.
+    let mut facts = argument.facts();
+    for arg in args {
+        let value = evaluate_expr(arg, lookup, argument.with_facts(&facts), observer)?;
+        let bound = call.bind_next(value).map_err(call_error)?;
+        if is_truthy(bound) == stop_on_truthy {
+            return Ok(Value::Bool(stop_on_truthy));
+        }
+        if O::OBSERVES {
+            facts = facts.assume(arg, polarity);
         }
     }
+    call.finish().map_err(call_error)?;
+    Ok(Value::Bool(!stop_on_truthy))
 }
 
 fn evaluate_caller_file_argument<L: EvaluationLookup, O: MissingRootObserver>(
@@ -1067,21 +992,17 @@ mod tests {
             );
         }
 
+        /// Arity is the binder's: a typed call error naming every candidate
+        /// signature, never a handler's text.
         #[test]
-        fn arity_error_includes_signature_and_example() {
+        fn arity_error_is_typed_and_names_the_signatures() {
             let err = evaluate(&parse("length()").unwrap(), &lookup(json!({}))).unwrap_err();
-            assert!(
-                err.contains("requires 1 argument"),
-                "error should preserve arity message: {err}"
-            );
-            assert!(
-                err.contains("length("),
-                "error should include function signature: {err}"
-            );
-            assert!(
-                err.contains("example:"),
-                "error should include an example: {err}"
-            );
+            let ExpressionError::Call(call) = &err else {
+                panic!("an arity error is a call error: {err:?}");
+            };
+            assert_eq!(call.kind(), call_binding::CallErrorKind::Arity);
+            assert!(err.contains("no signature takes 0 arguments"), "{err}");
+            assert!(err.contains("length("), "error should include function signature: {err}");
         }
     }
 

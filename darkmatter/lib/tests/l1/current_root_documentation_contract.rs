@@ -49,7 +49,7 @@ const PAGES: &[(&str, &[&str])] = &[
         ".claude/skills/claudine/cli-commands.md",
         &[
             "`current.<key>` is the same key as `ctx.<key>` read lazily",
-            "(`ctx.recent_commits` / `recent_commits(count)`) shares one definition",
+            "(`ctx.recent_commits` / `recent_commits(count)`) shares one output format",
             "are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does",
             "refresh between events",
             RUN_RULE,
@@ -59,7 +59,7 @@ const PAGES: &[(&str, &[&str])] = &[
         ".claude/skills/darkmatter/compose.md",
         &[
             "`current.<key>` where `<key>` is cataloged",
-            "`ctx.recent_commits` is the eager snapshot of the same descriptor",
+            "`ctx.recent_commits` is the eager snapshot in the same rendering",
             "from the request's one repository observation (D3)",
         ],
     ),

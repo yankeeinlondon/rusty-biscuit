@@ -62,6 +62,11 @@ enum Class {
     /// as a document schema by any path, while its declarations parse and
     /// resolve inline from its own directory.
     GlobalCatalog,
+    /// A function catalog (`kind: schema` with `categories:` and `function`
+    /// types): it parses as a standalone schema, but a document schema can
+    /// never hold a function, so applying it through `$schema: ./file` fails;
+    /// each of its other named types imports and lowers.
+    FunctionCatalog,
 }
 
 struct Exception {
@@ -99,12 +104,6 @@ const EXCEPTIONS: &[Exception] = &[
     ),
     exception(
         "darkmatter/docs/schemas",
-        "expression-functions.yaml",
-        Class::NotASchema,
-        "`kind: expression-function-catalog`; its `$schema` describes the catalog",
-    ),
-    exception(
-        "darkmatter/docs/schemas",
         "err.yaml",
         Class::EnvelopeRejected,
         "tagged envelope carries `$schema`, `name`, and `description` header keys",
@@ -115,6 +114,42 @@ const EXCEPTIONS: &[Exception] = &[
         "darkmatter.yaml",
         Class::GlobalCatalog,
         "Darkmatter's global catalog, registered explicitly",
+    ),
+    exception(
+        "darkmatter/schemas",
+        "partials/functions.yaml",
+        Class::FunctionCatalog,
+        "the expression-function catalog, embedded by Darkmatter's catalog loader",
+    ),
+    exception(
+        "darkmatter/schemas",
+        "partials/mutations.yaml",
+        Class::FunctionCatalog,
+        "the mutation-function catalog",
+    ),
+    exception(
+        "darkmatter/schemas",
+        "partials/function-examples/as_line_separated.yaml",
+        Class::NotASchema,
+        "a `kind: example` artifact embedded by the expression-function catalog",
+    ),
+    exception(
+        "darkmatter/schemas",
+        "partials/function-examples/as_ordered_list.yaml",
+        Class::NotASchema,
+        "a `kind: example` artifact embedded by the expression-function catalog",
+    ),
+    exception(
+        "darkmatter/schemas",
+        "partials/function-examples/as_tsv.yaml",
+        Class::NotASchema,
+        "a `kind: example` artifact embedded by the expression-function catalog",
+    ),
+    exception(
+        "darkmatter/schemas",
+        "partials/function-examples/as_unordered_list.yaml",
+        Class::NotASchema,
+        "a `kind: example` artifact embedded by the expression-function catalog",
     ),
     // claudine/schemas
     exception(
@@ -209,21 +244,6 @@ const EXCEPTIONS: &[Exception] = &[
             error: "types: invalid SimplifiedSchema for property `<root>`: $schema must be a mapping or a sequence, got null",
         },
         "empty `types:`; the event placeholders are `unknown` and load",
-    ),
-    exception(
-        "claudine/docs/schemas",
-        "partials/mutations.yaml",
-        Class::EnvelopeRejected,
-        "draft with a `name` header key; its `function(...)` signatures parse",
-    ),
-    exception(
-        "claudine/docs/schemas",
-        "partials/functions.yaml",
-        Class::Draft {
-            error: "unknown constraint `min-length(...)`",
-        },
-        "draft `min-length(...)` string constraint (the catalog migration normalizes it); \
-         local `number`/`date` collide with built-ins",
     ),
 ];
 
@@ -431,6 +451,20 @@ fn standalone_outcome(
     }
 }
 
+/// Whether a catalog entry is a function: a `function(...)` type or a union
+/// of them (an overload set).
+fn is_function_definition(definition: &PropertyDef) -> bool {
+    let is_function = |atom: &PropertyAtom| match &atom.ty {
+        TypeExpr::Function(_) => true,
+        TypeExpr::Union(arms) => arms.iter().all(|arm| matches!(arm.ty, TypeExpr::Function(_))),
+        _ => false,
+    };
+    match definition {
+        PropertyDef::Single(atom) => is_function(atom),
+        PropertyDef::Union(atoms) => atoms.iter().all(is_function),
+    }
+}
+
 fn is_named_type_error(error: &SchemaError) -> bool {
     match error {
         SchemaError::UnknownNamedType { .. }
@@ -606,6 +640,19 @@ fn shipped_schema_artifacts_parse_passively() {
                 record_core_types(&mut core_type_users, &label, &parsed);
                 loadable += 1;
             }
+            Class::FunctionCatalog => {
+                let Ok(Some(parsed_document)) = &outcome else {
+                    panic!("{label} must parse as a standalone schema: {outcome:?}");
+                };
+                assert!(parsed_document.categories.is_some(), "{label} declares `categories:`");
+                let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
+                assert!(
+                    parsed.iter().any(is_function_definition),
+                    "{label} holds no function type; reclassify it",
+                );
+                definitions += parsed.len();
+                record_core_types(&mut core_type_users, &label, &parsed);
+            }
             Class::Placeholder => {
                 assert!(
                     artifact.source.trim().is_empty(),
@@ -778,6 +825,34 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                             "{label} `{key}` resolved inline must not fail on a named type: {error}",
                         ),
                     }
+                    inline_bodies += 1;
+                }
+            }
+            Class::FunctionCatalog => {
+                let error = resolve_schema_with_roots(&reference, dir, &[], &context)
+                    .expect_err(&format!("{label} must never apply as a document schema"));
+                assert!(
+                    format!("{error:?}").contains("a `function` type is description-only"),
+                    "{label} must be refused for its function types: {error}"
+                );
+                let types = yaml_key(&document, "types")
+                    .and_then(YamlValue::as_mapping)
+                    .unwrap_or_else(|| panic!("{label} declares `types:`"));
+                for (name, value) in types {
+                    let name = name.as_str().expect("a type name");
+                    let definition = parse_property_definition(name, value)
+                        .unwrap_or_else(|error| panic!("{label} `{name}`: {error}"));
+                    if is_function_definition(&definition) {
+                        continue;
+                    }
+                    let import = serde_yaml_ng::from_str::<YamlValue>(&format!(
+                        "probe: \"{name}@./{}\"",
+                        artifact.path.file_name().and_then(|file| file.to_str()).expect("UTF-8 file name")
+                    ))
+                    .expect("YAML");
+                    let resolved = resolve_yaml_schema(&import, dir, &context)
+                        .unwrap_or_else(|error| panic!("{label} `{name}` must import: {error}"));
+                    assert_lowered(&resolved, &format!("{label} `{name}`"));
                     inline_bodies += 1;
                 }
             }

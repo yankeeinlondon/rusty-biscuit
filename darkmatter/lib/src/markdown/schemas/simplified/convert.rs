@@ -48,7 +48,8 @@ use crate::markdown::compose::expression::parse_condition;
 use crate::markdown::schemas::errors::SchemaError;
 use crate::markdown::schemas::file_match::{DARKMATTER_MATCH_KEYWORD, file_match_groups};
 use crate::markdown::schemas::format::{
-    DARKMATTER_DATETIME_FORMAT, DARKMATTER_EXPRESSION_FORMAT, DARKMATTER_FILE_FORMAT,
+    DARKMATTER_INTEGER_KEYWORD,
+    DARKMATTER_BOOLISH_FORMAT, DARKMATTER_DATETIME_FORMAT, DARKMATTER_NUMBERLIKE_FORMAT, DARKMATTER_EXPRESSION_FORMAT, DARKMATTER_FILE_FORMAT,
     DARKMATTER_FILE_REFERENCE_FORMAT, DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD,
     DARKMATTER_SHELL_FORMAT, DARKMATTER_TYPE_ANNOTATION,
     DARKMATTER_TIME_FORMAT, DARKMATTER_TYPE_DEFINITION_KEYWORD, DARKMATTER_YAML_FORMAT,
@@ -56,17 +57,6 @@ use crate::markdown::schemas::format::{
 
 /// Draft 2020-12 schema URI emitted on every generated root schema.
 pub const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
-
-/// String spellings a `boolish` field accepts (and that coercion maps to a
-/// real boolean). Single source of truth shared with [`super::super::coerce`].
-pub(in crate::markdown::schemas) const BOOLISH_VALUES: [&str; 6] =
-    ["true", "false", "True", "False", "TRUE", "FALSE"];
-
-/// Pattern the `numberlike` string arm carries — the source for the schema the
-/// validator compiles. Single source of truth shared with
-/// [`super::super::coerce`], which matches it exactly when recognizing a
-/// numberlike `anyOf` arm.
-pub(in crate::markdown::schemas) const NUMBERLIKE_PATTERN: &str = r"^-?\d+(\.\d+)?$";
 
 /// Converts a [`SimplifiedSchema`] into a Draft 2020-12 JSON Schema value.
 ///
@@ -1211,8 +1201,7 @@ fn push_unique(patterns: &mut Vec<String>, pattern: &str) {
 
 /// A value must satisfy every pattern. One pattern keeps the plain `pattern`
 /// keyword; several become `allOf` entries beside the base fragment's other
-/// keywords, never one combined regex. `coerce` recognizes the numberlike arm
-/// by its single `pattern` key, which this keeps unchanged.
+/// keywords, never one combined regex.
 fn insert_patterns(m: &mut Map<String, Value>, patterns: Vec<String>) {
     match <[String; 1]>::try_from(patterns) {
         Ok([only]) => {
@@ -1274,31 +1263,24 @@ fn number_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Sche
         "type".into(),
         Value::String(if is_integer { "integer" } else { "number" }.into()),
     );
+    if is_integer {
+        m.insert(DARKMATTER_INTEGER_KEYWORD.into(), Value::Bool(true));
+    }
     Ok(Value::Object(m))
 }
 
+/// `numberlike` accepts a real number or number text and keeps it as sent,
+/// so it compiles to both JSON types plus the format backed by the canonical
+/// numeric-text parser; a regex cannot express the exactness check.
 fn numberlike_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
     reject_unsupported(name, "numberlike", constraints, &[])?;
-    Ok(json!({
-        "anyOf": [
-            { "type": "number" },
-            { "type": "string", "pattern": NUMBERLIKE_PATTERN }
-        ]
-    }))
+    Ok(json!({ "type": ["number", "string"], "format": DARKMATTER_NUMBERLIKE_FORMAT }))
 }
 
+/// `boolish` accepts a real boolean or a boolean word and keeps it as sent.
 fn boolish_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
     reject_unsupported(name, "boolish", constraints, &[])?;
-    let enum_members: Vec<Value> = BOOLISH_VALUES
-        .iter()
-        .map(|s| Value::String((*s).into()))
-        .collect();
-    Ok(json!({
-        "anyOf": [
-            { "type": "boolean" },
-            { "enum": enum_members }
-        ]
-    }))
+    Ok(json!({ "type": ["boolean", "string"], "format": DARKMATTER_BOOLISH_FORMAT }))
 }
 
 fn simple_typed_fragment(
@@ -1799,22 +1781,19 @@ mod tests {
     }
 
     #[test]
-    fn numberlike_is_any_of() {
-        let v = atom_value("numberlike");
-        let arms = v["anyOf"].as_array().expect("anyOf");
-        assert_eq!(arms.len(), 2);
-        assert_eq!(arms[0]["type"], "number");
-        assert_eq!(arms[1]["type"], "string");
-        assert_eq!(arms[1]["pattern"], r"^-?\d+(\.\d+)?$");
+    fn numberlike_compiles_to_its_format() {
+        assert_eq!(
+            atom_value("numberlike"),
+            json!({ "type": ["number", "string"], "format": DARKMATTER_NUMBERLIKE_FORMAT })
+        );
     }
 
     #[test]
-    fn boolish_is_any_of() {
-        let v = atom_value("boolish");
-        let arms = v["anyOf"].as_array().expect("anyOf");
-        assert_eq!(arms.len(), 2);
-        assert_eq!(arms[0]["type"], "boolean");
-        assert!(arms[1]["enum"].is_array());
+    fn boolish_compiles_to_its_format() {
+        assert_eq!(
+            atom_value("boolish"),
+            json!({ "type": ["boolean", "string"], "format": DARKMATTER_BOOLISH_FORMAT })
+        );
     }
 
     #[test]

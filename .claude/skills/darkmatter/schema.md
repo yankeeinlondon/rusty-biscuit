@@ -352,10 +352,35 @@ References; Choosing an Arm: Reporting versus Changing Data).
   arm). Editors use `completion::{for_list_item, for_property_value,
   alternatives_for_def}`; never add a DMLS-local union interpretation.
 - Safety rule per consumer: validation accepts any arm; literal-tag narrowing
-  (and root-union closest arm) only shapes reports; coercion commits only
-  when exactly one candidate validates; eager-file rewriting needs exactly one
-  validating arm containing an eager `file`; cleanup never repairs inside a
-  union.
+  (and root-union closest arm) only shapes reports; conversion follows the
+  engine's union rule (exact match, one reachable option, number over
+  boolean, JSON over YAML, else an ambiguity error; order-independent);
+  eager-file rewriting needs exactly one validating arm containing an eager
+  `file`; cleanup never repairs inside a union.
+
+## Conversion engine (`2026-10-28-schema-enhancements`)
+
+- One rule core, `markdown::coercion` (`Shape`, `bind`, `bind_with`,
+  `check_exact`, `accepts_exactly`, `content_error`), serves frontmatter and
+  function calls. Translators only map syntax: `schemas::shape_from_json_schema`
+  (compiled/raw JSON Schema; unmodeled keywords become `Assert`s) and
+  `compose::expression::call_binding::shape_from_property_def` (grammar).
+  `tests/l1/coercion_translator_conformance.rs` requires identical outcomes;
+  a new construct needs both translators and a row there.
+- `schemas/coerce.rs` decides only what is committed: an instance the complete
+  schema accepts is kept; else the whole converted document if the complete
+  schema accepts it; else each top-level property that converts cleanly
+  (root unions keep the whole-document rule). Never reintroduce per-surface
+  conversion rules there (`coercion_engine_parity::old_frontmatter_rule_code_is_gone`).
+- Performance: `EffectiveSchema` keeps a `ConversionPlan` keyed by the digest
+  `ValidatorCache::shared_schema_hash` already records, and checks
+  `accepts_as_is` with its own compiled validators first. Never hash or
+  compile a large schema per call (`schema_content_hash` serializes the whole
+  schema); `Shape::describe` is capped at `DESCRIPTION_LIMIT`.
+- `number(integer)` lowers with `x-darkmatter-integer: true` (magnitude below
+  2^64, a custom keyword in `validate.rs`); raw `integer` has no ceiling.
+  `numberlike`/`boolish` lower to the `darkmatter-numberlike`/`-boolish`
+  formats and are kept as written.
 
 ## Tuples, functions, `|`, and categories
 
@@ -439,9 +464,10 @@ needs `@this`.
   `PropertyAtom::alphanumeric_options()`, never from display strings. Lowering:
   `string` + canonical linear-time `pattern` (user patterns and `not-empty`
   as further `allOf` entries) + `x-darkmatter-type` /
-  `x-darkmatter-options`. `coerce.rs` skips fragments annotated
-  `x-darkmatter-type: alphanumeric`, so numbers and booleans stay mismatches
-  (other union arms keep their coercion). `default`/`suggest` values must
+  `x-darkmatter-options`. The JSON translator maps
+  `x-darkmatter-type: alphanumeric` to `TextShape { scalar_text: false }`, so
+  numbers and booleans stay mismatches (other union arms keep their
+  conversion). `default`/`suggest` values must
   validate, without coercion, or the load fails; other types' suggestions
   stay lint-only. `md schema validate` assignments force a string for a
   top-level `alphanumeric` (`assignment.rs::atom_prefers_string`), so

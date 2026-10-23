@@ -7,7 +7,7 @@ use serde_json::Value;
 use sniff::network::ScopedIpAddr;
 use sniff::network::icmp::{PingVerdict, ProbeBudget};
 
-use super::{EvaluationMode, FunctionBinding, FunctionHandler, ResolutionContext};
+use super::{BoundCall, FunctionBinding, ResolutionContext, required_text};
 use crate::markdown::compose::context::ContextGroup;
 use crate::markdown::compose::expression::ExpressionError;
 
@@ -18,30 +18,10 @@ const DEFAULT_PING_TIMEOUT_MS: f64 = 100.0;
 const DEFAULT_PING_UNDER_ATTEMPTS: f64 = 3.0;
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding {
-        canonical: "ipv4",
-        aliases: &[],
-        evaluation: EvaluationMode::Context,
-        handler: Some(FunctionHandler::Context(ipv4_fn)),
-    },
-    FunctionBinding {
-        canonical: "ipv6",
-        aliases: &[],
-        evaluation: EvaluationMode::Context,
-        handler: Some(FunctionHandler::Context(ipv6_fn)),
-    },
-    FunctionBinding {
-        canonical: "ping",
-        aliases: &[],
-        evaluation: EvaluationMode::Context,
-        handler: Some(FunctionHandler::Context(ping_fn)),
-    },
-    FunctionBinding {
-        canonical: "ping_under",
-        aliases: &[],
-        evaluation: EvaluationMode::Context,
-        handler: Some(FunctionHandler::Context(ping_under_fn)),
-    },
+    FunctionBinding::context("ipv4", &[], ipv4_fn),
+    FunctionBinding::context("ipv6", &[], ipv6_fn),
+    FunctionBinding::context("ping", &[], ping_fn),
+    FunctionBinding::context("ping_under", &[], ping_under_fn),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,39 +30,22 @@ enum Family {
     V6,
 }
 
-fn ipv4_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    addresses("ipv4", Family::V4, args, context)
+fn ipv4_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    addresses("ipv4", Family::V4, call, context)
 }
 
-fn ipv6_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    addresses("ipv6", Family::V6, args, context)
+fn ipv6_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    addresses("ipv6", Family::V6, call, context)
 }
 
+/// An omitted `filter` selects the default set.
 fn addresses(
     function: &'static str,
     family: Family,
-    args: &[Value],
+    call: &BoundCall<'_>,
     context: &ResolutionContext,
 ) -> Result<Value, ExpressionError> {
-    if args.len() > 1 {
-        return Err(ExpressionError::Other {
-            function: function.to_string(),
-            message: format!("requires zero or one arguments, got {}", args.len()),
-        });
-    }
-    // An absent optional value arrives as `null`; it selects the default set.
-    let filter = match args.first() {
-        None | Some(Value::Null) => None,
-        Some(Value::String(filter)) => Some(filter.as_str()),
-        Some(other) => {
-            return Err(ExpressionError::ArgType {
-                function,
-                index: 0,
-                expected: "string",
-                actual_type: super::git::value_type(other),
-            });
-        }
-    };
+    let filter = call.args().text(0);
     let observed = context.observations.addresses().ok_or_else(|| {
         ExpressionError::FunctionContextNotCaptured {
             function: function.to_string(),
@@ -128,9 +91,9 @@ fn family_of(address: &ScopedIpAddr) -> Family {
 }
 
 /// `ping(address, timeout?)`: one echo, `true` when it replies in time.
-fn ping_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    let target = target("ping", args)?;
-    let timeout = number("ping", args, 1, Some(DEFAULT_PING_TIMEOUT_MS))?;
+fn ping_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    let target = target("ping", call)?;
+    let timeout = call.args().number(1).unwrap_or(DEFAULT_PING_TIMEOUT_MS);
     let budget = budget("ping", timeout, 1.0)?;
     // One attempt can only be all-replied or none-replied.
     Ok(match context.icmp.run("ping", &target, budget)? {
@@ -141,10 +104,11 @@ fn ping_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, Express
 
 /// `ping_under(address, timeout, attempts?)`: a sequential series, `true` when
 /// every reply beat the threshold, `false` when none did, `"unstable"` between.
-fn ping_under_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    let target = target("ping_under", args)?;
-    let timeout = number("ping_under", args, 1, None)?;
-    let attempts = number("ping_under", args, 2, Some(DEFAULT_PING_UNDER_ATTEMPTS))?;
+fn ping_under_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    let target = target("ping_under", call)?;
+    // Required, so always bound; NaN could only fail the budget check below.
+    let timeout = call.args().number(1).unwrap_or(f64::NAN);
+    let attempts = call.args().number(2).unwrap_or(DEFAULT_PING_UNDER_ATTEMPTS);
     let budget = budget("ping_under", timeout, attempts)?;
     Ok(match context.icmp.run("ping_under", &target, budget)? {
         None => Value::Null,
@@ -154,54 +118,17 @@ fn ping_under_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, E
     })
 }
 
-/// The first argument as a validated literal address.
+/// The bound `ip-address` as a scoped address.
 ///
-/// Nothing here resolves DNS: a name that is not an IPv4, IPv6, or scoped IPv6
-/// literal is an authoring error, not a lookup.
-fn target(function: &'static str, args: &[Value]) -> Result<ScopedIpAddr, ExpressionError> {
-    let Some(Value::String(text)) = args.first() else {
-        return Err(ExpressionError::ArgType {
-            function,
-            index: 0,
-            expected: "ip-address",
-            actual_type: args.first().map_or("null", super::git::value_type),
-        });
-    };
+/// Nothing here resolves DNS: binding already refused anything that is not an
+/// IPv4, IPv6, or scoped IPv6 literal, so a parse failure here means the
+/// `ip-address` pattern admitted a spelling the parser does not.
+fn target(function: &'static str, call: &BoundCall<'_>) -> Result<ScopedIpAddr, ExpressionError> {
+    let text = required_text(function, call, 0)?;
     text.parse().map_err(|error| ExpressionError::ContractViolation {
         function: function.to_string(),
         message: format!("`{text}` is not an IP address literal: {error}"),
     })
-}
-
-/// Argument `index` as a number, or `default` when it is absent or `null`.
-fn number(
-    function: &'static str,
-    args: &[Value],
-    index: usize,
-    default: Option<f64>,
-) -> Result<f64, ExpressionError> {
-    let arg_type = |value: &Value| ExpressionError::ArgType {
-        function,
-        index,
-        expected: "number",
-        actual_type: super::git::value_type(value),
-    };
-    match (args.get(index), default) {
-        (None | Some(Value::Null), Some(default)) => Ok(default),
-        (None, None) => Err(ExpressionError::ArgType {
-            function,
-            index,
-            expected: "number",
-            actual_type: "null",
-        }),
-        (Some(Value::Number(number)), _) => number.as_f64().ok_or_else(|| {
-            ExpressionError::ContractViolation {
-                function: function.to_string(),
-                message: format!("argument {index} is not representable as a number: {number}"),
-            }
-        }),
-        (Some(other), _) => Err(arg_type(other)),
-    }
 }
 
 /// The validated budget, or the compose error its rejection carries.
@@ -226,7 +153,7 @@ fn budget(
 mod tests {
     use serde_json::{Value, json};
 
-    use super::super::dispatch_fs;
+    use super::super::call_function;
     use crate::markdown::compose::context::capture::CapturedObservations;
     use crate::markdown::compose::context::ContextGroup;
     use crate::markdown::compose::expression::{ExpressionError, ResolutionContext};
@@ -254,14 +181,16 @@ mod tests {
     }
 
     fn call(name: &str, args: &[Value]) -> Result<Value, ExpressionError> {
-        dispatch_fs(name, args, &context()).expect("registered context function")
+        call_function(name, args, Some(&context())).expect("registered context function")
     }
 
     #[test]
     fn default_sets_exclude_loopback_link_local_and_the_other_family() {
         assert_eq!(call("ipv4", &[]).unwrap(), json!(["10.1.2.3", "100.101.102.103", "192.168.10.5"]));
         assert_eq!(call("ipv6", &[]).unwrap(), json!(["2001:db8::10", "fd00::5"]));
-        assert_eq!(call("ipv4", &[Value::Null]).unwrap(), call("ipv4", &[]).unwrap());
+        // Ledger row 69: omission selects the default set; `null` is not
+        // omission and is a type error.
+        assert!(matches!(call("ipv4", &[Value::Null]), Err(ExpressionError::Call(_))));
     }
 
     /// AC20: a covering CIDR includes loopback, a partial address is a
@@ -301,9 +230,9 @@ mod tests {
     fn empty_capture_is_empty_and_uncaptured_network_is_fatal() {
         let empty = ResolutionContext::default()
             .with_observations(CapturedObservations::for_test_addresses(&[]));
-        assert_eq!(dispatch_fs("ipv4", &[], &empty).unwrap().unwrap(), json!([]));
+        assert_eq!(call_function("ipv4", &[], Some(&empty)).unwrap().unwrap(), json!([]));
 
-        let error = dispatch_fs("ipv6", &[], &ResolutionContext::default()).unwrap().unwrap_err();
+        let error = call_function("ipv6", &[], Some(&ResolutionContext::default())).unwrap().unwrap_err();
         assert!(matches!(
             error,
             ExpressionError::FunctionContextNotCaptured { group: ContextGroup::Network, .. }
@@ -311,13 +240,13 @@ mod tests {
         assert!(error.is_authoring_fatal());
     }
 
+    /// Ledger rows 69-70: a number filter converts to its text (a substring
+    /// filter); a list filter or an extra argument fails at binding.
     #[test]
-    fn non_string_filters_and_extra_arguments_are_errors() {
-        assert!(matches!(
-            call("ipv4", &[json!(10)]),
-            Err(ExpressionError::ArgType { function: "ipv4", index: 0, .. })
-        ));
-        assert!(call("ipv6", &[json!("a"), json!("b")]).is_err());
+    fn filters_bind_as_text_and_extra_arguments_are_errors() {
+        assert_eq!(call("ipv4", &[json!(10)]).unwrap(), call("ipv4", &[json!("10")]).unwrap());
+        assert!(matches!(call("ipv4", &[json!(["10"])]), Err(ExpressionError::Call(_))));
+        assert!(matches!(call("ipv6", &[json!("a"), json!("b")]), Err(ExpressionError::Call(_))));
     }
 }
 
@@ -330,7 +259,7 @@ mod ping_tests {
 
     use serde_json::{Value, json};
 
-    use super::super::dispatch_fs;
+    use super::super::call_function;
     use crate::markdown::compose::expression::{ExpressionError, ResolutionContext};
     use crate::markdown::compose::icmp::IcmpAuthority;
     use crate::markdown::compose::icmp::test_support::{
@@ -345,7 +274,7 @@ mod ping_tests {
     }
 
     fn call(name: &str, args: &[Value], authority: &IcmpAuthority) -> Result<Value, ExpressionError> {
-        dispatch_fs(name, args, &context(authority)).expect("registered context function")
+        call_function(name, args, Some(&context(authority))).expect("registered context function")
     }
 
     /// AC6: an ungranted target answers `null` with exactly one warning, and
@@ -485,9 +414,13 @@ mod ping_tests {
     }
 
     /// AC33: every malformed address is rejected before a packet is sent, and
-    /// no spelling reaches DNS.
+    /// no spelling reaches DNS. The `ip-address` type rejects each one at
+    /// binding (ledger row 71), so the handler is never entered.
     #[test]
     fn ac33_malformed_addresses_are_rejected_without_probing() {
+        use crate::markdown::compose::expression::functions::test_hooks::{handler_entries, reset_handler_entries};
+
+        reset_handler_entries();
         let log = ProbeLog::default();
         // A grant wide enough that only validation can stop these.
         let grants = authority(&["0.0.0.0/0", "::/0"], &log, vec![reply(1)]);
@@ -505,16 +438,16 @@ mod ping_tests {
         ] {
             let error = call("ping", &[json!(spelling)], &grants)
                 .unwrap_err_or_panic(spelling);
-            assert!(
-                matches!(error, ExpressionError::ContractViolation { .. }),
-                "{spelling}: {error}"
-            );
+            assert!(matches!(error, ExpressionError::Call(_)), "{spelling}: {error}");
         }
+        assert_eq!(handler_entries("ping"), 0);
         assert_eq!(log.count(), 0);
     }
 
     /// AC33: non-finite, non-positive, overflowing, and fractional numbers are
-    /// range-checked before conversion rather than truncated.
+    /// range-checked before conversion rather than truncated. `timeout` is a
+    /// plain `number`, so its range stays the handler's check; `attempts` is
+    /// `number(integer; min(1); max(100))`, so binding rejects it.
     #[test]
     fn ac33_invalid_time_and_attempt_budgets_are_rejected() {
         let log = ProbeLog::default();
@@ -529,34 +462,31 @@ mod ping_tests {
         for attempts in [json!(0), json!(2.5), json!(-1), json!(101), json!(1e18)] {
             let error = call("ping_under", &[json!("10.0.0.1"), json!(50), attempts.clone()], &grants)
                 .unwrap_err_or_panic(&attempts.to_string());
-            assert!(matches!(error, ExpressionError::ContractViolation { .. }), "{attempts}: {error}");
+            assert!(matches!(error, ExpressionError::Call(_)), "{attempts}: {error}");
         }
         assert_eq!(log.count(), 0);
     }
 
-    /// An absent optional argument and an explicit `null` take the default; a
-    /// wrongly typed one is an argument-type error.
+    /// An absent optional argument takes the default. Ledger rows 71-72:
+    /// `null` is not omission and is a type error; numeric text converts.
     #[test]
-    fn optional_arguments_default_and_wrong_types_are_argument_errors() {
+    fn optional_arguments_default_and_wrong_types_are_binding_errors() {
         let log = ProbeLog::default();
         let grants = authority(&["10.0.0.1"], &log, vec![reply(1), reply(1), reply(1), reply(1)]);
 
         assert_eq!(call("ping", &[json!("10.0.0.1")], &grants).unwrap(), json!(true));
-        assert_eq!(call("ping", &[json!("10.0.0.1"), Value::Null], &grants).unwrap(), json!(true));
+        assert_eq!(call("ping", &[json!("10.0.0.1"), json!("50")], &grants).unwrap(), json!(true));
 
-        assert!(matches!(
-            call("ping", &[json!(10)], &grants),
-            Err(ExpressionError::ArgType { function: "ping", index: 0, .. })
-        ));
-        assert!(matches!(
-            call("ping", &[json!("10.0.0.1"), json!("50")], &grants),
-            Err(ExpressionError::ArgType { function: "ping", index: 1, .. })
-        ));
-        // `ping_under`'s timeout is required, unlike `ping`'s.
-        assert!(matches!(
-            call("ping_under", &[json!("10.0.0.1"), Value::Null], &grants),
-            Err(ExpressionError::ArgType { function: "ping_under", index: 1, .. })
-        ));
+        for (name, args) in [
+            ("ping", vec![json!("10.0.0.1"), Value::Null]),
+            ("ping", vec![json!(10)]),
+            // `ping_under`'s timeout is required, unlike `ping`'s.
+            ("ping_under", vec![json!("10.0.0.1")]),
+            ("ping_under", vec![json!("10.0.0.1"), Value::Null]),
+        ] {
+            assert!(matches!(call(name, &args, &grants), Err(ExpressionError::Call(_))), "{name}{args:?}");
+        }
+        assert_eq!(log.count(), 2);
     }
 
     /// The default authority grants nothing, so a surface that was never handed

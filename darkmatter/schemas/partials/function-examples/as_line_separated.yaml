@@ -1,0 +1,9 @@
+kind: example
+invocation: 'as_line_separated(["a", "b", "c"])'
+returns: |-
+    a
+    b
+    c
+description: |-
+    `as_line_separated` joins a list into newline-separated text, one element
+    per line.

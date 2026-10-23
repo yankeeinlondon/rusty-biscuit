@@ -23,12 +23,14 @@
 //!
 //! This stage also MUTATES the stored frontmatter. It first materializes each
 //! absent, optional, no-default top-level property owned by the document's
-//! inline or referenced SimplifiedSchema as JSON `null`. It then coerces
-//! schema-recognized scalar values to their declared types (e.g. the string
-//! `"true"` against a `boolean` field becomes a real JSON bool) via
-//! [`coerce_frontmatter_with_pending`] and writes the coerced top-level
+//! inline or referenced SimplifiedSchema as JSON `null`. It then converts
+//! values to their declared types through the one conversion engine (e.g. the
+//! string `"yes"` against a `boolean` field becomes a real JSON bool) via
+//! [`coerce_frontmatter_with_pending`] and writes the converted top-level
 //! properties back into `markdown.frontmatter_mut()`, so the effective bindings
-//! and real types flow to every later stage and into the composed output. Values
+//! and real types flow to every later stage and into the composed output. A
+//! conversion is written back only when the whole document then satisfies the
+//! schema; a value that fails anywhere leaves every value as written. Values
 //! still composition-pending — holding a `$(...)` shell expression or an
 //! unresolved `{{ ... }}` template — are left untouched here; their real type
 //! is resolved at post-shell re-validation.
@@ -269,13 +271,13 @@ pub(crate) fn prepare_schemas(
 /// 3. Resolves the effective schema once and materializes absent, optional,
 ///    no-default top-level bindings owned by a document or referenced-file
 ///    SimplifiedSchema as JSON `null`.
-/// 4. Coerces the frontmatter against that schema via
-///    [`coerce_frontmatter_with_pending`] and writes coerced top-level properties
-///    back into `markdown.frontmatter_mut()` (skipping any value still
-///    composition-pending — a `$(...)` shell expression or an unresolved
+/// 4. Converts the frontmatter against that schema via
+///    [`coerce_frontmatter_with_pending`] and writes converted top-level
+///    properties back into `markdown.frontmatter_mut()` (skipping any value
+///    still composition-pending — a `$(...)` shell expression or an unresolved
 ///    `{{ ... }}` template). The pending-key set is passed through so a
-///    root-union arm can be committed when its only residual problems are
-///    composition-pending keys, letting resolved siblings still coerce and
+///    conversion is committed when its only residual problems are
+///    composition-pending keys, letting resolved siblings still convert and
 ///    write back.
 /// 5. Validates the coerced frontmatter through the held [`EffectiveSchema`]
 ///    (F5); with active triggers, re-resolves via `schemas.validate` because
@@ -341,13 +343,12 @@ pub(crate) fn run_with_registry(
     }
 
     if let Some(effective) = effective.as_ref() {
-        // Coerce schema-recognized scalars to their declared types and write the
-        // coerced top-level properties back, so real types flow to every later
-        // stage and into the composed output.
+        // Convert values to their declared types and write the converted
+        // top-level properties back, so real types flow to every later stage
+        // and into the composed output.
         let (instance, mut composition_pending) = build_validation_instance(markdown, options, data);
         composition_pending.extend(deferral.later_resolved_keys(markdown, data));
-        let outcome =
-            coerce_frontmatter_with_pending(&effective.json_schema, &instance, &composition_pending);
+        let outcome = effective.coerce_frontmatter_with_pending(&instance, &composition_pending);
         if outcome.changed
             && let serde_json::Value::Object(coerced) = outcome.value
         {
@@ -365,7 +366,7 @@ pub(crate) fn run_with_registry(
         }
     }
 
-    // Coercion above is unconditional; the verdict is not. A pass that does not
+    // Conversion above runs in every pass; the verdict does not. A pass that does not
     // own the verdict stops here, before a validator is even built: a schema
     // that cannot be *prepared* is likewise not this pass's failure to report.
     if options.defer_schema_verdict {
@@ -2338,13 +2339,15 @@ mod tests {
 
     #[test]
     fn inline_object_array_nested_coercion() {
-        // Each array item's nested scalar is coerced independently.
+        // Each array item's nested scalar is converted independently; the
+        // `numberlike` field is validated and kept as written.
         let mut md = md_with_schema(
             "$schema:\n\
-             \x20 authors: \"{ active: boolish, score: numberlike }[]\"\n\
+             \x20 authors: \"{ active: boolean, score: number, code: numberlike }[]\"\n\
              authors:\n\
              \x20 - active: \"true\"\n\
              \x20   score: \"4.5\"\n\
+             \x20   code: \"02134\"\n\
              \x20 - active: \"False\"\n\
              \x20   score: \"-2\"\n",
         );
@@ -2353,6 +2356,7 @@ mod tests {
         let authors = &md.frontmatter().as_map()["authors"];
         assert_eq!(authors[0]["active"], serde_json::json!(true));
         assert_eq!(authors[0]["score"], serde_json::json!(4.5));
+        assert_eq!(authors[0]["code"], serde_json::json!("02134"));
         assert_eq!(authors[1]["active"], serde_json::json!(false));
         assert_eq!(authors[1]["score"], serde_json::json!(-2));
     }

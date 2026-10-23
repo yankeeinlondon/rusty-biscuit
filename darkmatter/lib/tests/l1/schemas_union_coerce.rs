@@ -1,10 +1,12 @@
-//! Coercion through a union item (`U[]`, lowered to
-//! `items: {anyOf: [arm…]}`): each item takes the property-union rule on its
-//! own — commit only when exactly one arm's coerced candidate validates — and
-//! the specialized `boolish`/`numberlike` arms still coerce inside the union.
+//! Conversion through a union item (`U[]`, lowered to
+//! `items: {anyOf: [arm…]}`): each item takes the conversion engine's union
+//! rule on its own (an exact match is kept, else the one reachable option
+//! converts), `boolish`/`numberlike` arms keep an accepted item exactly as
+//! written, and a value that fails anywhere commits nothing.
 //!
-//! Every test asserts at least one item that must change, so a coercer that
-//! skips `items.anyOf` (or applies one arm to every item) fails it.
+//! Every conversion test asserts at least one item that must change, so a
+//! converter that skips `items.anyOf` (or applies one arm to every item)
+//! fails it.
 
 use std::path::{Path, PathBuf};
 
@@ -63,26 +65,26 @@ fn coerced(root: &Path, key: &str, type_expr: &str, value_yaml: &str) -> Value {
 }
 
 #[test]
-fn boolish_and_numberlike_arms_coerce_inside_a_union_item() {
+fn boolish_and_numberlike_arms_keep_items_as_written() {
     let (_dir, root) = fixture();
 
     assert_eq!(
         coerced(&root, "toggles", "toggle[]@./coerce.yaml", "[\"TRUE\", \"false\"]"),
-        json!([true, false]),
+        json!(["TRUE", "false"]),
     );
     assert_eq!(
         coerced(&root, "amounts", "amount[]@./coerce.yaml", "[\"42\", \"-0.5\"]"),
-        json!([42, -0.5]),
+        json!(["42", "-0.5"]),
     );
-    // `U[](required)` lowers without the null wrapper; the items coerce alike.
+    // The object arm beside them still converts its own fields.
     assert_eq!(
-        coerced(&root, "toggles", "toggle[](required)@./coerce.yaml", "[\"True\"]"),
-        json!([true]),
+        coerced(&root, "toggles", "toggle[](required)@./coerce.yaml", "[\"True\", {name: x, enabled: \"yes\"}]"),
+        json!(["True", { "name": "x", "enabled": true }]),
     );
 }
 
 #[test]
-fn composition_writes_back_a_coerced_union_item() {
+fn composition_writes_back_a_converted_union_item() {
     let (_dir, root) = fixture();
     let (path, markdown) =
         document(&root, "toggles", "toggle[]@./coerce.yaml", "[\"TRUE\", {name: x, enabled: \"false\"}]");
@@ -96,23 +98,23 @@ fn composition_writes_back_a_coerced_union_item() {
         .get::<Value>("toggles")
         .expect("frontmatter reads")
         .expect("key present");
-    assert_eq!(toggles, json!([true, { "name": "x", "enabled": false }]));
+    assert_eq!(toggles, json!(["TRUE", { "name": "x", "enabled": false }]));
 }
 
 #[test]
-fn an_item_no_arm_accepts_is_left_unchanged_beside_one_that_coerces() {
+fn an_item_no_arm_accepts_leaves_the_whole_list_unchanged() {
     let (_dir, root) = fixture();
 
     // `maybe` is not boolish and not an object; `[1]` is neither too.
     assert_eq!(
-        coerced(&root, "toggles", "toggle[]@./coerce.yaml", "[maybe, \"TRUE\", [1]]"),
-        json!(["maybe", true, [1]]),
+        coerced(&root, "toggles", "toggle[]@./coerce.yaml", "[maybe, {name: x, enabled: \"true\"}, [1]]"),
+        json!(["maybe", { "name": "x", "enabled": "true" }, [1]]),
     );
     // An object item missing the required `name` fails the object arm even
-    // after its `enabled` would coerce, so it is not partially rewritten.
+    // after its `enabled` would convert, so it is not partially rewritten.
     assert_eq!(
         coerced(&root, "toggles", "toggle[]@./coerce.yaml", "[{enabled: \"true\"}, \"false\"]"),
-        json!([{ "enabled": "true" }, false]),
+        json!([{ "enabled": "true" }, "false"]),
     );
 }
 
@@ -160,21 +162,22 @@ fn independent_items_select_different_arms() {
             { "kind": "wait", "seconds": 1.5 },
         ]),
     );
-    // Mixed scalar and object arms of one union in one array.
+    // Mixed scalar and object arms of one union in one array: the
+    // `numberlike` item is kept as written, the object item converts.
     assert_eq!(
         coerced(&root, "amounts", "amount[]@./coerce.yaml", "[\"8\", {unit: m, size: \"2\"}]"),
-        json!([8, { "unit": "m", "size": 2 }]),
+        json!(["8", { "unit": "m", "size": 2 }]),
     );
 }
 
 #[test]
-fn a_union_item_coerces_exactly_as_the_same_union_property() {
+fn a_union_item_converts_exactly_as_the_same_union_property() {
     let (_dir, root) = fixture();
     let cases: &[(&str, &str, Value)] = &[
-        ("toggle", "\"TRUE\"", json!(true)),
+        ("toggle", "\"TRUE\"", json!("TRUE")),
         ("toggle", "maybe", json!("maybe")),
         ("toggle", "{name: x, enabled: \"false\"}", json!({ "name": "x", "enabled": false })),
-        ("amount", "\"42\"", json!(42)),
+        ("amount", "\"42\"", json!("42")),
         ("amount", "{unit: kg, size: \"3\"}", json!({ "unit": "kg", "size": 3 })),
         ("either", "\"42\"", json!("42")),
         ("either", "true", json!("true")),
@@ -191,15 +194,19 @@ fn a_union_item_coerces_exactly_as_the_same_union_property() {
 }
 
 #[test]
-fn a_postfixed_nested_union_coerces_like_its_direct_control_as_property_and_item() {
+fn a_postfixed_nested_union_converts_like_its_direct_control_as_property_and_item() {
     let (_dir, root) = fixture();
     write_files(&root, &[(NESTED_UNION_FILE, NESTED_UNION_TYPES)]);
 
+    // `toggle` is `boolish | number`: `"TRUE"` matches `boolish` exactly and
+    // is kept as written; `"7"` matches `boolish` nowhere and converts to `7`.
     for (key, type_expr, value, expected) in [
-        ("p", "direct@./types.yaml", "\"TRUE\"", json!(true)),
-        ("p", "nested@./types.yaml", "\"TRUE\"", json!(true)),
-        ("p", "direct[]@./types.yaml", "[\"TRUE\"]", json!([true])),
-        ("p", "nested[]@./types.yaml", "[\"TRUE\"]", json!([true])),
+        ("p", "direct@./types.yaml", "\"TRUE\"", json!("TRUE")),
+        ("p", "nested@./types.yaml", "\"TRUE\"", json!("TRUE")),
+        ("p", "direct[]@./types.yaml", "[\"TRUE\"]", json!(["TRUE"])),
+        ("p", "nested[]@./types.yaml", "[\"TRUE\"]", json!(["TRUE"])),
+        ("p", "direct@./types.yaml", "\"7\"", json!(7)),
+        ("p", "nested[]@./types.yaml", "[\"7\"]", json!([7])),
     ] {
         assert_eq!(coerced(&root, key, type_expr, value), expected, "{type_expr}");
     }

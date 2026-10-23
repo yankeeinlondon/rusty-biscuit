@@ -33,7 +33,6 @@ use biscuit_file::FileReference;
 use jsonschema::Validator;
 use serde_json::{Map, Value};
 
-use super::coerce::unwrap_nullable_arm;
 use super::format::DARKMATTER_FILE_FORMAT;
 use super::validate::{self, error_top_level_key};
 use crate::markdown::compose::expression::path_projection::make_portable_relative_in_context;
@@ -68,10 +67,10 @@ pub struct NormalizationOutcome {
 /// those keys verbatim so a not-yet-expanded value is never rewritten
 /// (Decision #4); their post-shell re-validation will handle them.
 ///
-/// For a root `anyOf` union, the rewrite commits the first arm that
-/// validates the instance (the same selection rule
-/// [`super::coerce::coerce_root_union`] uses) and rewrites only the
-/// committed arm's eager-file properties (Decision #8/#9).
+/// For a root `anyOf` union, the rewrite runs through every arm that accepts
+/// the (already-converted) instance and is committed only when those arms
+/// agree on the result, so the written order of the arms never matters
+/// (Decision #8/#9).
 pub fn rewrite_eager_file_values(
     json_schema: &Value,
     instance: &Value,
@@ -100,14 +99,13 @@ pub fn rewrite_eager_file_values(
     )
 }
 
-/// Root-union pass: commit the first arm that validates the (already-coerced)
-/// instance — the same selection rule [`super::coerce::coerce_root_union`]
-/// uses — then rewrite only the committed arm's eager-file properties.
+/// Root-union pass: rewrite through each arm that accepts the
+/// (already-converted) instance, and commit only when every accepting arm
+/// produces the same result. Arms that disagree leave the instance untouched
+/// (Decision #9: "no guessing"), whatever order they are written in.
 ///
-/// Rewriting against a different arm than the one used for type write-back
-/// would risk normalizing a value the validator never accepted. Pinning to
-/// the committed arm keeps the rewrite structurally consistent with
-/// validation (Decision #9).
+/// Rewriting against an arm the validator never accepted would normalize a
+/// value under the wrong declaration, so only accepting arms take part.
 fn rewrite_root_union(
     arms: &[Value],
     instance: &Value,
@@ -116,6 +114,7 @@ fn rewrite_root_union(
     composition_pending: &HashSet<String>,
     request_context: &biscuit_file::FileResolutionContext,
 ) -> NormalizationOutcome {
+    let mut agreed: Option<NormalizationOutcome> = None;
     for arm in arms {
         let wrapped = validate::wrap_arm_as_root_schema(arm);
         // A schema that fails to build cannot be a valid arm; skip it. The
@@ -130,31 +129,43 @@ fn rewrite_root_union(
         ) else {
             continue;
         };
-        if arm_accepts(&validator, instance, composition_pending) {
-            return rewrite_object(
-                arm,
-                instance,
-                base_dir,
-                fallback,
-                composition_pending,
-                request_context,
-            );
+        if !arm_accepts(&validator, instance, composition_pending) {
+            continue;
+        }
+        let outcome = rewrite_object(
+            arm,
+            instance,
+            base_dir,
+            fallback,
+            composition_pending,
+            request_context,
+        );
+        match &agreed {
+            None => agreed = Some(outcome),
+            Some(previous) if previous.value == outcome.value => {}
+            Some(_) => {
+                return NormalizationOutcome {
+                    value: instance.clone(),
+                    changed: false,
+                };
+            }
         }
     }
-    NormalizationOutcome {
+    agreed.unwrap_or_else(|| NormalizationOutcome {
         value: instance.clone(),
         changed: false,
-    }
+    })
 }
 
-/// Whether a root-union arm accepts the (already-coerced) instance.
+/// Whether a root-union arm accepts the (already-converted) instance.
 ///
-/// Mirrors [`super::coerce::arm_accepts`]: a fully valid candidate is always
-/// accepted; otherwise — only when `composition_pending` is non-empty — the
-/// arm is still accepted if every residual validation problem points at a
-/// pending `$(...)` top-level key. Those keys are re-validated and coerced
-/// after shell expansion, so deferring them here is sound; a problem on any
-/// non-pending key rejects the arm.
+/// A fully valid candidate is always accepted; otherwise — only when
+/// `composition_pending` is non-empty — the arm is still accepted if every
+/// residual validation problem points at a pending `$(...)` top-level key.
+/// Those keys are re-validated and converted after shell expansion, so
+/// deferring them here is sound; a problem on any non-pending key rejects the
+/// arm. The same allowance [`super::coerce::coerce_frontmatter_with_pending`]
+/// applies.
 fn arm_accepts(
     validator: &Validator,
     candidate: &Value,
@@ -224,6 +235,20 @@ fn rewrite_object(
     }
 }
 
+/// If `schema` is one of Darkmatter's optional-property wrappers, the typed
+/// inner arm: `{"anyOf":[{"type":"null"}, <typed>]}`, or the optional `file`
+/// form `{"anyOf":[{"type":"null"}, {"const":""}, <file-typed>]}`. Any other
+/// schema is `None`.
+fn unwrap_nullable_arm(schema: &Value) -> Option<&Value> {
+    let arms = schema.as_object()?.get("anyOf").and_then(Value::as_array)?;
+    let null_first = arms.first().and_then(|arm| arm.get("type")).and_then(Value::as_str) == Some("null");
+    match arms.as_slice() {
+        [_, typed] if null_first => Some(typed),
+        [_, empty, file] if null_first && empty.get("const").and_then(Value::as_str) == Some("") => Some(file),
+        _ => None,
+    }
+}
+
 /// Rewrites a single property's value (or array item), descending through
 /// nullable wrappers, unions, inline objects, and arrays to reach any
 /// eager-file markers.
@@ -243,8 +268,7 @@ fn rewrite_property(
     }
 
     // Look through the nullable `anyOf` wrapper so a `file(eager) | null`
-    // property still triggers on its present, non-null arm — mirrors
-    // `coerce::coerce_object`'s unwrap at the same position.
+    // property still triggers on its present, non-null arm.
     let effective = unwrap_nullable_arm(prop_schema).unwrap_or(prop_schema);
 
     // Union (property-level, item-level, or an arm's own sentinel wrapper).
@@ -456,7 +480,7 @@ fn contains_eager_file_fragment(schema: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::expression::functions::relative_fn;
+    use crate::markdown::compose::expression::functions::call_function;
     use crate::markdown::compose::expression::resolve_ctx::ResolutionContext;
     use serde_json::json;
     use tempfile::TempDir;
@@ -590,7 +614,9 @@ mod tests {
 
         // Projection via the shared helper the expression path uses.
         let ctx = ResolutionContext::at(base_dir.clone());
-        let relative = relative_fn(&[json!("./guide.md")], &ctx).expect("relative_fn resolves");
+        let relative = call_function("relative", &[json!("./guide.md")], Some(&ctx))
+            .expect("relative is registered")
+            .expect("relative resolves");
         assert_eq!(relative, json!("guide.md"));
 
         // Projection via the rewrite pass.

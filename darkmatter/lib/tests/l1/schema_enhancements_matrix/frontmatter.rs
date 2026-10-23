@@ -3,11 +3,12 @@
 //! property, under a schema declaring each archetype; each cell edits that
 //! output once.
 //!
-//! Absent here, because a later task decides them: `numberlike`/`boolish`
-//! preservation through containers and numeric-text conversion of list or
-//! object members (Wave 3/4), tuple slots and union-arm values (Grammar,
-//! then Schema adapter), and every JSON value-loading surface's duplicate
-//! cell (R3).
+//! The conversion cells point the same control at a schema with one more
+//! property per conversion archetype (`frontmatter.conversion.schema.yaml`):
+//! numeric text in list and object members, `numberlike`/`boolish`
+//! preservation through containers, tuple slots, pattern-key values, a
+//! whole-value union, and a `json` content target, including duplicate keys
+//! in its text (R3).
 
 use std::path::Path;
 
@@ -204,6 +205,127 @@ fn frontmatter_value_matrix() {
     let mut failures = Vec::new();
     for (index, cell) in CELLS.iter().enumerate() {
         let frontmatter = apply(control, cell.edit);
+        if !matches!(cell.edit, Control) {
+            assert_ne!(frontmatter, control, "{}: the edit must change the control", cell.label);
+        }
+        if let Err(problem) = check_cell(dir, index, &frontmatter, cell.outcome) {
+            failures.push(format!("{}: {problem}\n--- frontmatter ---\n{frontmatter}", cell.label));
+        }
+    }
+    assert!(failures.is_empty(), "{} cell(s) failed:\n\n{}", failures.len(), failures.join("\n\n"));
+}
+
+const CONVERSION_CELLS: &[Cell] = &[
+    cell("control", Control, Composes("7|2|02134|On|false", control_values)),
+    // numeric text in a typed list and a typed object converts
+    cell(
+        "values numeric text",
+        Set("values", " ['1', '2.5']"),
+        Composes("7|2|02134|On|false", || vec![("values", Some(json!([1, 2.5])))]),
+    ),
+    cell("values one wrong element", Set("values", " ['1', pear]"), ValidationFails),
+    cell("values every element wrong", Set("values", " [pear, plum]"), ValidationFails),
+    cell(
+        "meta numeric text",
+        Replace("level: 3", "level: '3'"),
+        Composes("7|2|02134|On|false", || vec![("meta", Some(json!({"level": 3})))]),
+    ),
+    cell("meta wrong member", Replace("level: 3", "level: pear"), ValidationFails),
+    // `numberlike`/`boolish` through containers: validated, kept as written
+    cell(
+        "codes kept",
+        Append("codes: ['02134', 5, ' 4 ']\n"),
+        Composes("7|2|02134|On|false", || vec![("codes", Some(json!(["02134", 5, " 4 "])))]),
+    ),
+    cell("codes one wrong element", Append("codes: ['02134', pear]\n"), ValidationFails),
+    cell(
+        "toggles kept",
+        Append("toggles: ['On', 'no', true]\n"),
+        Composes("7|2|02134|On|false", || vec![("toggles", Some(json!(["On", "no", true])))]),
+    ),
+    cell("toggles native number", Append("toggles: [1]\n"), ValidationFails),
+    cell(
+        "nested kept",
+        Append("nested:\n  zip: '007'\n  on: 'Yes'\n"),
+        Composes("7|2|02134|On|false", || vec![("nested", Some(json!({"zip": "007", "on": "Yes"})))]),
+    ),
+    // tuple slots
+    cell(
+        "pair every slot",
+        Append("pair: [a, '4', 'yes']\n"),
+        Composes("7|2|02134|On|false", || vec![("pair", Some(json!(["a", 4, true])))]),
+    ),
+    cell(
+        "pair optional slot absent",
+        Append("pair: [5, '4']\n"),
+        Composes("7|2|02134|On|false", || vec![("pair", Some(json!(["5", 4])))]),
+    ),
+    cell("pair required slot absent", Append("pair: [a]\n"), ValidationFails),
+    cell("pair optional slot null", Append("pair: [a, 4, null]\n"), ValidationFails),
+    cell("pair extra element", Append("pair: [a, 4, true, x]\n"), ValidationFails),
+    cell("pair empty", Append("pair: []\n"), ValidationFails),
+    cell("pair scalar", Append("pair: a\n"), ValidationFails),
+    // pattern-key values
+    cell(
+        "dict values",
+        Append("dict:\n  a: '3'\n  b: 4\n"),
+        Composes("7|2|02134|On|false", || vec![("dict", Some(json!({"a": 3, "b": 4})))]),
+    ),
+    cell("dict one wrong value", Append("dict: {a: '3', b: pear}\n"), ValidationFails),
+    cell(
+        "dict empty",
+        Append("dict: {}\n"),
+        Composes("7|2|02134|On|false", || vec![("dict", Some(json!({})))]),
+    ),
+    cell("dict nested duplicate", Append("dict:\n  a: 1\n  a: 2\n"), ParseFails),
+    // whole-value union: number wins over boolean for `"1"`
+    cell(
+        "either number text",
+        Append("either: '1'\n"),
+        Composes("7|2|02134|On|false", || vec![("either", Some(json!(1)))]),
+    ),
+    cell(
+        "either boolean word",
+        Append("either: 'yes'\n"),
+        Composes("7|2|02134|On|false", || vec![("either", Some(json!(true)))]),
+    ),
+    cell("either neither", Append("either: pear\n"), ValidationFails),
+    // the `json` content target
+    cell(
+        "config native mapping",
+        Append("config:\n  port: 8080\n  debug: true\n"),
+        Composes("7|2|02134|On|false", || vec![("config", Some(json!("{\"port\":8080,\"debug\":true}")))]),
+    ),
+    cell(
+        "config text",
+        Append("config: '{\"a\": 1}'\n"),
+        Composes("7|2|02134|On|false", || vec![("config", Some(json!("{\"a\": 1}")))]),
+    ),
+    cell(
+        "config null",
+        Append("config: null\n"),
+        Composes("7|2|02134|On|false", || vec![("config", Some(Value::Null))]),
+    ),
+    cell("config malformed text", Append("config: '{a'\n"), ValidationFails),
+    cell("config empty text", Append("config: ''\n"), ValidationFails),
+    cell("config trailing text", Append("config: '{\"a\": 1} x'\n"), ValidationFails),
+    cell("config duplicate key in text", Append("config: '{\"a\": 1, \"a\": 2}'\n"), ValidationFails),
+    cell("config overflow in text", Append("config: '[1e400]'\n"), ValidationFails),
+    // a failure anywhere commits nothing, and the report names only it
+    cell("convertible beside a failure", Append("either: '1'\ndict: {a: pear}\n"), ValidationFails),
+];
+
+#[test]
+fn frontmatter_conversion_matrix() {
+    let control = include_str!("../../fixtures/schema_enhancements_matrix/frontmatter.md-get.yaml")
+        .replacen("./frontmatter.schema.yaml", "./frontmatter.conversion.schema.yaml", 1);
+    let schema = include_str!("../../fixtures/schema_enhancements_matrix/frontmatter.conversion.schema.yaml");
+    let workspace = tempfile::tempdir().expect("matrix workspace");
+    let dir = workspace.path();
+    std::fs::write(dir.join("frontmatter.conversion.schema.yaml"), schema).expect("write schema");
+    let mut failures = Vec::new();
+    for (index, cell) in CONVERSION_CELLS.iter().enumerate() {
+        let frontmatter = apply(&control, cell.edit);
         if !matches!(cell.edit, Control) {
             assert_ne!(frontmatter, control, "{}: the edit must change the control", cell.label);
         }

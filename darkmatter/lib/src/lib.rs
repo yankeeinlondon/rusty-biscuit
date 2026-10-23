@@ -44,7 +44,11 @@
 //!   and [`markdown::compose::expression::expression_function_descriptors()`] describe
 //!   every callable function in the expression engine (type predicates, math,
 //!   collection operations, string predicates/mutations, date formatting/validators,
-//!   logical operators, filesystem queries).
+//!   logical operators, filesystem queries). Descriptors are projected from the embedded
+//!   `darkmatter/schemas/partials/functions.yaml` catalog, one per overload with
+//!   its typed signature; see
+//!   [`markdown::compose::expression::expression_function_catalog()`] and
+//!   [`markdown::compose::expression::function_descriptors()`].
 //!
 //! - **Side-effect capabilities** — [`effects::EffectDescriptor`] and
 //!   [`effects::effect_descriptors()`] describe every mutating verb exposed by

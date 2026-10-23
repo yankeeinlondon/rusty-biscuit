@@ -230,7 +230,7 @@ fn shipped_schema_corpus_is_passively_classified_without_resolution() {
     paths.sort();
     // The runtime baseline left this directory for the global catalog's
     // `fm` partial (`darkmatter/schemas/partials/fm.yaml`).
-    assert_eq!(paths.len(), 4, "every shipped YAML artifact must remain in the corpus");
+    assert_eq!(paths.len(), 3, "every shipped YAML artifact must remain in the corpus");
 
     let mut schemas = Vec::new();
     let mut other_artifacts = Vec::new();
@@ -245,7 +245,7 @@ fn shipped_schema_corpus_is_passively_classified_without_resolution() {
         }
     }
     assert_eq!(schemas, ["env.yaml"]);
-    assert_eq!(other_artifacts, ["expression-functions.yaml", "schema-definition.yaml"]);
+    assert_eq!(other_artifacts, ["schema-definition.yaml"]);
     assert_eq!(rejected_claims, ["err.yaml"]);
 }
 

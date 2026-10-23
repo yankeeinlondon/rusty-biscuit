@@ -85,9 +85,9 @@ $schema:
 | `datetime`   | An RFC 3339 datetime `YYYY-MM-DDThh:mm:ss[.ms]` with a **required** offset (`Z` or `±HH:MM`).          | JSON Schema `format: date-time`.                                                                                                                                                |
 | `time`       | An RFC 3339 time `hh:mm:ss` or `hh:mm:ss.ms` with a **required** offset (`Z` or `±HH:MM`); seconds are required (`14:30Z` is invalid). | JSON Schema `format: time`.                                                                                                                       |
 | `number`     | Any JSON number.                                                                                       | Constraints: `min`, `max`, `integer`, `suggest`, `default`, `required`.                                                                                                         |
-| `numberlike` | A JSON number **or** a numeric string (`"4"`, `"-13"`, `"3.14"`).                                      | Compiles to `anyOf: [number, regex-pattern string]`. A numeric-string value is **normalized** to a real number (see [Type Coercion](#type-coercion)).                            |
+| `numberlike` | A JSON number **or** text `number` would accept (`"4"`, `" 4 "`, `"+4"`, `"1e3"`, `"1_000"`).          | Compiles to `{ "type": ["number", "string"], "format": "darkmatter-numberlike" }`. The value is validated and kept **exactly as written** (see [Type Coercion](#numberlike-and-boolish-keep-what-was-written)). |
 | `boolean`    | Any JSON boolean.                                                                                      | Constraints: `default`, `required`.                                                                                                                                             |
-| `boolish`    | A JSON boolean **or** the strings `"true"` / `"false"` (any case).                                     | Compiles to `anyOf: [boolean, enum]`. A `"true"` / `"false"` value is **normalized** to a real boolean (see [Type Coercion](#type-coercion)).                                  |
+| `boolish`    | A JSON boolean **or** a boolean word (`true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`, any case).      | Compiles to `{ "type": ["boolean", "string"], "format": "darkmatter-boolish" }`. The value is validated and kept **exactly as written** (see [Type Coercion](#numberlike-and-boolish-keep-what-was-written)). |
 | `object`     | Any YAML/JSON object.                                                                                  | No nested-schema authoring in v1 — `object` accepts any shape. Reference an external file for deeper typing.                                                                    |
 | `file`       | A file reference parsed via `biscuit-file::FileReference`. Single or array form.                       | Constraints: `eager`, `match(glob, ...)` (each glob a prefixed glob reference such as `^**/*spec*.md`), `required`. **Lazy by default**; `file(eager)` resolves and checks existence (implicit paths from the document directory first, then the repository root; explicit `./`/`../` from the document directory only). Schema-selected file values materialize as absolute native paths at the request boundary; lazy values use the first unprobed candidate. See [Files](#files).        |
 | `enum`       | A value from an explicit set.                                                                          | Constraints required — the members are the constraint. See [Enumerations](#enumerations).                                                                                       |
@@ -611,7 +611,7 @@ A non-`required` literal accepts missing/`null` through the standard optional-nu
 
 #### Coercion
 
-The literal implies its scalar type, so the write-back pass treats it like the corresponding primitive: a document value `"2"` against `literal(2)` coerces to the number `2`; `"true"` against `literal(true)` coerces to the boolean `true`. **String literals never coerce.** As with all coercion, write-back happens only when the coerced result validates, and `$(...)`-pending values are skipped.
+The literal implies its scalar type, so conversion treats it like the corresponding primitive: a document value `"2"` against `literal(2)` converts to the number `2`; `"yes"` against `literal(true)` converts to the boolean `true`; a number or boolean against a string literal converts to its text (`2` against `literal('2')` becomes `"2"`) and is then compared. A converted value that does not equal the literal is an error, and `$(...)`-pending values wait for expansion (see [Type Coercion](#type-coercion)).
 
 #### Relationship to `enum`
 
@@ -1919,7 +1919,10 @@ flowchart TD
     Q -->|report a problem| RP{Does a literal tag select exactly one arm?}
     RP -->|yes| RN["Report that arm's problems"]
     RP -->|no| RU[Report the ordinary union problems]
-    Q -->|coerce or rewrite| TC{Does exactly one arm qualify?}
+    Q -->|convert| CV{Kept by an arm, or one arm wins by the union rule?}
+    CV -->|yes| CA[Convert through that arm]
+    CV -->|no| CU[Leave the value unchanged and report the error]
+    Q -->|rewrite an eager file| TC{Does exactly one arm qualify?}
     TC -->|yes| TA[Change the value through that arm]
     TC -->|no| TU[Leave the value unchanged]
     Q -->|clean up| CL["Never repair inside a union, report only"]
@@ -1929,15 +1932,15 @@ flowchart TD
 |---|---|---|
 | Validation | It never needs to: the value is valid when any arm accepts it. | — |
 | Problem reporting | A literal tag selects one arm ([Discriminated Unions](#discriminated-unions)). A root union also reports its closest arm. | The ordinary union report. |
-| Coercion (compose) | Exactly one arm's coerced candidate validates ([Inline Object and Union Coercion](#inline-object-and-union-coercion)). | The value is left unchanged. |
+| Conversion (validation and compose) | An arm accepts the value as written; otherwise exactly one arm is reachable, or the number-over-boolean or JSON-over-YAML tie-breaker settles it ([Unions](#unions)). Arm order never matters. | The value is left as written; a tie no tie-breaker settles is an error naming each reading. |
 | Eager-`file` rewriting (compose) | Exactly one arm that contains an eager `file`, as the value itself or as a field of an object arm, accepts the value ([Files](#files)). | The value is left unchanged. |
 | Cleanup (`md clean`) | Never inside a union, even when a tag would identify the arm. | Problems are reported and the value is left unchanged; no key is deleted. Values outside the union keep cleanup's usual repair rules. |
 | Editor completion and hover | Completion: a literal tag selects one arm. Hover: exactly one arm accepts the value. | Every applicable alternative is offered or listed. |
 
 The same rules apply to every item of a `U[]` list, judged on its own, so
 neighboring items can select different arms. Closest-arm scoring only ever
-explains a failure: it never decides which arm coerces, rewrites, or cleans a
-value.
+explains a failure: it never decides which arm converts, rewrites, or cleans
+a value.
 
 ### Root-Level Unions
 
@@ -2369,59 +2372,150 @@ This semantics is chosen because per-constraint merging produces surprising resu
 
 ## Type Coercion
 
-When a frontmatter value is *trivially* the wrong JSON type but **unambiguously** convertible to the type its property declares, Darkmatter coerces the stored value to the declared type and accepts it, rather than failing validation. This is driven by the merged compiled JSON Schema, so it covers inline `$schema`, baseline-merged fields, raw JSON Schema, and root unions through one path.
+When a frontmatter value is not the type its property declares but converts
+to it without changing its meaning, Darkmatter converts the stored value and
+accepts it. Function arguments go through the same conversion engine with the
+same rules, so a type means the same thing in `$schema` and in a function
+signature. Conversion is always on; there is no opt-in or strict flag. It
+covers inline `$schema`, baseline-merged fields, trigger payloads, and raw
+JSON Schema documents.
 
-Coercion is **default-on**: there is no opt-in flag and no opt-out / strict-types flag. It is unambiguous by construction — it only *adds* acceptances for values with exactly one possible target, never changes the outcome of an already-valid value, and never masks a genuinely-wrong value. A value outside the matrix below is left untouched and fails with the same `Type` error it does today.
+For each value the engine takes exactly one of three actions:
 
-### Coercion Matrix
-
-| Declared type | Incoming value | Coerced result |
-|---|---|---|
-| `boolean` | a string in the set `{true, false, True, False, TRUE, FALSE}` | real boolean (`"true"` → `true`) |
-| `boolish` | same boolish set | real boolean (**normalized** — previously left as a string) |
-| `number` / `integer` | a string matching `^-?\d+(\.\d+)?$` | real number (`"42"` → `42`, `"3.14"` → `3.14`); text whose number no `f64` holds exactly (`"9007199254740993"`) stays text and fails the type check with the reason ([Numbers](../numbers.md)) |
-| `numberlike` | a numeric string (same regex) | real number (**normalized** — previously left as a string) |
-| `string` (incl. `date` / `datetime` / `time` / `url` / `email` / `file`) | a `number` or `boolean` scalar | its canonical string (`42` → `"42"`, `true` → `"true"`) |
-| `yaml` | a native mapping / sequence / scalar | its YAML string serialization (validated as YAML) |
-| `json` | a native mapping / sequence / scalar | its JSON string serialization (validated as strict JSON) |
-| `expression` / `shell` | a `number` or `boolean` scalar | its canonical string (`true` → `"true"`) |
-| `array` of a coercible item type | an array | each element coerced by the item rule (recursively) |
-
-The string direction is reverse-direction and always unambiguous (every scalar has exactly one canonical string form). It targets `string` only — a number landing in a `date` field coerces to its string form and then fails the `date` format check normally, so coercion never produces a false accept.
-
-### Never Coerced (Ambiguous)
-
-These remain uncoerced and continue to fail strict validation on a type mismatch:
-
-- `"yes"` / `"no"` / `"on"` / `"off"` → boolean (not in the boolish set).
-- `"1"` / `"0"` → boolean (equally valid as numbers).
-- any string that does not match the numeric regex → number.
-- arrays, objects, or `null` → any scalar type.
-- a string → object, or an object → string.
-- a `number` or `boolean` → `alphanumeric`. The value must already be a string; in a union, another arm such as `string` may still coerce it.
-- anything → `unknown` or `null`. `unknown` keeps every value as written, and `null` accepts only `null`.
-
-Nested object properties are not deeply coerced — coercion applies to top-level properties and to the elements of top-level typed arrays. Coercing an already-correctly-typed value is a no-op (idempotent).
-
-### Root Unions
-
-For a root-level union, coercion must make the instance satisfy *at least one* arm, and arms may type the same property differently. Each arm is tried **in index order**: a per-arm coerced candidate is built and strict-validated, and the **first arm that validates post-coercion wins**; its coerced candidate is committed. If no arm validates post-coercion, the instance is returned unchanged and the existing closest-matching-arm error reporting runs.
-
-### Inline Object and Union Coercion
-
-Coercion recurses into the nested structure of an inline object when the matching schema path is unambiguous. The same boolean / boolish / number / numberlike / string-shaped scalar matrix that applies to top-level fields also applies to fields inside an inline object body and to elements of an inline object array. A value at `/authors/0/active` is coerced from `"true"` to `true` when the schema is `authors: "{ active: boolean }[]"`.
-
-For property-level unions, coercion is attempted per arm. The compose stage builds a per-arm coerced candidate using that arm's schema path, validates each candidate against that arm, and commits the coerced value only when **exactly one** arm validates after coercion. If zero arms validate, or if multiple arms validate (ambiguous), the original value is left uncoerced and normal validation/reporting proceeds from the original. This avoids guessing across ambiguous inline object paths while still allowing unambiguous union arms to coerce nested scalars.
-
-An array of a union (a `U[]` reference to a union-typed named type) applies the same rule to **each item on its own**. Every item builds its candidates from its original value, and each item may select a different arm. An item that no arm accepts, or that several arms accept, is left unchanged while its siblings still coerce. A `boolish` or `numberlike` arm inside the union normalizes its item just as it does at property level. Given `toggle: [boolish, "{ name: string(required), enabled: boolean }"]`:
-
-```yaml
-toggles: ["TRUE", {name: x, enabled: "false"}, maybe]
-# coerces to
-toggles: [true, {name: x, enabled: false}, maybe]   # `maybe` fits no arm and fails validation
+```mermaid
+flowchart TD
+    V[value + declared type] --> K{Already matches the type<br/>and its constraints?}
+    K -->|yes| KEEP[keep it unchanged]
+    K -->|no| C{One direct conversion<br/>into the type?}
+    C -->|no| ERR[validation error with the reason]
+    C -->|yes| CHECK{Converted value meets<br/>the constraints?}
+    CHECK -->|yes| CONV[write back the converted copy]
+    CHECK -->|no| ERR
 ```
 
-The same conservative rules apply at every nested level — coercion never fires on array- or object-typed values, never crosses a property boundary, and never produces a false accept on a value that is genuinely the wrong type.
+Constraints are enforced, never repaired: `"2.5"` against `number(integer)`
+is an error, not `2`, and `"ABCD"` against `string(max(3))` is never
+truncated. The original value is never mutated; compose writes back a
+converted copy, and validation-only calls write nothing.
+
+### Conversion Rules
+
+These are the only conversions, and they are never chained:
+
+| From | To | Example |
+|---|---|---|
+| number | text (`string`, `date`, `url`, `file`, `enum(...)`, string `literal`, `expression`, `shell`, ...) | `version: 1.2` against `string` → `"1.2"`; `n: 2` against `enum("1", "2")` → `"2"` |
+| boolean | text | `true` → `"true"` |
+| text | `number` | `" 4 "`, `"+4"`, `"-3.5"`, `"1e3"`, `".5"`, `"1_000"` → a number |
+| text | `boolean` | `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`, any letter case → a boolean |
+| object, list, number, or boolean | `json` / `yaml` | a mapping → its JSON (written key order) or YAML text |
+
+A refined text type (`date`, `url`, `email`, `file`, `enum`, a string literal)
+first receives the text and then runs its own check, so `2026` against `date`
+becomes `"2026"` and then fails the date check. A number or boolean literal
+accepts the matching text: `"2"` against `literal(2)` becomes `2`.
+
+Text given to `json` or `yaml` is already content: it is validated (JSON
+rejects duplicate keys and numbers such as `1e400`) and kept as written,
+never quoted again.
+
+These are **never** converted:
+
+- a boolean to a number (`true` is not `1`), or a native number to a boolean;
+- `null` to anything (`0`, `""`, `"null"`, `false`, or omission);
+- a single value into a list (`"a"` is not `["a"]`);
+- text into an object or list (`"[1, 2]"` stays text);
+- text that is not a number (`"pear"`, `"NaN"`, `"0x10"`, `"1,000"`, `"5."`);
+- a number or boolean into `alphanumeric`, which must already be text;
+- anything into `unknown`, which keeps every value as written.
+
+Whole numbers must be held exactly: `"9007199254740993"` and the native YAML
+`9007199254740993` are errors with the reason "cannot be represented
+exactly", `"1e400"` is "not finite", and `"1e-400"` would become `0`, which is
+also an error. `number(integer)` means a whole number below 2^64 in
+magnitude (the compiled schema carries `x-darkmatter-integer: true`); a raw
+JSON Schema `integer` has no such ceiling. See [Numbers](../numbers.md).
+
+### `numberlike` and `boolish` Keep What Was Written
+
+`numberlike` accepts exactly what `number` accepts, and `boolish` exactly what
+`boolean` accepts, but neither converts: the value is validated and kept as
+written. `zip: "02134"` against `zip: numberlike` stays the text `"02134"`;
+`flag: "On"` against `boolish` stays `"On"`; `zip: "pear"` fails. They compile
+to `{ "type": ["number", "string"], "format": "darkmatter-numberlike" }` and
+`{ "type": ["boolean", "string"], "format": "darkmatter-boolish" }`, whose
+formats use the same parser as the engine.
+
+### Nested Values
+
+Conversion follows the declared structure at every depth: lists, tuples,
+inline objects, unions inside them, `numberlike`/`boolish` fields, and the
+values under pattern keys (`<string>: number`). A list or object is converted
+all or nothing, and an error names the failing path (`meta.inner.count`,
+`values[2]`). A missing optional tuple position stays missing.
+
+```yaml
+$schema:
+    meta: "{ inner: { count: number }, scores: { <string>: number } }"
+meta:
+    inner: { count: "3" }
+    scores: { a: "4" }
+# composes as
+meta:
+    inner: { count: 3 }
+    scores: { a: 4 }
+```
+
+Each top-level property is its own value. When one property fails, the
+others still convert, and a missing required property never stops a sibling
+from converting: presence is reported by validation, not by conversion.
+
+### Unions
+
+A union chooses its option the same way everywhere, and the order the
+options are written in never matters:
+
+1. A value an option already accepts is kept.
+2. Otherwise, the options the value converts into (with constraints met) are
+   *reachable*. One reachable option wins.
+3. When several are reachable with different results, exactly two
+   tie-breakers apply: a number beats a boolean (`"1"` against
+   `number | boolean` becomes `1`), and JSON beats YAML (a mapping against
+   `json | yaml` becomes JSON text). They apply field by field inside
+   objects. Any other tie is an error that names each reading.
+
+| Declared type | Value | Result |
+|---|---|---|
+| `string \| number` | `"4"` | `"4"` (already a string) |
+| `string \| string[]` | `2026` | `"2026"` (only `string` is reachable) |
+| `number(min(5)) \| boolean` | `"1"` | `true` (`1` fails `min(5)`) |
+| `{ id: number } \| { id: boolean }` | `{ id: "1" }` | `{ id: 1 }` |
+| `{ a: number, b: boolean } \| { a: boolean, b: number }` | `{ a: "1", b: "1" }` | error naming both readings |
+| `(boolean \| number)[]` | `["2", "yes"]` | `[2, true]` |
+
+A root-level union picks its arm by the same rule; an arm's conversions are
+written back only when the converted document satisfies that arm.
+
+### Raw JSON Schema
+
+A raw JSON Schema converts through `type` (including type arrays), `const`,
+`enum`, `properties`, `patternProperties`, `additionalProperties`, `items`,
+`prefixItems`, `anyOf`, `oneOf`, local `$ref` with `$defs`/`definitions`
+(honoring `$id` and `$anchor`), numeric bounds, and string and list lengths.
+The complete schema still decides: a converted value is kept only if every
+assertion accepts it, including keywords that drive no conversion (`allOf`,
+`not`, `if`/`then`/`else`, `multipleOf`, `dependent*`, `propertyNames`,
+`contains`, `unevaluated*`). So `{ "oneOf": [{ "type": "number" }, { "type":
+"integer" }] }` rejects `"3"` (the converted `3` matches both), and with
+`{ "type": "number", "multipleOf": 2 }` the text `"4"` converts while `"3"`
+fails. A key matching both `properties` and `patternProperties` must satisfy
+both. Remote references are never fetched.
+
+### Values Waiting on Composition
+
+A value that still holds `$(...)` or an unresolved `{{ ... }}` is not
+converted or judged yet; it is checked after shell expansion and
+interpolation, while its resolved siblings convert now.
 
 ## CLI: `md schema validate`
 

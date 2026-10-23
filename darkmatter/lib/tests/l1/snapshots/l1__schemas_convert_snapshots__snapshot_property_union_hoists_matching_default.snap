@@ -17,21 +17,11 @@ expression: convert_yaml(yaml)
           "type": "boolean"
         },
         {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "enum": [
-                "true",
-                "false",
-                "True",
-                "False",
-                "TRUE",
-                "FALSE"
-              ]
-            }
-          ]
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "format": "darkmatter-boolish"
         }
       ]
     }

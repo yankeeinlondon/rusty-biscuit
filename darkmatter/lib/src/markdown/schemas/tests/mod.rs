@@ -254,8 +254,8 @@ fn coerces_numeric_string_against_inline_schema() {
 }
 
 #[test]
-fn ambiguous_string_still_reports_type_problem() {
-    let md = md_with_schema("$schema:\n  flag: boolean(required)\nflag: \"yes\"\n");
+fn non_boolean_word_still_reports_type_problem() {
+    let md = md_with_schema("$schema:\n  flag: boolean(required)\nflag: \"maybe\"\n");
     let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
     let report = api.validate(&md).unwrap();
     assert!(!report.valid);

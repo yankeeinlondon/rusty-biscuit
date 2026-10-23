@@ -3,31 +3,21 @@
 
 use serde_json::Value;
 
-use super::{EvaluationMode, FunctionBinding, FunctionHandler, ResolutionContext, resolve_path_shape};
+use super::{BoundCall, FunctionBinding, ResolutionContext, required_text, resolve_path_shape};
 use crate::markdown::compose::context::ContextGroup;
 use crate::markdown::compose::expression::ExpressionError;
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding {
-        canonical: "package_area",
-        aliases: &[],
-        evaluation: EvaluationMode::Context,
-        handler: Some(FunctionHandler::Context(package_area_fn)),
-    },
-    FunctionBinding {
-        canonical: "package",
-        aliases: &[],
-        evaluation: EvaluationMode::Context,
-        handler: Some(FunctionHandler::Context(package_fn)),
-    },
+    FunctionBinding::context("package_area", &[], package_area_fn),
+    FunctionBinding::context("package", &[], package_fn),
 ];
 
-fn package_area_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    lookup("package_area", args, context).map(|found| Value::String(found.area))
+fn package_area_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    lookup("package_area", call, context).map(|found| Value::String(found.area))
 }
 
-fn package_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    lookup("package", args, context).map(|found| Value::String(found.package))
+fn package_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    lookup("package", call, context).map(|found| Value::String(found.package))
 }
 
 /// Resolves `where` to a path shape through the request's file-resolution
@@ -38,23 +28,10 @@ fn package_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, Expr
 /// `FileReference` failures keep their own classification; neither is a miss.
 fn lookup(
     function: &'static str,
-    args: &[Value],
+    call: &BoundCall<'_>,
     context: &ResolutionContext,
 ) -> Result<crate::markdown::compose::context::PackageMatch, ExpressionError> {
-    let [where_value] = args else {
-        return Err(ExpressionError::Other {
-            function: function.to_string(),
-            message: format!("requires 1 argument, got {}", args.len()),
-        });
-    };
-    let Some(raw) = where_value.as_str() else {
-        return Err(ExpressionError::ArgType {
-            function,
-            index: 0,
-            expected: "file | string",
-            actual_type: super::git::value_type(where_value),
-        });
-    };
+    let raw = required_text(function, call, 0)?;
     // R12 exempts only lookup misses from erroring; these functions take a
     // local path, so a URL is a contract violation rather than a miss.
     if super::is_remote_url(raw) {
@@ -85,7 +62,7 @@ mod tests {
     use serde_json::{Value, json};
     use sniff::filesystem::repo::{Package, RepoInfo};
 
-    use super::super::dispatch_fs;
+    use super::super::call_function;
     use crate::markdown::compose::context::capture::CapturedObservations;
     use crate::markdown::compose::context::{ContextGroup, repository_scope_catalog};
     use crate::markdown::compose::expression::{ExpressionError, ResolutionContext};
@@ -142,7 +119,7 @@ mod tests {
 
     fn names(fixture: &Fixture, where_value: Value) -> (Value, Value) {
         let call = |name| {
-            dispatch_fs(name, std::slice::from_ref(&where_value), &fixture.context)
+            call_function(name, std::slice::from_ref(&where_value), Some(&fixture.context))
                 .expect("registered context function")
                 .unwrap_or_else(|error| panic!("{name}({where_value}): {error}"))
         };
@@ -200,7 +177,7 @@ mod tests {
         let fixture = fixture();
         let reference = "../../outside/foo/lib/src/lib.rs";
         for name in ["package", "package_area"] {
-            let error = dispatch_fs(name, &[json!(reference)], &fixture.context)
+            let error = call_function(name, &[json!(reference)], Some(&fixture.context))
                 .unwrap()
                 .unwrap_err();
             assert!(
@@ -231,14 +208,14 @@ mod tests {
     fn remote_and_unresolvable_references_are_errors_not_misses() {
         let fixture = fixture();
         for name in ["package", "package_area"] {
-            let remote = dispatch_fs(name, &[json!("https://example.com/foo/lib")], &fixture.context)
+            let remote = call_function(name, &[json!("https://example.com/foo/lib")], Some(&fixture.context))
                 .unwrap()
                 .unwrap_err();
             assert!(matches!(remote, ExpressionError::ContractViolation { .. }), "{remote:?}");
             assert!(remote.is_authoring_fatal());
             assert!(remote.to_string().contains("does not accept HTTP(S) URLs"), "{remote}");
 
-            let vault = dispatch_fs(name, &[json!("vault:notes/x.md")], &fixture.context)
+            let vault = call_function(name, &[json!("vault:notes/x.md")], Some(&fixture.context))
                 .unwrap()
                 .unwrap_err();
             assert!(
@@ -254,22 +231,25 @@ mod tests {
         }
     }
 
+    /// Ledger rows 67-68 (`where: file`, no null arm): `null` and a list fail
+    /// at binding; a number converts to a text path and is looked up.
     #[test]
-    fn non_string_arguments_are_type_errors() {
+    fn non_text_arguments_bind_or_are_type_errors() {
         let fixture = fixture();
-        for argument in [json!(null), json!(3), json!(["foo"])] {
+        for argument in [json!(null), json!(["foo"])] {
             assert!(matches!(
-                dispatch_fs("package", &[argument], &fixture.context),
-                Some(Err(ExpressionError::ArgType { function: "package", index: 0, .. }))
+                call_function("package", &[argument], Some(&fixture.context)),
+                Some(Err(ExpressionError::Call(_)))
             ));
         }
+        assert_eq!(names(&fixture, json!(3)), names(&fixture, json!("3")));
     }
 
     #[test]
     fn uncaptured_repository_observation_is_fatal() {
         let mut context = fixture().context;
         context.observations = CapturedObservations::default();
-        let error = dispatch_fs("package_area", &[json!("../foo/lib")], &context).unwrap().unwrap_err();
+        let error = call_function("package_area", &[json!("../foo/lib")], Some(&context)).unwrap().unwrap_err();
         assert!(matches!(
             error,
             ExpressionError::FunctionContextNotCaptured { group: ContextGroup::Repo, .. }

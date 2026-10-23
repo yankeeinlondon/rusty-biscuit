@@ -565,8 +565,8 @@ fn schema_about_verbose_prints_advanced_sections_as_readable_lists() {
     assert!(plain.contains("Validation Notes"));
     assert!(plain.contains("- Object shape. Write fields inside braces"));
     assert!(plain.contains("  - Details: { title: string, rating: number }"));
-    assert!(plain.contains("- Booleans. When the schema expects boolean or boolish"));
-    assert!(plain.contains("  - Behavior: true and false, in any case"));
+    assert!(plain.contains("- Booleans. When the schema expects boolean, text such as"));
+    assert!(plain.contains("  - Behavior: Boolean words become real booleans"));
     assert!(plain.contains("- Extra root keys. A document may contain frontmatter"));
     assert!(
         !plain.contains("<green>") && !plain.contains("<dim>"),
@@ -581,8 +581,8 @@ fn schema_about_verbose_prints_advanced_sections_as_readable_lists() {
 
 /// More-context plan Phase 4, end to end through the shipped catalogs: the
 /// added `ctx.*` variables and typed function signatures (including the
-/// refined `ip-address` argument, the `"unstable" | null` return union, and the
-/// generated agentic-CLI enum) reach `md --verbose schema about`.
+/// catalog's named `ip-address`, `agentic-cli`, and `recent-commits` types and
+/// the `unstable` return member) reach `md --verbose schema about`.
 #[test]
 fn verbose_schema_about_projects_more_context_descriptors() {
     let process = CliProcessFixture::new();
@@ -604,12 +604,12 @@ fn verbose_schema_about_projects_more_context_descriptors() {
         "ctx.tailnet",
         "ctx.gateway_v6",
         "ctx.recent_commits",
-        "recent_commits(count: number(integer)) -> string[] | error",
+        "recent_commits(count: number(integer;min(1))) -> recent-commits | error",
         "ping(address: ip-address, [timeout: number]) -> boolean | null | error",
-        "-> boolean | \"unstable\" | null | error",
-        "has_agentic_cli(agent: enum(claude, codex,",
-        "has_binary(name_or_path: string) -> boolean",
-        "as_markdown(content: string) -> string | error",
+        "-> boolean | enum(unstable) | null | error",
+        "has_agentic_cli(agent: agentic-cli | null) -> boolean | error",
+        "has_binary(name_or_path: string | null) -> boolean",
+        "as_markdown(content: string | null) -> string | null | error",
     ] {
         assert!(normalized.contains(needle), "verbose schema about missing `{needle}`");
     }
@@ -638,7 +638,7 @@ fn schema_about_verbose_prints_context_and_expression_sections() {
         "ctx.packages",
         "string[]",
         "Expression Functions",
-        "as_csv(list: any[]) -> string | error",
+        "as_csv(list: unknown[] | null) -> string | null",
     ] {
         assert!(
             plain.contains(needle),

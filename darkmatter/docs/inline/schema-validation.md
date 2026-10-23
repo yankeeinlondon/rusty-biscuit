@@ -372,40 +372,59 @@ Each bullet carries the YAML `line:col` when available, and root-union failures 
 
 Strict JSON Schema rejects a string where a boolean is declared — but many value sources can only ever produce strings. Shell expansion always yields a string; a ternary like `"{{ spec ? true : false }}"` renders the literal into a **quoted** scalar, so the stored value is the string `"true"`, not a real boolean. Coercion fixes this class of mismatch.
 
-When a frontmatter value is *trivially* the wrong JSON type but **unambiguously** convertible to the declared type, Darkmatter coerces the stored value and accepts it. Coercion is **default-on** with no opt-out.
+When a frontmatter value is not the declared type but converts to it without
+changing its meaning, Darkmatter converts the stored value and accepts it.
+Conversion is always on. Function arguments use the same engine and rules.
+The full rule list, with unions, nested values, and raw JSON Schema, is
+[Type Coercion](../topics/schemas/definition.md#type-coercion).
 
-| Declared type | Incoming value | Coerced to |
-|---------------|----------------|------------|
-| `boolean` / `boolish` | `true`/`false`/`True`/`False`/`TRUE`/`FALSE` (as a string) | real boolean |
-| `number` / `integer` / `numberlike` | numeric string (`"42"`, `"-13"`, `"3.14"`) | real number |
-| `string` (incl. `date`/`url`/`email`/`file`…) | a number or boolean scalar | its canonical string (`42` → `"42"`) |
-| `array` of `T` | an array | each element coerced by `T`'s rule |
-| `array` of a union `U` | an array | each element coerced on its own by the property-union rule: committed only when exactly one arm's coerced candidate validates |
-| `expression` / `shell` | a number or boolean scalar | its canonical string (`true` → `"true"`) |
-| `object`, `unknown`, `alphanumeric`, bare `enum`, `null` | — | untouched (`3` against `alphanumeric` is a type mismatch) |
+| Declared type | Incoming value | Result |
+|---------------|----------------|--------|
+| `boolean` | a boolean word as text: `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`, any case | real boolean |
+| `number` | numeric text: `"42"`, `" 4 "`, `"+4"`, `"1e3"`, `".5"`, `"1_000"` | real number; a whole number no `f64` holds exactly is an error |
+| `numberlike` / `boolish` | what `number` / `boolean` accept | validated, then kept **exactly as written** (`"02134"` stays text) |
+| `string` (incl. `date`/`url`/`email`/`file`, `enum`, string `literal`) | a number or boolean | its text (`42` → `"42"`), then the type's own check |
+| `json` / `yaml` | a mapping, list, number, or boolean | its JSON (written key order) or YAML text |
+| lists, tuples, inline objects, pattern-key values | a value of that structure | each part converted by its declared type, at every depth |
+| `object`, `unknown`, `alphanumeric`, `null` | anything else | kept as written (`3` against `alphanumeric` is a type mismatch) |
 
 Two consequences matter:
 
-- **Coercion mutates the stored value, not just the validator.** A `has_spec` field holding the string `"false"` becomes a real `false`. This is correctness, not just ergonomics: condition evaluators (`::block when="!has_spec"`, init-stack `when:`) treat any non-empty string as truthy, so leaving `"false"` as a string is a latent logic bug that coercion eliminates.
-- **`boolish` and `numberlike` now normalize**, where previously they merely *accepted* the string form. After coercion their stored value is the canonical JSON type.
+- **Conversion changes the stored value, not just the verdict.** A `has_spec`
+  field holding the text `"false"` becomes a real `false`. Condition
+  evaluators (`::block when="!has_spec"`, init-stack `when:`) treat any
+  non-empty string as truthy, so leaving `"false"` as text would be a latent
+  logic bug.
+- **`numberlike` and `boolish` do not normalize.** They exist for values whose
+  written form matters, such as a ZIP code.
 
-### What is never coerced
+### What is never converted
 
-Anything ambiguous falls through to the existing strict error unchanged — coercion only ever *adds* acceptances for unambiguous cases, never masks a genuinely-wrong value:
+- a boolean into a number, or a native number into a boolean;
+- `null` into anything;
+- text that is not a number (`"pear"`, `"NaN"`, `"1,000"`) into a number;
+- a single value into a list, or text into an object or list.
 
-- `"yes"` / `"no"` / `"on"` / `"off"` → boolean (not in the boolish set)
-- `"1"` / `"0"` → boolean (equally valid as numbers)
-- any non-numeric string → number
-- arrays, objects, or `null` → a scalar type; a string → object, or vice versa
+Constraints are enforced, never repaired: `"2.5"` against `number(integer)`
+is an error, and a number given to `date` becomes text and then fails the
+date check.
 
-Coercion also never *parses into* a constrained string type: a number landing in a `date` field becomes its string form and then fails the `date` format check normally — it can never produce a false accept.
+### Where conversion runs
 
-### Where coercion runs
+- **Library validation** converts a *working copy* of the instance, then
+  validates it. It reports validity after conversion but performs **no
+  document mutation**: `md schema validate` does not rewrite files.
+- **The compose stage** writes converted top-level properties back into the
+  frontmatter, so the real boolean, number, or text flows to every later
+  stage and into the composed output. Each top-level property is converted on
+  its own: one failing property does not stop its siblings. Values deferred
+  to the post-shell check are skipped here and converted there. Conversion is
+  idempotent.
 
-- **Library validation** coerces a *working copy* of the instance, then validates it. It reports post-coercion validity but performs **no document mutation** — `md schema validate` does not rewrite files.
-- **The compose stage** writes coerced top-level properties back into the frontmatter, so the real boolean/number/string flows to every later stage and into the composed output. Values deferred to the post-shell check are skipped here and coerced there. Coercion is idempotent, so re-validating an already-coerced value is a no-op.
-
-For root unions, Darkmatter coerces against each arm in order and commits the first arm that validates post-coercion.
+A union keeps a value one option already accepts; otherwise the one
+reachable option wins, a number beats a boolean, and JSON beats YAML. Any
+other tie is an error naming each reading, and option order never matters,
+including for root unions.
 
 ### Schema-selected `file` value materialization
 

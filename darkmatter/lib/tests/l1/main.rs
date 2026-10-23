@@ -6,6 +6,22 @@
 //! `Cargo.toml` sets `autotests = false`, so a file in this directory that is
 //! not declared below never compiles; `test_layout.rs` rejects one.
 
+mod coercion_core;
+mod coercion_engine_parity;
+mod coercion_translator_conformance;
+mod function_call_binding;
+#[cfg(feature = "effects-instrumentation")]
+mod function_dispatch;
+#[cfg(feature = "effects-instrumentation")]
+mod pure_function_contracts;
+#[cfg(feature = "effects-instrumentation")]
+mod context_function_contracts;
+#[cfg(feature = "effects-instrumentation")]
+mod function_binding_registry;
+#[cfg(feature = "effects-instrumentation")]
+mod function_binding_conversions;
+#[cfg(feature = "effects-instrumentation")]
+mod function_catalog_parity;
 mod compose_diagnostic_identity;
 mod compose_expression_failure_contract;
 mod context_construction_guard;
@@ -77,6 +93,7 @@ mod error_snapshots;
 mod expression_regression;
 mod expression_strict_equality;
 mod expression_type_scope;
+mod frontmatter_coercion_engine;
 mod frontmatter_surface_projection;
 mod fs_capability;
 mod git_context_integration;
@@ -115,6 +132,7 @@ mod persistent_cache_disabled;
 mod predict_conflicts;
 mod prelude_exports;
 mod prose_wrap_parity;
+mod raw_schema_conversion;
 mod reference_integration;
 mod request_context_builder;
 mod required_context;

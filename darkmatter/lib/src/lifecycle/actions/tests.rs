@@ -220,10 +220,10 @@ fn side_effect_signature_derives_from_descriptors() {
 
 #[test]
 fn expression_function_signature_bracket_optional() {
-    // `number(x, [default])` — the bracketed param is optional, so the
+    // `number(x, [fallback])` — the bracketed param is optional, so the
     // one-argument form `number("{{ value }}")` is valid arity.
     let sig = expression_function_signature("number").unwrap();
-    assert_eq!(sig.params, vec!["x", "default"]);
+    assert_eq!(sig.params, vec!["x", "fallback"]);
     assert_eq!(sig.optional_tail, 1);
     assert_eq!(sig.required_count(), 1);
     assert_eq!(sig.max_count(), Some(2));

@@ -1,380 +1,155 @@
-//! Typed descriptor catalog for expression functions.
+//! The expression-function catalog: one descriptor per function overload,
+//! projected once from the embedded `darkmatter/schemas/partials/functions.yaml`.
 //!
-//! Each [`ExpressionFunctionDescriptor`] describes a single callable function
-//! available in Darkmatter expressions. The public catalog is projected once
-//! from the embedded authored schema; reading it performs no host probes, no
-//! filesystem I/O, and no runtime context capture.
+//! The file is a tagged SimplifiedSchema document (`kind: schema`,
+//! `categories:`, `types:`). Each `types:` entry whose definition is a
+//! `function(...)`, or a union of them (an overload set), is a function; every
+//! other entry is a named helper type that signatures may reference
+//! (`agentic-cli`, `ip-address`), never a function. Reading the catalog
+//! performs no host probes, no filesystem I/O, and no context capture: the
+//! file and its file-form examples are compiled in.
 //!
-//! Each descriptor now also carries a **typed signature** ([`ParamType`] per
-//! parameter plus a [`ReturnType`]). The type vocabulary is the schema-plus
-//! *data-type* domain ([`DataType`]) for parameters, while returns additionally
-//! support closed enums and the `error` union member. This is
-//! a **catalog-only** concern: [`DataType`] deliberately has **no** `error` or
-//! function-type variant, and `error` is a return-position flag — never a
-//! parameter type — so a frontmatter property can never be typed as a function
-//! or as `error` (spec D7, schema-plus § Type domains).
-use std::collections::HashMap;
+//! Every function is also registered for dispatch; the registry
+//! (`expression::functions`) compiles each function's overloads from these
+//! descriptors and checks catalog/registry parity both ways.
+
 use std::sync::LazyLock;
 
-use crate::catalog::{Described, Example, ExampleVerification};
+use indexmap::IndexMap;
+use serde_json::Value;
 
-pub(crate) mod ast;
-pub(crate) mod parser;
+use crate::catalog::{Described, Example, ExampleVerification};
+use crate::markdown::compose::expression::call_binding::TypeResolver;
+use crate::markdown::schemas::simplified::{
+    Constraint, ExampleOutcome, FunctionType, LOCAL_REFERENCE, PropertyAtom, PropertyDef, SimplifiedSchema,
+    StandaloneSchemaEnvelope, TypeExpr, parse_standalone_schema_document, serialize_property_def,
+};
+
 mod roots;
 
 pub use roots::{ReservedRootDescriptor, RootEvaluation, RootMembers, reserved_root_descriptors};
 
-use ast::{CatalogReturnValue, CatalogVerification, ExpressionFunctionCatalog};
-use parser::{CatalogParseError, parse_expression_function_catalog};
+/// The embedded catalog file's repository path, used in load errors.
+const CATALOG_PATH: &str = "darkmatter/schemas/partials/functions.yaml";
 
-/// A data type usable in a function **parameter** or (non-`error`) **return**
-/// position.
-///
-/// Mirrors the schema-plus *data-type* domain — the `SimplifiedType` keyword set
-/// plus `any`. It intentionally carries **no** `error` variant and **no**
-/// function type: those belong to the return and catalog domains respectively,
-/// keeping the frontmatter validator's type set untouched by function typing.
+const CATALOG_SOURCE: &str = include_str!("../../../../../../schemas/partials/functions.yaml");
+
+/// The file-form example artifacts a catalog entry may reference with
+/// `example(./function-examples/<name>.yaml)`, keyed by that reference
+/// without its leading `./`. Compiled in so reading the catalog never touches
+/// the disk; an entry naming a file missing here is a load error.
+const EXAMPLE_FILES: &[(&str, &str)] = &[
+    (
+        "function-examples/as_line_separated.yaml",
+        include_str!("../../../../../../schemas/partials/function-examples/as_line_separated.yaml"),
+    ),
+    (
+        "function-examples/as_ordered_list.yaml",
+        include_str!("../../../../../../schemas/partials/function-examples/as_ordered_list.yaml"),
+    ),
+    (
+        "function-examples/as_tsv.yaml",
+        include_str!("../../../../../../schemas/partials/function-examples/as_tsv.yaml"),
+    ),
+    (
+        "function-examples/as_unordered_list.yaml",
+        include_str!("../../../../../../schemas/partials/function-examples/as_unordered_list.yaml"),
+    ),
+];
+
+/// One entry of the catalog's `categories:` list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DataType {
-    /// `string`.
-    String,
-    /// `number`.
-    Number,
-    /// `number(integer)` — an integer-constrained number.
-    Integer,
-    /// `boolean`.
-    Boolean,
-    /// `date`.
-    Date,
-    /// `datetime`.
-    DateTime,
-    /// `time`.
-    Time,
-    /// `object`.
-    Object,
-    /// `file` reference.
-    File,
-    /// `url`.
-    Url,
-    /// `email`.
-    Email,
-    /// `yaml` content-format string.
-    Yaml,
-    /// `json` content-format string.
-    Json,
-    /// `any`.
-    Any,
+pub struct CatalogCategory {
+    pub name: &'static str,
+    pub description: Option<&'static str>,
 }
 
-impl DataType {
-    /// Parses a canonical function-catalog type keyword.
-    pub fn from_keyword(keyword: &str) -> Option<Self> {
-        use crate::markdown::schemas::SimplifiedType;
-
-        if keyword == "number(integer)" {
-            return Some(Self::Integer);
-        }
-        Some(match SimplifiedType::from_keyword(keyword)? {
-            SimplifiedType::String => Self::String,
-            SimplifiedType::Number => Self::Number,
-            SimplifiedType::Boolean => Self::Boolean,
-            SimplifiedType::Date => Self::Date,
-            SimplifiedType::DateTime => Self::DateTime,
-            SimplifiedType::Time => Self::Time,
-            SimplifiedType::Object => Self::Object,
-            SimplifiedType::File => Self::File,
-            SimplifiedType::Url => Self::Url,
-            SimplifiedType::Email => Self::Email,
-            SimplifiedType::Yaml => Self::Yaml,
-            SimplifiedType::Json => Self::Json,
-            SimplifiedType::Unknown => Self::Any,
-            SimplifiedType::NumberLike
-            | SimplifiedType::Null
-            | SimplifiedType::Alphanumeric
-            | SimplifiedType::Shell
-            | SimplifiedType::Boolish
-            | SimplifiedType::Enum
-            | SimplifiedType::Literal
-            | SimplifiedType::Expression
-            | SimplifiedType::TypeDefinition
-            | SimplifiedType::Schema => {
-                return None;
-            }
-        })
-    }
-
-    /// Canonical type keyword (`string`, `datetime`, `any`, …).
-    pub const fn as_keyword(self) -> &'static str {
-        match self {
-            DataType::String => "string",
-            DataType::Number => "number",
-            DataType::Integer => "number(integer)",
-            DataType::Boolean => "boolean",
-            DataType::Date => "date",
-            DataType::DateTime => "datetime",
-            DataType::Time => "time",
-            DataType::Object => "object",
-            DataType::File => "file",
-            DataType::Url => "url",
-            DataType::Email => "email",
-            DataType::Yaml => "yaml",
-            DataType::Json => "json",
-            DataType::Any => "any",
-        }
-    }
-}
-
-/// One typed function parameter.
-///
-/// Parameter names live in [`ExpressionFunctionDescriptor::signature`]; this
-/// carries only the *type* shape so common parameter lists can be shared as
-/// `const`s across descriptors.
+/// One parameter of a function overload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ParamType {
-    /// The parameter's data type.
-    pub ty: DataType,
-    /// A catalog-only restriction on the values `ty` accepts, if any.
-    pub refinement: Option<ParamRefinement>,
-    /// Whether the parameter is an array of `ty` (`ty[]`).
-    pub array: bool,
-    /// Whether the parameter is optional (`[name]` in the signature).
+pub struct FunctionParameterDescriptor {
+    pub name: &'static str,
+    /// The declared type in canonical grammar spelling, without descriptions
+    /// (`number | null`, `number(integer; min(1))`).
+    pub type_text: &'static str,
     pub optional: bool,
-    /// Whether the parameter is variadic (`...`).
-    pub variadic: bool,
+    pub rest: bool,
 }
 
-impl ParamType {
-    /// A required scalar parameter of type `ty`.
-    pub const fn val(ty: DataType) -> Self {
-        Self { ty, refinement: None, array: false, optional: false, variadic: false }
-    }
-    /// A required array parameter (`ty[]`).
-    pub const fn array(ty: DataType) -> Self {
-        Self { ty, refinement: None, array: true, optional: false, variadic: false }
-    }
-    /// An optional scalar parameter.
-    pub const fn optional(ty: DataType) -> Self {
-        Self { ty, refinement: None, array: false, optional: true, variadic: false }
-    }
-    /// A variadic scalar parameter.
-    pub const fn variadic(ty: DataType) -> Self {
-        Self { ty, refinement: None, array: false, optional: false, variadic: true }
-    }
-
-    fn render(&self) -> String {
-        let mut rendered = match self.refinement {
-            None => self.ty.as_keyword().to_string(),
-            Some(refinement) => refinement.render(),
-        };
-        if self.array {
-            rendered.push_str("[]");
-        }
-        rendered
-    }
+/// An example attached to a function overload.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FunctionExample {
+    /// `example(CALL => RESULT)`; `result` is the authored literal text or
+    /// `error`.
+    Call {
+        call: &'static str,
+        expected: ExampleOutcome,
+        result: &'static str,
+        display_only: Option<&'static str>,
+    },
+    /// `example(./function-examples/x.yaml)`, read from the embedded file.
+    /// `returns` is the file's `returns` text, or its JSON spelling when it is
+    /// not a string.
+    File {
+        path: &'static str,
+        invocation: &'static str,
+        returns: &'static str,
+        description: Option<&'static str>,
+    },
 }
 
-/// A catalog-only restriction on a `string` parameter.
-///
-/// Like `error`, these never enter [`DataType`] or the frontmatter validator's
-/// type domain; they describe what a function accepts, not a property type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParamRefinement {
-    /// An IPv4, IPv6, or scoped IPv6 (`fe80::1%en0`) literal. Host names are
-    /// not addresses; nothing resolves DNS. Authored as `ip-address`.
-    IpAddress,
-    /// One of a closed set of names. Authored through a named generated set
-    /// (`agentic-cli`), never an inline `enum(...)` parameter.
-    Enum(&'static [&'static str]),
-}
-
-impl ParamRefinement {
-    /// Parses a refined parameter keyword into its underlying data type and
-    /// refinement.
-    fn from_keyword(keyword: &str) -> Option<(DataType, Self)> {
-        match keyword {
-            "ip-address" => Some((DataType::String, Self::IpAddress)),
-            "agentic-cli" => Some((DataType::String, Self::Enum(agentic_cli_names()))),
-            _ => None,
-        }
-    }
-
-    fn render(self) -> String {
-        match self {
-            Self::IpAddress => "ip-address".to_string(),
-            Self::Enum(variants) => render_enum(variants),
-        }
-    }
-}
-
-/// Every accepted `has_agentic_cli` name, in the generated roster order.
-///
-/// The names come from `claudine-gen`'s committed artifact, so the descriptor
-/// enum and the runtime mapping to `sniff::programs::AiCli` share one list.
-pub(crate) fn agentic_cli_names() -> &'static [&'static str] {
-    static NAMES: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
-        super::functions::agentic_cli_generated::AGENTIC_CLI_NAMES
-            .iter()
-            .map(|(name, _)| *name)
-            .collect()
-    });
-    &NAMES
-}
-
-/// Renders `enum(a, b)`, quoting any variant that is not a bare snake_case word.
-fn render_enum(variants: &[&str]) -> String {
-    let variants = variants
-        .iter()
-        .map(|variant| {
-            if !variant.is_empty()
-                && variant.chars().all(|character| {
-                    character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
-                })
-            {
-                (*variant).to_string()
-            } else {
-                serde_json::to_string(variant).expect("a string enum variant must serialize")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("enum({variants})")
-}
-
-/// The success value of a function return.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReturnValueType {
-    /// A value from the ordinary function data-type vocabulary.
-    Data(DataType),
-    /// A string restricted to the declared closed set.
-    Enum(&'static [&'static str]),
-}
-
-impl ReturnValueType {
-    fn render(self) -> String {
-        match self {
-            Self::Data(ty) => ty.as_keyword().to_string(),
-            Self::Enum(variants) => render_enum(variants),
-        }
-    }
-}
-
-/// A function's typed return.
-///
-/// The rendered union is `value[] | "literal"… | null | error`, in that order.
-/// A fallible function returns `<success> | error`, modeled by
-/// [`ReturnType::fallible`] set to `true` (mirrors Rust `Result<T, error>`). The
-/// `error` type is a **return-position-only** anchor — it is never a
-/// [`DataType`] and so can never appear in a parameter or a frontmatter property.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ReturnType {
-    /// The success value type.
-    pub value: ReturnValueType,
-    /// Whether the success value is an array.
-    pub array: bool,
-    /// Additional string-literal union members (`boolean | "unstable"`).
-    pub literals: &'static [&'static str],
-    /// Whether `null` is a declared success value (adds `| null`).
-    pub nullable: bool,
-    /// Whether the function is fallible (adds the `| error` union member).
-    pub fallible: bool,
-}
-
-impl ReturnType {
-    /// An infallible scalar return of type `ty`.
-    pub const fn plain(ty: DataType) -> Self {
-        Self { value: ReturnValueType::Data(ty), array: false, literals: &[], nullable: false, fallible: false }
-    }
-    /// A fallible scalar return (`ty | error`).
-    pub const fn fallible(ty: DataType) -> Self {
-        Self { value: ReturnValueType::Data(ty), array: false, literals: &[], nullable: false, fallible: true }
-    }
-
-    fn render(&self) -> String {
-        let mut rendered = self.value.render();
-        if self.array {
-            rendered.push_str("[]");
-        }
-        for literal in self.literals {
-            rendered.push_str(" | ");
-            rendered.push_str(&serde_json::to_string(literal).expect("a string literal must serialize"));
-        }
-        if self.nullable {
-            rendered.push_str(" | null");
-        }
-        if self.fallible {
-            rendered.push_str(" | error");
-        }
-        rendered
-    }
-}
-
-/// Descriptor for a single expression function.
+/// Descriptor for one overload of an expression function.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ExpressionFunctionDescriptor {
-
-    /// Canonical snake_case signature (e.g., `is_string(x)`). Preserved verbatim
-    /// as the display key for `md schema about`, the generated doc table, and
-    /// DMLS descriptor consumers.
+    /// The canonical name.
+    pub name: &'static str,
+    /// The aliases dispatch also accepts for this function.
+    pub aliases: &'static [&'static str],
+    /// The display key: parameter names only, optional ones bracketed and a
+    /// rest parameter as `...` (`round(x, [fallback])`, `and(...)`). Read by
+    /// `md schema about`, the generated doc table, DMLS, and lifecycle verb
+    /// parsing.
     pub signature: &'static str,
-    /// Short description of the function's behavior.
     pub description: &'static str,
-    /// Logical grouping category.
     pub category: &'static str,
-    /// Stable display order within the category.
+    /// 1-based position within its category, counting every overload.
     pub order: usize,
-    /// Typed parameter list, in signature order (data types only; names come
-    /// from [`Self::signature`]).
-    pub parameters: &'static [ParamType],
-    /// Typed return, including `error` union membership for fallible functions.
-    pub returns: ReturnType,
-    /// The `ctx.*` variable this function pairs with under R29, if any. A
-    /// paired function shares that variable's description and value type; the
-    /// variable is the launch-time capture and the function evaluates at call.
-    pub pair: Option<&'static str>,
-    /// Optional verified example.
+    /// Index within the function's overloads, in authored order.
+    pub overload: usize,
+    pub parameters: &'static [FunctionParameterDescriptor],
+    /// The return type in canonical grammar spelling.
+    pub returns: &'static str,
+    pub fallible: bool,
+    pub function_type: &'static FunctionType,
+    pub examples: &'static [FunctionExample],
+    /// The first inline example, for [`Described`].
     pub example: Option<Example>,
 }
 
 impl ExpressionFunctionDescriptor {
-    /// Renders the fully typed signature, e.g. `as_csv(list: any[]) -> string | error`.
-    ///
-    /// Parameter names are read from [`Self::signature`]; their types come from
-    /// [`Self::parameters`]. Optional parameters render as `[name: type]`,
-    /// variadic parameters as `...type`. The return renders as described on
-    /// [`ReturnType`].
+    /// The fully typed signature, e.g.
+    /// `round(x: numberlike, [fallback: number]) -> number` or
+    /// `and(...values: unknown | null) -> boolean`. A fallible function's
+    /// return ends in ` | error`.
     pub fn typed_signature(&self) -> String {
-        let name = self.signature.split('(').next().unwrap_or(self.signature);
-        let inner = self
-            .signature
-            .split_once('(')
-            .and_then(|(_, rest)| rest.rsplit_once(')'))
-            .map(|(params, _)| params)
-            .unwrap_or("");
-        let raw_names: Vec<&str> = if inner.trim().is_empty() {
-            Vec::new()
-        } else {
-            inner.split(',').map(str::trim).collect()
-        };
-
-        let mut parts = Vec::with_capacity(self.parameters.len());
-        for (i, p) in self.parameters.iter().enumerate() {
-            let ty = p.render();
-            if p.variadic {
-                parts.push(format!("...{ty}"));
-                continue;
-            }
-            let raw = raw_names.get(i).copied().unwrap_or("");
-            let base = raw.trim_start_matches('[').trim_end_matches(']');
-            if p.optional {
-                parts.push(format!("[{base}: {ty}]"));
-            } else {
-                parts.push(format!("{base}: {ty}"));
-            }
-        }
-
-        format!("{name}({}) -> {}", parts.join(", "), self.returns.render())
+        let parameters: Vec<String> = self
+            .parameters
+            .iter()
+            .map(|parameter| {
+                let FunctionParameterDescriptor { name, type_text, .. } = parameter;
+                if parameter.rest {
+                    format!("...{name}: {type_text}")
+                } else if parameter.optional {
+                    format!("[{name}: {type_text}]")
+                } else {
+                    format!("{name}: {type_text}")
+                }
+            })
+            .collect();
+        let error = if self.fallible { " | error" } else { "" };
+        format!("{}({}) -> {}{error}", self.name, parameters.join(", "), self.returns)
     }
 }
+
 impl Described for ExpressionFunctionDescriptor {
     fn key(&self) -> &'static str {
         self.signature
@@ -393,1006 +168,428 @@ impl Described for ExpressionFunctionDescriptor {
     }
 }
 
-fn leak(value: String) -> &'static str {
-    Box::leak(value.into_boxed_str())
+/// The loaded catalog: categories in list order and every overload's
+/// descriptor in documentation order (category list order, then canonical
+/// name, then authored overload order).
+#[derive(Debug)]
+pub struct FunctionCatalog {
+    pub categories: &'static [CatalogCategory],
+    pub descriptors: &'static [ExpressionFunctionDescriptor],
+    /// The non-function `types:` entries, for resolving references in
+    /// signatures.
+    named_types: IndexMap<String, PropertyDef>,
 }
 
-fn project_descriptors(
-    catalog: ExpressionFunctionCatalog,
-) -> Vec<ExpressionFunctionDescriptor> {
-    let mut functions = catalog.functions;
-    functions.sort_by_key(|function| function.order);
+impl FunctionCatalog {
+    /// Every overload of the function `name` names: case-insensitive, by
+    /// canonical name or registered alias. Empty for an unknown name.
+    pub fn descriptors_for(&self, name: &str) -> &'static [ExpressionFunctionDescriptor] {
+        let lower = name.to_ascii_lowercase();
+        let canonical = super::functions::alias_canonical(&lower).unwrap_or(lower.as_str());
+        let descriptors = self.descriptors;
+        let Some(start) = descriptors.iter().position(|descriptor| descriptor.name == canonical) else {
+            return &[];
+        };
+        let len = descriptors[start..].iter().take_while(|descriptor| descriptor.name == canonical).count();
+        &descriptors[start..start + len]
+    }
 
-    let mut category_orders = HashMap::<String, usize>::new();
-    let mut descriptors = Vec::new();
-    for function in functions {
-        let category_order = category_orders.entry(function.category.clone()).or_default();
-        let category = leak(function.category);
-        let description = leak(function.description);
-        let name = leak(function.name.clone());
-        for overload in function.overloads {
-            *category_order += 1;
-            let parameter_names = overload
-                .parameters
-                .iter()
-                .map(|parameter| {
-                    if parameter.variadic {
-                        "...".to_string()
-                    } else if parameter.optional {
-                        format!("[{}]", parameter.name)
-                    } else {
-                        parameter.name.clone()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            let signature = leak(format!("{}({parameter_names})", function.name));
-            let parameters = overload
-                .parameters
-                .into_iter()
-                .map(|parameter| ParamType {
-                    ty: parameter.ty,
-                    refinement: parameter.refinement,
-                    array: parameter.array,
-                    optional: parameter.optional,
-                    variadic: parameter.variadic,
-                })
-                .collect::<Vec<_>>();
-            let parameters = Box::leak(parameters.into_boxed_slice());
-            let verification = match overload.example.verification {
-                CatalogVerification::Executable => ExampleVerification::Executable,
-                CatalogVerification::DisplayOnly(reason) => {
-                    ExampleVerification::DisplayOnly(leak(reason))
-                }
-            };
-            descriptors.push(ExpressionFunctionDescriptor {
-                signature,
-                description,
-                category,
-                order: *category_order,
-                parameters,
-                returns: ReturnType {
-                    value: match overload.returns.value {
-                        CatalogReturnValue::Data(ty) => ReturnValueType::Data(ty),
-                        CatalogReturnValue::Enum(variants) => {
-                            let variants = variants
-                                .into_iter()
-                                .map(leak)
-                                .collect::<Vec<_>>();
-                            ReturnValueType::Enum(Box::leak(variants.into_boxed_slice()))
-                        }
-                    },
-                    array: overload.returns.array,
-                    literals: Box::leak(
-                        overload.returns.literals.into_iter().map(leak).collect::<Vec<_>>().into_boxed_slice(),
-                    ),
-                    nullable: overload.returns.nullable,
-                    fallible: overload.returns.fallible,
-                },
-                pair: function.pair.then_some(name),
-                example: Some(Example {
-                    invocation: leak(overload.example.expression),
-                    result: leak(overload.example.result),
-                    verification,
-                }),
-            });
+    /// The catalog's named helper types, as a [`TypeResolver`] for compiling
+    /// signatures that reference them.
+    pub(crate) fn type_resolver(&self) -> impl TypeResolver + '_ {
+        move |name: &str, reference: &str| {
+            (reference == LOCAL_REFERENCE).then(|| self.named_types.get(name).cloned()).flatten()
         }
     }
-    descriptors
+
+    /// The names of the non-function `types:` entries, in authored order.
+    pub fn named_type_names(&self) -> impl Iterator<Item = &str> {
+        self.named_types.keys().map(String::as_str)
+    }
+
+    /// The definition of a named helper type.
+    pub fn named_type(&self, name: &str) -> Option<&PropertyDef> {
+        self.named_types.get(name)
+    }
 }
 
-pub(crate) fn expression_function_catalog() -> &'static ExpressionFunctionCatalog {
-    static CATALOG: LazyLock<ExpressionFunctionCatalog> = LazyLock::new(|| {
-        parse_expression_function_catalog(include_str!(
-            "../../../../../../docs/schemas/expression-functions.yaml"
-        ))
-        .expect("embedded expression-function catalog must parse")
+/// The embedded catalog, loaded once.
+///
+/// ## Panics
+///
+/// When the embedded file does not load; a unit test loads it.
+pub fn expression_function_catalog() -> &'static FunctionCatalog {
+    static CATALOG: LazyLock<FunctionCatalog> = LazyLock::new(|| {
+        load_catalog(CATALOG_SOURCE, CATALOG_PATH, EXAMPLE_FILES)
+            .unwrap_or_else(|error| panic!("the embedded expression-function catalog does not load: {error}"))
     });
     &CATALOG
 }
 
-#[allow(dead_code)]
-pub(crate) fn try_parse_catalog(
-    yaml: &str,
-) -> Result<ExpressionFunctionCatalog, CatalogParseError> {
-    parse_expression_function_catalog(yaml)
-}
-
-/// Returns all expression function descriptors in display order.
+/// Every overload's descriptor, in documentation order.
 pub fn expression_function_descriptors() -> &'static [ExpressionFunctionDescriptor] {
-    static DESCRIPTORS: LazyLock<Vec<ExpressionFunctionDescriptor>> = LazyLock::new(|| {
-        project_descriptors(expression_function_catalog().clone())
-    });
-    &DESCRIPTORS
+    expression_function_catalog().descriptors
 }
 
-/// Generates a Markdown function-reference table from the expression catalog.
+/// Every overload of the function `name` names, resolving aliases and case
+/// like dispatch.
+pub fn function_descriptors(name: &str) -> &'static [ExpressionFunctionDescriptor] {
+    expression_function_catalog().descriptors_for(name)
+}
+
+/// Why a catalog document does not load.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum CatalogError {
+    #[error(transparent)]
+    Schema(#[from] crate::markdown::schemas::SchemaError),
+    #[error("{path}: {message}")]
+    Invalid { path: String, message: String },
+}
+
+/// Loads a catalog document. Strict: the tagged envelope with `categories:`,
+/// each function entry a `function` or a union of `function`s, one category
+/// per function, and every file-form example present in `example_files` and
+/// valid under the example envelope.
 ///
-/// The output is a single table with `Category`, `Function`, `Description`, and
-/// `Example` columns, suitable for embedding in `darkmatter-expressions.md`.
-/// Only machine-executed (`Executable`) examples populate the example cell;
-/// display-only examples are illustrative metadata, not verified results, so
-/// their cell is left empty.
+/// Descriptors are leaked to `'static`; the embedded catalog loads once, and
+/// tests load small fixtures.
+pub(crate) fn load_catalog(
+    source: &str,
+    path: &str,
+    example_files: &[(&str, &str)],
+) -> Result<FunctionCatalog, CatalogError> {
+    let invalid = |message: String| CatalogError::Invalid {
+        path: path.to_string(),
+        message,
+    };
+    let document = parse_standalone_schema_document(source, path)?
+        .ok_or_else(|| invalid("not a SimplifiedSchema document; expected `kind: schema`".into()))?;
+    if document.envelope != StandaloneSchemaEnvelope::Tagged {
+        return Err(invalid("expected the tagged envelope (`kind: schema`, `categories:`, `types:`)".into()));
+    }
+    let Some(categories) = document.categories.as_ref() else {
+        return Err(invalid("missing the `categories:` list".into()));
+    };
+    let Some(SimplifiedSchema::Single(types)) = document.schema() else {
+        return Err(invalid("`types:` must be a mapping of named types".into()));
+    };
+    let raw_entries = raw_type_entries(source);
+
+    let mut named_types = IndexMap::new();
+    let mut functions: Vec<CatalogFunction<'_>> = Vec::new();
+    for (name, def) in &types.properties {
+        let atoms = overload_atoms(def);
+        let function_count = atoms.iter().filter(|atom| is_function_atom(atom)).count();
+        if function_count == 0 {
+            named_types.insert(name.clone(), def.clone());
+            continue;
+        }
+        if function_count != atoms.len() {
+            return Err(invalid(format!(
+                "`types.{name}` mixes `function(...)` options with other types; a function entry is a \
+                 `function` or a union of `function`s"
+            )));
+        }
+        let mut category = None;
+        for atom in &atoms {
+            if let Some(found) = category_of(atom) {
+                match category {
+                    None => category = Some(found),
+                    Some(first) if first != found => {
+                        return Err(invalid(format!(
+                            "`types.{name}`: overloads name different categories (`{first}`, `{found}`)"
+                        )));
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        let category = category.ok_or_else(|| invalid(format!("`types.{name}` has no `category(...)`")))?;
+        let category_index = categories
+            .iter()
+            .position(|declared| declared.name == category)
+            .ok_or_else(|| invalid(format!("`types.{name}`: category `{category}` is not in `categories:`")))?;
+        let raw = raw_entries.get(name.as_str()).cloned().unwrap_or_default();
+        let raw = if raw.len() == atoms.len() { raw } else { vec![None; atoms.len()] };
+        functions.push(CatalogFunction {
+            category_index,
+            name,
+            atoms,
+            raw,
+        });
+    }
+    functions.sort_by(|left, right| (left.category_index, left.name).cmp(&(right.category_index, right.name)));
+
+    let leaked_categories: Vec<CatalogCategory> = categories
+        .iter()
+        .map(|category| CatalogCategory {
+            name: leak(category.name.clone()),
+            description: category.description.clone().map(leak),
+        })
+        .collect();
+    let leaked_categories: &'static [CatalogCategory] = Box::leak(leaked_categories.into_boxed_slice());
+
+    let mut descriptors = Vec::new();
+    let mut position_in_category = vec![0usize; leaked_categories.len()];
+    for CatalogFunction {
+        category_index,
+        name,
+        atoms,
+        raw,
+    } in functions
+    {
+        let name: &'static str = leak(name.clone());
+        let aliases = super::functions::registered_aliases(name);
+        for (overload, (atom, raw)) in atoms.into_iter().zip(raw).enumerate() {
+            let TypeExpr::Function(function_type) = &atom.ty else {
+                unreachable!("every overload atom is a function");
+            };
+            let function_type: &'static FunctionType = Box::leak(function_type.clone());
+            position_in_category[category_index] += 1;
+            let examples = project_examples(name, atom, function_type, raw.as_deref(), example_files)
+                .map_err(&invalid)?;
+            let example = examples.iter().find_map(|example| match example {
+                FunctionExample::Call {
+                    call,
+                    result,
+                    display_only,
+                    ..
+                } => Some(Example {
+                    invocation: call,
+                    result,
+                    verification: display_only.map_or(ExampleVerification::Executable, ExampleVerification::DisplayOnly),
+                }),
+                FunctionExample::File { .. } => None,
+            });
+            let parameters: Vec<FunctionParameterDescriptor> = function_type
+                .parameters
+                .as_slice()
+                .iter()
+                .map(|parameter| FunctionParameterDescriptor {
+                    name: leak(parameter.name.clone()),
+                    type_text: leak(type_text(&parameter.def)),
+                    optional: parameter.optional,
+                    rest: parameter.rest,
+                })
+                .collect();
+            let display: Vec<String> = parameters
+                .iter()
+                .map(|parameter| {
+                    if parameter.rest {
+                        "...".to_string()
+                    } else if parameter.optional {
+                        format!("[{}]", parameter.name)
+                    } else {
+                        parameter.name.to_string()
+                    }
+                })
+                .collect();
+            descriptors.push(ExpressionFunctionDescriptor {
+                name,
+                aliases,
+                signature: leak(format!("{name}({})", display.join(", "))),
+                description: leak(atom.description.clone().unwrap_or_default()),
+                category: leaked_categories[category_index].name,
+                order: position_in_category[category_index],
+                overload,
+                parameters: Box::leak(parameters.into_boxed_slice()),
+                returns: leak(type_text(&function_type.returns)),
+                fallible: function_type.fallible,
+                function_type,
+                examples: Box::leak(examples.into_boxed_slice()),
+                example,
+            });
+        }
+    }
+
+    Ok(FunctionCatalog {
+        categories: leaked_categories,
+        descriptors: Box::leak(descriptors.into_boxed_slice()),
+        named_types,
+    })
+}
+
+/// One function entry while loading.
+struct CatalogFunction<'a> {
+    category_index: usize,
+    name: &'a String,
+    /// One `function(...)` atom per overload, in authored order.
+    atoms: Vec<&'a PropertyAtom>,
+    /// Each overload's authored text, when it could be recovered.
+    raw: Vec<Option<String>>,
+}
+
+/// The options of a `types:` entry: the arms of a union (list form or `|`
+/// form), or the single atom.
+fn overload_atoms(def: &PropertyDef) -> Vec<&PropertyAtom> {
+    match def {
+        PropertyDef::Single(atom) => match &atom.ty {
+            TypeExpr::Union(arms) if !atom.is_array => arms.iter().collect(),
+            _ => vec![atom],
+        },
+        PropertyDef::Union(arms) => arms.iter().collect(),
+    }
+}
+
+fn is_function_atom(atom: &PropertyAtom) -> bool {
+    matches!(atom.ty, TypeExpr::Function(_)) && !atom.is_array
+}
+
+fn category_of(atom: &PropertyAtom) -> Option<&str> {
+    atom.constraints.iter().find_map(|constraint| match constraint {
+        Constraint::Category(name) => Some(name.as_str()),
+        _ => None,
+    })
+}
+
+/// Each `types:` entry's authored overload texts (one per list item, or the
+/// single string), so an inline example's result can be shown as written.
+/// Missing or unexpected shapes yield no text; the result then falls back to
+/// its JSON spelling.
+fn raw_type_entries(source: &str) -> IndexMap<String, Vec<Option<String>>> {
+    let Ok(document) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source) else {
+        return IndexMap::new();
+    };
+    let Some(types) = document.get("types").and_then(serde_yaml_ng::Value::as_mapping) else {
+        return IndexMap::new();
+    };
+    types
+        .iter()
+        .filter_map(|(key, value)| {
+            let texts = match value {
+                serde_yaml_ng::Value::String(text) => vec![Some(text.clone())],
+                serde_yaml_ng::Value::Sequence(items) => {
+                    items.iter().map(|item| item.as_str().map(str::to_string)).collect()
+                }
+                _ => return None,
+            };
+            Some((key.as_str()?.to_string(), texts))
+        })
+        .collect()
+}
+
+fn project_examples(
+    function: &str,
+    atom: &PropertyAtom,
+    function_type: &'static FunctionType,
+    raw: Option<&str>,
+    example_files: &[(&str, &str)],
+) -> Result<Vec<FunctionExample>, String> {
+    let mut examples = Vec::new();
+    for example in &function_type.examples {
+        let authored = raw
+            .and_then(|text| text.get(example.expected_span.clone()))
+            .map(str::trim)
+            .filter(|text| !text.is_empty() && !text.contains("=>"));
+        let result = match (authored, &example.expected) {
+            (Some(text), _) => text.to_string(),
+            (None, ExampleOutcome::Error) => "error".to_string(),
+            (None, ExampleOutcome::Value(value)) => value.to_string(),
+        };
+        examples.push(FunctionExample::Call {
+            call: leak(example.call.clone()),
+            expected: example.expected.clone(),
+            result: leak(result),
+            display_only: example.display_only.clone().map(leak),
+        });
+    }
+    for constraint in &atom.constraints {
+        let Constraint::Example(references) = constraint else {
+            continue;
+        };
+        for reference in references {
+            examples.push(file_example(function, reference, example_files)?);
+        }
+    }
+    Ok(examples)
+}
+
+fn file_example(function: &str, reference: &str, example_files: &[(&str, &str)]) -> Result<FunctionExample, String> {
+    let key = reference.trim().trim_start_matches("./");
+    let (path, text) = example_files
+        .iter()
+        .find(|(path, _)| *path == key)
+        .ok_or_else(|| format!("`types.{function}`: example file `{reference}` is not embedded"))?;
+    let object = crate::markdown::schemas::example::validate_example_bytes(reference, text.as_bytes())
+        .map_err(|error| format!("`types.{function}`: {error}"))?;
+    let invocation = object
+        .get("invocation")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("`types.{function}`: example file `{reference}` needs a call `invocation`"))?;
+    let returns = match object.get("returns") {
+        Some(Value::String(text)) => text.clone(),
+        Some(other) => other.to_string(),
+        None => String::new(),
+    };
+    Ok(FunctionExample::File {
+        path: leak(path.to_string()),
+        invocation: leak(invocation.to_string()),
+        returns: leak(returns),
+        description: object.get("description").and_then(Value::as_str).map(|text| leak(text.to_string())),
+    })
+}
+
+/// The declared type as written, without descriptions.
+fn type_text(def: &PropertyDef) -> String {
+    let strip = |atom: &PropertyAtom| PropertyAtom {
+        description: None,
+        ..atom.clone()
+    };
+    let bare = match def {
+        PropertyDef::Single(atom) => PropertyDef::Single(strip(atom)),
+        PropertyDef::Union(arms) => PropertyDef::Union(arms.iter().map(strip).collect()),
+    };
+    serialize_property_def(&bare)
+}
+
+fn leak(value: String) -> &'static str {
+    Box::leak(value.into_boxed_str())
+}
+
+/// Generates the Markdown function-reference table for
+/// `darkmatter-expressions.md`: `Category`, `Function`, `Description`, and
+/// `Example` columns, one row per overload in documentation order. The example
+/// cell lists every inline example (display-only ones marked with their
+/// reason) and every file-form example.
 pub fn generate_expression_function_table() -> String {
     let mut out = String::new();
     out.push_str("| Category | Function | Description | Example |\n");
     out.push_str("| --- | --- | --- | --- |\n");
-    for d in expression_function_descriptors() {
-        let example = match d.example() {
-            Some(ex) if ex.verification == ExampleVerification::Executable => {
-                format!("`{}` ⇒ `{}`", ex.invocation, ex.result)
-            }
-            _ => String::new(),
-        };
-        let description = d.description().replace('|', "\\|");
+    for descriptor in expression_function_descriptors() {
+        let examples: Vec<String> = descriptor
+            .examples
+            .iter()
+            .map(|example| match example {
+                FunctionExample::Call {
+                    call,
+                    result,
+                    display_only: None,
+                    ..
+                } => format!("`{call}` ⇒ `{result}`"),
+                FunctionExample::Call {
+                    call,
+                    result,
+                    display_only: Some(reason),
+                    ..
+                } => format!("`{call}` ⇒ `{result}` (display only: {reason})"),
+                FunctionExample::File {
+                    invocation, returns, ..
+                } => {
+                    let returns = serde_json::to_string(returns).expect("a string serializes");
+                    format!("`{invocation}` ⇒ `{returns}` (example file)")
+                }
+            })
+            .collect();
         out.push_str(&format!(
             "| {} | `{}` | {} | {} |\n",
-            d.category(),
-            d.key(),
-            description,
-            example
+            descriptor.category,
+            descriptor.signature,
+            descriptor.description.replace('|', "\\|").replace('\n', " "),
+            examples.join("<br>").replace('|', "\\|"),
         ));
     }
     out
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::markdown::compose::expression::functions::{
-        dispatchable_signatures, lazy_operator_names,
-    };
-    use crate::markdown::compose::expression::{
-        evaluate, parse, EvaluationLookup, ResolutionContext,
-    };
-    use serde_json::Value;
-    use std::collections::HashSet;
-
-    #[test]
-    fn malformed_catalog_is_rejected_before_projection() {
-        // The fixture carries a minimal `$schema` so it clears structural
-        // validation and reaches the function-domain `EmptyCatalog` check.
-        let error = try_parse_catalog(
-            "kind: expression-function-catalog\n$schema:\n  kind: string(required)\n  functions: string[](required)\nfunctions: []\n",
-        )
-        .expect_err("an empty catalog must not reach descriptor projection");
-        assert!(error.to_string().contains("function"));
-    }
-
-    /// `try_parse_catalog` returns the **owned** AST, never a leaking
-    /// `&'static` descriptor projection. The spec's lifetime decision permits
-    /// leaking only the one validated embedded catalog (via
-    /// [`expression_function_descriptors`]); the fixture path must stay owned
-    /// so repeated valid-fixture parsing cannot accumulate process-lifetime
-    /// allocations. The explicit owned type annotation below is the
-    /// structural proof; each iteration's catalog then drops in place.
-    #[test]
-    fn try_parse_catalog_returns_owned_catalog_without_leaking() {
-        use super::ast::ExpressionFunctionCatalog;
-
-        const FIXTURE: &str = r#"kind: expression-function-catalog
-$schema:
-  kind: string(required)
-  functions: "{ name: string(not-empty; required), category: string(not-empty; required), order: number(integer; required), description: string(not-empty; required), overloads: { parameters: { name: string(not-empty; required), type: string(not-empty; required), array: boolean, optional: boolean, variadic: boolean }[], returns: { type: string(not-empty; required), array: boolean, fallible: boolean }, example: { expression: string(not-empty; required), result: string(required), verification: enum(executable, display-only; required), reason: string(not-empty) } }[](min(1); required) }[](min(1); required)"
-functions:
-  - name: ping
-    category: Test
-    order: 1
-    description: Returns its argument.
-    overloads:
-      - parameters:
-          - { name: value, type: string }
-        returns: { type: string }
-        example: { expression: 'ping("x")', result: x, verification: executable }
-"#;
-
-        let catalog: ExpressionFunctionCatalog =
-            try_parse_catalog(FIXTURE).expect("valid fixture must parse as owned catalog");
-        assert_eq!(catalog.functions.len(), 1);
-        assert_eq!(catalog.functions[0].name, "ping");
-
-        // Repeatable valid-fixture parsing with no static promotion: each
-        // owned catalog drops at the end of the iteration.
-        for _ in 0..3 {
-            let _owned: ExpressionFunctionCatalog =
-                try_parse_catalog(FIXTURE).expect("valid fixture must parse repeatedly");
-        }
-    }
-
-    /// The number of arguments to pass when exercising a signature: the count
-    /// of comma-separated parameters, with a variadic `...` exercised at two
-    /// arguments and optional `[param]` placeholders counted as present.
-    fn signature_call_arity(signature: &str) -> usize {
-        let inner = signature
-            .split_once('(')
-            .and_then(|(_, rest)| rest.rsplit_once(')'))
-            .map(|(params, _)| params.trim())
-            .unwrap_or("");
-        if inner.is_empty() {
-            return 0;
-        }
-        if inner.contains("...") {
-            return 2;
-        }
-        inner.split(',').filter(|p| !p.trim().is_empty()).count()
-    }
-
-    /// Whether `message` is an arity (wrong-argument-count) error rather than a
-    /// type/domain error.
-    ///
-    /// Arity errors come from `require_args` and the variadic count guards and
-    /// read "… requires N argument(s)" / "… requires 1 or 2 arguments" / "…
-    /// requires at least 1 argument". Type errors also contain "requires …
-    /// argument" but name the rejected domain ("numeric"/"string"/"array"), so
-    /// those are excluded.
-    fn is_arity_error(message: &str) -> bool {
-        let m = message.to_lowercase();
-        m.contains("requires")
-            && m.contains("argument")
-            && !m.contains("numeric")
-            && !m.contains("string argument")
-            && !m.contains("array argument")
-    }
-
-    /// A lookup that supplies a [`ResolutionContext`] so the filesystem
-    /// dispatch surface (`dispatch_fs`) is reachable — without one,
-    /// `evaluate_function` skips `dispatch_fs` and every fs function would look
-    /// "unknown" even though it is dispatchable.
-    struct FsLookup {
-        ctx: ResolutionContext,
-    }
-
-    impl EvaluationLookup for FsLookup {
-        fn get(&self, _path: &str) -> Option<Value> {
-            None
-        }
-        fn resolution_context(&self) -> Option<ResolutionContext> {
-            Some(self.ctx.clone())
-        }
-    }
-
-    /// Evaluate `name(0, 0, …)` with `arity` arguments through the real parse +
-    /// evaluate pipeline and return the error string, if any. A recognized
-    /// function either succeeds or fails with an argument/type error; only an
-    /// *unrecognized* name yields `Unknown function: …`.
-    fn dispatch_error_arity(name: &str, arity: usize, lookup: &FsLookup) -> Option<String> {
-        let args = vec!["0"; arity].join(", ");
-        let expr = parse(&format!("{name}({args})")).expect("descriptor signature must parse");
-        evaluate(&expr, lookup).err().map(|error| error.to_string())
-    }
-
-    /// Convenience: exercise a name with two arguments.
-    fn dispatch_error(name: &str, lookup: &FsLookup) -> Option<String> {
-        dispatch_error_arity(name, 2, lookup)
-    }
-
-    /// Exact, bidirectional parity between descriptor *signatures* and the
-    /// runtime *signature* surface — overload for overload, not merely name for
-    /// name.
-    ///
-    /// The runtime side is [`dispatchable_signatures`], which enumerates the
-    /// per-registration `signatures` of [`dispatch`]/[`dispatch_fs`] plus the
-    /// lazy logical operators. Comparing full signatures (with arity) rather
-    /// than collapsed names means set equality fails in *both* directions for
-    /// overloads too:
-    ///
-    /// - adding or removing a callable overload (e.g. a second
-    ///   `frontmatter(file, prop)` registration signature) without the matching
-    ///   descriptor, and
-    /// - adding or removing a descriptor overload without the matching callable
-    ///   signature.
-    #[test]
-    fn descriptor_signature_set_equals_dispatchable_signature_set() {
-        let descriptors: HashSet<&str> = expression_function_descriptors()
-            .iter()
-            .map(|d| d.signature)
-            .collect();
-        let runtime: HashSet<&str> = dispatchable_signatures().into_iter().collect();
-
-        let missing_descriptors: Vec<_> = runtime.difference(&descriptors).collect();
-        let extra_descriptors: Vec<_> = descriptors.difference(&runtime).collect();
-
-        assert!(
-            missing_descriptors.is_empty(),
-            "dispatchable signatures without descriptors: {missing_descriptors:?}"
-        );
-        assert!(
-            extra_descriptors.is_empty(),
-            "descriptor signatures without a dispatchable signature: {extra_descriptors:?}"
-        );
-    }
-
-    /// The lazy logical operators must genuinely resolve at runtime, so their
-    /// presence in the lazy registrations (and the parity set above) is real.
-    #[test]
-    fn lazy_operators_are_dispatchable() {
-        let lookup = FsLookup {
-            ctx: ResolutionContext::at(std::env::temp_dir()),
-        };
-        for name in lazy_operator_names() {
-            let err = dispatch_error(name, &lookup);
-            assert!(
-                err.as_deref().map(|e| !e.contains("Unknown function")).unwrap_or(true),
-                "lazy operator `{name}` must dispatch; got error: {err:?}"
-            );
-        }
-    }
-
-    /// Every descriptor overload must be dispatchable at its declared arity.
-    ///
-    /// Complements the set-equality test above with an end-to-end proof that is
-    /// arity-aware: each descriptor signature is parsed for its argument count
-    /// and exercised through the actual `evaluate` → `evaluate_function` →
-    /// `dispatch_fs`/`dispatch` pipeline at *that* arity. A descriptor whose
-    /// handler was removed yields `Unknown function`; a bogus overload arity the
-    /// handler rejects (e.g. a spurious three-argument `frontmatter`) yields an
-    /// arity error. Either fails here — so the declared signatures are bound to
-    /// what the runtime genuinely accepts, not just to a dispatchable name.
-    #[test]
-    fn every_descriptor_overload_is_dispatchable_at_its_declared_arity() {
-        let lookup = FsLookup {
-            ctx: ResolutionContext::at(std::env::temp_dir()),
-        };
-
-        let mut failures = Vec::new();
-        for desc in expression_function_descriptors() {
-            let name = desc.signature.split('(').next().unwrap();
-            let arity = signature_call_arity(desc.signature);
-            if let Some(err) = dispatch_error_arity(name, arity, &lookup)
-                && (err.contains("Unknown function") || is_arity_error(&err))
-            {
-                failures.push((desc.signature, err));
-            }
-        }
-
-        assert!(
-            failures.is_empty(),
-            "descriptor overloads the evaluator does not accept at their declared arity: {failures:?}"
-        );
-    }
-
-    /// Anchor for the recognition test: a name with no runtime arm must be
-    /// rejected as `Unknown function`, proving the assertion above is real.
-    #[test]
-    fn unknown_function_is_rejected() {
-        let lookup = FsLookup {
-            ctx: ResolutionContext::at(std::env::temp_dir()),
-        };
-        let err = dispatch_error("definitely_not_a_real_function", &lookup)
-            .expect("an unknown function must error");
-        assert!(
-            err.contains("Unknown function"),
-            "unknown name must report `Unknown function`; got: {err}"
-        );
-    }
-
-    #[test]
-    fn descriptor_traversal_order_is_deterministic() {
-        let sigs: Vec<&str> = expression_function_descriptors()
-            .iter()
-            .map(|d| d.signature)
-            .collect();
-        let sigs_again: Vec<&str> = expression_function_descriptors()
-            .iter()
-            .map(|d| d.signature)
-            .collect();
-        assert_eq!(sigs, sigs_again);
-    }
-
-    #[test]
-    fn descriptor_signatures_are_unique() {
-        let mut seen = HashSet::new();
-        for d in expression_function_descriptors() {
-            assert!(
-                seen.insert(d.signature),
-                "Duplicate descriptor signature: {}",
-                d.signature
-            );
-        }
-    }
-
-    #[test]
-    fn catalog_access_performs_no_capture() {
-        let _ = expression_function_descriptors();
-    }
-
-    /// Every expression descriptor that carries an example must declare it
-    /// `Executable` or `DisplayOnly` — never `TypeShapeOnly`. Expression
-    /// functions are deterministic enough to either be executed or to carry a
-    /// documented opt-out reason; a "type shape only" example would be an
-    /// un-audited, un-explained middle ground.
-    #[test]
-    fn every_expression_example_is_executable_or_display_only() {
-        use crate::catalog::ExampleVerification;
-        let mut offenders = Vec::new();
-        for d in expression_function_descriptors() {
-            if let Some(example) = d.example()
-                && matches!(example.verification, ExampleVerification::TypeShapeOnly)
-            {
-                offenders.push(d.signature);
-            }
-        }
-        assert!(
-            offenders.is_empty(),
-            "expression descriptors must not use TypeShapeOnly: {offenders:?}"
-        );
-    }
-
-    /// The generated function table in `darkmatter-expressions.md` must match
-    /// the catalog output exactly.
-    #[test]
-    fn narrative_doc_function_table_matches_catalog() {
-        let manifest_dir = biscuit_test_harness::manifest_dir!();
-        let doc_path = manifest_dir
-            .join("../../darkmatter/docs/topics/darkmatter-expressions.md");
-        let content = std::fs::read_to_string(&doc_path)
-            .expect("darkmatter-expressions.md should be readable");
-
-        const START: &str = "<!-- BEGIN GENERATED FUNCTION TABLE -->";
-        const END: &str = "<!-- END GENERATED FUNCTION TABLE -->";
-
-        let start = content.find(START).expect("start marker should exist") + START.len();
-        let end = content.find(END).expect("end marker should exist");
-
-        let doc_table = content[start..end].trim();
-        let generated = generate_expression_function_table().trim().to_string();
-
-        assert_eq!(
-            doc_table, generated,
-            "function table in darkmatter-expressions.md does not match generated output"
-        );
-    }
-
-    /// The `pr_list`/`cicd_list` catalog descriptions carry the query-vocabulary
-    /// link that DMLS hover and completion surface, so a dead link would be
-    /// worse than no link at all. Asserts the link target file exists and that
-    /// its fragment resolves to a real heading whose GitHub-style slug matches.
-    #[test]
-    fn query_vocabulary_link_resolves_to_an_existing_doc_anchor() {
-        const LINK: &str =
-            "(darkmatter-expressions.md#provider-query-vocabulary)";
-        const ANCHOR: &str = "provider-query-vocabulary";
-
-        let linking: Vec<&str> = expression_function_descriptors()
-            .iter()
-            .filter(|d| d.description.contains(LINK))
-            .map(|d| d.signature)
-            .collect();
-        for signature in ["pr_list(query)", "pr_list(count)", "cicd_list(query)", "cicd_list(count)"] {
-            assert!(
-                linking.contains(&signature),
-                "`{signature}` must link to the query vocabulary; linking: {linking:?}"
-            );
-        }
-
-        // The link is authored sibling-relative, so it resolves against the
-        // topic doc's own directory.
-        let doc_path = biscuit_test_harness::manifest_dir!()
-            .join("../../darkmatter/docs/topics/darkmatter-expressions.md");
-        let content = std::fs::read_to_string(&doc_path)
-            .expect("darkmatter-expressions.md should be readable");
-
-        let has_anchor = content.lines().filter_map(|line| line.strip_prefix("## ")).any(|heading| {
-            let slug: String = heading
-                .trim()
-                .to_ascii_lowercase()
-                .chars()
-                .filter_map(|c| match c {
-                    ' ' => Some('-'),
-                    c if c.is_ascii_alphanumeric() || c == '-' => Some(c),
-                    _ => None,
-                })
-                .collect();
-            slug == ANCHOR
-        });
-        assert!(has_anchor, "`#{ANCHOR}` must resolve to a heading in darkmatter-expressions.md");
-
-        // The section must actually document the vocabulary, not just exist.
-        for required in [
-            "`pr_list(query)` keys",
-            "`cicd_list(query)` keys",
-            "Closed enum values",
-            "RFC 3339",
-            "the hard maximum is 100",
-            "newest-first",
-        ] {
-            assert!(
-                content.contains(required),
-                "query-vocabulary section is missing `{required}`"
-            );
-        }
-    }
-
-    /// Claudine anti-drift: every function added by this feature must remain
-    /// present in the exported expression catalog (`claudine context --expressions`).
-    ///
-    /// Asserts against the shared [`expression_function_descriptors()`] so the
-    /// check stays in sync with the runtime surface and does not duplicate a
-    /// Claudine-only list.
-    #[test]
-    fn feature_functions_are_present_in_exported_expression_catalog() {
-        let expected = [
-            // Phase 3 — pure functions
-            "is_positive(val)",
-            "is_negative(val)",
-            "is_integer(val)",
-            "without_date(string)",
-            "ensure_leading(var, prefix)",
-            "ensure_trailing(var, postfix)",
-            "replace(x, find, replacement)",
-            "replace_first(x, find, replacement)",
-            "replace_last(x, find, replacement)",
-            "terminal(string)",
-            // Phase 4 — filesystem functions
-            "is_indexed_file(file)",
-            "file_index(file)",
-            "increment_file_index(file)",
-            "decrement_file_index(file)",
-            "basename(file)",
-            "basename_without_index(file)",
-            "dirname(file)",
-            "ext(file)",
-            "parent_dir(file)",
-            "file_trailing(file)",
-            "dir_leading(file)",
-            "join(left, right)",
-            // Phase 5 — link and skill functions
-            "link(file)",
-            "link(target, desc)",
-            "code_link(file)",
-            "code_link(target, desc)",
-            "has_skill(name)",
-            "has_local_skill(name)",
-        ];
-
-        let descriptor_sigs: std::collections::HashSet<&str,
-        > = expression_function_descriptors()
-            .iter()
-            .map(|d| d.signature)
-            .collect();
-
-        let missing: Vec<&str> = expected
-            .iter()
-            .copied()
-            .filter(|sig| !descriptor_sigs.contains(sig))
-            .collect();
-
-        assert!(
-            missing.is_empty(),
-            "Feature function signatures missing from exported catalog: {missing:?}"
-        );
-    }
-}
-
-#[cfg(test)]
-mod phase2_tests {
-    use super::*;
-    use crate::markdown::compose::expression::{evaluate, parse, EvaluationLookup, ResolutionContext};
-    use serde_json::Value;
-
-    struct FixtureLookup {
-        ctx: ResolutionContext,
-        data: std::collections::HashMap<String, Value>,
-    }
-
-    impl EvaluationLookup for FixtureLookup {
-        fn get(&self, path: &str) -> Option<Value> {
-            self.data.get(path).cloned()
-        }
-        fn resolution_context(&self) -> Option<ResolutionContext> {
-            Some(self.ctx.clone())
-        }
-    }
-
-    fn make_fixture() -> (tempfile::TempDir, FixtureLookup) {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::write(
-            dir.path().join("fixture.md"),
-            "---\ntitle: Fixture Title\n---\n# Fixture\n\nBody\n",
-        )
-        .unwrap();
-        std::fs::write(dir.path().join("note.md"), "plain\n").unwrap();
-        std::fs::write(dir.path().join("review-1.md"), "").unwrap();
-        std::fs::write(dir.path().join("review-2.md"), "").unwrap();
-        std::fs::create_dir(dir.path().join("sub")).unwrap();
-        std::fs::write(dir.path().join("sub/note.md"), "").unwrap();
-        let ctx = ResolutionContext::at(dir.path().to_path_buf());
-        let mut data = std::collections::HashMap::new();
-        data.insert("items".to_string(), serde_json::json!([1, 2, 3]));
-        data.insert("obj".to_string(), serde_json::json!({"a": 1}));
-        let lookup = FixtureLookup { ctx, data };
-        (dir, lookup)
-    }
-
-    fn render_value(value: &Value) -> String {
-        match value {
-            Value::Null => "null".to_string(),
-            Value::Bool(b) => b.to_string(),
-            Value::Number(n) => n.to_string(),
-            Value::String(s) => s.clone(),
-            other => other.to_string(),
-        }
-    }
-
-    #[test]
-    fn every_example_evaluates_to_its_declared_result() {
-        use crate::catalog::ExampleVerification;
-        let (_dir, lookup) = make_fixture();
-        let mut failures = Vec::new();
-        for d in expression_function_descriptors() {
-            let Some(example) = d.example() else { continue };
-            // Only `Executable` examples are asserted to evaluate to their
-            // declared result; display-only examples are illustrative and not
-            // run.
-            if example.verification != ExampleVerification::Executable {
-                continue;
-            }
-            let expr = match parse(example.invocation) {
-                Ok(e) => e,
-                Err(err) => {
-                    failures.push((d.signature, format!("parse error: {}", err.message)));
-                    continue;
-                }
-            };
-            let result = match evaluate(&expr, &lookup) {
-                Ok(v) => render_value(&v),
-                Err(err) => {
-                    failures.push((d.signature, format!("eval error: {}", err)));
-                    continue;
-                }
-            };
-            if result != example.result {
-                failures.push((
-                    d.signature,
-                    format!("got {:?}, expected {:?}", result, example.result),
-                ));
-            }
-        }
-        assert!(
-            failures.is_empty(),
-            "expression examples did not evaluate to declared results: {failures:?}"
-        );
-    }
-}
-
-#[cfg(test)]
-mod typed_signature_tests {
-    use super::*;
-    use crate::markdown::schemas::SimplifiedType;
-
-    /// Every descriptor's typed signature renders and always names a return
-    /// type; a fallible return carries the `| error` union member.
-    #[test]
-    fn every_descriptor_has_a_typed_signature() {
-        for d in expression_function_descriptors() {
-            let typed = d.typed_signature();
-            assert!(
-                typed.starts_with(d.signature.split('(').next().unwrap()),
-                "typed signature `{typed}` should start with `{}`",
-                d.signature
-            );
-            assert!(typed.contains(" -> "), "typed signature must show a return: {typed}");
-            assert_eq!(
-                d.returns.fallible,
-                typed.contains("| error"),
-                "`| error` presence must match the fallible flag for {}",
-                d.signature
-            );
-        }
-    }
-
-    /// The eight list formatters are all present, take a single `any[]`, and
-    /// return `string | error`. The two serializers carry executable examples;
-    /// the multi-line renderers are verified through their example files.
-    #[test]
-    fn list_formatting_functions_are_typed() {
-        use crate::catalog::ExampleVerification;
-        let expected = [
-            "as_line_separated(list)",
-            "as_csv(list)",
-            "as_tsv(list)",
-            "as_space_separated(list)",
-            "as_unordered_list(list)",
-            "as_ordered_list(list)",
-            "as_json(list)",
-            "as_json5(list)",
-        ];
-        for signature in expected {
-            let d = expression_function_descriptors()
-                .iter()
-                .find(|d| d.signature == signature)
-                .unwrap_or_else(|| panic!("missing list formatter: {signature}"));
-            assert_eq!(d.category, "List Formatting");
-            assert_eq!(d.parameters.len(), 1);
-            assert_eq!(d.parameters[0].ty, DataType::Any);
-            assert!(d.parameters[0].array, "list parameter must be an array");
-            assert_eq!(d.returns.value, ReturnValueType::Data(DataType::String));
-            assert!(d.returns.fallible, "list formatters are fallible");
-        }
-        for signature in ["as_json(list)", "as_json5(list)"] {
-            let example = expression_function_descriptors()
-                .iter()
-                .find(|d| d.signature == signature)
-                .and_then(|d| d.example())
-                .unwrap_or_else(|| panic!("{signature} must carry an example"));
-            assert_eq!(example.verification, ExampleVerification::Executable);
-        }
-        let csv = expression_function_descriptors()
-            .iter()
-            .find(|d| d.signature == "as_csv(list)")
-            .unwrap();
-        assert_eq!(csv.typed_signature(), "as_csv(list: any[]) -> string | error");
-    }
-
-    /// `error` is a **return-position** anchor only: no function parameter may be
-    /// typed as `error`, and `DataType` (the parameter/data domain) has no
-    /// `error` keyword. `SimplifiedType` (the frontmatter validator) likewise
-    /// knows neither `error` nor a function type, so a frontmatter property can
-    /// never be typed as a function (spec D7, "catalog-only" typing).
-    #[test]
-    fn error_and_functions_never_leak_into_the_data_or_frontmatter_type_domains() {
-        // No DataType keyword is `error` or a function signature.
-        for dt in [
-            DataType::String,
-            DataType::Number,
-            DataType::Integer,
-            DataType::Boolean,
-            DataType::Date,
-            DataType::DateTime,
-            DataType::Time,
-            DataType::Object,
-            DataType::File,
-            DataType::Url,
-            DataType::Email,
-            DataType::Yaml,
-            DataType::Json,
-            DataType::Any,
-        ] {
-            let keyword = dt.as_keyword();
-            assert_ne!(keyword, "error");
-            assert!(!keyword.contains("->"), "no data type is a function signature");
-        }
-        // The frontmatter validator's type set knows neither.
-        assert!(SimplifiedType::from_keyword("error").is_none());
-        assert!(SimplifiedType::from_keyword("function").is_none());
-    }
-}
-
-#[cfg(test)]
-mod list_formatting_example_files {
-    use crate::markdown::compose::expression::{EvaluationLookup, evaluate, parse};
-    use serde_json::Value;
-    use std::collections::HashMap;
-
-    struct MapLookup {
-        data: HashMap<String, Value>,
-    }
-
-    impl EvaluationLookup for MapLookup {
-        fn get(&self, path: &str) -> Option<Value> {
-            self.data.get(path).cloned()
-        }
-    }
-
-    fn render(value: &Value) -> String {
-        match value {
-            Value::String(s) => s.clone(),
-            other => other.to_string(),
-        }
-    }
-
-    /// Every schema-plus example file for a list formatter evaluates its
-    /// `invocation` (with `parameters` bound as initial values) to the declared
-    /// `returns` string — the verified-example requirement (spec E3 / task 7).
-    #[test]
-    fn example_files_evaluate_to_their_declared_returns() {
-        let manifest_dir = biscuit_test_harness::manifest_dir!();
-        let dir = manifest_dir
-            .join("../features/_completed/2026-07-08-single-sourcing-schema/examples");
-        let files = [
-            "as_line_separated.yaml",
-            "as_csv.yaml",
-            "as_tsv.yaml",
-            "as_space_separated.yaml",
-            "as_unordered_list.yaml",
-            "as_ordered_list.yaml",
-        ];
-        for file in files {
-            let path = dir.join(file);
-            let text = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("read {file}: {e}"));
-            let doc: Value = serde_yaml_ng::from_str(&text)
-                .unwrap_or_else(|e| panic!("parse {file}: {e}"));
-
-            let invocation = doc
-                .get("invocation")
-                .and_then(Value::as_str)
-                .unwrap_or_else(|| panic!("{file} missing string invocation"));
-            let expected = doc
-                .get("returns")
-                .and_then(Value::as_str)
-                .unwrap_or_else(|| panic!("{file} missing string returns"));
-
-            let mut data = HashMap::new();
-            if let Some(params) = doc.get("parameters").and_then(Value::as_array) {
-                for entry in params {
-                    if let Some(obj) = entry.as_object() {
-                        for (key, value) in obj {
-                            data.insert(key.clone(), value.clone());
-                        }
-                    }
-                }
-            }
-
-            let lookup = MapLookup { data };
-            let expr = parse(invocation)
-                .unwrap_or_else(|e| panic!("{file} parse `{invocation}`: {}", e.message));
-            let got = render(
-                &evaluate(&expr, &lookup)
-                    .unwrap_or_else(|e| panic!("{file} eval `{invocation}`: {e}")),
-            );
-            assert_eq!(got, expected, "example {file} did not match its declared returns");
-        }
-    }
-}
-
-#[cfg(test)]
-mod more_context_descriptor_tests {
-    use super::*;
-    use crate::markdown::compose::context::context_variable_descriptors;
-
-    fn only(signature: &str) -> &'static ExpressionFunctionDescriptor {
-        let matches: Vec<_> = expression_function_descriptors()
-            .iter()
-            .filter(|descriptor| descriptor.signature == signature)
-            .collect();
-        assert_eq!(matches.len(), 1, "`{signature}` must be cataloged exactly once");
-        matches[0]
-    }
-
-    /// Every function the feature adds is cataloged with its exact typed
-    /// signature, so `claudine context --expressions`, DMLS, and
-    /// `md schema about` all discover the same shape (AC1, AC12, AC33).
-    #[test]
-    fn new_functions_have_their_specified_typed_signatures() {
-        let expected = [
-            ("as_markdown(content)", "as_markdown(content: string) -> string | error"),
-            ("package_area(where)", "package_area(where: file) -> string | error"),
-            ("package(where)", "package(where: file) -> string | error"),
-            ("recent_commits(count)", "recent_commits(count: number(integer)) -> string[] | error"),
-            ("ipv4([filter])", "ipv4([filter: string]) -> string[]"),
-            ("ipv6([filter])", "ipv6([filter: string]) -> string[]"),
-            ("ping(address, [timeout])", "ping(address: ip-address, [timeout: number]) -> boolean | null | error"),
-            (
-                "ping_under(address, timeout, [attempts])",
-                "ping_under(address: ip-address, timeout: number, [attempts: number(integer)]) -> boolean | \"unstable\" | null | error",
-            ),
-            ("has_alias(name)", "has_alias(name: string) -> boolean"),
-            ("has_binary(name_or_path)", "has_binary(name_or_path: string) -> boolean"),
-            ("has_builtin_function(name)", "has_builtin_function(name: string) -> boolean"),
-            ("has_user_function(name)", "has_user_function(name: string) -> boolean"),
-            ("can_execute(name)", "can_execute(name: string) -> boolean"),
-        ];
-        for (signature, typed) in expected {
-            assert_eq!(only(signature).typed_signature(), typed);
-        }
-        assert!(
-            only("has_agentic_cli(agent)")
-                .typed_signature()
-                .starts_with("has_agentic_cli(agent: enum(claude, codex, gemini, goose, kimi, kimicode, kimi_code, \"kimi-code\","),
-        );
-    }
-
-    /// AC12: both names are cataloged and dispatch to the same probe.
-    #[test]
-    fn has_binary_and_has_command_share_one_probe() {
-        use crate::markdown::compose::expression::{ResolutionContext, functions::dispatch_fs};
-
-        only("has_command(cmd)");
-        only("has_binary(name_or_path)");
-        let context = ResolutionContext::at(std::env::temp_dir());
-        for probe in ["sh", "definitely-not-a-real-bin-zzz", "", "./relative"] {
-            let args = [serde_json::json!(probe)];
-            assert_eq!(
-                dispatch_fs("has_binary", &args, &context).unwrap().unwrap(),
-                dispatch_fs("has_command", &args, &context).unwrap().unwrap(),
-                "`{probe}`"
-            );
-        }
-    }
-
-    /// AC26 / R29: `recent_commits` is one variable and one function projected
-    /// from one entry. The authored function entry carries no description or
-    /// return type of its own, so the two cannot drift.
-    #[test]
-    fn recent_commits_pair_projects_from_one_descriptor_entry() {
-        let variables: Vec<_> = context_variable_descriptors()
-            .iter()
-            .filter(|variable| variable.name == "recent_commits")
-            .collect();
-        assert_eq!(variables.len(), 1);
-        let variable = variables[0];
-        let function_overloads: Vec<_> = expression_function_descriptors()
-            .iter()
-            .filter(|descriptor| descriptor.signature.split('(').next() == Some("recent_commits"))
-            .collect();
-        assert_eq!(function_overloads.len(), 1);
-        let function = function_overloads[0];
-
-        assert_eq!(function.pair, Some("recent_commits"));
-        assert_eq!(function.description, variable.description);
-        assert_eq!(function.returns.value, ReturnValueType::Data(DataType::String));
-        assert!(function.returns.array && variable.display_type.is_array);
-        assert_eq!(variable.display_type.base, crate::markdown::schemas::SimplifiedType::String);
-
-        let authored: serde_yaml_ng::Value = serde_yaml_ng::from_str(include_str!(
-            "../../../../../../docs/schemas/expression-functions.yaml"
-        ))
-        .unwrap();
-        let entry = authored["functions"]
-            .as_sequence()
-            .unwrap()
-            .iter()
-            .find(|entry| entry["name"].as_str() == Some("recent_commits"))
-            .unwrap();
-        assert_eq!(entry["pair"].as_bool(), Some(true));
-        assert!(entry.get("description").is_none(), "the pair's description is authored once, on ctx");
-        for overload in entry["overloads"].as_sequence().unwrap() {
-            assert!(overload["returns"].get("type").is_none());
-            assert!(overload["returns"].get("array").is_none());
-        }
-
-        let paired: Vec<_> = expression_function_descriptors()
-            .iter()
-            .filter_map(|descriptor| descriptor.pair)
-            .collect();
-        assert_eq!(paired, ["recent_commits"], "recent_commits is the only pair so far");
-    }
-
-    /// AC18 / AC19 (Darkmatter side): the descriptor enum is the generated
-    /// name list, every row binds a real sniff `AiCli` variant, and aliases
-    /// share their provider's binding.
-    #[test]
-    fn agentic_cli_enum_is_the_generated_table_and_every_binding_resolves() {
-        use super::super::functions::agentic_cli_generated::AGENTIC_CLI_NAMES;
-        use sniff::programs::AiCli;
-
-        let descriptor = only("has_agentic_cli(agent)");
-        assert_eq!(descriptor.parameters.len(), 1);
-        let Some(ParamRefinement::Enum(names)) = descriptor.parameters[0].refinement else {
-            panic!("has_agentic_cli must take the generated enum");
-        };
-        assert_eq!(descriptor.parameters[0].ty, DataType::String);
-        assert_eq!(names, AGENTIC_CLI_NAMES.iter().map(|(name, _)| *name).collect::<Vec<_>>());
-
-        let binding = |wanted: &str| -> AiCli {
-            let (_, variant) = AGENTIC_CLI_NAMES
-                .iter()
-                .find(|(name, _)| *name == wanted)
-                .unwrap_or_else(|| panic!("`{wanted}` must be generated"));
-            serde_json::from_value(serde_json::json!(variant))
-                .unwrap_or_else(|error| panic!("`{variant}` is not an AiCli variant: {error}"))
-        };
-        for (name, _) in AGENTIC_CLI_NAMES {
-            binding(name);
-        }
-        assert_eq!(binding("kimi_code"), binding("kimi"));
-        assert_eq!(binding("kimi_code"), AiCli::KimiCli);
-        assert!(!names.contains(&"not_a_provider"));
-    }
-
-    /// AC33 (descriptor portion): ICMP arguments are typed addresses, and the
-    /// returns include the denial `null` and the `"unstable"` literal.
-    #[test]
-    fn icmp_descriptors_declare_address_arguments_and_denial_returns() {
-        for signature in ["ping(address, [timeout])", "ping_under(address, timeout, [attempts])"] {
-            let descriptor = only(signature);
-            assert_eq!(descriptor.parameters[0].refinement, Some(ParamRefinement::IpAddress));
-            assert_eq!(descriptor.parameters[0].ty, DataType::String);
-            assert!(descriptor.returns.nullable && descriptor.returns.fallible);
-            assert_eq!(descriptor.returns.value, ReturnValueType::Data(DataType::Boolean));
-        }
-        assert_eq!(only("ping(address, [timeout])").returns.literals, [] as [&str; 0]);
-        assert_eq!(only("ping_under(address, timeout, [attempts])").returns.literals, ["unstable"]);
-    }
-}
+mod tests;

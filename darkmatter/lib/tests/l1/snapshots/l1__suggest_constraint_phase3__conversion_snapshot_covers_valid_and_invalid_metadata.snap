@@ -25,7 +25,8 @@ expression: "serde_json::to_string_pretty(&schema).unwrap()"
       ],
       "minimum": 0,
       "maximum": 10,
-      "type": "integer"
+      "type": "integer",
+      "x-darkmatter-integer": true
     },
     "tags": {
       "anyOf": [

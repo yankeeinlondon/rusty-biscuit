@@ -157,14 +157,16 @@ fn validate_leaf(
 }
 
 /// Validates `style.markdown` as a whole through the cleanup rules'
-/// validator, so rendering accepts exactly what cleanup accepts. Unknown
+/// validator, after the same conversion-engine binding cleanup applies, so
+/// rendering accepts exactly what cleanup accepts. Unknown
 /// rule names and snake-case spellings are rejected here: the rules have no
 /// aliases.
 fn validate_markdown_rules(value: &Value) -> Result<(), StyleParseError> {
     if value.is_null() {
         return Ok(());
     }
-    match crate::markdown::cleanup::rules::rules_from_json(value) {
+    let rules = crate::markdown::cleanup::rules::bind_document_rules(value);
+    match crate::markdown::cleanup::rules::rules_from_json(&rules) {
         Ok(_) => Ok(()),
         Err(errors) => {
             let first = &errors[0];
@@ -526,7 +528,7 @@ mod tests {
     #[test]
     fn invalid_markdown_rules_return_the_rule_validators_reason() {
         for (value, path) in [
-            (json!({"markdown": {"indentation": "4"}}), "style.markdown.indentation"),
+            (json!({"markdown": {"indentation": "3"}}), "style.markdown.indentation"),
             (json!({"markdown": {"fixed-width": 0}}), "style.markdown.fixed-width"),
             (json!({"markdown": {"bogus": true}}), "style.markdown.bogus"),
             (json!({"markdown": {"fixed_width": 80}}), "style.markdown.fixed_width"),
@@ -540,6 +542,18 @@ mod tests {
                 }
                 other => panic!("{value}: expected InvalidRule, got {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn markdown_rule_values_bind_like_schema_validation() {
+        for value in [
+            json!({"markdown": {"indentation": "4"}}),
+            json!({"markdown": {"fixed-width": "80"}}),
+            json!({"markdown": {"unwrap": "true"}}),
+            json!({"markdown": {"default-language": 5}}),
+        ] {
+            assert!(from_json_value(&value).is_ok(), "{value}");
         }
     }
 

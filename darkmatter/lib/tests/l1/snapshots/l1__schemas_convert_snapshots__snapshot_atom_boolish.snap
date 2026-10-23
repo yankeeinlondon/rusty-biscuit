@@ -13,21 +13,11 @@ expression: "convert_atom(\"boolish\")"
           "type": "null"
         },
         {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "enum": [
-                "true",
-                "false",
-                "True",
-                "False",
-                "TRUE",
-                "FALSE"
-              ]
-            }
-          ]
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "format": "darkmatter-boolish"
         }
       ]
     }
