@@ -303,7 +303,11 @@ impl Refusal {
                 StoreError::Pending(_) | StoreError::Record { .. } | StoreError::Journal { .. } | StoreError::InventoryMismatch => {
                     ExitClass::Refused
                 }
-                StoreError::WrongLock | StoreError::PhaseOrder | StoreError::Completed(_) => ExitClass::Failure,
+                StoreError::WrongLock
+                | StoreError::PhaseOrder
+                | StoreError::Completed(_)
+                | StoreError::NotSaved(_)
+                | StoreError::Cancelled => ExitClass::Failure,
             },
             Self::Move(error) => match error.class() {
                 MoveErrorClass::Refused => ExitClass::Refused,

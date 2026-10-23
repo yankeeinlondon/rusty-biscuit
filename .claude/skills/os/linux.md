@@ -121,6 +121,23 @@ adapter that relies on this is `worktree/lib/src/remove/observation/inotify.rs`:
 - Parse `/proc/<pid>/stat` after the last `)`: `comm` can contain spaces and
   parentheses. Field 22 (`starttime`) is the PID-reuse token.
 
+## cap-std directory handles are `O_PATH`: permission code green on macOS, red on Linux
+
+- On Linux, `cap_std::fs::Dir` holds a directory as an `O_PATH` descriptor.
+  `fchmod` on it fails with `EBADF`; change the mode through
+  `/proc/self/fd/<fd>` instead (`remove::delete::platform::chmod_handle`).
+- `Dir::open_dir` on a mode-`000` directory **succeeds** on Linux (no
+  permission is needed for `O_PATH`), so the `EACCES` arrives when the
+  directory is listed. On macOS the open itself fails. Handle the denial at
+  both points.
+- To change a child directory's mode without following a link, open it with
+  `O_PATH | O_NOFOLLOW | O_DIRECTORY`, check its device and inode, and change
+  the mode through that descriptor. Do not rely on glibc's
+  `fchmodat(…, AT_SYMLINK_NOFOLLOW)`, which needs glibc 2.32+ and `/proc`.
+- Found in `2026-10-22-confirmed-remove-always-deletes` by
+  `just cross-check worktree --os linux remove::` after every macOS test had
+  passed.
+
 ## `/bin/sh` is dash: `set -m` hangs or silently does nothing
 
 Debian and Ubuntu (WSL2 included) link `/bin/sh` to dash; macOS runs bash as

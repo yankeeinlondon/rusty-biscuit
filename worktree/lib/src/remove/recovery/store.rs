@@ -62,6 +62,13 @@ pub enum StoreError {
     /// fit; nothing of the attempt was written.
     #[error("the space available at {} could not be read, so this removal's deletion journal ({needed} bytes) is not known to fit: {reason}", path.display())]
     SpaceUnknown { path: PathBuf, needed: u64, reason: String },
+    /// The approval could not be saved; nothing was unlocked, moved, or
+    /// deleted.
+    #[error("the removal could not be saved, so nothing was deleted: {0}")]
+    NotSaved(#[source] io::Error),
+    /// A wait for another removal's lock was cancelled.
+    #[error("the wait for another wt remove of this worktree was cancelled")]
+    Cancelled,
     #[error(transparent)]
     Io(#[from] io::Error),
 }
@@ -619,6 +626,10 @@ pub(crate) mod fault {
         matches!(error, StoreError::Io(error) if error.to_string() == CRASHED)
     }
 }
+
+mod compact;
+
+pub use compact::{PendingRemoval, Stored, StoredOperation};
 
 #[cfg(test)]
 mod tests;

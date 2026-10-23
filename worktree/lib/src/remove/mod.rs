@@ -11,8 +11,11 @@
 //! [`quarantine`] moves the checkout aside without replacing anything (and
 //! unregisters it once it is gone), and [`observation`] watches both
 //! locations while that happens and deletes the moved checkout entry by
-//! entry against its operation-start inventory. [`lifecycle`] runs those
-//! steps in order as one removal, and resumes one that stopped.
+//! entry against its operation-start inventory. [`delete`] is the plain
+//! engine that replaces that checked deletion: it deletes whatever the
+//! approved checkout holds, never crossing a link or a mount, and waits out
+//! only temporary contention. [`lifecycle`] runs those steps in order as one
+//! removal, and resumes one that stopped.
 //! Its waits, mount boundaries, and filesystem failures are injected through
 //! [`clock`], [`mounts`], and [`faults`], so tests never sleep, mount, or need
 //! privileges.
@@ -23,6 +26,7 @@
 
 pub mod admin_entry;
 pub mod clock;
+pub mod delete;
 pub mod faults;
 pub mod handoff;
 pub mod included;

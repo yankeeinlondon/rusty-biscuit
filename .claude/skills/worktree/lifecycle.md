@@ -164,6 +164,37 @@ registration from the admin `gitdir` (`registration_state`), then:
 - **A completed record** is `StoreError::Completed` from `inspect`,
   `resume`, and `reopen`, and `pending()` skips it.
 
+## Compact record and store (`record_version` 2)
+
+These are being built to replace the journal (spec
+`2026-10-22-confirmed-remove-always-deletes`). They exist beside the journal
+path, and the lifecycle above does not call them yet.
+
+- **`recovery::compact::CompactRecord`** is the approval. It has no expiry,
+  and `progress` (`Approved` → `Unlocked` → `Placed` → `ContentRemoved` →
+  `Unregistered`) is a hint, never proof. Branch steps carry their own
+  `StepState` and may finish only at `Unregistered`. `deletion_mode: in_place`
+  requires `deletion_path == original`. `compact::record_version(bytes)` is
+  read first, so an unknown version is refused before any other field.
+- **`recovery::legacy`** reads a v1 record and, separately, its optional
+  report (≤ v6). A report never changes what migration authorizes.
+  `to_compact` keeps a local step only for the checkout's own branch
+  (`Conditional`, with the v1 `approved_tip`). Every other step, and every
+  remote step, becomes `BranchAction::Unbound` with `StepState::Kept`: it is
+  never run, and it ends in exit 1.
+- **Store API (`store/compact.rs`):**
+    - `approve` saves the record before any mutation. Any failure to save
+      is `StoreError::NotSaved` ("nothing was deleted", exit 1).
+    - `resume` migrates a v1 record by one atomic replacement of
+      `record.json`, then deletes the journals and report unread.
+    - `lock_waiting` backs off on a `Clock` and ends in
+      `StoreError::Cancelled`.
+    - `PendingRemoval::finish` deletes the whole operation directory.
+    - `operations()` lists both formats. The old `pending()` reads v1 only,
+      and refuses any v2 directory as unsupported.
+- **Crash injection:** `store::compact::fault::inject` stops at a `SaveStep`
+  (`Staged`, `Migrated`, `MigrationPublished`).
+
 ## How `wt remove` drives it (`cli/src/commands/remove/`)
 
 - **Resolution:** `run` calls `resolve_target`, not `find_worktree`. Only-live

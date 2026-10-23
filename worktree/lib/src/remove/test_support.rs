@@ -330,3 +330,40 @@ impl FsFaults for ScriptedFaults {
         Some((fault.make)())
     }
 }
+
+/// [`Holders`](super::delete::Holders) that answers from a script, one
+/// report per query (the last repeats), and records what each query asked
+/// about.
+#[derive(Default)]
+pub struct ScriptedHolders {
+    reports: Mutex<Vec<super::delete::HolderReport>>,
+    asked: Mutex<Vec<Vec<PathBuf>>>,
+}
+
+impl ScriptedHolders {
+    /// Answers every query with [`HolderReport::Unknown`](super::delete::HolderReport::Unknown).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn answering(reports: Vec<super::delete::HolderReport>) -> Self {
+        Self { reports: Mutex::new(reports), ..Self::default() }
+    }
+
+    /// The blocked paths of each query, in order.
+    pub fn asked(&self) -> Vec<Vec<PathBuf>> {
+        self.asked.lock().unwrap().clone()
+    }
+}
+
+impl super::delete::Holders for ScriptedHolders {
+    fn query(&self, _root: &Path, blocked: &[PathBuf]) -> super::delete::HolderReport {
+        self.asked.lock().unwrap().push(blocked.to_vec());
+        let mut reports = self.reports.lock().unwrap();
+        match reports.len() {
+            0 => super::delete::HolderReport::Unknown,
+            1 => reports[0].clone(),
+            _ => reports.remove(0),
+        }
+    }
+}

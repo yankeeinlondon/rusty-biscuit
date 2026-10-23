@@ -27,6 +27,7 @@ facts and traps, not user docs.
 | `wt create`, fork-origin records, `.worktreeinclude`, include copying and copy records | [create-and-include.md](create-and-include.md) |
 | `wt remove`: inventory fingerprint, safety tiers, handoff, `--force-remote` endpoint checks | [remove.md](remove.md) |
 | `wt remove`'s removal lifecycle (`remove::lifecycle`): order of steps, exit classes, crash recovery, retry resolution, resume | [lifecycle.md](lifecycle.md) |
+| `wt remove`'s plain deletion engine (`remove::delete`): link and mount boundaries, error classes, waits on held files and refilling directories, Windows deletion by handle | [deletion.md](deletion.md) |
 | `wt remove`'s activity observer (watched scopes, lost coverage, inotify, FSEvents, and `ReadDirectoryChangesW` adapters, handle registration), the deletion inventory, and the checked deletion engine | [observation.md](observation.md) |
 | `wt list` local pipeline, comparison cache, caption, table, columns, `--ff`, `--ignore-api` | [list.md](list.md) |
 | `wt list` background worker, PR store, live-head store, receipts, the wait and its budgets | [list-remote.md](list-remote.md) |

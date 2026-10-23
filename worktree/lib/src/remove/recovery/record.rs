@@ -1,9 +1,13 @@
-//! The recovery record: what one removal operation set out to do, bound to
-//! the exact checkout, repository, and approvals it was decided on.
+//! The legacy recovery record (`record_version` 1): what one removal
+//! operation set out to do, bound to the exact checkout, repository, and
+//! approvals it was decided on.
 //!
-//! The record describes an operation; it never authorizes one. Retry
-//! re-collects consent, and `completed_phase` is a hint about where to look,
-//! never proof of what the paths or Git hold now.
+//! Its checkout-removal intent is continued approval, but only through
+//! migration to a [`super::compact::CompactRecord`] ([`super::legacy`]), and
+//! only while its repository and worktree-record bindings still match. Its
+//! branch actions are rebuilt only where their bindings are recorded, never a
+//! remote one. `completed_phase` is a hint about where to look, never proof
+//! of what the paths or Git hold now.
 //!
 //! [`parse`] is strict: every field is required, `null` is never read as
 //! absent, unknown or repeated keys and trailing content are refused, and an

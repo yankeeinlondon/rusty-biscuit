@@ -1,7 +1,18 @@
 //! Durable state of a contention-aware removal, kept so that a stopped or
 //! crashed operation can be found, explained, and resumed.
 //!
-//! Each operation owns `<common-git-dir>/wt-removal/<operation-id>/`:
+//! Each operation owns `<common-git-dir>/wt-removal/<operation-id>/`.
+//!
+//! A confirmed removal saves only a compact `record.json`
+//! ([`compact::CompactRecord`], `record_version` 2) before its first unlock,
+//! move, or deletion; the record is the approval a later run finishes from,
+//! and a finished operation's directory is deleted
+//! ([`store::PendingRemoval`]). An operation an earlier `wt` saved (the
+//! layout below, `record_version` 1) is migrated to a compact record when it
+//! is resumed ([`legacy`]), and its journals and report are then deleted
+//! unread.
+//!
+//! The legacy layout, still written by the journal-based lifecycle:
 //!
 //! | File | Written | Kept after completion |
 //! | --- | --- | --- |
@@ -50,7 +61,9 @@
 //!   metadata. Std's rename replaces an existing file there as on Unix, which
 //!   every replacement above relies on; each replaced file is closed first.
 
+pub mod compact;
 pub mod journal;
+pub mod legacy;
 pub mod lock;
 pub mod record;
 pub mod space;

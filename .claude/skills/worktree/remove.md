@@ -499,10 +499,26 @@ recovery record between the two calls ([lifecycle.md](lifecycle.md)).
   line ending are kept, so Git's own spelling (`C:/…` on Windows) survives.
   A record that does not end in `<sep><name><sep>.git` refuses. The file is
   replaced by temp + rename and keeps its permissions (not the store's 0600).
-- **The `.git` file is never touched.** It must be absolute, or relative with
-  only leading `..` steps; `../x/../…` resolves through the checkout's own
-  name and breaks after the move, so it refuses. Lexical comparison would
-  accept it — do not "simplify" to that.
+- **The `.git` file is kept unless its link breaks after the move (R8).**
+  Absolute, or relative with only leading `..` steps, survives. `../x/../…`
+  resolves *physically* through the checkout's own name and breaks after the
+  move (lexical comparison would accept it — do not "simplify" to that), so
+  `plan_move` plans `gitdir: <absolute admin dir>` (original line ending,
+  `/` separators on Windows) and `move_with` replaces `<quarantine>/.git`
+  atomically (`replace_file`) after the rename; rollback restores the
+  original bytes *before* moving back. A link that resolves to this
+  worktree's record but cannot be written absolutely refuses
+  `MoveRefusal::LinkNotMovable`; one naming another record stays `Changed`.
+- **Moved or in place: `quarantine::placement::place(base, &plan, mounts,
+  activity_observed)`.** Not yet called by the lifecycle (Phase 5 of
+  `2026-10-22-confirmed-remove-always-deletes`). A mount strictly inside the
+  checkout → `InPlace(NestedMounts)` without trying the rename;
+  `RenameFailure::{Unsupported, Sharing}` → `InPlace` (drvfs, a Windows
+  holder), checkout untouched; `LinkNotMovable` → `InPlace` (callers apply
+  `in_place_for_refusal` to `plan_move`'s error too, since no plan exists
+  then). Every other failure stays an error. Never fall back to a
+  check-then-`std::fs::rename`. Tests inject the rename's OS error with
+  `Faults::rename_instead`.
 - **Refusals match Git's `validate_no_submodules`:** an admin `modules`
   entry, or a `160000` gitlink in the worktree's index (read with
   `GIT_INDEX_FILE`, from the base). Any entry named `locked` in the admin

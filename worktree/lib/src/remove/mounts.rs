@@ -2,9 +2,20 @@
 //! across. A mount is found by its mount point in the platform's mount
 //! table, never by comparing device IDs: a Linux bind mount of a directory
 //! on the same filesystem has the same device as its parent.
+//!
+//! [`NativeMounts`] reads the host's table; tests inject a fixed one.
 
 use std::io;
 use std::path::{Path, PathBuf};
+
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(any(target_os = "linux", test))]
+mod mountinfo;
+#[cfg(windows)]
+mod windows;
 
 /// One entry of the mount table.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,13 +29,42 @@ pub struct Mount {
 /// Where the mount table comes from. Tests inject one, including
 /// same-device bind mounts, so no test needs privileges to mount.
 pub trait MountInfo: Sync {
-    /// The mount table, with mount points spelled as the caller spells the
-    /// checkout path it compares them with.
+    /// The mount table. A native table spells mount points as the OS's real
+    /// paths (on macOS `/var/folders/...` is `/private/var/folders/...`), so
+    /// the caller resolves the checkout path the same way, for example with
+    /// `biscuit_file::canonicalize_simplified`, before comparing.
     ///
     /// ## Errors
     ///
     /// The table could not be read.
     fn mounts(&self) -> io::Result<Vec<Mount>>;
+}
+
+/// The host's mount table, read without mounting, unmounting, or elevating:
+/// `/proc/self/mountinfo` on Linux (which lists same-device bind mounts),
+/// `getfsstat` on macOS, and every volume's mount points on Windows, with
+/// the volume GUID name as the source.
+///
+/// ## Errors
+///
+/// The table could not be read, a Linux mountinfo line is malformed (failing
+/// rather than skipping it, which could hide a mount), or the platform has
+/// no reader ([`io::ErrorKind::Unsupported`] on Unix other than Linux and
+/// macOS).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NativeMounts;
+
+impl MountInfo for NativeMounts {
+    fn mounts(&self) -> io::Result<Vec<Mount>> {
+        #[cfg(target_os = "linux")]
+        return linux::mounts();
+        #[cfg(target_os = "macos")]
+        return macos::mounts();
+        #[cfg(windows)]
+        return windows::mounts();
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+        return Err(io::Error::new(io::ErrorKind::Unsupported, "no mount table reader for this platform"));
+    }
 }
 
 /// The mounts strictly inside `root`, outermost first. A mount at `root`
@@ -74,5 +114,30 @@ mod tests {
         let table = table.mounts().unwrap();
 
         assert_eq!(mounts_within(&table, &root), [&mount(&bound, "/dev/sda1")]);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn the_native_table_contains_the_root_filesystem() {
+        let table = NativeMounts.mounts().unwrap();
+
+        assert!(table.iter().any(|mount| mount.mount_point == Path::new("/")), "{table:?}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_native_table_contains_the_system_drive_root() {
+        let drive_root = format!("{}\\", std::env::var("SystemDrive").unwrap());
+
+        let table = NativeMounts.mounts().unwrap();
+
+        assert!(table.iter().any(|mount| mount.mount_point.as_os_str().to_string_lossy().eq_ignore_ascii_case(&drive_root)), "{table:?}");
+        assert!(table.iter().all(|mount| mount.source.starts_with("\\\\?\\Volume{")), "{table:?}");
+    }
+
+    #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+    #[test]
+    fn the_native_table_is_unsupported_on_other_unix() {
+        assert_eq!(NativeMounts.mounts().unwrap_err().kind(), io::ErrorKind::Unsupported);
     }
 }

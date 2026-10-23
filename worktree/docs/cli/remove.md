@@ -202,7 +202,12 @@ A checkout that exists is never deleted in place. After the report, the
 questions, and the [usage check](#background-programs-writing-into-the-worktree),
 `wt remove` moves it to a unique hidden sibling on the same filesystem
 (`.wt-remove-<name>-<token>`, beside the original), deletes it there while
-watching both paths, and only then unregisters it and runs the branch steps:
+watching both paths, and only then unregisters it and runs the branch steps.
+A checkout whose `.git` file uses a relative link that would break after the
+move (anything other than leading `..` steps, for example
+`gitdir: ../x/../../repo/.git/worktrees/x`) is moved too: its `.git` file is
+rewritten to name Git's record by its absolute path, and restored if the move
+is undone. Nothing is asked or shown for this.
 
 ```mermaid
 flowchart LR
@@ -601,8 +606,6 @@ These checkouts are refused before anything changes:
   mount, or an unsupported reparse point, exits 3.
 - A locked worktree (`git worktree lock`) exits 3. `wt` never unlocks it; run
   `git worktree unlock <path>` yourself if the lock is stale.
-- A checkout whose `.git` file uses a relative link that would break after
-  the move (anything other than leading `..` steps) exits 3.
 - A checkout that can no longer be identified when usage is checked (it
   vanished, or its path is no longer a directory) exits 3; run the command
   again.

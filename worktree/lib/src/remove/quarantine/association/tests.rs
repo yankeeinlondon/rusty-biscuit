@@ -202,18 +202,86 @@ fn unsupported_shapes_refuse_before_anything_moves() {
     let refused = plan_move(&repo.path(), &main, &OperationId::generate().unwrap());
     assert!(matches!(&refused, Err(MoveRefusal::Unsupported(why)) if why.contains("main checkout")), "{refused:?}");
 
-    // Git reads this link, but from a sibling `../bent/..` would not exist.
-    let target = repo.add_worktree("feat/bent", "bent", "main");
-    fs::write(target.join(".git"), "gitdir: ../bent/../../repo/.git/worktrees/bent\n").unwrap();
-    repo.git_in(&target, &["rev-parse", "--git-dir"]);
-    let refused = plan(&repo, &target);
-    assert!(matches!(&refused, Err(MoveRefusal::Unsupported(why)) if why.contains("relative link")), "{refused:?}");
-
-    // A relative link with only leading `..` survives the move.
-    fs::write(target.join(".git"), "gitdir: ../../repo/.git/worktrees/bent\n").unwrap();
+    // A relative link with only leading `..` survives the move unchanged.
+    let target = repo.add_worktree("feat/lead", "lead", "main");
+    let link = b"gitdir: ../../repo/.git/worktrees/lead\n";
+    fs::write(target.join(".git"), link).unwrap();
     let plan = plan(&repo, &target).unwrap();
     move_to_quarantine(&repo.path(), &plan, &quiet).unwrap();
     repo.git_in(&plan.quarantine, &["status", "--porcelain"]);
+    assert_eq!(fs::read(plan.quarantine.join(".git")).unwrap(), link);
+}
+
+/// Git reads `../bent/..` through the checkout's own name, which is gone
+/// after the rename; the move replaces the link with an absolute one (R8).
+#[test]
+fn a_link_through_the_checkout_is_rewritten_for_the_move() {
+    let repo = TestRepo::new();
+    let target = repo.add_worktree("feat/bent", "bent", "main");
+    fs::write(target.join(".git"), "gitdir: ../bent/../../repo/.git/worktrees/bent\r\n").unwrap();
+    fs::write(target.join("scratch.txt"), "untracked\n").unwrap();
+    let admin = admin_dir(&repo, &target);
+    let plan = plan(&repo, &target).unwrap();
+
+    move_to_quarantine(&repo.path(), &plan, &quiet).unwrap();
+
+    let link = fs::read_to_string(plan.quarantine.join(".git")).unwrap();
+    let named = link.strip_prefix("gitdir: ").and_then(|rest| rest.strip_suffix("\r\n")).expect(&link);
+    assert!(Path::new(named).is_absolute() && same_location(Path::new(named), &admin), "{link:?}");
+    assert!(same_location(&read_back_reference(&admin).unwrap(), &plan.quarantine.join(".git")));
+    let now = listed_at(&repo, &plan.quarantine);
+    assert_eq!((now.len(), now[0].branch.as_deref(), now[0].prunable.as_deref()), (1, Some("feat/bent"), None));
+    assert!(listed_at(&repo, &target).is_empty());
+    assert_eq!(repo.git_in(&plan.quarantine, &["status", "--porcelain"]), "?? scratch.txt");
+    let verified = verify_quarantined(&repo.path(), &plan.quarantine, &plan.identity, &admin);
+    assert!(verified.is_ok(), "resume accepts the rewritten link: {verified:?}");
+}
+
+/// The rollback puts the original link back before the checkout returns.
+#[test]
+fn a_rewritten_link_is_restored_when_the_move_is_rolled_back() {
+    let repo = TestRepo::new();
+    let target = repo.add_worktree("feat/bent", "bent", "main");
+    fs::write(target.join(".git"), "gitdir: ../bent/../../repo/.git/worktrees/bent\n").unwrap();
+    let plan = plan(&repo, &target).unwrap();
+    let before = git_state(&repo, &target);
+
+    let faults = Faults { fail_write: true, ..Faults::default() };
+    let error = move_with(&repo.path(), &plan, &quiet, &faults).unwrap_err();
+
+    assert!(matches!(&error, MoveError::RolledBack { cause: AssociationFailure::Write(_) }), "{error:?}");
+    assert_untouched(&repo, &plan, &before);
+    let leftovers: Vec<_> = fs::read_dir(&target).unwrap().map(|entry| entry.unwrap().file_name()).filter(|name| name.to_string_lossy().ends_with(".tmp")).collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}
+
+/// A link through the checkout that names another worktree's record is a
+/// refusal, never a rewrite.
+#[test]
+fn a_link_through_the_checkout_to_another_record_refuses() {
+    let repo = TestRepo::new();
+    repo.add_worktree("feat/other", "other", "main");
+    let target = repo.add_worktree("feat/bent", "bent", "main");
+    fs::write(target.join(".git"), "gitdir: ../bent/../../repo/.git/worktrees/other\n").unwrap();
+    let before = git_state(&repo, &target);
+
+    let refused = plan(&repo, &target);
+
+    assert!(matches!(&refused, Err(MoveRefusal::Changed(why)) if why.contains("other")), "{refused:?}");
+    assert_eq!(git_state(&repo, &target), before);
+}
+
+#[test]
+fn the_link_rewrite_names_the_record_absolutely() {
+    let admin = std::env::temp_dir().join("repo").join(".git").join("worktrees").join("x");
+    let spelled = admin.to_str().unwrap().replace('\\', "/");
+    for ending in [&b"\n"[..], b"\r\n", b""] {
+        let mut expected = format!("gitdir: {spelled}").into_bytes();
+        expected.extend_from_slice(ending);
+        assert_eq!(absolute_link(&admin, ending), Some(expected));
+    }
+    assert_eq!(absolute_link(Path::new("repo/.git/worktrees/x"), b"\n"), None, "relative");
+    assert_eq!(absolute_link(&admin.join("a\nb"), b"\n"), None, "not one line");
 }
 
 #[test]
