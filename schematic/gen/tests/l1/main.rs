@@ -9,6 +9,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod api_inventory;
 mod artifact_drift;
 mod asyncapi_import;
 mod definition_baseline;
@@ -17,6 +18,7 @@ mod discriminated_unions;
 mod e2e_generation;
 mod endpoint_auth_output;
 mod extension_reimport;
+mod extension_round_trip;
 mod fixed_header_export;
 mod fresh_output_compile;
 mod http_client;

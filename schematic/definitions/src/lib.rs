@@ -206,10 +206,10 @@ pub use unfolded_circle::{
 use indexmap::IndexMap;
 use schematic_define::RestApi;
 
-/// Returns all RestApi definitions grouped by resolved module name.
+/// Returns all shipped REST API definitions grouped by registered module.
 ///
-/// APIs are grouped by their `module_path` field if set, otherwise by their
-/// lowercased name. This enables grouped export for APIs that share a module.
+/// APIs that share a generated module (a module group) share one entry, in
+/// catalog order. Derived from [`registry::registrations`].
 ///
 /// ## Examples
 ///
@@ -223,26 +223,11 @@ use schematic_define::RestApi;
 /// assert_eq!(grouped["emqx"].len(), 2);
 /// ```
 pub fn apis_by_module() -> IndexMap<String, Vec<RestApi>> {
-    let all_apis = all_apis();
-
-    let mut grouped: IndexMap<String, Vec<RestApi>> = IndexMap::new();
-
-    for api in all_apis {
-        let module_name = api
-            .module_path
-            .as_deref()
-            .unwrap_or(&api.name.to_lowercase())
-            .to_string();
-
-        grouped.entry(module_name).or_default().push(api);
-    }
-
-    grouped
+    registry::group_by_module(registry::registrations())
 }
 
 /// All shipped REST APIs in catalog order, each assembled with its module
-/// group's schema components.
+/// group's schema components. Derived from [`registry::registrations`].
 pub fn all_apis() -> Vec<RestApi> {
-    registry::MODULES.iter().flat_map(|assemble|
-        assemble().expect("valid shipped module group")).collect()
+    registry::rest_apis(registry::registrations())
 }

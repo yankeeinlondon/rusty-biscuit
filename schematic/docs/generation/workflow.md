@@ -36,6 +36,52 @@ WebSocket clients also cover ElevenLabs TTS, Samsung Smart TV remote control,
 and Unfolded Circle Core, Dock, and Integration APIs. Their definition types
 remain separate from REST builders.
 
+## Register an API
+
+Every shipped API, REST or WebSocket, is one entry in
+`schematic_definitions::registry::registrations()`
+(`schematic/definitions/src/registry/inventory.rs`). Adding an API is that one
+entry; every list of APIs is derived from it:
+
+```rust
+// A REST API: its selection key, its generated module, the definitions
+// module, and its index in the module group that builds it.
+rest("OllamaOpenAI", "ollama-openai", "ollama", "ollama", ollama::module_group, 1),
+// A WebSocket API: its generated module, the definitions module, its
+// constructor, and a one-line summary for the generated docs.
+websocket("ElevenLabsTTS", "elevenlabs_ws", "elevenlabs",
+    elevenlabs::define_elevenlabs_websocket_api, "define_elevenlabs_websocket_api",
+    "ElevenLabs Text-to-Speech WebSocket API definition"),
+```
+
+```mermaid
+flowchart LR
+    inv["registrations()"] --> rest["REST entries"]
+    inv --> ws["WebSocket entries"]
+    rest --> sel["--api names, help text,<br/>resolve_api"]
+    rest --> all["all_apis(), apis_by_module(),<br/>registry_key_for"]
+    all --> outputs["Rust client, OpenAPI,<br/>Postman"]
+    all --> gate["strict-completeness gate<br/>and per-API tests"]
+    ws --> pkg["WebSocket modules,<br/>lib.rs and prelude.rs entries,<br/>reserved module names"]
+```
+
+- **Order.** Entries are in catalog order, and every derived list keeps it:
+  `--api` help, `lib.rs`, `prelude.rs`, and `apis_by_module()`.
+- **Module groups.** REST APIs that share a generated module name the same
+  `module_group` function and their index in what it returns. A group member
+  without an entry, or an entry with the wrong index, panics the first time the
+  registry is built, so a new member cannot be skipped silently.
+- **Protocol.** A consumer that handles one protocol filters for it. WebSocket
+  entries have no `--api` key; every Rust generation run packages them.
+- **Tests.** A test that must cover every API derives its list from the
+  inventory. A test that pins expected per-API values (for example
+  `definitions/tests/api_policy.rs`) compares its table with the inventory, so
+  a new API fails there until its row is added.
+- **Fixtures.** Consumers that tests drive with a local inventory take the
+  registrations as an argument (`resolve_api_in`, `available_apis_in`,
+  `RustOutputRequest::registrations`, `validate_rust_client_in`), so a test
+  never edits the shipped list.
+
 ## Generate artifacts
 
 ```sh

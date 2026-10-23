@@ -11,6 +11,9 @@
 //!    has a dangling reference, and writes nothing.
 //! 3. Every shipped API resolves every reference, and every module's grouped
 //!    document carries exactly its members' components.
+//! 4. The gate covers every registered REST API: its covered set derives
+//!    from the registration inventory, and a deliberate skip is a named,
+//!    reasoned entry in [`STRICT_GATE_SKIPS`].
 
 use std::collections::BTreeSet;
 
@@ -23,6 +26,21 @@ use schematic_gen::diagnostics::Feature;
 use schematic_gen::errors::GeneratorError;
 use schematic_gen::export::openapi::{build_openapi_grouped, write_openapi_grouped};
 use schematic_gen::validation::validate_openapi;
+use schematic_definitions::registry::{ApiRegistration, registrations, rest_apis};
+
+/// REST APIs deliberately left out of the strict gate, as `(API name,
+/// reason)`. This is the only place a skip may be declared; it is empty
+/// because every registered API passes.
+const STRICT_GATE_SKIPS: &[(&str, &str)] = &[];
+
+/// The APIs the strict gate checks: every REST API of `registrations` not
+/// named in [`STRICT_GATE_SKIPS`].
+fn strict_gate_apis(registrations: &[ApiRegistration]) -> Vec<RestApi> {
+    rest_apis(registrations)
+        .into_iter()
+        .filter(|api| !STRICT_GATE_SKIPS.iter().any(|(name, _)| *name == api.name))
+        .collect()
+}
 
 /// Builds a tiny `RestApi`, carrying no components, whose single endpoint
 /// references the supplied JSON response type by name.
@@ -138,7 +156,7 @@ fn real_apis_still_pass_strict_completeness() {
     // Every API exposed by the generator resolves every reference in its own
     // components. If this fails, the generator cannot emit OpenAPI for that
     // API and a human needs to fix its registrations before merging.
-    for api in schematic_definitions::all_apis() {
+    for api in strict_gate_apis(registrations()) {
         api.validate_references()
             .unwrap_or_else(|error| panic!("{}: {error}", api.name));
         let diagnostics: Vec<_> = validate_openapi(&[&api])
@@ -168,4 +186,25 @@ fn real_module_documents_carry_exactly_their_components() {
             .collect();
         assert_eq!(exported, carried, "module {module_name:?}");
     }
+}
+
+#[test]
+fn the_strict_gate_covers_every_registered_api() {
+    let shipped: BTreeSet<String> =
+        schematic_definitions::apis_by_module().into_values().flatten().map(|api| api.name).collect();
+    let covered: BTreeSet<String> = strict_gate_apis(registrations()).into_iter().map(|api| api.name).collect();
+    let skipped: BTreeSet<String> = STRICT_GATE_SKIPS.iter().map(|(name, _)| (*name).to_owned()).collect();
+    for (name, reason) in STRICT_GATE_SKIPS {
+        assert!(shipped.contains(*name), "skip `{name}` names no registered API");
+        assert!(!reason.trim().is_empty(), "skip `{name}` gives no reason");
+    }
+    assert_eq!(&covered | &skipped, shipped, "the gate's covered set plus its named skips must be exactly apis_by_module()");
+    assert!(covered.is_disjoint(&skipped));
+}
+
+#[test]
+fn a_fixture_registration_joins_the_strict_gate() {
+    let covered: Vec<String> =
+        strict_gate_apis(&crate::api_inventory::fixture_inventory()).into_iter().map(|api| api.name).collect();
+    assert_eq!(covered, ["FixtureOne", "FixtureTwo"]);
 }

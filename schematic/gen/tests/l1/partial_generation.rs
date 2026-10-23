@@ -68,6 +68,7 @@ fn prepare(
 ) -> Result<RustOutputPlan, GeneratorError> {
     prepare_rust_output(&RustOutputRequest {
         registry,
+        registrations: schematic_definitions::registry::registrations(),
         selection,
         output_dir: root,
         manifest_dir: None,
@@ -556,6 +557,7 @@ fn unowned_manifest_is_never_overwritten() {
 
     let err = prepare_rust_output(&RustOutputRequest {
         registry: &registry,
+        registrations: schematic_definitions::registry::registrations(),
         selection: Selection::All,
         output_dir: &crate_dir.join("src"),
         manifest_dir: Some(&crate_dir),

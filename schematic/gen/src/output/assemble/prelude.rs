@@ -5,15 +5,14 @@ use quote::{format_ident, quote};
 use schematic_define::RestApi;
 
 use super::helpers::get_module_path;
-use crate::output::ws_modules::ws_definition_modules;
+use schematic_definitions::registry::ApiRegistration;
 
-/// Assembles the prelude.rs content for the schema crate.
-pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
-    assemble_prelude_with_options(apis, true)
-}
+use crate::output::ws_modules::{ws_helper_name, ws_registrations};
 
-/// Assembles prelude.rs with optional WebSocket definition helper exports.
-pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool) -> TokenStream {
+/// Assembles the prelude.rs content for the schema crate, exporting the
+/// `define_api` helper of every WebSocket entry in `registrations` (none for
+/// an empty slice).
+pub fn assemble_prelude(apis: &[&RestApi], registrations: &[ApiRegistration]) -> TokenStream {
     let api_reexports: Vec<_> = apis
         .iter()
         .map(|api| {
@@ -25,20 +24,15 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
             }
         })
         .collect();
-    let ws_reexports: Vec<_> = if include_ws_helpers {
-        ws_definition_modules()
-            .iter()
-            .map(|ws| {
-                let module_name = format_ident!("{}", ws.module);
-                let helper_name = format_ident!("{}", ws.helper);
-                quote! {
-                    pub use crate::#module_name::define_api as #helper_name;
-                }
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let ws_reexports: Vec<_> = ws_registrations(registrations)
+        .map(|(entry, _)| {
+            let module_name = format_ident!("{}", entry.module);
+            let helper_name = format_ident!("{}", ws_helper_name(entry.module));
+            quote! {
+                pub use crate::#module_name::define_api as #helper_name;
+            }
+        })
+        .collect();
 
     let client_list: Vec<String> = apis
         .iter()
@@ -46,17 +40,12 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
         .collect();
     let client_list_str = client_list.join("\n");
     let client_list_tokens: TokenStream = client_list_str.parse().unwrap_or_default();
-    let ws_helper_list_tokens: TokenStream = if include_ws_helpers {
-        ws_definition_modules()
-            .iter()
-            .map(|ws| format!("//! - [`{}`] ({})", ws.helper, ws.display_name))
-            .collect::<Vec<_>>()
-            .join("\n")
-            .parse()
-            .unwrap_or_default()
-    } else {
-        TokenStream::new()
-    };
+    let ws_helper_list_tokens: TokenStream = ws_registrations(registrations)
+        .map(|(entry, _)| format!("//! - [`{}`] ({})", ws_helper_name(entry.module), entry.name))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .parse()
+        .unwrap_or_default();
 
     quote! {
         //! Convenient re-exports for working with generated API clients.

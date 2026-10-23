@@ -166,7 +166,9 @@ definitions/src/
 4. Set `module_path` if API name differs from module name
 5. Add types with `#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]`
    and a `Registration` impl (`definition_type!` or the nominal macro)
-6. Export from `lib.rs` and `prelude.rs`, and add the API's row to
+6. Export from `lib.rs` and `prelude.rs`, register the API with one entry in
+   `registry/inventory.rs` (`rest(..)` or `websocket(..)`; every API list,
+   `--api` name, and output derives from it), and add the API's row to
    `definitions/tests/api_policy.rs` (and `pagination_coverage/` for lists)
 7. Run verification:
    ```bash

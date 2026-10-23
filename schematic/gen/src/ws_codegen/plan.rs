@@ -1926,20 +1926,10 @@ mod tests {
 
     #[test]
     fn lower_all_known_ws_apis() {
-        // Verify lowering works for all currently defined WS APIs
-        use schematic_definitions::{
-            define_elevenlabs_websocket_api, define_samsung_smart_tv_remote_ws_api,
-            define_unfolded_circle_core_ws_api, define_unfolded_circle_dock_ws_api,
-            define_unfolded_circle_integration_ws_api,
-        };
+        // Verify lowering works for every registered WS API
+        use schematic_definitions::registry::{registrations, websocket_apis};
 
-        let apis = vec![
-            define_elevenlabs_websocket_api(),
-            define_unfolded_circle_core_ws_api(),
-            define_unfolded_circle_dock_ws_api(),
-            define_unfolded_circle_integration_ws_api(),
-            define_samsung_smart_tv_remote_ws_api(),
-        ];
+        let apis = websocket_apis(registrations());
 
         for api in &apis {
             let plan = lower_to_plan(api).unwrap();

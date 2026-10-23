@@ -48,7 +48,7 @@ schematic-gen import --input api.yaml --output generated/src --strict
 | `--module-path` | Override module path for generated code |
 | `--output` | Output directory for generated code |
 | `--dry-run` | Print generated code without writing files |
-| `--strict` | Fail on any warning-level diagnostic |
+| `--strict` | Fail on any WARN or ERROR diagnostic (INFO never fails) |
 
 ### What Gets Generated
 
@@ -356,6 +356,7 @@ generate_and_write_all(&apis, output_dir, dry_run)?;
 use schematic_gen::output::{RustOutputRequest, Selection, prepare_rust_output};
 let prepared = prepare_rust_output(&RustOutputRequest {
     registry: &all_apis,                 // every API, registry order
+    registrations: registrations(),      // WebSocket modules to package
     selection: Selection::Apis(&[&api]), // or Selection::All
     output_dir,
     manifest_dir: Some(schema_dir),      // writes Cargo.toml too

@@ -13,6 +13,10 @@ let api = &apis[0];
 assert!(api.validate_references().is_ok());
 ```
 
+Every shipped API is one entry in `registry::registrations()`, from which
+`all_apis()`, `apis_by_module()`, and the generator's API lists derive. See
+[Register an API](../docs/generation/workflow.md#register-an-api).
+
 ## Available APIs
 
 | API | Module | Definition Function | Endpoints | Description |

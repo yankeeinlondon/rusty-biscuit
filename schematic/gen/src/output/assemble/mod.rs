@@ -14,5 +14,5 @@ pub use api::{
 pub use helpers::{get_module_path, get_request_suffix};
 pub(crate) use helpers::definitions_module_path;
 pub use lib_rs::{assemble_lib_rs, assemble_lib_rs_with_options};
-pub use prelude::{assemble_prelude, assemble_prelude_with_options};
+pub use prelude::assemble_prelude;
 pub use shared::assemble_shared_module;

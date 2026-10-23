@@ -5,7 +5,7 @@
 
 use schematic_definitions::{
     define_elevenlabs_websocket_api, define_samsung_smart_tv_remote_ws_api,
-    define_unfolded_circle_core_ws_api, define_unfolded_circle_dock_ws_api,
+    define_unfolded_circle_core_ws_api,
     define_unfolded_circle_integration_ws_api,
 };
 use schematic_gen::ws_codegen::client::generate_ws_client_module;
@@ -14,29 +14,12 @@ use schematic_gen::ws_codegen::host::generate_ws_host_module;
 use schematic_gen::ws_codegen::plan::{EndpointRole, WsRuntimePlan, lower_to_plan};
 use schematic_gen::ws_codegen::shared::generate_ws_shared_module;
 
+/// Every registered WebSocket API, lowered.
 fn lower_all_apis() -> Vec<(&'static str, WsRuntimePlan)> {
-    vec![
-        (
-            "ElevenLabsTTS",
-            lower_to_plan(&define_elevenlabs_websocket_api()).unwrap(),
-        ),
-        (
-            "UnfoldedCircleCoreWs",
-            lower_to_plan(&define_unfolded_circle_core_ws_api()).unwrap(),
-        ),
-        (
-            "UnfoldedCircleDockWs",
-            lower_to_plan(&define_unfolded_circle_dock_ws_api()).unwrap(),
-        ),
-        (
-            "UnfoldedCircleIntegrationWs",
-            lower_to_plan(&define_unfolded_circle_integration_ws_api()).unwrap(),
-        ),
-        (
-            "SamsungSmartTvRemote",
-            lower_to_plan(&define_samsung_smart_tv_remote_ws_api()).unwrap(),
-        ),
-    ]
+    schematic_definitions::registry::registrations()
+        .iter()
+        .filter_map(|entry| entry.websocket().map(|ws| (entry.name, lower_to_plan(&(ws.define)()).unwrap())))
+        .collect()
 }
 
 // --- Plan lowering tests ---
@@ -509,7 +492,7 @@ fn a_declared_heartbeat_is_documented_on_the_client_without_a_warning() {
 /// writes it to `schematic/schema/src/<module>.rs`.
 fn shipped_module(module: &str) -> String {
     let file = format!("{module}.rs");
-    schematic_gen::output::ws_modules::generate_ws_definition_modules()
+    schematic_gen::output::ws_modules::generate_ws_definition_modules(schematic_definitions::registry::registrations())
         .expect("the shipped definitions generate")
         .into_iter()
         .find(|(name, _)| *name == file)
@@ -676,7 +659,7 @@ fn the_integration_handler_takes_and_returns_typed_messages() {
 #[test]
 fn every_shipped_client_sends_its_typed_enum_and_values_only_through_send_value() {
     let mut clients = 0;
-    for (module, source) in schematic_gen::output::ws_modules::generate_ws_definition_modules().expect("generates") {
+    for (module, source) in schematic_gen::output::ws_modules::generate_ws_definition_modules(schematic_definitions::registry::registrations()).expect("generates") {
         let file = parse(&source);
         let client_types: Vec<String> = file
             .items

@@ -25,9 +25,9 @@
 
 mod typed;
 pub use typed::assemble_module_group;
-mod lookup;
+mod inventory;
 
-pub use lookup::*;
+pub use inventory::*;
 
 /// Names of the registered (Rust-typed) components of `api`, in order.
 #[cfg(test)]
@@ -49,38 +49,6 @@ mod tests {
         let model = components.iter().find(|c| c.name == "Model").expect("Model component");
         let description = model.schema["description"].as_str();
         assert!(description.is_some_and(|d| d.contains("OpenAI model")), "got {description:?}");
-    }
-
-    #[test]
-    fn registry_key_for_covers_every_shipped_api() {
-        let table = [
-            ("Anthropic", "anthropic"),
-            ("ArtificialAnalysisData", "artificial-analysis-data"),
-            ("ArtificialAnalysisCritPt", "artificial-analysis-critpt"),
-            ("OpenAI", "openai"),
-            ("ElevenLabs", "elevenlabs"),
-            ("Gitea", "gitea"),
-            ("GitHub", "github"),
-            ("GitLab", "gitlab"),
-            ("HuggingFaceHub", "huggingface"),
-            ("LmStudio", "lmstudio"),
-            ("OllamaNative", "ollama-native"),
-            ("OllamaOpenAI", "ollama-openai"),
-            ("EmqxBasic", "emqx-basic"),
-            ("EmqxBearer", "emqx-bearer"),
-            ("Eversolo", "eversolo"),
-            ("SamsungSmartTv", "samsung-smart-tv"),
-            ("UnfoldedCircleCoreRest", "unfolded-circle-core-rest"),
-            ("Bitbucket", "bitbucket"),
-        ];
-        for (api_name, expected_key) in table {
-            assert_eq!(registry_key_for(api_name), expected_key, "registry_key_for({api_name:?})");
-        }
-        let mut shipped: Vec<String> = crate::all_apis().into_iter().map(|api| api.name).collect();
-        let mut listed: Vec<String> = table.iter().map(|(name, _)| (*name).to_owned()).collect();
-        shipped.sort();
-        listed.sort();
-        assert_eq!(shipped, listed, "every shipped API needs an explicit key");
     }
 
     #[test]

@@ -316,17 +316,8 @@ fn duplicate_keys_and_trailing_content_are_rejected() {
 
 #[test]
 fn every_shipped_definition_round_trips_twice_without_loss() {
-    use schematic_definitions::{
-        define_elevenlabs_websocket_api, define_samsung_smart_tv_remote_ws_api,
-        define_unfolded_circle_core_ws_api, define_unfolded_circle_integration_ws_api,
-    };
-    for api in [
-        define_elevenlabs_websocket_api(),
-        define_unfolded_circle_core_ws_api(),
-        define_unfolded_circle_dock_ws_api(),
-        define_unfolded_circle_integration_ws_api(),
-        define_samsung_smart_tv_remote_ws_api(),
-    ] {
+    use schematic_definitions::registry::{registrations, websocket_apis};
+    for api in websocket_apis(registrations()) {
         let first = serde_json::to_string(&api).unwrap();
         let restored: WebSocketApi = serde_json::from_str(&first).unwrap();
         let second = serde_json::to_string(&restored).unwrap();

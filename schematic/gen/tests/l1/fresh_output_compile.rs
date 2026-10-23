@@ -2422,6 +2422,7 @@ fn slow_real_apis_compile_offline() {
         api_refs.iter().copied().filter(|api| api.name == "OllamaNative").collect();
     let prepared = prepare_rust_output(&RustOutputRequest {
         registry: &api_refs,
+        registrations: schematic_definitions::registry::registrations(),
         selection: Selection::Apis(&ollama_native),
         output_dir: &fresh.src_dir,
         manifest_dir: None,

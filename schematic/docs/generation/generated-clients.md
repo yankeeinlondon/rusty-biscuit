@@ -124,7 +124,7 @@ See [`docs/generation/partial-generation.md`](../generation/partial-generation.m
 | `--module-path <PATH>` | Override module path for generated code |
 | `-o, --output <DIR>` | Output directory for generated code |
 | `--dry-run` | Print generated code without writing files |
-| `--strict` | Fail on any warning-level diagnostic |
+| `--strict` | Fail on any WARN or ERROR diagnostic; INFO never fails |
 | `-v, --verbose` | Increase verbosity level |
 
 ### Validation
@@ -296,10 +296,12 @@ deleted or overwritten.
 
 ### Available APIs
 
-The CLI supports these API names:
+The CLI accepts the selection key of every REST entry in the registration
+inventory, in catalog order, then `all` (see
+[Register an API](workflow.md#register-an-api)):
 
 ```
-anthropic, bitbucket, openai, elevenlabs, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, all
+anthropic, artificial-analysis-data, artificial-analysis-critpt, bitbucket, openai, elevenlabs, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, eversolo, samsung-smart-tv, unfolded-circle-core-rest, all
 ```
 
 ### Module Naming
@@ -1393,12 +1395,12 @@ Import produces diagnostics for potential issues:
 ```rust
 pub enum DiagnosticSeverity {
     Info,   // Informational messages
-    Warn,   // Non-blocking issues
-    Error,  // Blocking issues (fail in strict mode)
+    Warn,   // Approximated or ignored input (fails strict mode)
+    Error,  // Input that could not be imported (fails strict mode)
 }
 ```
 
-Use `--strict` to fail on warnings, or `-v` to print all diagnostics.
+Use `--strict` to fail on any WARN or ERROR, or `-v` to print all diagnostics.
 
 ## OpenAPI Export
 
@@ -1412,7 +1414,7 @@ schematic-gen generate --api openai --openapi-out specs/
 schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
 ```
 
-Exported specs include `x-schematic` extensions preserving Schematic-specific metadata (module path, request suffix, env mapping, per-endpoint schema references) for round-trip fidelity.
+Exported specs include `x-schematic` extensions carrying the Schematic metadata standard OpenAPI cannot (module path, request suffix, env mapping, auth details, success shapes, declared errors, and more). `import` reads them back, so an exported document re-imports as its definition apart from a few listed facts; see [OpenAPI extensions](../io/openapi-extensions.md#what-round-trips).
 
 APIs that share a generated Rust module are exported as one OpenAPI document
 using the module filename. For example, `OllamaNative` and `OllamaOpenAI`

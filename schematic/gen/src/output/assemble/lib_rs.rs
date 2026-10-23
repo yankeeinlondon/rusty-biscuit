@@ -8,10 +8,13 @@ use schematic_define::{AuthStrategy, RestApi, RestMethod};
 
 use super::helpers::get_module_path;
 use crate::output::options::OutputOptions;
-use crate::output::ws_modules::ws_definition_modules;
+use schematic_definitions::registry::ApiRegistration;
 
-/// Assembles the lib.rs content for the schema crate.
-pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
+use crate::output::ws_modules::ws_registrations;
+
+/// Assembles the lib.rs content for the schema crate, declaring and listing
+/// every WebSocket entry of `registrations` beside the REST `apis`.
+pub fn assemble_lib_rs(apis: &[&RestApi], registrations: &[ApiRegistration]) -> TokenStream {
     let mut seen_modules = HashSet::new();
     let mut module_decls: Vec<_> = apis
         .iter()
@@ -32,9 +35,9 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
             pub mod ws_shared;
         });
     }
-    for ws in ws_definition_modules() {
-        if seen_modules.insert(ws.module.to_string()) {
-            let module_name = format_ident!("{}", ws.module);
+    for (entry, _) in ws_registrations(registrations) {
+        if seen_modules.insert(entry.module.to_string()) {
+            let module_name = format_ident!("{}", entry.module);
             module_decls.push(quote! {
                 pub mod #module_name;
             });
@@ -58,12 +61,11 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
         })
         .collect();
     let api_table = api_rows.join("\n");
-    let ws_rows: Vec<String> = ws_definition_modules()
-        .iter()
-        .map(|ws| {
+    let ws_rows: Vec<String> = ws_registrations(registrations)
+        .map(|(entry, ws)| {
             format!(
                 "//! | [`{}`] | [`{}`]({}::define_api) | {} |",
-                ws.module, ws.display_name, ws.module, ws.description
+                entry.module, entry.name, entry.module, ws.summary
             )
         })
         .collect();

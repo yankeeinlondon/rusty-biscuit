@@ -1,8 +1,9 @@
 //! WebSocket definition module metadata and assembly.
 
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use schematic_define::WebSocketApi;
+use schematic_definitions::registry::{ApiRegistration, WebSocketRegistration, websocket_apis};
 
 use crate::diagnostics::{Feature, Output, ValidationDiagnostic};
 use crate::errors::GeneratorError;
@@ -10,125 +11,33 @@ use crate::ws_codegen::client::generate_ws_client_module;
 use crate::ws_codegen::host::generate_ws_host_module;
 use crate::ws_codegen::plan::{WsRuntimePlan, lower_to_plan};
 
-/// Metadata for generated WebSocket definition helper modules.
-pub struct WsDefinitionModule {
-    pub module: &'static str,
-    pub helper: &'static str,
-    pub display_name: &'static str,
-    pub description: &'static str,
+/// The WebSocket entries of `registrations`, in order.
+pub fn ws_registrations(
+    registrations: &[ApiRegistration],
+) -> impl Iterator<Item = (&ApiRegistration, &WebSocketRegistration)> {
+    registrations.iter().filter_map(|entry| entry.websocket().map(|ws| (entry, ws)))
 }
 
-const WS_DEFINITION_MODULES: &[WsDefinitionModule] = &[
-    WsDefinitionModule {
-        module: "elevenlabs_ws",
-        helper: "define_elevenlabs_ws_api_definition",
-        display_name: "ElevenLabsTTS",
-        description: "ElevenLabs Text-to-Speech WebSocket API definition",
-    },
-    WsDefinitionModule {
-        module: "unfolded_circle_core_ws",
-        helper: "define_unfolded_circle_core_ws_api_definition",
-        display_name: "UnfoldedCircleCoreWs",
-        description: "Unfolded Circle Core WebSocket API definition",
-    },
-    WsDefinitionModule {
-        module: "unfolded_circle_dock_ws",
-        helper: "define_unfolded_circle_dock_ws_api_definition",
-        display_name: "UnfoldedCircleDockWs",
-        description: "Unfolded Circle Dock WebSocket API definition",
-    },
-    WsDefinitionModule {
-        module: "unfolded_circle_integration_ws",
-        helper: "define_unfolded_circle_integration_ws_api_definition",
-        display_name: "UnfoldedCircleIntegrationWs",
-        description: "Unfolded Circle Integration WebSocket API definition",
-    },
-    WsDefinitionModule {
-        module: "samsung_smart_tv_remote_ws",
-        helper: "define_samsung_smart_tv_remote_ws_api_definition",
-        display_name: "SamsungSmartTvRemote",
-        description: "Samsung Smart TV Remote Control WebSocket API definition",
-    },
-];
-
-/// Returns the list of WS definition module specs for use in prelude/lib.rs generation.
-pub fn ws_definition_modules() -> &'static [WsDefinitionModule] {
-    WS_DEFINITION_MODULES
+/// The prelude name of a WebSocket module's `define_api` helper.
+pub fn ws_helper_name(module: &str) -> String {
+    format!("define_{module}_api_definition")
 }
 
-/// The definition function, re-export, and `define_api` tokens of one
-/// shipped WebSocket module; `None` for a module name not in
-/// [`WS_DEFINITION_MODULES`].
-type ShippedWsModule = (fn() -> WebSocketApi, TokenStream, TokenStream);
+/// The definition re-export and `define_api` tokens of one registered
+/// WebSocket module.
+fn ws_module_items(entry: &ApiRegistration, ws: &WebSocketRegistration) -> TokenStream {
+    let segments = entry.definitions_path.split("::").map(|segment| format_ident!("{}", segment));
+    let constructor = format_ident!("{}", ws.constructor);
+    let doc = format!(" Builds the {}.", ws.summary);
+    quote! {
+        pub use schematic_definitions::#(#segments)::*::*;
 
-fn shipped_ws_module(module: &str) -> Option<ShippedWsModule> {
-    Some(match module {
-        "elevenlabs_ws" => (
-            || schematic_definitions::define_elevenlabs_websocket_api(),
-            quote! { pub use schematic_definitions::elevenlabs::*; },
-            quote! {
-                /// Builds the ElevenLabs Text-to-Speech WebSocket API definition.
-                #[must_use]
-                pub fn define_api() -> schematic_define::websocket::WebSocketApi {
-                    schematic_definitions::define_elevenlabs_websocket_api()
-                }
-            },
-        ),
-        "unfolded_circle_core_ws" => (
-            || schematic_definitions::define_unfolded_circle_core_ws_api(),
-            quote! { pub use schematic_definitions::unfolded_circle::core_ws::*; },
-            quote! {
-                /// Builds the Unfolded Circle Core WebSocket API definition.
-                #[must_use]
-                pub fn define_api() -> schematic_define::websocket::WebSocketApi {
-                    schematic_definitions::define_unfolded_circle_core_ws_api()
-                }
-            },
-        ),
-        "unfolded_circle_dock_ws" => (
-            || schematic_definitions::define_unfolded_circle_dock_ws_api(),
-            quote! { pub use schematic_definitions::unfolded_circle::dock_ws::*; },
-            quote! {
-                /// Builds the Unfolded Circle Dock WebSocket API definition.
-                #[must_use]
-                pub fn define_api() -> schematic_define::websocket::WebSocketApi {
-                    schematic_definitions::define_unfolded_circle_dock_ws_api()
-                }
-            },
-        ),
-        "unfolded_circle_integration_ws" => (
-            || schematic_definitions::define_unfolded_circle_integration_ws_api(),
-            quote! { pub use schematic_definitions::unfolded_circle::integration_ws::*; },
-            quote! {
-                /// Builds the Unfolded Circle Integration WebSocket API definition.
-                #[must_use]
-                pub fn define_api() -> schematic_define::websocket::WebSocketApi {
-                    schematic_definitions::define_unfolded_circle_integration_ws_api()
-                }
-            },
-        ),
-        "samsung_smart_tv_remote_ws" => (
-            || schematic_definitions::define_samsung_smart_tv_remote_ws_api(),
-            quote! { pub use schematic_definitions::samsung_smart_tv::remote_ws::*; },
-            quote! {
-                /// Builds the Samsung Smart TV Remote Control WebSocket API definition.
-                #[must_use]
-                pub fn define_api() -> schematic_define::websocket::WebSocketApi {
-                    schematic_definitions::define_samsung_smart_tv_remote_ws_api()
-                }
-            },
-        ),
-        _ => return None,
-    })
-}
-
-/// The shipped WebSocket API definitions, in [`WS_DEFINITION_MODULES`] order.
-pub fn shipped_ws_apis() -> Vec<WebSocketApi> {
-    WS_DEFINITION_MODULES
-        .iter()
-        .filter_map(|spec| shipped_ws_module(spec.module))
-        .map(|(define_fn, _, _)| define_fn())
-        .collect()
+        #[doc = #doc]
+        #[must_use]
+        pub fn define_api() -> schematic_define::websocket::WebSocketApi {
+            schematic_definitions::#constructor()
+        }
+    }
 }
 
 /// The findings of lowering WebSocket definitions for the Rust output.
@@ -167,10 +76,10 @@ pub fn validate_ws_apis(apis: &[WebSocketApi]) -> WsValidation {
     validation
 }
 
-/// [`validate_ws_apis`] over the shipped WebSocket definitions, which every
-/// Rust generation run writes.
-pub fn validate_ws_definition_modules() -> WsValidation {
-    validate_ws_apis(&shipped_ws_apis())
+/// [`validate_ws_apis`] over the WebSocket definitions of `registrations`,
+/// which every Rust generation run writes.
+pub fn validate_ws_definition_modules(registrations: &[ApiRegistration]) -> WsValidation {
+    validate_ws_apis(&websocket_apis(registrations))
 }
 
 /// Lowers `api`, turning a failure into the Rust output's validation error.
@@ -230,25 +139,21 @@ pub fn render_ws_api_module(api: &WebSocketApi) -> Result<String, GeneratorError
     Ok(super::format::format_code(&file))
 }
 
-/// Generate all WebSocket definition modules.
+/// Generate the WebSocket definition module of every WebSocket entry in
+/// `registrations`.
 ///
 /// ## Errors
 ///
-/// [`GeneratorError::Validation`] for [`Output::Rust`] naming every shipped
+/// [`GeneratorError::Validation`] for [`Output::Rust`] naming every
 /// definition's warnings and errors when any of them fails to lower; no
 /// module is dropped silently.
-pub fn generate_ws_definition_modules() -> Result<Vec<(String, String)>, GeneratorError> {
+pub fn generate_ws_definition_modules(
+    registrations: &[ApiRegistration],
+) -> Result<Vec<(String, String)>, GeneratorError> {
     let mut modules = Vec::new();
     let mut diagnostics = Vec::new();
-    for spec in WS_DEFINITION_MODULES {
-        let (define_fn, reexport_path, api_fn) = shipped_ws_module(spec.module)
-            .ok_or_else(|| {
-                GeneratorError::CodeGenError(format!(
-                    "WebSocket module `{}` has no definition function",
-                    spec.module
-                ))
-            })?;
-        let plan = match lower_for_rust(&define_fn()) {
+    for (entry, ws) in ws_registrations(registrations) {
+        let plan = match lower_for_rust(&(ws.define)()) {
             Ok(plan) => plan,
             Err(GeneratorError::Validation { diagnostics: found, .. }) => {
                 diagnostics.extend(found);
@@ -256,16 +161,9 @@ pub fn generate_ws_definition_modules() -> Result<Vec<(String, String)>, Generat
             }
             Err(other) => return Err(other),
         };
-        let tokens = ws_module_tokens(
-            &plan,
-            quote! {
-                #reexport_path
-
-                #api_fn
-            },
-        );
+        let tokens = ws_module_tokens(&plan, ws_module_items(entry, ws));
         let file = super::format::validate_code(&tokens)?;
-        modules.push((format!("{}.rs", spec.module), super::format::format_code(&file)));
+        modules.push((format!("{}.rs", entry.module), super::format::format_code(&file)));
     }
     if !diagnostics.is_empty() {
         return Err(GeneratorError::Validation {

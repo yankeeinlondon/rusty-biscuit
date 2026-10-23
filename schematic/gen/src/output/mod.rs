@@ -49,11 +49,12 @@ use std::path::{Path, PathBuf};
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
 use schematic_define::RestApi;
+use schematic_definitions::registry::{ApiRegistration, registrations};
 
 use crate::cargo_gen::generate_cargo_toml;
 use crate::diagnostics::Output;
 use crate::errors::GeneratorError;
-use crate::validation::{ensure_no_errors, validate_rust_client};
+use crate::validation::{ensure_no_errors, validate_rust_client_in};
 
 use inventory::{Occupant, Proof, list_entries, occupant};
 
@@ -68,7 +69,7 @@ pub mod ws_modules;
 pub use assemble::{
     SPLIT_THRESHOLD_LINES, SplitApiParts, assemble_api_code, assemble_api_module,
     assemble_api_module_with_options, assemble_combined_api_module, assemble_lib_rs,
-    assemble_lib_rs_with_options, assemble_prelude, assemble_prelude_with_options,
+    assemble_lib_rs_with_options, assemble_prelude,
     assemble_shared_module, assemble_split_api_module, assemble_split_combined_api_module,
     get_module_path, get_request_suffix,
 };
@@ -145,6 +146,11 @@ pub struct RustOutputRequest<'a> {
     /// Every API the generator knows, in registry order. `lib.rs` and
     /// `prelude.rs` list modules in this order.
     pub registry: &'a [&'a RestApi],
+    /// The registration inventory whose WebSocket entries the crate
+    /// packages: their modules, `lib.rs` and `prelude.rs` entries, and
+    /// reserved module names. Its REST entries are not read; REST APIs come
+    /// from `registry`.
+    pub registrations: &'a [ApiRegistration],
     /// What this run regenerates.
     pub selection: Selection<'a>,
     /// The crate's `src` directory.
@@ -197,6 +203,7 @@ pub fn generate_and_write_all(
 ) -> Result<String, GeneratorError> {
     let prepared = prepare_rust_output(&RustOutputRequest {
         registry: apis,
+        registrations: registrations(),
         selection: Selection::All,
         output_dir,
         manifest_dir: None,
@@ -240,11 +247,11 @@ pub fn prepare_rust_output(
     let groups = module_groups(request.registry);
     let selected = selected_groups(request.registry, request.selection)?;
     let regenerated_apis = expand_selection(request.registry, request.selection)?;
-    ensure_valid_rust_batch(&regenerated_apis)?;
+    ensure_valid_rust_batch(&regenerated_apis, request.registrations)?;
 
     let inventory = match request.selection {
         Selection::All => inventory::RustInventory::default(),
-        Selection::Apis(_) => inventory::read_rust_inventory(root, &groups, &selected)?,
+        Selection::Apis(_) => inventory::read_rust_inventory(root, &groups, &selected, request.registrations)?,
     };
     let retained = inventory.retained;
     let exported: BTreeSet<&str> = selected.iter().chain(&retained).map(String::as_str).collect();
@@ -255,12 +262,12 @@ pub fn prepare_rust_output(
         .filter(|api| exported.contains(get_module_path(api).as_str()))
         .collect();
 
-    let lib = render(&assemble_lib_rs(&crate_apis))?;
+    let lib = render(&assemble_lib_rs(&crate_apis, request.registrations))?;
     let shared = render(&assemble_shared_module())?;
-    let prelude = render(&assemble_prelude(&crate_apis))?;
+    let prelude = render(&assemble_prelude(&crate_apis, request.registrations))?;
     let generated = assemble_modules(&regenerated_apis)?;
     let (ws_shared_filename, ws_shared) = ws_modules::generate_ws_shared_module()?;
-    let ws_definition_modules = ws_modules::generate_ws_definition_modules()?;
+    let ws_definition_modules = ws_modules::generate_ws_definition_modules(request.registrations)?;
 
     inventory::shared_runtime_compatibility(
         root,
@@ -405,9 +412,10 @@ impl GeneratedModule {
 }
 
 /// Fails with [`GeneratorError::Validation`] when the batch cannot produce a
-/// valid Rust client, before anything is assembled or written.
-fn ensure_valid_rust_batch(apis: &[&RestApi]) -> Result<(), GeneratorError> {
-    ensure_no_errors(Output::Rust, validate_rust_client(apis))
+/// valid Rust client beside the WebSocket modules of `registrations`, before
+/// anything is assembled or written.
+fn ensure_valid_rust_batch(apis: &[&RestApi], registrations: &[ApiRegistration]) -> Result<(), GeneratorError> {
+    ensure_no_errors(Output::Rust, validate_rust_client_in(apis, registrations))
 }
 
 /// Remedy shown when a planned path holds content the generator did not write.
@@ -646,7 +654,7 @@ pub fn generate_and_write_standalone(
     has_types: bool,
 ) -> Result<String, GeneratorError> {
     let apis = [api];
-    ensure_valid_rust_batch(&apis)?;
+    ensure_valid_rust_batch(&apis, registrations())?;
     let options = OutputOptions {
         standalone: true,
         include_types_module: has_types,
@@ -654,7 +662,7 @@ pub fn generate_and_write_standalone(
 
     let lib = render(&assemble_lib_rs_with_options(&apis, &options))?;
     let shared = render(&assemble_shared_module())?;
-    let prelude = render(&assemble_prelude_with_options(&apis, false))?;
+    let prelude = render(&assemble_prelude(&apis, &[]))?;
     let api_formatted = render(&assemble_api_module_with_options(api, &options))?;
 
     // The import path writes the API as a single `{module}.rs` file; an owned
@@ -1152,7 +1160,7 @@ mod tests {
     fn assemble_lib_rs_deduplicates_modules() {
         let (api_a, api_b) = make_shared_module_apis();
         let apis: Vec<&RestApi> = vec![&api_a, &api_b];
-        let tokens = assemble_lib_rs(&apis);
+        let tokens = assemble_lib_rs(&apis, registrations());
         let code = tokens.to_string();
         let count = code.matches("pub mod foo").count();
         assert_eq!(
@@ -1344,7 +1352,7 @@ mod tests {
     fn prelude_exports_all_apis_in_shared_module() {
         let (api_a, api_b) = make_shared_module_apis();
         let apis: Vec<&RestApi> = vec![&api_a, &api_b];
-        let tokens = assemble_prelude(&apis);
+        let tokens = assemble_prelude(&apis, registrations());
         let file = validate_code(&tokens).unwrap();
         let code = format_code(&file);
         assert!(

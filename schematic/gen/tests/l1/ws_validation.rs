@@ -8,7 +8,7 @@ use schematic_define::{AuthStrategy, Schema};
 use schematic_gen::diagnostics::{Feature, Output, Severity, has_errors};
 use schematic_gen::errors::GeneratorError;
 use schematic_gen::output::ws_modules::{
-    generate_ws_definition_modules, render_ws_api_module, shipped_ws_apis, validate_ws_apis,
+    generate_ws_definition_modules, render_ws_api_module, validate_ws_apis,
     validate_ws_definition_modules,
 };
 use schematic_gen::ws_codegen::plan::lower_to_plan;
@@ -60,7 +60,7 @@ fn every_shipped_endpoint_composes_its_documented_url() {
     ];
 
     let mut composed = Vec::new();
-    for api in shipped_ws_apis() {
+    for api in schematic_definitions::registry::websocket_apis(schematic_definitions::registry::registrations()) {
         let plan = lower_to_plan(&api).expect("shipped definitions lower");
         for endpoint in &plan.endpoints {
             // The generated connect methods join `base_url` and the
@@ -85,7 +85,7 @@ fn every_shipped_endpoint_composes_its_documented_url() {
 
 #[test]
 fn shipped_definitions_report_no_warning_or_error() {
-    let validation = validate_ws_definition_modules();
+    let validation = validate_ws_definition_modules(schematic_definitions::registry::registrations());
     assert!(
         validation.diagnostics.is_empty(),
         "shipped WebSocket definitions must lower cleanly: {:#?}",
@@ -99,7 +99,7 @@ fn shipped_definitions_report_no_warning_or_error() {
 
 #[test]
 fn every_shipped_module_is_generated() {
-    let modules = generate_ws_definition_modules().expect("shipped modules generate");
+    let modules = generate_ws_definition_modules(schematic_definitions::registry::registrations()).expect("shipped modules generate");
     let names: Vec<&str> = modules.iter().map(|(name, _)| name.as_str()).collect();
     assert_eq!(
         names,

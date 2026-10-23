@@ -29,11 +29,14 @@ pub fn get_request_suffix(api: &RestApi) -> String {
         .unwrap_or_else(|| "Request".to_string())
 }
 
+/// The `schematic_definitions` module path of the registered REST module
+/// `flat_module_path`; an unregistered module is its own path.
 pub(crate) fn definitions_module_path(flat_module_path: &str) -> &str {
-    match flat_module_path {
-        "unfolded_circle_core_rest" => "unfolded_circle::core_rest",
-        _ => flat_module_path,
-    }
+    schematic_definitions::registry::registrations()
+        .iter()
+        .filter(|entry| entry.rest().is_some())
+        .find(|entry| entry.module == flat_module_path)
+        .map_or(flat_module_path, |entry| entry.definitions_path)
 }
 
 pub(crate) fn build_definitions_import(module_path: &str) -> TokenStream {

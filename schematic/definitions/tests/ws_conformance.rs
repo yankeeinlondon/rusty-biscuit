@@ -9,20 +9,10 @@ use schematic_define::websocket::{
     EndpointRole, MessageDirection, MessageSchema, WebSocketApi, WebSocketEndpoint,
 };
 use schematic_define::RestApi;
-use schematic_definitions::{
-    define_elevenlabs_websocket_api, define_samsung_smart_tv_remote_ws_api,
-    define_unfolded_circle_core_ws_api, define_unfolded_circle_dock_ws_api,
-    define_unfolded_circle_integration_ws_api,
-};
+use schematic_definitions::registry::{registrations, websocket_apis};
 
 fn shipped() -> Vec<WebSocketApi> {
-    vec![
-        define_elevenlabs_websocket_api(),
-        define_unfolded_circle_core_ws_api(),
-        define_unfolded_circle_dock_ws_api(),
-        define_unfolded_circle_integration_ws_api(),
-        define_samsung_smart_tv_remote_ws_api(),
-    ]
+    websocket_apis(registrations())
 }
 
 use MessageDirection::{Bidirectional as B, Client as C, Server as S};
