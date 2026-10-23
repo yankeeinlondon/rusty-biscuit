@@ -215,6 +215,12 @@ sequenceDiagram
   replacement connection, and commands still queued when a connection is lost
   are dropped rather than written to the next one.
 
+Declare a link only where the protocol carries the id both ways. The Dock's
+`auth` request and its `authentication` result carry none, so its `Auth`
+message has no `responds_with`; its exchange runs in the
+[setup callback](#setup-callbacks-for-challenge-flows) instead of as a
+request that could only time out.
+
 Generation rejects a link set on a server message, one naming no message of
 the endpoint or a client message, a link on an endpoint without hints, and a
 linked request named `Value`; hints or a `string` id type that nothing
@@ -269,10 +275,15 @@ flowchart LR
 ```rust,ignore
 use schematic_runtime::Credential;
 
+// Core declares a challenge flow, so its connect takes a setup callback
+// (see "Setup callbacks for challenge flows"); `authenticate` answers it.
 let api = UnfoldedCircleCoreWs::new().api_key("client-key");
-let core = api.connect_core_ws(WsClientOptions::default()).await?; // client-key
+let core = api.connect_core_ws_with_setup(WsClientOptions::default(), authenticate).await?; // client-key
 let other = api
-    .connect_core_ws(WsClientOptions::builder().credential(Credential::api_key("once")).build())
+    .connect_core_ws_with_setup(
+        WsClientOptions::builder().credential(Credential::api_key("once")).build(),
+        authenticate,
+    )
     .await?; // once
 assert_eq!(core.auth_method(), &schematic_runtime::AuthMethod::ClientLevel);
 ```
@@ -368,6 +379,27 @@ derives `Debug`. It implements `Serialize` where the endpoint sends that
 direction and has `decode` where it receives it, so a server payload of a
 client-only endpoint needs only `Deserialize`, and no payload needs `Clone`
 or `PartialEq`.
+
+A typed variant holds only what its payload type models, so model each
+payload on the protocol's recorded frames, including the fields it does not
+name. An envelope that carries its data as top-level fields rather than in a
+nested object keeps the rest in a flattened map; the Unfolded Circle Dock
+reply and event types do this:
+
+```rust,ignore
+#[derive(Serialize, Deserialize)]
+pub struct DockWsEventEnvelope {
+    #[serde(rename = "type")]
+    pub type_name: DockWsEnvelopeType,
+    pub msg: DockWsMessageName,
+    #[serde(flatten)]
+    pub data: serde_json::Map<String, serde_json::Value>, // `ir_code`, `format`, ...
+}
+```
+
+`{"type":"event","msg":"ir_receive","ir_code":"4;0x10;12;0"}` then decodes
+with `data["ir_code"]` intact. (`serde_json`'s `RawValue` cannot be
+flattened; use a map.)
 
 The `frame_format` decides the frame kind: `json_text` (the default) or
 `json_binary`. `raw_binary` and `mixed` are generation errors: the message
@@ -485,9 +517,11 @@ selected, a value the caller wrote is sent as given. A binding without an
 
 ### Setup callbacks for challenge flows
 
-An endpoint that declares `AuthFlowHints` also gets
-`connect_{endpoint}_with_setup`, taking an async callback that receives a
-typed `{Endpoint}Setup` session after the opening message:
+An endpoint that declares `AuthFlowHints` gets only
+`connect_{endpoint}_with_setup`, never a plain `connect_{endpoint}`: `Ready`
+promises that the challenge was answered, so no connect can reach it without
+a callback. The callback receives a typed `{Endpoint}Setup` session after the
+opening message:
 
 ```rust,ignore
 let core = api
@@ -505,6 +539,9 @@ let core = api
     .await?;
 ```
 
+- A caller that has already authenticated by other means passes an explicit
+  `|_| async { Ok(()) }`. The generator does not infer the exchange from the
+  hints; the callback performs it.
 - The callback runs on the initial connection and on every reconnect,
   before `Ready`. Frames it does not read are delivered as events afterwards.
 - `session.credential()` is the credential the handshake carried; its

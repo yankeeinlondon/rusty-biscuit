@@ -26,6 +26,13 @@
   endpoint's `CorrelationHints` (no API-level fallback). Correlation exists
   only with both; message names are never inspected. API
   `request_id_type` `String` → JSON-string ids, default `U64` → numbers.
+  Link only when request and answer both carry the id (Dock `auth` →
+  `authentication` carries none, so no link; it runs in setup).
+- **Payload types model the recorded frame.** A typed variant keeps only
+  what its type models: test decoding with unedited recorded frames and
+  assert payload content. Top-level data goes in a
+  `#[serde(flatten)] Map<String, Value>` (Dock `params`/`data`); `RawValue`
+  cannot be flattened.
 - **Challenge flows** are `AuthFlowHints`, never prose. Heartbeats are
   caller-managed `HeartbeatHints`, documented in the client rustdoc, no
   warning. Durations must be ≥ 1 s.
@@ -87,8 +94,9 @@ on a request named `Value`. Warnings: hints with no link, hints on a
 - Supervisor (`supervisor.rs` → `ws_shared::connect_session`, shared by every
   endpoint client): connect = ONE inline attempt (dial → opening write →
   setup) under `handshake_timeout`, then a spawned supervisor. `Ready` only
-  after setup. `AuthFlowHints` endpoints also get
-  `connect_{ep}_with_setup(.., setup: Fn({Ep}Setup) -> Fut)`;
+  after setup. `AuthFlowHints` endpoints get ONLY
+  `connect_{ep}_with_setup(.., setup: Fn({Ep}Setup) -> Fut)` (no plain
+  `connect_{ep}`; already-authenticated callers pass `|_| async { Ok(()) }`);
   `{Ep}Setup = WsSetupSession<ClientMsg, ServerMsg>` (slot + revocation
   watch; invalid after its attempt; `credential().expose_secret()`).
   `WsSetupError::Rejected` → `WsError::SetupRejected`, terminal; other →
