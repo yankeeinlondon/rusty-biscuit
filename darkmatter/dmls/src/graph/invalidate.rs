@@ -77,6 +77,9 @@ pub struct WorkspaceIndex {
     /// path references through.
     contexts: Arc<dyn DocumentContexts>,
     generation: u64,
+    /// `Some` between [`begin_batch`](Self::begin_batch) and
+    /// [`end_batch`](Self::end_batch): whether a rebuild was asked for.
+    batch: Option<bool>,
 }
 
 impl WorkspaceIndex {
@@ -105,7 +108,28 @@ impl WorkspaceIndex {
             wiki_roots: Vec::new(),
             contexts,
             generation: 0,
+            batch: None,
         }
+    }
+
+    /// Defers every rebuild until [`end_batch`](Self::end_batch), so a
+    /// notification of many changes rebuilds once. Inside a batch,
+    /// [`snapshot`](Self::snapshot) is the one before it.
+    pub fn begin_batch(&mut self) {
+        self.batch = Some(false);
+    }
+
+    /// Ends a batch, running the one rebuild it deferred, if any.
+    ///
+    /// ## Returns
+    ///
+    /// Whether the snapshot changed.
+    pub fn end_batch(&mut self) -> bool {
+        let rebuild = self.batch.take().unwrap_or(false);
+        if rebuild {
+            self.rebuild();
+        }
+        rebuild
     }
 
     /// Sets the wiki roots and rebuilds so already-indexed documents pick up
@@ -295,8 +319,10 @@ impl WorkspaceIndex {
     ///
     /// A parsed dependency is marked stale and re-read on its next need,
     /// keeping its parse and hash until then. A created Markdown file that is
-    /// not parsed rebuilds the snapshot, so a reference that failed to
-    /// resolve while it was absent now finds it. Any other path is ignored.
+    /// not parsed rebuilds the snapshot when a reference failed to resolve
+    /// to it (see [`WorkspaceGraph::awaits`]), so that reference now finds
+    /// it. Any other path is ignored, so files no link names (build output,
+    /// generated docs) cost nothing.
     ///
     /// ## Returns
     ///
@@ -306,7 +332,7 @@ impl WorkspaceIndex {
             self.stale.insert(path.to_path_buf());
             return false;
         }
-        if created && is_markdown_path(path) && !self.documents.contains_key(path) {
+        if created && is_markdown_path(path) && !self.documents.contains_key(path) && self.snapshot.awaits(path) {
             self.rebuild();
             return true;
         }
@@ -565,6 +591,10 @@ impl WorkspaceIndex {
     }
 
     fn rebuild(&mut self) {
+        if let Some(requested) = self.batch.as_mut() {
+            *requested = true;
+            return;
+        }
         self.generation += 1;
         let dependencies: BTreeSet<PathBuf> = self.dependencies().cloned().collect();
         // The universe is this index's own wiki candidates: the file list
@@ -870,6 +900,62 @@ mod tests {
         listed(&mut index, &[&source, &target]);
         assert!(!index.is_dependency(&target));
         assert!(!index.snapshot().document(index.snapshot().document_id(&target).unwrap()).unwrap().dependency);
+    }
+
+    /// Created Markdown nothing links to (build output, generated docs) never
+    /// rebuilds; creating a file a link is waiting for rebuilds once and
+    /// resolves it.
+    #[test]
+    fn test_only_an_awaited_unlisted_creation_rebuilds() {
+        let (_temp, root, contexts) = disk_workspace();
+        let (source, target) = (root.join("source.md"), root.join("target.md"));
+        std::fs::write(&source, "[a](target.md)\n").unwrap();
+        let mut index = WorkspaceIndex::new(contexts);
+        listed(&mut index, &[&source]);
+        index.open_buffer(&source, "[a](target.md)\n");
+        assert!(index.snapshot().awaits(&target), "the broken link waits for target.md");
+
+        let generated = root.join("target-dir/doc");
+        std::fs::create_dir_all(&generated).unwrap();
+        let generation = index.generation();
+        for n in 0..20 {
+            let path = generated.join(format!("gen{n}.md"));
+            std::fs::write(&path, "# generated\n").unwrap();
+            assert!(!index.unlisted_changed(&path, true), "nothing links to {path:?}");
+        }
+        assert_eq!(index.generation(), generation, "unreferenced creations never rebuild");
+
+        std::fs::write(&target, "# Target\n").unwrap();
+        assert!(index.unlisted_changed(&target, true));
+        assert_eq!(index.generation(), generation + 1);
+        assert!(!index.snapshot().awaits(&target), "the link now finds target.md");
+    }
+
+    /// A batch defers every rebuild its changes ask for to one at its end.
+    #[test]
+    fn test_a_batch_of_joined_files_rebuilds_once() {
+        let (_temp, root, contexts) = disk_workspace();
+        let paths: Vec<PathBuf> = ["a.md", "b.md", "c.md", "d.md"].iter().map(|name| root.join(name)).collect();
+        for path in &paths {
+            std::fs::write(path, "# Doc\n").unwrap();
+        }
+        let mut index = WorkspaceIndex::new(contexts);
+        listed(&mut index, &[&paths[0]]);
+        let generation = index.generation();
+
+        index.begin_batch();
+        for path in &paths[1..] {
+            assert!(index.disk_changed(path), "{path:?} joins the list");
+        }
+        assert_eq!(index.generation(), generation, "nothing rebuilt inside the batch");
+        assert!(index.end_batch());
+        assert_eq!(index.generation(), generation + 1, "one rebuild for the batch");
+        for path in &paths {
+            assert!(index.snapshot().document_id(path).is_some(), "{path:?} is a graph document");
+        }
+        index.begin_batch();
+        assert!(!index.end_batch(), "an empty batch rebuilds nothing");
+        assert_eq!(index.generation(), generation + 1);
     }
 
     #[test]
