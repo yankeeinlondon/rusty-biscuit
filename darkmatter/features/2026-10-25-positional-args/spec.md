@@ -49,12 +49,16 @@ When we map positional arguments into frontmatter properties the schemas activat
         - explicitly given a TYPE
         - the TYPE is unmistakeably distinguishable from the variadic parameter that preceded it
 
-        ```yaml
-        $schema:
-            colors: enum(red,blue,green; required)
-            numbers: number[]
-        positional: [ "colors", "numbers" ]
-        ```
+            ```yaml
+            $schema:
+                colors: enum(red,blue,green; required)[]
+                numbers: number[]
+            positional: [ "numbers", "colors" ]
+            ```
+    
+            Both `colors` and `numbers` are variadic but their types have no overlapping members so this is considered valid
+    
+            
 
 
 ## Documentation
