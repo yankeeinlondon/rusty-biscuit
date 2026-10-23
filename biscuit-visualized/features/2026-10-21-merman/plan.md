@@ -1081,7 +1081,7 @@ promote the package to gating, and add the local speed guard.
 - [ ] **Corpus contrast test (R-V3, D45, AC-T4).** Every text element in every
   golden, derived-palette goldens included, meets 4.5:1 against the fill
   behind it.
-- [ ] **Corpus checks.** No `foreignObject` in rasterized output (AC-C7);
+- [x] **Corpus checks.** No `foreignObject` in rasterized output (AC-C7);
   measured width = usvg width over the corpus (AC-M1); wrapping survey with
   zero measurer-attributable clips (AC-M2).
 
