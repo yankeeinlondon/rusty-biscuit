@@ -26,20 +26,20 @@ Every shipped API is one entry in `registry::registrations()`, from which
 | Artificial Analysis CritPt | `artificial_analysis` | `define_artificial_analysis_critpt_api()` | 1 | Artificial Analysis CritPt benchmark evaluation API |
 | Bitbucket | `bitbucket` | `define_bitbucket_api()` | 15 | Bitbucket Cloud REST API for repos, PRs, issues, tags |
 | OpenAI | `openai` | `define_openai_api()` | 258 | Full OpenAI platform surface, imported from the vendored spec (see `specs/openai/`) |
-| HuggingFace Hub | `huggingface` | `define_huggingface_hub_api()` | 28+ | Hugging Face Hub API (models, datasets, spaces, repos) |
+| HuggingFace Hub | `huggingface` | `define_huggingface_hub_api()` | 26 | Hugging Face Hub API (models, datasets, spaces, repos) |
 | LM Studio | `lmstudio` | `define_lmstudio_api()` | 6 | LM Studio local inference API |
 | Ollama Native | `ollama` | `define_ollama_native_api()` | 11 | Ollama local inference API (generate, chat, embeddings) |
 | Ollama OpenAI | `ollama` | `define_ollama_openai_api()` | 4 | Ollama OpenAI-compatible API |
-| ElevenLabs REST | `elevenlabs` | `define_elevenlabs_rest_api()` | 35+ | ElevenLabs TTS REST API (voices, text-to-speech, audio) |
+| ElevenLabs REST | `elevenlabs` | `define_elevenlabs_rest_api()` | 42 | ElevenLabs TTS REST API (voices, text-to-speech, audio) |
 | ElevenLabs WebSocket | `elevenlabs` | `define_elevenlabs_websocket_api()` | 2 | ElevenLabs TTS WebSocket streaming API |
-| EMQX Basic | `emqx` | `define_emqx_basic_api()` | 30+ | EMQX MQTT Broker REST API with Basic auth |
-| EMQX Bearer | `emqx` | `define_emqx_bearer_api()` | 30+ | EMQX MQTT Broker REST API with Bearer token auth |
+| EMQX Basic | `emqx` | `define_emqx_basic_api()` | 36 | EMQX MQTT Broker REST API with Basic auth |
+| EMQX Bearer | `emqx` | `define_emqx_bearer_api()` | 38 | EMQX MQTT Broker REST API with Bearer token auth |
 | GitHub | `github` | `define_github_api()` | 16 | GitHub REST API for repos, PRs, issues, releases |
 | GitLab | `gitlab` | `define_gitlab_api()` | 19 | GitLab REST API for repos, MRs, issues, releases |
 | Gitea | `gitea` | `define_gitea_api()` | 15 | Gitea REST API for self-hosted Git forge instances |
 | Eversolo | `eversolo` | `define_eversolo_api()` | 24 | Eversolo DMP-A8 local HTTP control API |
-| Samsung Smart TV REST | `samsung_smart_tv` | `define_samsung_smart_tv_api()` | 4 | Samsung S95C-focused LAN API (Smart View) |
-| Samsung Smart TV Remote WS | `samsung_smart_tv::remote_ws` | `define_samsung_smart_tv_remote_ws_api()` | 1 | Samsung remote control WebSocket channel |
+| Samsung Smart TV REST | `samsung_smart_tv` | `define_samsung_smart_tv_api()` | 7 | Samsung S95C-focused LAN API (Smart View) |
+| Samsung Smart TV Remote WS | `samsung_smart_tv::remote_ws` | `define_samsung_smart_tv_remote_ws_api()` | 2 | Samsung remote control WebSocket channel |
 | Unfolded Circle Core REST | `unfolded_circle::core_rest` | `define_unfolded_circle_core_rest_api()` | 11 | Unfolded Circle Core REST API |
 | Unfolded Circle Core WS | `unfolded_circle::core_ws` | `define_unfolded_circle_core_ws_api()` | 4 | Unfolded Circle Core WebSocket API |
 | Unfolded Circle Dock WS | `unfolded_circle::dock_ws` | `define_unfolded_circle_dock_ws_api()` | 1 | Unfolded Circle Dock WebSocket API |

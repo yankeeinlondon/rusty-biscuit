@@ -126,7 +126,8 @@ pub fn endpoint_uniqueness_key(endpoint: &Endpoint) -> EndpointUniquenessKey {
 /// collisions across each module group, endpoint-method and setter renames (warnings), and the request
 /// inputs the client sends verbatim: header and cookie parameter names, raw
 /// body content types, and API-key parameter names. A module path may not
-/// take a shipped WebSocket module's name.
+/// take a shipped WebSocket module's name, `default`, or a name that differs
+/// from another module's only by letter case.
 pub fn validate_rust_client(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
     validate_rust_client_in(apis, registrations())
 }
@@ -158,8 +159,10 @@ pub fn validate_rust_client_in(
 /// Validates a batch of APIs for OpenAPI export.
 ///
 /// Checks route identity, the `query-in-path` error, the document file
-/// name, and that every JSON body reference resolves in the API's own
-/// [`RestApi::schemas`], which become the document's `components.schemas`.
+/// name and its letter-case uniqueness across the batch, that every JSON
+/// body reference resolves in the API's own [`RestApi::schemas`] (which
+/// become the document's `components.schemas`), and that every `$ref`
+/// inside those components resolves too.
 pub fn validate_openapi(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
     let mut diagnostics = Vec::new();
     for api in apis {
@@ -175,7 +178,7 @@ pub fn validate_openapi(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
 /// Validates a batch of APIs for Postman export.
 ///
 /// Checks route identity, the `query-in-path` error, and the collection
-/// file name, and warns about vocabulary Postman cannot express and every
+/// file name and its letter-case uniqueness across the batch, and warns about vocabulary Postman cannot express and every
 /// example the collection leaves out because none validating against its
 /// schema could be built ([`Feature::ExampleValue`]).
 pub fn validate_postman(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {

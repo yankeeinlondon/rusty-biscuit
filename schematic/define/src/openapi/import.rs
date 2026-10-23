@@ -8,10 +8,13 @@
 //! The import process converts OpenAPI 3.x specifications into Schematic's
 //! internal representation for code generation. It handles:
 //!
-//! - Security schemes → `AuthStrategy`
+//! - Root and operation `security` → `AuthStrategy`, `AuthPolicy`, and
+//!   endpoint auth overrides
 //! - Paths and operations → `Endpoint`
 //! - Component schemas → `ModelCatalog`
-//! - Parameters → `EndpointParams`
+//! - Path-item and operation parameters → `EndpointParams`
+//! - `x-schematic` extensions → the Schematic metadata standard fields cannot
+//!   carry, for the subset `schematic/docs/io/openapi-extensions.md` lists
 //!
 //! ## Examples
 //!

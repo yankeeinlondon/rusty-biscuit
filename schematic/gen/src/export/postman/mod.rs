@@ -156,7 +156,8 @@ pub(crate) fn export_diagnostics(api: &RestApi) -> Vec<crate::diagnostics::Valid
 
 /// Builds the Postman environment of one export module: every variable its
 /// collection declares, with base URLs and GraphQL addresses valued and
-/// credentials and parameters empty (credentials typed `secret`).
+/// credentials and parameters empty (credentials and secret parameters
+/// typed `secret`).
 ///
 /// ## Examples
 ///

@@ -113,7 +113,15 @@ Use `request_id_header`, `secret_header`, and parameter `secret()` for metadata.
 Endpoint `cross_origin` replaces the API policy; runtime callers may only tighten
 it. Allowed origins must be bare HTTP(S) origins.
 
-Register the module, catalog lookup/group assembly, and documented provider row.
+Declare `pub mod {api_name};` in `schematic/definitions/src/lib.rs`, then
+register the API once: one `rest(..)` entry per API in `REGISTRATIONS`
+(`schematic/definitions/src/registry/inventory.rs`). Every API list, `--api`
+name, generated module, Cargo feature, and export file derives from that entry;
+there is no other runtime list to edit. Test tables that need literal artifact
+paths (`shipped_modules!` in `gen/tests/l1/postman_runnable.rs`, the artifact
+lists in `extension_round_trip.rs` and `fixed_header_export.rs`) are guarded
+against the inventory and fail until the new module is added. Add the
+documented provider row.
 Update the appropriate shipped-policy and ordered endpoint-id inventories.
 READMEs remain overviews; current behavior belongs in the area's docs tree.
 Future response methods remain planned; only `ErrorSet::none()` is
@@ -129,10 +137,10 @@ at the appropriate fidelity. Do not rely on tests that merely repeat literals.
 Run in `schematic/`:
 
 ```sh
-just generate
+just generate            # or `just generate-one <key>` (the registration's `--api` key)
 just test
 just lint
-just doctest
+just doctest             # includes doctest-schema (generated crate)
 just test-schema
 just lint-schema
 just migration-check

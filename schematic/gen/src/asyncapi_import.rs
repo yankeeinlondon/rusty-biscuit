@@ -312,8 +312,8 @@ struct Import<'a> {
     version: AsyncApiVersion,
     components: Components<'a>,
     ws_role: WsRole,
-    /// Payload schema names messages referenced (2.x keeps unreferenced
-    /// names out of nothing; both versions list them in the catalog).
+    /// Payload schema names messages referenced; the catalog lists each,
+    /// even one no component schema declares.
     payload_refs: BTreeSet<String>,
     /// Constant handshake headers, from every channel's headers binding.
     headers: Vec<(String, String)>,

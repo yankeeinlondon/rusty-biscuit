@@ -336,10 +336,12 @@ flowchart TD
 
 ## Version Resolution
 
-OpenAPI spec version is resolved with this priority chain:
+The document's `info.version` (the API's version, not the `openapi: 3.0.3`
+format version) is resolved with this priority chain:
 
 1. `--openapi-version <VERSION>` CLI flag (highest priority)
-2. `RestApi.version` field on the API definition
+2. `RestApi.version` field on the API definition (the first member's, for a
+   module group's shared document)
 3. Fallback: `"0.1.0"`
 
 ## Shared Modules

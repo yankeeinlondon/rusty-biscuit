@@ -22,7 +22,24 @@ schematic-gen import --input <FILE> [--api-name <NAME>] [--module-path <PATH>] \
 schematic-gen --api <NAME> --output <DIR>
 ```
 
-**Available APIs**: `anthropic`, `openai`, `elevenlabs`, `huggingface`, `lmstudio`, `ollama-native`, `ollama-openai`, `emqx-basic`, `emqx-bearer`, `all`
+**Available APIs**: every REST registration's `key` in `REGISTRATIONS`
+(`definitions/src/registry/inventory.rs`) in registration order, then `all`
+(`pipeline::available_apis`); for example `anthropic`, `ollama-native`,
+`emqx-bearer`, `unfolded-circle-core-rest`. Selecting one member generates its
+whole module group. WebSocket APIs have no `--api` key; `generate` packages
+them from the same inventory.
+
+### `just` recipes (run in `schematic/`)
+
+| Recipe | Does |
+|---|---|
+| `generate` | every API to `schema/src`, `openapi/`, `postman/` (with environments), then `export-asyncapi` to `asyncapi/` |
+| `generate-one <key>` | one API's module group to `schema/src`, `openapi/`, `postman/`, keeping every other module |
+| `generate-openapi` / `generate-postman` | `generate --api all` with only that export (`--no-postman` / `--no-openapi`) |
+| `generate-asyncapi` | only `export-asyncapi --output asyncapi` |
+| `check-drift` | committed artifacts equal fresh output; the real APIs compile offline |
+| `doctest` | doctests of the schematic crates, then `doctest-schema` (the generated crate: default features, then `emqx` alone) |
+| `test-schema` / `lint-schema` | nextest / clippy `-D warnings` on the generated crate (excluded from the workspace) |
 
 ## OpenAPI Import
 

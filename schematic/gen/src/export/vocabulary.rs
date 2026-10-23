@@ -15,7 +15,7 @@ use crate::export::auth::{ExportAuth, policy_alternatives};
 ///   header the operation does not carry as a header parameter
 ///   ([`schematic_define::openapi::header_gaps`]).
 ///   OpenAPI also skips each GraphQL operation, which is outside its round-trip
-///   subset (R55); Postman exports them as requests.
+///   subset; Postman exports them as requests.
 /// - Postman: an OAuth2 device-code grant (Postman has no device-code
 ///   grant), and a replacement policy with more than one alternative (a
 ///   request holds one auth).

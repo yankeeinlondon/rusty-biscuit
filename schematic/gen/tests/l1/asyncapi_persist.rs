@@ -133,7 +133,7 @@ fn a_failed_import_writes_nothing() {
 }
 
 fn schematic_gen() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_schematic-gen"))
+    Command::new(biscuit_test_harness::bin_exe!("schematic-gen"))
 }
 
 /// The CLI wiring: `export-asyncapi` writes one document per WebSocket API,

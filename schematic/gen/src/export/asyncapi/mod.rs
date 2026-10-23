@@ -78,8 +78,10 @@ pub struct AsyncApiDocument {
 ///
 /// [`GeneratorError::Validation`] for output `asyncapi` when the definition
 /// cannot become a valid document: a base URL that is not `ws://` or
-/// `wss://`, a name AsyncAPI keys cannot hold, two messages of one endpoint
-/// sharing a name, or a `responds_with` naming no message of its endpoint.
+/// `wss://` or names no host, a name AsyncAPI keys cannot hold, two
+/// endpoints sharing an id, two messages of one endpoint sharing a name, a
+/// `responds_with` naming no message of its endpoint, or a `$ref` the
+/// document does not resolve.
 pub fn export_asyncapi(api: &WebSocketApi) -> Result<AsyncApiExport, GeneratorError> {
     let mut exporter = Exporter { api, diagnostics: Vec::new() };
     let document = exporter.document();
@@ -627,7 +629,8 @@ pub(crate) fn param_type_schema(param_type: &QueryParamType) -> Map<String, Valu
 }
 
 /// The [`X_PARAM`] members of `param` that differ from its location's
-/// defaults (`default_style`, not exploded, no Rust name, not secret).
+/// defaults (`default_style`, not exploded, no Rust name, not secret, not
+/// pager-managed), plus `deprecated` for a path parameter.
 fn param_extension(param: &ParamDef, default_style: ParamStyle) -> Map<String, Value> {
     let mut extension = Map::new();
     if param.style != default_style {

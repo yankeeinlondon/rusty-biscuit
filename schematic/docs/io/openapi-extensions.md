@@ -574,6 +574,19 @@ this page, every standard field, and the definition's components (names and
 schemas). A test exports each shipped definition, imports the committed
 artifact, exports again, and compares both the documents and the definitions.
 
+```mermaid
+flowchart LR
+    Def["RestApi definition"] -->|"openapi::export"| Doc["OpenAPI 3.0.3 document<br/>(standard fields + x-schematic)"]
+    Doc -->|"OpenApiImport"| Imp["Imported RestApi"]
+    Imp -->|"openapi::export"| Doc2["Re-exported document"]
+    Imp -.->|"compared: equal in meaning"| Def
+    Doc2 -.->|"compared: equal as parsed values"| Doc
+```
+
+Both comparisons are of parsed values, never bytes, so member order and
+normalization may differ while meaning may not. A difference is accepted only
+when it is one of the losses listed next.
+
 ### What does not round-trip
 
 - **Pagination:** an API's default pagination, an endpoint's pagination, and a

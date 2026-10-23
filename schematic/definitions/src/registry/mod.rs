@@ -1,4 +1,5 @@
-//! Module-group assembly for the shipped REST definitions.
+//! The registration inventory of shipped APIs ([`registrations`]) and
+//! module-group assembly for the REST definitions.
 //!
 //! The APIs that share a generated types module are assembled from one
 //! [`DefinitionContext`](schematic_define::DefinitionContext), and each of

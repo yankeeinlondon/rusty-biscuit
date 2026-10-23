@@ -2,8 +2,9 @@
 //!
 //! An API's module name is its generated Rust module (`pub mod <name>;`,
 //! `<name>.rs`) and the file stem of its OpenAPI document and Postman
-//! collection. Every writer, and the registration grouping, calls
-//! [`resolve_module_name`], so one API never lands under two names.
+//! collection. Every writer calls [`resolve_module_name`], and an L1 test
+//! holds each registration's `module` equal to it, so one API never lands
+//! under two names.
 //!
 //! ## Resolution order
 //!
@@ -111,8 +112,7 @@ pub fn infer_module_path(api_name: &str) -> Option<String> {
     // Extract the base name (all words except the suffix)
     let base_words: Vec<&str> = words[..words.len() - 1].to_vec();
 
-    // Join words with underscores and lowercase for the module path
-    // e.g., ["Hugging", "Face"] -> "huggingface" (no underscores for module names)
+    // Words join without separators: ["Hugging", "Face"] -> "huggingface".
     Some(
         base_words
             .iter()

@@ -17,7 +17,8 @@ use super::types::{PostmanHeader, PostmanResponse};
 const TEXT_PLACEHOLDER: &str = "string";
 
 /// The saved responses of one endpoint or operation, and each example that
-/// could not be built with the role it was for (`200 response`).
+/// could not be built with the role it was for
+/// (`200 OK (application/json) response`).
 pub(crate) fn saved_responses(
     examples: &ExampleSource,
     success: &[SuccessShape],

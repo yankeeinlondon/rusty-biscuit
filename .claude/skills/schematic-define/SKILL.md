@@ -159,7 +159,8 @@ let _models = client.list_models().await?; // ListModelsResponse, or a CallError
 cargo nextest run -p schematic-gen --test l1 -E 'test(/^e2e_generation::(binary|text|empty|mixed)_response/)'
 cargo nextest run -p schematic-gen --test l1 -E 'test(/^response_adapters::/)'
 just -f schematic/justfile test        # includes the fresh-output guard (compiles and sends against wiremock)
-just -f schematic/justfile generate
+just -f schematic/justfile generate    # or generate-one <key>; generate-{openapi,postman,asyncapi} for one export
+just -f schematic/justfile doctest     # includes doctest-schema (generated crate)
 just -f schematic/justfile test-schema
 just -f schematic/justfile lint-schema
 just -f schematic/justfile migration-check

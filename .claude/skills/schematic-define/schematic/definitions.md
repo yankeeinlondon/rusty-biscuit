@@ -165,15 +165,20 @@ definitions/src/
    `.default_errors(..)`) for each endpoint; see [`responses.md`](./responses.md)
 4. Set `module_path` if API name differs from module name. Without it,
    `schematic_definitions::naming::resolve_module_name` (the only module-name
-   resolver; Rust, OpenAPI, Postman, grouping, and `import` all call it) drops
-   a Native/Client/Service/Hub/Api/Sdk suffix or lowercases the name. The
-   registration's `module` must equal it; names differing only by case are refused
+   resolver; Rust, OpenAPI, Postman, and `import` call it) drops a
+   Native/Client/Service/Hub/Api/Sdk suffix or lowercases the name. Grouping
+   (`apis_by_module`) reads the registration's `module`, which an L1 test
+   requires to equal it; names differing only by case are refused
 5. Add types with `#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]`
    and a `Registration` impl (`definition_type!` or the nominal macro)
 6. Export from `lib.rs` and `prelude.rs`, register the API with one entry in
    `registry/inventory.rs` (`rest(..)` or `websocket(..)`; every API list,
-   `--api` name, and output derives from it), and add the API's row to
-   `definitions/tests/api_policy.rs` (and `pagination_coverage/` for lists)
+   `--api` name, Cargo feature, and output derives from it), and add the API's
+   row to `definitions/tests/api_policy.rs` (and `pagination_coverage/` for
+   lists). Test tables that need literal artifact paths are not derived but
+   are guarded against the inventory, so they fail until the module is added:
+   `shipped_modules!` in `gen/tests/l1/postman_runnable.rs`, the artifact
+   lists in `extension_round_trip.rs` and `fixed_header_export.rs`
 7. Run verification:
    ```bash
    cargo run -p schematic-gen -- generate --api myapi --dry-run

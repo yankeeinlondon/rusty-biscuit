@@ -34,7 +34,9 @@ cargo build -p schematic-gen --release
 
 ## CLI Usage
 
-The CLI provides three subcommands: `generate`, `validate`, and `import`.
+The CLI provides seven subcommands; the examples below cover `generate`,
+`validate`, and `import` (see [the generation workflow](workflow.md) for the
+others).
 
 ```bash
 # Regenerate the OpenAI API's module group; every other module is kept
@@ -77,7 +79,11 @@ schematic-gen --api openai --output schematic/schema/src
 |------------|-------------|
 | `generate` | Generate the Rust client, OpenAPI, and Postman outputs (each validated first) |
 | `validate` | Validate API definition without generating code |
+| `bundle` | Write an API's self-contained definition bundle as canonical JSON (see [definition bundles](../io/definition-bundles.md)) |
+| `export-bundle` | Export OpenAPI and Postman from a definition bundle, without the registry |
 | `import` | Import an OpenAPI 3.x spec and generate Rust client code |
+| `export-asyncapi` | Export one AsyncAPI 3.0 document per registered WebSocket API (see [AsyncAPI](../io/asyncapi.md)) |
+| `import-asyncapi` | Import an AsyncAPI 2.x or 3.0 document and save its WebSocket definition and models |
 
 ### Generate Options
 
@@ -92,6 +98,7 @@ schematic-gen --api openai --output schematic/schema/src
 | `--postman-out <DIR>` | Output directory for Postman collections (auto: `postman/`) |
 | `--no-openapi` | Skip OpenAPI specification generation |
 | `--no-postman` | Skip Postman collection generation |
+| `--postman-environment` | Also write each collection's Postman environment (`<module>.postman_environment.json`) beside it |
 | `-v, --verbose` | Increase verbosity level |
 
 When the output path ends with `schema/src`, OpenAPI and Postman output directories default to `openapi/` and `postman/` (sibling to `schema/`). Use `--no-openapi` or `--no-postman` to suppress.
@@ -123,6 +130,10 @@ See [`docs/generation/partial-generation.md`](../generation/partial-generation.m
 | `--api-name <NAME>` | Override API name (default: derived from spec title) |
 | `--module-path <PATH>` | Override module path for generated code |
 | `-o, --output <DIR>` | Output directory for generated code |
+| `--definitions-out <DIR>` | Emit a `schematic-definitions` module here instead of a standalone client |
+| `--overlay <RUST_PATH>` | A hand-written `fn(RestApi) -> RestApi` the emitted definition applies; requires `--definitions-out` (see [overlays](../io/import-openapi.md#overlays-authored-additions-the-import-keeps)) |
+| `--exclude-path <PREFIX>` | Skip endpoints whose path starts with this prefix (repeatable) |
+| `--request-id-header <HEADER>` | The response header that carries the provider's request id |
 | `--dry-run` | Print generated code without writing files |
 | `--strict` | Fail on any WARN or ERROR diagnostic; INFO never fails |
 | `-v, --verbose` | Increase verbosity level |
@@ -209,59 +220,16 @@ let formatted = format_code(&file);
 
 ## Generation Pipeline
 
-The generator follows a multi-phase pipeline:
+The generator follows a multi-phase pipeline for each module group of the
+Rust output:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      API Definition                              │
-│  (RestApi struct from schematic-define)                          │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Phase 1: Code Generation                      │
-│  ┌───────────────┐ ┌───────────────┐ ┌───────────────────────┐  │
-│  │ Request       │ │ EndpointSpec  │ │ API Client Struct,    │  │
-│  │ Structs       │ │ Impls         │ │ Tag, Constructor      │  │
-│  └───────────────┘ └───────────────┘ └───────────────────────┘  │
-│  ┌───────────────┐ ┌───────────────┐ ┌───────────────────────┐  │
-│  │ Shared Request│ │ Pager         │ │ Module Docs           │  │
-│  │ Helpers       │ │ Impls         │ │ Generation            │  │
-│  └───────────────┘ └───────────────┘ └───────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Phase 2: Assembly                             │
-│  - Combine all TokenStreams                                      │
-│  - Add module documentation                                      │
-│  - Add imports and lint attributes                               │
-│  - Generate lib.rs (with the runtime ABI check), shared.rs,      │
-│    prelude.rs                                                    │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Phase 3: Validation                           │
-│  - Parse with syn to verify syntax                               │
-│  - Catch generation bugs before writing                          │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Phase 4: Formatting                           │
-│  - Format with prettyplease                                      │
-│  - Consistent style and indentation                              │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Phase 5: Output                               │
-│  - Check every planned path's ownership before the first write   │
-│  - Atomic per-file writes; lib.rs last                           │
-│  - Generate Cargo.toml for schema package                        │
-│  - Delete obsolete generator-owned paths                         │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A["RestApi definitions of one module group<br/>(schematic-define)"] --> G["Phase 1: Code generation<br/>request structs, EndpointSpec impls,<br/>client struct, tag, constructor,<br/>shared helpers, pager impls, module docs"]
+    G --> M["Phase 2: Assembly<br/>combine TokenStreams, module docs,<br/>imports and lint attributes;<br/>lib.rs with the runtime ABI check,<br/>shared.rs, prelude.rs"]
+    M --> V["Phase 3: Validation<br/>parse with syn to catch generation bugs"]
+    V --> F["Phase 4: Formatting with prettyplease"]
+    F --> O["Phase 5: Output<br/>check every planned path's ownership first,<br/>atomic per-file writes with lib.rs last,<br/>Cargo.toml, delete obsolete generated paths"]
 ```
 
 ## Generated Output Structure
@@ -1232,8 +1200,8 @@ Per-output validators; each takes the whole batch and returns
 | Function | Description |
 |----------|-------------|
 | `validate_rust_client(&apis)` | Routes, schema references, plus Rust-only rules: identifiers, suffixes, module paths, type syntax, generated-name collisions, request-input names and content types |
-| `validate_openapi(&apis)` | Routes, embedded queries, schema references, document file names |
-| `validate_postman(&apis)` | Routes, embedded queries, collection file names |
+| `validate_openapi(&apis)` | Routes, embedded queries, schema references (including every `$ref` inside a component), document file names (unique ignoring letter case) |
+| `validate_postman(&apis)` | Routes, embedded queries, collection file names (unique ignoring letter case); warns about vocabulary Postman cannot express and every example it could not build (`example-value`) |
 | `endpoint_uniqueness_key(&endpoint)` | The `(method, normalized path)` identity two endpoints of one API may not share |
 
 ### Module names
@@ -1498,6 +1466,20 @@ produce `ollama.json`, while `EmqxBasic` and `EmqxBearer` produce `emqx.json`.
 | `build_postman_collection_grouped(&apis, &module_name)` | Build grouped collection from multiple APIs |
 | `write_postman(&api, &dir, dry_run)` | Write single-API Postman collection to disk |
 | `write_postman_grouped(&apis, &module_name, &dir, dry_run)` | Write grouped Postman collection to disk |
+| `build_postman_environment(&apis, &module_name)` | Build a module's Postman environment, declaring every collection variable |
+| `write_postman_environment(&apis, &module_name, &dir, dry_run)` | Write `<module>.postman_environment.json` |
+
+`openapi_output` and `postman_output` are deprecated re-exports of
+`schematic_gen::export::openapi` and `schematic_gen::export::postman`; new
+code uses those paths.
+
+### Module Reference: AsyncAPI
+
+| Function | Description |
+|----------|-------------|
+| `export::asyncapi::export_asyncapi(&api)` | Build one WebSocket API's AsyncAPI 3.0 document and its export warnings |
+| `export::asyncapi::asyncapi_documents(registrations)` | The WebSocket APIs of an inventory and their document file names |
+| `asyncapi_import::read_import_output(&dir, module_path)` | Read a saved AsyncAPI import back as a `WebSocketApi` and `ModelCatalog` |
 
 ### Module Reference: `export`
 

@@ -56,7 +56,9 @@ fn null_branch() -> Value {
 /// ## Errors
 ///
 /// [`OpenApiError::UnsupportedFeature`] naming the first keyword OpenAPI 3.0.3
-/// cannot express, with its JSON-pointer schema path as context.
+/// cannot express, with its JSON-pointer schema path as context; or
+/// [`OpenApiError::Validation`] at the component's pointer when the converted
+/// JSON does not deserialize as an [`openapiv3::Schema`].
 pub(super) fn convert_component_schema(name: &str, value: &Value) -> Result<Schema, OpenApiError> {
     let pointer = format!("#/components/schemas/{}", escape(name));
     let converted = convert(value, &pointer)?;

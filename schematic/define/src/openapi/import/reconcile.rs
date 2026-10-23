@@ -31,7 +31,7 @@ use crate::{PrimitiveType, TypeRef};
 /// With a root `security`, its requirements are authoritative: none is
 /// anonymous, one is an [`AuthStrategy`], several are an [`AuthPolicy`]
 /// accepting each. Without one, the first supported component scheme is
-/// taken, as it always was.
+/// taken.
 pub(super) fn map_root_auth(
     doc: &OpenAPI,
     details: &AuthDetails,
@@ -80,7 +80,7 @@ pub(super) fn map_root_auth(
 /// The endpoint auth an operation's own `security` declares.
 ///
 /// Absent inherits; `[]` is public; the document's own requirements, with no
-/// operation details, also inherit. Operation auth details and `env_mapping`
+/// operation auth details or `env_mapping`, also inherit. Operation auth details and `env_mapping`
 /// apply only to an override (R54); elsewhere they are WARN.
 pub(super) fn map_operation_auth(
     doc: &OpenAPI,
@@ -404,7 +404,8 @@ pub(super) fn settle_document_errors(
 }
 
 /// A header parameter that is the single-value `enum` of an effective fixed
-/// header is that header's standard form (Phase 3 export), not a parameter.
+/// header is that header's standard form (as `export/headers.rs` writes it),
+/// not a parameter.
 fn drop_fixed_header_parameters(endpoint: &mut Endpoint, api_headers: &[(String, String)]) {
     let Some(params) = &mut endpoint.params else { return };
     let effective = |name: &str| {

@@ -44,11 +44,13 @@ Every shipped API, REST or WebSocket, is one entry in
 entry; every list of APIs is derived from it:
 
 ```rust
-// A REST API: its selection key, its generated module, the definitions
-// module, and its index in the module group that builds it.
+// A REST API: its name, its `--api` selection key, its generated module,
+// the definitions module, the module group that builds it, and its index in
+// what that group returns.
 rest("OllamaOpenAI", "ollama-openai", "ollama", "ollama", ollama::module_group, 1),
-// A WebSocket API: its generated module, the definitions module, its
-// constructor, and a one-line summary for the generated docs.
+// A WebSocket API: its name, its generated module, the definitions module,
+// its constructor and that constructor's name, and a one-line summary for
+// the generated docs.
 websocket("ElevenLabsTTS", "elevenlabs_ws", "elevenlabs",
     elevenlabs::define_elevenlabs_websocket_api, "define_elevenlabs_websocket_api",
     "ElevenLabs Text-to-Speech WebSocket API definition"),
@@ -93,8 +95,24 @@ just -f schematic/justfile generate-asyncapi
 just -f schematic/justfile check-drift
 ```
 
-The standard output roots are `schematic/schema/src`, `schematic/openapi`, and
-`schematic/postman`. When the CLI output ends in `schema/src`, it selects the
+```mermaid
+flowchart LR
+    Inv["registrations()"] --> Rest["REST entries"]
+    Inv --> Ws["WebSocket entries"]
+    Rest --> Group["module_group():<br/>one DefinitionContext per module"]
+    Group --> Apis["RestApi values with RestApi::schemas"]
+    Apis --> V{"validated per output"}
+    V -->|"rust"| Crate["schema/src modules, lib.rs, prelude.rs,<br/>schema/Cargo.toml features"]
+    V -->|"openapi"| Oas["openapi/{module}.json"]
+    V -->|"postman"| Pm["postman/{module}.postman_collection.json<br/>and environment"]
+    Ws --> Crate
+    Ws -->|"export-asyncapi"| Async["asyncapi/{module}.json"]
+```
+
+`generate` writes the first three outputs; each is validated and published on
+its own, so a failure in one never stops the others, and nothing of a failed
+output is written. The standard output roots are `schematic/schema/src`,
+`schematic/openapi`, and `schematic/postman`. When the CLI output ends in `schema/src`, it selects the
 sibling export directories automatically; `--no-openapi` and `--no-postman`
 suppress those outputs, and `--postman-environment` (which the `just` recipes
 pass) adds each collection's Postman environment. A Rust module can be a single file or a directory

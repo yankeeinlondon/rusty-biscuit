@@ -44,7 +44,9 @@ registry, never from the selection, so a partial run writes the same
 OpenAPI and Postman follow the same rule with their own module names: a
 partial run rewrites only the selected groups' `<module>.json` and
 `<module>.postman_collection.json` (plus `<module>.postman_environment.json`
-with `--postman-environment`) and deletes nothing.
+with `--postman-environment`) and deletes nothing. AsyncAPI documents are not
+written by `generate`; `export-asyncapi` writes them, with the same rule for
+one API and for all (see [AsyncAPI](../io/asyncapi.md#file-names)).
 
 ```bash
 # Regenerate the Ollama group in all three outputs
@@ -255,13 +257,16 @@ and no directories, including the output roots and `Cargo.toml`.
 the regenerated groups, and the retained groups) without writing anything;
 `MutationPlan::publish` applies it and returns a `PublicationReport`.
 `output::Selection::All` is full generation and `Selection::Apis(&[...])` a
-partial run; `registry` lists every API in registry order:
+partial run; `registry` lists every REST API in registry order, and
+`registrations` is the inventory whose WebSocket entries the crate packages:
 
 ```rust,ignore
+use schematic_definitions::registry::registrations;
 use schematic_gen::output::{RustOutputRequest, Selection, prepare_rust_output};
 
 let prepared = prepare_rust_output(&RustOutputRequest {
     registry: &registry,                   // every API, registry order
+    registrations: registrations(),        // the inventory: WebSocket modules to package
     selection: Selection::Apis(&[&ollama_native]),
     output_dir: Path::new("schema/src"),
     manifest_dir: Some(Path::new("schema")),

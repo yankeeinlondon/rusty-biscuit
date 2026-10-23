@@ -124,7 +124,7 @@ fn first_success_content_type(endpoint: &Endpoint) -> Option<String> {
 
 /// The endpoint description followed by one line per piece of definition
 /// vocabulary Postman has no field for: the first success shape's content
-/// type (R29), endpoint and parameter deprecation, and the effective
+/// type, endpoint and parameter deprecation, and the effective
 /// rate-limit and retry metadata. `None` when all are absent, so an endpoint
 /// declaring none of them keeps its description alone.
 fn request_description(endpoint: &Endpoint, api: &RestApi) -> Option<String> {

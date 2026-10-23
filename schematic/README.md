@@ -1,7 +1,7 @@
 # Schematic
 
 Schematic defines REST and WebSocket APIs and generates typed Rust clients,
-OpenAPI documents, and Postman collections. REST definitions use builders and a
+OpenAPI documents, Postman collections, and AsyncAPI documents. REST definitions use builders and a
 typed registration context; generated clients send through `schematic-runtime`.
 
 | Package | Purpose |
@@ -18,7 +18,8 @@ flowchart LR
     Types["Rust model types"] --> Context["Definition context and builders"]
     Context --> Generator["schematic-gen"]
     Generator --> Clients["Typed Rust clients"]
-    Generator --> Artifacts["OpenAPI and Postman"]
+    Generator --> Artifacts["OpenAPI and Postman (REST)"]
+    Generator --> AsyncDocs["AsyncAPI (WebSocket)"]
     Clients --> Runtime["schematic-runtime"]
 ```
 
@@ -117,7 +118,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [Declare success shapes, streams, and error bodies](docs/responses-and-errors.md), and [add GraphQL operations](docs/graphql.md).
 - [Generate artifacts and verify changes](docs/generation/workflow.md), including the current provider catalog and shared-module settings.
 - [Call an API](docs/runtime/calling-an-api.md), [read responses](docs/runtime/README.md), and [page through lists](docs/pagination.md).
-- [Import OpenAPI](docs/io/import-openapi.md), [export OpenAPI](docs/io/export-openapi.md), or [export Postman](docs/io/export-postman.md).
+- [Import OpenAPI](docs/io/import-openapi.md), [export OpenAPI](docs/io/export-openapi.md), or [export Postman](docs/io/export-postman.md); see [what round-trips through `x-schematic`](docs/io/openapi-extensions.md#what-round-trips).
+- [Export and import AsyncAPI](docs/io/asyncapi.md) for the WebSocket APIs.
+- [Build only the modules you use](docs/generation/generated-clients.md#selecting-modules-with-cargo-features): each generated module is a Cargo feature, all on by default.
 - [Save a definition as a self-contained bundle](docs/io/definition-bundles.md) and export from the file alone.
 - [Understand generated requests](docs/generation/request-side.md), [validation](docs/generation/validation.md), and [partial generation](docs/generation/partial-generation.md).
 - [Define a WebSocket API](docs/websocket-definitions.md), including [its handshake credential](docs/websocket-definitions.md#the-handshake-credential), [request/response correlation](docs/websocket-definitions.md#linking-a-request-to-its-response), and [setup, timeouts, and reconnecting](docs/websocket-definitions.md#connecting-setup-and-recovery).

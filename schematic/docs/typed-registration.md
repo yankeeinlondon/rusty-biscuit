@@ -142,7 +142,11 @@ flowchart LR
 
 `schematic_definitions::registry::assemble_module_group` calls an author-supplied
 assembly function with one context and returns `Result<Vec<RestApi>,
-DefinitionError>`. There is no separate API inventory. Because a module group's
+DefinitionError>`. There is no separate schema registry: the components come
+from the context alone. Each API the module group returns is then listed once
+in the registration inventory, `registry::registrations()`, which every
+generator input, export, and test derives from (see
+[Register an API](generation/workflow.md#register-an-api)). Because a module group's
 APIs are built one at a time, an early member's build sees only the types
 registered so far; assembly therefore gives every member the finished context's
 components and re-runs `validate_references`, so all members carry identical

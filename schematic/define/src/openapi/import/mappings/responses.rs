@@ -260,8 +260,8 @@ fn map_form_field(
 /// the content type becomes `accept`. Without one, a part follows OpenAPI's
 /// default encoding: a primitive (or a composition of primitives) is a text
 /// part, and an object-valued part, which would default to JSON, is reported
-/// and kept as text, the part's form before its encoding was read. Anything
-/// else the model cannot carry is reported.
+/// and imported as text. A non-file array part, or a text part with a media
+/// type other than `text/plain`, is reported and imported as text.
 fn multipart_kind(
     shape: FormPropertyShape,
     content_type: Option<&str>,

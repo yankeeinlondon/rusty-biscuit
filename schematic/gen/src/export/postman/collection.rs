@@ -80,7 +80,8 @@ pub(crate) fn build_single(api: &RestApi) -> Built {
 ///   [`ExportAuth`] (after suffixing, only when none authenticates);
 ///   otherwise per-request auth and `collection.auth = None`
 /// - All endpoints grouped by folder key, with duplicate request IDs
-///   in mixed-auth groups disambiguated as `"<Id> (<ApiName>)"`
+///   in mixed-auth groups disambiguated as `"<Id> (<ApiName>)"`, and every
+///   member's GraphQL operations in one `GraphQL` folder
 ///
 /// ## Examples
 ///

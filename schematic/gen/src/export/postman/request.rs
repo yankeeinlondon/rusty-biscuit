@@ -23,13 +23,11 @@ pub(crate) fn build_url(
     auth: &ExportAuth,
     collected: &mut Collected,
 ) -> PostmanUrl {
-    // Build raw URL with the chosen base-URL variable and path params as :param
     let path_with_colon = path_params.iter().fold(path.to_string(), |acc, param| {
         acc.replace(&format!("{{{}}}", param), &format!(":{}", param))
     });
     let raw = format!("{}{}", reference(base_url_var), path_with_colon);
 
-    // Split path into segments, converting {param} to :param
     let path_segments: Vec<String> = path
         .trim_start_matches('/')
         .split('/')
