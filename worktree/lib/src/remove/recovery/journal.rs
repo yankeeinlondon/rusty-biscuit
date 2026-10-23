@@ -3,21 +3,32 @@
 //! became of them.
 //!
 //! ```text
-//! {"header":{"journal_version":2,"operation_id":"…"}}
+//! {"header":{"journal_version":3,"operation_id":"…"}}
 //! {"inventory":{"root":{…},"entries":[{"path":{"display":"target/a.o"},"identity":{…},"shape":{"file":{…}}}]}}
-//! {"intent":{"batch":1,"entries":[{"path":{"display":"target/a.o"},"kind":"file"}]}}
-//! {"results":{"batch":1,"entries":[{"path":{"display":"target/a.o"},"state":"deleted"}]}}
+//! {"intent":{"batch":1,"entries":[4,5,6]}}
+//! {"results":{"batch":1,"states":["deleted","deleted","externally_absent"]}}
 //! ```
 //!
 //! The second line is the operation-start [`DeletionInventory`]: every entry
 //! the removal is approved to delete. It is written with the header, before
-//! the move, and a batch may only plan entries it lists, with the same kind.
-//! Paths are relative to the quarantine and use Sniff's lossless
-//! [`NativeString`] form. A batch holds at most [`MAX_BATCH_ENTRIES`]
-//! entries of one directory. Its intent is flushed before any entry is
+//! the move. A batch names entries by their zero-based position in that
+//! line, which gives each its path and kind; its results hold one state per
+//! planned entry, in the intent's order. Paths are relative to the
+//! quarantine and use Sniff's lossless [`NativeString`] form. A batch holds
+//! at most [`MAX_BATCH_ENTRIES`] entries of one directory, and no entry is
+//! planned twice in a journal. Its intent is flushed before any entry is
 //! unlinked and its results after, so an intent without results is the one
 //! batch a crash interrupted: [`JournalLog::replay`] calls its absent entries
 //! [`EntryState::Uncertain`], since nothing establishes who removed them.
+//!
+//! This build writes version 3 and reads versions 2 and 3, each file by its
+//! own header, so a removal an older `wt` stopped resumes. Version 2 batches
+//! repeat each entry's path and kind instead of its position:
+//!
+//! ```text
+//! {"intent":{"batch":1,"entries":[{"path":{"display":"target/a.o"},"kind":"file"}]}}
+//! {"results":{"batch":1,"entries":[{"path":{"display":"target/a.o"},"state":"deleted"}]}}
+//! ```
 //!
 //! Every line is written whole and newline-terminated. An unterminated final
 //! line is a write the crash cut short and is ignored ([`JournalLog::torn_tail`]);
@@ -29,6 +40,7 @@ use std::sync::Arc;
 use std::io::{self, Write};
 use std::path::Path;
 
+use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
 use sniff::filesystem::query::NativeString;
 
@@ -36,8 +48,12 @@ use super::OperationId;
 use crate::remove::observation::inventory::{DeletionInventory, Shape, is_plain_relative};
 use crate::remove::outcome::{EntryCounts, JournalSummary};
 
-/// The only `journal_version` this build reads or writes.
-pub const JOURNAL_VERSION: u32 = 2;
+/// The `journal_version` this build writes.
+pub const JOURNAL_VERSION: u32 = 3;
+
+/// The version whose batches repeat paths, still read so that a removal an
+/// older `wt` stopped resumes.
+const LEGACY_JOURNAL_VERSION: u32 = 2;
 
 /// The most entries one deletion batch may plan. A batch also never spans
 /// two directories; S2 found 256-event bursts arrive intact on FSEvents.
@@ -45,25 +61,19 @@ pub const MAX_BATCH_ENTRIES: usize = 256;
 
 /// The journal's size limit for the deletion batches of `inventory`: the
 /// most bytes their lines can take when every listed entry is planned once,
-/// each in a batch of its own, with the longest kind and result. A journal
-/// plans each entry at most once, so the limit binds only a writer that has
-/// gone wrong, never a removal, however large the checkout. The header and
-/// inventory lines do not count against it.
+/// each in a batch of its own with the longest batch number and result. A
+/// journal plans each entry at most once, so the limit binds only a writer
+/// that has gone wrong, never a removal, however large the checkout. The
+/// header and inventory lines do not count against it.
 pub fn limit_for(inventory: &DeletionInventory) -> u64 {
-    let empty: [PlannedEntry; 0] = [];
-    let per_batch = (line(&Line::Intent { batch: u64::MAX, entries: empty.to_vec() }).len()
-        + results_line(u64::MAX, &empty, &[]).len()) as u64;
-    inventory
-        .entries()
-        .iter()
-        .map(|entry| {
-            let path = entry.path.clone();
-            // Each element, with the comma that separates it from the next.
-            let planned = json_len(&PlannedEntry { path: path.clone(), kind: EntryKind::Directory }) + 1;
-            let result = json_len(&EntryResult { path, state: ResultState::ExternallyAbsent }) + 1;
-            planned + result + per_batch
+    let results = results_line(u64::MAX, &[ResultState::ExternallyAbsent]).len() as u64;
+    (0..inventory.entries().len())
+        .map(|at| {
+            let intent = LineV3::Intent(IntentV3 { batch: u64::MAX, entries: vec![at as u64] });
+            // With its newline.
+            (json_len(&intent) + 1).saturating_add(results)
         })
-        .sum()
+        .fold(0, u64::saturating_add)
 }
 
 /// The length of `value` as JSON, without keeping the bytes.
@@ -122,20 +132,127 @@ pub enum ResultState {
     Kept,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// One journal line; every version shares the header and inventory lines
+/// and has its own batch lines.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+enum Line<I, R> {
+    Header { journal_version: u32, operation_id: OperationId },
+    Inventory(DeletionInventory),
+    Intent(I),
+    Results(R),
+}
+
+/// A first line read only for its header, whatever version follows.
+type HeaderLine = Line<IgnoredAny, IgnoredAny>;
+/// A line this build writes.
+type LineV3 = Line<IntentV3, ResultsV3>;
+
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct EntryResult {
+struct IntentV2 {
+    batch: u64,
+    entries: Vec<PlannedEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EntryResultV2 {
     path: NativeString,
     state: ResultState,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-enum Line {
-    Header { journal_version: u32, operation_id: OperationId },
-    Inventory(DeletionInventory),
-    Intent { batch: u64, entries: Vec<PlannedEntry> },
-    Results { batch: u64, entries: Vec<EntryResult> },
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResultsV2 {
+    batch: u64,
+    entries: Vec<EntryResultV2>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IntentV3 {
+    batch: u64,
+    /// Positions in the journal's inventory line.
+    entries: Vec<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResultsV3 {
+    batch: u64,
+    states: Vec<ResultState>,
+}
+
+/// A version's intent line, read back as the entries it plans.
+trait IntentLine: DeserializeOwned {
+    fn batch(&self) -> u64;
+    fn planned(self, inventory: &DeletionInventory) -> Result<Vec<PlannedEntry>, &'static str>;
+}
+
+/// A version's results line, read back as one state per planned entry.
+trait ResultsLine: DeserializeOwned {
+    fn batch(&self) -> u64;
+    fn states(self, planned: &[PlannedEntry]) -> Result<Vec<ResultState>, &'static str>;
+}
+
+const MISALIGNED: &str = "results do not match the batch's planned entries";
+
+impl IntentLine for IntentV2 {
+    fn batch(&self) -> u64 {
+        self.batch
+    }
+
+    fn planned(self, _: &DeletionInventory) -> Result<Vec<PlannedEntry>, &'static str> {
+        Ok(self.entries)
+    }
+}
+
+impl ResultsLine for ResultsV2 {
+    fn batch(&self) -> u64 {
+        self.batch
+    }
+
+    fn states(self, planned: &[PlannedEntry]) -> Result<Vec<ResultState>, &'static str> {
+        let aligned =
+            self.entries.len() == planned.len() && self.entries.iter().zip(planned).all(|(result, planned)| result.path == planned.path);
+        if !aligned {
+            return Err(MISALIGNED);
+        }
+        Ok(self.entries.into_iter().map(|result| result.state).collect())
+    }
+}
+
+impl IntentLine for IntentV3 {
+    fn batch(&self) -> u64 {
+        self.batch
+    }
+
+    fn planned(self, inventory: &DeletionInventory) -> Result<Vec<PlannedEntry>, &'static str> {
+        self.entries
+            .into_iter()
+            .map(|position| {
+                let listed = usize::try_from(position)
+                    .ok()
+                    .and_then(|at| inventory.entries().get(at))
+                    .ok_or("a batch plans a position the inventory does not have")?;
+                Ok(PlannedEntry { path: listed.path.clone(), kind: EntryKind::of(&listed.shape) })
+            })
+            .collect()
+    }
+}
+
+impl ResultsLine for ResultsV3 {
+    fn batch(&self) -> u64 {
+        self.batch
+    }
+
+    fn states(self, planned: &[PlannedEntry]) -> Result<Vec<ResultState>, &'static str> {
+        if self.states.len() != planned.len() {
+            return Err(MISALIGNED);
+        }
+        Ok(self.states)
+    }
 }
 
 /// Why a journal cannot be read. Recovery refuses to resume and keeps the
@@ -200,67 +317,81 @@ pub struct JournalEntry {
     pub state: EntryState,
 }
 
-/// Reads the journal of `operation`.
+/// Reads the journal of `operation`, of either readable version.
 pub fn parse(bytes: &[u8], operation: &OperationId) -> Result<JournalLog, JournalInvalid> {
     let mut lines: Vec<&[u8]> = bytes.split(|byte| *byte == b'\n').collect();
     // `split` yields an empty last piece exactly when the file ends with a
     // newline; anything else there is a torn write.
     let tail = lines.pop().unwrap_or_default();
     let torn_tail = !tail.is_empty();
-    let malformed = |line: usize, reason: &str| JournalInvalid::Malformed { line, reason: reason.to_string() };
 
     let Some((first, rest)) = lines.split_first() else {
         return Err(malformed(1, "the header is missing"));
     };
-    match serde_json::from_slice::<Line>(first) {
+    let version = match serde_json::from_slice::<HeaderLine>(first) {
         Ok(Line::Header { journal_version, operation_id }) => {
-            if journal_version != JOURNAL_VERSION {
+            if journal_version != JOURNAL_VERSION && journal_version != LEGACY_JOURNAL_VERSION {
                 return Err(JournalInvalid::UnsupportedVersion(journal_version.into()));
             }
             if &operation_id != operation {
                 return Err(JournalInvalid::OperationMismatch);
             }
+            journal_version
         }
         Ok(_) => return Err(malformed(1, "the header is missing")),
         Err(error) => return Err(malformed(1, &error.to_string())),
+    };
+    if version == LEGACY_JOURNAL_VERSION {
+        read_batches::<IntentV2, ResultsV2>(rest, torn_tail)
+    } else {
+        read_batches::<IntentV3, ResultsV3>(rest, torn_tail)
     }
-    let Some((second, rest)) = rest.split_first() else {
+}
+
+fn malformed(line: usize, reason: &str) -> JournalInvalid {
+    JournalInvalid::Malformed { line, reason: reason.to_string() }
+}
+
+/// The inventory and batches of a journal whose header named the version
+/// of `I` and `R`; `lines` follow the header.
+fn read_batches<I: IntentLine, R: ResultsLine>(lines: &[&[u8]], torn_tail: bool) -> Result<JournalLog, JournalInvalid> {
+    let Some((second, rest)) = lines.split_first() else {
         return Err(malformed(2, "the inventory is missing"));
     };
-    let inventory = match serde_json::from_slice::<Line>(second) {
+    let inventory = match serde_json::from_slice::<Line<I, R>>(second) {
         Ok(Line::Inventory(inventory)) => inventory,
         Ok(_) => return Err(malformed(2, "the inventory is missing")),
         Err(error) => return Err(malformed(2, &error.to_string())),
     };
+    let mut planned_before = vec![false; inventory.entries().len()];
     let mut log = JournalLog { inventory, batches: Vec::new(), torn_tail };
 
     for (index, text) in rest.iter().enumerate() {
         let line = index + 3;
-        match serde_json::from_slice::<Line>(text).map_err(|error| malformed(line, &error.to_string()))? {
+        match serde_json::from_slice::<Line<I, R>>(text).map_err(|error| malformed(line, &error.to_string()))? {
             Line::Header { .. } => return Err(malformed(line, "a second header")),
             Line::Inventory(_) => return Err(malformed(line, "a second inventory")),
-            Line::Intent { batch, entries } => {
+            Line::Intent(intent) => {
                 if log.batches.last().is_some_and(|open| open.results.is_none()) {
                     return Err(malformed(line, "an intent before the previous batch's results"));
                 }
+                let batch = intent.batch();
                 if batch != log.batches.last().map_or(1, |last| last.number + 1) {
                     return Err(malformed(line, "batch numbers are not consecutive"));
                 }
-                check_batch(&entries, &log.inventory).map_err(|reason| malformed(line, reason))?;
+                let entries = intent.planned(&log.inventory).map_err(|reason| malformed(line, reason))?;
+                let positions = check_batch(&entries, &log.inventory).map_err(|reason| malformed(line, reason))?;
+                mark_planned(&mut planned_before, &positions).map_err(|reason| malformed(line, reason))?;
                 log.batches.push(Batch { number: batch, entries, results: None });
             }
-            Line::Results { batch, entries } => {
+            Line::Results(results) => {
+                let batch = results.batch();
                 let open = log
                     .batches
                     .last_mut()
                     .filter(|open| open.number == batch && open.results.is_none())
                     .ok_or_else(|| malformed(line, "results for a batch that is not open"))?;
-                let aligned = entries.len() == open.entries.len()
-                    && entries.iter().zip(&open.entries).all(|(result, planned)| result.path == planned.path);
-                if !aligned {
-                    return Err(malformed(line, "results do not match the batch's planned entries"));
-                }
-                open.results = Some(entries.into_iter().map(|result| result.state).collect());
+                open.results = Some(results.states(&open.entries).map_err(|reason| malformed(line, reason))?);
             }
         }
     }
@@ -317,27 +448,43 @@ pub fn summarize(entries: &[JournalEntry]) -> JournalSummary {
     summary
 }
 
-/// A batch the writer would refuse, and the reader too.
-fn check_batch(entries: &[PlannedEntry], inventory: &DeletionInventory) -> Result<(), &'static str> {
+/// A batch the writer would refuse, and the reader too: on success, the
+/// inventory position of each entry, in order.
+fn check_batch(entries: &[PlannedEntry], inventory: &DeletionInventory) -> Result<Vec<usize>, &'static str> {
     if entries.is_empty() || entries.len() > MAX_BATCH_ENTRIES {
         return Err("a batch plans no entries or more than the batch bound");
     }
     let parent = entries[0].path.as_path().parent();
+    let mut positions = Vec::with_capacity(entries.len());
     let mut seen = HashSet::new();
     for entry in entries {
         let path = entry.path.as_path();
         if !is_plain_relative(path) {
             return Err("an entry path is not a plain relative path");
         }
-        if inventory.get(path).is_none_or(|listed| EntryKind::of(&listed.shape) != entry.kind) {
-            return Err("a batch plans an entry the inventory does not list with that kind");
-        }
+        let at = inventory
+            .position(path)
+            .filter(|&at| EntryKind::of(&inventory.entries()[at].shape) == entry.kind)
+            .ok_or("a batch plans an entry the inventory does not list with that kind")?;
         if path.parent() != parent {
             return Err("a batch spans more than one directory");
         }
-        if !seen.insert(path) {
+        if !seen.insert(at) {
             return Err("a batch plans the same entry twice");
         }
+        positions.push(at);
+    }
+    Ok(positions)
+}
+
+/// Records that a batch planned `positions`, refusing one an earlier batch of
+/// the same journal planned. Nothing is recorded on refusal.
+fn mark_planned(planned_before: &mut [bool], positions: &[usize]) -> Result<(), &'static str> {
+    if positions.iter().any(|&at| planned_before[at]) {
+        return Err("a batch plans an entry an earlier batch planned");
+    }
+    for &at in positions {
+        planned_before[at] = true;
     }
     Ok(())
 }
@@ -382,7 +529,8 @@ pub struct JournalWriter<S: JournalSink = File> {
     /// Which inventory entries an earlier batch of this journal planned.
     planned: Vec<bool>,
     last_batch: u64,
-    open: Option<Vec<PlannedEntry>>,
+    /// How many entries the open batch plans.
+    open: Option<usize>,
     poisoned: bool,
 }
 
@@ -395,8 +543,8 @@ impl<S: JournalSink> JournalWriter<S> {
         inventory: Arc<DeletionInventory>,
         limit: u64,
     ) -> Result<Self, JournalWriteError> {
-        let header = line(&Line::Header { journal_version: JOURNAL_VERSION, operation_id: operation.clone() });
-        let listed = line(&Line::Inventory((*inventory).clone()));
+        let header = line(&LineV3::Header { journal_version: JOURNAL_VERSION, operation_id: operation.clone() });
+        let listed = line(&LineV3::Inventory((*inventory).clone()));
         let mut writer = Self::after_header(sink, inventory, limit);
         let mut opening = header;
         opening.extend_from_slice(&listed);
@@ -428,26 +576,22 @@ impl<S: JournalSink> JournalWriter<S> {
         if self.open.is_some() {
             return Err(JournalWriteError::InvalidBatch("the previous batch has no results"));
         }
-        check_batch(&entries, &self.inventory).map_err(JournalWriteError::InvalidBatch)?;
+        let positions = check_batch(&entries, &self.inventory).map_err(JournalWriteError::InvalidBatch)?;
         // `limit_for` counts every entry once.
-        let positions: Vec<usize> =
-            entries.iter().filter_map(|entry| self.inventory.position(entry.path.as_path())).collect();
         if positions.iter().any(|&at| self.planned[at]) {
             return Err(JournalWriteError::InvalidBatch("a batch plans an entry an earlier batch planned"));
         }
         let batch = self.last_batch + 1;
-        let intent = line(&Line::Intent { batch, entries: entries.clone() });
+        let intent = line(&LineV3::Intent(IntentV3 { batch, entries: positions.iter().map(|&at| at as u64).collect() }));
         // Reserve the longest results line this batch could need.
-        let reserve = results_line(batch, &entries, &vec![ResultState::ExternallyAbsent; entries.len()]).len();
+        let reserve = results_line(batch, &vec![ResultState::ExternallyAbsent; positions.len()]).len();
         if self.written + (intent.len() + reserve) as u64 > self.limit {
             return Err(JournalWriteError::LimitReached { limit: self.limit });
         }
         self.write(&intent)?;
-        for at in positions {
-            self.planned[at] = true;
-        }
+        mark_planned(&mut self.planned, &positions).expect("checked above");
         self.last_batch = batch;
-        self.open = Some(entries);
+        self.open = Some(positions.len());
         Ok(batch)
     }
 
@@ -457,13 +601,13 @@ impl<S: JournalSink> JournalWriter<S> {
         if self.poisoned {
             return Err(JournalWriteError::Poisoned);
         }
-        let Some(entries) = self.open.as_ref() else {
+        let Some(planned) = self.open else {
             return Err(JournalWriteError::InvalidBatch("no batch is open"));
         };
-        if states.len() != entries.len() {
+        if states.len() != planned {
             return Err(JournalWriteError::InvalidBatch("one result per planned entry is required"));
         }
-        let results = results_line(self.last_batch, entries, states);
+        let results = results_line(self.last_batch, states);
         self.write(&results)?;
         self.open = None;
         Ok(())
@@ -471,7 +615,7 @@ impl<S: JournalSink> JournalWriter<S> {
 
     /// The batch whose intent is durable and whose results are not.
     pub fn open_batch(&self) -> Option<u64> {
-        self.open.as_ref().map(|_| self.last_batch)
+        self.open.map(|_| self.last_batch)
     }
 
     fn write(&mut self, bytes: &[u8]) -> Result<(), JournalWriteError> {
@@ -485,16 +629,11 @@ impl<S: JournalSink> JournalWriter<S> {
     }
 }
 
-fn results_line(batch: u64, entries: &[PlannedEntry], states: &[ResultState]) -> Vec<u8> {
-    let entries = entries
-        .iter()
-        .zip(states)
-        .map(|(planned, state)| EntryResult { path: planned.path.clone(), state: *state })
-        .collect();
-    line(&Line::Results { batch, entries })
+fn results_line(batch: u64, states: &[ResultState]) -> Vec<u8> {
+    line(&LineV3::Results(ResultsV3 { batch, states: states.to_vec() }))
 }
 
-fn line(line: &Line) -> Vec<u8> {
+fn line(line: &impl Serialize) -> Vec<u8> {
     let mut bytes = serde_json::to_vec(line).expect("a journal line always serializes");
     bytes.push(b'\n');
     bytes
@@ -668,8 +807,9 @@ mod tests {
             probe.contents().len()
         };
         let entries = vec![file("a")];
-        let intent = line(&Line::Intent { batch: 1, entries: entries.clone() }).len() as u64;
-        let worst = results_line(1, &entries, &[ResultState::ExternallyAbsent]).len() as u64;
+        let position = listed().position(Path::new("a")).unwrap() as u64;
+        let intent = line(&LineV3::Intent(IntentV3 { batch: 1, entries: vec![position] })).len() as u64;
+        let worst = results_line(1, &[ResultState::ExternallyAbsent]).len() as u64;
 
         // The header and inventory never count: a zero limit still opens.
         // One byte short of intent plus worst-case results: refused, nothing written.
