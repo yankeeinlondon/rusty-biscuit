@@ -83,10 +83,15 @@ those changes: this document describes the target after they land.
   profile and references those definitions. Darkmatter never depends on a
   Claudine crate. Darkmatter's baseline remains tolerant of unknown host
   actions; Claudine's profile remains closed.
-- `2026-10-28-schema-enhancements` supplies tuples and the typed function
-  catalog at `darkmatter/schemas/partials/functions.yaml`, with
-  `mutations.yaml` beside it. A catalog `function` describes a signature; it
-  cannot itself be used as a frontmatter value schema.
+- `2026-10-28-schema-enhancements` supplies tuples, `|` unions, and the typed
+  function catalog at `darkmatter/schemas/partials/functions.yaml`, with
+  `mutations.yaml` beside it, read through
+  `expression_function_catalog()` / `function_descriptors(name)` (each
+  `ExpressionFunctionDescriptor` carries its parsed `function_type`). It also
+  supplies the one conversion engine (`darkmatter/lib/src/markdown/coercion/`)
+  that frontmatter validation and function-call binding
+  (`FunctionRegistration::bind_call`) share. A catalog `function` describes a
+  signature; it cannot itself be used as a frontmatter value schema.
 - `2026-10-29-recursive-schema-types` supplies recursive references, local
   JSON Schema `$ref`/`$defs`, positioned errors, and editor traversal.
 
@@ -226,7 +231,8 @@ typing only cancellation would leave the main container coverage gap open.
 
 ### Generated actions project catalog signatures into value schemas
 
-Read the typed expression catalog through Darkmatter's library API. A
+Read the typed expression catalog through Darkmatter's library API
+(`expression_function_descriptors()` and each descriptor's `function_type`). A
 repository generator may read the authoritative YAML using the same grammar;
 it must not parse Rust source or use a separate reduced signature vocabulary.
 Read the side-effect inventory through Darkmatter's public descriptor API.
@@ -332,9 +338,14 @@ convertible inputs and deferred operands. The implementation must connect the
 shared parameter binder and template classification to passive schema
 validation, rather than widening every numeric argument to arbitrary text.
 That integration belongs to Darkmatter so `md`, DMLS, and Claudine use one
-verdict. If the prerequisites do not expose the necessary passive API, adding
-that API is required work here and its cost must be recorded; it is not
-permission to omit argument checks. Use the same overload-selection rules
+verdict. The schema-enhancement prerequisite now supplies most of it (see
+[Reconciliation with the implemented schema enhancements](#reconciliation-with-the-implemented-schema-enhancements)):
+frontmatter validation already judges a converted copy through the shared
+engine, the engine's `BindOptions.defer` predicate already treats a value at
+any path as matching its declared type (composition uses it today for
+top-level `{{ … }}` and `$(…)` values), and `bind_call` binds without running a
+handler. Wiring those to lifecycle operands is required work here and its cost
+must be recorded; a missing piece is not permission to omit argument checks. Use the same overload-selection rules
 at validation and execution, and never combine separate overloads' parameters
 to accept a call that no overload admits. This intentionally replaces any
 older merged-signature approximation for generated argument checks, while
@@ -359,6 +370,54 @@ therefore decided as follows:
 - Missing metadata never silently falls back to untyped values; it fails the
   coverage test and generation.
 - There is no generator-local table of effect parameter types.
+
+### Reconciliation with the implemented schema enhancements
+
+*(added 2026-10-23)* `2026-10-28-schema-enhancements` is implemented. This
+section records what its delivered code settles for this spec; the
+prerequisite bullet and the deferred-arguments section above now name its
+APIs. No outcome of this spec changed.
+
+- **The binder decides overloads; the value schema follows it.**
+  *Decision:* a generated operand is judged by binding it through the
+  `FunctionRegistration` built from the same signature
+  (`FunctionRegistration::builder_from_types` accepts the parsed
+  `function_type`, so effect definitions written in the catalog grammar get the
+  same binder) and calling `bind_call` passively. The generated union of
+  overload arms gives structure, completion, and hover, and a parity test binds
+  every fixture call both ways. *Alternatives:* rely on JSON Schema union
+  selection over the overload arms alone. *Why:* the two selection rules
+  differ. `bind_call` prefers an overload that binds exactly over one that
+  needs conversion and otherwise reports `AmbiguousOverload`, while the
+  engine's union rule breaks ties field by field (number over boolean, JSON
+  over YAML) and keeps a value the schema already accepts. The spec requires
+  "the same overload-selection rules at validation and execution".
+  *Downsides:* operand validation calls the binder as well as the schema
+  validator; the parity test must cover every overloaded action.
+- **Generated value schemas inline the catalog's helper types.**
+  *Decision:* where a parameter names a catalog helper type (`agentic-cli`,
+  `ip-address`, `recent-commits`), the generator writes that type's
+  definition into the generated YAML instead of importing
+  `functions.yaml`, and the drift test compares the inlined body with the
+  catalog's. *Alternatives:* import the type from `functions.yaml`; move the
+  helper types into an already embedded partial. *Why:* the prerequisite tried
+  the import and rejected it. Every on-disk copy of the shipped partials would
+  then need `functions.yaml` beside it, which broke about 20 existing tests.
+  Moving the types is a Darkmatter ownership change this spec does not need.
+  *Downsides:* a second copy of each helper type, kept equal by the drift test
+  rather than by one definition.
+- **A callback parameter has no value projection.** *Decision:* a catalog
+  function whose parameter is itself a `function` type (inline callbacks, as
+  `2026-11-01-map-and-filter` proposes for `map` and `filter`) gets no
+  generated action and is not a generated verb. It stays callable inside
+  expressions. *Alternatives:* emit a verb whose callback operand is an
+  unconstrained string. *Why:* a callback exists only in expression syntax and
+  is never a value, so no YAML operand can carry it; an unconstrained string
+  is the untyped fallback this spec forbids. *Downsides:* the
+  catalog-to-verb parity check needs one documented exclusion class. Today
+  the prerequisite's registration rejects function-typed parameters
+  (`RegistrationError::FunctionValued`), so the class is empty until that
+  feature lands.
 
 ### The conditional depth limit remains parser-only
 
