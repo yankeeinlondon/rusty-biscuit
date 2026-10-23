@@ -272,6 +272,7 @@ fn serialized_field_shapes_per_validator() {
         ("format unknown name", with_tags_rules(json!({"items": {"format": "x-anything"}})), Ok(())),
         ("format empty", with_tags_rules(json!({"items": {"format": ""}})), Err("names no format")),
         ("format null", with_tags_rules(json!({"items": {"format": null}})), Err("null")),
+        ("format wrong type", with_tags_rules(json!({"items": {"format": 5}})), Err("invalid type")),
         // uniqueItems (a Boolean whose false is absent).
         ("unique true", with_tags_rules(json!({"unique_items": true})), Ok(())),
         ("unique null", with_tags_rules(json!({"unique_items": null})), Err("null")),
