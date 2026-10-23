@@ -195,7 +195,7 @@ intermixed with the implementation where ever possible. As a result, the very fi
     - the spec file
 - both subagents should be instructed to:
     - find any decisions which were made by the agent during the implementations
-    - find any rules or decisions that the agent flagged as needing to be made
+    - find any rules or decisions that the agent flagged as needing to be made, starting with the log's `decisions_for_review` frontmatter list (the implementation never stops for a human, so this review is where those decisions first reach one)
     - find any work that was deferred
 - based on what you hear back you need to choose one of the following courses of action:
     1. **Human review:**

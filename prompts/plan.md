@@ -40,6 +40,7 @@ The plan you write will be executed by a series of **non-interactive agent sessi
 
 - you have the repository: read the code, trace the callers, check the types, and run read-only commands so that a question is answered at planning time instead of being handed to the implementer
 - a plan that says "decide during implementation", "the implementer's choice", "if the trace shows X then ...", "either A or B", or "record for author review" is **not finished**; replace each with the decision and a sentence of evidence for it
+- a plan never contains a human gate, sign-off, approval step, or "stop and wait for a ruling" between or inside phases; the implementation runs every phase without a human, and human judgment happens in the review after the final phase. Work a human will want to judge (a visual look, a spec departure) is produced, built on, and listed for that review; if the human later changes it, the review cycle redoes the dependent work
 - prefer a decisive choice with a stated reason over a cautious deferral; this repo has no install base, so a public API change, a rename, or updating callers in another package is an acceptable cost when it is the better design
 
 ## Task
