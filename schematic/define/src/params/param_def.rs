@@ -10,7 +10,7 @@
 /// ```
 /// use schematic_define::params::{ParamDef, QueryParamType, ParamStyle};
 ///
-/// let param = ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+/// let param = ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false, constraints: None,
 ///     name: "tags".to_string(),
 ///     required: false,
 ///     description: Some("Filter by tags".to_string()),
@@ -52,6 +52,10 @@ pub struct ParamDef {
     pub explode: bool,
     /// Serialization style for the parameter.
     pub style: ParamStyle,
+    /// Value rules checked before the parameter is serialized; arrays are
+    /// counted before joining or exploding. See [`crate::constraints`].
+    #[serde(default, deserialize_with = "crate::serde_presence::non_null_map", skip_serializing_if = "Option::is_none")]
+    pub constraints: Option<Box<crate::constraints::Constraints>>,
 }
 
 /// Type of a parameter value.
@@ -152,7 +156,7 @@ pub enum ParamStyle {
 impl ParamDef {
     pub fn new(name: impl Into<String>, param_type: QueryParamType) -> Self {
         Self { name: name.into(), param_type, required: false, description: None,
-            explode: false, style: ParamStyle::Form, rust_name: None, secret: false, pager_managed: false, deprecated: false }
+            explode: false, style: ParamStyle::Form, rust_name: None, secret: false, pager_managed: false, deprecated: false, constraints: None }
     }
     /// A typed path parameter: required, `Simple` style, not exploded, as
     /// [`crate::EndpointBuilder::path_param`] also enforces.
@@ -165,6 +169,8 @@ impl ParamDef {
     pub fn secret(mut self) -> Self { self.secret = true; self }
     pub fn pager_managed(mut self) -> Self { self.pager_managed = true; self }
     pub fn deprecated(mut self) -> Self { self.deprecated = true; self }
+    /// Replaces the parameter's value rules; they must suit its type.
+    pub fn constraints(mut self, rules: crate::constraints::Constraints) -> Self { self.constraints = Some(Box::new(rules)); self }
 }
 
 #[cfg(test)]
@@ -173,7 +179,7 @@ mod tests {
 
     #[test]
     fn param_def_debug_clone_eq() {
-        let param = ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+        let param = ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
             name: "limit".to_string(),
             required: false,
             description: Some("Max results".to_string()),
@@ -188,7 +194,7 @@ mod tests {
 
     #[test]
     fn param_def_required() {
-        let param = ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+        let param = ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
             name: "id".to_string(),
             required: true,
             description: None,
@@ -201,7 +207,7 @@ mod tests {
 
     #[test]
     fn param_def_with_explode() {
-        let param = ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+        let param = ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
             name: "tags".to_string(),
             required: false,
             description: None,

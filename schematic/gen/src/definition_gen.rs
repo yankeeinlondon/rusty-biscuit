@@ -457,6 +457,7 @@ fn param_def_tokens(param: &ParamDef) -> TokenStream {
             param_type: #param_type,
             explode: #explode,
             style: #style,
+            constraints: None,
         }
     }
 }

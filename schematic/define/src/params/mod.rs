@@ -33,7 +33,7 @@
 //!
 //! let params = EndpointParams {
 //!     query: vec![
-//!         ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+//!         ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false, constraints: None,
 //!             name: "page".to_string(),
 //!             required: false,
 //!             description: Some("Page number".to_string()),
@@ -41,7 +41,7 @@
 //!             explode: false,
 //!             style: ParamStyle::Form,
 //!         },
-//!         ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+//!         ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false, constraints: None,
 //!             name: "limit".to_string(),
 //!             required: false,
 //!             description: Some("Items per page".to_string()),
@@ -124,7 +124,7 @@ impl EndpointParams {
         required: bool,
         description: Option<&str>,
     ) -> Self {
-        self.query.push(ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+        self.query.push(ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
             name: name.to_string(),
             required,
             description: description.map(|s| s.to_string()),
@@ -192,7 +192,7 @@ mod tests {
     #[test]
     fn endpoint_params_with_query() {
         let params = EndpointParams {
-            query: vec![ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+            query: vec![ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "page".to_string(),
                 required: false,
                 description: None,
@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn endpoint_params_with_all_locations() {
         let params = EndpointParams { path: vec![],
-            query: vec![ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+            query: vec![ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "q".to_string(),
                 required: true,
                 description: Some("Search query".to_string()),
@@ -221,7 +221,7 @@ mod tests {
                 explode: false,
                 style: ParamStyle::Form,
             }],
-            header: vec![ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+            header: vec![ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "X-Request-Id".to_string(),
                 required: false,
                 description: None,
@@ -229,7 +229,7 @@ mod tests {
                 explode: false,
                 style: ParamStyle::Simple,
             }],
-            cookie: vec![ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+            cookie: vec![ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "session".to_string(),
                 required: true,
                 description: None,
@@ -248,7 +248,7 @@ mod tests {
     fn endpoint_params_pagination_example() {
         let params = EndpointParams {
             query: vec![
-                ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+                ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                     name: "page".to_string(),
                     required: false,
                     description: Some("Page number (1-indexed)".to_string()),
@@ -256,7 +256,7 @@ mod tests {
                     explode: false,
                     style: ParamStyle::Form,
                 },
-                ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+                ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                     name: "per_page".to_string(),
                     required: false,
                     description: Some("Items per page (default: 20)".to_string()),
@@ -264,7 +264,7 @@ mod tests {
                     explode: false,
                     style: ParamStyle::Form,
                 },
-                ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+                ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                     name: "sort".to_string(),
                     required: false,
                     description: Some("Sort order".to_string()),
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn endpoint_params_filter_with_arrays() {
         let params = EndpointParams {
-            query: vec![ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false,
+            query: vec![ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "status".to_string(),
                 required: false,
                 description: Some("Filter by status (multiple allowed)".to_string()),

@@ -212,7 +212,7 @@ mod tests {
             env_auth: vec!["TEST_API_KEY".to_string()],
             headers: vec![],
             endpoints: vec![
-                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+                Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "ListItems".to_string(),
                     method: RestMethod::Get,
                     path: "/items".to_string(),
@@ -223,7 +223,7 @@ mod tests {
                     params: None,
                     cross_origin: None, pagination: None,
                 },
-                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+                Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "GetItem".to_string(),
                     method: RestMethod::Get,
                     path: "/items/{item_id}".to_string(),
@@ -354,7 +354,7 @@ mod tests {
             auth_policy: None,
             env_auth: vec![],
             headers: vec![],
-            endpoints: vec![Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+            endpoints: vec![Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                 id: "Create".to_string(),
                 method: RestMethod::Post,
                 path: "/create".to_string(),
@@ -399,7 +399,7 @@ mod tests {
             auth_policy: None,
             env_auth: vec![],
             headers: vec![],
-            endpoints: vec![Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+            endpoints: vec![Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                 id: "Get".to_string(),
                 method: RestMethod::Get,
                 path: "/get".to_string(),
@@ -444,7 +444,7 @@ mod tests {
             auth_policy: None,
             env_auth: vec![],
             headers: vec![],
-            endpoints: vec![Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+            endpoints: vec![Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                 id: "GetModel".to_string(),
                 method: RestMethod::Get,
                 path: "/models/{+repo_id}".to_string(),
@@ -507,7 +507,7 @@ mod tests {
             auth_policy: None,
             env_auth: vec![],
             headers: vec![],
-            endpoints: vec![Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+            endpoints: vec![Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                 id: "Create".to_string(),
                 method: RestMethod::Post,
                 path: "/create".to_string(),
@@ -547,7 +547,7 @@ mod tests {
         use openapiv3::ReferenceOr;
 
         let mut api = create_test_api();
-        api.endpoints = vec![Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+        api.endpoints = vec![Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
             id: "ListItems".to_string(),
             method: RestMethod::Get,
             path: "/items".to_string(),
@@ -556,7 +556,7 @@ mod tests {
             response: vec![SuccessShape::empty()],
             headers: vec![],
             params: Some(EndpointParams {
-                query: vec![ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
+                query: vec![ParamDef { constraints: None, deprecated: false, rust_name: None, secret: false, pager_managed: false,
                     name: "limit".to_string(),
                     required: false,
                     description: Some("Page size".to_string()),
@@ -600,7 +600,7 @@ mod tests {
 
         let mut api = create_test_api();
         api.endpoints = vec![
-            Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+            Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                 id: "GetItem".to_string(),
                 method: RestMethod::Get,
                 path: "/items/{item_id}".to_string(),
@@ -611,7 +611,7 @@ mod tests {
                 params: None,
                 cross_origin: None, pagination: None,
             },
-            Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+            Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                 id: "DeleteItem".to_string(),
                 method: RestMethod::Delete,
                 path: "/items/{item_id}".to_string(),

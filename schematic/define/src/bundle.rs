@@ -304,6 +304,15 @@ fn is_schema_payload(pointer: &str) -> bool {
         .is_some_and(|(index, member)| index.bytes().all(|b| b.is_ascii_digit()) && member == "schema")
 }
 
+/// Whether the member at `pointer` is a constraint's `allowed_values` or
+/// `constant`, whose JSON `null` is a value to compare against.
+fn is_constraint_data(pointer: &str) -> bool {
+    let mut tokens = pointer.rsplit('/');
+    let member = tokens.next();
+    let constraints = tokens.any(|token| matches!(token, "constraints" | "request_constraints"));
+    constraints && matches!(member, Some("allowed_values" | "constant"))
+}
+
 fn reject_nulls(value: &Value, pointer: &mut String, grant: bool) -> Result<(), BundleError> {
     match value {
         Value::Null if grant => Ok(()),
@@ -319,7 +328,7 @@ fn reject_nulls(value: &Value, pointer: &mut String, grant: bool) -> Result<(), 
             let length = pointer.len();
             push_token(pointer, key);
             let grant = object.contains_key("grant_type") && GRANT_FIELDS.contains(&key.as_str());
-            let result = if is_schema_payload(pointer) { Ok(()) } else { reject_nulls(value, pointer, grant) };
+            let result = if is_schema_payload(pointer) || is_constraint_data(pointer) { Ok(()) } else { reject_nulls(value, pointer, grant) };
             pointer.truncate(length);
             result
         }),
@@ -331,9 +340,10 @@ fn reject_nulls(value: &Value, pointer: &mut String, grant: bool) -> Result<(), 
 /// explicit default is legitimate input the writer omits. Coupled to the
 /// `skip_serializing_if` attributes on `RestApi`, `Endpoint`,
 /// `EndpointParams`, `ParamDef`, `AuthPolicy`, `SuccessShape`,
-/// `ResponseShape::Stream`, `GraphQlSurface`, and `GraphQlOperation`.
-const OMITTED_DEFAULTS: [&str; 11] = ["deprecated", "secret", "pager_managed", "path", "explicit",
-    "errors", "no_declared_errors", "operations", "statuses", "fallback", "keep"];
+/// `ResponseShape::Stream`, `GraphQlSurface`, `GraphQlOperation`, and
+/// `Constraints`.
+const OMITTED_DEFAULTS: [&str; 13] = ["deprecated", "secret", "pager_managed", "path", "explicit",
+    "errors", "no_declared_errors", "operations", "statuses", "fallback", "keep", "unique_items", "pattern_unenforced"];
 
 /// Every member of `input` must survive typed deserialization: `written`,
 /// the re-serialized bundle, holds it with the same value. This rejects keys
@@ -448,7 +458,7 @@ fn model_name(model: &ModelDef) -> &str {
 }
 
 
-/// Drop `null` members outside component schemas: the definition types
+/// Drop `null` members outside component schemas and constraint data: the definition types
 /// serialize some absent options as `null`, and a bundle omits them.
 fn omit_nulls(value: &mut Value, pointer: &mut String) {
     match value {
@@ -456,14 +466,14 @@ fn omit_nulls(value: &mut Value, pointer: &mut String) {
             object.retain(|key, value| {
                 let length = pointer.len();
                 push_token(pointer, key);
-                let keep = is_schema_payload(pointer) || !value.is_null();
+                let keep = is_schema_payload(pointer) || is_constraint_data(pointer) || !value.is_null();
                 pointer.truncate(length);
                 keep
             });
             for (key, value) in object.iter_mut() {
                 let length = pointer.len();
                 push_token(pointer, key);
-                if !is_schema_payload(pointer) { omit_nulls(value, pointer); }
+                if !is_schema_payload(pointer) && !is_constraint_data(pointer) { omit_nulls(value, pointer); }
                 pointer.truncate(length);
             }
         }

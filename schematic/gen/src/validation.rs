@@ -142,6 +142,7 @@ pub fn validate_rust_client_in(
     for api in apis {
         check_routes(api, Output::Rust, &mut diagnostics);
         check_schema_references(api, Output::Rust, &mut diagnostics);
+        check_constraints(api, Output::Rust, &mut diagnostics);
         check_rust_api(api, registrations, &mut diagnostics);
     }
     check_stem_case_collisions(apis, Output::Rust, &mut diagnostics);
@@ -169,6 +170,7 @@ pub fn validate_openapi(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
         check_routes(api, Output::OpenApi, &mut diagnostics);
         check_export_filename(api, Output::OpenApi, &mut diagnostics);
         check_schema_references(api, Output::OpenApi, &mut diagnostics);
+        check_constraints(api, Output::OpenApi, &mut diagnostics);
         diagnostics.extend(crate::export::vocabulary::diagnostics(api, Output::OpenApi));
     }
     check_stem_case_collisions(apis, Output::OpenApi, &mut diagnostics);
@@ -186,6 +188,7 @@ pub fn validate_postman(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
     for api in apis {
         check_routes(api, Output::Postman, &mut diagnostics);
         check_export_filename(api, Output::Postman, &mut diagnostics);
+        check_constraints(api, Output::Postman, &mut diagnostics);
         diagnostics.extend(crate::export::vocabulary::diagnostics(api, Output::Postman));
         diagnostics.extend(crate::export::postman::export_diagnostics(api));
     }
@@ -208,6 +211,22 @@ pub(crate) fn ensure_no_errors(
         });
     }
     Ok(())
+}
+
+/// Reports every value constraint the definition cannot carry, the same
+/// check API build and bundle load apply, so a definition edited after
+/// build is refused before any output is written.
+fn check_constraints(api: &RestApi, output: Output, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    for problem in schematic_define::constraints::constraint_problems(api) {
+        diagnostics.push(ValidationDiagnostic::new(
+            Severity::Error,
+            &api.name,
+            Some(&problem.endpoint),
+            Feature::TypeConstraint,
+            output,
+            format!("{} `{}` {}", problem.path, problem.keyword, problem.reason),
+        ));
+    }
 }
 
 /// Checks endpoint ids, route identity, and embedded queries for one output.
@@ -1468,7 +1487,7 @@ mod tests {
     }
 
     fn param(name: &str, required: bool) -> ParamDef {
-        ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
+        ParamDef { constraints: None, deprecated: false, rust_name: None, secret: false, pager_managed: false,
             name: name.to_string(),
             required,
             description: None,

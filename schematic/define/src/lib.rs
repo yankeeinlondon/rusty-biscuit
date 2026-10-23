@@ -128,6 +128,7 @@ pub struct ReadmeDoc;
 pub mod auth;
 pub mod bundle;
 pub mod components;
+pub mod constraints;
 pub mod cross_origin;
 pub mod headers;
 pub mod models;

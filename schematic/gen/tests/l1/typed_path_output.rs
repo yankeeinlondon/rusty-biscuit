@@ -50,7 +50,7 @@ fn fixture_api() -> RestApi {
     let list = Endpoint::get("ListAll", "/all")
         .describes("Legacy optional query")
         .returns_empty()
-        .query(ParamDef {
+        .query(ParamDef { constraints: None,
             deprecated: false,
             rust_name: None,
             secret: false,

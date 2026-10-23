@@ -712,6 +712,15 @@ fn lower_params(
     diagnostics: &mut Vec<WsDiagnostic>,
 ) -> (Vec<PathParamPlan>, Vec<QueryParamPlan>) {
     let base = format!("endpoints/{}/params", ep.id);
+    let located = [("path", &ep.params.path), ("query", &ep.params.query), ("header", &ep.params.header), ("cookie", &ep.params.cookie)];
+    for (location, params) in located {
+        for param in params.iter().filter(|param| param.constraints.is_some()) {
+            diagnostics.push(WsDiagnostic::error(
+                format!("{base}/{location}/{}", param.name),
+                "value constraints are not enforced on a WebSocket handshake parameter; remove them",
+            ));
+        }
+    }
     for (location, params) in [("header", &ep.params.header), ("cookie", &ep.params.cookie)] {
         for param in params {
             diagnostics.push(WsDiagnostic::error(
@@ -1552,6 +1561,17 @@ mod tests {
             .filter(|d| d.severity == WsSeverity::Error)
             .map(|d| d.path.clone())
             .collect()
+    }
+
+    #[test]
+    fn a_constrained_handshake_parameter_is_an_error_naming_its_location() {
+        use schematic_define::constraints::Constraints;
+        let mut api = minimal_api();
+        api.endpoints[0].params.query.push(ParamDef::new("limit", QueryParamType::Integer));
+        assert!(lower_to_plan(&api).is_ok(), "control: an unconstrained query parameter lowers");
+        api.endpoints[0].params.query[0] = ParamDef::new("limit", QueryParamType::Integer)
+            .constraints(Constraints::new().maximum(10));
+        assert_eq!(errors_of(&api), ["endpoints/Echo/params/query/limit"]);
     }
 
     #[test]

@@ -360,7 +360,7 @@ fn fixture_api(name: &str, module: &str, auth: AuthStrategy, endpoints: Vec<Endp
 }
 
 fn named_param(name: &str, param_type: QueryParamType) -> ParamDef {
-    ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
+    ParamDef { constraints: None, deprecated: false, rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required: false,
         description: None,

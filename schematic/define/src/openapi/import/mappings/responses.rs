@@ -245,7 +245,7 @@ fn map_form_field(
         }
     };
 
-    let field = FormField { name: name.to_string(), kind, required: true, description: None };
+    let field = FormField { constraints: None, name: name.to_string(), kind, required: true, description: None };
     let field = if required { field } else { field.optional() };
 
     Some(match describe_form_property(property, resolver) {

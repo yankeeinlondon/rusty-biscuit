@@ -4,7 +4,8 @@ use std::collections::HashSet;
 use std::fmt;
 
 use super::collection::{Collection, Pagination};
-use super::resolve::{AdoptionOutcome, ParamLocation, Resolution, param_adoptions, path_params, request_inputs, resolve};
+use super::lower::page_size_conflicts;
+use super::resolve::{AdoptionOutcome, ManagedRole, ParamLocation, Resolution, param_adoptions, path_params, request_inputs, resolve};
 use super::selector::{JsonPath, Step};
 use super::strategy::{
     Boundary, Carry, CountUnit, CursorSource, InputParam, LinkSource, MoreSignal, PageSize,
@@ -73,6 +74,24 @@ pub enum PaginationError {
     /// The value the pager sends for a required adopted parameter does not
     /// parse as the parameter's declared type; `expected` names that type.
     PagerManagedDefaultInvalid { strategy: &'static str, param: String, value: String, expected: &'static str },
+    /// The declared parameter adopted as the page size carries value rules
+    /// that disagree with the strategy's page size; see
+    /// [`page_size_constraints`](super::page_size_constraints).
+    PageSizeConstraintConflict { param: String, conflict: PageSizeConflict },
+}
+
+/// How an adopted page-size parameter's declared rules disagree with its
+/// strategy, reported by [`PaginationError::PageSizeConstraintConflict`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PageSizeConflict {
+    /// `minimum` or `maximum` is declared but the pair is not exactly the
+    /// strategy's `min` and `max` (a bound declared alone while the strategy
+    /// has the other also lands here). The declared bounds keep their text.
+    Bounds { declared_minimum: Option<String>, declared_maximum: Option<String>, min: u32, max: Option<u32> },
+    /// A value keyword other than the bounds and `format`, named by its JSON
+    /// Schema spelling; the pager chooses the value and cannot honor it.
+    Unenforceable(&'static str),
 }
 
 impl PaginationError {
@@ -113,6 +132,7 @@ impl PaginationError {
             Self::AdoptionWithoutKnob(_) => "adoption-without-knob",
             Self::PagerManagedRequiredWithoutDefault { .. } => "pager-managed-required-without-default",
             Self::PagerManagedDefaultInvalid { .. } => "pager-managed-default-invalid",
+            Self::PageSizeConstraintConflict { .. } => "page-size-constraint-conflict",
         }
     }
 
@@ -129,7 +149,8 @@ impl PaginationError {
             | Self::CollidesWithEndpointParam(_)
             | Self::AdoptionWithoutKnob(_)
             | Self::PagerManagedRequiredWithoutDefault { .. }
-            | Self::PagerManagedDefaultInvalid { .. } => PaginationRuleGroup::Parameter,
+            | Self::PagerManagedDefaultInvalid { .. }
+            | Self::PageSizeConstraintConflict { .. } => PaginationRuleGroup::Parameter,
             _ => PaginationRuleGroup::Strategy,
         }
     }
@@ -247,6 +268,22 @@ impl fmt::Display for PaginationError {
                 f,
                 "required parameter `{param}` is pager-managed by the `{strategy}` strategy, whose \
                  default `{value}` is not a valid {expected}"
+            ),
+            Self::PageSizeConstraintConflict { param, conflict: PageSizeConflict::Bounds { declared_minimum, declared_maximum, min, max } } => {
+                let text = |value: Option<&str>| value.map_or_else(|| "none".to_owned(), str::to_owned);
+                write!(
+                    f,
+                    "page-size parameter `{param}` declares minimum {} and maximum {}, but the strategy's \
+                     page size has min {min} and max {}; declare exactly those bounds or none",
+                    text(declared_minimum.as_deref()),
+                    text(declared_maximum.as_deref()),
+                    text(max.map(|max| max.to_string()).as_deref()),
+                )
+            }
+            Self::PageSizeConstraintConflict { param, conflict: PageSizeConflict::Unenforceable(keyword) } => write!(
+                f,
+                "page-size parameter `{param}` declares `{keyword}`, which the pager cannot honor \
+                 because it chooses the value; only `minimum`, `maximum`, and `format` are allowed"
             ),
         }
     }
@@ -634,8 +671,9 @@ fn is_bodyless(method: RestMethod) -> bool {
 }
 
 /// The rules of a strategy that depend on its endpoint. Declared-parameter
-/// rules apply to the primary strategy only: alternates are not generated, so
-/// they remove no request field.
+/// rules, including agreement of an adopted page-size parameter's own value
+/// rules with the strategy's page size, apply to the primary strategy only:
+/// alternates are not generated, so they remove no request field.
 fn endpoint_errors(endpoint: &Endpoint, strategy: &Strategy, primary: bool) -> Vec<PaginationError> {
     let mut errors = Vec::new();
     let known_path = path_params(&endpoint.path);
@@ -748,6 +786,15 @@ fn endpoint_errors(endpoint: &Endpoint, strategy: &Strategy, primary: bool) -> V
 
     if primary {
         for adoption in param_adoptions(endpoint, strategy) {
+            if adoption.outcome == AdoptionOutcome::Adopted
+                && adoption.role == ManagedRole::PageSize
+                && let (Some(size), Some(declared)) =
+                    (strategy.kind.size(), declared_param(endpoint, adoption.location, &adoption.name))
+            {
+                errors.extend(page_size_conflicts(declared, size).into_iter().map(|conflict| {
+                    PaginationError::PageSizeConstraintConflict { param: adoption.name.clone(), conflict }
+                }));
+            }
             match adoption.outcome {
                 AdoptionOutcome::NearMiss | AdoptionOutcome::NotAdoptable => {
                     errors.push(PaginationError::CollidesWithEndpointParam(adoption.name));
@@ -783,7 +830,7 @@ fn endpoint_errors(endpoint: &Endpoint, strategy: &Strategy, primary: bool) -> V
 
 /// The declared plain parameter an adoption names, matched the way
 /// [`param_adoptions`] matched it.
-fn declared_param<'a>(endpoint: &'a Endpoint, location: ParamLocation, name: &str) -> Option<&'a ParamDef> {
+pub(super) fn declared_param<'a>(endpoint: &'a Endpoint, location: ParamLocation, name: &str) -> Option<&'a ParamDef> {
     let params = endpoint.params.as_ref()?;
     let (defs, any_case) = match location {
         ParamLocation::Query => (&params.query, false),

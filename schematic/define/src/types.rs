@@ -486,6 +486,11 @@ pub struct Endpoint {
     /// Author JSON bodies with [`crate::EndpointBuilder::request_json`] and
     /// multipart uploads with [`crate::EndpointBuilder::request_form`].
     pub request: Option<ApiRequest>,
+    /// Rules on the request body's root value when no schema component
+    /// carries them: a text body, or a JSON body whose root is an array,
+    /// map, or primitive. See [`crate::constraints`].
+    #[serde(default, deserialize_with = "crate::serde_presence::non_null_map", skip_serializing_if = "Option::is_none")]
+    pub request_constraints: Option<Box<crate::constraints::Constraints>>,
     /// The success shapes a reply may take (R1): nonempty, and selectable by
     /// status, media type, and JSON tag when there are several. Serialized as
     /// an array under the historical member name.

@@ -1847,6 +1847,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -1862,6 +1863,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -1962,6 +1964,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -1977,6 +1980,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -2024,6 +2028,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "metadata".to_string(),
@@ -2039,6 +2044,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Json,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -2054,6 +2060,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -2066,6 +2073,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -2083,6 +2091,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -2162,6 +2171,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -2174,6 +2184,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -2191,6 +2202,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -2223,6 +2235,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -2240,6 +2253,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -2255,6 +2269,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "name".to_string(),
@@ -2267,6 +2282,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -2319,6 +2335,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -2336,6 +2353,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -2351,6 +2369,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -2424,6 +2443,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -2441,6 +2461,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -2455,6 +2476,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "include".to_string(),
@@ -2470,6 +2492,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::Json)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -2497,6 +2520,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::Json)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -2662,6 +2686,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::Json)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -2703,6 +2728,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -2715,6 +2741,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -2732,6 +2759,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order_by".to_string(),
@@ -2751,6 +2779,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -2812,6 +2841,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -2824,6 +2854,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -2841,6 +2872,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "status".to_string(),
@@ -2866,6 +2898,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -2945,6 +2978,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -2957,6 +2991,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "status".to_string(),
@@ -2974,6 +3009,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -2991,6 +3027,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -3023,6 +3060,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -3038,6 +3076,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -3055,6 +3094,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -3070,6 +3110,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -3164,6 +3205,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -3179,6 +3221,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -3191,6 +3234,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -3209,6 +3253,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -3262,6 +3307,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -3274,6 +3320,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "metadata".to_string(),
@@ -3289,6 +3336,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Json,
                 explode: true,
                 style: ParamStyle::DeepObject,
+                constraints: None,
             })
             .build()
     }
@@ -3349,6 +3397,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -3361,6 +3410,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -3387,6 +3437,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -3399,6 +3450,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -3545,6 +3597,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -3559,6 +3612,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -3571,6 +3625,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -3629,6 +3684,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Json,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "project_ids[]".to_string(),
@@ -3641,6 +3697,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "event_types[]".to_string(),
@@ -3656,6 +3713,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::Json)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "actor_ids[]".to_string(),
@@ -3671,6 +3729,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "actor_emails[]".to_string(),
@@ -3686,6 +3745,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "resource_ids[]".to_string(),
@@ -3701,6 +3761,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "tenant_only".to_string(),
@@ -3716,6 +3777,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Boolean,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -3731,6 +3793,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -3746,6 +3809,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "before".to_string(),
@@ -3761,6 +3825,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -3787,6 +3852,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -3802,6 +3868,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -3819,6 +3886,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -3895,6 +3963,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -3944,6 +4013,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "end_time".to_string(),
@@ -3959,6 +4029,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "bucket_width".to_string(),
@@ -3976,6 +4047,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "project_ids".to_string(),
@@ -3988,6 +4060,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "api_key_ids".to_string(),
@@ -4000,6 +4073,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "group_by".to_string(),
@@ -4027,6 +4101,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -4042,6 +4117,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "page".to_string(),
@@ -4057,6 +4133,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -4102,6 +4179,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -4117,6 +4195,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -4133,6 +4212,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -4199,6 +4279,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -4214,6 +4295,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -4230,6 +4312,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -4294,6 +4377,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -4309,6 +4393,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -4325,6 +4410,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -4381,6 +4467,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -4396,6 +4483,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -4452,6 +4540,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -4467,6 +4556,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "include_archived".to_string(),
@@ -4482,6 +4572,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Boolean,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -4548,6 +4639,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -4563,6 +4655,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "owner_project_access".to_string(),
@@ -4586,6 +4679,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -4656,6 +4750,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -4671,6 +4766,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -4688,6 +4784,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -4765,6 +4862,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -4780,6 +4878,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -4794,6 +4893,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -4833,6 +4933,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -4927,6 +5028,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -4942,6 +5044,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "before".to_string(),
@@ -4957,6 +5060,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -5009,6 +5113,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -5024,6 +5129,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -5107,6 +5213,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -5123,6 +5230,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -5138,6 +5246,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "before".to_string(),
@@ -5153,6 +5262,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -5232,6 +5342,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -5247,6 +5358,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -5340,6 +5452,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -5355,6 +5468,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -5369,6 +5483,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -5425,6 +5540,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -5441,6 +5557,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -5456,6 +5573,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "before".to_string(),
@@ -5471,6 +5589,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -5543,6 +5662,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "end_time".to_string(),
@@ -5558,6 +5678,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "bucket_width".to_string(),
@@ -5577,6 +5698,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "project_ids".to_string(),
@@ -5589,6 +5711,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "user_ids".to_string(),
@@ -5601,6 +5724,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "api_key_ids".to_string(),
@@ -5613,6 +5737,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "models".to_string(),
@@ -5625,6 +5750,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "group_by".to_string(),
@@ -5653,6 +5779,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -5668,6 +5795,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "page".to_string(),
@@ -5683,6 +5811,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -5709,6 +5838,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "end_time".to_string(),
@@ -5724,6 +5854,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "bucket_width".to_string(),
@@ -5743,6 +5874,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "project_ids".to_string(),
@@ -5755,6 +5887,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "user_ids".to_string(),
@@ -5767,6 +5900,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "api_key_ids".to_string(),
@@ -5779,6 +5913,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "models".to_string(),
@@ -5791,6 +5926,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "group_by".to_string(),
@@ -5819,6 +5955,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -5834,6 +5971,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "page".to_string(),
@@ -5849,6 +5987,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -5877,6 +6016,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "end_time".to_string(),
@@ -5892,6 +6032,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "bucket_width".to_string(),
@@ -5911,6 +6052,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "project_ids".to_string(),
@@ -5923,6 +6065,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "group_by".to_string(),
@@ -5944,6 +6087,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -5959,6 +6103,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "page".to_string(),
@@ -5974,6 +6119,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -6000,6 +6146,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "end_time".to_string(),
@@ -6015,6 +6162,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "bucket_width".to_string(),
@@ -6034,6 +6182,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "project_ids".to_string(),
@@ -6046,6 +6195,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "user_ids".to_string(),
@@ -6058,6 +6208,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "api_key_ids".to_string(),
@@ -6070,6 +6221,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "models".to_string(),
@@ -6082,6 +6234,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "batch".to_string(),
@@ -6097,6 +6250,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Boolean,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "group_by".to_string(),
@@ -6127,6 +6281,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -6142,6 +6297,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "page".to_string(),
@@ -6157,6 +6313,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -6183,6 +6340,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "end_time".to_string(),
@@ -6198,6 +6356,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "bucket_width".to_string(),
@@ -6217,6 +6376,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "project_ids".to_string(),
@@ -6229,6 +6389,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "user_ids".to_string(),
@@ -6241,6 +6402,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "api_key_ids".to_string(),
@@ -6253,6 +6415,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "models".to_string(),
@@ -6265,6 +6428,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "group_by".to_string(),
@@ -6293,6 +6457,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -6308,6 +6473,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "page".to_string(),
@@ -6323,6 +6489,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -6349,6 +6516,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "end_time".to_string(),
@@ -6364,6 +6532,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "bucket_width".to_string(),
@@ -6383,6 +6552,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "project_ids".to_string(),
@@ -6395,6 +6565,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "user_ids".to_string(),
@@ -6407,6 +6578,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "api_key_ids".to_string(),
@@ -6419,6 +6591,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "vector_store_ids".to_string(),
@@ -6433,6 +6606,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "group_by".to_string(),
@@ -6461,6 +6635,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -6476,6 +6651,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "page".to_string(),
@@ -6491,6 +6667,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -6513,6 +6690,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "end_time".to_string(),
@@ -6528,6 +6706,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "bucket_width".to_string(),
@@ -6547,6 +6726,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "sources".to_string(),
@@ -6574,6 +6754,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "sizes".to_string(),
@@ -6603,6 +6784,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "project_ids".to_string(),
@@ -6615,6 +6797,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "user_ids".to_string(),
@@ -6627,6 +6810,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "api_key_ids".to_string(),
@@ -6639,6 +6823,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "models".to_string(),
@@ -6651,6 +6836,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "group_by".to_string(),
@@ -6681,6 +6867,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -6696,6 +6883,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "page".to_string(),
@@ -6711,6 +6899,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -6737,6 +6926,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "end_time".to_string(),
@@ -6752,6 +6942,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "bucket_width".to_string(),
@@ -6771,6 +6962,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "project_ids".to_string(),
@@ -6783,6 +6975,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "user_ids".to_string(),
@@ -6795,6 +6988,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "api_key_ids".to_string(),
@@ -6807,6 +7001,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "models".to_string(),
@@ -6819,6 +7014,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "group_by".to_string(),
@@ -6847,6 +7043,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -6862,6 +7059,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "page".to_string(),
@@ -6877,6 +7075,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -6903,6 +7102,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "end_time".to_string(),
@@ -6918,6 +7118,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "bucket_width".to_string(),
@@ -6937,6 +7138,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "project_ids".to_string(),
@@ -6949,6 +7151,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "group_by".to_string(),
@@ -6970,6 +7173,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -6985,6 +7189,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "page".to_string(),
@@ -7000,6 +7205,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -7026,6 +7232,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "end_time".to_string(),
@@ -7041,6 +7248,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "bucket_width".to_string(),
@@ -7060,6 +7268,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "project_ids".to_string(),
@@ -7072,6 +7281,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "user_ids".to_string(),
@@ -7084,6 +7294,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "api_key_ids".to_string(),
@@ -7096,6 +7307,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "models".to_string(),
@@ -7108,6 +7320,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "context_levels".to_string(),
@@ -7134,6 +7347,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "group_by".to_string(),
@@ -7163,6 +7377,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "limit".to_string(),
@@ -7178,6 +7393,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "page".to_string(),
@@ -7193,6 +7409,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -7215,6 +7432,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -7230,6 +7448,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "emails".to_string(),
@@ -7242,6 +7461,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -7292,6 +7512,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -7307,6 +7528,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -7323,6 +7545,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -7385,6 +7608,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -7400,6 +7624,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -7416,6 +7641,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -7476,6 +7702,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -7491,6 +7718,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -7505,6 +7733,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -7577,6 +7806,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -7592,6 +7822,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -7608,6 +7839,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -7794,6 +8026,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Boolean,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .header_param(ParamDef {
                 name: "openai-beta".to_string(),
@@ -7814,6 +8047,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: false,
                 style: ParamStyle::Simple,
+                constraints: None,
             })
             .build()
     }
@@ -7836,6 +8070,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::Json)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "stream".to_string(),
@@ -7851,6 +8086,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Boolean,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "starting_after".to_string(),
@@ -7866,6 +8102,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "include_obfuscation".to_string(),
@@ -7881,6 +8118,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Boolean,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "beta".to_string(),
@@ -7893,6 +8131,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Boolean,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .header_param(ParamDef {
                 name: "openai-beta".to_string(),
@@ -7913,6 +8152,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: false,
                 style: ParamStyle::Simple,
+                constraints: None,
             })
             .build()
     }
@@ -7939,6 +8179,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Boolean,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .header_param(ParamDef {
                 name: "openai-beta".to_string(),
@@ -7959,6 +8200,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: false,
                 style: ParamStyle::Simple,
+                constraints: None,
             })
             .build()
     }
@@ -7991,6 +8233,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Boolean,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .header_param(ParamDef {
                 name: "openai-beta".to_string(),
@@ -8011,6 +8254,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: false,
                 style: ParamStyle::Simple,
+                constraints: None,
             })
             .build()
     }
@@ -8037,6 +8281,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -8054,6 +8299,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -8068,6 +8314,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "include".to_string(),
@@ -8083,6 +8330,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Array(Box::new(QueryParamType::Json)),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "beta".to_string(),
@@ -8095,6 +8343,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Boolean,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .header_param(ParamDef {
                 name: "openai-beta".to_string(),
@@ -8115,6 +8364,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: false,
                 style: ParamStyle::Simple,
+                constraints: None,
             })
             .build()
     }
@@ -8185,6 +8435,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -8202,6 +8453,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -8217,6 +8469,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "before".to_string(),
@@ -8232,6 +8485,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -8336,6 +8590,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -8353,6 +8608,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -8368,6 +8624,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "before".to_string(),
@@ -8383,6 +8640,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "filter".to_string(),
@@ -8407,6 +8665,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -8433,6 +8692,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -8450,6 +8710,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -8465,6 +8726,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "before".to_string(),
@@ -8480,6 +8742,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "filter".to_string(),
@@ -8504,6 +8767,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -8743,6 +9007,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -8758,6 +9023,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Json,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -8773,6 +9039,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -8873,6 +9140,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Json,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -8903,6 +9171,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Boolean,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .header_param(ParamDef {
                 name: "openai-beta".to_string(),
@@ -8923,6 +9192,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: false,
                 style: ParamStyle::Simple,
+                constraints: None,
             })
             .build()
     }
@@ -8945,6 +9215,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Boolean,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .header_param(ParamDef {
                 name: "openai-beta".to_string(),
@@ -8965,6 +9236,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 ),
                 explode: false,
                 style: ParamStyle::Simple,
+                constraints: None,
             })
             .build()
     }
@@ -8984,6 +9256,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -8999,6 +9272,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Json,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -9014,6 +9288,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -9079,6 +9354,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -9093,6 +9369,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Json,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -9105,6 +9382,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -9198,6 +9476,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -9213,6 +9492,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Json,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -9228,6 +9508,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "before".to_string(),
@@ -9243,6 +9524,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }
@@ -9285,6 +9567,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Integer,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "order".to_string(),
@@ -9300,6 +9583,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::Json,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "after".to_string(),
@@ -9315,6 +9599,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "before".to_string(),
@@ -9330,6 +9615,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .query(ParamDef {
                 name: "user".to_string(),
@@ -9345,6 +9631,7 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 param_type: QueryParamType::String,
                 explode: true,
                 style: ParamStyle::Form,
+                constraints: None,
             })
             .build()
     }

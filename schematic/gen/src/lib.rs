@@ -95,7 +95,7 @@ pub mod ws_codegen;
 /// compile time that the runtime it builds against has the same value;
 /// partial generation refuses to keep modules generated for another value.
 /// It changes together with the runtime's constant, which a test checks.
-pub const RUNTIME_ABI: u32 = 7;
+pub const RUNTIME_ABI: u32 = 8;
 
 
 pub use export::openapi::{

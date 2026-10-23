@@ -15,7 +15,7 @@ use crate::output::assemble::assemble_api_module;
 use crate::validation::validate_rust_client;
 
 fn param(name: &str, required: bool) -> ParamDef {
-    ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
+    ParamDef { constraints: None, deprecated: false, rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required,
         description: None,

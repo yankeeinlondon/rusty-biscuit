@@ -775,7 +775,7 @@ fn make_endpoint_with_query(
         Some(EndpointParams { path: vec![],
             query: query_params
                 .into_iter()
-                .map(|(name, required, desc, param_type)| ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
+                .map(|(name, required, desc, param_type)| ParamDef { constraints: None, deprecated: false, rust_name: None, secret: false, pager_managed: false,
                     name: name.to_string(),
                     required,
                     description: desc.map(|s| s.to_string()),
@@ -1215,7 +1215,7 @@ fn squash(code: &str) -> String {
 }
 
 fn named_param(name: &str, param_type: QueryParamType) -> schematic_define::ParamDef {
-    schematic_define::ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
+    schematic_define::ParamDef { constraints: None, deprecated: false, rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required: true,
         description: None,

@@ -5,6 +5,8 @@
 //! [`resolve`] checks the endpoint collection first, then infers a root array
 //! from a GET's explicit `Vec<T>` response. [`caller_knobs`] describes controls
 //! and [`validate_pagination`] checks strategy and parameter contracts.
+//! [`page_size_constraints`] lowers a page size into the `minimum`/`maximum`
+//! of the parameter it adopts ([`adopted_page_size`]).
 //!
 //! A strategy is one of four kinds ([`PageStrategy`]: page number, offset,
 //! cursor, next link) plus shared dimensions: constants, totals, terminal
@@ -28,6 +30,7 @@
 //! ```
 
 mod collection;
+mod lower;
 mod relay;
 mod resolve;
 mod selector;
@@ -35,6 +38,7 @@ mod strategy;
 mod validate;
 
 pub use collection::{Alternate, Collection, Pagination};
+pub use lower::{AdoptedPageSize, adopted_page_size, page_size_constraints};
 pub use relay::Relay;
 pub use resolve::{
     AdoptionOutcome, Direction, Knob, ManagedRole, ParamAdoption, ParamLocation, Resolution,
@@ -51,6 +55,6 @@ pub use strategy::{
     SessionOpen, SessionStep, Strategy, ValueSource,
 };
 pub use validate::{
-    PaginationDiagnostic, PaginationError, PaginationRuleGroup, validate_pagination,
+    PageSizeConflict, PaginationDiagnostic, PaginationError, PaginationRuleGroup, validate_pagination,
     validate_strategy,
 };

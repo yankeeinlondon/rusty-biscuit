@@ -12,6 +12,8 @@ bytes = "1"
 futures-core = "0.3"
 futures-util = { version = "0.3", default-features = false }
 http = "1"
+num-bigint = "0.4"
+regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 rustls = { version = "0.23", default-features = false }
 serde = { version = "1", features = ["derive"] }

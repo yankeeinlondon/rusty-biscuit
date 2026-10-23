@@ -13,7 +13,7 @@ fn endpoint_literal(ctx: &mut DefinitionContext) -> Endpoint {
         .describes("List releases")
         .returns_json::<Vec<Release>>(ctx)
         .params(EndpointParams {
-            query: vec![ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
+            query: vec![ParamDef { constraints: None, deprecated: false, rust_name: None, secret: false, pager_managed: false,
                 name: "per_page".to_string(), required: false, description: None,
                 param_type: QueryParamType::Integer, explode: true, style: ParamStyle::Form,
             }],

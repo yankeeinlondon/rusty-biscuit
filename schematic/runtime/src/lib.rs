@@ -37,7 +37,10 @@
 //! - the two response [`hooks`], gated by [`SupportsHooks`];
 //! - the [`pager`] for list endpoints whose definition authors a pagination
 //!   strategy: [`Call::pager`] and the generated endpoint calls' pager
-//!   controls, `pages()`, `fetch_page()`, and `collect_all()`.
+//!   controls, `pages()`, `fetch_page()`, and `collect_all()`;
+//! - [`validate`], the request-side constraint checks (exact numbers,
+//!   patterns, lengths, item counts, `enum` and `const`) and their
+//!   value-free [`Violations`](validate::Violations) report.
 //!
 //! ## The governing rule
 //!
@@ -81,6 +84,7 @@ pub mod response;
 pub mod shapes;
 pub mod stream;
 pub mod transport;
+pub mod validate;
 
 pub use call::{Call, CallError, CallFuture, FullCall};
 pub use client::{ApiDefinition, Client, DEFAULT_TIMEOUT, MAX_REDIRECTS};
@@ -124,4 +128,4 @@ pub use response::{
 /// value its generator was built against, and the generator's partial
 /// generation refuses to keep modules generated against a different value.
 /// Increment it with every change that generated code can observe.
-pub const ABI: u32 = 7;
+pub const ABI: u32 = 8;

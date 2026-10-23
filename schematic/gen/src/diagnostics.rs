@@ -173,6 +173,9 @@ pub enum Feature {
     /// generated module. The message starts with the definition path.
     #[serde(rename = "websocket-definition")]
     WebSocketDefinition,
+    /// A value constraint on a parameter, form field, or request body root
+    /// that contradicts itself or its value's type.
+    TypeConstraint,
 }
 
 impl Feature {
@@ -208,6 +211,7 @@ impl Feature {
             Self::GraphQlOperation => "graphql-operation",
             Self::ExampleValue => "example-value",
             Self::WebSocketDefinition => "websocket-definition",
+            Self::TypeConstraint => "type-constraint",
         }
     }
 }
@@ -400,6 +404,7 @@ mod tests {
             Feature::GraphQlOperation,
             Feature::ExampleValue,
             Feature::WebSocketDefinition,
+            Feature::TypeConstraint,
         ];
         for feature in features {
             assert_eq!(

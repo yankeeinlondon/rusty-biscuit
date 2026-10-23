@@ -19,7 +19,7 @@ fn endpoint(id: &str, method: RestMethod, path: &str, description: &str) -> Endp
 }
 
 fn param(name: &str, param_type: QueryParamType, description: Option<&str>) -> ParamDef {
-    ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
+    ParamDef { constraints: None, deprecated: false, rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required: false,
         description: description.map(str::to_string),

@@ -39,4 +39,7 @@ mod streams;
 mod support;
 mod test_layout;
 mod timing;
+mod validate_decimal;
+mod validate_eval;
+mod validate_report;
 mod whole_send_elapsed;

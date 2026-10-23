@@ -127,6 +127,11 @@ pub struct FormField {
 
     /// Human-readable description of this field.
     pub description: Option<String>,
+
+    /// Value rules for a text or JSON field, checked before the form is
+    /// encoded. File fields take none. See [`crate::constraints`].
+    #[serde(default, deserialize_with = "crate::serde_presence::non_null_map", skip_serializing_if = "Option::is_none")]
+    pub constraints: Option<Box<crate::constraints::Constraints>>,
 }
 
 impl FormField {
@@ -146,6 +151,7 @@ impl FormField {
             kind: FormFieldKind::Text,
             required: true,
             description: None,
+            constraints: None,
         }
     }
 
@@ -166,6 +172,7 @@ impl FormField {
             kind: FormFieldKind::File { accept: vec![] },
             required: true,
             description: None,
+            constraints: None,
         }
     }
 
@@ -188,6 +195,7 @@ impl FormField {
             kind: FormFieldKind::File { accept },
             required: true,
             description: None,
+            constraints: None,
         }
     }
 
@@ -212,6 +220,7 @@ impl FormField {
             },
             required: true,
             description: None,
+            constraints: None,
         }
     }
 
@@ -245,6 +254,7 @@ impl FormField {
             kind: FormFieldKind::Files { accept, min, max },
             required: true,
             description: None,
+            constraints: None,
         }
     }
 
@@ -265,6 +275,7 @@ impl FormField {
             kind: FormFieldKind::Json(reference),
             required: true,
             description: None,
+            constraints: None,
         }
     }
 
@@ -296,6 +307,22 @@ impl FormField {
     /// ```
     pub fn with_description(mut self, desc: impl Into<String>) -> Self {
         self.description = Some(desc.into());
+        self
+    }
+
+    /// Replaces the field's value rules; text and JSON fields only.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use schematic_define::FormField;
+    /// use schematic_define::constraints::Constraints;
+    ///
+    /// let field = FormField::text("title").constraints(Constraints::new().min_length(1).max_length(200));
+    /// assert_eq!(field.constraints.unwrap().max_length, Some(200));
+    /// ```
+    pub fn constraints(mut self, rules: crate::constraints::Constraints) -> Self {
+        self.constraints = Some(Box::new(rules));
         self
     }
 }
@@ -693,7 +720,7 @@ mod tests {
             headers: vec![],
             endpoints: vec![
                 // JSON endpoint
-                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+                Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "CreateFolder".to_string(),
                     method: RestMethod::Post,
                     path: "/folders".to_string(),
@@ -705,7 +732,7 @@ mod tests {
                     cross_origin: None, pagination: None,
                 },
                 // FormData endpoint with file upload
-                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+                Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "UploadFile".to_string(),
                     method: RestMethod::Post,
                     path: "/folders/{folder_id}/files".to_string(),
@@ -723,7 +750,7 @@ mod tests {
                     cross_origin: None, pagination: None,
                 },
                 // GET endpoint with no request body
-                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+                Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "ListFiles".to_string(),
                     method: RestMethod::Get,
                     path: "/folders/{folder_id}/files".to_string(),
@@ -735,7 +762,7 @@ mod tests {
                     cross_origin: None, pagination: None,
                 },
                 // Binary download
-                Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
+                Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "DownloadFile".to_string(),
                     method: RestMethod::Get,
                     path: "/files/{file_id}/content".to_string(),

@@ -177,7 +177,7 @@ impl Endpoint {
     #[allow(clippy::new_ret_no_self)]
     pub fn new(id: impl Into<String>, method: RestMethod, path: impl Into<String>) -> EndpointBuilder {
         EndpointBuilder { endpoint: Endpoint { id: id.into(), method, path: path.into(),
-            description: String::new(), request: None, response: vec![],
+            description: String::new(), request: None, request_constraints: None, response: vec![],
             headers: vec![], params: None, cross_origin: None, pagination: None, rate_limit: None, retry_guidance: None,
             deprecated: false, auth: None, errors: vec![], no_declared_errors: false }, successes: vec![], auth_choices: 0, error: None, state: PhantomData }
     }
@@ -235,6 +235,10 @@ impl<D, S> EndpointBuilder<D, S> {
     pub fn request_text(mut self) -> Self { self.endpoint.request = Some(ApiRequest::Text { content_type: "text/plain".into() }); self }
     pub fn request_text_with_content_type(mut self, content_type: impl Into<String>) -> Self { self.endpoint.request = Some(ApiRequest::Text { content_type: content_type.into() }); self }
     pub fn request_binary_with_content_type(mut self, content_type: impl Into<String>) -> Self { self.endpoint.request = Some(ApiRequest::Binary { content_type: content_type.into() }); self }
+    /// Rules on the request body's root value: a text body, or a JSON body
+    /// whose root is not a schema component (a component's rules are
+    /// Schemars attributes on its model). Checked at build.
+    pub fn request_constraints(mut self, rules: crate::constraints::Constraints) -> Self { self.endpoint.request_constraints = Some(Box::new(rules)); self }
     pub fn request_binary(mut self) -> Self { self.endpoint.request = Some(ApiRequest::Binary { content_type: "application/octet-stream".into() }); self }
     pub fn pagination(mut self, collection: crate::pagination::Collection) -> Self { self.endpoint.pagination = Some(collection); self }
     pub fn cross_origin(mut self, policy: CrossOrigin) -> Self { self.endpoint.cross_origin = Some(policy); self }
@@ -499,7 +503,11 @@ fn validate_endpoint_vocabulary(api: &str, ep: &Endpoint) -> Result<(), Definiti
     }
     validate_success_shapes(&ep.response).map_err(&fail)?;
     validate_error_policy(&[], &ep.errors, ep.no_declared_errors).map_err(&fail)?;
-    validate_typed_paths(ep).map_err(fail)
+    validate_typed_paths(ep).map_err(fail)?;
+    match crate::constraints::endpoint_problems(ep).into_iter().next() {
+        Some(problem) => Err(DefinitionError::InvalidConstraint { api: api.into(), problem: Box::new(problem) }),
+        None => Ok(()),
+    }
 }
 
 fn validate_oauth2(policy: &AuthPolicy) -> Result<(), crate::OAuth2ConfigError> {

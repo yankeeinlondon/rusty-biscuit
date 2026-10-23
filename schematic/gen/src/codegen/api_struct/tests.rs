@@ -407,7 +407,7 @@ fn endpoint_origin_replacement_and_parameter_secrets_use_runtime_metadata() {
         .describes("List entries").returns_empty()
         .build().unwrap();
     endpoint.cross_origin = Some(CrossOrigin::same_origin());
-    let secret = schematic_define::ParamDef { deprecated: false,
+    let secret = schematic_define::ParamDef { constraints: None, deprecated: false,
         name: "X-Pin".into(), rust_name: None, secret: true, pager_managed: false,
         required: false, description: None, param_type: schematic_define::QueryParamType::String,
         explode: false, style: schematic_define::ParamStyle::Simple,

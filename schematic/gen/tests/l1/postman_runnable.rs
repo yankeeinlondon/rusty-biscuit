@@ -293,7 +293,7 @@ fn endpoint(id: &str, path: &str) -> Endpoint {
 }
 
 fn param(name: &str, required: bool) -> ParamDef {
-    ParamDef {
+    ParamDef { constraints: None,
         name: name.into(), rust_name: None, secret: false, pager_managed: false, deprecated: false, required,
         description: None, param_type: QueryParamType::String, explode: false, style: ParamStyle::Form,
     }

@@ -295,7 +295,7 @@ fn same_api_duplicate_route_blocks_every_output() {
 }
 
 fn located_param(name: &str, required: bool) -> ParamDef {
-    ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
+    ParamDef { constraints: None, deprecated: false, rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required,
         description: Some(format!("{name} input")),
@@ -1014,4 +1014,25 @@ fn query_enums_need_values_distinct_variants_and_a_free_type_name() {
         })
         .collect();
     assert_eq!(collisions.len(), 1, "{:?}", validate_rust_client(&[&api, &other]));
+}
+
+#[test]
+fn a_contradictory_constraint_edited_after_build_blocks_every_output() {
+    use schematic_define::constraints::Constraints;
+    let mut api = fixture_api("Rules", "rules");
+    let mut params = EndpointParams::new();
+    params.query.push(ParamDef::new("limit", QueryParamType::Integer).constraints(Constraints::new().minimum(1).maximum(100)));
+    api.endpoints[0].params = Some(params);
+    assert!(validate_rust_client(&[&api]).iter().all(|d| d.feature != Feature::TypeConstraint), "control");
+
+    api.endpoints[0].params.as_mut().unwrap().query[0].constraints = Some(Box::new(Constraints::new().minimum(10).maximum(1)));
+    for (output, diagnostics) in [(Output::Rust, validate_rust_client(&[&api])),
+        (Output::OpenApi, validate_openapi(&[&api])), (Output::Postman, validate_postman(&[&api]))] {
+        let found: Vec<_> = diagnostics.iter().filter(|d| d.feature == Feature::TypeConstraint).collect();
+        assert_eq!(found.len(), 1, "{output}: {diagnostics:?}");
+        assert_eq!(found[0].severity, Severity::Error);
+        assert_eq!(found[0].endpoint.as_deref(), Some("ListThings"));
+        assert_eq!(found[0].output, output);
+        assert_eq!(found[0].message, "query.limit `minimum` leaves no number between the lower and upper bounds");
+    }
 }

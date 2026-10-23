@@ -17,7 +17,7 @@ use crate::common::fresh_output::{Definitions, FreshCrate};
 const MODULE: &str = "fixture_endpoint_auth";
 
 fn param(name: &str) -> ParamDef {
-    ParamDef {
+    ParamDef { constraints: None,
         deprecated: false,
         rust_name: None,
         secret: false,

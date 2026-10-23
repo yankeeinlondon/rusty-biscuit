@@ -58,7 +58,7 @@ fn accepted_successes_and_requests_preserve_stored_wire_shapes() {
     }
     let fields = vec![FormField::text("caption").optional().with_description("Caption"),
         FormField::file_accept("image", vec!["image/png".into()]),
-        FormField { name: "metadata".into(), required: true, description: Some("Metadata".into()),
+        FormField { constraints: None, name: "metadata".into(), required: true, description: Some("Metadata".into()),
             kind: FormFieldKind::Json(desc.into_type_ref()) }];
     for ep in [Endpoint::post("Multipart", "/").describes("Upload").request_form(fields.clone()).returns_empty().build().unwrap(),
         Endpoint::post("Encoded", "/").describes("Submit").request_urlencoded(fields.clone()).returns_empty().build().unwrap()] {
@@ -332,6 +332,7 @@ fn public_default_set_equals_documented_allow_list() {
         include_str!("../src/params/mod.rs"),
         include_str!("../src/params/param_def.rs"),
         include_str!("../src/prelude.rs"),
+        include_str!("../src/constraints/mod.rs"),
         include_str!("../src/registration.rs"),
         include_str!("../src/request.rs"),
         include_str!("../src/response.rs"),
@@ -367,7 +368,7 @@ fn public_default_set_equals_documented_allow_list() {
             }
         }
     }
-    let allowed = ["AuthPolicy", "AuthStrategy", "ConnectionLifecycle", "CrossOrigin", "EndpointParams",
+    let allowed = ["AuthPolicy", "AuthStrategy", "ConnectionLifecycle", "Constraints", "CrossOrigin", "EndpointParams",
         "EndpointRole", "EnvMapping", "ExportFormat", "ExportOptions", "FrameFormat", "Headers", "OAuth2ClientAuthMethod",
         "OpenApiImportOptions", "PkceRequirement", "RequestIdType", "SchematicDocExtension",
         "SensitiveString", "WebSocketEndpoint", "WebSocketEndpointHints",
@@ -408,7 +409,7 @@ fn typed_list_recognition_respects_root_array_and_get_boundaries() {
 fn missing_destination_references_fail_in_both_form_encodings() {
     let mut source = DefinitionContext::types_in("::models");
     let desc = source.register::<Model>().unwrap();
-    let fields = vec![FormField { name: "metadata".into(), required: true, description: None,
+    let fields = vec![FormField { constraints: None, name: "metadata".into(), required: true, description: None,
         kind: FormFieldKind::Json(desc.into_type_ref()) }];
     let destination = DefinitionContext::types_in("::models");
     for ep in [Endpoint::post("Multipart", "/").describes("Multipart").request_form(fields.clone()).returns_empty().build().unwrap(),

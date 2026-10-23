@@ -96,7 +96,7 @@ pub fn map_operation<'a>(
     );
 
     Ok((
-        Endpoint { rate_limit: None, retry_guidance: None, deprecated: op.deprecated, auth: None, errors: classification.errors, no_declared_errors: false,
+        Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: op.deprecated, auth: None, errors: classification.errors, no_declared_errors: false,
             id,
             method,
             path: path.to_string(),

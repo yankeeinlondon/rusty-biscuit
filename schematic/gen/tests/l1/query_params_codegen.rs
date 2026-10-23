@@ -44,7 +44,7 @@ fn make_endpoint_with_query(
         Some(EndpointParams { path: vec![],
             query: query_params
                 .into_iter()
-                .map(|(name, param_type)| ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
+                .map(|(name, param_type)| ParamDef { constraints: None, deprecated: false, rust_name: None, secret: false, pager_managed: false,
                     name: name.to_string(),
                     required: false,
                     description: None,
