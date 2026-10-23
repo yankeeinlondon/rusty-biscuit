@@ -17,6 +17,7 @@ mod discriminated_unions;
 mod e2e_generation;
 mod endpoint_auth_output;
 mod extension_reimport;
+mod fixed_header_export;
 mod fresh_output_compile;
 mod http_client;
 mod import_overlay;

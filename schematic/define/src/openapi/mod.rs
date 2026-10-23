@@ -85,7 +85,7 @@ mod options;
 mod source;
 
 pub use error::OpenApiError;
-pub use export::{export, extract_path_params, map_security};
+pub use export::{HeaderGap, HeaderGapReason, export, extract_path_params, header_gaps, map_security};
 pub use extensions::{
     AuthExtension, SchematicDocExtension, SchematicOpExtension, SchematicSchemaExtension,
 };

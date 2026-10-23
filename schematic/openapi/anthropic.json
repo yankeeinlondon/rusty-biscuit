@@ -17,6 +17,21 @@
         "summary": "Create a message with optional tool use for agent interactions",
         "description": "Create a message with optional tool use for agent interactions",
         "operationId": "CreateMessage",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "anthropic-version",
+            "required": true,
+            "schema": {
+              "default": "2023-06-01",
+              "type": "string",
+              "enum": [
+                "2023-06-01"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -88,6 +103,21 @@
         "summary": "Count tokens in a message before sending",
         "description": "Count tokens in a message before sending",
         "operationId": "CountTokens",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "anthropic-version",
+            "required": true,
+            "schema": {
+              "default": "2023-06-01",
+              "type": "string",
+              "enum": [
+                "2023-06-01"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -129,6 +159,21 @@
         "summary": "List available Claude models",
         "description": "List available Claude models",
         "operationId": "ListModels",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "anthropic-version",
+            "required": true,
+            "schema": {
+              "default": "2023-06-01",
+              "type": "string",
+              "enum": [
+                "2023-06-01"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -155,6 +200,21 @@
         "summary": "Get information about a specific model",
         "description": "Get information about a specific model",
         "operationId": "RetrieveModel",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "anthropic-version",
+            "required": true,
+            "schema": {
+              "default": "2023-06-01",
+              "type": "string",
+              "enum": [
+                "2023-06-01"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -198,30 +258,52 @@
           "max_tokens": {
             "description": "Maximum tokens to generate.\n\nMust be less than the model's maximum output limit.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "messages": {
             "description": "Conversation messages.\n\nMessages alternate between user and assistant roles.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Message"
-                }
-              ]
+              "$ref": "#/components/schemas/Message"
             }
           },
           "metadata": {
-            "description": "Request metadata for tracking."
+            "description": "Request metadata for tracking.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Metadata"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "model": {
             "description": "Model identifier (e.g., \"claude-sonnet-4-5-20250514\").",
             "type": "string"
           },
           "service_tier": {
-            "description": "Service tier selection."
+            "description": "Service tier selection.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceTier"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "stop_sequences": {
+            "nullable": true,
             "description": "Custom stop sequences.",
             "type": "array",
             "items": {
@@ -229,40 +311,78 @@
             }
           },
           "stream": {
+            "nullable": true,
             "description": "Whether to stream the response.",
             "type": "boolean"
           },
           "system": {
-            "description": "System prompt providing context and instructions."
+            "description": "System prompt providing context and instructions.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SystemPrompt"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "temperature": {
+            "nullable": true,
             "description": "Sampling temperature (0.0-1.0).\n\nLower values are more deterministic.",
             "type": "number",
             "format": "double"
           },
           "thinking": {
-            "description": "Extended thinking configuration."
+            "description": "Extended thinking configuration.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThinkingConfig"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "tool_choice": {
-            "description": "How to select tools for use."
+            "description": "How to select tools for use.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolChoice"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "tools": {
+            "nullable": true,
             "description": "Tools available for the model to use.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Tool"
-                }
-              ]
+              "$ref": "#/components/schemas/Tool"
             }
           },
           "top_k": {
+            "nullable": true,
             "description": "Top-K sampling parameter.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "top_p": {
+            "nullable": true,
             "description": "Top-P (nucleus) sampling parameter.",
             "type": "number",
             "format": "double"
@@ -279,7 +399,9 @@
         "type": "object",
         "properties": {
           "ttl": {
-            "description": "Time-to-live for the cache entry.\n\nValid values: \"5m\" (default), \"1h\""
+            "nullable": true,
+            "description": "Time-to-live for the cache entry.\n\nValid values: \"5m\" (default), \"1h\"",
+            "type": "string"
           },
           "type": {
             "description": "Cache type (currently only \"ephemeral\" is supported).",
@@ -292,13 +414,345 @@
       },
       "ContentBlock": {
         "title": "ContentBlock",
-        "description": "Content block for messages.\n\nMessages contain an array of content blocks that can include text,\nimages, documents, tool use requests, and tool results."
+        "description": "Content block for messages.\n\nMessages contain an array of content blocks that can include text,\nimages, documents, tool use requests, and tool results.",
+        "oneOf": [
+          {
+            "description": "Text content.",
+            "type": "object",
+            "properties": {
+              "cache_control": {
+                "description": "Optional cache control for prompt caching.",
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CacheControl"
+                  },
+                  {
+                    "nullable": true,
+                    "type": "object",
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "text": {
+                "description": "The text content.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "text"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "text"
+            ]
+          },
+          {
+            "description": "Image content.",
+            "type": "object",
+            "properties": {
+              "cache_control": {
+                "description": "Optional cache control for prompt caching.",
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CacheControl"
+                  },
+                  {
+                    "nullable": true,
+                    "type": "object",
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "source": {
+                "description": "The image source (base64 or URL).",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ImageSource"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "image"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "source"
+            ]
+          },
+          {
+            "description": "Document content (PDF, text files).",
+            "type": "object",
+            "properties": {
+              "cache_control": {
+                "description": "Optional cache control for prompt caching.",
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CacheControl"
+                  },
+                  {
+                    "nullable": true,
+                    "type": "object",
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "context": {
+                "nullable": true,
+                "description": "Optional context about the document.",
+                "type": "string"
+              },
+              "source": {
+                "description": "The document source.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/DocumentSource"
+                  }
+                ]
+              },
+              "title": {
+                "nullable": true,
+                "description": "Optional title for the document.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "document"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "source"
+            ]
+          },
+          {
+            "description": "Tool use request from the assistant.\n\nWhen the model wants to use a tool, it returns this content block.\nExecute the tool and return a `ToolResult` block in the next message.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "Unique identifier for this tool use.",
+                "type": "string"
+              },
+              "input": {
+                "description": "Input parameters for the tool."
+              },
+              "name": {
+                "description": "Name of the tool to execute.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tool_use"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "id",
+              "name",
+              "input"
+            ]
+          },
+          {
+            "description": "Result from a tool execution.\n\nInclude this in a user message after executing a tool requested\nby the assistant.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "description": "The result content (string or nested content blocks).",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ToolResultContent"
+                  }
+                ]
+              },
+              "is_error": {
+                "nullable": true,
+                "description": "Whether the tool execution resulted in an error.",
+                "type": "boolean"
+              },
+              "tool_use_id": {
+                "description": "The tool_use_id from the corresponding ToolUse block.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tool_result"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "tool_use_id",
+              "content"
+            ]
+          },
+          {
+            "description": "Extended thinking block (response only).\n\nContains the model's internal reasoning when extended thinking is enabled.",
+            "type": "object",
+            "properties": {
+              "signature": {
+                "nullable": true,
+                "description": "Cryptographic signature for verification.",
+                "type": "string"
+              },
+              "thinking": {
+                "description": "The thinking content.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "thinking"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "thinking"
+            ]
+          }
+        ]
       },
       "DocumentSource": {
-        "description": "Source for document content."
+        "description": "Source for document content.",
+        "oneOf": [
+          {
+            "description": "Base64-encoded document data.",
+            "type": "object",
+            "properties": {
+              "data": {
+                "description": "The base64-encoded document data.",
+                "type": "string"
+              },
+              "media_type": {
+                "description": "MIME type of the document.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "base64"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "data",
+              "media_type"
+            ]
+          },
+          {
+            "description": "URL reference to a document.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "url"
+                ]
+              },
+              "url": {
+                "description": "The URL of the document.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "url"
+            ]
+          },
+          {
+            "description": "Plain text content.",
+            "type": "object",
+            "properties": {
+              "data": {
+                "description": "The text content.",
+                "type": "string"
+              },
+              "media_type": {
+                "description": "MIME type (typically \"text/plain\").",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "text"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "data",
+              "media_type"
+            ]
+          }
+        ]
       },
       "ImageSource": {
-        "description": "Source for image content."
+        "description": "Source for image content.",
+        "oneOf": [
+          {
+            "description": "Base64-encoded image data.",
+            "type": "object",
+            "properties": {
+              "data": {
+                "description": "The base64-encoded image data.",
+                "type": "string"
+              },
+              "media_type": {
+                "description": "MIME type of the image.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "base64"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "data",
+              "media_type"
+            ]
+          },
+          {
+            "description": "URL reference to an image.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "url"
+                ]
+              },
+              "url": {
+                "description": "The URL of the image.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "url"
+            ]
+          }
+        ]
       },
       "Message": {
         "title": "Message",
@@ -309,15 +763,16 @@
             "description": "Content blocks making up the message.\n\nFor simple text messages, use a single TextBlock.\nFor multimodal or tool interactions, use multiple blocks.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ContentBlock"
-                }
-              ]
+              "$ref": "#/components/schemas/ContentBlock"
             }
           },
           "role": {
-            "description": "The role of the message author."
+            "description": "The role of the message author.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MessageRole"
+              }
+            ]
           }
         },
         "required": [
@@ -326,32 +781,120 @@
         ]
       },
       "MessageRole": {
-        "description": "The role of a message in the conversation."
+        "description": "The role of a message in the conversation.",
+        "oneOf": [
+          {
+            "description": "A message from the user.",
+            "type": "string",
+            "enum": [
+              "user"
+            ]
+          },
+          {
+            "description": "A message from the assistant.",
+            "type": "string",
+            "enum": [
+              "assistant"
+            ]
+          }
+        ]
       },
       "Metadata": {
         "description": "Request metadata for tracking purposes.",
         "type": "object",
         "properties": {
           "user_id": {
-            "description": "External user identifier for abuse detection.\n\nShould be a UUID or hash, not raw identifiable information."
+            "nullable": true,
+            "description": "External user identifier for abuse detection.\n\nShould be a UUID or hash, not raw identifiable information.",
+            "type": "string"
           }
         }
       },
       "ServiceTier": {
-        "description": "Service tier selection for the request."
+        "description": "Service tier selection for the request.",
+        "oneOf": [
+          {
+            "description": "Automatically select the appropriate tier.",
+            "type": "string",
+            "enum": [
+              "auto"
+            ]
+          },
+          {
+            "description": "Use only standard capacity (no priority queue).",
+            "type": "string",
+            "enum": [
+              "standard_only"
+            ]
+          }
+        ]
       },
       "SystemContent": {
-        "description": "System prompt content block."
+        "description": "System prompt content block.",
+        "oneOf": [
+          {
+            "description": "Text system prompt.",
+            "type": "object",
+            "properties": {
+              "cache_control": {
+                "description": "Optional cache control.",
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CacheControl"
+                  },
+                  {
+                    "nullable": true,
+                    "type": "object",
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "text": {
+                "description": "The system prompt text.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "text"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "text"
+            ]
+          }
+        ]
       },
       "SystemPrompt": {
-        "description": "System prompt for the conversation.\n\nCan be a simple string or an array of content blocks."
+        "description": "System prompt for the conversation.\n\nCan be a simple string or an array of content blocks.",
+        "anyOf": [
+          {
+            "description": "Simple text system prompt.",
+            "type": "string"
+          },
+          {
+            "description": "Structured system prompt with cache control.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SystemContent"
+            }
+          }
+        ]
       },
       "ThinkingConfig": {
         "description": "Configuration for extended thinking.\n\nExtended thinking allows the model to reason internally before responding,\nimproving accuracy on complex tasks.",
         "type": "object",
         "properties": {
           "budget_tokens": {
-            "description": "Token budget for thinking (minimum 1024).\n\nOnly used when type is \"enabled\"."
+            "nullable": true,
+            "description": "Token budget for thinking (minimum 1024).\n\nOnly used when type is \"enabled\".",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "type": {
             "description": "Whether extended thinking is enabled.",
@@ -367,7 +910,23 @@
         ]
       },
       "ThinkingType": {
-        "description": "Extended thinking enablement state."
+        "description": "Extended thinking enablement state.",
+        "oneOf": [
+          {
+            "description": "Extended thinking is enabled.",
+            "type": "string",
+            "enum": [
+              "enabled"
+            ]
+          },
+          {
+            "description": "Extended thinking is disabled.",
+            "type": "string",
+            "enum": [
+              "disabled"
+            ]
+          }
+        ]
       },
       "Tool": {
         "title": "Tool",
@@ -375,7 +934,19 @@
         "type": "object",
         "properties": {
           "cache_control": {
-            "description": "Optional cache control for the tool definition."
+            "description": "Optional cache control for the tool definition.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheControl"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "description": {
             "description": "Human-readable description of what the tool does.\n\nInclude when and how to use the tool. Be specific about trigger conditions.",
@@ -396,10 +967,90 @@
         ]
       },
       "ToolChoice": {
-        "description": "How the model should choose which tools to use."
+        "description": "How the model should choose which tools to use.",
+        "oneOf": [
+          {
+            "description": "Let the model decide whether to use tools.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "auto"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Model must use at least one tool.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "any"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Model must use the specified tool.",
+            "type": "object",
+            "properties": {
+              "name": {
+                "description": "Name of the required tool.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tool"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "name"
+            ]
+          },
+          {
+            "description": "Model should not use any tools.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
       },
       "ToolResultContent": {
-        "description": "Content for a tool result.\n\nCan be a simple string or an array of content blocks for rich results."
+        "description": "Content for a tool result.\n\nCan be a simple string or an array of content blocks for rich results.",
+        "anyOf": [
+          {
+            "description": "Simple text result.",
+            "type": "string"
+          },
+          {
+            "description": "Rich content blocks.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContentBlock"
+            }
+          }
+        ]
       },
       "CountTokensBody": {
         "title": "CountTokensBody",
@@ -410,11 +1061,7 @@
             "description": "Conversation messages.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Message"
-                }
-              ]
+              "$ref": "#/components/schemas/Message"
             }
           },
           "model": {
@@ -422,23 +1069,56 @@
             "type": "string"
           },
           "system": {
-            "description": "System prompt."
+            "description": "System prompt.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SystemPrompt"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "thinking": {
-            "description": "Extended thinking configuration."
+            "description": "Extended thinking configuration.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThinkingConfig"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "tool_choice": {
-            "description": "Tool choice strategy."
+            "description": "Tool choice strategy.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolChoice"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "tools": {
+            "nullable": true,
             "description": "Tools to include in token count.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Tool"
-                }
-              ]
+              "$ref": "#/components/schemas/Tool"
             }
           }
         },
@@ -456,11 +1136,7 @@
             "description": "Content blocks in the response.\n\nMay contain text, tool_use, and thinking blocks.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ContentBlock"
-                }
-              ]
+              "$ref": "#/components/schemas/ContentBlock"
             }
           },
           "id": {
@@ -472,12 +1148,23 @@
             "type": "string"
           },
           "role": {
-            "description": "Message role (always \"assistant\")."
+            "description": "Message role (always \"assistant\").",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MessageRole"
+              }
+            ]
           },
           "stop_reason": {
-            "description": "Why generation stopped."
+            "description": "Why generation stopped.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StopReason"
+              }
+            ]
           },
           "stop_sequence": {
+            "nullable": true,
             "description": "The stop sequence that was matched, if any.",
             "type": "string"
           },
@@ -486,7 +1173,12 @@
             "type": "string"
           },
           "usage": {
-            "description": "Token usage statistics."
+            "description": "Token usage statistics.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Usage"
+              }
+            ]
           }
         },
         "required": [
@@ -500,30 +1192,86 @@
         ]
       },
       "StopReason": {
-        "description": "Why the model stopped generating."
+        "description": "Why the model stopped generating.",
+        "oneOf": [
+          {
+            "description": "Natural end of the response.",
+            "type": "string",
+            "enum": [
+              "end_turn"
+            ]
+          },
+          {
+            "description": "Reached the max_tokens limit.",
+            "type": "string",
+            "enum": [
+              "max_tokens"
+            ]
+          },
+          {
+            "description": "Hit a custom stop sequence.",
+            "type": "string",
+            "enum": [
+              "stop_sequence"
+            ]
+          },
+          {
+            "description": "Model wants to use a tool (continue the agent loop).",
+            "type": "string",
+            "enum": [
+              "tool_use"
+            ]
+          },
+          {
+            "description": "Model paused for user input.",
+            "type": "string",
+            "enum": [
+              "pause_turn"
+            ]
+          },
+          {
+            "description": "Model refused to generate content.",
+            "type": "string",
+            "enum": [
+              "refusal"
+            ]
+          }
+        ]
       },
       "Usage": {
         "description": "Token usage statistics.",
         "type": "object",
         "properties": {
           "cache_creation_input_tokens": {
-            "description": "Tokens written to cache."
+            "nullable": true,
+            "description": "Tokens written to cache.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "cache_read_input_tokens": {
-            "description": "Tokens read from cache."
+            "nullable": true,
+            "description": "Tokens read from cache.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "input_tokens": {
             "description": "Number of input tokens.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "output_tokens": {
             "description": "Number of output tokens.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "service_tier": {
-            "description": "Service tier used for this request."
+            "nullable": true,
+            "description": "Service tier used for this request.",
+            "type": "string"
           }
         },
         "required": [
@@ -537,19 +1285,24 @@
         "type": "object",
         "properties": {
           "cache_creation_input_tokens": {
+            "nullable": true,
             "description": "Tokens that would be written to cache.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "cache_read_input_tokens": {
+            "nullable": true,
             "description": "Tokens that would be read from cache.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "input_tokens": {
             "description": "Number of input tokens.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           }
         },
         "required": [
@@ -565,11 +1318,7 @@
             "description": "List of available models.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ModelInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/ModelInfo"
             }
           },
           "first_id": {
@@ -623,21 +1372,320 @@
       },
       "MessageStreamEvent": {
         "title": "MessageStreamEvent",
-        "description": "One event of a streamed Create Message reply."
+        "description": "One event of a streamed Create Message reply.",
+        "oneOf": [
+          {
+            "description": "Opens the stream with a message whose `content` is empty.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The message being streamed.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StreamMessage"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "message_start"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "message"
+            ]
+          },
+          {
+            "description": "Opens the content block at `index` of the final message.",
+            "type": "object",
+            "properties": {
+              "content_block": {
+                "description": "The block's initial, usually empty, state.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ContentBlock"
+                  }
+                ]
+              },
+              "index": {
+                "description": "Position of the block in the final message's `content`.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "content_block_start"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "index",
+              "content_block"
+            ]
+          },
+          {
+            "description": "An incremental update to the content block at `index`.",
+            "type": "object",
+            "properties": {
+              "delta": {
+                "description": "The update to apply.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ContentBlockDelta"
+                  }
+                ]
+              },
+              "index": {
+                "description": "Position of the block in the final message's `content`.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "content_block_delta"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "index",
+              "delta"
+            ]
+          },
+          {
+            "description": "Closes the content block at `index`.",
+            "type": "object",
+            "properties": {
+              "index": {
+                "description": "Position of the block in the final message's `content`.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "content_block_stop"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "index"
+            ]
+          },
+          {
+            "description": "Top-level changes to the final message.",
+            "type": "object",
+            "properties": {
+              "delta": {
+                "description": "Changed top-level fields.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/MessageDelta"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "message_delta"
+                ]
+              },
+              "usage": {
+                "description": "Cumulative token counts; omitted by some streams.",
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/MessageDeltaUsage"
+                  },
+                  {
+                    "nullable": true,
+                    "type": "object",
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "delta"
+            ]
+          },
+          {
+            "description": "The final event; the stream's declared terminator.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "message_stop"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Keep-alive; may appear any number of times.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ping"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "An error delivered inside the stream, such as `overloaded_error`.",
+            "type": "object",
+            "properties": {
+              "error": {
+                "description": "The error's type and message.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StreamErrorDetail"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "error"
+            ]
+          }
+        ]
       },
       "ContentBlockDelta": {
         "title": "ContentBlockDelta",
-        "description": "The update carried by a `content_block_delta` event."
+        "description": "The update carried by a `content_block_delta` event.",
+        "oneOf": [
+          {
+            "description": "Text to append to a `text` block.",
+            "type": "object",
+            "properties": {
+              "text": {
+                "description": "The text fragment.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "text_delta"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "text"
+            ]
+          },
+          {
+            "description": "A fragment of a `tool_use` block's `input`; fragments concatenate to\nJSON only once the block stops.",
+            "type": "object",
+            "properties": {
+              "partial_json": {
+                "description": "The partial JSON fragment.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "input_json_delta"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "partial_json"
+            ]
+          },
+          {
+            "description": "Text to append to a `thinking` block.",
+            "type": "object",
+            "properties": {
+              "thinking": {
+                "description": "The thinking fragment.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "thinking_delta"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "thinking"
+            ]
+          },
+          {
+            "description": "The `thinking` block's signature, sent just before the block stops.",
+            "type": "object",
+            "properties": {
+              "signature": {
+                "description": "The signature.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "signature_delta"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "signature"
+            ]
+          }
+        ]
       },
       "MessageDelta": {
         "description": "Top-level message fields changed by `message_delta`.",
         "type": "object",
         "properties": {
           "stop_reason": {
-            "description": "Why generation stopped."
+            "description": "Why generation stopped.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StopReason"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "stop_sequence": {
-            "description": "The stop sequence that was matched, if any."
+            "nullable": true,
+            "description": "The stop sequence that was matched, if any.",
+            "type": "string"
           }
         }
       },
@@ -646,18 +1694,31 @@
         "type": "object",
         "properties": {
           "cache_creation_input_tokens": {
-            "description": "Tokens written to cache."
+            "nullable": true,
+            "description": "Tokens written to cache.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "cache_read_input_tokens": {
-            "description": "Tokens read from cache."
+            "nullable": true,
+            "description": "Tokens read from cache.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "input_tokens": {
-            "description": "Input tokens."
+            "nullable": true,
+            "description": "Input tokens.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "output_tokens": {
             "description": "Output tokens so far.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           }
         },
         "required": [
@@ -688,13 +1749,10 @@
         "properties": {
           "content": {
             "description": "Content blocks; empty at `message_start`.",
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ContentBlock"
-                }
-              ]
+              "$ref": "#/components/schemas/ContentBlock"
             }
           },
           "id": {
@@ -714,17 +1772,43 @@
             ]
           },
           "stop_reason": {
-            "description": "Why generation stopped; null at `message_start`."
+            "description": "Why generation stopped; null at `message_start`.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StopReason"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "stop_sequence": {
-            "description": "The stop sequence that was matched, if any."
+            "nullable": true,
+            "description": "The stop sequence that was matched, if any.",
+            "type": "string"
           },
           "type": {
             "description": "Object type (always \"message\").",
             "type": "string"
           },
           "usage": {
-            "description": "Initial token usage."
+            "description": "Initial token usage.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Usage"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         },
         "required": [

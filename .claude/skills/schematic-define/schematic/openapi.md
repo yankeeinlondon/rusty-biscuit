@@ -184,6 +184,20 @@ let options = ExportOptions::new()
 let openapi_doc = export(&api, &options)?;
 ```
 
+Component schemas convert faithfully to OAS 3.0.3 (`define/src/openapi/export/conversion.rs`;
+rules and examples in `schematic/docs/io/export-openapi.md#how-component-schemas-convert`):
+
+- Both schemars dialects convert: root `nullable`, nested 2020-12 `type: [T, "null"]`,
+  `const` (→ one-value `enum`), `{type: "null"}` members.
+- Nullable `$ref`/composition → `anyOf: [X, {type: object, nullable: true, enum: [null]}]`;
+  nullable enum keeps `null` in `enum`; several types → `anyOf` (never `oneOf`).
+- A bare `$ref` stays bare; one with siblings becomes `allOf: [{$ref}]` + siblings.
+- `"default": null` is dropped (openapiv3 reparse would lose it anyway).
+- An inexpressible keyword fails export with `OpenApiError::UnsupportedFeature`
+  and its JSON pointer. Export also runs `validate_schema_closure` first.
+- Gates: `schematic-definitions` tests `schema_fidelity` (zero lost/typed-loss
+  positions over 18 registries) and `schema_values` (jsonschema accepts/rejects).
+
 ### Schematic Extensions
 
 OpenAPI specs include `x-schematic` extensions for round-trip fidelity:
@@ -222,6 +236,18 @@ endpoint auth overrides use standard `deprecated`/`security`. JSON shapes hold
 the stored `TypeRef` (component names plus wrappers), never a Rust path.
 GraphQL operations are not exported (`graphql-operation` warning). See
 `schematic/docs/io/openapi-extensions.md`.
+
+Fixed headers (`.header(name, value)`, API or endpoint) also export as
+standard parameters: one required header parameter per operation with
+`schema: {type: string, enum: [value], default: value}`, endpoint over API by
+case-insensitive name. Left out, and reported as a `fixed-header` warning
+(`openapi::header_gaps` lists the same): a header the operation's effective
+security sends, `Accept`/`Content-Type` values its content does not declare,
+`Authorization`, explicit reserved-name parameters, and a fixed value an
+explicit header parameter's schema rejects (a compatible one merges into it:
+required, value as default). GitHub's `Accept: application/vnd.github+json`
+and Gitea's raw-content `Accept` are the pinned shipped gaps. See
+`schematic/docs/io/export-openapi.md#fixed-headers`.
 
 ## Feature Configuration
 

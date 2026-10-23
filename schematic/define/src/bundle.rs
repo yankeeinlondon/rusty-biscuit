@@ -195,11 +195,19 @@ impl DefinitionBundle {
 /// What construction and loading both guarantee: the builder's rules, a
 /// closed component namespace, and a consistent catalog.
 fn validate(api: &RestApi, models: Option<&ModelCatalog>) -> Result<(), BundleError> {
-    crate::builders::validate_api(api)?;
-    for component in &api.schemas {
-        check_refs(&component.schema, api).map_err(|(reference, problem)| BundleError::SchemaReference {
-            api: api.name.clone(), component: component.name.clone(), reference, problem })?;
-    }
+    // The builder's rules end with the component closure, reported here in
+    // the bundle's terms.
+    crate::builders::validate_api(api).map_err(|error| match error {
+        DefinitionError::UnresolvedSchemaReferences { api, mut references } => {
+            let first = references.swap_remove(0);
+            let problem = match first.missing {
+                Some(_) => "names no component in the bundle",
+                None => "is not a local component reference; bundles never fetch external schemas",
+            };
+            BundleError::SchemaReference { api, component: first.parent, reference: first.reference, problem }
+        }
+        error => error.into(),
+    })?;
     if let Some(models) = models { validate_catalog(api, models)?; }
     Ok(())
 }
@@ -363,7 +371,6 @@ fn check_members(input: &Value, written: &Value, pointer: &mut String) -> Result
 /// them is not a reference.
 const DATA_KEYWORDS: [&str; 5] = ["const", "default", "enum", "example", "examples"];
 
-fn decode(token: &str) -> String { token.replace("~1", "/").replace("~0", "~") }
 
 /// Rewrite local references into the component namespace. `Err` carries the
 /// offending reference and why.
@@ -391,27 +398,6 @@ fn normalize_refs(value: &mut Value, own: &str, registered: bool) -> Result<(), 
         _ => Ok(()),
     }
 }
-
-fn check_refs(value: &Value, api: &RestApi) -> Result<(), (String, &'static str)> {
-    match value {
-        Value::Object(object) => {
-            if let Some(Value::String(reference)) = object.get("$ref") {
-                let Some(name) = reference.strip_prefix(COMPONENTS) else {
-                    return Err((reference.clone(), "is not a local component reference; bundles never fetch external schemas"));
-                };
-                if api.component(&decode(name)).is_none() {
-                    return Err((reference.clone(), "names no component in the bundle"));
-                }
-            }
-            object.iter()
-                .filter(|(key, _)| !DATA_KEYWORDS.contains(&key.as_str()))
-                .try_for_each(|(_, value)| check_refs(value, api))
-        }
-        Value::Array(values) => values.iter().try_for_each(|value| check_refs(value, api)),
-        _ => Ok(()),
-    }
-}
-
 
 fn validate_catalog(api: &RestApi, models: &ModelCatalog) -> Result<(), BundleError> {
     let fail = |message: String| BundleError::Catalog { api: api.name.clone(), message };

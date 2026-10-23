@@ -558,10 +558,12 @@
         "type": "object",
         "properties": {
           "message": {
+            "nullable": true,
             "description": "Human-readable message.",
             "type": "string"
           },
           "status": {
+            "nullable": true,
             "description": "Response status text.",
             "type": "string"
           }
@@ -607,7 +609,12 @@
             "format": "int32"
           },
           "item": {
-            "description": "Restored object category."
+            "description": "Restored object category.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BackupRestoreItem"
+              }
+            ]
           },
           "ok": {
             "description": "Successfully restored items.",
@@ -622,7 +629,72 @@
         ]
       },
       "BackupRestoreItem": {
-        "description": "Backup restore report item type."
+        "description": "Backup restore report item type.",
+        "oneOf": [
+          {
+            "description": "Database records.",
+            "type": "string",
+            "enum": [
+              "db"
+            ]
+          },
+          {
+            "description": "Integration driver records.",
+            "type": "string",
+            "enum": [
+              "integration_driver"
+            ]
+          },
+          {
+            "description": "Integration records.",
+            "type": "string",
+            "enum": [
+              "integration"
+            ]
+          },
+          {
+            "description": "Activity records.",
+            "type": "string",
+            "enum": [
+              "activity"
+            ]
+          },
+          {
+            "description": "Macro records.",
+            "type": "string",
+            "enum": [
+              "macro"
+            ]
+          },
+          {
+            "description": "Remote records.",
+            "type": "string",
+            "enum": [
+              "remote"
+            ]
+          },
+          {
+            "description": "Profile records.",
+            "type": "string",
+            "enum": [
+              "profile"
+            ]
+          },
+          {
+            "description": "Dock records.",
+            "type": "string",
+            "enum": [
+              "dock"
+            ]
+          },
+          {
+            "description": "Resource records.",
+            "type": "string",
+            "enum": [
+              "resource"
+            ]
+          }
+        ]
       },
       "ResourceItem": {
         "title": "ResourceItem",
@@ -634,9 +706,11 @@
             "type": "string"
           },
           "size": {
+            "nullable": true,
             "description": "Size in bytes.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "type": {
             "description": "Resource type.\n\nSerialized as `type` in API payloads.",
@@ -654,6 +728,7 @@
         "type": "object",
         "properties": {
           "developer_name": {
+            "nullable": true,
             "description": "Optional developer name.",
             "type": "string"
           },
@@ -662,12 +737,30 @@
             "type": "string"
           },
           "driver_state": {
-            "description": "Optional runtime state."
+            "description": "Optional runtime state.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DriverState"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "driver_type": {
-            "description": "Driver origin/type."
+            "description": "Driver origin/type.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IntegrationDriverType"
+              }
+            ]
           },
           "driver_url": {
+            "nullable": true,
             "description": "Optional external driver URL.",
             "type": "string"
           },
@@ -676,12 +769,16 @@
             "type": "boolean"
           },
           "icon": {
+            "nullable": true,
             "description": "Optional icon identifier.",
             "type": "string"
           },
           "name": {
             "description": "Localized driver display name.",
-            "type": "object"
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           },
           "version": {
             "description": "Driver version.",
@@ -697,10 +794,77 @@
         ]
       },
       "DriverState": {
-        "description": "Integration driver runtime state."
+        "description": "Integration driver runtime state.",
+        "oneOf": [
+          {
+            "description": "Driver exists but requires configuration before activation.",
+            "type": "string",
+            "enum": [
+              "NOT_CONFIGURED"
+            ]
+          },
+          {
+            "description": "Driver is idle.",
+            "type": "string",
+            "enum": [
+              "IDLE"
+            ]
+          },
+          {
+            "description": "Driver is currently connecting.",
+            "type": "string",
+            "enum": [
+              "CONNECTING"
+            ]
+          },
+          {
+            "description": "Driver is connected and active.",
+            "type": "string",
+            "enum": [
+              "ACTIVE"
+            ]
+          },
+          {
+            "description": "Driver is attempting to reconnect.",
+            "type": "string",
+            "enum": [
+              "RECONNECTING"
+            ]
+          },
+          {
+            "description": "Driver is in an error state.",
+            "type": "string",
+            "enum": [
+              "ERROR"
+            ]
+          }
+        ]
       },
       "IntegrationDriverType": {
-        "description": "Integration driver type."
+        "description": "Integration driver type.",
+        "oneOf": [
+          {
+            "description": "Firmware built-in integration driver.",
+            "type": "string",
+            "enum": [
+              "LOCAL"
+            ]
+          },
+          {
+            "description": "User-installed integration driver package.",
+            "type": "string",
+            "enum": [
+              "CUSTOM"
+            ]
+          },
+          {
+            "description": "External network-hosted integration driver.",
+            "type": "string",
+            "enum": [
+              "EXTERNAL"
+            ]
+          }
+        ]
       },
       "CodeSetUploadResult": {
         "title": "CodeSetUploadResult",
@@ -710,17 +874,20 @@
           "added": {
             "description": "Number of newly added rows.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "processed": {
             "description": "Total number of processed CSV rows.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "updated": {
             "description": "Number of updated IR code rows.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           }
         },
         "required": [
@@ -739,9 +906,15 @@
             "type": "boolean"
           },
           "component": {
-            "description": "Component key (`ui` or `web_configurator`)."
+            "description": "Component key (`ui` or `web_configurator`).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CustomComponent"
+              }
+            ]
           },
           "installation_date": {
+            "nullable": true,
             "description": "Installation timestamp (when installed).",
             "type": "string"
           },
@@ -757,7 +930,23 @@
         ]
       },
       "CustomComponent": {
-        "description": "Type of custom component installation."
+        "description": "Type of custom component installation.",
+        "oneOf": [
+          {
+            "description": "Custom UI replacement.",
+            "type": "string",
+            "enum": [
+              "ui"
+            ]
+          },
+          {
+            "description": "Custom web configurator replacement.",
+            "type": "string",
+            "enum": [
+              "web_configurator"
+            ]
+          }
+        ]
       }
     },
     "securitySchemes": {

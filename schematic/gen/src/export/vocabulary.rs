@@ -13,7 +13,9 @@ use crate::export::auth::policy_alternatives;
 /// The diagnostics `output` reports for vocabulary of `api` it cannot express.
 ///
 /// - OpenAPI: an OAuth2 device-code grant (OpenAPI 3.0 has no device-code
-///   flow), on the API or as an endpoint's replacement method.
+///   flow), on the API or as an endpoint's replacement method; and each
+///   header the operation does not carry as a header parameter
+///   ([`schematic_define::openapi::header_gaps`]).
 /// - Postman: a replacement policy with more than one alternative (a request
 ///   holds one auth), and a JSON body or response naming a composed
 ///   (`oneOf`/`anyOf`/`allOf`) component.
@@ -89,6 +91,13 @@ fn openapi_diagnostics(api: &RestApi) -> Vec<ValidationDiagnostic> {
                  method is omitted and {consequence}"
             ),
         ));
+    }
+    // An API that does not export reports its own error when the output is
+    // built; it has no header gaps to add here.
+    if let Ok(gaps) = schematic_define::openapi::header_gaps(api) {
+        diagnostics.extend(gaps.iter().map(|gap| {
+            warning(api, Some(&gap.endpoint_id), Feature::FixedHeader, Output::OpenApi, gap.to_string())
+        }));
     }
     diagnostics
 }

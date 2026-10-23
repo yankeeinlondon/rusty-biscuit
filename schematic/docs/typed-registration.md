@@ -201,8 +201,8 @@ Endpoint::post("Adopt", "/pets").request_json::<Pet>(&mut ctx) // references Pet
 `TypeDesc` is an authoring handle only: it has no Serde derives and no public
 constructor. A `RestApi` does serialize, and its references and components
 travel with it. Treat a deserialized definition as untrusted and call
-`RestApi::validate_references` before using it. It is the same check API build
-runs:
+`RestApi::validate_references` and `RestApi::validate_schema_closure` before
+using it. They are the checks API build runs:
 
 - every name in every JSON body, response, and form-part reference resolves to
   a component with a Rust path, or the error is
@@ -210,6 +210,11 @@ runs:
 - component names are nonempty and unique, Rust paths are nonempty, and each
   schema is a JSON Schema object or boolean
 - compositions, `Unknown`, and empty map keys are rejected
+- every `$ref` inside every component schema names a component
+  (`#/components/schemas/{name}`, with `~1`/`~0` and `%XX` escapes decoded), or
+  the error is `DefinitionError::UnresolvedSchemaReferences`, listing each
+  reference with its parent component and JSON pointer; a reference to another
+  document is listed with no missing name and is never fetched
 
 ```json
 {

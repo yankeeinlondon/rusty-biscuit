@@ -57,6 +57,18 @@
 
 ---
 
+## schematic-definitions
+
+### Development Dependencies
+
+- [jsonschema](https://github.com/Stranger6667/jsonschema) _v0.55_ [📄](https://docs.rs/jsonschema)
+
+    _JSON Schema validator (default features off, the workspace-wide pin) used by the L1 `schema_values` test, which validates accepted and rejected instances against exported OpenAPI component schemas, offline._
+
+    _Tags: testing, json-schema_
+
+---
+
 ## schematic-gen
 
 ### Production Dependencies

@@ -283,11 +283,14 @@
         "type": "object",
         "properties": {
           "context_length": {
+            "nullable": true,
             "description": "Context length override (optional).",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "max_tokens": {
+            "nullable": true,
             "description": "Maximum tokens to generate.",
             "type": "integer",
             "format": "int32"
@@ -296,11 +299,7 @@
             "description": "Chat messages.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Message"
-                }
-              ]
+              "$ref": "#/components/schemas/Message"
             }
           },
           "model": {
@@ -308,6 +307,7 @@
             "type": "string"
           },
           "stop": {
+            "nullable": true,
             "description": "Stop sequences.",
             "type": "array",
             "items": {
@@ -315,10 +315,12 @@
             }
           },
           "stream": {
+            "nullable": true,
             "description": "Whether to stream the response as SSE (default: false).",
             "type": "boolean"
           },
           "temperature": {
+            "nullable": true,
             "description": "Sampling temperature (0.0-2.0).",
             "type": "number",
             "format": "double"
@@ -353,17 +355,26 @@
         "type": "object",
         "properties": {
           "config": {
-            "description": "Optional load configuration."
+            "description": "Optional load configuration.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LoadConfig"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "integrations": {
+            "nullable": true,
             "description": "Optional MCP integrations.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Integration"
-                }
-              ]
+              "$ref": "#/components/schemas/Integration"
             }
           },
           "model": {
@@ -393,10 +404,17 @@
         "type": "object",
         "properties": {
           "context_length": {
-            "description": "Context length to use."
+            "nullable": true,
+            "description": "Context length to use.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "gpu_offload": {
-            "description": "GPU offload layers (-1 for all)."
+            "nullable": true,
+            "description": "GPU offload layers (-1 for all).",
+            "type": "integer",
+            "format": "int32"
           }
         }
       },
@@ -451,11 +469,7 @@
             "description": "List of available models.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ModelInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/ModelInfo"
             }
           },
           "object": {
@@ -474,10 +488,12 @@
         "type": "object",
         "properties": {
           "function_calling": {
+            "nullable": true,
             "description": "Whether the model supports function calling.",
             "type": "boolean"
           },
           "vision": {
+            "nullable": true,
             "description": "Whether the model supports vision/multimodal input.",
             "type": "boolean"
           }
@@ -489,11 +505,14 @@
         "type": "object",
         "properties": {
           "context_length": {
+            "nullable": true,
             "description": "Current context length.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "id": {
+            "nullable": true,
             "description": "The instance identifier.",
             "type": "string"
           }
@@ -505,13 +524,27 @@
         "type": "object",
         "properties": {
           "architecture": {
+            "nullable": true,
             "description": "Architecture of the model.",
             "type": "string"
           },
           "capabilities": {
-            "description": "Model capabilities."
+            "description": "Model capabilities.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Capabilities"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "compatibility_type": {
+            "nullable": true,
             "description": "Compatibility type.",
             "type": "string"
           },
@@ -520,14 +553,11 @@
             "type": "string"
           },
           "loaded_instances": {
+            "nullable": true,
             "description": "Currently loaded instances.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/LoadedInstance"
-                }
-              ]
+              "$ref": "#/components/schemas/LoadedInstance"
             }
           },
           "object": {
@@ -535,16 +565,42 @@
             "type": "string"
           },
           "publisher": {
+            "nullable": true,
             "description": "Publisher/author of the model.",
             "type": "string"
           },
           "quantization": {
-            "description": "Quantization details."
+            "description": "Quantization details.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Quantization"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "stats": {
-            "description": "Model statistics."
+            "description": "Model statistics.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Stats"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "type": {
+            "nullable": true,
             "description": "Model type (e.g., \"llm\").",
             "type": "string"
           }
@@ -560,6 +616,7 @@
         "type": "object",
         "properties": {
           "format": {
+            "nullable": true,
             "description": "The quantization format (e.g., \"Q4_0\", \"Q8_0\").",
             "type": "string"
           }
@@ -571,13 +628,16 @@
         "type": "object",
         "properties": {
           "parameters": {
+            "nullable": true,
             "description": "Number of parameters.",
             "type": "string"
           },
           "size": {
+            "nullable": true,
             "description": "Model size in bytes.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         }
       },
@@ -591,6 +651,7 @@
             "type": "string"
           },
           "status": {
+            "nullable": true,
             "description": "Load status message.",
             "type": "string"
           }
@@ -619,21 +680,20 @@
         "type": "object",
         "properties": {
           "error": {
+            "nullable": true,
             "description": "Error message if download failed.",
             "type": "string"
           },
           "output": {
+            "nullable": true,
             "description": "Output items being downloaded.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/OutputItem"
-                }
-              ]
+              "$ref": "#/components/schemas/OutputItem"
             }
           },
           "progress": {
+            "nullable": true,
             "description": "Overall progress (0.0-1.0).",
             "type": "number",
             "format": "double"
@@ -653,15 +713,18 @@
         "type": "object",
         "properties": {
           "path": {
+            "nullable": true,
             "description": "Path where the file is being downloaded.",
             "type": "string"
           },
           "progress": {
+            "nullable": true,
             "description": "Download progress (0.0-1.0).",
             "type": "number",
             "format": "double"
           },
           "type": {
+            "nullable": true,
             "description": "Type of output (e.g., \"file\").",
             "type": "string"
           }
@@ -680,19 +743,21 @@
             "description": "Output items in generation order.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ChatOutputItem"
-                }
-              ]
+              "$ref": "#/components/schemas/ChatOutputItem"
             }
           },
           "response_id": {
+            "nullable": true,
             "description": "Response identifier starting with `resp_`; present when `store` is true.",
             "type": "string"
           },
           "stats": {
-            "description": "Token usage and performance."
+            "description": "Token usage and performance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ChatStats"
+              }
+            ]
           }
         },
         "required": [
@@ -702,7 +767,116 @@
         ]
       },
       "ChatOutputItem": {
-        "description": "One item of a chat result's `output`."
+        "description": "One item of a chat result's `output`.",
+        "oneOf": [
+          {
+            "description": "Text of the model's reply.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "description": "The reply text.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "message"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "content"
+            ]
+          },
+          {
+            "description": "A tool call the model made and its result.",
+            "type": "object",
+            "properties": {
+              "arguments": {
+                "description": "The arguments passed to the tool."
+              },
+              "output": {
+                "description": "The raw tool output.",
+                "type": "string"
+              },
+              "provider_info": {
+                "description": "The tool provider.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ToolProviderInfo"
+                  }
+                ]
+              },
+              "tool": {
+                "description": "The tool name.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tool_call"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "tool",
+              "arguments",
+              "output",
+              "provider_info"
+            ]
+          },
+          {
+            "description": "The model's reasoning text.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "description": "The reasoning text.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "reasoning"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "content"
+            ]
+          },
+          {
+            "description": "A tool call that was rejected.",
+            "type": "object",
+            "properties": {
+              "metadata": {
+                "description": "Details of the rejected call.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/InvalidToolCallMetadata"
+                  }
+                ]
+              },
+              "reason": {
+                "description": "Why the call was invalid.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "invalid_tool_call"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "reason",
+              "metadata"
+            ]
+          }
+        ]
       },
       "ChatStats": {
         "description": "Token usage and performance of one chat.",
@@ -711,15 +885,20 @@
           "input_tokens": {
             "description": "Input tokens, including formatting, tool definitions, and prior messages.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "model_load_time_seconds": {
-            "description": "Seconds spent loading the model; only when the request loaded it."
+            "nullable": true,
+            "description": "Seconds spent loading the model; only when the request loaded it.",
+            "type": "number",
+            "format": "double"
           },
           "reasoning_output_tokens": {
             "description": "Output tokens spent on reasoning.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "time_to_first_token_seconds": {
             "description": "Seconds until the first token.",
@@ -734,7 +913,8 @@
           "total_output_tokens": {
             "description": "Total output tokens generated.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
@@ -753,7 +933,19 @@
             "description": "The arguments the model passed; only for `invalid_arguments`."
           },
           "provider_info": {
-            "description": "The tool provider; only for `invalid_arguments`."
+            "description": "The tool provider; only for `invalid_arguments`.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolProviderInfo"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "tool_name": {
             "description": "The tool name the model used.",
@@ -770,25 +962,493 @@
         ]
       },
       "ToolProviderInfo": {
-        "description": "The provider of a tool the model called."
+        "description": "The provider of a tool the model called.",
+        "oneOf": [
+          {
+            "description": "A tool provided by an LM Studio plugin.",
+            "type": "object",
+            "properties": {
+              "plugin_id": {
+                "description": "The plugin identifier.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "plugin"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "plugin_id"
+            ]
+          },
+          {
+            "description": "A tool provided by an ephemeral MCP server.",
+            "type": "object",
+            "properties": {
+              "server_label": {
+                "description": "The MCP server label.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ephemeral_mcp"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "server_label"
+            ]
+          }
+        ]
       },
       "ChatStreamEvent": {
         "title": "ChatStreamEvent",
-        "description": "One server-sent event of `/api/v1/chat` when `stream` is true, decoded\nfrom the event's `data`, whose `type` repeats the SSE event name.\n\nThe stream ends with [`ChatStreamEvent::ChatEnd`]. An `error` event does\nnot end it: `chat.end` still follows with whatever was generated."
+        "description": "One server-sent event of `/api/v1/chat` when `stream` is true, decoded\nfrom the event's `data`, whose `type` repeats the SSE event name.\n\nThe stream ends with [`ChatStreamEvent::ChatEnd`]. An `error` event does\nnot end it: `chat.end` still follows with whatever was generated.",
+        "oneOf": [
+          {
+            "description": "The chat began.",
+            "type": "object",
+            "properties": {
+              "model_instance_id": {
+                "description": "The model instance serving the chat.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "chat.start"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "model_instance_id"
+            ]
+          },
+          {
+            "description": "The model began loading.",
+            "type": "object",
+            "properties": {
+              "model_instance_id": {
+                "description": "The model instance being loaded.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "model_load.start"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "model_instance_id"
+            ]
+          },
+          {
+            "description": "Model loading progressed.",
+            "type": "object",
+            "properties": {
+              "model_instance_id": {
+                "description": "The model instance being loaded.",
+                "type": "string"
+              },
+              "progress": {
+                "description": "Progress from 0 to 1.",
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "model_load.progress"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "model_instance_id",
+              "progress"
+            ]
+          },
+          {
+            "description": "The model finished loading.",
+            "type": "object",
+            "properties": {
+              "load_time_seconds": {
+                "description": "Seconds the load took.",
+                "type": "number",
+                "format": "double"
+              },
+              "model_instance_id": {
+                "description": "The loaded model instance.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "model_load.end"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "model_instance_id",
+              "load_time_seconds"
+            ]
+          },
+          {
+            "description": "Prompt processing began.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "prompt_processing.start"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Prompt processing progressed.",
+            "type": "object",
+            "properties": {
+              "progress": {
+                "description": "Progress from 0 to 1.",
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "prompt_processing.progress"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "progress"
+            ]
+          },
+          {
+            "description": "Prompt processing finished.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "prompt_processing.end"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Reasoning output began.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "reasoning.start"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "A fragment of reasoning text.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "description": "The text fragment.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "reasoning.delta"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "content"
+            ]
+          },
+          {
+            "description": "Reasoning output finished.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "reasoning.end"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The model began a tool call.",
+            "type": "object",
+            "properties": {
+              "provider_info": {
+                "description": "The tool provider.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ToolProviderInfo"
+                  }
+                ]
+              },
+              "tool": {
+                "description": "The tool name.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tool_call.start"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "tool",
+              "provider_info"
+            ]
+          },
+          {
+            "description": "The arguments of the current tool call are complete.",
+            "type": "object",
+            "properties": {
+              "arguments": {
+                "description": "The arguments, shaped by the tool."
+              },
+              "provider_info": {
+                "description": "The tool provider.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ToolProviderInfo"
+                  }
+                ]
+              },
+              "tool": {
+                "description": "The tool name.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tool_call.arguments"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "tool",
+              "arguments",
+              "provider_info"
+            ]
+          },
+          {
+            "description": "The tool call returned.",
+            "type": "object",
+            "properties": {
+              "arguments": {
+                "description": "The arguments passed to the tool."
+              },
+              "output": {
+                "description": "The raw tool output.",
+                "type": "string"
+              },
+              "provider_info": {
+                "description": "The tool provider.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ToolProviderInfo"
+                  }
+                ]
+              },
+              "tool": {
+                "description": "The tool name.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tool_call.success"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "tool",
+              "arguments",
+              "output",
+              "provider_info"
+            ]
+          },
+          {
+            "description": "The tool call was rejected.",
+            "type": "object",
+            "properties": {
+              "metadata": {
+                "description": "Details of the rejected call.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/InvalidToolCallMetadata"
+                  }
+                ]
+              },
+              "reason": {
+                "description": "Why the call failed.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tool_call.failure"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "reason",
+              "metadata"
+            ]
+          },
+          {
+            "description": "Reply text began.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "message.start"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "A fragment of reply text.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "description": "The text fragment.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "message.delta"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "content"
+            ]
+          },
+          {
+            "description": "Reply text finished.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "message.end"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "An error occurred; the stream continues to `chat.end`.",
+            "type": "object",
+            "properties": {
+              "error": {
+                "description": "The error details.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ChatStreamErrorDetail"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "error"
+            ]
+          },
+          {
+            "description": "The chat finished; the stream's terminator.",
+            "type": "object",
+            "properties": {
+              "result": {
+                "description": "The aggregated result, the same shape as the non-streaming reply.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ChatResult"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "chat.end"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "result"
+            ]
+          }
+        ]
       },
       "ChatStreamErrorDetail": {
         "description": "The `error` object of a chat stream `error` event.",
         "type": "object",
         "properties": {
           "code": {
-            "description": "A more specific error code, such as `missing_required_parameter`."
+            "nullable": true,
+            "description": "A more specific error code, such as `missing_required_parameter`.",
+            "type": "string"
           },
           "message": {
             "description": "Human-readable description.",
             "type": "string"
           },
           "param": {
-            "description": "The request parameter the error relates to."
+            "nullable": true,
+            "description": "The request parameter the error relates to.",
+            "type": "string"
           },
           "type": {
             "description": "The error category, such as `invalid_request` or `model_not_found`.",
@@ -806,14 +1466,17 @@
         "type": "object",
         "properties": {
           "completed_at": {
+            "nullable": true,
             "description": "ISO 8601 completion time; present when `status` is `completed`.",
             "type": "string"
           },
           "job_id": {
+            "nullable": true,
             "description": "Download job identifier; absent when `status` is `already_downloaded`.",
             "type": "string"
           },
           "started_at": {
+            "nullable": true,
             "description": "ISO 8601 start time; absent when `status` is `already_downloaded`.",
             "type": "string"
           },
@@ -822,9 +1485,11 @@
             "type": "string"
           },
           "total_size_bytes": {
+            "nullable": true,
             "description": "Total download size in bytes; absent when `status` is\n`already_downloaded`.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [

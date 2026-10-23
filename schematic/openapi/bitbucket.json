@@ -1020,77 +1020,144 @@
         "type": "object",
         "properties": {
           "created_on": {
+            "nullable": true,
             "description": "Creation timestamp (ISO 8601).",
             "type": "string"
           },
           "description": {
+            "nullable": true,
             "description": "Repository description.",
             "type": "string"
           },
           "fork_policy": {
+            "nullable": true,
             "description": "Fork policy: \"allow_forks\", \"no_public_forks\", \"no_forks\".",
             "type": "string"
           },
           "full_name": {
+            "nullable": true,
             "description": "Full name in \"workspace/repo_slug\" format.",
             "type": "string"
           },
           "has_issues": {
+            "nullable": true,
             "description": "Whether the repository has issues enabled.",
             "type": "boolean"
           },
           "has_wiki": {
+            "nullable": true,
             "description": "Whether the repository has a wiki enabled.",
             "type": "boolean"
           },
           "is_private": {
             "description": "Whether the repository is private.",
+            "default": false,
             "type": "boolean"
           },
           "language": {
+            "nullable": true,
             "description": "Primary programming language.",
             "type": "string"
           },
           "links": {
+            "nullable": true,
             "description": "HATEOAS links for this repository.",
-            "type": "object"
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "mainbranch": {
-            "description": "Main branch information."
+            "description": "Main branch information.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BranchInfo"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "name": {
+            "nullable": true,
             "description": "The repository name.",
             "type": "string"
           },
           "owner": {
-            "description": "Repository owner."
+            "description": "Repository owner.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "project": {
-            "description": "Project the repository belongs to."
+            "description": "Project the repository belongs to.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Project"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "size": {
+            "nullable": true,
             "description": "Size of the repository in bytes.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "slug": {
+            "nullable": true,
             "description": "The repository slug (URL-friendly name).",
             "type": "string"
           },
           "type": {
+            "nullable": true,
             "description": "Object type (e.g., \"repository\").",
             "type": "string"
           },
           "updated_on": {
+            "nullable": true,
             "description": "Last update timestamp (ISO 8601).",
             "type": "string"
           },
           "uuid": {
+            "nullable": true,
             "description": "The repository's UUID.",
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace the repository belongs to."
+            "description": "Workspace the repository belongs to.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Workspace"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         }
       },
@@ -1099,10 +1166,14 @@
         "type": "object",
         "properties": {
           "name": {
-            "description": "Branch name."
+            "nullable": true,
+            "description": "Branch name.",
+            "type": "string"
           },
           "type": {
-            "description": "Object type (e.g., \"branch\")."
+            "nullable": true,
+            "description": "Object type (e.g., \"branch\").",
+            "type": "string"
           }
         }
       },
@@ -1124,19 +1195,32 @@
         "type": "object",
         "properties": {
           "key": {
-            "description": "The project key."
+            "nullable": true,
+            "description": "The project key.",
+            "type": "string"
           },
           "links": {
-            "description": "HATEOAS links."
+            "nullable": true,
+            "description": "HATEOAS links.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "name": {
-            "description": "The project name."
+            "nullable": true,
+            "description": "The project name.",
+            "type": "string"
           },
           "type": {
-            "description": "Object type (e.g., \"project\")."
+            "nullable": true,
+            "description": "Object type (e.g., \"project\").",
+            "type": "string"
           },
           "uuid": {
-            "description": "The project UUID."
+            "nullable": true,
+            "description": "The project UUID.",
+            "type": "string"
           }
         }
       },
@@ -1145,22 +1229,37 @@
         "type": "object",
         "properties": {
           "account_id": {
-            "description": "The user's account ID."
+            "nullable": true,
+            "description": "The user's account ID.",
+            "type": "string"
           },
           "display_name": {
-            "description": "The user's display name."
+            "nullable": true,
+            "description": "The user's display name.",
+            "type": "string"
           },
           "links": {
-            "description": "HATEOAS links for this user."
+            "nullable": true,
+            "description": "HATEOAS links for this user.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "nickname": {
-            "description": "The user's nickname/username."
+            "nullable": true,
+            "description": "The user's nickname/username.",
+            "type": "string"
           },
           "type": {
-            "description": "Object type (e.g., \"user\")."
+            "nullable": true,
+            "description": "Object type (e.g., \"user\").",
+            "type": "string"
           },
           "uuid": {
-            "description": "The user's UUID (e.g., \"{abc-123}\")."
+            "nullable": true,
+            "description": "The user's UUID (e.g., \"{abc-123}\").",
+            "type": "string"
           }
         }
       },
@@ -1169,19 +1268,32 @@
         "type": "object",
         "properties": {
           "links": {
-            "description": "HATEOAS links."
+            "nullable": true,
+            "description": "HATEOAS links.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "name": {
-            "description": "The workspace name."
+            "nullable": true,
+            "description": "The workspace name.",
+            "type": "string"
           },
           "slug": {
-            "description": "The workspace slug."
+            "nullable": true,
+            "description": "The workspace slug.",
+            "type": "string"
           },
           "type": {
-            "description": "Object type (e.g., \"workspace\")."
+            "nullable": true,
+            "description": "Object type (e.g., \"workspace\").",
+            "type": "string"
           },
           "uuid": {
-            "description": "The workspace UUID."
+            "nullable": true,
+            "description": "The workspace UUID.",
+            "type": "string"
           }
         }
       },
@@ -1191,37 +1303,41 @@
         "type": "object",
         "properties": {
           "next": {
+            "nullable": true,
             "description": "URL to the next page of results, if any.",
             "type": "string"
           },
           "page": {
+            "nullable": true,
             "description": "Current page number (1-indexed).",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "pagelen": {
+            "nullable": true,
             "description": "Number of items per page.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "previous": {
+            "nullable": true,
             "description": "URL to the previous page of results, if any.",
             "type": "string"
           },
           "size": {
+            "nullable": true,
             "description": "Total number of items across all pages.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "values": {
             "description": "The items in this page.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/SourceEntry"
-                }
-              ]
+              "$ref": "#/components/schemas/SourceEntry"
             }
           }
         }
@@ -1231,13 +1347,22 @@
         "type": "object",
         "properties": {
           "hash": {
-            "description": "Commit hash."
+            "nullable": true,
+            "description": "Commit hash.",
+            "type": "string"
           },
           "links": {
-            "description": "HATEOAS links."
+            "nullable": true,
+            "description": "HATEOAS links.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "type": {
-            "description": "Object type (e.g., \"commit\")."
+            "nullable": true,
+            "description": "Object type (e.g., \"commit\").",
+            "type": "string"
           }
         }
       },
@@ -1246,25 +1371,57 @@
         "type": "object",
         "properties": {
           "attributes": {
-            "description": "File attributes."
+            "nullable": true,
+            "description": "File attributes.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "commit": {
-            "description": "Commit hash (for files)."
+            "description": "Commit hash (for files).",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CommitInfo"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "links": {
-            "description": "HATEOAS links including \"self\" for raw content."
+            "nullable": true,
+            "description": "HATEOAS links including \"self\" for raw content.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "mimetype": {
-            "description": "MIME type for files."
+            "nullable": true,
+            "description": "MIME type for files.",
+            "type": "string"
           },
           "path": {
-            "description": "Full path from repository root."
+            "nullable": true,
+            "description": "Full path from repository root.",
+            "type": "string"
           },
           "size": {
-            "description": "Size in bytes (only for files)."
+            "nullable": true,
+            "description": "Size in bytes (only for files).",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
           "type": {
-            "description": "Entry type: \"commit_directory\" or \"commit_file\"."
+            "nullable": true,
+            "description": "Entry type: \"commit_directory\" or \"commit_file\".",
+            "type": "string"
           }
         }
       },
@@ -1274,37 +1431,41 @@
         "type": "object",
         "properties": {
           "next": {
+            "nullable": true,
             "description": "URL to the next page of results, if any.",
             "type": "string"
           },
           "page": {
+            "nullable": true,
             "description": "Current page number (1-indexed).",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "pagelen": {
+            "nullable": true,
             "description": "Number of items per page.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "previous": {
+            "nullable": true,
             "description": "URL to the previous page of results, if any.",
             "type": "string"
           },
           "size": {
+            "nullable": true,
             "description": "Total number of items across all pages.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "values": {
             "description": "The items in this page.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/PullRequest"
-                }
-              ]
+              "$ref": "#/components/schemas/PullRequest"
             }
           }
         }
@@ -1314,13 +1475,49 @@
         "type": "object",
         "properties": {
           "branch": {
-            "description": "Branch information."
+            "description": "Branch information.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BranchInfo"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "commit": {
-            "description": "Commit information."
+            "description": "Commit information.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CommitInfo"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "repository": {
-            "description": "Repository information."
+            "description": "Repository information.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepositoryRef"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         }
       },
@@ -1329,13 +1526,19 @@
         "type": "object",
         "properties": {
           "html": {
-            "description": "Rendered HTML."
+            "nullable": true,
+            "description": "Rendered HTML.",
+            "type": "string"
           },
           "markup": {
-            "description": "Markup type: \"markdown\", \"creole\", \"plaintext\"."
+            "nullable": true,
+            "description": "Markup type: \"markdown\", \"creole\", \"plaintext\".",
+            "type": "string"
           },
           "raw": {
-            "description": "Raw content (markdown or plain text)."
+            "nullable": true,
+            "description": "Raw content (markdown or plain text).",
+            "type": "string"
           }
         }
       },
@@ -1345,26 +1548,48 @@
         "properties": {
           "approved": {
             "description": "Whether the participant has approved the PR.",
+            "default": false,
             "type": "boolean"
           },
           "changes_requested": {
             "description": "Whether the participant has requested changes.",
+            "default": false,
             "type": "boolean"
           },
           "participated_on": {
-            "description": "Timestamp of participation."
+            "nullable": true,
+            "description": "Timestamp of participation.",
+            "type": "string"
           },
           "role": {
-            "description": "Participant role: \"REVIEWER\" or \"PARTICIPANT\"."
+            "nullable": true,
+            "description": "Participant role: \"REVIEWER\" or \"PARTICIPANT\".",
+            "type": "string"
           },
           "state": {
-            "description": "State of participation: \"approved\", \"changes_requested\", null."
+            "nullable": true,
+            "description": "State of participation: \"approved\", \"changes_requested\", null.",
+            "type": "string"
           },
           "type": {
-            "description": "Object type."
+            "nullable": true,
+            "description": "Object type.",
+            "type": "string"
           },
           "user": {
-            "description": "The participating user."
+            "description": "The participating user.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         }
       },
@@ -1374,93 +1599,177 @@
         "type": "object",
         "properties": {
           "author": {
-            "description": "PR author."
+            "description": "PR author.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "close_source_branch": {
             "description": "Whether to close the source branch after merge.",
+            "default": false,
             "type": "boolean"
           },
           "closed_by": {
-            "description": "User who closed the PR."
+            "description": "User who closed the PR.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "comment_count": {
+            "nullable": true,
             "description": "Number of comments on this PR.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "created_on": {
+            "nullable": true,
             "description": "Creation timestamp (ISO 8601).",
             "type": "string"
           },
           "description": {
+            "nullable": true,
             "description": "PR description (markdown).",
             "type": "string"
           },
           "destination": {
-            "description": "Destination branch information."
+            "description": "Destination branch information.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BranchRef"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "id": {
+            "nullable": true,
             "description": "PR ID (unique within the repository).",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "links": {
+            "nullable": true,
             "description": "HATEOAS links.",
-            "type": "object"
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "merge_commit": {
-            "description": "PR merge commit (if merged)."
+            "description": "PR merge commit (if merged).",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CommitInfo"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "participants": {
             "description": "Users who have participated in this PR.",
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Participant"
-                }
-              ]
+              "$ref": "#/components/schemas/Participant"
             }
           },
           "reason": {
+            "nullable": true,
             "description": "Reason for PR state.",
             "type": "string"
           },
           "reviewers": {
             "description": "Users who have been added as reviewers.",
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/User"
-                }
-              ]
+              "$ref": "#/components/schemas/User"
             }
           },
           "source": {
-            "description": "Source branch information."
+            "description": "Source branch information.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BranchRef"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "state": {
+            "nullable": true,
             "description": "PR state: \"OPEN\", \"MERGED\", \"DECLINED\", \"SUPERSEDED\".",
             "type": "string"
           },
           "summary": {
-            "description": "Summary of changes."
+            "description": "Summary of changes.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Content"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "task_count": {
+            "nullable": true,
             "description": "Number of tasks on this PR.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "title": {
+            "nullable": true,
             "description": "PR title.",
             "type": "string"
           },
           "type": {
+            "nullable": true,
             "description": "Object type (e.g., \"pullrequest\").",
             "type": "string"
           },
           "updated_on": {
+            "nullable": true,
             "description": "Last update timestamp (ISO 8601).",
             "type": "string"
           }
@@ -1471,19 +1780,32 @@
         "type": "object",
         "properties": {
           "full_name": {
-            "description": "Full name in \"workspace/repo_slug\" format."
+            "nullable": true,
+            "description": "Full name in \"workspace/repo_slug\" format.",
+            "type": "string"
           },
           "links": {
-            "description": "HATEOAS links."
+            "nullable": true,
+            "description": "HATEOAS links.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "name": {
-            "description": "Repository name."
+            "nullable": true,
+            "description": "Repository name.",
+            "type": "string"
           },
           "type": {
-            "description": "Object type."
+            "nullable": true,
+            "description": "Object type.",
+            "type": "string"
           },
           "uuid": {
-            "description": "Repository UUID."
+            "nullable": true,
+            "description": "Repository UUID.",
+            "type": "string"
           }
         }
       },
@@ -1493,37 +1815,41 @@
         "type": "object",
         "properties": {
           "next": {
+            "nullable": true,
             "description": "URL to the next page of results, if any.",
             "type": "string"
           },
           "page": {
+            "nullable": true,
             "description": "Current page number (1-indexed).",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "pagelen": {
+            "nullable": true,
             "description": "Number of items per page.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "previous": {
+            "nullable": true,
             "description": "URL to the previous page of results, if any.",
             "type": "string"
           },
           "size": {
+            "nullable": true,
             "description": "Total number of items across all pages.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "values": {
             "description": "The items in this page.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/PullRequestComment"
-                }
-              ]
+              "$ref": "#/components/schemas/PullRequestComment"
             }
           }
         }
@@ -1533,7 +1859,11 @@
         "type": "object",
         "properties": {
           "id": {
-            "description": "Parent comment ID."
+            "nullable": true,
+            "description": "Parent comment ID.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           }
         }
       },
@@ -1542,13 +1872,23 @@
         "type": "object",
         "properties": {
           "from": {
-            "description": "Line number (old version)."
+            "nullable": true,
+            "description": "Line number (old version).",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
           "path": {
-            "description": "File path."
+            "nullable": true,
+            "description": "File path.",
+            "type": "string"
           },
           "to": {
-            "description": "Line number (new version)."
+            "nullable": true,
+            "description": "Line number (new version).",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           }
         }
       },
@@ -1557,35 +1897,99 @@
         "type": "object",
         "properties": {
           "content": {
-            "description": "Comment content."
+            "description": "Comment content.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Content"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "created_on": {
-            "description": "Creation timestamp (ISO 8601)."
+            "nullable": true,
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
           },
           "deleted": {
             "description": "Whether this is a deleted comment.",
+            "default": false,
             "type": "boolean"
           },
           "id": {
-            "description": "Comment ID."
+            "nullable": true,
+            "description": "Comment ID.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
           "inline": {
-            "description": "Inline context (for code comments)."
+            "description": "Inline context (for code comments).",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InlineContext"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "links": {
-            "description": "HATEOAS links."
+            "nullable": true,
+            "description": "HATEOAS links.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "parent": {
-            "description": "Parent comment ID (for threaded comments)."
+            "description": "Parent comment ID (for threaded comments).",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CommentParent"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "type": {
-            "description": "Object type."
+            "nullable": true,
+            "description": "Object type.",
+            "type": "string"
           },
           "updated_on": {
-            "description": "Last update timestamp (ISO 8601)."
+            "nullable": true,
+            "description": "Last update timestamp (ISO 8601).",
+            "type": "string"
           },
           "user": {
-            "description": "Comment author."
+            "description": "Comment author.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         }
       },
@@ -1595,37 +1999,41 @@
         "type": "object",
         "properties": {
           "next": {
+            "nullable": true,
             "description": "URL to the next page of results, if any.",
             "type": "string"
           },
           "page": {
+            "nullable": true,
             "description": "Current page number (1-indexed).",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "pagelen": {
+            "nullable": true,
             "description": "Number of items per page.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "previous": {
+            "nullable": true,
             "description": "URL to the previous page of results, if any.",
             "type": "string"
           },
           "size": {
+            "nullable": true,
             "description": "Total number of items across all pages.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "values": {
             "description": "The items in this page.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Issue"
-                }
-              ]
+              "$ref": "#/components/schemas/Issue"
             }
           }
         }
@@ -1636,83 +2044,165 @@
         "type": "object",
         "properties": {
           "assignee": {
-            "description": "Assigned user."
+            "description": "Assigned user.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "comment_count": {
+            "nullable": true,
             "description": "Number of comments.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "component": {
+            "nullable": true,
             "description": "Component (if any).",
             "type": "string"
           },
           "content": {
-            "description": "Issue content/description."
+            "description": "Issue content/description.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Content"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "created_on": {
+            "nullable": true,
             "description": "Creation timestamp (ISO 8601).",
             "type": "string"
           },
           "edited_on": {
+            "nullable": true,
             "description": "Last edit timestamp (ISO 8601).",
             "type": "string"
           },
           "id": {
+            "nullable": true,
             "description": "Issue ID (unique within the repository).",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "kind": {
+            "nullable": true,
             "description": "Issue type: \"bug\", \"enhancement\", \"proposal\", \"task\".",
             "type": "string"
           },
           "links": {
+            "nullable": true,
             "description": "HATEOAS links.",
-            "type": "object"
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "milestone": {
-            "description": "Milestone (if any)."
+            "description": "Milestone (if any).",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Milestone"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "priority": {
+            "nullable": true,
             "description": "Issue priority: \"trivial\", \"minor\", \"major\", \"critical\", \"blocker\".",
             "type": "string"
           },
           "reporter": {
-            "description": "Issue reporter."
+            "description": "Issue reporter.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "repository": {
-            "description": "Repository this issue belongs to."
+            "description": "Repository this issue belongs to.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepositoryRef"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "state": {
+            "nullable": true,
             "description": "Issue state: \"new\", \"open\", \"resolved\", \"on hold\", \"invalid\", \"duplicate\", \"wontfix\", \"closed\".",
             "type": "string"
           },
           "title": {
+            "nullable": true,
             "description": "Issue title.",
             "type": "string"
           },
           "type": {
+            "nullable": true,
             "description": "Object type.",
             "type": "string"
           },
           "updated_on": {
+            "nullable": true,
             "description": "Last update timestamp (ISO 8601).",
             "type": "string"
           },
           "version": {
+            "nullable": true,
             "description": "Version (if any).",
             "type": "string"
           },
           "votes": {
+            "nullable": true,
             "description": "Number of votes.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "watchers": {
+            "nullable": true,
             "description": "Number of watchers.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           }
         }
       },
@@ -1721,13 +2211,24 @@
         "type": "object",
         "properties": {
           "id": {
-            "description": "Milestone ID."
+            "nullable": true,
+            "description": "Milestone ID.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
           "links": {
-            "description": "HATEOAS links."
+            "nullable": true,
+            "description": "HATEOAS links.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "name": {
-            "description": "Milestone name."
+            "nullable": true,
+            "description": "Milestone name.",
+            "type": "string"
           }
         }
       },
@@ -1737,37 +2238,41 @@
         "type": "object",
         "properties": {
           "next": {
+            "nullable": true,
             "description": "URL to the next page of results, if any.",
             "type": "string"
           },
           "page": {
+            "nullable": true,
             "description": "Current page number (1-indexed).",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "pagelen": {
+            "nullable": true,
             "description": "Number of items per page.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "previous": {
+            "nullable": true,
             "description": "URL to the previous page of results, if any.",
             "type": "string"
           },
           "size": {
+            "nullable": true,
             "description": "Total number of items across all pages.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "values": {
             "description": "The items in this page.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/IssueComment"
-                }
-              ]
+              "$ref": "#/components/schemas/IssueComment"
             }
           }
         }
@@ -1777,25 +2282,64 @@
         "type": "object",
         "properties": {
           "content": {
-            "description": "Comment content."
+            "description": "Comment content.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Content"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "created_on": {
-            "description": "Creation timestamp (ISO 8601)."
+            "nullable": true,
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
           },
           "id": {
-            "description": "Comment ID."
+            "nullable": true,
+            "description": "Comment ID.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
           "links": {
-            "description": "HATEOAS links."
+            "nullable": true,
+            "description": "HATEOAS links.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "type": {
-            "description": "Object type."
+            "nullable": true,
+            "description": "Object type.",
+            "type": "string"
           },
           "updated_on": {
-            "description": "Last update timestamp (ISO 8601)."
+            "nullable": true,
+            "description": "Last update timestamp (ISO 8601).",
+            "type": "string"
           },
           "user": {
-            "description": "Comment author."
+            "description": "Comment author.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         }
       },
@@ -1805,37 +2349,41 @@
         "type": "object",
         "properties": {
           "next": {
+            "nullable": true,
             "description": "URL to the next page of results, if any.",
             "type": "string"
           },
           "page": {
+            "nullable": true,
             "description": "Current page number (1-indexed).",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "pagelen": {
+            "nullable": true,
             "description": "Number of items per page.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "previous": {
+            "nullable": true,
             "description": "URL to the previous page of results, if any.",
             "type": "string"
           },
           "size": {
+            "nullable": true,
             "description": "Total number of items across all pages.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "values": {
             "description": "The items in this page.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/IssueChange"
-                }
-              ]
+              "$ref": "#/components/schemas/IssueChange"
             }
           }
         }
@@ -1845,10 +2393,14 @@
         "type": "object",
         "properties": {
           "new": {
-            "description": "New value."
+            "nullable": true,
+            "description": "New value.",
+            "type": "string"
           },
           "old": {
-            "description": "Old value."
+            "nullable": true,
+            "description": "Old value.",
+            "type": "string"
           }
         }
       },
@@ -1857,22 +2409,60 @@
         "type": "object",
         "properties": {
           "changes": {
-            "description": "The changes made (field name -> change detail)."
+            "nullable": true,
+            "description": "The changes made (field name -> change detail).",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ChangeDetail"
+            }
           },
           "created_on": {
-            "description": "Change timestamp (ISO 8601)."
+            "nullable": true,
+            "description": "Change timestamp (ISO 8601).",
+            "type": "string"
           },
           "links": {
-            "description": "HATEOAS links."
+            "nullable": true,
+            "description": "HATEOAS links.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "message": {
-            "description": "Message associated with the change (if any)."
+            "description": "Message associated with the change (if any).",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Content"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "type": {
-            "description": "Object type."
+            "nullable": true,
+            "description": "Object type.",
+            "type": "string"
           },
           "user": {
-            "description": "User who made the change."
+            "description": "User who made the change.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         }
       },
@@ -1882,37 +2472,41 @@
         "type": "object",
         "properties": {
           "next": {
+            "nullable": true,
             "description": "URL to the next page of results, if any.",
             "type": "string"
           },
           "page": {
+            "nullable": true,
             "description": "Current page number (1-indexed).",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "pagelen": {
+            "nullable": true,
             "description": "Number of items per page.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "previous": {
+            "nullable": true,
             "description": "URL to the previous page of results, if any.",
             "type": "string"
           },
           "size": {
+            "nullable": true,
             "description": "Total number of items across all pages.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "values": {
             "description": "The items in this page.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Tag"
-                }
-              ]
+              "$ref": "#/components/schemas/Tag"
             }
           }
         }
@@ -1922,10 +2516,24 @@
         "type": "object",
         "properties": {
           "raw": {
-            "description": "Raw author string (e.g., \"Name <email>\")."
+            "nullable": true,
+            "description": "Raw author string (e.g., \"Name <email>\").",
+            "type": "string"
           },
           "user": {
-            "description": "Linked user account (if any)."
+            "description": "Linked user account (if any).",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         }
       },
@@ -1935,28 +2543,60 @@
         "type": "object",
         "properties": {
           "date": {
+            "nullable": true,
             "description": "Creation timestamp (ISO 8601, for annotated tags).",
             "type": "string"
           },
           "links": {
+            "nullable": true,
             "description": "HATEOAS links.",
-            "type": "object"
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "message": {
+            "nullable": true,
             "description": "Tag message (for annotated tags).",
             "type": "string"
           },
           "name": {
+            "nullable": true,
             "description": "Tag name.",
             "type": "string"
           },
           "tagger": {
-            "description": "Tagger information (for annotated tags)."
+            "description": "Tagger information (for annotated tags).",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tagger"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "target": {
-            "description": "Commit this tag points to."
+            "description": "Commit this tag points to.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TagTarget"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "type": {
+            "nullable": true,
             "description": "Object type (e.g., \"tag\").",
             "type": "string"
           }
@@ -1967,22 +2607,47 @@
         "type": "object",
         "properties": {
           "author": {
-            "description": "Commit author."
+            "description": "Commit author.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CommitAuthor"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "date": {
-            "description": "Commit date (ISO 8601)."
+            "nullable": true,
+            "description": "Commit date (ISO 8601).",
+            "type": "string"
           },
           "hash": {
-            "description": "Commit hash."
+            "nullable": true,
+            "description": "Commit hash.",
+            "type": "string"
           },
           "links": {
-            "description": "HATEOAS links."
+            "nullable": true,
+            "description": "HATEOAS links.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "message": {
-            "description": "Commit message."
+            "nullable": true,
+            "description": "Commit message.",
+            "type": "string"
           },
           "type": {
-            "description": "Object type (e.g., \"commit\")."
+            "nullable": true,
+            "description": "Object type (e.g., \"commit\").",
+            "type": "string"
           }
         }
       },
@@ -1991,10 +2656,24 @@
         "type": "object",
         "properties": {
           "raw": {
-            "description": "Raw tagger string (e.g., \"Name <email>\")."
+            "nullable": true,
+            "description": "Raw tagger string (e.g., \"Name <email>\").",
+            "type": "string"
           },
           "user": {
-            "description": "Linked user account (if any)."
+            "description": "Linked user account (if any).",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         }
       },
@@ -2004,15 +2683,24 @@
         "type": "object",
         "properties": {
           "links": {
+            "nullable": true,
             "description": "HATEOAS links.",
-            "type": "object"
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "name": {
             "description": "Branch name.",
             "type": "string"
           },
           "target": {
-            "description": "Head commit of the branch."
+            "description": "Head commit of the branch.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CommitInfo"
+              }
+            ]
           }
         },
         "required": [
@@ -2026,37 +2714,41 @@
         "type": "object",
         "properties": {
           "next": {
+            "nullable": true,
             "description": "URL to the next page of results, if any.",
             "type": "string"
           },
           "page": {
+            "nullable": true,
             "description": "Current page number (1-indexed).",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "pagelen": {
+            "nullable": true,
             "description": "Number of items per page.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "previous": {
+            "nullable": true,
             "description": "URL to the previous page of results, if any.",
             "type": "string"
           },
           "size": {
+            "nullable": true,
             "description": "Total number of items across all pages.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "values": {
             "description": "The items in this page.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Download"
-                }
-              ]
+              "$ref": "#/components/schemas/Download"
             }
           }
         }
@@ -2066,25 +2758,56 @@
         "type": "object",
         "properties": {
           "created_on": {
-            "description": "Creation timestamp (ISO 8601)."
+            "nullable": true,
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
           },
           "downloads": {
-            "description": "Number of times this file has been downloaded."
+            "nullable": true,
+            "description": "Number of times this file has been downloaded.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
           "links": {
-            "description": "HATEOAS links (includes \"self\" for download URL)."
+            "nullable": true,
+            "description": "HATEOAS links (includes \"self\" for download URL).",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Link"
+            }
           },
           "name": {
-            "description": "Filename."
+            "nullable": true,
+            "description": "Filename.",
+            "type": "string"
           },
           "size": {
-            "description": "File size in bytes."
+            "nullable": true,
+            "description": "File size in bytes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
           "type": {
-            "description": "Object type."
+            "nullable": true,
+            "description": "Object type.",
+            "type": "string"
           },
           "user": {
-            "description": "User who uploaded this download."
+            "description": "User who uploaded this download.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         }
       },
@@ -2094,37 +2817,41 @@
         "type": "object",
         "properties": {
           "next": {
+            "nullable": true,
             "description": "URL to the next page of results, if any.",
             "type": "string"
           },
           "page": {
+            "nullable": true,
             "description": "Current page number (1-indexed).",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "pagelen": {
+            "nullable": true,
             "description": "Number of items per page.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "previous": {
+            "nullable": true,
             "description": "URL to the previous page of results, if any.",
             "type": "string"
           },
           "size": {
+            "nullable": true,
             "description": "Total number of items across all pages.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "values": {
             "description": "The items in this page.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Repository"
-                }
-              ]
+              "$ref": "#/components/schemas/Repository"
             }
           }
         }

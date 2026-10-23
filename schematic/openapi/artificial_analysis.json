@@ -292,6 +292,7 @@
             "format": "int32"
           },
           "format_category": {
+            "nullable": true,
             "description": "The format category name, if applicable.",
             "type": "string"
           },
@@ -414,7 +415,12 @@
         "type": "object",
         "properties": {
           "evaluations": {
-            "description": "Benchmark evaluation scores."
+            "description": "Benchmark evaluation scores.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LlmEvaluations"
+              }
+            ]
           },
           "id": {
             "description": "Stable identifier for the model.",
@@ -431,14 +437,24 @@
             "format": "double"
           },
           "model_creator": {
-            "description": "The creator of this model."
+            "description": "The creator of this model.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ModelCreator"
+              }
+            ]
           },
           "name": {
             "description": "Human-readable display name.",
             "type": "string"
           },
           "pricing": {
-            "description": "Pricing information."
+            "description": "Pricing information.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LlmPricing"
+              }
+            ]
           },
           "slug": {
             "description": "URL-safe slug (may change over time — prefer `id`).",
@@ -485,15 +501,16 @@
             "description": "List of LLM models with their benchmarks.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/LlmModel"
-                }
-              ]
+              "$ref": "#/components/schemas/LlmModel"
             }
           },
           "prompt_options": {
-            "description": "Prompt configuration used for the benchmark."
+            "description": "Prompt configuration used for the benchmark.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PromptOptions"
+              }
+            ]
           },
           "status": {
             "description": "HTTP status code echoed by the API.",
@@ -518,14 +535,11 @@
             "format": "int32"
           },
           "categories": {
+            "nullable": true,
             "description": "Per-category breakdown, when requested.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/CategoryBreakdown"
-                }
-              ]
+              "$ref": "#/components/schemas/CategoryBreakdown"
             }
           },
           "ci95": {
@@ -542,7 +556,12 @@
             "type": "string"
           },
           "model_creator": {
-            "description": "The creator of this model."
+            "description": "The creator of this model.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ModelCreator"
+              }
+            ]
           },
           "name": {
             "description": "Human-readable display name.",
@@ -554,6 +573,7 @@
             "format": "int32"
           },
           "release_date": {
+            "nullable": true,
             "description": "Release date, if available.",
             "type": "string"
           },
@@ -582,14 +602,11 @@
             "description": "List of media models with their Elo ratings.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/MediaModel"
-                }
-              ]
+              "$ref": "#/components/schemas/MediaModel"
             }
           },
           "include_categories": {
+            "nullable": true,
             "description": "Whether category breakdown was included.",
             "type": "boolean"
           },
@@ -636,14 +653,11 @@
             "description": "Sampler/generation configuration as an arbitrary JSON object."
           },
           "messages": {
+            "nullable": true,
             "description": "Optional prompt history.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/CritPtMessage"
-                }
-              ]
+              "$ref": "#/components/schemas/CritPtMessage"
             }
           },
           "model": {
@@ -674,11 +688,7 @@
             "description": "List of code-generation submissions to evaluate.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/CritPtSubmission"
-                }
-              ]
+              "$ref": "#/components/schemas/CritPtSubmission"
             }
           }
         },

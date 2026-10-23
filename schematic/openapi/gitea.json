@@ -1095,84 +1095,115 @@
         "properties": {
           "archived": {
             "description": "Whether the repository is archived.",
+            "default": false,
             "type": "boolean"
           },
           "clone_url": {
+            "nullable": true,
             "description": "Clone URL (HTTPS).",
             "type": "string"
           },
           "created_at": {
+            "nullable": true,
             "description": "Creation timestamp (ISO 8601).",
             "type": "string"
           },
           "default_branch": {
+            "nullable": true,
             "description": "Default branch name.",
             "type": "string"
           },
           "description": {
+            "nullable": true,
             "description": "Repository description.",
             "type": "string"
           },
           "empty": {
             "description": "Whether the repository is empty.",
+            "default": false,
             "type": "boolean"
           },
           "forks_count": {
+            "nullable": true,
             "description": "Number of forks.",
             "type": "integer",
             "format": "int64"
           },
           "full_name": {
+            "nullable": true,
             "description": "Full name in \"owner/repo\" format.",
             "type": "string"
           },
           "html_url": {
+            "nullable": true,
             "description": "HTML URL to the repository.",
             "type": "string"
           },
           "id": {
+            "nullable": true,
             "description": "Repository ID.",
             "type": "integer",
             "format": "int64"
           },
           "language": {
+            "nullable": true,
             "description": "Primary programming language.",
             "type": "string"
           },
           "mirror": {
             "description": "Whether the repository is a mirror.",
+            "default": false,
             "type": "boolean"
           },
           "name": {
+            "nullable": true,
             "description": "Repository name.",
             "type": "string"
           },
           "open_issues_count": {
+            "nullable": true,
             "description": "Number of open issues.",
             "type": "integer",
             "format": "int64"
           },
           "owner": {
-            "description": "Repository owner."
+            "description": "Repository owner.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "private": {
             "description": "Whether the repository is private.",
+            "default": false,
             "type": "boolean"
           },
           "ssh_url": {
+            "nullable": true,
             "description": "SSH URL for cloning.",
             "type": "string"
           },
           "stars_count": {
+            "nullable": true,
             "description": "Number of stars.",
             "type": "integer",
             "format": "int64"
           },
           "updated_at": {
+            "nullable": true,
             "description": "Last update timestamp (ISO 8601).",
             "type": "string"
           },
           "watchers_count": {
+            "nullable": true,
             "description": "Number of watchers.",
             "type": "integer",
             "format": "int64"
@@ -1184,19 +1215,30 @@
         "type": "object",
         "properties": {
           "avatar_url": {
-            "description": "URL to the user's avatar image."
+            "nullable": true,
+            "description": "URL to the user's avatar image.",
+            "type": "string"
           },
           "full_name": {
-            "description": "The user's full name."
+            "nullable": true,
+            "description": "The user's full name.",
+            "type": "string"
           },
           "id": {
-            "description": "The user's unique ID."
+            "nullable": true,
+            "description": "The user's unique ID.",
+            "type": "integer",
+            "format": "int64"
           },
           "login": {
-            "description": "The user's login handle."
+            "nullable": true,
+            "description": "The user's login handle.",
+            "type": "string"
           },
           "username": {
-            "description": "Alternative field name for login (Gitea sometimes uses `username`)."
+            "nullable": true,
+            "description": "Alternative field name for login (Gitea sometimes uses `username`).",
+            "type": "string"
           }
         }
       },
@@ -1206,35 +1248,37 @@
         "type": "object",
         "properties": {
           "page": {
+            "nullable": true,
             "description": "Current page (when paginated).",
             "type": "integer",
             "format": "int64"
           },
           "sha": {
+            "nullable": true,
             "description": "SHA of the tree.",
             "type": "string"
           },
           "total_count": {
+            "nullable": true,
             "description": "Total count of entries (when paginated).",
             "type": "integer",
             "format": "int64"
           },
           "tree": {
             "description": "Tree entries (files and directories).",
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/GitTreeEntry"
-                }
-              ]
+              "$ref": "#/components/schemas/GitTreeEntry"
             }
           },
           "truncated": {
             "description": "Whether the response was truncated.",
+            "default": false,
             "type": "boolean"
           },
           "url": {
+            "nullable": true,
             "description": "API URL for this tree.",
             "type": "string"
           }
@@ -1245,22 +1289,35 @@
         "type": "object",
         "properties": {
           "mode": {
-            "description": "Git file mode (e.g., \"100644\" for regular file)."
+            "nullable": true,
+            "description": "Git file mode (e.g., \"100644\" for regular file).",
+            "type": "string"
           },
           "path": {
-            "description": "File or directory path."
+            "nullable": true,
+            "description": "File or directory path.",
+            "type": "string"
           },
           "sha": {
-            "description": "SHA of the entry."
+            "nullable": true,
+            "description": "SHA of the entry.",
+            "type": "string"
           },
           "size": {
-            "description": "Size in bytes (only for blobs)."
+            "nullable": true,
+            "description": "Size in bytes (only for blobs).",
+            "type": "integer",
+            "format": "int64"
           },
           "type": {
-            "description": "Entry type: \"blob\" (file), \"tree\" (directory), or \"commit\" (submodule)."
+            "nullable": true,
+            "description": "Entry type: \"blob\" (file), \"tree\" (directory), or \"commit\" (submodule).",
+            "type": "string"
           },
           "url": {
-            "description": "API URL for the entry."
+            "nullable": true,
+            "description": "API URL for the entry.",
+            "type": "string"
           }
         }
       },
@@ -1270,78 +1327,124 @@
         "type": "object",
         "properties": {
           "base": {
-            "description": "Base branch info."
+            "description": "Base branch info.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PullRef"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "body": {
+            "nullable": true,
             "description": "PR body/description.",
             "type": "string"
           },
           "created_at": {
+            "nullable": true,
             "description": "Creation timestamp.",
             "type": "string"
           },
           "draft": {
+            "nullable": true,
             "description": "Whether this is a draft PR.",
             "type": "boolean"
           },
           "has_merged": {
+            "nullable": true,
             "description": "Whether the PR has been merged.",
             "type": "boolean"
           },
           "head": {
-            "description": "Head branch info."
+            "description": "Head branch info.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PullRef"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "html_url": {
+            "nullable": true,
             "description": "HTML URL to the PR.",
             "type": "string"
           },
           "id": {
+            "nullable": true,
             "description": "PR ID.",
             "type": "integer",
             "format": "int64"
           },
           "labels": {
+            "nullable": true,
             "description": "Labels applied to the PR.\n\nGitea returns the same `Label` shape on PRs as on issues. The list\nendpoint includes this field by default, but `#[serde(default)]`\nkeeps responses (or fixtures) that omit it deserializable.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Label"
-                }
-              ]
+              "$ref": "#/components/schemas/Label"
             }
           },
           "mergeable": {
+            "nullable": true,
             "description": "Whether the PR is mergeable.",
             "type": "boolean"
           },
           "merged_at": {
+            "nullable": true,
             "description": "Merge timestamp (if merged).",
             "type": "string"
           },
           "number": {
+            "nullable": true,
             "description": "PR number (index).",
             "type": "integer",
             "format": "int64"
           },
           "state": {
+            "nullable": true,
             "description": "PR state: \"open\", \"closed\".",
             "type": "string"
           },
           "title": {
+            "nullable": true,
             "description": "PR title.",
             "type": "string"
           },
           "updated_at": {
+            "nullable": true,
             "description": "Last update timestamp.",
             "type": "string"
           },
           "url": {
+            "nullable": true,
             "description": "API URL for the PR.",
             "type": "string"
           },
           "user": {
-            "description": "PR author."
+            "description": "PR author.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         }
       },
@@ -1351,27 +1454,33 @@
         "type": "object",
         "properties": {
           "color": {
+            "nullable": true,
             "description": "Label color (hex without `#`, e.g. \"ff0000\").",
             "type": "string"
           },
           "description": {
+            "nullable": true,
             "description": "Optional human-readable description.",
             "type": "string"
           },
           "exclusive": {
+            "nullable": true,
             "description": "Whether the label is exclusive within its scope.",
             "type": "boolean"
           },
           "id": {
+            "nullable": true,
             "description": "Label ID.",
             "type": "integer",
             "format": "int64"
           },
           "name": {
+            "nullable": true,
             "description": "Label name (e.g. \"bug\", \"enhancement\").",
             "type": "string"
           },
           "url": {
+            "nullable": true,
             "description": "Optional API URL for the label resource.",
             "type": "string"
           }
@@ -1382,10 +1491,14 @@
         "type": "object",
         "properties": {
           "ref": {
-            "description": "Branch name."
+            "nullable": true,
+            "description": "Branch name.",
+            "type": "string"
           },
           "sha": {
-            "description": "Commit SHA."
+            "nullable": true,
+            "description": "Commit SHA.",
+            "type": "string"
           }
         }
       },
@@ -1395,25 +1508,30 @@
         "type": "object",
         "properties": {
           "additions": {
+            "nullable": true,
             "description": "Number of additions.",
             "type": "integer",
             "format": "int64"
           },
           "changes": {
+            "nullable": true,
             "description": "Total number of changes.",
             "type": "integer",
             "format": "int64"
           },
           "deletions": {
+            "nullable": true,
             "description": "Number of deletions.",
             "type": "integer",
             "format": "int64"
           },
           "filename": {
+            "nullable": true,
             "description": "Filename (full path).",
             "type": "string"
           },
           "status": {
+            "nullable": true,
             "description": "Change status: \"added\", \"removed\", \"modified\", \"renamed\".",
             "type": "string"
           }
@@ -1425,37 +1543,45 @@
         "type": "object",
         "properties": {
           "body": {
+            "nullable": true,
             "description": "Issue body/description.",
             "type": "string"
           },
           "closed_at": {
+            "nullable": true,
             "description": "Close timestamp (if closed).",
             "type": "string"
           },
           "comments": {
+            "nullable": true,
             "description": "Number of comments.",
             "type": "integer",
             "format": "int64"
           },
           "created_at": {
+            "nullable": true,
             "description": "Creation timestamp.",
             "type": "string"
           },
           "html_url": {
+            "nullable": true,
             "description": "HTML URL to the issue.",
             "type": "string"
           },
           "id": {
+            "nullable": true,
             "description": "Issue ID.",
             "type": "integer",
             "format": "int64"
           },
           "index": {
+            "nullable": true,
             "description": "Issue index (number).",
             "type": "integer",
             "format": "int64"
           },
           "number": {
+            "nullable": true,
             "description": "Alternative field name for index (some endpoints use `number`).",
             "type": "integer",
             "format": "int64"
@@ -1464,23 +1590,39 @@
             "description": "Pull request info (present if this issue is a PR)."
           },
           "state": {
+            "nullable": true,
             "description": "Issue state: \"open\", \"closed\".",
             "type": "string"
           },
           "title": {
+            "nullable": true,
             "description": "Issue title.",
             "type": "string"
           },
           "updated_at": {
+            "nullable": true,
             "description": "Last update timestamp.",
             "type": "string"
           },
           "url": {
+            "nullable": true,
             "description": "API URL for the issue.",
             "type": "string"
           },
           "user": {
-            "description": "Issue author."
+            "description": "Issue author.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         }
       },
@@ -1490,24 +1632,40 @@
         "type": "object",
         "properties": {
           "body": {
+            "nullable": true,
             "description": "Comment body.",
             "type": "string"
           },
           "created_at": {
+            "nullable": true,
             "description": "Creation timestamp.",
             "type": "string"
           },
           "id": {
+            "nullable": true,
             "description": "Comment ID.",
             "type": "integer",
             "format": "int64"
           },
           "updated_at": {
+            "nullable": true,
             "description": "Last update timestamp.",
             "type": "string"
           },
           "user": {
-            "description": "Comment author."
+            "description": "Comment author.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         }
       },
@@ -1517,19 +1675,23 @@
         "type": "object",
         "properties": {
           "created": {
+            "nullable": true,
             "description": "Event timestamp.",
             "type": "string"
           },
           "id": {
+            "nullable": true,
             "description": "Event ID.",
             "type": "integer",
             "format": "int64"
           },
           "type": {
+            "nullable": true,
             "description": "Event type.",
             "type": "string"
           }
-        }
+        },
+        "additionalProperties": true
       },
       "RepoTag": {
         "title": "RepoTag",
@@ -1537,25 +1699,42 @@
         "type": "object",
         "properties": {
           "commit": {
-            "description": "Commit the tag points to."
+            "description": "Commit the tag points to.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TagCommit"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "id": {
+            "nullable": true,
             "description": "Tag ID (Gitea-specific).",
             "type": "string"
           },
           "message": {
+            "nullable": true,
             "description": "Tag message (for annotated tags).",
             "type": "string"
           },
           "name": {
+            "nullable": true,
             "description": "Tag name.",
             "type": "string"
           },
           "tarball_url": {
+            "nullable": true,
             "description": "URL to download tarball.",
             "type": "string"
           },
           "zipball_url": {
+            "nullable": true,
             "description": "URL to download zipball.",
             "type": "string"
           }
@@ -1566,7 +1745,9 @@
         "type": "object",
         "properties": {
           "sha": {
-            "description": "Commit SHA."
+            "nullable": true,
+            "description": "Commit SHA.",
+            "type": "string"
           }
         }
       },
@@ -1576,42 +1757,63 @@
         "type": "object",
         "properties": {
           "author": {
-            "description": "Author of the release."
+            "description": "Author of the release.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "body": {
+            "nullable": true,
             "description": "Release body (markdown).",
             "type": "string"
           },
           "created_at": {
+            "nullable": true,
             "description": "Creation timestamp.",
             "type": "string"
           },
           "draft": {
+            "nullable": true,
             "description": "Whether this is a draft.",
             "type": "boolean"
           },
           "html_url": {
+            "nullable": true,
             "description": "HTML URL to the release.",
             "type": "string"
           },
           "id": {
+            "nullable": true,
             "description": "Release ID.",
             "type": "integer",
             "format": "int64"
           },
           "name": {
+            "nullable": true,
             "description": "Release name/title.",
             "type": "string"
           },
           "prerelease": {
+            "nullable": true,
             "description": "Whether this is a prerelease.",
             "type": "boolean"
           },
           "published_at": {
+            "nullable": true,
             "description": "Publish timestamp.",
             "type": "string"
           },
           "tag_name": {
+            "nullable": true,
             "description": "Tag name associated with the release.",
             "type": "string"
           }
@@ -1623,13 +1825,19 @@
         "type": "object",
         "properties": {
           "commit": {
-            "description": "Head commit of the branch."
+            "description": "Head commit of the branch.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BranchCommit"
+              }
+            ]
           },
           "name": {
             "description": "Branch name.",
             "type": "string"
           },
           "protected": {
+            "nullable": true,
             "description": "Whether the branch is protected.",
             "type": "boolean"
           }
@@ -1648,10 +1856,14 @@
             "type": "string"
           },
           "message": {
-            "description": "Commit message."
+            "nullable": true,
+            "description": "Commit message.",
+            "type": "string"
           },
           "timestamp": {
-            "description": "Commit timestamp."
+            "nullable": true,
+            "description": "Commit timestamp.",
+            "type": "string"
           }
         },
         "required": [
@@ -1664,13 +1876,27 @@
         "type": "object",
         "properties": {
           "object": {
-            "description": "Object the ref points to."
+            "description": "Object the ref points to.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GitRefObject"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "ref": {
+            "nullable": true,
             "description": "Full ref name (e.g., \"refs/tags/v1.0.0\").",
             "type": "string"
           },
           "url": {
+            "nullable": true,
             "description": "API URL.",
             "type": "string"
           }
@@ -1681,13 +1907,19 @@
         "type": "object",
         "properties": {
           "sha": {
-            "description": "Object SHA."
+            "nullable": true,
+            "description": "Object SHA.",
+            "type": "string"
           },
           "type": {
-            "description": "Object type: \"commit\" (lightweight tag) or \"tag\" (annotated tag)."
+            "nullable": true,
+            "description": "Object type: \"commit\" (lightweight tag) or \"tag\" (annotated tag).",
+            "type": "string"
           },
           "url": {
-            "description": "API URL for the object."
+            "nullable": true,
+            "description": "API URL for the object.",
+            "type": "string"
           }
         }
       },
@@ -1697,18 +1929,22 @@
         "type": "object",
         "properties": {
           "message": {
+            "nullable": true,
             "description": "Tag message.",
             "type": "string"
           },
           "sha": {
+            "nullable": true,
             "description": "Tag object SHA.",
             "type": "string"
           },
           "tag": {
+            "nullable": true,
             "description": "Tag name.",
             "type": "string"
           },
           "url": {
+            "nullable": true,
             "description": "API URL.",
             "type": "string"
           }

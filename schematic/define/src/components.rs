@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{ApiRequest, DefinitionError, Endpoint, ErrorEntry, FormFieldKind, ResponseShape, RestApi, StreamFraming, TypeRef};
+use crate::{ApiRequest, DefinitionError, Endpoint, ErrorEntry, FormFieldKind, ResponseShape, RestApi, SchemaReference, StreamFraming, TypeRef};
 
 /// One named schema component.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -200,8 +200,9 @@ impl RestApi {
     }
 
     /// Check that components are well formed with unique names, and that
-    /// every endpoint reference resolves. API build runs this; run it on a
-    /// deserialized definition before use.
+    /// every endpoint reference resolves. API build runs this; run it, and
+    /// [`Self::validate_schema_closure`], on a deserialized definition before
+    /// use.
     pub fn validate_references(&self) -> Result<(), DefinitionError> {
         let invalid = |message: String| DefinitionError::InvalidDefinition { api: self.name.clone(), endpoint: "<api>".into(), message };
         for (index, component) in self.schemas.iter().enumerate() {
@@ -242,9 +243,120 @@ impl RestApi {
         Ok(())
     }
 
+    /// Check that every `$ref` inside every component schema resolves to a
+    /// component of [`Self::schemas`]. Endpoint references name components,
+    /// so this closes every schema an endpoint names as well.
+    ///
+    /// A reference resolves when it is `#/components/schemas/{name}`, with
+    /// percent-encoding and JSON-pointer escapes (`~1`, `~0`) decoded; a
+    /// `$ref` inside instance data (`default`, `enum`, ...) is not one. Each
+    /// component is walked once, without following references, so a
+    /// recursive model terminates. Nested definitions extracted from a
+    /// registration are components already, so for a built API this is a
+    /// backstop. API build, bundle loading, generation, and export run it;
+    /// OpenAPI import does not, since an imported document can hold
+    /// references its components cannot satisfy.
+    ///
+    /// ## Errors
+    ///
+    /// [`DefinitionError::UnresolvedSchemaReferences`] listing every
+    /// reference that does not resolve, with its parent component and path.
+    pub fn validate_schema_closure(&self) -> Result<(), DefinitionError> {
+        let mut references = Vec::new();
+        for component in &self.schemas {
+            collect_references(&component.schema, &mut String::new(), &mut |path, reference| {
+                let missing = match component_reference(reference) {
+                    Some(name) if self.component(&name).is_some() => return,
+                    other => other,
+                };
+                references.push(SchemaReference { parent: component.name.clone(), path: path.into(), reference: reference.into(), missing });
+            });
+        }
+        if references.is_empty() { Ok(()) } else { Err(DefinitionError::UnresolvedSchemaReferences { api: self.name.clone(), references }) }
+    }
+
     fn unresolved_name<'a>(&self, reference: &'a TypeRef) -> Option<&'a str> {
         reference.names().into_iter().find(|name| self.component(name).is_none_or(|c| c.rust_path.is_none()))
     }
+}
+
+/// Keywords whose values are instance data, not schemas, so a `$ref` inside
+/// them is not a reference.
+const DATA_KEYWORDS: [&str; 5] = ["const", "default", "enum", "example", "examples"];
+
+/// Keywords whose values map names to schemas, so a key there is a name,
+/// never a keyword.
+const SCHEMA_MAPS: [&str; 5] = ["properties", "patternProperties", "dependentSchemas", "$defs", "definitions"];
+
+/// Calls `found(path, reference)` for every `$ref` of the schema
+/// `value` and its subschemas, where `path` is the JSON pointer to the
+/// schema holding it.
+fn collect_references(value: &Value, path: &mut String, found: &mut impl FnMut(&str, &str)) {
+    match value {
+        Value::Object(object) => {
+            // A `$ref` that is not a string is reported in its JSON spelling,
+            // never read as no reference.
+            match object.get("$ref") {
+                Some(Value::String(reference)) => found(if path.is_empty() { "/" } else { path }, reference),
+                Some(other) => found(if path.is_empty() { "/" } else { path }, &other.to_string()),
+                None => {}
+            }
+            for (key, child) in object.iter().filter(|(key, _)| !DATA_KEYWORDS.contains(&key.as_str())) {
+                let length = push_token(path, key);
+                match child.as_object().filter(|_| SCHEMA_MAPS.contains(&key.as_str())) {
+                    Some(named) => for (name, schema) in named {
+                        let inner = push_token(path, name);
+                        collect_references(schema, path, found);
+                        path.truncate(inner);
+                    },
+                    None => collect_references(child, path, found),
+                }
+                path.truncate(length);
+            }
+        }
+        Value::Array(values) => for (index, child) in values.iter().enumerate() {
+            let length = push_token(path, &index.to_string());
+            collect_references(child, path, found);
+            path.truncate(length);
+        },
+        _ => {}
+    }
+}
+
+/// Appends `token`, escaped, to the JSON pointer `path`; returns the length
+/// to truncate back to.
+fn push_token(path: &mut String, token: &str) -> usize {
+    let length = path.len();
+    path.push('/');
+    path.push_str(&token.replace('~', "~0").replace('/', "~1"));
+    length
+}
+
+/// The component name a `#/components/schemas/{name}` reference names,
+/// decoded; `None` for any other reference.
+fn component_reference(reference: &str) -> Option<String> {
+    let fragment = percent_decode(reference.strip_prefix('#')?)?;
+    let token = fragment.strip_prefix("/components/schemas/")?;
+    (!token.is_empty() && !token.contains('/')).then(|| token.replace("~1", "/").replace("~0", "~"))
+}
+
+/// `text` with `%XX` escapes decoded; `None` for a malformed escape or
+/// non-UTF-8 result.
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = std::str::from_utf8(bytes.get(index + 1..index + 3)?).ok()?;
+            decoded.push(u8::from_str_radix(hex, 16).ok()?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
 }
 
 fn error_references(entries: &[ErrorEntry]) -> impl Iterator<Item = &TypeRef> {

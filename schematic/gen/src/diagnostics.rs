@@ -110,6 +110,10 @@ pub enum Feature {
     HeaderParameter,
     /// `EndpointParams.cookie` entries.
     CookieParameter,
+    /// A fixed or explicit header an OpenAPI operation does not carry as a
+    /// header parameter (a credential, `Accept`, `Content-Type`, or
+    /// `Authorization` header, or a conflicting declaration).
+    FixedHeader,
     /// Two endpoints of one API share an id.
     DuplicateEndpointId,
     /// Two endpoints of one API share a method and normalized path.
@@ -176,6 +180,7 @@ impl Feature {
             Self::QueryParameter => "query-parameter",
             Self::HeaderParameter => "header-parameter",
             Self::CookieParameter => "cookie-parameter",
+            Self::FixedHeader => "fixed-header",
             Self::DuplicateEndpointId => "duplicate-endpoint-id",
             Self::DuplicateMethodPath => "duplicate-method-path",
             Self::InvalidTypeSyntax => "invalid-type-syntax",

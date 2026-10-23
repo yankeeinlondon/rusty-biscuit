@@ -170,7 +170,7 @@ pub use error_table::{ErrorEntry, ErrorTable, StatusMatch};
 pub use graphql::{AddressRule, GraphQlOperation, GraphQlOperationBuilder, GraphQlSurface, GraphQlVariables, OperationKind};
 pub use schema::{Schema, SchemaObject};
 pub use types::{Endpoint, ResolvedEndpointAuth, RestApi, RestMethod};
-pub use registration::{DefinitionContext, DefinitionError, MapKey, Registration, RustPath, TypeDesc, TypeRegistration};
+pub use registration::{DefinitionContext, DefinitionError, MapKey, Registration, RustPath, SchemaReference, TypeDesc, TypeRegistration};
 pub use websocket::{
     AuthFlowHints, ConnectionLifecycle, CorrelationHints, EndpointRole, FrameFormat,
     HeartbeatHints, MessageDirection, MessageSchema, MessageSelector, RequestIdType,

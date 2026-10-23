@@ -1348,22 +1348,30 @@
         "type": "object",
         "properties": {
           "nl": {
+            "nullable": true,
             "description": "No local flag (MQTT 5.0).",
             "type": "boolean"
           },
           "qos": {
+            "nullable": true,
             "description": "QoS level (0, 1, or 2).",
             "type": "integer",
-            "format": "uint8"
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255
           },
           "rap": {
+            "nullable": true,
             "description": "Retain as published flag (MQTT 5.0).",
             "type": "boolean"
           },
           "rh": {
+            "nullable": true,
             "description": "Retain handling (MQTT 5.0).",
             "type": "integer",
-            "format": "uint8"
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255
           },
           "topic": {
             "description": "Topic filter to subscribe to.",
@@ -1380,29 +1388,39 @@
         "type": "object",
         "properties": {
           "encoding": {
+            "nullable": true,
             "description": "Message encoding (plain, base64).",
             "type": "string"
           },
           "message_expiry_interval": {
+            "nullable": true,
             "description": "Message expiry interval in seconds (MQTT 5.0).",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "payload": {
             "description": "Message payload.",
             "type": "string"
           },
           "payload_format_indicator": {
+            "nullable": true,
             "description": "Payload format indicator (MQTT 5.0).",
             "type": "integer",
-            "format": "uint8"
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255
           },
           "qos": {
+            "nullable": true,
             "description": "QoS level (0, 1, or 2).",
             "type": "integer",
-            "format": "uint8"
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255
           },
           "retain": {
+            "nullable": true,
             "description": "Retain flag.",
             "type": "boolean"
           },
@@ -1428,11 +1446,7 @@
             "description": "List of messages to publish.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/PublishBody"
-                }
-              ]
+              "$ref": "#/components/schemas/PublishBody"
             }
           }
         },
@@ -1446,21 +1460,20 @@
         "type": "object",
         "properties": {
           "actions": {
+            "nullable": true,
             "description": "List of actions to execute.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/RuleAction"
-                }
-              ]
+              "$ref": "#/components/schemas/RuleAction"
             }
           },
           "description": {
+            "nullable": true,
             "description": "Rule description.",
             "type": "string"
           },
           "enabled": {
+            "nullable": true,
             "description": "Whether the rule is enabled.",
             "type": "boolean"
           },
@@ -1521,6 +1534,7 @@
         "type": "object",
         "properties": {
           "is_superuser": {
+            "nullable": true,
             "description": "Whether the user is a superuser.",
             "type": "boolean"
           },
@@ -1548,11 +1562,14 @@
             "type": "string"
           },
           "duration": {
+            "nullable": true,
             "description": "Ban duration in seconds.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "reason": {
+            "nullable": true,
             "description": "Reason for ban.",
             "type": "string"
           },
@@ -1572,11 +1589,14 @@
         "type": "object",
         "properties": {
           "connections": {
+            "nullable": true,
             "description": "Number of connections.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "load": {
+            "nullable": true,
             "description": "Load averages [1min, 5min, 15min].",
             "type": "array",
             "items": {
@@ -1585,34 +1605,44 @@
             }
           },
           "max_fds": {
+            "nullable": true,
             "description": "Maximum file descriptors.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "memory_total": {
+            "nullable": true,
             "description": "Total memory in bytes.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "memory_used": {
+            "nullable": true,
             "description": "Used memory in bytes.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "node": {
             "description": "Node name (e.g., \"emqx@127.0.0.1\").",
             "type": "string"
           },
           "status": {
+            "nullable": true,
             "description": "Node status (running, stopped, etc.).",
             "type": "string"
           },
           "uptime": {
+            "nullable": true,
             "description": "Node uptime in milliseconds.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "version": {
+            "nullable": true,
             "description": "EMQX version.",
             "type": "string"
           }
@@ -1630,11 +1660,7 @@
             "description": "List of nodes in the cluster.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/NodeInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/NodeInfo"
             }
           }
         },
@@ -1648,6 +1674,7 @@
         "type": "object",
         "properties": {
           "running": {
+            "nullable": true,
             "description": "Running node names.",
             "type": "array",
             "items": {
@@ -1655,6 +1682,7 @@
             }
           },
           "stopped": {
+            "nullable": true,
             "description": "Stopped node names.",
             "type": "array",
             "items": {
@@ -1669,6 +1697,7 @@
         "type": "object",
         "properties": {
           "clean_start": {
+            "nullable": true,
             "description": "Clean session/start flag.",
             "type": "boolean"
           },
@@ -1677,65 +1706,88 @@
             "type": "string"
           },
           "connected_at": {
+            "nullable": true,
             "description": "Connection timestamp.",
             "type": "string"
           },
           "created_at": {
+            "nullable": true,
             "description": "Created at timestamp.",
             "type": "string"
           },
           "expiry_interval": {
+            "nullable": true,
             "description": "Expiry interval for session.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "ip_address": {
+            "nullable": true,
             "description": "Client IP address.",
             "type": "string"
           },
           "is_bridge": {
+            "nullable": true,
             "description": "Is client connected via bridge.",
             "type": "boolean"
           },
           "keepalive": {
+            "nullable": true,
             "description": "Keepalive interval in seconds.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "listener": {
+            "nullable": true,
             "description": "Connection listener.",
             "type": "string"
           },
           "mqueue_dropped": {
+            "nullable": true,
             "description": "Messages dropped.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "mqueue_len": {
+            "nullable": true,
             "description": "Messages in queue (inflight + awaiting ack).",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "node": {
+            "nullable": true,
             "description": "Node the client is connected to.",
             "type": "string"
           },
           "port": {
+            "nullable": true,
             "description": "Client port.",
             "type": "integer",
-            "format": "uint16"
+            "format": "uint16",
+            "minimum": 0,
+            "maximum": 65535
           },
           "proto_ver": {
+            "nullable": true,
             "description": "MQTT protocol version (3, 4, or 5).",
             "type": "integer",
-            "format": "uint8"
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255
           },
           "subscriptions_cnt": {
+            "nullable": true,
             "description": "Number of subscriptions.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "username": {
+            "nullable": true,
             "description": "Client username.",
             "type": "string"
           }
@@ -1753,15 +1805,23 @@
             "description": "List of connected clients.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ClientInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/ClientInfo"
             }
           },
           "meta": {
-            "description": "Pagination metadata."
+            "description": "Pagination metadata.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         },
         "required": [
@@ -1774,23 +1834,30 @@
         "type": "object",
         "properties": {
           "count": {
+            "nullable": true,
             "description": "Total count of items.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "hasnext": {
+            "nullable": true,
             "description": "Whether more pages exist.",
             "type": "boolean"
           },
           "limit": {
+            "nullable": true,
             "description": "Maximum items per page.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "page": {
+            "nullable": true,
             "description": "Current page number.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           }
         }
       },
@@ -1804,26 +1871,35 @@
             "type": "string"
           },
           "nl": {
+            "nullable": true,
             "description": "No local flag.",
             "type": "boolean"
           },
           "node": {
+            "nullable": true,
             "description": "Node where subscription exists.",
             "type": "string"
           },
           "qos": {
+            "nullable": true,
             "description": "QoS level.",
             "type": "integer",
-            "format": "uint8"
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255
           },
           "rap": {
+            "nullable": true,
             "description": "Retain as published flag.",
             "type": "boolean"
           },
           "rh": {
+            "nullable": true,
             "description": "Retain handling.",
             "type": "integer",
-            "format": "uint8"
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255
           },
           "topic": {
             "description": "Subscribed topic.",
@@ -1844,15 +1920,23 @@
             "description": "List of subscriptions.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/SubscriptionInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/SubscriptionInfo"
             }
           },
           "meta": {
-            "description": "Pagination metadata."
+            "description": "Pagination metadata.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         },
         "required": [
@@ -1865,25 +1949,25 @@
         "type": "object",
         "properties": {
           "actions": {
+            "nullable": true,
             "description": "List of actions to execute.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/RuleAction"
-                }
-              ]
+              "$ref": "#/components/schemas/RuleAction"
             }
           },
           "created_at": {
+            "nullable": true,
             "description": "Creation timestamp.",
             "type": "string"
           },
           "description": {
+            "nullable": true,
             "description": "Rule description.",
             "type": "string"
           },
           "enabled": {
+            "nullable": true,
             "description": "Whether the rule is enabled.",
             "type": "boolean"
           },
@@ -1913,11 +1997,7 @@
             "description": "List of rules.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/RuleInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/RuleInfo"
             }
           }
         },
@@ -1941,6 +2021,7 @@
         "type": "object",
         "properties": {
           "is_superuser": {
+            "nullable": true,
             "description": "Whether the user is a superuser.",
             "type": "boolean"
           },
@@ -1959,10 +2040,12 @@
         "type": "object",
         "properties": {
           "backend": {
+            "nullable": true,
             "description": "Backend configuration.",
             "type": "string"
           },
           "enable": {
+            "nullable": true,
             "description": "Whether the authenticator is enabled.",
             "type": "boolean"
           },
@@ -1978,7 +2061,8 @@
         "required": [
           "id",
           "type"
-        ]
+        ],
+        "additionalProperties": true
       },
       "ListAuthenticatorsResponse": {
         "title": "ListAuthenticatorsResponse",
@@ -1989,11 +2073,7 @@
             "description": "List of configured authenticators.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/AuthenticatorInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/AuthenticatorInfo"
             }
           }
         },
@@ -2007,6 +2087,7 @@
         "type": "object",
         "properties": {
           "enable": {
+            "nullable": true,
             "description": "Whether the source is enabled.",
             "type": "boolean"
           },
@@ -2017,7 +2098,8 @@
         },
         "required": [
           "type"
-        ]
+        ],
+        "additionalProperties": true
       },
       "ListAuthzSourcesResponse": {
         "title": "ListAuthzSourcesResponse",
@@ -2028,11 +2110,7 @@
             "description": "List of authorization sources.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/AuthzSourceInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/AuthzSourceInfo"
             }
           }
         },
@@ -2046,24 +2124,30 @@
         "type": "object",
         "properties": {
           "bind": {
+            "nullable": true,
             "description": "Bind address and port.",
             "type": "string"
           },
           "current_connections": {
+            "nullable": true,
             "description": "Current connections on this listener.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "id": {
             "description": "Listener identifier.",
             "type": "string"
           },
           "max_connections": {
+            "nullable": true,
             "description": "Maximum connections allowed.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "running": {
+            "nullable": true,
             "description": "Whether the listener is running.",
             "type": "boolean"
           },
@@ -2086,11 +2170,7 @@
             "description": "List of configured listeners.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ListenerInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/ListenerInfo"
             }
           }
         },
@@ -2104,56 +2184,77 @@
         "type": "object",
         "properties": {
           "bytes_received": {
+            "nullable": true,
             "description": "Total bytes received.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "bytes_sent": {
+            "nullable": true,
             "description": "Total bytes sent.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "connections_count": {
+            "nullable": true,
             "description": "Current connections count.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "messages.publish": {
+            "nullable": true,
             "description": "Messages publish received.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "messages_dropped": {
+            "nullable": true,
             "description": "Total messages dropped.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "messages_received": {
+            "nullable": true,
             "description": "Total messages received.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "messages_retained": {
+            "nullable": true,
             "description": "Total messages retained.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "messages_sent": {
+            "nullable": true,
             "description": "Total messages sent.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "subscriptions_count": {
+            "nullable": true,
             "description": "Current subscriptions count.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "topics_count": {
+            "nullable": true,
             "description": "Current topics count.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
-        }
+        },
+        "additionalProperties": true
       },
       "ListMetricsResponse": {
         "title": "ListMetricsResponse",
@@ -2164,11 +2265,7 @@
             "description": "List of per-node metrics.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/MetricsInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/MetricsInfo"
             }
           }
         },
@@ -2182,31 +2279,42 @@
         "type": "object",
         "properties": {
           "connections": {
+            "nullable": true,
             "description": "Current connections.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "live_connections": {
+            "nullable": true,
             "description": "Live connections.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "retained_count": {
+            "nullable": true,
             "description": "Retained messages.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "subscriptions": {
+            "nullable": true,
             "description": "Subscriptions.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "topics": {
+            "nullable": true,
             "description": "Topics.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
-        }
+        },
+        "additionalProperties": true
       },
       "ListStatsResponse": {
         "title": "ListStatsResponse",
@@ -2217,11 +2325,7 @@
             "description": "List of per-node stats.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/StatsInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/StatsInfo"
             }
           }
         },
@@ -2235,6 +2339,7 @@
         "type": "object",
         "properties": {
           "node": {
+            "nullable": true,
             "description": "Node where topic exists.",
             "type": "string"
           },
@@ -2256,15 +2361,23 @@
             "description": "List of topics.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/TopicInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/TopicInfo"
             }
           },
           "meta": {
-            "description": "Pagination metadata."
+            "description": "Pagination metadata.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         },
         "required": [
@@ -2277,25 +2390,32 @@
         "type": "object",
         "properties": {
           "from_clientid": {
+            "nullable": true,
             "description": "Publisher client ID.",
             "type": "string"
           },
           "from_username": {
+            "nullable": true,
             "description": "Publisher username.",
             "type": "string"
           },
           "payload": {
+            "nullable": true,
             "description": "Message payload.",
             "type": "string"
           },
           "publish_at": {
+            "nullable": true,
             "description": "Publish timestamp.",
             "type": "string"
           },
           "qos": {
+            "nullable": true,
             "description": "QoS level.",
             "type": "integer",
-            "format": "uint8"
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255
           },
           "topic": {
             "description": "Topic of the retained message.",
@@ -2315,15 +2435,23 @@
             "description": "List of retained messages.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/RetainedMessage"
-                }
-              ]
+              "$ref": "#/components/schemas/RetainedMessage"
             }
           },
           "meta": {
-            "description": "Pagination metadata."
+            "description": "Pagination metadata.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         },
         "required": [
@@ -2336,10 +2464,12 @@
         "type": "object",
         "properties": {
           "activate_at": {
+            "nullable": true,
             "description": "Activation timestamp.",
             "type": "string"
           },
           "deactivate_at": {
+            "nullable": true,
             "description": "Deactivation timestamp (if cleared).",
             "type": "string"
           },
@@ -2347,11 +2477,14 @@
             "description": "Alarm details."
           },
           "duration": {
+            "nullable": true,
             "description": "Duration in milliseconds.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "message": {
+            "nullable": true,
             "description": "Alarm message.",
             "type": "string"
           },
@@ -2360,6 +2493,7 @@
             "type": "string"
           },
           "node": {
+            "nullable": true,
             "description": "Node where alarm was raised.",
             "type": "string"
           }
@@ -2377,11 +2511,7 @@
             "description": "List of alarms.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/AlarmInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/AlarmInfo"
             }
           }
         },
@@ -2399,14 +2529,17 @@
             "type": "string"
           },
           "at": {
+            "nullable": true,
             "description": "Ban start time.",
             "type": "string"
           },
           "reason": {
+            "nullable": true,
             "description": "Reason for ban.",
             "type": "string"
           },
           "until": {
+            "nullable": true,
             "description": "Ban expiration time.",
             "type": "string"
           },
@@ -2429,15 +2562,23 @@
             "description": "List of ban records.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/BanInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/BanInfo"
             }
           },
           "meta": {
-            "description": "Pagination metadata."
+            "description": "Pagination metadata.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         },
         "required": [

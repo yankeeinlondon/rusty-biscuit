@@ -828,10 +828,12 @@
         "type": "object",
         "properties": {
           "ableRemoteBoot": {
+            "nullable": true,
             "description": "Whether the device supports remote boot/wake behavior.\n\nThis field may be absent on firmware versions that do not expose it.",
             "type": "boolean"
           },
           "androidVersion": {
+            "nullable": true,
             "description": "Android base version reported by firmware.\n\nThis field may be absent on older firmware builds. The API uses\nall-lowercase `androidversion` rather than camelCase.",
             "type": "string"
           },
@@ -839,6 +841,7 @@
             "type": "string"
           },
           "hasEqSetting": {
+            "nullable": true,
             "description": "Whether EQ settings are available on this hardware/firmware combination.\n\nThis field may be absent on models or firmware without EQ support metadata.",
             "type": "boolean"
           },
@@ -876,12 +879,27 @@
         "type": "object",
         "properties": {
           "duration": {
+            "nullable": true,
             "description": "Total duration in milliseconds.",
             "type": "integer",
             "format": "int64"
           },
-          "playingMusic": {},
+          "playingMusic": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlayingMusic"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "position": {
+            "nullable": true,
             "description": "Current position in milliseconds.",
             "type": "integer",
             "format": "int64"
@@ -892,11 +910,25 @@
             "format": "int32"
           },
           "status": {
+            "nullable": true,
             "description": "Status code (200 = success). Absent from some firmware versions.",
             "type": "integer",
             "format": "int32"
           },
-          "volumeData": {}
+          "volumeData": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VolumeData"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          }
         },
         "required": [
           "state"
@@ -906,10 +938,23 @@
         "description": "Metadata for the currently playing track.",
         "type": "object",
         "properties": {
-          "album": {},
-          "artist": {},
-          "title": {},
-          "trackNumber": {}
+          "album": {
+            "nullable": true,
+            "type": "string"
+          },
+          "artist": {
+            "nullable": true,
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "type": "string"
+          },
+          "trackNumber": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int32"
+          }
         }
       },
       "VolumeData": {
@@ -922,16 +967,26 @@
             "format": "int32"
           },
           "isMute": {
+            "default": false,
             "type": "boolean"
           },
-          "isVolumeEnable": {},
+          "isVolumeEnable": {
+            "nullable": true,
+            "type": "boolean"
+          },
           "maxVolume": {
             "type": "integer",
             "format": "int32"
           },
-          "minVolume": {},
+          "minVolume": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int32"
+          },
           "volumeDb": {
-            "description": "Displayed dB string."
+            "nullable": true,
+            "description": "Displayed dB string.",
+            "type": "string"
           }
         },
         "required": [
@@ -947,14 +1002,11 @@
           "inputData": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/InputItem"
-                }
-              ]
+              "$ref": "#/components/schemas/InputItem"
             }
           },
           "inputIndex": {
+            "nullable": true,
             "description": "Index into `input_data` of the currently selected input source.",
             "type": "integer",
             "format": "int32"
@@ -962,14 +1014,11 @@
           "outputData": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/OutputItem"
-                }
-              ]
+              "$ref": "#/components/schemas/OutputItem"
             }
           },
           "outputIndex": {
+            "nullable": true,
             "description": "Index into `output_data` of the currently selected output port.",
             "type": "integer",
             "format": "int32"
@@ -992,11 +1041,18 @@
         "description": "An available audio input.",
         "type": "object",
         "properties": {
-          "icon": {},
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
-          "sortedIndex": {},
+          "sortedIndex": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int32"
+          },
           "tag": {
             "type": "string"
           }
@@ -1011,13 +1067,21 @@
         "type": "object",
         "properties": {
           "enable": {
+            "default": false,
             "type": "boolean"
           },
-          "icon": {},
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
-          "sortedIndex": {},
+          "sortedIndex": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int32"
+          },
           "tag": {
             "type": "string"
           }
@@ -1035,11 +1099,7 @@
           "data": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/PowerOption"
-                }
-              ]
+              "$ref": "#/components/schemas/PowerOption"
             }
           },
           "status": {
@@ -1081,11 +1141,13 @@
             "format": "int32"
           },
           "max": {
+            "nullable": true,
             "description": "Maximum brightness.",
             "type": "integer",
             "format": "int32"
           },
           "status": {
+            "nullable": true,
             "description": "Status code (200 = success). May be absent on some firmware versions.",
             "type": "integer",
             "format": "int32"
@@ -1101,17 +1163,14 @@
         "type": "object",
         "properties": {
           "currentIndex": {
+            "nullable": true,
             "type": "integer",
             "format": "int32"
           },
           "data": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/DisplayMode"
-                }
-              ]
+              "$ref": "#/components/schemas/DisplayMode"
             }
           },
           "status": {
@@ -1129,10 +1188,15 @@
         "type": "object",
         "properties": {
           "index": {
-            "description": "Mode index accepted by `setVUMode` / `setSpPlayModeList`."
+            "nullable": true,
+            "description": "Mode index accepted by `setVUMode` / `setSpPlayModeList`.",
+            "type": "integer",
+            "format": "int32"
           },
           "tag": {
-            "description": "Mode tag identifier used for selection."
+            "nullable": true,
+            "description": "Mode tag identifier used for selection.",
+            "type": "string"
           },
           "title": {
             "description": "Display name (the API uses `title`, not `name`).",

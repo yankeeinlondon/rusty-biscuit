@@ -17,6 +17,7 @@
 
 mod components;
 mod conversion;
+mod headers;
 mod info;
 mod paths;
 mod parameters;
@@ -39,6 +40,7 @@ use paths::map_paths;
 use security::map_security_requirements;
 use validate::validate_ref_closure;
 
+pub use headers::{HeaderGap, HeaderGapReason};
 pub use paths::extract_path_params;
 pub use security::map_security;
 
@@ -60,16 +62,40 @@ pub use security::map_security;
 ///
 /// ## Errors
 ///
-/// Returns `OpenApiError` if the export fails due to validation issues.
+/// Returns `OpenApiError` if the export fails due to validation issues: a
+/// component `$ref` that does not resolve
+/// ([`crate::DefinitionError::UnresolvedSchemaReferences`]), a schema keyword
+/// OpenAPI 3.0.3 cannot express, or a dangling endpoint reference.
 pub fn export(
     api: &RestApi,
     options: &ExportOptions,
 ) -> Result<OpenAPI, OpenApiError> {
+    export_with_header_gaps(api, options).map(|(openapi, _)| openapi)
+}
+
+/// The headers of `api` its OpenAPI export does not carry as header
+/// parameters: credential headers, `Accept`/`Content-Type` values the
+/// operation's content does not declare, `Authorization`, and fixed headers
+/// that conflict with an explicit header parameter.
+///
+/// ## Errors
+///
+/// Whatever [`export`] returns for `api`.
+pub fn header_gaps(api: &RestApi) -> Result<Vec<HeaderGap>, OpenApiError> {
+    export_with_header_gaps(api, &ExportOptions::new().skip_extensions()).map(|(_, gaps)| gaps)
+}
+
+fn export_with_header_gaps(
+    api: &RestApi,
+    options: &ExportOptions,
+) -> Result<(OpenAPI, Vec<HeaderGap>), OpenApiError> {
+    api.validate_schema_closure()?;
     let info = map_info(api, options);
     let servers = map_servers(api);
-    let mut components = map_components(api, options);
+    let mut components = map_components(api, options)?;
     // Endpoint auth registers override-only schemes after the API's own.
-    let paths = map_paths(api, options, &mut components.security_schemes)?;
+    let mut header_gaps = Vec::new();
+    let paths = map_paths(api, options, &mut components.security_schemes, &mut header_gaps)?;
     let security = map_security_requirements(api);
 
     let mut extensions = IndexMap::new();
@@ -113,7 +139,7 @@ pub fn export(
 
     validate_ref_closure(&openapi)?;
 
-    Ok(openapi)
+    Ok((openapi, header_gaps))
 }
 
 #[cfg(test)]

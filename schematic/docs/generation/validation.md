@@ -144,6 +144,7 @@ The same fields are available to code as
 | `pagination-exception`: an endpoint collection has an unusable item selector, item type, item location, or alternates | ✓ | | | error |
 | `pagination-parameter`: a strategy input collides with a declared parameter it cannot adopt, adopts one without the knob that replaces it, or manages a required one without a value to send | ✓ | | | error |
 | `oauth2-grant`: the API, or an endpoint's replacement policy, uses an OAuth2 device-code grant, which OpenAPI 3.0 has no flow for; the scheme is left out | | ✓ | | warning |
+| `fixed-header`: an operation does not carry a header as a header parameter: a fixed or explicit header its effective security already sends, an `Accept` or `Content-Type` value its success responses or request body do not declare, an `Authorization` header no scheme sends, an explicit `Accept`/`Content-Type`/`Authorization` parameter, or a fixed header whose explicit parameter's schema rejects the value (see [Fixed headers](../io/export-openapi.md#fixed-headers)) | | ✓ | | warning |
 | `endpoint-auth`: an endpoint's replacement policy accepts more than one authentication alternative, but a Postman request holds one auth; only the first is exported | | | ✓ | warning |
 | `schema-composition`: an endpoint's JSON body or response names a composed (`oneOf`/`anyOf`/`allOf`) component, which a Postman collection cannot declare; the existing example is kept and none is invented | | | ✓ | warning |
 | `graphql-operation`: the API declares a GraphQL operation, which neither output carries; the endpoint field names the operation, and the message reads `<API> operation <id>: GraphQL operation skipped in <OpenAPI\|Postman> output` | | ✓ | ✓ | warning |
@@ -157,7 +158,8 @@ OpenAPI declares header and cookie parameters in their own locations, and a
 Postman collection carries each one as a request header, disabled when the
 parameter is optional (see
 [Postman parameter mapping](../io/export-postman.md#parameter-mapping)), so
-neither export has a rule for them.
+neither export checks their names; OpenAPI reports only the headers it leaves
+out (`fixed-header`).
 
 The Rust client sends each element of a header or cookie array as text,
 joined with `,`. An element that is itself an array has no text form, so an
@@ -213,9 +215,15 @@ severity=error api=Items endpoint=ListItems feature=invalid-schema-reference out
 Each dangling name is reported once per endpoint, including every name inside
 a wrapped reference. A name that exists only nested inside another component
 (its entry has no Rust path) cannot be referenced directly. When every name
-resolves, `RestApi::validate_references` still runs, so an empty or duplicate
-component name, a schema that is not a JSON Schema object or boolean, or an
-empty map key is reported under the same feature. The Postman collection never
+resolves, `RestApi::validate_references` and `RestApi::validate_schema_closure`
+still run, so an empty or duplicate component name, a schema that is not a JSON
+Schema object or boolean, an empty map key, or a `$ref` inside a component that
+no component satisfies is reported under the same feature, with the parent
+component and the path to the reference:
+
+```text
+severity=error api=TestApi endpoint=<none> feature=invalid-schema-reference output=rust: TestApi schema Response at /properties/owner: unresolved schema reference "Gone"
+``` The Postman collection never
 reads a schema, so it is written regardless.
 
 A grouped OpenAPI document also reports the feature, for the module and both

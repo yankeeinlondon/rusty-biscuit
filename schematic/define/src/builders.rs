@@ -486,7 +486,8 @@ pub(crate) fn validate_api(api: &RestApi) -> Result<(), DefinitionError> {
             }
         }
     }
-    api.validate_references()
+    api.validate_references()?;
+    api.validate_schema_closure()
 }
 
 /// Rules needing only the endpoint. Endpoint build runs them, and API build

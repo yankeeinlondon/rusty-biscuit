@@ -17,6 +17,34 @@
         "summary": "Get repository metadata including default branch",
         "description": "Get repository metadata including default branch",
         "operationId": "GetRepository",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -73,6 +101,32 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -130,6 +184,34 @@
         "summary": "Get raw file content from repository",
         "description": "Get raw file content from repository",
         "operationId": "GetRepositoryContentRaw",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful text response",
@@ -252,6 +334,32 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -325,6 +433,32 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -451,6 +585,32 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -504,6 +664,34 @@
         "summary": "Get a single issue by number",
         "description": "Get a single issue by number",
         "operationId": "GetIssue",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -579,6 +767,32 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -661,6 +875,32 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -743,6 +983,32 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -816,6 +1082,32 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -869,6 +1161,34 @@
         "summary": "Get tag reference (check object.type: 'commit' vs 'tag')",
         "description": "Get tag reference (check object.type: 'commit' vs 'tag')",
         "operationId": "GetTagReference",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -924,6 +1244,34 @@
         "summary": "Get branch reference (object.sha is the branch head commit)",
         "description": "Get branch reference (object.sha is the branch head commit)",
         "operationId": "GetBranchReference",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -979,6 +1327,34 @@
         "summary": "Get annotated tag object details (message, tagger, verification)",
         "description": "Get annotated tag object details (message, tagger, verification)",
         "operationId": "GetAnnotatedTag",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -1100,6 +1476,32 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -1216,6 +1618,32 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "X-GitHub-Api-Version",
+            "required": true,
+            "schema": {
+              "default": "2022-11-28",
+              "type": "string",
+              "enum": [
+                "2022-11-28"
+              ]
+            },
+            "style": "simple"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-github-client",
+              "type": "string",
+              "enum": [
+                "schematic-github-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -1265,9 +1693,11 @@
         "properties": {
           "archived": {
             "description": "Whether the repository is archived.",
+            "default": false,
             "type": "boolean"
           },
           "created_at": {
+            "nullable": true,
             "description": "Creation timestamp (ISO 8601).",
             "type": "string"
           },
@@ -1276,27 +1706,33 @@
             "type": "string"
           },
           "description": {
+            "nullable": true,
             "description": "Repository description.",
             "type": "string"
           },
           "disabled": {
             "description": "Whether the repository is disabled.",
+            "default": false,
             "type": "boolean"
           },
           "forks_count": {
+            "nullable": true,
             "description": "Number of forks.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "full_name": {
             "description": "Full name in \"owner/repo\" format.",
             "type": "string"
           },
           "has_issues": {
+            "nullable": true,
             "description": "Whether issues are enabled.",
             "type": "boolean"
           },
           "has_wiki": {
+            "nullable": true,
             "description": "Whether the wiki is enabled.",
             "type": "boolean"
           },
@@ -1307,48 +1743,75 @@
           "id": {
             "description": "Repository ID.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "language": {
+            "nullable": true,
             "description": "Primary programming language.",
             "type": "string"
           },
           "license": {
-            "description": "License information."
+            "description": "License information.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LicenseInfo"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "name": {
             "description": "Repository name.",
             "type": "string"
           },
           "open_issues_count": {
+            "nullable": true,
             "description": "Number of open issues.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "owner": {
-            "description": "Repository owner."
+            "description": "Repository owner.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              }
+            ]
           },
           "private": {
             "description": "Whether the repository is private.",
+            "default": false,
             "type": "boolean"
           },
           "pushed_at": {
+            "nullable": true,
             "description": "Last push timestamp (ISO 8601).",
             "type": "string"
           },
           "stargazers_count": {
+            "nullable": true,
             "description": "Number of stargazers.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "topics": {
             "description": "Topics/tags on the repository.",
+            "default": [],
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "updated_at": {
+            "nullable": true,
             "description": "Last update timestamp (ISO 8601).",
             "type": "string"
           },
@@ -1357,9 +1820,11 @@
             "type": "string"
           },
           "watchers_count": {
+            "nullable": true,
             "description": "Number of watchers.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
@@ -1385,10 +1850,14 @@
             "type": "string"
           },
           "spdx_id": {
-            "description": "SPDX ID."
+            "nullable": true,
+            "description": "SPDX ID.",
+            "type": "string"
           },
           "url": {
-            "description": "URL to license details."
+            "nullable": true,
+            "description": "URL to license details.",
+            "type": "string"
           }
         },
         "required": [
@@ -1401,23 +1870,35 @@
         "type": "object",
         "properties": {
           "avatar_url": {
-            "description": "URL to the user's avatar image."
+            "nullable": true,
+            "description": "URL to the user's avatar image.",
+            "type": "string"
           },
           "html_url": {
-            "description": "HTML URL to the user's profile."
+            "nullable": true,
+            "description": "HTML URL to the user's profile.",
+            "type": "string"
           },
           "id": {
-            "description": "The user's unique ID."
+            "nullable": true,
+            "description": "The user's unique ID.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
           "login": {
             "description": "The user's login handle.",
             "type": "string"
           },
           "type": {
-            "description": "User type (e.g., \"User\", \"Organization\", \"Bot\")."
+            "nullable": true,
+            "description": "User type (e.g., \"User\", \"Organization\", \"Bot\").",
+            "type": "string"
           },
           "url": {
-            "description": "API URL for the user resource."
+            "nullable": true,
+            "description": "API URL for the user resource.",
+            "type": "string"
           }
         },
         "required": [
@@ -1437,15 +1918,12 @@
             "description": "Tree entries (files and directories).",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/GitTreeEntry"
-                }
-              ]
+              "$ref": "#/components/schemas/GitTreeEntry"
             }
           },
           "truncated": {
             "description": "Whether the response was truncated (> 100k entries or 7MB).",
+            "default": false,
             "type": "boolean"
           },
           "url": {
@@ -1464,24 +1942,34 @@
         "type": "object",
         "properties": {
           "mode": {
-            "description": "Git file mode (e.g., \"100644\" for regular file)."
+            "nullable": true,
+            "description": "Git file mode (e.g., \"100644\" for regular file).",
+            "type": "string"
           },
           "path": {
             "description": "File or directory path.",
             "type": "string"
           },
           "sha": {
-            "description": "SHA of the entry."
+            "nullable": true,
+            "description": "SHA of the entry.",
+            "type": "string"
           },
           "size": {
-            "description": "Size in bytes (only for blobs)."
+            "nullable": true,
+            "description": "Size in bytes (only for blobs).",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
           "type": {
             "description": "Entry type: \"blob\" (file), \"tree\" (directory), or \"commit\" (submodule).",
             "type": "string"
           },
           "url": {
-            "description": "API URL for the entry."
+            "nullable": true,
+            "description": "API URL for the entry.",
+            "type": "string"
           }
         },
         "required": [
@@ -1495,21 +1983,30 @@
         "type": "object",
         "properties": {
           "base": {
-            "description": "Base branch info."
+            "description": "Base branch info.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BranchRef"
+              }
+            ]
           },
           "body": {
+            "nullable": true,
             "description": "PR body/description.",
             "type": "string"
           },
           "closed_at": {
+            "nullable": true,
             "description": "Close timestamp (if closed).",
             "type": "string"
           },
           "comments_url": {
+            "nullable": true,
             "description": "API URL for PR comments.",
             "type": "string"
           },
           "commits_url": {
+            "nullable": true,
             "description": "API URL for commits.",
             "type": "string"
           },
@@ -1518,41 +2015,48 @@
             "type": "string"
           },
           "draft": {
+            "nullable": true,
             "description": "Whether this is a draft PR.",
             "type": "boolean"
           },
           "head": {
-            "description": "Head branch info."
+            "description": "Head branch info.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BranchRef"
+              }
+            ]
           },
           "html_url": {
             "description": "HTML URL to the PR.",
             "type": "string"
           },
           "issue_url": {
+            "nullable": true,
             "description": "API URL for issue resource.",
             "type": "string"
           },
           "labels": {
             "description": "Labels applied to the PR.\n\nGitHub returns labels on PRs through the same `labels` array shape\nused by issues. The list endpoint includes this field by default,\nbut `#[serde(default)]` keeps older fixtures (or alternative APIs\nthat omit it) deserializable.",
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/IssueLabel"
-                }
-              ]
+              "$ref": "#/components/schemas/IssueLabel"
             }
           },
           "merged_at": {
+            "nullable": true,
             "description": "Merge timestamp (if merged).",
             "type": "string"
           },
           "number": {
             "description": "PR number.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "review_comments_url": {
+            "nullable": true,
             "description": "API URL for review comments.",
             "type": "string"
           },
@@ -1561,6 +2065,7 @@
             "type": "string"
           },
           "statuses_url": {
+            "nullable": true,
             "description": "API URL for statuses.",
             "type": "string"
           },
@@ -1577,7 +2082,12 @@
             "type": "string"
           },
           "user": {
-            "description": "PR author."
+            "description": "PR author.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              }
+            ]
           }
         },
         "required": [
@@ -1602,7 +2112,19 @@
             "type": "string"
           },
           "repo": {
-            "description": "Repository the branch belongs to."
+            "description": "Repository the branch belongs to.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepositoryInfo"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "sha": {
             "description": "Commit SHA.",
@@ -1619,10 +2141,14 @@
         "type": "object",
         "properties": {
           "color": {
-            "description": "Label color (hex without #)."
+            "nullable": true,
+            "description": "Label color (hex without #).",
+            "type": "string"
           },
           "description": {
-            "description": "Label description."
+            "nullable": true,
+            "description": "Label description.",
+            "type": "string"
           },
           "name": {
             "description": "Label name.",
@@ -1640,24 +2166,29 @@
         "properties": {
           "additions": {
             "description": "Number of additions.",
+            "default": 0,
             "type": "integer",
             "format": "int64"
           },
           "blob_url": {
+            "nullable": true,
             "description": "API URL for the blob.",
             "type": "string"
           },
           "changes": {
             "description": "Total number of changes.",
+            "default": 0,
             "type": "integer",
             "format": "int64"
           },
           "contents_url": {
+            "nullable": true,
             "description": "URL to view the file at this commit.",
             "type": "string"
           },
           "deletions": {
             "description": "Number of deletions.",
+            "default": 0,
             "type": "integer",
             "format": "int64"
           },
@@ -1666,18 +2197,22 @@
             "type": "string"
           },
           "patch": {
+            "nullable": true,
             "description": "Patch/diff content.",
             "type": "string"
           },
           "previous_filename": {
+            "nullable": true,
             "description": "Previous filename (if renamed).",
             "type": "string"
           },
           "raw_url": {
+            "nullable": true,
             "description": "Raw content URL.",
             "type": "string"
           },
           "sha": {
+            "nullable": true,
             "description": "SHA of the file.",
             "type": "string"
           },
@@ -1698,29 +2233,31 @@
         "properties": {
           "assignees": {
             "description": "Assigned users.",
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/UserSummary"
-                }
-              ]
+              "$ref": "#/components/schemas/UserSummary"
             }
           },
           "body": {
+            "nullable": true,
             "description": "Issue body/description.",
             "type": "string"
           },
           "closed_at": {
+            "nullable": true,
             "description": "Close timestamp (if closed).",
             "type": "string"
           },
           "comments": {
             "description": "Number of comments.",
+            "default": 0,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "comments_url": {
+            "nullable": true,
             "description": "API URL for comments.",
             "type": "string"
           },
@@ -1729,6 +2266,7 @@
             "type": "string"
           },
           "events_url": {
+            "nullable": true,
             "description": "API URL for events.",
             "type": "string"
           },
@@ -1739,26 +2277,37 @@
           "id": {
             "description": "Issue ID.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "labels": {
             "description": "Labels on the issue.",
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/IssueLabel"
-                }
-              ]
+              "$ref": "#/components/schemas/IssueLabel"
             }
           },
           "milestone": {
-            "description": "Milestone (if any)."
+            "description": "Milestone (if any).",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Milestone"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "number": {
             "description": "Issue number.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "pull_request": {
             "description": "Pull request info (present if this issue is a PR).\n\nUse `.is_some()` to distinguish issues from PRs."
@@ -1780,7 +2329,12 @@
             "type": "string"
           },
           "user": {
-            "description": "Issue author."
+            "description": "Issue author.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              }
+            ]
           }
         },
         "required": [
@@ -1800,12 +2354,15 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "Milestone description."
+            "nullable": true,
+            "description": "Milestone description.",
+            "type": "string"
           },
           "number": {
             "description": "Milestone number.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "state": {
             "description": "Milestone state: \"open\", \"closed\".",
@@ -1836,24 +2393,32 @@
             "type": "string"
           },
           "html_url": {
+            "nullable": true,
             "description": "HTML URL to the comment.",
             "type": "string"
           },
           "id": {
             "description": "Comment ID.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "updated_at": {
             "description": "Last update timestamp.",
             "type": "string"
           },
           "url": {
+            "nullable": true,
             "description": "API URL for the comment.",
             "type": "string"
           },
           "user": {
-            "description": "Comment author."
+            "description": "Comment author.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              }
+            ]
           }
         },
         "required": [
@@ -1870,22 +2435,39 @@
         "type": "object",
         "properties": {
           "actor": {
-            "description": "Actor who triggered the event."
+            "description": "Actor who triggered the event.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "created_at": {
+            "nullable": true,
             "description": "Event timestamp.",
             "type": "string"
           },
           "event": {
+            "nullable": true,
             "description": "Event type (e.g., \"commented\", \"committed\", \"labeled\", \"closed\").",
             "type": "string"
           },
           "id": {
+            "nullable": true,
             "description": "Event ID (may be absent for some event types).",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
-        }
+        },
+        "additionalProperties": true
       },
       "RepoTag": {
         "title": "RepoTag",
@@ -1893,13 +2475,19 @@
         "type": "object",
         "properties": {
           "commit": {
-            "description": "Commit the tag points to."
+            "description": "Commit the tag points to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TagCommit"
+              }
+            ]
           },
           "name": {
             "description": "Tag name.",
             "type": "string"
           },
           "node_id": {
+            "nullable": true,
             "description": "Node ID.",
             "type": "string"
           },
@@ -1944,19 +2532,29 @@
         "properties": {
           "assets": {
             "description": "Release assets.",
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ReleaseAsset"
-                }
-              ]
+              "$ref": "#/components/schemas/ReleaseAsset"
             }
           },
           "author": {
-            "description": "Author of the release."
+            "description": "Author of the release.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "body": {
+            "nullable": true,
             "description": "Release body (markdown).",
             "type": "string"
           },
@@ -1966,6 +2564,7 @@
           },
           "draft": {
             "description": "Whether this is a draft.",
+            "default": false,
             "type": "boolean"
           },
           "html_url": {
@@ -1975,21 +2574,26 @@
           "id": {
             "description": "Release ID.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "immutable": {
+            "nullable": true,
             "description": "Whether this release is immutable.",
             "type": "boolean"
           },
           "name": {
+            "nullable": true,
             "description": "Release name/title.",
             "type": "string"
           },
           "prerelease": {
             "description": "Whether this is a prerelease.",
+            "default": false,
             "type": "boolean"
           },
           "published_at": {
+            "nullable": true,
             "description": "Publish timestamp.",
             "type": "string"
           },
@@ -1998,6 +2602,7 @@
             "type": "string"
           },
           "url": {
+            "nullable": true,
             "description": "API URL for the release.",
             "type": "string"
           }
@@ -2014,25 +2619,38 @@
         "type": "object",
         "properties": {
           "browser_download_url": {
-            "description": "Download URL."
+            "nullable": true,
+            "description": "Download URL.",
+            "type": "string"
           },
           "content_type": {
-            "description": "Asset content type."
+            "nullable": true,
+            "description": "Asset content type.",
+            "type": "string"
           },
           "download_count": {
-            "description": "Download count."
+            "nullable": true,
+            "description": "Download count.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
           "id": {
             "description": "Asset ID.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "name": {
             "description": "Asset filename.",
             "type": "string"
           },
           "size": {
-            "description": "Asset size in bytes."
+            "nullable": true,
+            "description": "Asset size in bytes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
@@ -2046,11 +2664,17 @@
         "type": "object",
         "properties": {
           "node_id": {
+            "nullable": true,
             "description": "Node ID.",
             "type": "string"
           },
           "object": {
-            "description": "Object the ref points to."
+            "description": "Object the ref points to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GitRefObject"
+              }
+            ]
           },
           "ref": {
             "description": "Full ref name (e.g., \"refs/tags/v1.0.0\" or \"refs/heads/main\").",
@@ -2100,11 +2724,17 @@
             "type": "string"
           },
           "node_id": {
+            "nullable": true,
             "description": "Node ID.",
             "type": "string"
           },
           "object": {
-            "description": "Object the tag points to."
+            "description": "Object the tag points to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TagObjectRef"
+              }
+            ]
           },
           "sha": {
             "description": "Tag object SHA.",
@@ -2115,14 +2745,39 @@
             "type": "string"
           },
           "tagger": {
-            "description": "Tagger information."
+            "description": "Tagger information.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnnotatedTagger"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "url": {
+            "nullable": true,
             "description": "API URL.",
             "type": "string"
           },
           "verification": {
-            "description": "GPG signature verification."
+            "description": "GPG signature verification.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TagVerification"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         },
         "required": [
@@ -2183,21 +2838,27 @@
         "type": "object",
         "properties": {
           "payload": {
-            "description": "Payload that was signed."
+            "nullable": true,
+            "description": "Payload that was signed.",
+            "type": "string"
           },
           "reason": {
             "description": "Verification reason/status.",
             "type": "string"
           },
           "signature": {
-            "description": "Signature data."
+            "nullable": true,
+            "description": "Signature data.",
+            "type": "string"
           },
           "verified": {
             "description": "Whether the signature is verified.",
             "type": "boolean"
           },
           "verified_at": {
-            "description": "Verification timestamp."
+            "nullable": true,
+            "description": "Verification timestamp.",
+            "type": "string"
           }
         },
         "required": [
@@ -2211,19 +2872,18 @@
         "type": "object",
         "properties": {
           "total_count": {
+            "nullable": true,
             "description": "Total number of workflow runs matching the query.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "workflow_runs": {
             "description": "The workflow runs.",
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/WorkflowRun"
-                }
-              ]
+              "$ref": "#/components/schemas/WorkflowRun"
             }
           }
         }
@@ -2233,54 +2893,111 @@
         "type": "object",
         "properties": {
           "actor": {
-            "description": "The actor who triggered the run."
+            "description": "The actor who triggered the run.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "conclusion": {
-            "description": "Run conclusion (e.g., \"success\", \"failure\", \"cancelled\", \"skipped\")."
+            "nullable": true,
+            "description": "Run conclusion (e.g., \"success\", \"failure\", \"cancelled\", \"skipped\").",
+            "type": "string"
           },
           "created_at": {
-            "description": "Creation timestamp (ISO 8601)."
+            "nullable": true,
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
           },
           "event": {
-            "description": "The event that triggered the workflow (e.g., \"push\", \"pull_request\")."
+            "nullable": true,
+            "description": "The event that triggered the workflow (e.g., \"push\", \"pull_request\").",
+            "type": "string"
           },
           "head_branch": {
-            "description": "The branch or tag ref that triggered the run."
+            "nullable": true,
+            "description": "The branch or tag ref that triggered the run.",
+            "type": "string"
           },
           "head_sha": {
-            "description": "The commit SHA at the head of the run."
+            "nullable": true,
+            "description": "The commit SHA at the head of the run.",
+            "type": "string"
           },
           "html_url": {
-            "description": "HTML URL to the workflow run."
+            "nullable": true,
+            "description": "HTML URL to the workflow run.",
+            "type": "string"
           },
           "id": {
             "description": "Workflow run ID.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "name": {
-            "description": "Run display name."
+            "nullable": true,
+            "description": "Run display name.",
+            "type": "string"
           },
           "run_attempt": {
-            "description": "Run attempt number."
+            "nullable": true,
+            "description": "Run attempt number.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
           "run_number": {
-            "description": "Run number (incrementing per workflow)."
+            "nullable": true,
+            "description": "Run number (incrementing per workflow).",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
           "status": {
-            "description": "Run status (e.g., \"queued\", \"in_progress\", \"completed\")."
+            "nullable": true,
+            "description": "Run status (e.g., \"queued\", \"in_progress\", \"completed\").",
+            "type": "string"
           },
           "triggering_actor": {
-            "description": "The actor who triggered the re-run (if applicable)."
+            "description": "The actor who triggered the re-run (if applicable).",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "updated_at": {
-            "description": "Last update timestamp (ISO 8601)."
+            "nullable": true,
+            "description": "Last update timestamp (ISO 8601).",
+            "type": "string"
           },
           "url": {
-            "description": "API URL."
+            "nullable": true,
+            "description": "API URL.",
+            "type": "string"
           },
           "workflow_id": {
-            "description": "The workflow ID this run belongs to."
+            "nullable": true,
+            "description": "The workflow ID this run belongs to.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [

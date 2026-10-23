@@ -263,7 +263,7 @@ fn every_source_form_imports_petstore_with_resolvable_exportable_components() {
         let document = schematic_define::openapi::export(&api, &schematic_define::openapi::ExportOptions::new())
             .unwrap_or_else(|error| panic!("{form}: {error}"));
         let pet = serde_json::to_value(&document.components.unwrap().schemas["Pet"]).unwrap();
-        assert_eq!(pet.pointer("/properties/status/allOf/0/$ref"), Some(&"#/components/schemas/PetStatus".into()), "{form}");
+        assert_eq!(pet.pointer("/properties/status/$ref"), Some(&"#/components/schemas/PetStatus".into()), "{form}");
     }
 }
 

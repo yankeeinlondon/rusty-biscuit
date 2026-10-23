@@ -637,6 +637,29 @@ fn grouped_document_renames_a_shared_raw_id() {
 /// All nine original query-bearing routes have been normalized or merged.
 const EMBEDDED_QUERY_ENDPOINTS: [(&str, &str); 0] = [];
 
+/// The fixed headers of the live definitions that OpenAPI operations cannot
+/// carry: an `Accept` value no success response declares as its media type.
+/// The value stays in `x-schematic`.
+const FIXED_HEADER_GAPS: [(&str, &str, &str); 17] = [
+    ("Gitea", "GetRepositoryContentRaw", "Accept: application/json"),
+    ("GitHub", "GetRepository", "Accept: application/vnd.github+json"),
+    ("GitHub", "GetGitTree", "Accept: application/vnd.github+json"),
+    ("GitHub", "GetRepositoryContentRaw", "Accept: application/vnd.github.raw+json"),
+    ("GitHub", "ListPullRequests", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListPullRequestFiles", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListIssues", "Accept: application/vnd.github+json"),
+    ("GitHub", "GetIssue", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListIssueComments", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListIssueTimeline", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListTags", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListReleases", "Accept: application/vnd.github+json"),
+    ("GitHub", "GetTagReference", "Accept: application/vnd.github+json"),
+    ("GitHub", "GetBranchReference", "Accept: application/vnd.github+json"),
+    ("GitHub", "GetAnnotatedTag", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListWorkflowRuns", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListOrgRepos", "Accept: application/vnd.github+json"),
+];
+
 /// The query parameters of the live definitions that the Rust client cannot
 /// serialize, so it leaves them out of their request types: JSON values
 /// (OpenAI's import maps some `$ref`'d enums and objects to JSON) and one
@@ -699,10 +722,28 @@ fn live_definitions_have_no_embedded_queries_or_validation_gaps() {
             BTreeSet::new()
         };
         assert_eq!(omitted, expected_omitted, "{output}");
+        let header_gaps: BTreeSet<(String, String, String)> = diagnostics
+            .iter()
+            .filter(|d| d.feature == Feature::FixedHeader)
+            .map(|d| {
+                assert_eq!((d.severity, d.output), (Severity::Warning, Output::OpenApi), "{d}");
+                let header = d.message.split('`').nth(1).unwrap().to_string();
+                (d.api.join(","), d.endpoint.clone().unwrap(), header)
+            })
+            .collect();
+        let expected_header_gaps: BTreeSet<(String, String, String)> = if *output == Output::OpenApi {
+            FIXED_HEADER_GAPS
+                .iter()
+                .map(|(api, endpoint, header)| (api.to_string(), endpoint.to_string(), header.to_string()))
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
+        assert_eq!(header_gaps, expected_header_gaps, "{output}");
         // Embedded queries are the only other accepted gap in any output.
         let other: Vec<_> = diagnostics
             .iter()
-            .filter(|d| d.feature != Feature::QueryInPath && d.feature != Feature::QueryParameter)
+            .filter(|d| ![Feature::QueryInPath, Feature::QueryParameter, Feature::FixedHeader].contains(&d.feature))
             .collect();
         assert!(other.is_empty(), "{output}: {other:#?}");
 
@@ -767,8 +808,11 @@ fn run_cli(args: &[&str]) -> std::process::Output {
         .expect("run schematic-gen")
 }
 
+/// Gitea's one warning is real: its raw-content endpoint inherits the API's
+/// fixed `Accept: application/json` but returns text, so the OpenAPI
+/// operation cannot express that header.
 #[test]
-fn cli_migrated_provider_generates_all_outputs_without_warnings() {
+fn cli_migrated_provider_generates_all_outputs_with_only_its_known_warning() {
     let roots = Roots::new();
     let output = run_cli(&[
         "generate",
@@ -788,7 +832,13 @@ fn cli_migrated_provider_generates_all_outputs_without_warnings() {
     for target in ["rust", "openapi", "postman"] {
         assert!(stdout.contains(&format!("[OK] {target} output")), "{stdout}");
     }
-    assert!(!stderr.contains("severity="), "{stderr}");
+    let warnings: Vec<&str> = stderr.lines().filter(|line| line.contains("severity=")).collect();
+    assert_eq!(warnings.len(), 1, "{stderr}");
+    assert!(
+        warnings[0].contains("endpoint=GetRepositoryContentRaw feature=fixed-header output=openapi")
+            && warnings[0].contains("`Accept: application/json`"),
+        "{stderr}"
+    );
     assert!(Path::new(&roots.openapi).join("gitea.json").is_file());
 }
 

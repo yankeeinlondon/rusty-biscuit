@@ -4,10 +4,11 @@ use openapiv3::{Operation, Parameter, PathItem, Paths, ReferenceOr, SecuritySche
 use super::super::OpenApiError;
 use super::super::extensions::SchematicOpExtension;
 use super::super::options::ExportOptions;
+use super::headers::{HeaderGap, apply_fixed_headers, credential_headers};
 use super::parameters::{map_parameters, param_schema};
 use super::request_body::map_request_body;
 use super::responses::map_responses;
-use super::security::endpoint_security;
+use super::security::{endpoint_security, map_security_requirements};
 use crate::params::ParamDef;
 use crate::response::ResponseShape;
 use crate::types::{Endpoint, RestMethod};
@@ -20,18 +21,27 @@ use crate::types::{Endpoint, RestMethod};
 /// that differs carries its own declaration as an operation-level override,
 /// so the result never depends on endpoint order.
 ///
-/// Endpoint security schemes are registered in `security_schemes`.
+/// Endpoint security schemes are registered in `security_schemes`. Fixed
+/// headers become operation-level header parameters; the ones that cannot
+/// are appended to `header_gaps`.
 pub(super) fn map_paths(
     api: &crate::types::RestApi,
     options: &ExportOptions,
     security_schemes: &mut IndexMap<String, ReferenceOr<SecurityScheme>>,
+    header_gaps: &mut Vec<HeaderGap>,
 ) -> Result<Paths, OpenApiError> {
     let mut paths: IndexMap<String, PathItem> = IndexMap::new();
     let mut declarations: IndexMap<String, Vec<(RestMethod, Vec<Parameter>)>> = IndexMap::new();
+    let document_security = map_security_requirements(api);
 
     for endpoint in &api.endpoints {
         let mut operation = map_operation(api, endpoint, options)?;
         operation.security = endpoint_security(endpoint, security_schemes);
+        let credentials = credential_headers(
+            operation.security.as_deref().unwrap_or(&document_security),
+            security_schemes,
+        );
+        header_gaps.extend(apply_fixed_headers(api, endpoint, &mut operation, &credentials));
 
         // A reserved-expansion marker (`{+name}`) is a runtime encoding hint;
         // the exported OpenAPI path key must render as valid `{name}`.

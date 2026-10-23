@@ -67,8 +67,9 @@ let api = RestApi::builder(&context, "Items", "https://example.com")
 
 - Description and one success shape are required for endpoints; description
   and one explicit auth choice are required for APIs. Builds validate values,
-  auth/env coherence, and that every schema reference resolves
-  (`RestApi::validate_references`). GET bodies fail.
+  auth/env coherence, that every schema reference resolves
+  (`RestApi::validate_references`), and that every `$ref` inside a component
+  names a component (`RestApi::validate_schema_closure`). GET bodies fail.
 - Use typed JSON methods, `Success`, request body builders, and `ParamDef`
   locations. Do not author response/request/Schema constructors or string types.
 - `definition_type!` supplies nominal registration. Aliases/re-exports use

@@ -243,9 +243,10 @@ fn check_routes(api: &RestApi, output: Output, diagnostics: &mut Vec<ValidationD
 /// Checks that every JSON body reference of `api` resolves in
 /// [`RestApi::schemas`], reporting each dangling name with its endpoint.
 ///
-/// When every name resolves, [`RestApi::validate_references`] still runs,
-/// so a malformed component or an unsupported reference form is reported
-/// too.
+/// When every name resolves, [`RestApi::validate_references`] and
+/// [`RestApi::validate_schema_closure`] still run, so a malformed component,
+/// an unsupported reference form, or a `$ref` inside a component that no
+/// component satisfies is reported too.
 fn check_schema_references(api: &RestApi, output: Output, diagnostics: &mut Vec<ValidationDiagnostic>) {
     let before = diagnostics.len();
     for endpoint in &api.endpoints {
@@ -271,7 +272,7 @@ fn check_schema_references(api: &RestApi, output: Output, diagnostics: &mut Vec<
     if diagnostics.len() > before {
         return;
     }
-    if let Err(error) = api.validate_references() {
+    if let Err(error) = api.validate_references().and_then(|()| api.validate_schema_closure()) {
         let endpoint = match &error {
             DefinitionError::UnresolvedReference { endpoint, .. }
             | DefinitionError::InvalidDefinition { endpoint, .. }
@@ -2235,6 +2236,21 @@ mod tests {
         let diagnostics = rust(&api);
         assert_eq!(features(&diagnostics), [(Severity::Error, Feature::InvalidSchemaReference)]);
         assert!(diagnostics[0].message.contains("`Response`"), "{}", diagnostics[0]);
+    }
+
+    #[test]
+    fn a_dangling_reference_inside_a_component_blocks_rust_and_openapi_with_its_location() {
+        let mut api = api_with(vec![get("ListModels")]);
+        api.schemas[0].schema = serde_json::json!({"type": "object", "properties": {"owner": {"$ref": "#/components/schemas/Gone"}}});
+
+        for diagnostics in [rust(&api), validate_openapi(&[&api])] {
+            assert_eq!(features(&diagnostics), [(Severity::Error, Feature::InvalidSchemaReference)]);
+            assert_eq!(diagnostics[0].endpoint, None);
+            assert_eq!(
+                diagnostics[0].message,
+                format!("TestApi schema {} at /properties/owner: unresolved schema reference \"Gone\"", api.schemas[0].name)
+            );
+        }
     }
 
     #[test]

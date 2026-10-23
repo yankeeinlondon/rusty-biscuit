@@ -84,6 +84,10 @@ pub enum DefinitionError {
     /// A reference names a component the API does not carry.
     #[error("{api} endpoint {endpoint}: unresolved schema reference \"{name}\"")]
     UnresolvedReference { api: String, endpoint: String, name: String },
+    /// `$ref`s inside component schemas that no component satisfies, or that
+    /// are not local component references, in component then schema order.
+    #[error("{}", render_schema_references(api, references))]
+    UnresolvedSchemaReferences { api: String, references: Vec<SchemaReference> },
     /// Invalid authored facts, with assembly context.
     #[error("{api} endpoint {endpoint}: {message}")]
     InvalidDefinition { api: String, endpoint: String, message: String },
@@ -115,13 +119,38 @@ pub enum DefinitionError {
     DuplicateMember { target: &'static str, name: String },
 }
 
+/// One `$ref` inside a component schema that does not resolve.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SchemaReference {
+    /// The component whose schema holds the reference.
+    pub parent: String,
+    /// JSON pointer to the reference inside the parent's schema, for example
+    /// `/properties/owner/anyOf/0`.
+    pub path: String,
+    /// The `$ref` value as written.
+    pub reference: String,
+    /// The component name the reference resolves to, which no component
+    /// carries. `None` for a reference that is not a local component
+    /// reference (another document, or a pointer into a schema), which is
+    /// never fetched.
+    pub missing: Option<String>,
+}
+
+fn render_schema_references(api: &str, references: &[SchemaReference]) -> String {
+    let line = |reference: &SchemaReference| match &reference.missing {
+        Some(name) => format!("{api} schema {} at {}: unresolved schema reference \"{name}\"", reference.parent, reference.path),
+        None => format!("{api} schema {} at {}: unsupported reference \"{}\"; only local component references resolve, and none is fetched", reference.parent, reference.path, reference.reference),
+    };
+    references.iter().map(line).collect::<Vec<_>>().join("\n")
+}
+
 impl DefinitionError {
     /// Render registration errors with the API being assembled, one collision
     /// per line. Reference and key errors already carry their endpoint context.
     pub fn diagnostics(&self, api: &str) -> String {
         match self {
             Self::Collisions(errors) => errors.iter().map(|e| e.diagnostics(api)).collect::<Vec<_>>().join("\n"),
-            Self::UnresolvedReference { .. } | Self::UnsupportedKey { .. } => self.to_string(),
+            Self::UnresolvedReference { .. } | Self::UnresolvedSchemaReferences { .. } | Self::UnsupportedKey { .. } => self.to_string(),
             _ => format!("API {api}: {self}"),
         }
     }

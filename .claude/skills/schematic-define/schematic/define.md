@@ -45,7 +45,11 @@ and GraphQL: [`responses.md`](./responses.md). Pagination:
   `Primitive(Json)`), never a Rust path. API build stores the context's
   components in `RestApi::schemas` (`SchemaComponent { name, rust_path,
   schema }`, nested `$defs` flattened with `rust_path: None`) and runs
-  `validate_references` (`DefinitionError::UnresolvedReference`). A name
+  `validate_references` (`DefinitionError::UnresolvedReference`) and
+  `validate_schema_closure` (`DefinitionError::UnresolvedSchemaReferences`:
+  every component `$ref` that names no `#/components/schemas/{name}`, with
+  parent, JSON pointer, and missing name; external refs are never fetched;
+  OpenAPI import skips it). A name
   reached with a different wire schema fails as `ComponentConflict`.
   `api.rust_type(&reference)` spells the Rust type. `Schema { type_name,
   module_path }` is WebSocket-only.
@@ -100,8 +104,8 @@ build runs `OAuth2Config::validate`), `None`.
 
 ## Snapshots and bundles
 
-- REST definitions derive plain Serde. Call `validate_references` on a
-  deserialized API before use. `just -f schematic/justfile migration-check`
+- REST definitions derive plain Serde. Call `validate_references` and
+  `validate_schema_closure` on a deserialized API before use. `just -f schematic/justfile migration-check`
   compares historical JSON; see `schematic/docs/definition-snapshots.md`.
 - `DefinitionBundle::new(api)` (optionally `.with_models(catalog)?`): `to_json()`
   writes canonical JSON, `from_json` loads strictly (duplicate keys, trailing

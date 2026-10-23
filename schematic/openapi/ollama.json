@@ -854,6 +854,7 @@
         "type": "object",
         "properties": {
           "context": {
+            "nullable": true,
             "description": "Context from a previous response to continue generation.",
             "type": "array",
             "items": {
@@ -862,6 +863,7 @@
             }
           },
           "images": {
+            "nullable": true,
             "description": "Images for multimodal models (base64 encoded).",
             "type": "array",
             "items": {
@@ -869,6 +871,7 @@
             }
           },
           "keep_alive": {
+            "nullable": true,
             "description": "How long to keep the model loaded (e.g., \"5m\", \"-1\" for forever).",
             "type": "string"
           },
@@ -877,25 +880,41 @@
             "type": "string"
           },
           "options": {
-            "description": "Model options."
+            "description": "Model options.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelOptions"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "prompt": {
             "description": "The prompt to generate a response for.",
             "type": "string"
           },
           "raw": {
+            "nullable": true,
             "description": "Raw mode bypasses templating.",
             "type": "boolean"
           },
           "stream": {
+            "nullable": true,
             "description": "Enable streaming (default: true).",
             "type": "boolean"
           },
           "system": {
+            "nullable": true,
             "description": "Optional system prompt to override the model's default.",
             "type": "string"
           },
           "template": {
+            "nullable": true,
             "description": "Optional template to use for generation.",
             "type": "string"
           }
@@ -910,49 +929,100 @@
         "type": "object",
         "properties": {
           "mirostat": {
-            "description": "Enable Mirostat sampling (0, 1, or 2)."
+            "nullable": true,
+            "description": "Enable Mirostat sampling (0, 1, or 2).",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255
           },
           "mirostat_eta": {
-            "description": "Mirostat learning rate."
+            "nullable": true,
+            "description": "Mirostat learning rate.",
+            "type": "number",
+            "format": "double"
           },
           "mirostat_tau": {
-            "description": "Mirostat target perplexity."
+            "nullable": true,
+            "description": "Mirostat target perplexity.",
+            "type": "number",
+            "format": "double"
           },
           "num_ctx": {
-            "description": "Context window size (default: 2048)."
+            "nullable": true,
+            "description": "Context window size (default: 2048).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "num_gpu": {
-            "description": "Number of GPU layers to offload (-1 for all)."
+            "nullable": true,
+            "description": "Number of GPU layers to offload (-1 for all).",
+            "type": "integer",
+            "format": "int32"
           },
           "num_predict": {
-            "description": "Maximum tokens to generate."
+            "nullable": true,
+            "description": "Maximum tokens to generate.",
+            "type": "integer",
+            "format": "int32"
           },
           "num_thread": {
-            "description": "Number of CPU threads to use."
+            "nullable": true,
+            "description": "Number of CPU threads to use.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "penalize_newline": {
-            "description": "Penalize newline tokens."
+            "nullable": true,
+            "description": "Penalize newline tokens.",
+            "type": "boolean"
           },
           "repeat_penalty": {
-            "description": "Repetition penalty (1.0 = no penalty)."
+            "nullable": true,
+            "description": "Repetition penalty (1.0 = no penalty).",
+            "type": "number",
+            "format": "double"
           },
           "seed": {
-            "description": "Random seed for reproducibility."
+            "nullable": true,
+            "description": "Random seed for reproducibility.",
+            "type": "integer",
+            "format": "int64"
           },
           "stop": {
-            "description": "Stop sequences."
+            "nullable": true,
+            "description": "Stop sequences.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "temperature": {
-            "description": "Sampling temperature (0.0-2.0)."
+            "nullable": true,
+            "description": "Sampling temperature (0.0-2.0).",
+            "type": "number",
+            "format": "double"
           },
           "tfs_z": {
-            "description": "Tail-free sampling parameter."
+            "nullable": true,
+            "description": "Tail-free sampling parameter.",
+            "type": "number",
+            "format": "double"
           },
           "top_k": {
-            "description": "Top-K sampling parameter."
+            "nullable": true,
+            "description": "Top-K sampling parameter.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "top_p": {
-            "description": "Top-P (nucleus) sampling parameter."
+            "nullable": true,
+            "description": "Top-P (nucleus) sampling parameter.",
+            "type": "number",
+            "format": "double"
           }
         }
       },
@@ -962,10 +1032,12 @@
         "type": "object",
         "properties": {
           "format": {
+            "nullable": true,
             "description": "Format of the response (e.g., \"json\").",
             "type": "string"
           },
           "keep_alive": {
+            "nullable": true,
             "description": "How long to keep the model loaded.",
             "type": "string"
           },
@@ -973,11 +1045,7 @@
             "description": "Chat messages.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Message"
-                }
-              ]
+              "$ref": "#/components/schemas/Message"
             }
           },
           "model": {
@@ -985,9 +1053,22 @@
             "type": "string"
           },
           "options": {
-            "description": "Model options."
+            "description": "Model options.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelOptions"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "stream": {
+            "nullable": true,
             "description": "Enable streaming (default: true).",
             "type": "boolean"
           }
@@ -1007,6 +1088,7 @@
             "type": "string"
           },
           "images": {
+            "nullable": true,
             "description": "Optional images for multimodal models (base64 encoded).",
             "type": "array",
             "items": {
@@ -1029,6 +1111,7 @@
         "type": "object",
         "properties": {
           "keep_alive": {
+            "nullable": true,
             "description": "How long to keep the model loaded.",
             "type": "string"
           },
@@ -1037,7 +1120,19 @@
             "type": "string"
           },
           "options": {
-            "description": "Model options."
+            "description": "Model options.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelOptions"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "prompt": {
             "description": "Text to generate embeddings for.",
@@ -1059,6 +1154,7 @@
             "type": "string"
           },
           "verbose": {
+            "nullable": true,
             "description": "Include verbose details.",
             "type": "boolean"
           }
@@ -1073,6 +1169,7 @@
         "type": "object",
         "properties": {
           "insecure": {
+            "nullable": true,
             "description": "Allow insecure connections.",
             "type": "boolean"
           },
@@ -1081,6 +1178,7 @@
             "type": "string"
           },
           "stream": {
+            "nullable": true,
             "description": "Enable streaming progress updates (default: true).",
             "type": "boolean"
           }
@@ -1095,6 +1193,7 @@
         "type": "object",
         "properties": {
           "insecure": {
+            "nullable": true,
             "description": "Allow insecure connections.",
             "type": "boolean"
           },
@@ -1103,6 +1202,7 @@
             "type": "string"
           },
           "stream": {
+            "nullable": true,
             "description": "Enable streaming progress updates (default: true).",
             "type": "boolean"
           }
@@ -1150,6 +1250,7 @@
         "type": "object",
         "properties": {
           "modelfile": {
+            "nullable": true,
             "description": "Modelfile content.",
             "type": "string"
           },
@@ -1158,10 +1259,12 @@
             "type": "string"
           },
           "path": {
+            "nullable": true,
             "description": "Path to a Modelfile.",
             "type": "string"
           },
           "stream": {
+            "nullable": true,
             "description": "Enable streaming progress updates (default: true).",
             "type": "boolean"
           }
@@ -1197,11 +1300,7 @@
             "description": "List of available models.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ModelInfo"
-                }
-              ]
+              "$ref": "#/components/schemas/ModelInfo"
             }
           }
         },
@@ -1215,6 +1314,7 @@
         "type": "object",
         "properties": {
           "families": {
+            "nullable": true,
             "description": "Model families (e.g., [\"llama\"]).",
             "type": "array",
             "items": {
@@ -1222,22 +1322,27 @@
             }
           },
           "family": {
+            "nullable": true,
             "description": "Model family.",
             "type": "string"
           },
           "format": {
+            "nullable": true,
             "description": "Format of the model.",
             "type": "string"
           },
           "parameter_size": {
+            "nullable": true,
             "description": "Parameter size (e.g., \"8B\").",
             "type": "string"
           },
           "parent_model": {
+            "nullable": true,
             "description": "Parent model name.",
             "type": "string"
           },
           "quantization_level": {
+            "nullable": true,
             "description": "Quantization level (e.g., \"Q4_0\").",
             "type": "string"
           }
@@ -1249,13 +1354,27 @@
         "type": "object",
         "properties": {
           "details": {
-            "description": "Detailed model information."
+            "description": "Detailed model information.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelDetails"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "digest": {
+            "nullable": true,
             "description": "Model digest (truncated SHA256).",
             "type": "string"
           },
           "modified_at": {
+            "nullable": true,
             "description": "Model modification time.",
             "type": "string"
           },
@@ -1264,9 +1383,11 @@
             "type": "string"
           },
           "size": {
+            "nullable": true,
             "description": "Model size in bytes.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
@@ -1279,6 +1400,7 @@
         "type": "object",
         "properties": {
           "capabilities": {
+            "nullable": true,
             "description": "Model capabilities (e.g., \"completion\", \"vision\", \"tools\", \"thinking\").",
             "type": "array",
             "items": {
@@ -1286,9 +1408,22 @@
             }
           },
           "details": {
-            "description": "Model details."
+            "description": "Model details.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelDetails"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "license": {
+            "nullable": true,
             "description": "License information.",
             "type": "string"
           },
@@ -1296,18 +1431,22 @@
             "description": "Model information."
           },
           "modelfile": {
+            "nullable": true,
             "description": "The Modelfile content.",
             "type": "string"
           },
           "parameters": {
+            "nullable": true,
             "description": "Model parameters.",
             "type": "string"
           },
           "system": {
+            "nullable": true,
             "description": "System prompt.",
             "type": "string"
           },
           "template": {
+            "nullable": true,
             "description": "Model template.",
             "type": "string"
           }
@@ -1322,11 +1461,7 @@
             "description": "List of currently running models.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/RunningModel"
-                }
-              ]
+              "$ref": "#/components/schemas/RunningModel"
             }
           }
         },
@@ -1340,17 +1475,32 @@
         "type": "object",
         "properties": {
           "details": {
-            "description": "Model details."
+            "description": "Model details.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelDetails"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "digest": {
+            "nullable": true,
             "description": "Model digest.",
             "type": "string"
           },
           "expires_at": {
+            "nullable": true,
             "description": "When the model will be unloaded.",
             "type": "string"
           },
           "model": {
+            "nullable": true,
             "description": "Model identifier.",
             "type": "string"
           },
@@ -1359,14 +1509,18 @@
             "type": "string"
           },
           "size": {
+            "nullable": true,
             "description": "Model size in VRAM.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "size_vram": {
+            "nullable": true,
             "description": "Size in VRAM in bytes.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
@@ -1379,11 +1533,13 @@
         "type": "object",
         "properties": {
           "frequency_penalty": {
+            "nullable": true,
             "description": "Frequency penalty.",
             "type": "number",
             "format": "double"
           },
           "max_tokens": {
+            "nullable": true,
             "description": "Maximum tokens to generate.",
             "type": "integer",
             "format": "int32"
@@ -1392,11 +1548,7 @@
             "description": "Chat messages.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/OpenAIMessage"
-                }
-              ]
+              "$ref": "#/components/schemas/OpenAIMessage"
             }
           },
           "model": {
@@ -1404,11 +1556,13 @@
             "type": "string"
           },
           "presence_penalty": {
+            "nullable": true,
             "description": "Presence penalty.",
             "type": "number",
             "format": "double"
           },
           "stop": {
+            "nullable": true,
             "description": "Stop sequences.",
             "type": "array",
             "items": {
@@ -1416,15 +1570,18 @@
             }
           },
           "stream": {
+            "nullable": true,
             "description": "Enable streaming.",
             "type": "boolean"
           },
           "temperature": {
+            "nullable": true,
             "description": "Sampling temperature (0.0-2.0).",
             "type": "number",
             "format": "double"
           },
           "top_p": {
+            "nullable": true,
             "description": "Top-P (nucleus) sampling parameter.",
             "type": "number",
             "format": "double"
@@ -1460,10 +1617,12 @@
         "type": "object",
         "properties": {
           "echo": {
+            "nullable": true,
             "description": "Echo back the prompt.",
             "type": "boolean"
           },
           "max_tokens": {
+            "nullable": true,
             "description": "Maximum tokens to generate.",
             "type": "integer",
             "format": "int32"
@@ -1477,6 +1636,7 @@
             "type": "string"
           },
           "stop": {
+            "nullable": true,
             "description": "Stop sequences.",
             "type": "array",
             "items": {
@@ -1484,15 +1644,18 @@
             }
           },
           "stream": {
+            "nullable": true,
             "description": "Enable streaming.",
             "type": "boolean"
           },
           "temperature": {
+            "nullable": true,
             "description": "Sampling temperature (0.0-2.0).",
             "type": "number",
             "format": "double"
           },
           "top_p": {
+            "nullable": true,
             "description": "Top-P (nucleus) sampling parameter.",
             "type": "number",
             "format": "double"
@@ -1531,11 +1694,7 @@
             "description": "List of embeddings.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/OpenAIEmbeddingData"
-                }
-              ]
+              "$ref": "#/components/schemas/OpenAIEmbeddingData"
             }
           },
           "model": {
@@ -1547,7 +1706,19 @@
             "type": "string"
           },
           "usage": {
-            "description": "Token usage information."
+            "description": "Token usage information.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpenAIUsage"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         },
         "required": [
@@ -1572,7 +1743,8 @@
           "index": {
             "description": "Index of this embedding.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "object": {
             "description": "Object type, always \"embedding\".",
@@ -1593,17 +1765,20 @@
           "completion_tokens": {
             "description": "Tokens generated.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "prompt_tokens": {
             "description": "Tokens in the prompt.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "total_tokens": {
             "description": "Total tokens used.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           }
         },
         "required": [
@@ -1621,11 +1796,7 @@
             "description": "List of available models.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/OpenAIModel"
-                }
-              ]
+              "$ref": "#/components/schemas/OpenAIModel"
             }
           },
           "object": {
@@ -1674,16 +1845,23 @@
         "type": "object",
         "properties": {
           "finish_reason": {
+            "nullable": true,
             "description": "Why the model stopped generating.",
             "type": "string"
           },
           "index": {
             "description": "Index of this choice.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "message": {
-            "description": "The message generated."
+            "description": "The message generated.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OpenAIMessage"
+              }
+            ]
           }
         },
         "required": [
@@ -1700,11 +1878,7 @@
             "description": "List of completion choices.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/OpenAIChatCompletionChoice"
-                }
-              ]
+              "$ref": "#/components/schemas/OpenAIChatCompletionChoice"
             }
           },
           "created": {
@@ -1725,7 +1899,19 @@
             "type": "string"
           },
           "usage": {
-            "description": "Token usage information."
+            "description": "Token usage information.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpenAIUsage"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         },
         "required": [
@@ -1742,10 +1928,12 @@
         "type": "object",
         "properties": {
           "content": {
+            "nullable": true,
             "description": "The content chunk.",
             "type": "string"
           },
           "role": {
+            "nullable": true,
             "description": "The role (only in first chunk).",
             "type": "string"
           }
@@ -1757,16 +1945,23 @@
         "type": "object",
         "properties": {
           "delta": {
-            "description": "The delta content."
+            "description": "The delta content.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OpenAIDelta"
+              }
+            ]
           },
           "finish_reason": {
+            "nullable": true,
             "description": "Why the model stopped generating (final chunk only).",
             "type": "string"
           },
           "index": {
             "description": "Index of this choice.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           }
         },
         "required": [
@@ -1783,11 +1978,7 @@
             "description": "List of delta choices.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/OpenAIStreamChoice"
-                }
-              ]
+              "$ref": "#/components/schemas/OpenAIStreamChoice"
             }
           },
           "created": {
@@ -1822,13 +2013,15 @@
         "type": "object",
         "properties": {
           "finish_reason": {
+            "nullable": true,
             "description": "Why the model stopped generating.",
             "type": "string"
           },
           "index": {
             "description": "Index of this choice.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "text": {
             "description": "The generated text.",
@@ -1849,11 +2042,7 @@
             "description": "List of completion choices.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/OpenAICompletionChoice"
-                }
-              ]
+              "$ref": "#/components/schemas/OpenAICompletionChoice"
             }
           },
           "created": {
@@ -1874,7 +2063,19 @@
             "type": "string"
           },
           "usage": {
-            "description": "Token usage information."
+            "description": "Token usage information.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpenAIUsage"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           }
         },
         "required": [
@@ -1894,11 +2095,7 @@
             "description": "Text choices; `finish_reason` is set on the final chunk only.",
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/OpenAICompletionChoice"
-                }
-              ]
+              "$ref": "#/components/schemas/OpenAICompletionChoice"
             }
           },
           "created": {
@@ -1947,6 +2144,7 @@
         "type": "object",
         "properties": {
           "context": {
+            "nullable": true,
             "description": "Context for continuing generation (final chunk only).",
             "type": "array",
             "items": {
@@ -1963,27 +2161,34 @@
             "type": "boolean"
           },
           "eval_count": {
+            "nullable": true,
             "description": "Number of tokens generated (final chunk only).",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "model": {
             "description": "Model that generated the response.",
             "type": "string"
           },
           "prompt_eval_count": {
+            "nullable": true,
             "description": "Number of tokens in the prompt (final chunk only).",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "response": {
+            "nullable": true,
             "description": "The generated text chunk.",
             "type": "string"
           },
           "total_duration": {
+            "nullable": true,
             "description": "Total time in nanoseconds (final chunk only).",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
@@ -1994,7 +2199,25 @@
       },
       "GenerateStreamItem": {
         "title": "GenerateStreamItem",
-        "description": "One NDJSON line from the streaming `/api/generate` endpoint."
+        "description": "One NDJSON line from the streaming `/api/generate` endpoint.",
+        "anyOf": [
+          {
+            "description": "A mid-stream error line.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StreamErrorLine"
+              }
+            ]
+          },
+          {
+            "description": "A generated text chunk; the final one has `done: true` and statistics.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GenerateStreamChunk"
+              }
+            ]
+          }
+        ]
       },
       "GenerateCompletion": {
         "title": "GenerateCompletion",
@@ -2002,6 +2225,7 @@
         "type": "object",
         "properties": {
           "context": {
+            "nullable": true,
             "description": "Context for continuing the conversation.",
             "type": "array",
             "items": {
@@ -2018,42 +2242,54 @@
             "type": "boolean"
           },
           "eval_count": {
+            "nullable": true,
             "description": "Number of tokens generated.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "eval_duration": {
+            "nullable": true,
             "description": "Time spent generating tokens in nanoseconds.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "load_duration": {
+            "nullable": true,
             "description": "Time spent loading the model in nanoseconds.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "model": {
             "description": "Model that generated the response.",
             "type": "string"
           },
           "prompt_eval_count": {
+            "nullable": true,
             "description": "Number of tokens in the prompt.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "prompt_eval_duration": {
+            "nullable": true,
             "description": "Time spent evaluating the prompt in nanoseconds.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "response": {
             "description": "The generated text.",
             "type": "string"
           },
           "total_duration": {
+            "nullable": true,
             "description": "Total time in nanoseconds.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
@@ -2077,26 +2313,44 @@
             "type": "boolean"
           },
           "eval_count": {
+            "nullable": true,
             "description": "Number of tokens generated (final chunk only).",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "message": {
-            "description": "The message chunk."
+            "description": "The message chunk.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Message"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "model": {
             "description": "Model that generated the response.",
             "type": "string"
           },
           "prompt_eval_count": {
+            "nullable": true,
             "description": "Number of tokens in the prompt (final chunk only).",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "total_duration": {
+            "nullable": true,
             "description": "Total time in nanoseconds (final chunk only).",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
@@ -2107,7 +2361,25 @@
       },
       "ChatStreamItem": {
         "title": "ChatStreamItem",
-        "description": "One NDJSON line from the streaming `/api/chat` endpoint."
+        "description": "One NDJSON line from the streaming `/api/chat` endpoint.",
+        "anyOf": [
+          {
+            "description": "A mid-stream error line.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StreamErrorLine"
+              }
+            ]
+          },
+          {
+            "description": "A message chunk; the final one has `done: true` and statistics.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ChatStreamChunk"
+              }
+            ]
+          }
+        ]
       },
       "ChatCompletion": {
         "title": "ChatCompletion",
@@ -2123,41 +2395,58 @@
             "type": "boolean"
           },
           "eval_count": {
+            "nullable": true,
             "description": "Number of tokens generated.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "eval_duration": {
+            "nullable": true,
             "description": "Time spent generating tokens in nanoseconds.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "load_duration": {
+            "nullable": true,
             "description": "Time spent loading the model in nanoseconds.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "message": {
-            "description": "The assistant's message."
+            "description": "The assistant's message.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Message"
+              }
+            ]
           },
           "model": {
             "description": "Model that generated the response.",
             "type": "string"
           },
           "prompt_eval_count": {
+            "nullable": true,
             "description": "Number of tokens in the prompt.",
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "prompt_eval_duration": {
+            "nullable": true,
             "description": "Time spent evaluating the prompt in nanoseconds.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "total_duration": {
+            "nullable": true,
             "description": "Total time in nanoseconds.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
@@ -2173,11 +2462,14 @@
         "type": "object",
         "properties": {
           "completed": {
+            "nullable": true,
             "description": "Completed bytes.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "digest": {
+            "nullable": true,
             "description": "Digest being downloaded.",
             "type": "string"
           },
@@ -2186,9 +2478,11 @@
             "type": "string"
           },
           "total": {
+            "nullable": true,
             "description": "Total size in bytes.",
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
@@ -2197,7 +2491,25 @@
       },
       "PullModelStreamItem": {
         "title": "PullModelStreamItem",
-        "description": "One NDJSON line from a streaming `/api/pull` or `/api/push`."
+        "description": "One NDJSON line from a streaming `/api/pull` or `/api/push`.",
+        "anyOf": [
+          {
+            "description": "A mid-stream error line.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StreamErrorLine"
+              }
+            ]
+          },
+          {
+            "description": "A progress line.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PullModelProgress"
+              }
+            ]
+          }
+        ]
       },
       "CreateModelProgress": {
         "title": "CreateModelProgress",
@@ -2215,7 +2527,25 @@
       },
       "CreateModelStreamItem": {
         "title": "CreateModelStreamItem",
-        "description": "One NDJSON line from a streaming `/api/create`."
+        "description": "One NDJSON line from a streaming `/api/create`.",
+        "anyOf": [
+          {
+            "description": "A mid-stream error line.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StreamErrorLine"
+              }
+            ]
+          },
+          {
+            "description": "A progress line.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CreateModelProgress"
+              }
+            ]
+          }
+        ]
       },
       "StatusResponse": {
         "title": "StatusResponse",

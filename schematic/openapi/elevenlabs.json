@@ -1750,51 +1750,83 @@
         "type": "object",
         "properties": {
           "apply_language_text_normalization": {
+            "nullable": true,
             "type": "boolean"
           },
-          "apply_text_normalization": {},
+          "apply_text_normalization": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TextNormalization"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "language_code": {
+            "nullable": true,
             "type": "string"
           },
           "model_id": {
+            "nullable": true,
             "type": "string"
           },
           "next_request_ids": {
+            "nullable": true,
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "next_text": {
+            "nullable": true,
             "type": "string"
           },
           "previous_request_ids": {
+            "nullable": true,
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "previous_text": {
+            "nullable": true,
             "type": "string"
           },
           "pronunciation_dictionary_locators": {
+            "nullable": true,
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/PronunciationDictionaryLocator"
-                }
-              ]
+              "$ref": "#/components/schemas/PronunciationDictionaryLocator"
             }
           },
           "seed": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 0
           },
           "text": {
             "type": "string"
           },
-          "voice_settings": {}
+          "voice_settings": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VoiceSettings"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          }
         },
         "required": [
           "text"
@@ -1816,29 +1848,39 @@
         ]
       },
       "TextNormalization": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "auto",
+          "on",
+          "off"
+        ]
       },
       "VoiceSettings": {
         "title": "VoiceSettings",
         "type": "object",
         "properties": {
           "similarity_boost": {
+            "default": 0.75,
             "type": "number",
             "format": "double"
           },
           "speed": {
+            "nullable": true,
             "type": "number",
             "format": "double"
           },
           "stability": {
+            "default": 0.5,
             "type": "number",
             "format": "double"
           },
           "style": {
+            "nullable": true,
             "type": "number",
             "format": "double"
           },
           "use_speaker_boost": {
+            "default": true,
             "type": "boolean"
           }
         }
@@ -1860,10 +1902,15 @@
         "type": "object",
         "properties": {
           "description": {
+            "nullable": true,
             "type": "string"
           },
           "labels": {
-            "type": "object"
+            "nullable": true,
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           },
           "language": {
             "type": "string"
@@ -1882,6 +1929,7 @@
         "type": "object",
         "properties": {
           "model_id": {
+            "nullable": true,
             "type": "string"
           }
         }
@@ -1891,16 +1939,20 @@
         "type": "object",
         "properties": {
           "duration_seconds": {
+            "nullable": true,
             "type": "number",
             "format": "double"
           },
           "loop": {
+            "nullable": true,
             "type": "boolean"
           },
           "model_id": {
+            "nullable": true,
             "type": "string"
           },
           "prompt_influence": {
+            "nullable": true,
             "type": "number",
             "format": "double"
           },
@@ -1923,6 +1975,7 @@
             }
           },
           "output_format": {
+            "nullable": true,
             "type": "string"
           }
         },
@@ -1935,26 +1988,21 @@
         "type": "object",
         "properties": {
           "group_id": {
+            "nullable": true,
             "type": "string"
           },
           "resource_type": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ResourceType"
-              }
-            ]
+            "$ref": "#/components/schemas/ResourceType"
           },
           "role": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/AccessLevel"
-              }
-            ]
+            "$ref": "#/components/schemas/AccessLevel"
           },
           "user_email": {
+            "nullable": true,
             "type": "string"
           },
           "workspace_api_key_id": {
+            "nullable": true,
             "type": "string"
           }
         },
@@ -1964,29 +2012,49 @@
         ]
       },
       "AccessLevel": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "admin",
+          "editor",
+          "commenter",
+          "viewer"
+        ]
       },
       "ResourceType": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "voice",
+          "voice_collection",
+          "pronunciation_dictionary",
+          "dubbing",
+          "project",
+          "convai_conversation",
+          "convai_agent",
+          "convai_secret",
+          "convai_knowledge_base",
+          "convai_knowledge_base_document",
+          "convai_tool",
+          "convai_phone_number",
+          "convai_widget"
+        ]
       },
       "UnshareResourceBody": {
         "title": "UnshareResourceBody",
         "type": "object",
         "properties": {
           "group_id": {
+            "nullable": true,
             "type": "string"
           },
           "resource_type": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ResourceType"
-              }
-            ]
+            "$ref": "#/components/schemas/ResourceType"
           },
           "user_email": {
+            "nullable": true,
             "type": "string"
           },
           "workspace_api_key_id": {
+            "nullable": true,
             "type": "string"
           }
         },
@@ -1999,11 +2067,7 @@
         "type": "object",
         "properties": {
           "resource_type": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ResourceType"
-              }
-            ]
+            "$ref": "#/components/schemas/ResourceType"
           },
           "target_user_id": {
             "type": "string"
@@ -2019,6 +2083,7 @@
         "type": "object",
         "properties": {
           "character_limit": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           },
@@ -2026,11 +2091,7 @@
             "type": "string"
           },
           "permissions": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PermissionSpec"
-              }
-            ]
+            "$ref": "#/components/schemas/PermissionSpec"
           }
         },
         "required": [
@@ -2039,24 +2100,82 @@
         ]
       },
       "ApiPermission": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "text_to_speech",
+          "speech_to_speech",
+          "speech_to_text",
+          "models_read",
+          "models_write",
+          "voices_read",
+          "voices_write",
+          "speech_history_read",
+          "speech_history_write",
+          "sound_generation",
+          "audio_isolation",
+          "voice_generation",
+          "dubbing_read",
+          "dubbing_write",
+          "pronunciation_dictionaries_read",
+          "pronunciation_dictionaries_write",
+          "user_read",
+          "user_write",
+          "projects_read",
+          "projects_write",
+          "audio_native_read",
+          "audio_native_write",
+          "workspace_read",
+          "workspace_write",
+          "forced_alignment",
+          "convai_read",
+          "convai_write",
+          "music_generation"
+        ]
       },
-      "PermissionSpec": {},
+      "PermissionSpec": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiPermission"
+            }
+          }
+        ]
+      },
       "UpdateApiKeyBody": {
         "title": "UpdateApiKeyBody",
         "type": "object",
         "properties": {
           "character_limit": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           },
           "is_enabled": {
+            "nullable": true,
             "type": "boolean"
           },
           "name": {
+            "nullable": true,
             "type": "string"
           },
-          "permissions": {}
+          "permissions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PermissionSpec"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          }
         }
       },
       "CreateWebhookBody": {
@@ -2064,11 +2183,7 @@
         "type": "object",
         "properties": {
           "settings": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WebhookSettings"
-              }
-            ]
+            "$ref": "#/components/schemas/WebhookSettings"
           }
         },
         "required": [
@@ -2076,19 +2191,21 @@
         ]
       },
       "WebhookAuthType": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "hmac",
+          "oauth2",
+          "mtls"
+        ]
       },
       "WebhookSettings": {
         "type": "object",
         "properties": {
           "auth_type": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WebhookAuthType"
-              }
-            ]
+            "$ref": "#/components/schemas/WebhookAuthType"
           },
           "name": {
+            "default": "",
             "type": "string"
           },
           "webhook_url": {
@@ -2105,9 +2222,11 @@
         "type": "object",
         "properties": {
           "is_disabled": {
+            "nullable": true,
             "type": "boolean"
           },
           "name": {
+            "nullable": true,
             "type": "string"
           }
         }
@@ -2117,11 +2236,37 @@
         "description": "One with-timestamps reply, or one line of the streaming variant. Field names\nare snake_case on the wire (`audio_base64`), as the provider reference lists.",
         "type": "object",
         "properties": {
-          "alignment": {},
+          "alignment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HttpAlignment"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "audio_base64": {
             "type": "string"
           },
-          "normalized_alignment": {}
+          "normalized_alignment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HttpAlignment"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          }
         },
         "required": [
           "audio_base64"
@@ -2163,23 +2308,22 @@
         "type": "object",
         "properties": {
           "has_more": {
+            "default": false,
             "type": "boolean"
           },
           "next_page_token": {
+            "nullable": true,
             "type": "string"
           },
           "total_count": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           },
           "voices": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/VoiceResponseModel"
-                }
-              ]
+              "$ref": "#/components/schemas/VoiceResponseModel"
             }
           }
         },
@@ -2190,44 +2334,125 @@
       "FineTuningModel": {
         "type": "object",
         "properties": {
-          "dataset_duration_seconds": {},
-          "is_allowed_to_fine_tune": {},
-          "language": {},
-          "manual_verification_requested": {},
-          "max_verification_attempts": {},
-          "message": {},
-          "model_id": {},
-          "next_max_verification_attempts_reset_unix_ms": {},
-          "progress": {},
-          "state": {},
-          "verification_attempts_count": {},
-          "verification_failures": {},
-          "verification_required": {}
+          "dataset_duration_seconds": {
+            "nullable": true,
+            "type": "number",
+            "format": "double"
+          },
+          "is_allowed_to_fine_tune": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "language": {
+            "nullable": true,
+            "type": "string"
+          },
+          "manual_verification_requested": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "max_verification_attempts": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
+          "message": {
+            "nullable": true,
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "model_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "next_max_verification_attempts_reset_unix_ms": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
+          "progress": {
+            "nullable": true,
+            "type": "object",
+            "additionalProperties": true
+          },
+          "state": {
+            "nullable": true,
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FineTuningState"
+            }
+          },
+          "verification_attempts_count": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
+          "verification_failures": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "verification_required": {
+            "nullable": true,
+            "type": "boolean"
+          }
         }
       },
       "FineTuningState": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "not_started",
+          "queued",
+          "fine_tuning",
+          "fine_tuned",
+          "failed",
+          "delayed"
+        ]
       },
       "LanguageModel": {
         "type": "object",
         "properties": {
-          "accent": {},
+          "accent": {
+            "nullable": true,
+            "type": "string"
+          },
           "language_id": {
             "type": "string"
           },
-          "locale": {},
-          "model_id": {},
-          "name": {
+          "locale": {
+            "nullable": true,
             "type": "string"
           },
-          "preview_url": {}
+          "model_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "type": "string"
+          },
+          "preview_url": {
+            "nullable": true,
+            "type": "string"
+          }
         },
         "required": [
           "language_id"
         ]
       },
       "SafetyControl": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "NONE",
+          "BAN",
+          "CAPTCHA",
+          "ENTERPRISE_BAN",
+          "ENTERPRISE_CAPTCHA"
+        ]
       },
       "SampleModel": {
         "type": "object",
@@ -2260,99 +2485,202 @@
       "SharingModel": {
         "type": "object",
         "properties": {
-          "cloned_by_count": {},
+          "cloned_by_count": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
           "is_public": {
+            "default": false,
             "type": "boolean"
           },
-          "public_owner_id": {}
+          "public_owner_id": {
+            "nullable": true,
+            "type": "string"
+          }
         }
       },
       "VoiceCategory": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "premade",
+          "cloned",
+          "generated",
+          "professional",
+          "famous",
+          "high_quality"
+        ]
       },
       "VoiceResponseModel": {
         "title": "VoiceResponseModel",
         "type": "object",
         "properties": {
           "available_for_tiers": {
+            "nullable": true,
             "type": "array",
             "items": {
               "type": "string"
             }
           },
-          "category": {},
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VoiceCategory"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "collection_ids": {
+            "nullable": true,
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "created_at_unix": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           },
           "description": {
+            "nullable": true,
             "type": "string"
           },
           "favorited_at_unix": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           },
-          "fine_tuning": {},
+          "fine_tuning": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FineTuningModel"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "high_quality_base_model_ids": {
+            "nullable": true,
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "is_legacy": {
+            "default": false,
             "type": "boolean"
           },
           "is_mixed": {
+            "default": false,
             "type": "boolean"
           },
           "is_owner": {
+            "nullable": true,
             "type": "boolean"
           },
           "labels": {
-            "type": "object"
+            "nullable": true,
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           },
           "name": {
             "type": "string"
           },
           "permission_on_resource": {
+            "nullable": true,
             "type": "string"
           },
           "preview_url": {
+            "nullable": true,
             "type": "string"
           },
-          "safety_control": {},
+          "safety_control": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SafetyControl"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "samples": {
+            "nullable": true,
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/SampleModel"
-                }
-              ]
+              "$ref": "#/components/schemas/SampleModel"
             }
           },
-          "settings": {},
-          "sharing": {},
+          "settings": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VoiceSettings"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "sharing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SharingModel"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "verified_languages": {
+            "nullable": true,
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/LanguageModel"
-                }
-              ]
+              "$ref": "#/components/schemas/LanguageModel"
             }
           },
           "voice_id": {
             "type": "string"
           },
-          "voice_verification": {}
+          "voice_verification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VoiceVerificationModel"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          }
         },
         "required": [
           "voice_id",
@@ -2406,16 +2734,13 @@
             "type": "boolean"
           },
           "last_sort_id": {
+            "nullable": true,
             "type": "string"
           },
           "voices": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/LibraryVoiceResponseModel"
-                }
-              ]
+              "$ref": "#/components/schemas/LibraryVoiceResponseModel"
             }
           }
         },
@@ -2427,12 +2752,31 @@
       "LibraryVoiceResponseModel": {
         "type": "object",
         "properties": {
-          "category": {},
-          "description": {},
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VoiceCategory"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
-          "public_owner_id": {},
+          "public_owner_id": {
+            "nullable": true,
+            "type": "string"
+          },
           "voice_id": {
             "type": "string"
           }
@@ -2459,62 +2803,84 @@
         "type": "object",
         "properties": {
           "can_be_finetuned": {
+            "default": false,
             "type": "boolean"
           },
           "can_do_text_to_speech": {
+            "default": false,
             "type": "boolean"
           },
           "can_do_voice_conversion": {
+            "default": false,
             "type": "boolean"
           },
           "can_use_speaker_boost": {
+            "default": false,
             "type": "boolean"
           },
           "can_use_style": {
+            "default": false,
             "type": "boolean"
           },
           "concurrency_group": {
+            "nullable": true,
             "type": "string"
           },
           "description": {
             "type": "string"
           },
           "languages": {
+            "nullable": true,
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/LanguageModel"
-                }
-              ]
+              "$ref": "#/components/schemas/LanguageModel"
             }
           },
           "max_characters_request_free_user": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           },
           "max_characters_request_subscribed_user": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           },
           "maximum_text_length_per_request": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           },
           "model_id": {
             "type": "string"
           },
-          "model_rates": {},
+          "model_rates": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelRates"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "name": {
             "type": "string"
           },
           "requires_alpha_access": {
+            "default": false,
             "type": "boolean"
           },
           "serves_pro_voices": {
+            "default": false,
             "type": "boolean"
           },
           "token_cost_factor": {
+            "nullable": true,
             "type": "number",
             "format": "double"
           }
@@ -2559,17 +2925,15 @@
           "history": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/SpeechHistoryItemResponseModel"
-                }
-              ]
+              "$ref": "#/components/schemas/SpeechHistoryItemResponseModel"
             }
           },
           "last_history_item_id": {
+            "nullable": true,
             "type": "string"
           },
           "scanned_until": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           }
@@ -2582,52 +2946,141 @@
       "AlignmentModel": {
         "type": "object",
         "properties": {
-          "character_end_times_seconds": {},
-          "character_start_times_seconds": {},
-          "characters": {}
+          "character_end_times_seconds": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "character_start_times_seconds": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "characters": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         }
       },
       "FeedbackModel": {
         "type": "object",
         "properties": {
-          "feedback": {},
-          "thumbs_up": {}
+          "feedback": {
+            "nullable": true,
+            "type": "string"
+          },
+          "thumbs_up": {
+            "nullable": true,
+            "type": "boolean"
+          }
         }
       },
       "HistorySource": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "TTS",
+          "STS",
+          "Projects",
+          "Dubbing"
+        ]
       },
       "SpeechHistoryItemResponseModel": {
         "title": "SpeechHistoryItemResponseModel",
         "type": "object",
         "properties": {
-          "alignments": {},
+          "alignments": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AlignmentModel"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "content_type": {
+            "nullable": true,
             "type": "string"
           },
           "date_unix": {
             "type": "integer",
             "format": "int64"
           },
-          "feedback": {},
+          "feedback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeedbackModel"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "history_item_id": {
             "type": "string"
           },
           "model_id": {
+            "nullable": true,
             "type": "string"
           },
-          "source": {},
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HistorySource"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "state": {
+            "nullable": true,
             "type": "string"
           },
           "text": {
+            "nullable": true,
             "type": "string"
           },
-          "voice_category": {},
+          "voice_category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VoiceCategory"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "voice_id": {
             "type": "string"
           },
           "voice_name": {
+            "nullable": true,
             "type": "string"
           }
         },
@@ -2649,7 +3102,14 @@
             }
           },
           "usage": {
-            "type": "object"
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              }
+            }
           }
         },
         "required": [
@@ -2662,23 +3122,41 @@
         "type": "object",
         "properties": {
           "created_at": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           },
           "first_name": {
+            "nullable": true,
             "type": "string"
           },
           "is_new_user": {
+            "default": false,
             "type": "boolean"
           },
           "is_onboarding_completed": {
+            "default": false,
             "type": "boolean"
           },
-          "subscription": {},
+          "subscription": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionModel"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "user_id": {
             "type": "string"
           },
           "xi_api_key": {
+            "nullable": true,
             "type": "string"
           }
         },
@@ -2687,24 +3165,69 @@
         ]
       },
       "BillingPeriod": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "monthly",
+          "3-month",
+          "6-month",
+          "annual"
+        ]
       },
       "Currency": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "USD",
+          "EUR",
+          "INR"
+        ]
       },
       "InvoiceModel": {
         "type": "object",
         "properties": {
-          "amount_due": {},
-          "currency": {},
-          "due_date_unix": {}
+          "amount_due": {
+            "nullable": true,
+            "type": "number",
+            "format": "double"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Currency"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "due_date_unix": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          }
         }
       },
       "SubscriptionModel": {
         "title": "SubscriptionModel",
         "type": "object",
         "properties": {
-          "billing_period": {},
+          "billing_period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BillingPeriod"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "character_count": {
             "type": "integer",
             "format": "int64"
@@ -2713,29 +3236,73 @@
             "type": "integer",
             "format": "int64"
           },
-          "currency": {},
+          "currency": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Currency"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "max_character_limit_extension": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           },
-          "next_invoice": {},
+          "next_invoice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvoiceModel"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "professional_voice_limit": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           },
           "professional_voice_slots_used": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           },
-          "status": {},
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionStatus"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "tier": {
             "type": "string"
           },
           "voice_limit": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           },
           "voice_slots_used": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           }
@@ -2747,37 +3314,59 @@
         ]
       },
       "SubscriptionStatus": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "trialing",
+          "active",
+          "incomplete",
+          "past_due",
+          "free",
+          "free_disabled"
+        ]
       },
       "ResourceResponse": {
         "title": "ResourceResponse",
         "type": "object",
         "properties": {
-          "anonymous_access_level_override": {},
+          "anonymous_access_level_override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccessLevel"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "creator_user_id": {
+            "nullable": true,
             "type": "string"
           },
           "resource_id": {
             "type": "string"
           },
           "resource_type": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ResourceType"
-              }
-            ]
+            "$ref": "#/components/schemas/ResourceType"
           },
           "role_to_group_ids": {
-            "type": "object"
+            "nullable": true,
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           },
           "share_options": {
+            "nullable": true,
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ShareOptionModel"
-                }
-              ]
+              "$ref": "#/components/schemas/ShareOptionModel"
             }
           }
         },
@@ -2789,15 +3378,17 @@
       "ShareOptionModel": {
         "type": "object",
         "properties": {
-          "group_id": {},
-          "role": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/AccessLevel"
-              }
-            ]
+          "group_id": {
+            "nullable": true,
+            "type": "string"
           },
-          "user_email": {}
+          "role": {
+            "$ref": "#/components/schemas/AccessLevel"
+          },
+          "user_email": {
+            "nullable": true,
+            "type": "string"
+          }
         },
         "required": [
           "role"
@@ -2810,11 +3401,7 @@
           "service-accounts": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ServiceAccountModel"
-                }
-              ]
+              "$ref": "#/components/schemas/ServiceAccountModel"
             }
           }
         },
@@ -2825,11 +3412,27 @@
       "ApiKeyModel": {
         "type": "object",
         "properties": {
-          "character_count": {},
-          "character_limit": {},
-          "created_at_unix": {},
-          "hint": {},
+          "character_count": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
+          "character_limit": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at_unix": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
+          "hint": {
+            "nullable": true,
+            "type": "string"
+          },
           "is_disabled": {
+            "default": false,
             "type": "boolean"
           },
           "key_id": {
@@ -2838,8 +3441,17 @@
           "name": {
             "type": "string"
           },
-          "permissions": {},
-          "service_account_user_id": {}
+          "permissions": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiPermission"
+            }
+          },
+          "service_account_user_id": {
+            "nullable": true,
+            "type": "string"
+          }
         },
         "required": [
           "name",
@@ -2849,8 +3461,18 @@
       "ServiceAccountModel": {
         "type": "object",
         "properties": {
-          "api-keys": {},
-          "created_at_unix": {},
+          "api-keys": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyModel"
+            }
+          },
+          "created_at_unix": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
           "name": {
             "type": "string"
           },
@@ -2870,11 +3492,7 @@
           "api-keys": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ApiKeyModel"
-                }
-              ]
+              "$ref": "#/components/schemas/ApiKeyModel"
             }
           }
         },
@@ -2905,11 +3523,7 @@
           "webhooks": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/WebhookModel"
-                }
-              ]
+              "$ref": "#/components/schemas/WebhookModel"
             }
           }
         },
@@ -2920,36 +3534,54 @@
       "ProductModel": {
         "type": "object",
         "properties": {
-          "name": {},
-          "product_id": {}
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "product_id": {
+            "nullable": true,
+            "type": "string"
+          }
         }
       },
       "WebhookModel": {
         "type": "object",
         "properties": {
           "auth_type": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WebhookAuthType"
-              }
-            ]
+            "$ref": "#/components/schemas/WebhookAuthType"
           },
           "created_at_unix": {
             "type": "integer",
             "format": "int64"
           },
           "is_auto_disabled": {
+            "default": false,
             "type": "boolean"
           },
           "is_disabled": {
+            "default": false,
             "type": "boolean"
           },
-          "most_recent_failure_error_code": {},
-          "most_recent_failure_timestamp": {},
+          "most_recent_failure_error_code": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
+          "most_recent_failure_timestamp": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
           "name": {
             "type": "string"
           },
-          "usage": {},
+          "usage": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductModel"
+            }
+          },
           "webhook_id": {
             "type": "string"
           },
@@ -2973,6 +3605,7 @@
             "type": "string"
           },
           "webhook_secret": {
+            "nullable": true,
             "type": "string"
           }
         },
