@@ -5,6 +5,10 @@ mod bundled_font_tests;
 mod cache_identity_tests;
 mod cache_tests;
 #[cfg(feature = "image")]
+mod contrast_corpus_tests;
+#[cfg(feature = "image")]
+mod corpus_measure_tests;
+#[cfg(feature = "image")]
 mod font_chain_tests;
 #[cfg(feature = "image")]
 mod gitgraph_layout_tests;

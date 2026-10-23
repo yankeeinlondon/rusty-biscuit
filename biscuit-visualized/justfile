@@ -90,9 +90,14 @@ lint:
     @echo -e "Linting {{ BOLD }}{{ LIBRARY }}{{ RESET }} (--all-features)"
     @cargo clippy -p {{ LIBRARY }} --all-features --all-targets -- -D warnings
 
-# not applicable: biscuit-visualized has no criterion benches
-bench:
-    @echo "bench: not applicable for biscuit-visualized"
+# Lint, and hand any failure to an agent to fix.
+lint-fix:
+    @just lint || just _fix_lint {{ LIBRARY }}
+
+# The Mermaid render benchmark: the non-member crate in `bench/`, run directly
+# in release rather than through the shared `_bench` (see bench/README.md).
+bench *args:
+    @cd bench && cargo run --release --quiet -- "$@"
 
 # Per-package LCOV coverage for the library.
 coverage *args="":
@@ -123,7 +128,7 @@ check:
 
 # build and show the docs for the library code
 docs:
-    @cargo doc -p {{ LIBRARY }} --open
+    @cargo doc -p {{ LIBRARY }} --all-features --open
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).

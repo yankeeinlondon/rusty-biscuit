@@ -25,7 +25,7 @@ use merman::diagram_theme::{
 };
 use serde_json::{Map, Value, json};
 
-use super::color::{Rgb, TEXT_CONTRAST, with_contrast};
+use super::color::{Rgb, TEXT_CONTRAST, most_readable, with_contrast};
 use super::error::MermaidError;
 use super::palette::Palette;
 
@@ -41,6 +41,40 @@ const MINDMAP_LABEL: Rgb = Rgb::new(0x33, 0x33, 0x33);
 /// `Residual`. They are left out; the guard tests fail if one starts working
 /// or another appears.
 const REJECTED_DESPITE_SUPPORT: &[(&str, &str)] = &[("kanban", "task-label")];
+
+/// Targets whose fill is left to Merman although it is supported: C4 paints
+/// a boundary after the shapes inside it, so a filled boundary hides them
+/// (Mermaid's own boundary fill is `none`).
+const UNFILLED: &[(&str, &str)] = &[("c4", "cluster")];
+
+/// Merman's commit label background opacity (`.commit-label-bkg{opacity:0.5}`):
+/// a label is read over the background or over a branch line it overlaps.
+const COMMIT_LABEL_OPACITY: f64 = 0.5;
+
+/// Merman's sankey link opacity (`.link{stroke-opacity:0.5}`): node labels sit
+/// on their links.
+const SANKEY_LINK_OPACITY: f64 = 0.5;
+
+/// Mermaid's fill for C4 external elements, which Merman keeps.
+const C4_EXTERNAL_FILL: Rgb = Rgb::new(0x99, 0x99, 0x99);
+
+/// The C4 element types drawn on [`C4_EXTERNAL_FILL`].
+const C4_EXTERNAL_ELEMENTS: [&str; 10] = [
+    "external_person",
+    "external_system",
+    "external_system_db",
+    "external_system_queue",
+    "external_container",
+    "external_container_db",
+    "external_container_queue",
+    "external_component",
+    "external_component_db",
+    "external_component_queue",
+];
+
+/// The color Merman draws timeline labels in under the `base` theme
+/// (`.section-N text{fill:#333}`), like mindmap's.
+const TIMELINE_LABEL: Rgb = Rgb::new(0x33, 0x33, 0x33);
 
 /// One target's static paint before the support filter.
 struct RoleStyle {
@@ -124,22 +158,27 @@ fn role_styles(palette: &Palette) -> Vec<RoleStyle> {
 /// nodes).
 fn role_palettes(palette: &Palette, family: &str) -> Vec<(&'static str, [Rgb; 6])> {
     let node = match family {
-        GITGRAPH_FAMILY | "sankey" => palette.accents(),
+        GITGRAPH_FAMILY => palette.accents(),
         // Merman draws mindmap labels in the `base` theme's fixed label color,
         // which no compiled style reaches: the fills are the accents lightened
         // or darkened until that color reads on them.
         "mindmap" => palette
             .accents()
             .map(|accent| with_contrast(accent, MINDMAP_LABEL, TEXT_CONTRAST)),
+        "sankey" => palette.accents().map(|accent| sankey_node(palette, accent)),
         _ => palette.tints(),
     };
+    // Timeline labels, like mindmap's, keep `base`'s fixed color.
+    let timeline = palette
+        .accents()
+        .map(|accent| with_contrast(accent, TIMELINE_LABEL, TEXT_CONTRAST));
     vec![
         ("node", node),
         ("state", palette.tints()),
         ("task", palette.tints()),
         ("pie-slice", palette.chart_tints()),
         ("journey-task", palette.tints()),
-        ("timeline-event", palette.tints()),
+        ("timeline-event", timeline),
         ("chart-series", palette.accents()),
     ]
 }
@@ -162,6 +201,7 @@ pub(crate) fn design_json(palette: &Palette, family: &str) -> Value {
         // wherever the palette applies.
         if let Some(fill) = role.fill
             && !has_ordinal(role.target)
+            && !UNFILLED.contains(&(family, role.target))
             && supported(family, role.target, Facet::Fill)
         {
             style.insert("fill".to_string(), json!(fill.to_string()));
@@ -200,8 +240,9 @@ fn gitgraph_label_variables(palette: &Palette) -> Map<String, Value> {
     let mut set = |key: String, color: Rgb| {
         variables.insert(key, json!(color.to_string()));
     };
-    set("commitLabelColor".to_string(), palette.text_on(palette.surface_alt()));
-    set("commitLabelBackground".to_string(), palette.surface_alt());
+    let (label, label_background) = commit_label_colors(palette);
+    set("commitLabelColor".to_string(), label);
+    set("commitLabelBackground".to_string(), label_background);
     set("tagLabelColor".to_string(), palette.text_on(tag));
     set("tagLabelBackground".to_string(), tag);
     set("tagLabelBorder".to_string(), tag);
@@ -211,6 +252,39 @@ fn gitgraph_label_variables(palette: &Palette) -> Map<String, Value> {
         set(format!("gitBranchLabel{branch}"), palette.text_on(accent));
     }
     variables
+}
+
+/// The commit label's text and background colors: the label background is
+/// half transparent, so it is darkened (or lightened) from the second surface
+/// until the text reads on it over the background and over every branch
+/// color; when the palette text cannot, black or white is used.
+fn commit_label_colors(palette: &Palette) -> (Rgb, Rgb) {
+    let mut unders = palette.accents().to_vec();
+    unders.push(palette.background());
+    let away = if palette.text().is_dark() { Rgb::WHITE } else { Rgb::BLACK };
+    let extreme = if away == Rgb::BLACK { Rgb::WHITE } else { Rgb::BLACK };
+    for text in [palette.text(), extreme] {
+        for step in 0..=20 {
+            let label_background = away.over(palette.surface_alt(), f64::from(step) / 20.0);
+            let reads = unders.iter().all(|under| {
+                text.contrast(label_background.over(*under, COMMIT_LABEL_OPACITY)) >= TEXT_CONTRAST
+            });
+            if reads {
+                return (text, label_background);
+            }
+        }
+    }
+    (extreme, away)
+}
+
+/// A sankey node color: `accent` moved toward the background until the
+/// palette text reads on its half-transparent link.
+fn sankey_node(palette: &Palette, accent: Rgb) -> Rgb {
+    let background = palette.background();
+    (0..=20)
+        .map(|step| background.over(accent, f64::from(step) / 20.0))
+        .find(|node| palette.text().contrast(node.over(background, SANKEY_LINK_OPACITY)) >= TEXT_CONTRAST)
+        .unwrap_or(background)
 }
 
 /// Whether `family` also gets the palette as Mermaid `base` theme variables
@@ -228,14 +302,87 @@ pub(crate) fn wants_site_palette(family: &str, design: &Value) -> bool {
     !has_ordinal && !matches!(family, "sequence" | "class")
 }
 
-/// Site-config theme variables for label colors a family's compiled styles
-/// do not reach, each measured not to erase the family's compiled design
-/// (pie legend and slice labels; XY chart's plot background and axis text).
+/// Site-config theme variables for colors a family's compiled styles do not
+/// reach, each measured not to erase the family's compiled design: pie
+/// legend and slice labels; XY chart's plot background and axis text; the
+/// surfaces behind labels in gantt (alternate sections), cynefin (domains),
+/// event modeling (lanes and boxes), treemap and kanban (sections); and
+/// treeView's description text.
 pub(crate) fn family_site_variables(family: &str, palette: &Palette) -> Map<String, Value> {
     let text = json!(palette.text().to_string());
     let line = json!(palette.line().to_string());
+    let color = |color: Rgb| json!(color.to_string());
+    let [red, green, yellow, blue, magenta, _] = palette.tints();
     let mut variables = Map::new();
     match family {
+        "gantt" => {
+            // Drawn at Merman's 0.2 opacity; `base`'s white turns a dark
+            // palette's alternate sections light gray.
+            variables.insert("altSectionBkgColor".to_string(), color(palette.background()));
+        }
+        "cynefin" => {
+            let domains = [
+                ("complexBg", green),
+                ("complicatedBg", blue),
+                ("chaoticBg", red),
+                ("clearBg", yellow),
+                ("confusionBg", magenta),
+            ];
+            let domains: Map<String, Value> =
+                domains.into_iter().map(|(key, tint)| (key.to_string(), color(tint))).collect();
+            variables.insert("cynefin".to_string(), Value::Object(domains));
+        }
+        "treeView" => {
+            let description = with_contrast(palette.accents()[1], palette.background(), TEXT_CONTRAST);
+            variables.insert("treeView".to_string(), json!({ "descriptionColor": description.to_string() }));
+        }
+        "eventmodeling" => {
+            let [_, green_accent, yellow_accent, blue_accent, magenta_accent, _] = palette.accents();
+            let paints = [
+                ("emSwimlaneBackgroundOdd", palette.surface_alt()),
+                ("emSwimlaneBackgroundStroke", palette.border()),
+                ("emUiFill", palette.surface()),
+                ("emUiStroke", palette.border()),
+                ("emProcessorFill", magenta),
+                ("emProcessorStroke", magenta_accent),
+                ("emReadModelFill", green),
+                ("emReadModelStroke", green_accent),
+                ("emCommandFill", blue),
+                ("emCommandStroke", blue_accent),
+                ("emEventFill", yellow),
+                ("emEventStroke", yellow_accent),
+                ("emRelationStroke", palette.line()),
+                ("emArrowhead", palette.line()),
+            ];
+            for (key, paint) in paints {
+                variables.insert(key.to_string(), color(paint));
+            }
+        }
+        "venn" => {
+            // Sets are drawn at Merman's 0.1 fill opacity, their labels in the
+            // set color lightened (dark) or darkened (light) by 30 points.
+            for (index, accent) in palette.accents().iter().cycle().take(8).enumerate() {
+                variables.insert(format!("venn{}", index + 1), color(*accent));
+            }
+        }
+        "treemap" => {
+            for (index, tint) in palette.tints().iter().cycle().take(12).enumerate() {
+                variables.insert(format!("cScale{index}"), color(*tint));
+            }
+        }
+        "kanban" => {
+            // Merman lightens each `cScale` by 10 points of HSL lightness
+            // for its column fill; the columns are the second surface.
+            let (hue, saturation, lightness) = palette.surface_alt().to_hsl();
+            let scale = format!(
+                "hsl({hue}, {}%, {}%)",
+                saturation * 100.0,
+                ((lightness - 0.1) * 100.0).max(0.0)
+            );
+            for index in 0..12 {
+                variables.insert(format!("cScale{index}"), json!(scale));
+            }
+        }
         "pie" => {
             for key in ["pieTitleTextColor", "pieSectionTextColor", "pieLegendTextColor"] {
                 variables.insert(key.to_string(), text.clone());
@@ -259,9 +406,23 @@ pub(crate) fn family_site_variables(family: &str, palette: &Palette) -> Map<Stri
 
 /// Top-level site-config sections for families that read their colors from
 /// their own config rather than from theme variables (packet's
-/// `packet.blockFillColor` and label colors).
+/// `packet.blockFillColor` and label colors; C4's boundary and relationship
+/// text, and the text on its external elements' fixed gray).
 pub(crate) fn family_site_config(family: &str, palette: &Palette) -> Map<String, Value> {
     let mut sections = Map::new();
+    if family == "c4" {
+        let text = json!(palette.text().to_string());
+        let mut c4 = Map::new();
+        c4.insert("boundary_font_color".to_string(), text.clone());
+        c4.insert("relationship_text_color".to_string(), text);
+        // Merman's external elements keep Mermaid's `#999999` fill, on which
+        // its white text reads at 2.8:1.
+        let on_gray = most_readable(C4_EXTERNAL_FILL, &[palette.text(), Rgb::BLACK, Rgb::WHITE]);
+        for element in C4_EXTERNAL_ELEMENTS {
+            c4.insert(format!("{element}_font_color"), json!(on_gray.to_string()));
+        }
+        sections.insert("c4".to_string(), Value::Object(c4));
+    }
     if family == "packet" {
         let text = json!(palette.text().to_string());
         let mut packet = Map::new();

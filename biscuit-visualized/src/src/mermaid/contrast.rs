@@ -8,7 +8,9 @@
 //!
 //! The fill behind a `<text>` is the last shape painted with an **inline**
 //! fill in its nearest enclosing group or label viewport (a shape in a closed
-//! sibling group counts, as a node's shape group sits behind its label),
+//! sibling group counts, as a node's shape group sits behind its label, but
+//! only one level up: it does not reach the siblings of the node), mixed with
+//! what it covers when its fill is translucent,
 //! following Merman's `<use>` placements of label groups; a shape painted only
 //! by a stylesheet or a presentation attribute is unknown (the stylesheet may
 //! override the attribute), and the text is then left alone. Text with no
@@ -32,6 +34,15 @@ enum Behind {
     Unknown,
 }
 
+/// One open `<g>` or `<svg>`: the fill its last painted shape (or a closed
+/// child group, or its `<use>` placement) left, and whether a shape of its
+/// own painted that fill.
+struct Frame {
+    group: bool,
+    fill: Option<Behind>,
+    painted: bool,
+}
+
 /// `svg` with every failing text fill rewritten; borrowed when none fails.
 pub(crate) fn readable_text<'a>(svg: &'a str, palette: &Palette) -> Cow<'a, str> {
     // Merman's raster-safe labels are drawn once in a label group and placed
@@ -53,11 +64,9 @@ fn walk<'a>(
 ) -> Cow<'a, str> {
     let palette_colors = palette_colors(palette);
     let is_palette = |color: Rgb| palette_colors.contains(&color);
-    // One frame per open `<g>`/`<svg>`: whether it is a `<g>`, and the fill
-    // its last painted shape left.
-    let mut frames: Vec<(bool, Option<Behind>)> = Vec::new();
-    let behind = |frames: &[(bool, Option<Behind>)]| {
-        frames.iter().rev().find_map(|(_, fill)| *fill).unwrap_or(Behind::Known(palette.background()))
+    let mut frames: Vec<Frame> = Vec::new();
+    let behind = |frames: &[Frame]| {
+        frames.iter().rev().find_map(|frame| frame.fill).unwrap_or(Behind::Known(palette.background()))
     };
     let mut out = String::new();
     let mut copied = 0;
@@ -72,23 +81,35 @@ fn walk<'a>(
         match tag_name(tag) {
             "g" | "svg" if !self_closing => {
                 let placed = attribute(tag, "id").and_then(|id| placements.get(id)).copied();
-                frames.push((tag_name(tag) == "g", placed));
+                frames.push(Frame { group: tag_name(tag) == "g", fill: placed, painted: false });
             }
             "/g" | "/svg" => {
                 // A shape drawn in a closed group (a node's shape group) is
-                // still behind that group's later siblings (its label). A
+                // still behind that group's later siblings (its label), but
+                // not behind the siblings of the group that holds both: a
+                // node's fill does not spread to the rest of the diagram. A
                 // label viewport's own background stays inside it.
-                if let Some((true, Some(fill))) = frames.pop()
+                if let Some(Frame { group: true, fill: Some(fill), painted: true }) = frames.pop()
                     && let Some(parent) = frames.last_mut()
                 {
-                    parent.1 = Some(fill);
+                    parent.fill = Some(fill);
+                    parent.painted = false;
                 }
             }
             "rect" | "path" | "polygon" | "circle" | "ellipse" => {
-                if let Some(fill) = shape_fill(tag)
-                    && let Some(frame) = frames.last_mut()
+                if let Some((fill, alpha)) = shape_fill(tag)
+                    && !frames.is_empty()
                 {
-                    frame.1 = Some(fill);
+                    // A translucent fill is seen mixed with what it covers.
+                    let fill = match (fill, behind(&frames)) {
+                        (Behind::Known(fill), _) if alpha >= 1.0 => Behind::Known(fill),
+                        (Behind::Known(fill), Behind::Known(under)) => Behind::Known(fill.over(under, alpha)),
+                        _ => Behind::Unknown,
+                    };
+                    if let Some(frame) = frames.last_mut() {
+                        frame.fill = Some(fill);
+                        frame.painted = true;
+                    }
                 }
             }
             "use" => {
@@ -141,24 +162,26 @@ fn tag_name(tag: &str) -> &str {
     &body[..end]
 }
 
-/// What a shape leaves behind: `None` when it paints no fill (transparent),
-/// `Unknown` when its fill is not inline.
-fn shape_fill(tag: &str) -> Option<Behind> {
+/// What a shape paints and at what opacity: `None` when it paints no fill
+/// (transparent), `Unknown` when its fill is not inline.
+fn shape_fill(tag: &str) -> Option<(Behind, f64)> {
     let style = attribute(tag, "style").unwrap_or_default();
     let transparent = |value: &str| matches!(value.trim(), "none" | "transparent");
-    let hidden = |property: &str| {
+    let opacity = |property: &str| {
         declaration(style, property)
             .or_else(|| attribute(tag, property))
-            .is_some_and(|value| value.trim().parse::<f64>().is_ok_and(|opacity| opacity == 0.0))
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .map_or(1.0, |opacity| opacity.clamp(0.0, 1.0))
     };
-    if hidden("opacity") || hidden("fill-opacity") {
+    let alpha = opacity("opacity") * opacity("fill-opacity");
+    if alpha == 0.0 {
         return None;
     }
     match declaration(style, "fill") {
         Some(value) if transparent(value) => None,
-        Some(value) => Some(parse_css_color(value).map_or(Behind::Unknown, Behind::Known)),
+        Some(value) => Some((parse_css_color(value).map_or(Behind::Unknown, Behind::Known), alpha)),
         None if attribute(tag, "fill").is_some_and(transparent) => None,
-        None => Some(Behind::Unknown),
+        None => Some((Behind::Unknown, alpha)),
     }
 }
 

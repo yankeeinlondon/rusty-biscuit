@@ -39,7 +39,7 @@ const UPDATE_PNG_ENV: &str = "BISCUIT_VISUALIZED_UPDATE_GOLDENS";
 /// the fallback.
 const BUDGET: Duration = Duration::from_secs(60);
 
-fn golden_chain() -> &'static Arc<FontChain> {
+pub(super) fn golden_chain() -> &'static Arc<FontChain> {
     static CHAIN: OnceLock<Arc<FontChain>> = OnceLock::new();
     CHAIN.get_or_init(|| Arc::new(FontChain::injected(&[], &[], Some("Inter"))))
 }

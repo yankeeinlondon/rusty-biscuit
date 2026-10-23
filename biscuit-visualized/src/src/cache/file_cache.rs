@@ -25,7 +25,7 @@ pub const CACHE_DIR_ENV: &str = "BISCUIT_VISUALIZED_CACHE_DIR";
 /// otherwise identical inputs keep serving pre-change artifacts. A change of
 /// backend id also keeps every artifact of an earlier backend from being
 /// served.
-pub const MERMAID_BACKEND: &str = "merman@6e6b1e6554e8+bv2";
+pub const MERMAID_BACKEND: &str = "merman@6e6b1e6554e8+bv3";
 pub const GRAPH_BACKEND: &str = "layout-rs@0.1.x";
 pub const RASTERIZER: &str = "resvg@0.47";
 

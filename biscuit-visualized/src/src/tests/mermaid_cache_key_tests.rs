@@ -65,7 +65,7 @@ fn an_artifact_cached_before_the_cutover_is_not_served() {
 
     let artifact = MermaidDiagram::new(source).render(&request).unwrap();
 
-    assert_eq!(MERMAID_BACKEND, "merman@6e6b1e6554e8+bv2");
+    assert_eq!(MERMAID_BACKEND, "merman@6e6b1e6554e8+bv3");
     assert!(!artifact.cache_hit);
     assert_ne!(artifact.path, stale);
     assert!(
@@ -173,7 +173,7 @@ fn the_key_follows_the_post_process_version() {
         )
     };
 
-    assert_ne!(key_for(MERMAID_BACKEND), key_for("merman@6e6b1e6554e8+bv3"));
+    assert_ne!(key_for(MERMAID_BACKEND), key_for("merman@6e6b1e6554e8+bv4"));
 }
 
 /// The key carries the font chain's cache identity: two chains resolving

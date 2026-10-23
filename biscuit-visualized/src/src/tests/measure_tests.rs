@@ -330,7 +330,7 @@ fn comparable(text: &usvg::Text) -> bool {
 /// For each comparable drawn label of `svg`, the measurer's width (widest
 /// chunk, shaped with usvg's span values) against usvg's box, and its glyphs
 /// and faces against the drawn ones.
-fn compare_drawn_labels(
+pub(super) fn compare_drawn_labels(
     chain: &Arc<FontChain>,
     svg: &str,
     name: &str,
