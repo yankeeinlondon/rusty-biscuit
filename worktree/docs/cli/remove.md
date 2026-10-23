@@ -144,12 +144,12 @@ Removal stopped: a step failed (/code/wts/repo/.wt-remove-feat-x-a91c0d2e4f6b8a1
 
 Original: /code/wts/repo/feat-x
 Moved to: /code/wts/repo/.wt-remove-feat-x-a91c0d2e4f6b8a10
-Deleted before stopping: 124 files (listed in the saved report)
+Deleted before stopping: 124 files (listed in entries.jsonl.gz)
 Remaining: 6 entries in the moved directory
 Git registration: now points to the moved directory
 Branch feat/x: kept (not attempted)
 Only entries you approved before the move were deleted.
-  A file written in the instant before wt deleted its path would have been deleted too; the saved report lists every deleted path.
+  A file written in the instant before wt deleted its path would have been deleted too; the saved entries list (entries.jsonl.gz) names every deleted path.
 Before the move: Discovery is partial; FSEvents subscriptions cannot be listed on this system; open handles were only partly read.
 
 Retry: wt remove feat-x
@@ -565,13 +565,21 @@ has moved exits 1, even if no file was deleted yet.
 ## Recovery records and retry
 
 Each removal keeps its state in `<git-common-dir>/wt-removal/<operation-id>/`:
-`record.json` (what the removal set out to do), `journal.jsonl` (the list of
-approved entries, then each deletion batch), and `report.json` (the full
-report). While the record is pending, starting another removal of the same
-worktree exits 3. A completed record keeps `record.json` and `report.json`
-for reference and never authorizes another removal. Its journals are deleted
-once `report.json` lists every journal entry; if the entries could not be
-read, the journals are kept and `wt remove` warns.
+
+| File | Holds | Written |
+| --- | --- | --- |
+| `record.json` | what the removal set out to do, and the last step it finished | before anything changes, then after each step |
+| `journal.jsonl` | the list of approved entries, then each deletion batch | before and after each batch |
+| `report.json` | the report: outcome, counts, the first 200 deleted paths, timeline, activity, errors, earlier attempts | on every stop and on completion |
+| `entries.jsonl.gz` | every journal entry of every attempt, gzip-compressed | with `report.json`, when there are entries |
+
+While the record is pending, starting another removal of the same worktree
+exits 3. A completed record keeps `record.json`, `report.json`, and
+`entries.jsonl.gz` for reference (see
+[How long records are kept](#how-long-records-are-kept)) and never authorizes
+another removal. Its journals are deleted once `entries.jsonl.gz` holds every
+journal entry; if the entries could not be read, the journals are kept and
+`wt remove` warns.
 
 ### How long records are kept
 
@@ -606,16 +614,20 @@ flowchart LR
   `.<operation-id>.expired` folder before it is deleted, so an interrupted
   deletion never looks like a pending removal; the next run finishes it.
 
+### What the report holds
+
 `report.json` describes the whole removal, not only the last run of it:
 
-- `journal` counts and `journal_entries` cover every attempt. Each entry
-  names its `attempt`, its path relative to the moved checkout, its kind, and
-  its state: `deleted`, `externally_absent` (already gone), `uncertain` (gone,
-  but the run stopped before recording who removed it), `kept`, or `planned`.
-  A retry never counts an entry twice and never turns an uncertain entry into
-  a deleted one.
+- `journal` counts cover every attempt, and `entries.jsonl.gz` lists every
+  entry they count (see [below](#the-entries-file)). `entries_file` names
+  that file, `"entries.jsonl.gz"`, or is `null` when the removal planned no
+  entries or its journals could not be read. Saving a `null` report removes
+  any earlier entries file, so an entries file is never left looking
+  complete when it is not.
 - `deleted` names at most 200 deleted paths, with the rest counted in
-  `truncation.deleted_omitted`; `journal_entries` is never cut short.
+  `truncation.deleted_omitted`. `activity` lists at most 200 changes `wt`
+  saw, with the rest counted in `truncation.activity_omitted`. Changes stay
+  in `report.json`; the entries file lists only what the journals planned.
 - `discovery` lists the run's process checks by `purpose`: `preflight` (the
   check made for the report, or before deleting from the moved directory on a
   retry), and `diagnostic` (a check of each location after a stop). A report
@@ -656,12 +668,11 @@ completion, ends with a report like this (abridged):
 
 ```json
 {
+  "report_version": 6,
   "outcome": "removed",
   "journal": { "deleted": { "files": 7, "directories": 3, "links": 0 }, "...": "..." },
-  "journal_entries": [
-    { "attempt": 1, "batch": 1, "path": { "display": "target/debug/a.o" }, "kind": "file", "state": "deleted" },
-    { "attempt": 2, "batch": 1, "path": { "display": "README.md" }, "kind": "file", "state": "deleted" }
-  ],
+  "entries_file": "entries.jsonl.gz",
+  "deleted": [{ "display": "/work/.wt-remove-fix-a91c/target/debug/a.o" }, "..."],
   "earlier_attempts": [{ "outcome": "cleanup_failed", "errors": ["the removal was interrupted"], "...": "..." }]
 }
 ```
@@ -688,6 +699,50 @@ deletion records its watching like this:
 A Windows run whose watch on Git's record went silent records
 `"reason": { "kind": "delivery_stalled", "waited_ms": 30000, "watch": "admin" }`
 instead.
+
+### The entries file
+
+`entries.jsonl.gz` is gzip-compressed JSON Lines: one line per journal
+entry, oldest attempt first, never cut short. Read it with
+`gzip -dc entries.jsonl.gz` (or `zcat`). The removal above lists:
+
+```json
+{"attempt":1,"batch":1,"path":{"display":"target/debug/a.o"},"kind":"file","state":"deleted"}
+{"attempt":2,"batch":1,"path":{"display":"README.md"},"kind":"file","state":"deleted"}
+```
+
+Each entry names its `attempt` (1 for the first run, then one more per
+retry), its `batch` in that run's journal, its path relative to the moved
+checkout, its `kind` (`file`, `directory`, or `link`), and its state:
+`deleted`, `externally_absent` (already gone), `uncertain` (gone, but the run
+stopped before recording who removed it), `kept`, or `planned`. A retry never
+lists an entry twice and never turns an uncertain entry into a deleted one.
+The entries file holds `wt`'s own record of what it deleted: the 200
+`deleted` paths in `report.json` are a preview of the same list.
+
+Both files are written on every stop and on completion, each under a hidden
+temporary name that is then renamed into place, so neither is ever seen half
+written:
+
+1. `entries.jsonl.gz`, when there are entries;
+2. `report.json`, which then names it; a report naming no entries file
+   removes an earlier one;
+3. on completion only, the record is marked completed, and then the
+   journals are deleted.
+
+If writing either file fails, the removal is not marked completed and its
+journals are kept. A stop between the two renames can leave a newer
+`entries.jsonl.gz` beside the previous `report.json`; the removal is still
+pending then, and a retry reads its journals, not the entries file. `wt`
+never reads `entries.jsonl.gz` back.
+
+Reports saved by earlier versions of `wt` (`report_version` 4 and 5) list
+their entries inline as `journal_entries` and have no entries file. They are
+still read, and a retry carries such a report into `earlier_attempts` as
+usual. A report that cannot be read is not carried; the retry warns, naming
+the file, and continues from the journals.
+
+### Retrying a stopped removal
 
 A retry keeps the earlier journal as `journal-<n>.jsonl` and starts a new
 `journal.jsonl`. The new journal is written in full under a hidden name and

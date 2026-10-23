@@ -43,23 +43,15 @@ drain + `confirm_unchanged(.., admin_allowed = false)` → `move_to_quarantine`
 `delete_content` → `unregister_quarantine` → original's copy record → branch
 actions → `Operation::complete`.
 
-- **`check_usage` has one bounded exception to "no retry"** (author decision
-  2026-10-12): when every holder `is_windows_search` (image path, from
-  Sniff's process record, exactly `<system dir>\{SearchProtocolHost,
-  SearchFilterHost,SearchIndexer}.exe`, ASCII-case-insensitive, `\\?\`
-  stripped; no path, an uncertain identity, or the name elsewhere is an
-  ordinary holder), it calls `UsageSource::pause(SEARCH_RECHECK_WAIT)`
-  (500 ms) and queries exactly once more; that query decides. Any other
-  holder refuses without waiting. `UsageSource::system_directory` is
-  `GetSystemDirectoryW` on Windows and `None` elsewhere, so other OSes never
-  recheck. It is the only any-holder decision: the first attempt and the
-  `Quarantined` retry both go through `check_usage`; the `Diagnostic`
-  queries after a stop only name processes. The recheck lands in
-  `UsageClearance::search_recheck` / `InUse::search_recheck`;
-  `preflight_runs` records the first report as a `WindowsSearchHold`
-  discovery run before the `Preflight` one, and the `Discovery` timeline
-  event carries `SearchRecheck::summary` (the retry pushes that event only
-  when it rechecked). `REPORT_VERSION` 4 added the purpose; 5 added the
+- **`check_usage` never refuses for a holder and never waits** (author
+  decision 2026-10-23, replacing the 2026-10-12 Windows Search recheck).
+  The CLI queries the checkout for its report, shows `UsageClearance::holders`
+  before the question (`usage::holders_markup`), and passes that report in as
+  `ReportedUsage`, which answers the lifecycle's one query for that path and
+  sends any other (the post-stop `Diagnostic` queries) to Sniff. Holders
+  become `holders_warning` on the attempt. Only `UsageRefusal::Unverified`
+  refuses. `DiscoveryPurpose::WindowsSearchHold` stays readable for old
+  reports; nothing writes it. `REPORT_VERSION` 4 added the purpose; 5 added the
   optional `observation` diagnostics on the report and on each
   `EarlierAttempt` (absent or `null` reads as unknown, so v4 reports still
   load).
@@ -163,8 +155,9 @@ registration from the admin `gitdir` (`registration_state`), then:
   into a deletion. So registration and branch-only retries reopen with
   `DeletionInventory::empty`: copying the old inventory would make every
   unconfirmed entry look present and drop it. `complete(report,
-  journal_reported)` deletes the journals only once `report.journal_entries`
-  lists them all.
+  journal_reported)` deletes the journals only once `entries.jsonl.gz`
+  (written from `report.journal_entries`), then `report.json`, then the
+  completed record are all durable.
 - **A completed record** is `StoreError::Completed` from `inspect`,
   `resume`, and `reopen`, and `pending()` skips it. Its folder is deleted by
   the next `wt remove` once its report's last timeline event is more than 14

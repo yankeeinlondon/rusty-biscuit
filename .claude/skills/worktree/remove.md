@@ -99,8 +99,8 @@ code touches the network.
   `wt` nor a git child holds the worktree on Windows.
 - A checkout that exists is removed by `remove::lifecycle` after the
   questions ([lifecycle.md](lifecycle.md) has the order and the CLI wiring).
-  Usage is checked there, once, right before the move; nothing checks it
-  before the report. The old `remove_worktree`/`check_no_processes`/
+  Usage is checked once, for the report, and the lifecycle reuses that
+  answer (`ReportedUsage`); it informs and never refuses. The old `remove_worktree`/`check_no_processes`/
   `check_not_in_use` (Windows rename probe)/`finish_unregistered` path and
   the `DirectoryInUse`, `FolderNotFullyRemoved`, `LockProbeRenameBack`, and
   `NotARealDirectory` errors are gone.
@@ -368,7 +368,8 @@ The module docs of `recovery` state the crash guarantees; the facts below are
 the ones that cost time.
 
 - **Layout:** `<common-git-dir>/wt-removal/<operation-id>/` holds
-  `record.json`, `journal.jsonl`, and `report.json`; `wt-removal/locks/` holds
+  `record.json`, `journal.jsonl`, `report.json`, and `entries.jsonl.gz`;
+  `wt-removal/locks/` holds
   one `fs4` lock file per worktree record (key: BLAKE3 of the admin directory
   name, 32 hex). A lock file is never deleted; only a held lock is an active
   operation.
@@ -402,6 +403,28 @@ the ones that cost time.
   recovery test took 0.3–4 s; with `fsync`, ~30 ms.
 - **`begin` refuses while any record is unreadable,** not only one for the same
   worktree: an unreadable record could describe it.
+- **Report version 6 keeps entries out of `report.json`.**
+  `OperationReport::journal_entries` is still the full in-memory list
+  (`#[serde(skip_serializing)]`); `Operation::save_report` streams it into
+  `entries.jsonl.gz` (`store/entries.rs`, `flate2` Rust backend, mtime 0, no
+  name) **before** publishing the report, and only when
+  `entries_file == Some(ENTRIES_FILE)`. Set both through
+  `OperationReport::set_entries`, never by hand; a failed summary sets none,
+  and saving a `null` report deletes a stale sidecar. Production never reads
+  the sidecar (`read_report` returns a v6 report with an empty list); tests
+  decode it with `store::read_entries`. Compare a saved report with its
+  in-memory one only after hydrating that list (`lifecycle/tests.rs`
+  `saved_report`).
+- **Report reading is hand-written** (`outcome.rs`, `impl Deserialize for
+  OperationReport`): `strict_json::nested` refuses repeated keys, then
+  `report_version` dispatches: 4/5 require inline `journal_entries` and
+  refuse `entries_file`; 6 requires `entries_file` (`null` or exactly
+  `"entries.jsonl.gz"`) and refuses `journal_entries`. The rest goes through
+  `SharedMembers` (`deny_unknown_fields`). Errors surface as
+  `StoreError::Report { path, .. }`. Retention never uses this reader.
+- **Publication faults** are injected with `store::fault::inject_save` at
+  `SaveStep`s (entries written, flushed, published; report published;
+  completion persisted), beside `inject` for `reopen`'s `ReopenStep`s.
 - **Strict reading:** `record::parse` reads `record_version` through
   `strict_json::members` first (an unknown version is `UnsupportedVersion`, not
   `Malformed`), then the typed struct. Every field is required, with no
@@ -437,14 +460,12 @@ the ones that cost time.
 
 ## Usage check (`remove::usage`)
 
-The decisive check before the move: `check_usage(source, checkout, own)`
-queries once through a `UsageSource` (`SniffUsage` uses Sniff's default
-options; tests inject reports) and `assess` applies the policy. The one
-exception is a second query when only Windows Search held files
-([lifecycle.md](lifecycle.md#order-do-not-reorder)). Any evidence
-left after exclusion is `UsageRefusal::InUse`; any `PathUsageError` is
-`UsageRefusal::Unverified`. Both are exit 3. No match clears, whatever the
-coverage, and `UsageClearance` keeps the whole report.
+Information, never a gate: `check_usage(source, checkout, own)` queries once
+through a `UsageSource` (`SniffUsage` uses Sniff's default options;
+`ReportedUsage` replays the report's answer once; tests inject reports) and
+`assess` returns every holder left after exclusion in `UsageClearance`. Only
+a `PathUsageError` refuses, as `UsageRefusal::Unverified` (exit 3). There is
+no recheck and no wait.
 
 - **Sniff does not drop the caller's own evidence.** Only Windows open handles
   are excluded, by the kernel. A watcher that `wt` itself opens would refuse
@@ -453,12 +474,10 @@ coverage, and `UsageClearance` keeps the whole report.
   PID alone.** A record with `identity_uncertain`, or any record when
   this PID's certain records disagree on their creation token, is never
   excluded. Evidence without a descriptor, such as a loaded module when `wt`
-  runs from inside the checkout, always refuses.
-- **The CLI renderer** is `cli/src/commands/remove/usage.rs` (`refusal_markup`,
-  `usage_refusal`, `coverage_note`). Its snapshots are in
-  `cli/tests/remove_usage_refusal.rs`. Until `run` calls it, its module
-  declaration carries `#[allow(dead_code)]`, because the `wt` binary target
-  compiles it unused. Remove the attribute when wiring the call.
+  runs from inside the checkout, is always reported.
+- **The CLI renderer** is `cli/src/commands/remove/usage.rs`
+  (`holders_markup`, `refusal_markup`, `usage_refusal`, `coverage_note`). Its
+  snapshots are in `cli/tests/remove_usage_holders.rs`.
 - **Cost:** the real-query test (two queries of a small temp tree) takes
   about 0.5 s on macOS and about 2 s on native Windows, where Sniff opens each
   path to ask for its holders.

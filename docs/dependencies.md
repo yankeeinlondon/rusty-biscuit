@@ -363,6 +363,11 @@
   Its tests use `filetime` 0.2 (development only, already in the workspace
   graph) to backdate folder modification times for the 14-day retention of
   finished removals, instead of sleeping.
+  `flate2` 1 (MIT/Apache-2.0, already in the workspace graph) writes each
+  removal's `entries.jsonl.gz`, the gzip-compressed list of every journal
+  entry that `report.json` names instead of listing inline. Default features
+  are off and only `rust_backend` (`miniz_oxide`) is on, so no C compiler or
+  system zlib is needed on any OS.
   `wt remove`'s activity observer uses `inotify` 0.11 (ISC, no default
   features, so no tokio stream) on Linux only, and `fsevent-sys` 4.1 (MIT,
   FSEvents and Core Foundation declarations, including
@@ -1016,6 +1021,12 @@ This is a Rust workspace with the following modules:
     _Fast base64 encoding/decoding with support for multiple alphabets and URL-safe variants._
 
     _Tags: encoding, base64, data_
+
+- [flate2](https://github.com/rust-lang/flate2-rs) _v1_ [📄](https://docs.rs/flate2)
+
+    _DEFLATE, zlib, and gzip streams. Used by `worktree/lib` to write each removal's gzip-compressed `entries.jsonl.gz`, with only the pure-Rust `rust_backend`._
+
+    _Tags: encoding, compression, gzip_
 
 - [urlencoding](https://github.com/bt/rust_urlencoding) _v2.1_ [📄](https://docs.rs/urlencoding)
 
