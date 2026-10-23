@@ -55,8 +55,9 @@ request preparation runs the same checks before any credential or network
 work, so `.build()?`, an awaited call, `.full()`, `client.send(request)`,
 and `send_raw` all refuse a violating request with the existing
 `InvalidArgument` error (see [value rules](../generation/request-side.md#value-rules)).
-**Planned:** the pager will check each page size it chooses through the same
-helpers.
+The pager checks each page size it chooses against the strategy's `min`
+and `max` with the same bound comparison, inside the runtime; see
+[bounds are checked before sending](../pagination.md#bounds-are-checked-before-sending).
 
 ## The checks
 

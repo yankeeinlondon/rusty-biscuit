@@ -334,6 +334,25 @@ let refused = gh.list_releases("o", "r").page_size(101).fetch_page().await;
 `collect_all` reports the same refusal as `IncompleteReason::InvalidArgument`
 with `pages` counting the refused request.
 
+The size is checked every time the pager settles on the size the next
+request sends: the caller's `.page_size(n)`, an authored `sent_default` when
+the caller set none, and a `pages.set_page_size(n)` made during the
+traversal. A followed next link that already carries the provider's own size
+is sent as written, so it is not checked, unless the caller changed the size.
+The refusal names the bound it broke:
+
+```text
+the page size is above the declared maximum, 100
+the page size is below the declared minimum, 1
+```
+
+This check compares the size the same way, with the same evaluator, as a
+generated request's `minimum` and `maximum` rules (see
+[Value constraints](./value-constraints.md)). It stays in the pager
+because an adopted page-size parameter is not a request field: the
+request's `validate()` and its send-time check never see the size the pager
+chooses, including one changed mid-traversal.
+
 ### Explicit recovery of a traversal
 
 Use a retained traversal when you need to decide whether to retry:

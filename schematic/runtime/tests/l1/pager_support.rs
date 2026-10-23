@@ -790,6 +790,46 @@ endpoint!(
 impl PageSizeKnob for SentDefaultFullPage {}
 
 endpoint!(
+    SentDefaultAboveMax,
+    PageNumberKind,
+    Item,
+    "/sent-default-above-max",
+    Def::new(Kind::PageNumber {
+        page: Input::Query("page"),
+        base: IndexBase::OneBased,
+        more: MoreSignal::NonEmptyPage,
+    })
+    .size(PageSize {
+        sent_default: Some(20),
+        max: Some(10),
+        ..size(Input::Query("limit"))
+    })
+    .done(),
+    ItemSelector::ROOT
+);
+impl PageSizeKnob for SentDefaultAboveMax {}
+
+endpoint!(
+    AdjustableLinkCursor,
+    NextLinkKind,
+    Item,
+    "/adjustable-link",
+    Def::new(Kind::NextLink {
+        next: LinkSource::LinkHeader { rel: "next" },
+        prev: None,
+    })
+    .size(PageSize {
+        max: Some(10),
+        adjustable: true,
+        ..size(Input::Query("limit"))
+    })
+    .done(),
+    ItemSelector::ROOT
+);
+impl PageSizeKnob for AdjustableLinkCursor {}
+impl AdjustablePageSize for AdjustableLinkCursor {}
+
+endpoint!(
     ServerDefaultFullPage,
     PageNumberKind,
     Item,

@@ -18,8 +18,11 @@ use super::error::ContinuationProblem;
 use super::json::{self, Continuation, Read};
 use super::link;
 use super::progress::{BoundaryError, BoundaryTracker, History};
-use super::spec::{CountUnit, CursorLeg, CursorSource, IndexBase, Input, ItemSelector, Kind, LinkSource, MoreSignal, Polarity, Strategy};
+use super::spec::{
+    CountUnit, CursorLeg, CursorSource, IndexBase, Input, ItemSelector, Kind, LinkSource, MoreSignal, PageSize, Polarity, Strategy,
+};
 use crate::meta::ResponseMeta;
+use crate::validate::{self, Keyword, Numeric, Violations};
 
 /// A direction of traversal. A page-number or offset strategy has only
 /// [`Forward`](Self::Forward).
@@ -400,13 +403,8 @@ impl Engine {
             if let Some(size) = self.effective_size()
                 && send_size
             {
-                if size < size_spec.min {
-                    plan.problem.get_or_insert(format!("the page size is below the declared minimum, {}", size_spec.min));
-                }
-                if let Some(max) = size_spec.max
-                    && size > max
-                {
-                    plan.problem.get_or_insert(format!("the page size is above the declared maximum, {max}"));
+                if let Some(problem) = size_problem(size, size_spec) {
+                    plan.problem.get_or_insert(problem);
                 }
                 plan.inputs.push((size_spec.param, Value::from(size)));
                 sent.size = Some(size);
@@ -711,6 +709,21 @@ enum LegContinuation {
     /// Some parts are present and some ended.
     Partial,
     Invalid,
+}
+
+/// The first declared bound `size` breaks, checked by the same evaluator as
+/// a request's `minimum` and `maximum` rules. An adopted size parameter is not
+/// a request field, so this is the only check its value gets.
+fn size_problem(size: u32, spec: PageSize) -> Option<String> {
+    let mut violations = Violations::new();
+    validate::check_range(size, spec.min.to_decimal(), spec.max.and_then(Numeric::to_decimal), &[], &mut violations);
+    let broke = |keyword| violations.iter().any(|violation| violation.keyword() == keyword);
+    if broke(Keyword::Minimum) {
+        return Some(format!("the page size is below the declared minimum, {}", spec.min));
+    }
+    spec.max
+        .filter(|_| broke(Keyword::Maximum))
+        .map(|max| format!("the page size is above the declared maximum, {max}"))
 }
 
 fn push_parts(plan: &mut Plan, leg: &CursorLeg, values: Vec<Value>) {

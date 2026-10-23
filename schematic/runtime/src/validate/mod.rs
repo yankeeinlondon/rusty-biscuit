@@ -56,6 +56,7 @@ mod violation;
 
 pub use decimal::{Decimal, DecimalError, MAX_EXPONENT};
 pub use eval::{Numeric, check_array_len, check_number, check_str, check_value};
+pub(crate) use eval::check_range;
 pub use pattern::Pattern;
 pub use plan::{Literal, Plan, Property};
 pub use violation::{Keyword, PathSegment, Violation, Violations};

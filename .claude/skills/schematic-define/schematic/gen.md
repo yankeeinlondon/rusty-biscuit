@@ -297,24 +297,24 @@ struct, named after the endpoint id in snake case (`ListReleases` →
 order, and a call type named like the request with `Request` replaced by
 `Call` (`ListReleasesCall`). The call type wraps
 `schematic_runtime::Call`, has one setter per optional value (the request field
-name without `with_`), forwards `.anonymous()`, `.credential(..)`,
+name without `with_`; a parameter the pager adopts, such as GitHub's
+`per_page` on `list_releases`, has no setter: use `.page_size(..)`), forwards `.anonymous()`, `.credential(..)`,
 `.deadline(&d)`, `.full()`, and `.build()`, and implements `IntoFuture`:
 
 ```rust
 // GitHub, from schematic/schema/src/github/requests.rs (abridged)
 impl GitHub {
-    pub fn list_releases(&self, owner: impl Into<String>, repo: impl Into<String>)
-        -> ListReleasesCall<'_>;
+    pub fn get_git_tree(&self, owner: impl Into<String>, repo: impl Into<String>,
+        tree_sha: impl Into<String>) -> GetGitTreeCall<'_>;
 }
-pub struct ListReleasesCall<'a>(schematic_runtime::Call<'a, GitHubApi, ListReleasesRequest>);
-impl<'a> ListReleasesCall<'a> {
-    pub fn page(self, value: i64) -> Self;       // request.with_page(value)
-    pub fn per_page(self, value: i64) -> Self;   // request.with_per_page(value)
+pub struct GetGitTreeCall<'a>(schematic_runtime::Call<'a, GitHubApi, GetGitTreeRequest>);
+impl<'a> GetGitTreeCall<'a> {
+    pub fn recursive(self, value: bool) -> Self; // request.with_recursive(value)
     // anonymous, credential, deadline, full, build; `full` comes after the
     // setters, which its `FullCall` does not have
 }
 
-let releases = github.list_releases("owner", "repo").per_page(10).await?;
+let tree = github.get_git_tree("owner", "repo", "main").recursive(true).await?;
 // Result<Success, CallError<Failure>>; CallError is #[non_exhaustive]
 ```
 

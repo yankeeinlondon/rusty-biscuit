@@ -127,6 +127,25 @@ pub fn check_array_len(len: usize, plan: &Plan, path: &[PathSegment], out: &mut 
     walker.item_count(len as u64, plan);
 }
 
+/// Checks a number against inclusive bounds known only at run time, such as
+/// a pager strategy's page-size limits, with the same comparison and
+/// reasons as a plan's `minimum` and `maximum`.
+pub(crate) fn check_range(
+    value: impl Numeric,
+    minimum: Option<Decimal>,
+    maximum: Option<Decimal>,
+    path: &[PathSegment],
+    out: &mut Violations,
+) {
+    let mut walker = Walker {
+        path: path.to_vec(),
+        out,
+    };
+    let number = value.to_decimal();
+    walker.bound_at(number.as_ref(), Keyword::Minimum, minimum, "must be at least", |value, bound| value >= bound);
+    walker.bound_at(number.as_ref(), Keyword::Maximum, maximum, "must be at most", |value, bound| value <= bound);
+}
+
 /// A primitive number a parameter can hold.
 ///
 /// Implemented for every integer type, `f32`, and `f64`; sealed.
@@ -266,7 +285,18 @@ impl Walker<'_> {
         wording: &str,
         holds: fn(&Decimal, &Decimal) -> bool,
     ) {
-        let Some(bound) = bound.and_then(|text| Decimal::parse(text).ok()) else {
+        self.bound_at(number, keyword, bound.and_then(|text| Decimal::parse(text).ok()), wording, holds);
+    }
+
+    fn bound_at(
+        &mut self,
+        number: Option<&Decimal>,
+        keyword: Keyword,
+        bound: Option<Decimal>,
+        wording: &str,
+        holds: fn(&Decimal, &Decimal) -> bool,
+    ) {
+        let Some(bound) = bound else {
             return;
         };
         if !number.is_some_and(|number| holds(number, &bound)) {
