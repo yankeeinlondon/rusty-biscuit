@@ -12,6 +12,7 @@ mod common;
 mod artifact_drift;
 mod definition_baseline;
 mod definition_bundles;
+mod discriminated_unions;
 mod e2e_generation;
 mod endpoint_auth_output;
 mod fresh_output_compile;

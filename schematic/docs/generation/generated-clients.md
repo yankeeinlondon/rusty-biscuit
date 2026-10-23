@@ -1383,7 +1383,7 @@ The `import` subcommand provides a full pipeline for converting OpenAPI 3.x spec
 | `array` | `Vec<T>` |
 | `object` | Named struct |
 | `object` + `additionalProperties` | `HashMap<String, T>` |
-| `oneOf`/`anyOf` | Enum (untagged) |
+| `oneOf`/`anyOf` | Enum; decoded by its `discriminator` when every member has a tag value, else untagged |
 | `$ref` | Named type reference |
 
 ### Diagnostics

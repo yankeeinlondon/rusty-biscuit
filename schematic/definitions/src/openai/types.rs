@@ -1748,7 +1748,7 @@ impl schematic_define::Registration for ChatCompletionRequestAssistantMessage {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ChatCompletionRequestAssistantMessageContentPart {
@@ -1758,6 +1758,53 @@ pub enum ChatCompletionRequestAssistantMessageContentPart {
     ChatCompletionRequestMessageContentPartRefusal(
         ChatCompletionRequestMessageContentPartRefusal,
     ),
+}
+impl<'de> Deserialize<'de> for ChatCompletionRequestAssistantMessageContentPart {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`ChatCompletionRequestAssistantMessageContentPart` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "text" => {
+                serde_json::from_value(value)
+                    .map(Self::ChatCompletionRequestMessageContentPartText)
+            }
+            "refusal" => {
+                serde_json::from_value(value)
+                    .map(Self::ChatCompletionRequestMessageContentPartRefusal)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `ChatCompletionRequestAssistantMessageContentPart`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`ChatCompletionRequestAssistantMessageContentPart` with `type` `{}`: {}",
+                    tag, error
+                ),
+            ))
+    }
 }
 impl Default for ChatCompletionRequestAssistantMessageContentPart {
     fn default() -> Self {
@@ -1819,7 +1866,7 @@ impl schematic_define::Registration for ChatCompletionRequestFunctionMessage {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ChatCompletionRequestMessage {
@@ -1829,6 +1876,66 @@ pub enum ChatCompletionRequestMessage {
     ChatCompletionRequestAssistantMessage(ChatCompletionRequestAssistantMessage),
     ChatCompletionRequestToolMessage(ChatCompletionRequestToolMessage),
     ChatCompletionRequestFunctionMessage(ChatCompletionRequestFunctionMessage),
+}
+impl<'de> Deserialize<'de> for ChatCompletionRequestMessage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("role") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`ChatCompletionRequestMessage` discriminator `role` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("role")),
+        };
+        let decoded = match tag.as_str() {
+            "developer" => {
+                serde_json::from_value(value)
+                    .map(Self::ChatCompletionRequestDeveloperMessage)
+            }
+            "system" => {
+                serde_json::from_value(value)
+                    .map(Self::ChatCompletionRequestSystemMessage)
+            }
+            "user" => {
+                serde_json::from_value(value).map(Self::ChatCompletionRequestUserMessage)
+            }
+            "assistant" => {
+                serde_json::from_value(value)
+                    .map(Self::ChatCompletionRequestAssistantMessage)
+            }
+            "tool" => {
+                serde_json::from_value(value).map(Self::ChatCompletionRequestToolMessage)
+            }
+            "function" => {
+                serde_json::from_value(value)
+                    .map(Self::ChatCompletionRequestFunctionMessage)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `role` value `{}` for `ChatCompletionRequestMessage`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`ChatCompletionRequestMessage` with `role` `{}`: {}", tag, error
+                ),
+            ))
+    }
 }
 impl Default for ChatCompletionRequestMessage {
     fn default() -> Self {
@@ -2453,7 +2560,7 @@ impl schematic_define::Registration for CompoundFilter {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ComputerAction {
@@ -2466,6 +2573,50 @@ pub enum ComputerAction {
     ScrollParam(ScrollParam),
     TypeParam(TypeParam),
     WaitParam(WaitParam),
+}
+impl<'de> Deserialize<'de> for ComputerAction {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`ComputerAction` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "click" => serde_json::from_value(value).map(Self::ClickParam),
+            "double_click" => serde_json::from_value(value).map(Self::DoubleClickAction),
+            "drag" => serde_json::from_value(value).map(Self::DragParam),
+            "keypress" => serde_json::from_value(value).map(Self::KeyPressAction),
+            "move" => serde_json::from_value(value).map(Self::MoveParam),
+            "screenshot" => serde_json::from_value(value).map(Self::ScreenshotParam),
+            "scroll" => serde_json::from_value(value).map(Self::ScrollParam),
+            "type" => serde_json::from_value(value).map(Self::TypeParam),
+            "wait" => serde_json::from_value(value).map(Self::WaitParam),
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `ComputerAction`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`ComputerAction` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for ComputerAction {
     fn default() -> Self {
@@ -2724,7 +2875,7 @@ impl schematic_define::Registration for Content {
 }
 ///A single item within a conversation. The set of possible types are the same as the `output` type of a [Response object](/docs/api-reference/responses/object#responses/object-output).
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ConversationItem {
@@ -2756,6 +2907,103 @@ pub enum ConversationItem {
     MCPToolCall(MCPToolCall),
     CustomToolCall(CustomToolCall),
     CustomToolCallOutput(CustomToolCallOutput),
+}
+impl<'de> Deserialize<'de> for ConversationItem {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`ConversationItem` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "message" => serde_json::from_value(value).map(Self::Message),
+            "function_call" => {
+                serde_json::from_value(value).map(Self::FunctionToolCallResource)
+            }
+            "function_call_output" => {
+                serde_json::from_value(value).map(Self::FunctionToolCallOutputResource)
+            }
+            "file_search_call" => {
+                serde_json::from_value(value).map(Self::FileSearchToolCall)
+            }
+            "web_search_call" => {
+                serde_json::from_value(value).map(Self::WebSearchToolCall)
+            }
+            "image_generation_call" => {
+                serde_json::from_value(value).map(Self::ImageGenToolCall)
+            }
+            "computer_call" => serde_json::from_value(value).map(Self::ComputerToolCall),
+            "computer_call_output" => {
+                serde_json::from_value(value).map(Self::ComputerToolCallOutputResource)
+            }
+            "tool_search_call" => serde_json::from_value(value).map(Self::ToolSearchCall),
+            "tool_search_output" => {
+                serde_json::from_value(value).map(Self::ToolSearchOutput)
+            }
+            "additional_tools" => {
+                serde_json::from_value(value).map(Self::AdditionalTools)
+            }
+            "reasoning" => serde_json::from_value(value).map(Self::ReasoningItem),
+            "program" => serde_json::from_value(value).map(Self::Program),
+            "program_output" => serde_json::from_value(value).map(Self::ProgramOutput),
+            "compaction" => serde_json::from_value(value).map(Self::CompactionBody),
+            "code_interpreter_call" => {
+                serde_json::from_value(value).map(Self::CodeInterpreterToolCall)
+            }
+            "local_shell_call" => {
+                serde_json::from_value(value).map(Self::LocalShellToolCall)
+            }
+            "local_shell_call_output" => {
+                serde_json::from_value(value).map(Self::LocalShellToolCallOutput)
+            }
+            "shell_call" => serde_json::from_value(value).map(Self::FunctionShellCall),
+            "shell_call_output" => {
+                serde_json::from_value(value).map(Self::FunctionShellCallOutput)
+            }
+            "apply_patch_call" => {
+                serde_json::from_value(value).map(Self::ApplyPatchToolCall)
+            }
+            "apply_patch_call_output" => {
+                serde_json::from_value(value).map(Self::ApplyPatchToolCallOutput)
+            }
+            "mcp_list_tools" => serde_json::from_value(value).map(Self::MCPListTools),
+            "mcp_approval_request" => {
+                serde_json::from_value(value).map(Self::MCPApprovalRequest)
+            }
+            "mcp_approval_response" => {
+                serde_json::from_value(value).map(Self::MCPApprovalResponseResource)
+            }
+            "mcp_call" => serde_json::from_value(value).map(Self::MCPToolCall),
+            "custom_tool_call" => serde_json::from_value(value).map(Self::CustomToolCall),
+            "custom_tool_call_output" => {
+                serde_json::from_value(value).map(Self::CustomToolCallOutput)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `ConversationItem`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`ConversationItem` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for ConversationItem {
     fn default() -> Self {
@@ -3924,12 +4172,56 @@ impl schematic_define::Registration for CreateSpeechRequest2 {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum CreateSpeechResponseStreamEvent {
     SpeechAudioDeltaEvent(SpeechAudioDeltaEvent),
     SpeechAudioDoneEvent(SpeechAudioDoneEvent),
+}
+impl<'de> Deserialize<'de> for CreateSpeechResponseStreamEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`CreateSpeechResponseStreamEvent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "speech.audio.delta" => {
+                serde_json::from_value(value).map(Self::SpeechAudioDeltaEvent)
+            }
+            "speech.audio.done" => {
+                serde_json::from_value(value).map(Self::SpeechAudioDoneEvent)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `CreateSpeechResponseStreamEvent`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`CreateSpeechResponseStreamEvent` with `type` `{}`: {}", tag, error
+                ),
+            ))
+    }
 }
 impl Default for CreateSpeechResponseStreamEvent {
     fn default() -> Self {
@@ -4153,13 +4445,61 @@ impl schematic_define::Registration for CreateTranscriptionResponseJson {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum CreateTranscriptionResponseStreamEvent {
     TranscriptTextSegmentEvent(TranscriptTextSegmentEvent),
     TranscriptTextDeltaEvent(TranscriptTextDeltaEvent),
     TranscriptTextDoneEvent(TranscriptTextDoneEvent),
+}
+impl<'de> Deserialize<'de> for CreateTranscriptionResponseStreamEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`CreateTranscriptionResponseStreamEvent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "transcript.text.segment" => {
+                serde_json::from_value(value).map(Self::TranscriptTextSegmentEvent)
+            }
+            "transcript.text.delta" => {
+                serde_json::from_value(value).map(Self::TranscriptTextDeltaEvent)
+            }
+            "transcript.text.done" => {
+                serde_json::from_value(value).map(Self::TranscriptTextDoneEvent)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `CreateTranscriptionResponseStreamEvent`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`CreateTranscriptionResponseStreamEvent` with `type` `{}`: {}", tag,
+                    error
+                ),
+            ))
+    }
 }
 impl Default for CreateTranscriptionResponseStreamEvent {
     fn default() -> Self {
@@ -5816,13 +6156,54 @@ impl schematic_define::Registration for FineTuningJobEvent {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum FunctionAndCustomToolCallOutput {
     InputTextContent(InputTextContent),
     InputImageContent(InputImageContent),
     InputFileContent(InputFileContent),
+}
+impl<'de> Deserialize<'de> for FunctionAndCustomToolCallOutput {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`FunctionAndCustomToolCallOutput` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "input_text" => serde_json::from_value(value).map(Self::InputTextContent),
+            "input_image" => serde_json::from_value(value).map(Self::InputImageContent),
+            "input_file" => serde_json::from_value(value).map(Self::InputFileContent),
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `FunctionAndCustomToolCallOutput`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`FunctionAndCustomToolCallOutput` with `type` `{}`: {}", tag, error
+                ),
+            ))
+    }
 }
 impl Default for FunctionAndCustomToolCallOutput {
     fn default() -> Self {
@@ -6461,12 +6842,53 @@ impl schematic_define::Registration for ImageEditPartialImageEvent {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ImageEditStreamEvent {
     ImageEditPartialImageEvent(ImageEditPartialImageEvent),
     ImageEditCompletedEvent(ImageEditCompletedEvent),
+}
+impl<'de> Deserialize<'de> for ImageEditStreamEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`ImageEditStreamEvent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "image_edit.partial_image" => {
+                serde_json::from_value(value).map(Self::ImageEditPartialImageEvent)
+            }
+            "image_edit.completed" => {
+                serde_json::from_value(value).map(Self::ImageEditCompletedEvent)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `ImageEditStreamEvent`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`ImageEditStreamEvent` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for ImageEditStreamEvent {
     fn default() -> Self {
@@ -6545,12 +6967,53 @@ impl schematic_define::Registration for ImageGenPartialImageEvent {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ImageGenStreamEvent {
     ImageGenPartialImageEvent(ImageGenPartialImageEvent),
     ImageGenCompletedEvent(ImageGenCompletedEvent),
+}
+impl<'de> Deserialize<'de> for ImageGenStreamEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`ImageGenStreamEvent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "image_generation.partial_image" => {
+                serde_json::from_value(value).map(Self::ImageGenPartialImageEvent)
+            }
+            "image_generation.completed" => {
+                serde_json::from_value(value).map(Self::ImageGenCompletedEvent)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `ImageGenStreamEvent`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`ImageGenStreamEvent` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for ImageGenStreamEvent {
     fn default() -> Self {
@@ -6727,13 +7190,49 @@ impl schematic_define::Registration for InputAudio {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum InputContent {
     InputTextContent(InputTextContent),
     InputImageContent(InputImageContent),
     InputFileContent(InputFileContent),
+}
+impl<'de> Deserialize<'de> for InputContent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`InputContent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "input_text" => serde_json::from_value(value).map(Self::InputTextContent),
+            "input_image" => serde_json::from_value(value).map(Self::InputImageContent),
+            "input_file" => serde_json::from_value(value).map(Self::InputFileContent),
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!("unknown `type` value `{}` for `InputContent`", tag),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`InputContent` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for InputContent {
     fn default() -> Self {
@@ -6961,7 +7460,7 @@ impl schematic_define::Registration for InviteRequest {
 pub type Item = serde_json::Value;
 ///Content item used to generate a response.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ItemResource {
@@ -6994,6 +7493,108 @@ pub enum ItemResource {
     MCPToolCall(MCPToolCall),
     CustomToolCallResource(CustomToolCallResource),
     CustomToolCallOutputResource(CustomToolCallOutputResource),
+}
+impl<'de> Deserialize<'de> for ItemResource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`ItemResource` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "message" => {
+                if let Ok(decoded) = serde_json::from_value(value.clone()) {
+                    return Ok(Self::InputMessageResource(decoded));
+                }
+                serde_json::from_value(value).map(Self::OutputMessage)
+            }
+            "file_search_call" => {
+                serde_json::from_value(value).map(Self::FileSearchToolCall)
+            }
+            "computer_call" => serde_json::from_value(value).map(Self::ComputerToolCall),
+            "computer_call_output" => {
+                serde_json::from_value(value).map(Self::ComputerToolCallOutputResource)
+            }
+            "web_search_call" => {
+                serde_json::from_value(value).map(Self::WebSearchToolCall)
+            }
+            "function_call" => {
+                serde_json::from_value(value).map(Self::FunctionToolCallResource)
+            }
+            "function_call_output" => {
+                serde_json::from_value(value).map(Self::FunctionToolCallOutputResource)
+            }
+            "tool_search_call" => serde_json::from_value(value).map(Self::ToolSearchCall),
+            "tool_search_output" => {
+                serde_json::from_value(value).map(Self::ToolSearchOutput)
+            }
+            "additional_tools" => {
+                serde_json::from_value(value).map(Self::AdditionalTools)
+            }
+            "reasoning" => serde_json::from_value(value).map(Self::ReasoningItem),
+            "program" => serde_json::from_value(value).map(Self::Program),
+            "program_output" => serde_json::from_value(value).map(Self::ProgramOutput),
+            "compaction" => serde_json::from_value(value).map(Self::CompactionBody),
+            "image_generation_call" => {
+                serde_json::from_value(value).map(Self::ImageGenToolCall)
+            }
+            "code_interpreter_call" => {
+                serde_json::from_value(value).map(Self::CodeInterpreterToolCall)
+            }
+            "local_shell_call" => {
+                serde_json::from_value(value).map(Self::LocalShellToolCall)
+            }
+            "local_shell_call_output" => {
+                serde_json::from_value(value).map(Self::LocalShellToolCallOutput)
+            }
+            "shell_call" => serde_json::from_value(value).map(Self::FunctionShellCall),
+            "shell_call_output" => {
+                serde_json::from_value(value).map(Self::FunctionShellCallOutput)
+            }
+            "apply_patch_call" => {
+                serde_json::from_value(value).map(Self::ApplyPatchToolCall)
+            }
+            "apply_patch_call_output" => {
+                serde_json::from_value(value).map(Self::ApplyPatchToolCallOutput)
+            }
+            "mcp_list_tools" => serde_json::from_value(value).map(Self::MCPListTools),
+            "mcp_approval_request" => {
+                serde_json::from_value(value).map(Self::MCPApprovalRequest)
+            }
+            "mcp_approval_response" => {
+                serde_json::from_value(value).map(Self::MCPApprovalResponseResource)
+            }
+            "mcp_call" => serde_json::from_value(value).map(Self::MCPToolCall),
+            "custom_tool_call" => {
+                serde_json::from_value(value).map(Self::CustomToolCallResource)
+            }
+            "custom_tool_call_output" => {
+                serde_json::from_value(value).map(Self::CustomToolCallOutputResource)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!("unknown `type` value `{}` for `ItemResource`", tag),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`ItemResource` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for ItemResource {
     fn default() -> Self {
@@ -8556,13 +9157,53 @@ impl schematic_define::Registration for OutputAudio {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum OutputContent {
     OutputTextContent(OutputTextContent),
     RefusalContent(RefusalContent),
     ReasoningTextContent(ReasoningTextContent),
+}
+impl<'de> Deserialize<'de> for OutputContent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`OutputContent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "output_text" => serde_json::from_value(value).map(Self::OutputTextContent),
+            "refusal" => serde_json::from_value(value).map(Self::RefusalContent),
+            "reasoning_text" => {
+                serde_json::from_value(value).map(Self::ReasoningTextContent)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `OutputContent`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`OutputContent` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for OutputContent {
     fn default() -> Self {
@@ -8578,7 +9219,7 @@ impl schematic_define::Registration for OutputContent {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum OutputItem {
@@ -8610,6 +9251,97 @@ pub enum OutputItem {
     MCPApprovalResponseResource(MCPApprovalResponseResource),
     CustomToolCall(CustomToolCall),
     CustomToolCallOutputResource(CustomToolCallOutputResource),
+}
+impl<'de> Deserialize<'de> for OutputItem {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom("`OutputItem` discriminator `type` is not a string"),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "message" => serde_json::from_value(value).map(Self::OutputMessage),
+            "file_search_call" => {
+                serde_json::from_value(value).map(Self::FileSearchToolCall)
+            }
+            "function_call" => serde_json::from_value(value).map(Self::FunctionToolCall),
+            "function_call_output" => {
+                serde_json::from_value(value).map(Self::FunctionToolCallOutputResource)
+            }
+            "web_search_call" => {
+                serde_json::from_value(value).map(Self::WebSearchToolCall)
+            }
+            "computer_call" => serde_json::from_value(value).map(Self::ComputerToolCall),
+            "computer_call_output" => {
+                serde_json::from_value(value).map(Self::ComputerToolCallOutputResource)
+            }
+            "reasoning" => serde_json::from_value(value).map(Self::ReasoningItem),
+            "program" => serde_json::from_value(value).map(Self::Program),
+            "program_output" => serde_json::from_value(value).map(Self::ProgramOutput),
+            "tool_search_call" => serde_json::from_value(value).map(Self::ToolSearchCall),
+            "tool_search_output" => {
+                serde_json::from_value(value).map(Self::ToolSearchOutput)
+            }
+            "additional_tools" => {
+                serde_json::from_value(value).map(Self::AdditionalTools)
+            }
+            "compaction" => serde_json::from_value(value).map(Self::CompactionBody),
+            "image_generation_call" => {
+                serde_json::from_value(value).map(Self::ImageGenToolCall)
+            }
+            "code_interpreter_call" => {
+                serde_json::from_value(value).map(Self::CodeInterpreterToolCall)
+            }
+            "local_shell_call" => {
+                serde_json::from_value(value).map(Self::LocalShellToolCall)
+            }
+            "local_shell_call_output" => {
+                serde_json::from_value(value).map(Self::LocalShellToolCallOutput)
+            }
+            "shell_call" => serde_json::from_value(value).map(Self::FunctionShellCall),
+            "shell_call_output" => {
+                serde_json::from_value(value).map(Self::FunctionShellCallOutput)
+            }
+            "apply_patch_call" => {
+                serde_json::from_value(value).map(Self::ApplyPatchToolCall)
+            }
+            "apply_patch_call_output" => {
+                serde_json::from_value(value).map(Self::ApplyPatchToolCallOutput)
+            }
+            "mcp_call" => serde_json::from_value(value).map(Self::MCPToolCall),
+            "mcp_list_tools" => serde_json::from_value(value).map(Self::MCPListTools),
+            "mcp_approval_request" => {
+                serde_json::from_value(value).map(Self::MCPApprovalRequest)
+            }
+            "mcp_approval_response" => {
+                serde_json::from_value(value).map(Self::MCPApprovalResponseResource)
+            }
+            "custom_tool_call" => serde_json::from_value(value).map(Self::CustomToolCall),
+            "custom_tool_call_output" => {
+                serde_json::from_value(value).map(Self::CustomToolCallOutputResource)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!("unknown `type` value `{}` for `OutputItem`", tag),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`OutputItem` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for OutputItem {
     fn default() -> Self {
@@ -8652,12 +9384,49 @@ impl schematic_define::Registration for OutputMessage {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum OutputMessageContent {
     OutputTextContent(OutputTextContent),
     RefusalContent(RefusalContent),
+}
+impl<'de> Deserialize<'de> for OutputMessageContent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`OutputMessageContent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "output_text" => serde_json::from_value(value).map(Self::OutputTextContent),
+            "refusal" => serde_json::from_value(value).map(Self::RefusalContent),
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `OutputMessageContent`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`OutputMessageContent` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for OutputMessageContent {
     fn default() -> Self {
@@ -11295,7 +12064,7 @@ impl schematic_define::Registration for RealtimeCallRejectRequest {
 }
 ///A realtime client event.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum RealtimeClientEvent {
@@ -11314,6 +12083,84 @@ pub enum RealtimeClientEvent {
     RealtimeClientEventResponseCancel(RealtimeClientEventResponseCancel),
     RealtimeClientEventResponseCreate(RealtimeClientEventResponseCreate),
     RealtimeClientEventSessionUpdate(RealtimeClientEventSessionUpdate),
+}
+impl<'de> Deserialize<'de> for RealtimeClientEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`RealtimeClientEvent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "conversation.item.create" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeClientEventConversationItemCreate)
+            }
+            "conversation.item.delete" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeClientEventConversationItemDelete)
+            }
+            "conversation.item.retrieve" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeClientEventConversationItemRetrieve)
+            }
+            "conversation.item.truncate" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeClientEventConversationItemTruncate)
+            }
+            "input_audio_buffer.append" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeClientEventInputAudioBufferAppend)
+            }
+            "input_audio_buffer.clear" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeClientEventInputAudioBufferClear)
+            }
+            "output_audio_buffer.clear" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeClientEventOutputAudioBufferClear)
+            }
+            "input_audio_buffer.commit" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeClientEventInputAudioBufferCommit)
+            }
+            "response.cancel" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeClientEventResponseCancel)
+            }
+            "response.create" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeClientEventResponseCreate)
+            }
+            "session.update" => {
+                serde_json::from_value(value).map(Self::RealtimeClientEventSessionUpdate)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `RealtimeClientEvent`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`RealtimeClientEvent` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for RealtimeClientEvent {
     fn default() -> Self {
@@ -11689,7 +12536,7 @@ impl schematic_define::Registration for RealtimeClientEventTranscriptionSessionU
 }
 ///A single item within a Realtime conversation.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum RealtimeConversationItem {
@@ -11704,6 +12551,72 @@ pub enum RealtimeConversationItem {
     RealtimeMCPListTools(RealtimeMCPListTools),
     RealtimeMCPToolCall(RealtimeMCPToolCall),
     RealtimeMCPApprovalRequest(RealtimeMCPApprovalRequest),
+}
+impl<'de> Deserialize<'de> for RealtimeConversationItem {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`RealtimeConversationItem` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "message" => {
+                if let Ok(decoded) = serde_json::from_value(value.clone()) {
+                    return Ok(Self::RealtimeConversationItemMessageSystem(decoded));
+                }
+                if let Ok(decoded) = serde_json::from_value(value.clone()) {
+                    return Ok(Self::RealtimeConversationItemMessageUser(decoded));
+                }
+                serde_json::from_value(value)
+                    .map(Self::RealtimeConversationItemMessageAssistant)
+            }
+            "function_call" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeConversationItemFunctionCall)
+            }
+            "function_call_output" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeConversationItemFunctionCallOutput)
+            }
+            "mcp_approval_response" => {
+                serde_json::from_value(value).map(Self::RealtimeMCPApprovalResponse)
+            }
+            "mcp_list_tools" => {
+                serde_json::from_value(value).map(Self::RealtimeMCPListTools)
+            }
+            "mcp_call" => serde_json::from_value(value).map(Self::RealtimeMCPToolCall),
+            "mcp_approval_request" => {
+                serde_json::from_value(value).map(Self::RealtimeMCPApprovalRequest)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `RealtimeConversationItem`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`RealtimeConversationItem` with `type` `{}`: {}", tag, error
+                ),
+            ))
+    }
 }
 impl Default for RealtimeConversationItem {
     fn default() -> Self {
@@ -12335,7 +13248,7 @@ impl schematic_define::Registration for RealtimeResponseCreateParams {
 }
 ///A realtime server event.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum RealtimeServerEvent {
@@ -12441,6 +13354,229 @@ pub enum RealtimeServerEvent {
         RealtimeServerEventResponseMCPCallCompleted,
     ),
     RealtimeServerEventResponseMCPCallFailed(RealtimeServerEventResponseMCPCallFailed),
+}
+impl<'de> Deserialize<'de> for RealtimeServerEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`RealtimeServerEvent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "conversation.created" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventConversationCreated)
+            }
+            "conversation.item.created" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventConversationItemCreated)
+            }
+            "conversation.item.deleted" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventConversationItemDeleted)
+            }
+            "conversation.item.input_audio_transcription.completed" => {
+                serde_json::from_value(value)
+                    .map(
+                        Self::RealtimeServerEventConversationItemInputAudioTranscriptionCompleted,
+                    )
+            }
+            "conversation.item.input_audio_transcription.delta" => {
+                serde_json::from_value(value)
+                    .map(
+                        Self::RealtimeServerEventConversationItemInputAudioTranscriptionDelta,
+                    )
+            }
+            "conversation.item.input_audio_transcription.failed" => {
+                serde_json::from_value(value)
+                    .map(
+                        Self::RealtimeServerEventConversationItemInputAudioTranscriptionFailed,
+                    )
+            }
+            "conversation.item.retrieved" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventConversationItemRetrieved)
+            }
+            "conversation.item.truncated" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventConversationItemTruncated)
+            }
+            "error" => serde_json::from_value(value).map(Self::RealtimeServerEventError),
+            "input_audio_buffer.cleared" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventInputAudioBufferCleared)
+            }
+            "input_audio_buffer.committed" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventInputAudioBufferCommitted)
+            }
+            "input_audio_buffer.dtmf_event_received" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventInputAudioBufferDtmfEventReceived)
+            }
+            "input_audio_buffer.speech_started" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventInputAudioBufferSpeechStarted)
+            }
+            "input_audio_buffer.speech_stopped" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventInputAudioBufferSpeechStopped)
+            }
+            "rate_limits.updated" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventRateLimitsUpdated)
+            }
+            "response.output_audio.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseAudioDelta)
+            }
+            "response.output_audio.done" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseAudioDone)
+            }
+            "response.output_audio_transcript.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseAudioTranscriptDelta)
+            }
+            "response.output_audio_transcript.done" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseAudioTranscriptDone)
+            }
+            "response.content_part.added" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseContentPartAdded)
+            }
+            "response.content_part.done" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseContentPartDone)
+            }
+            "response.created" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseCreated)
+            }
+            "response.done" => {
+                serde_json::from_value(value).map(Self::RealtimeServerEventResponseDone)
+            }
+            "response.function_call_arguments.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseFunctionCallArgumentsDelta)
+            }
+            "response.function_call_arguments.done" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseFunctionCallArgumentsDone)
+            }
+            "response.output_item.added" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseOutputItemAdded)
+            }
+            "response.output_item.done" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseOutputItemDone)
+            }
+            "response.output_text.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseTextDelta)
+            }
+            "response.output_text.done" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseTextDone)
+            }
+            "session.created" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventSessionCreated)
+            }
+            "session.updated" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventSessionUpdated)
+            }
+            "output_audio_buffer.started" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventOutputAudioBufferStarted)
+            }
+            "output_audio_buffer.stopped" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventOutputAudioBufferStopped)
+            }
+            "output_audio_buffer.cleared" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventOutputAudioBufferCleared)
+            }
+            "conversation.item.added" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventConversationItemAdded)
+            }
+            "conversation.item.done" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventConversationItemDone)
+            }
+            "input_audio_buffer.timeout_triggered" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventInputAudioBufferTimeoutTriggered)
+            }
+            "conversation.item.input_audio_transcription.segment" => {
+                serde_json::from_value(value)
+                    .map(
+                        Self::RealtimeServerEventConversationItemInputAudioTranscriptionSegment,
+                    )
+            }
+            "mcp_list_tools.in_progress" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventMCPListToolsInProgress)
+            }
+            "mcp_list_tools.completed" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventMCPListToolsCompleted)
+            }
+            "mcp_list_tools.failed" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventMCPListToolsFailed)
+            }
+            "response.mcp_call_arguments.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseMCPCallArgumentsDelta)
+            }
+            "response.mcp_call_arguments.done" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseMCPCallArgumentsDone)
+            }
+            "response.mcp_call.in_progress" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseMCPCallInProgress)
+            }
+            "response.mcp_call.completed" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseMCPCallCompleted)
+            }
+            "response.mcp_call.failed" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeServerEventResponseMCPCallFailed)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `RealtimeServerEvent`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`RealtimeServerEvent` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for RealtimeServerEvent {
     fn default() -> Self {
@@ -14257,7 +15393,7 @@ impl schematic_define::Registration for RealtimeTranscriptionSessionCreateRespon
 }
 ///A Realtime translation client event.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum RealtimeTranslationClientEvent {
@@ -14270,6 +15406,56 @@ pub enum RealtimeTranslationClientEvent {
     RealtimeTranslationClientEventSessionClose(
         RealtimeTranslationClientEventSessionClose,
     ),
+}
+impl<'de> Deserialize<'de> for RealtimeTranslationClientEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`RealtimeTranslationClientEvent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "session.update" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeTranslationClientEventSessionUpdate)
+            }
+            "session.input_audio_buffer.append" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeTranslationClientEventInputAudioBufferAppend)
+            }
+            "session.close" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeTranslationClientEventSessionClose)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `RealtimeTranslationClientEvent`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`RealtimeTranslationClientEvent` with `type` `{}`: {}", tag, error
+                ),
+            ))
+    }
 }
 impl Default for RealtimeTranslationClientEvent {
     fn default() -> Self {
@@ -14415,7 +15601,7 @@ impl schematic_define::Registration for RealtimeTranslationClientSecretCreateRes
 }
 ///A Realtime translation server event.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum RealtimeTranslationServerEvent {
@@ -14438,6 +15624,71 @@ pub enum RealtimeTranslationServerEvent {
     RealtimeTranslationServerEventSessionOutputAudioDelta(
         RealtimeTranslationServerEventSessionOutputAudioDelta,
     ),
+}
+impl<'de> Deserialize<'de> for RealtimeTranslationServerEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`RealtimeTranslationServerEvent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "error" => serde_json::from_value(value).map(Self::RealtimeServerEventError),
+            "session.created" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeTranslationServerEventSessionCreated)
+            }
+            "session.updated" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeTranslationServerEventSessionUpdated)
+            }
+            "session.closed" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeTranslationServerEventSessionClosed)
+            }
+            "session.input_transcript.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeTranslationServerEventSessionInputTranscriptDelta)
+            }
+            "session.output_transcript.delta" => {
+                serde_json::from_value(value)
+                    .map(
+                        Self::RealtimeTranslationServerEventSessionOutputTranscriptDelta,
+                    )
+            }
+            "session.output_audio.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::RealtimeTranslationServerEventSessionOutputAudioDelta)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `RealtimeTranslationServerEvent`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`RealtimeTranslationServerEvent` with `type` `{}`: {}", tag, error
+                ),
+            ))
+    }
 }
 impl Default for RealtimeTranslationServerEvent {
     fn default() -> Self {
@@ -16314,7 +17565,7 @@ impl schematic_define::Registration for ResponseRefusalDoneEvent {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ResponseStreamEvent {
@@ -16375,6 +17626,227 @@ pub enum ResponseStreamEvent {
     ResponseQueuedEvent(ResponseQueuedEvent),
     ResponseCustomToolCallInputDeltaEvent(ResponseCustomToolCallInputDeltaEvent),
     ResponseCustomToolCallInputDoneEvent(ResponseCustomToolCallInputDoneEvent),
+}
+impl<'de> Deserialize<'de> for ResponseStreamEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`ResponseStreamEvent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "response.audio.delta" => {
+                serde_json::from_value(value).map(Self::ResponseAudioDeltaEvent)
+            }
+            "response.audio.done" => {
+                serde_json::from_value(value).map(Self::ResponseAudioDoneEvent)
+            }
+            "response.audio.transcript.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseAudioTranscriptDeltaEvent)
+            }
+            "response.audio.transcript.done" => {
+                serde_json::from_value(value).map(Self::ResponseAudioTranscriptDoneEvent)
+            }
+            "response.code_interpreter_call_code.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseCodeInterpreterCallCodeDeltaEvent)
+            }
+            "response.code_interpreter_call_code.done" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseCodeInterpreterCallCodeDoneEvent)
+            }
+            "response.code_interpreter_call.completed" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseCodeInterpreterCallCompletedEvent)
+            }
+            "response.code_interpreter_call.in_progress" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseCodeInterpreterCallInProgressEvent)
+            }
+            "response.code_interpreter_call.interpreting" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseCodeInterpreterCallInterpretingEvent)
+            }
+            "response.completed" => {
+                serde_json::from_value(value).map(Self::ResponseCompletedEvent)
+            }
+            "response.content_part.added" => {
+                serde_json::from_value(value).map(Self::ResponseContentPartAddedEvent)
+            }
+            "response.content_part.done" => {
+                serde_json::from_value(value).map(Self::ResponseContentPartDoneEvent)
+            }
+            "response.created" => {
+                serde_json::from_value(value).map(Self::ResponseCreatedEvent)
+            }
+            "error" => serde_json::from_value(value).map(Self::ResponseErrorEvent),
+            "response.file_search_call.completed" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseFileSearchCallCompletedEvent)
+            }
+            "response.file_search_call.in_progress" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseFileSearchCallInProgressEvent)
+            }
+            "response.file_search_call.searching" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseFileSearchCallSearchingEvent)
+            }
+            "response.function_call_arguments.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseFunctionCallArgumentsDeltaEvent)
+            }
+            "response.function_call_arguments.done" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseFunctionCallArgumentsDoneEvent)
+            }
+            "response.in_progress" => {
+                serde_json::from_value(value).map(Self::ResponseInProgressEvent)
+            }
+            "response.failed" => {
+                serde_json::from_value(value).map(Self::ResponseFailedEvent)
+            }
+            "response.incomplete" => {
+                serde_json::from_value(value).map(Self::ResponseIncompleteEvent)
+            }
+            "response.output_item.added" => {
+                serde_json::from_value(value).map(Self::ResponseOutputItemAddedEvent)
+            }
+            "response.output_item.done" => {
+                serde_json::from_value(value).map(Self::ResponseOutputItemDoneEvent)
+            }
+            "response.reasoning_summary_part.added" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseReasoningSummaryPartAddedEvent)
+            }
+            "response.reasoning_summary_part.done" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseReasoningSummaryPartDoneEvent)
+            }
+            "response.reasoning_summary_text.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseReasoningSummaryTextDeltaEvent)
+            }
+            "response.reasoning_summary_text.done" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseReasoningSummaryTextDoneEvent)
+            }
+            "response.reasoning_text.delta" => {
+                serde_json::from_value(value).map(Self::ResponseReasoningTextDeltaEvent)
+            }
+            "response.reasoning_text.done" => {
+                serde_json::from_value(value).map(Self::ResponseReasoningTextDoneEvent)
+            }
+            "response.refusal.delta" => {
+                serde_json::from_value(value).map(Self::ResponseRefusalDeltaEvent)
+            }
+            "response.refusal.done" => {
+                serde_json::from_value(value).map(Self::ResponseRefusalDoneEvent)
+            }
+            "response.output_text.delta" => {
+                serde_json::from_value(value).map(Self::ResponseTextDeltaEvent)
+            }
+            "response.output_text.done" => {
+                serde_json::from_value(value).map(Self::ResponseTextDoneEvent)
+            }
+            "response.web_search_call.completed" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseWebSearchCallCompletedEvent)
+            }
+            "response.web_search_call.in_progress" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseWebSearchCallInProgressEvent)
+            }
+            "response.web_search_call.searching" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseWebSearchCallSearchingEvent)
+            }
+            "response.image_generation_call.completed" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseImageGenCallCompletedEvent)
+            }
+            "response.image_generation_call.generating" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseImageGenCallGeneratingEvent)
+            }
+            "response.image_generation_call.in_progress" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseImageGenCallInProgressEvent)
+            }
+            "response.image_generation_call.partial_image" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseImageGenCallPartialImageEvent)
+            }
+            "response.mcp_call_arguments.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseMCPCallArgumentsDeltaEvent)
+            }
+            "response.mcp_call_arguments.done" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseMCPCallArgumentsDoneEvent)
+            }
+            "response.mcp_call.completed" => {
+                serde_json::from_value(value).map(Self::ResponseMCPCallCompletedEvent)
+            }
+            "response.mcp_call.failed" => {
+                serde_json::from_value(value).map(Self::ResponseMCPCallFailedEvent)
+            }
+            "response.mcp_call.in_progress" => {
+                serde_json::from_value(value).map(Self::ResponseMCPCallInProgressEvent)
+            }
+            "response.mcp_list_tools.completed" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseMCPListToolsCompletedEvent)
+            }
+            "response.mcp_list_tools.failed" => {
+                serde_json::from_value(value).map(Self::ResponseMCPListToolsFailedEvent)
+            }
+            "response.mcp_list_tools.in_progress" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseMCPListToolsInProgressEvent)
+            }
+            "response.output_text.annotation.added" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseOutputTextAnnotationAddedEvent)
+            }
+            "response.queued" => {
+                serde_json::from_value(value).map(Self::ResponseQueuedEvent)
+            }
+            "response.custom_tool_call_input.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseCustomToolCallInputDeltaEvent)
+            }
+            "response.custom_tool_call_input.done" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponseCustomToolCallInputDoneEvent)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `ResponseStreamEvent`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`ResponseStreamEvent` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for ResponseStreamEvent {
     fn default() -> Self {
@@ -16590,11 +18062,50 @@ impl schematic_define::Registration for ResponseWebSearchCallSearchingEvent {
 }
 ///Client events accepted by the Responses WebSocket server.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ResponsesClientEvent {
     ResponsesClientEventResponseCreate(ResponsesClientEventResponseCreate),
+}
+impl<'de> Deserialize<'de> for ResponsesClientEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`ResponsesClientEvent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "response.create" => {
+                serde_json::from_value(value)
+                    .map(Self::ResponsesClientEventResponseCreate)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `ResponsesClientEvent`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`ResponsesClientEvent` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for ResponsesClientEvent {
     fn default() -> Self {
@@ -16635,11 +18146,82 @@ impl schematic_define::Registration for ResponsesClientEventResponseCreate {
 }
 ///Server events emitted by the Responses WebSocket server.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ResponsesServerEvent {
     ResponseStreamEvent(ResponseStreamEvent),
+}
+impl<'de> Deserialize<'de> for ResponsesServerEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`ResponsesServerEvent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "response.audio.delta" | "response.audio.done"
+            | "response.audio.transcript.delta" | "response.audio.transcript.done"
+            | "response.code_interpreter_call_code.delta"
+            | "response.code_interpreter_call_code.done"
+            | "response.code_interpreter_call.completed"
+            | "response.code_interpreter_call.in_progress"
+            | "response.code_interpreter_call.interpreting" | "response.completed"
+            | "response.content_part.added" | "response.content_part.done"
+            | "response.created" | "error" | "response.file_search_call.completed"
+            | "response.file_search_call.in_progress"
+            | "response.file_search_call.searching"
+            | "response.function_call_arguments.delta"
+            | "response.function_call_arguments.done" | "response.in_progress"
+            | "response.failed" | "response.incomplete" | "response.output_item.added"
+            | "response.output_item.done" | "response.reasoning_summary_part.added"
+            | "response.reasoning_summary_part.done"
+            | "response.reasoning_summary_text.delta"
+            | "response.reasoning_summary_text.done" | "response.reasoning_text.delta"
+            | "response.reasoning_text.done" | "response.refusal.delta"
+            | "response.refusal.done" | "response.output_text.delta"
+            | "response.output_text.done" | "response.web_search_call.completed"
+            | "response.web_search_call.in_progress"
+            | "response.web_search_call.searching"
+            | "response.image_generation_call.completed"
+            | "response.image_generation_call.generating"
+            | "response.image_generation_call.in_progress"
+            | "response.image_generation_call.partial_image"
+            | "response.mcp_call_arguments.delta" | "response.mcp_call_arguments.done"
+            | "response.mcp_call.completed" | "response.mcp_call.failed"
+            | "response.mcp_call.in_progress" | "response.mcp_list_tools.completed"
+            | "response.mcp_list_tools.failed" | "response.mcp_list_tools.in_progress"
+            | "response.output_text.annotation.added" | "response.queued"
+            | "response.custom_tool_call_input.delta"
+            | "response.custom_tool_call_input.done" => {
+                serde_json::from_value(value).map(Self::ResponseStreamEvent)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `ResponsesServerEvent`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`ResponsesServerEvent` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for ResponsesServerEvent {
     fn default() -> Self {
@@ -17655,7 +19237,7 @@ impl schematic_define::Registration for ToggleCertificatesRequest {
 }
 ///A tool that can be used to generate a response.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum Tool {
@@ -17675,6 +19257,63 @@ pub enum Tool {
     ToolSearchToolParam(ToolSearchToolParam),
     WebSearchPreviewTool(WebSearchPreviewTool),
     ApplyPatchToolParam(ApplyPatchToolParam),
+}
+impl<'de> Deserialize<'de> for Tool {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom("`Tool` discriminator `type` is not a string"),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "function" => serde_json::from_value(value).map(Self::FunctionTool),
+            "file_search" => serde_json::from_value(value).map(Self::FileSearchTool),
+            "computer" => serde_json::from_value(value).map(Self::ComputerTool),
+            "computer_use_preview" => {
+                serde_json::from_value(value).map(Self::ComputerUsePreviewTool)
+            }
+            "web_search" | "web_search_2025_08_26" => {
+                serde_json::from_value(value).map(Self::WebSearchTool)
+            }
+            "mcp" => serde_json::from_value(value).map(Self::MCPTool),
+            "code_interpreter" => {
+                serde_json::from_value(value).map(Self::CodeInterpreterTool)
+            }
+            "programmatic_tool_calling" => {
+                serde_json::from_value(value).map(Self::ProgrammaticToolCallingParam)
+            }
+            "image_generation" => serde_json::from_value(value).map(Self::ImageGenTool),
+            "local_shell" => serde_json::from_value(value).map(Self::LocalShellToolParam),
+            "shell" => serde_json::from_value(value).map(Self::FunctionShellToolParam),
+            "custom" => serde_json::from_value(value).map(Self::CustomToolParam),
+            "namespace" => serde_json::from_value(value).map(Self::NamespaceToolParam),
+            "tool_search" => serde_json::from_value(value).map(Self::ToolSearchToolParam),
+            "web_search_preview" | "web_search_preview_2025_03_11" => {
+                serde_json::from_value(value).map(Self::WebSearchPreviewTool)
+            }
+            "apply_patch" => serde_json::from_value(value).map(Self::ApplyPatchToolParam),
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!("unknown `type` value `{}` for `Tool`", tag),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`Tool` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for Tool {
     fn default() -> Self {
@@ -20409,7 +22048,7 @@ impl schematic_define::Registration for ContainerFileCitationBody {
 }
 ///An annotation that applies to a span of output text.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum Annotation {
@@ -20417,6 +22056,43 @@ pub enum Annotation {
     UrlCitationBody(UrlCitationBody),
     ContainerFileCitationBody(ContainerFileCitationBody),
     FilePath(FilePath),
+}
+impl<'de> Deserialize<'de> for Annotation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom("`Annotation` discriminator `type` is not a string"),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "file_citation" => serde_json::from_value(value).map(Self::FileCitationBody),
+            "url_citation" => serde_json::from_value(value).map(Self::UrlCitationBody),
+            "container_file_citation" => {
+                serde_json::from_value(value).map(Self::ContainerFileCitationBody)
+            }
+            "file_path" => serde_json::from_value(value).map(Self::FilePath),
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!("unknown `type` value `{}` for `Annotation`", tag),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`Annotation` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for Annotation {
     fn default() -> Self {
@@ -20747,12 +22423,49 @@ impl schematic_define::Registration for ProgramToolCallCaller {
 }
 ///The execution context that produced this tool call.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ToolCallCaller {
     DirectToolCallCaller(DirectToolCallCaller),
     ProgramToolCallCaller(ProgramToolCallCaller),
+}
+impl<'de> Deserialize<'de> for ToolCallCaller {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`ToolCallCaller` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "direct" => serde_json::from_value(value).map(Self::DirectToolCallCaller),
+            "program" => serde_json::from_value(value).map(Self::ProgramToolCallCaller),
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `ToolCallCaller`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`ToolCallCaller` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for ToolCallCaller {
     fn default() -> Self {
@@ -20824,12 +22537,53 @@ impl schematic_define::Registration for ProgramToolCallCallerParam {
 }
 ///The execution context that produced this tool call.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ToolCallCallerParam {
     DirectToolCallCallerParam(DirectToolCallCallerParam),
     ProgramToolCallCallerParam(ProgramToolCallCallerParam),
+}
+impl<'de> Deserialize<'de> for ToolCallCallerParam {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`ToolCallCallerParam` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "direct" => {
+                serde_json::from_value(value).map(Self::DirectToolCallCallerParam)
+            }
+            "program" => {
+                serde_json::from_value(value).map(Self::ProgramToolCallCallerParam)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `ToolCallCallerParam`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`ToolCallCallerParam` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for ToolCallCallerParam {
     fn default() -> Self {
@@ -22946,7 +24700,7 @@ impl schematic_define::Registration for FunctionShellCallOutputExitOutcomeParam 
 }
 ///The exit or timeout outcome associated with this shell call.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum FunctionShellCallOutputOutcomeParam {
@@ -22954,6 +24708,53 @@ pub enum FunctionShellCallOutputOutcomeParam {
         FunctionShellCallOutputTimeoutOutcomeParam,
     ),
     FunctionShellCallOutputExitOutcomeParam(FunctionShellCallOutputExitOutcomeParam),
+}
+impl<'de> Deserialize<'de> for FunctionShellCallOutputOutcomeParam {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`FunctionShellCallOutputOutcomeParam` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "timeout" => {
+                serde_json::from_value(value)
+                    .map(Self::FunctionShellCallOutputTimeoutOutcomeParam)
+            }
+            "exit" => {
+                serde_json::from_value(value)
+                    .map(Self::FunctionShellCallOutputExitOutcomeParam)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `FunctionShellCallOutputOutcomeParam`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`FunctionShellCallOutputOutcomeParam` with `type` `{}`: {}", tag,
+                    error
+                ),
+            ))
+    }
 }
 impl Default for FunctionShellCallOutputOutcomeParam {
     fn default() -> Self {
@@ -23106,13 +24907,63 @@ impl schematic_define::Registration for ApplyPatchUpdateFileOperationParam {
 }
 ///One of the create_file, delete_file, or update_file operations supplied to the apply_patch tool.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ApplyPatchOperationParam {
     ApplyPatchCreateFileOperationParam(ApplyPatchCreateFileOperationParam),
     ApplyPatchDeleteFileOperationParam(ApplyPatchDeleteFileOperationParam),
     ApplyPatchUpdateFileOperationParam(ApplyPatchUpdateFileOperationParam),
+}
+impl<'de> Deserialize<'de> for ApplyPatchOperationParam {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`ApplyPatchOperationParam` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "create_file" => {
+                serde_json::from_value(value)
+                    .map(Self::ApplyPatchCreateFileOperationParam)
+            }
+            "delete_file" => {
+                serde_json::from_value(value)
+                    .map(Self::ApplyPatchDeleteFileOperationParam)
+            }
+            "update_file" => {
+                serde_json::from_value(value)
+                    .map(Self::ApplyPatchUpdateFileOperationParam)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `ApplyPatchOperationParam`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`ApplyPatchOperationParam` with `type` `{}`: {}", tag, error
+                ),
+            ))
+    }
 }
 impl Default for ApplyPatchOperationParam {
     fn default() -> Self {
@@ -24566,7 +26417,7 @@ impl schematic_define::Registration for CompactResponseMethodPublicBody {
 }
 ///An item representing a message, tool call, tool output, reasoning, or other response element.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ItemField {
@@ -24598,6 +26449,97 @@ pub enum ItemField {
     MCPToolCall(MCPToolCall),
     CustomToolCall(CustomToolCall),
     CustomToolCallOutput(CustomToolCallOutput),
+}
+impl<'de> Deserialize<'de> for ItemField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom("`ItemField` discriminator `type` is not a string"),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "message" => serde_json::from_value(value).map(Self::Message),
+            "program" => serde_json::from_value(value).map(Self::Program),
+            "program_output" => serde_json::from_value(value).map(Self::ProgramOutput),
+            "function_call" => serde_json::from_value(value).map(Self::FunctionToolCall),
+            "tool_search_call" => serde_json::from_value(value).map(Self::ToolSearchCall),
+            "tool_search_output" => {
+                serde_json::from_value(value).map(Self::ToolSearchOutput)
+            }
+            "additional_tools" => {
+                serde_json::from_value(value).map(Self::AdditionalTools)
+            }
+            "function_call_output" => {
+                serde_json::from_value(value).map(Self::FunctionToolCallOutput)
+            }
+            "file_search_call" => {
+                serde_json::from_value(value).map(Self::FileSearchToolCall)
+            }
+            "web_search_call" => {
+                serde_json::from_value(value).map(Self::WebSearchToolCall)
+            }
+            "image_generation_call" => {
+                serde_json::from_value(value).map(Self::ImageGenToolCall)
+            }
+            "computer_call" => serde_json::from_value(value).map(Self::ComputerToolCall),
+            "computer_call_output" => {
+                serde_json::from_value(value).map(Self::ComputerToolCallOutputResource)
+            }
+            "reasoning" => serde_json::from_value(value).map(Self::ReasoningItem),
+            "compaction" => serde_json::from_value(value).map(Self::CompactionBody),
+            "code_interpreter_call" => {
+                serde_json::from_value(value).map(Self::CodeInterpreterToolCall)
+            }
+            "local_shell_call" => {
+                serde_json::from_value(value).map(Self::LocalShellToolCall)
+            }
+            "local_shell_call_output" => {
+                serde_json::from_value(value).map(Self::LocalShellToolCallOutput)
+            }
+            "shell_call" => serde_json::from_value(value).map(Self::FunctionShellCall),
+            "shell_call_output" => {
+                serde_json::from_value(value).map(Self::FunctionShellCallOutput)
+            }
+            "apply_patch_call" => {
+                serde_json::from_value(value).map(Self::ApplyPatchToolCall)
+            }
+            "apply_patch_call_output" => {
+                serde_json::from_value(value).map(Self::ApplyPatchToolCallOutput)
+            }
+            "mcp_list_tools" => serde_json::from_value(value).map(Self::MCPListTools),
+            "mcp_approval_request" => {
+                serde_json::from_value(value).map(Self::MCPApprovalRequest)
+            }
+            "mcp_approval_response" => {
+                serde_json::from_value(value).map(Self::MCPApprovalResponseResource)
+            }
+            "mcp_call" => serde_json::from_value(value).map(Self::MCPToolCall),
+            "custom_tool_call" => serde_json::from_value(value).map(Self::CustomToolCall),
+            "custom_tool_call_output" => {
+                serde_json::from_value(value).map(Self::CustomToolCallOutput)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!("unknown `type` value `{}` for `ItemField`", tag),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`ItemField` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for ItemField {
     fn default() -> Self {
@@ -25571,7 +27513,7 @@ impl schematic_define::Registration for TaskGroupItem {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ThreadItem {
@@ -25581,6 +27523,53 @@ pub enum ThreadItem {
     ClientToolCallItem(ClientToolCallItem),
     TaskItem(TaskItem),
     TaskGroupItem(TaskGroupItem),
+}
+impl<'de> Deserialize<'de> for ThreadItem {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom("`ThreadItem` discriminator `type` is not a string"),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "chatkit.user_message" => {
+                serde_json::from_value(value).map(Self::UserMessageItem)
+            }
+            "chatkit.assistant_message" => {
+                serde_json::from_value(value).map(Self::AssistantMessageItem)
+            }
+            "chatkit.widget" => {
+                serde_json::from_value(value).map(Self::WidgetMessageItem)
+            }
+            "chatkit.client_tool_call" => {
+                serde_json::from_value(value).map(Self::ClientToolCallItem)
+            }
+            "chatkit.task" => serde_json::from_value(value).map(Self::TaskItem),
+            "chatkit.task_group" => {
+                serde_json::from_value(value).map(Self::TaskGroupItem)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!("unknown `type` value `{}` for `ThreadItem`", tag),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`ThreadItem` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for ThreadItem {
     fn default() -> Self {
@@ -26353,7 +28342,7 @@ impl schematic_define::Registration for BetaResponseFormatText {
 }
 ///A tool that can be used to generate a response.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaTool {
@@ -26373,6 +28362,75 @@ pub enum BetaTool {
     BetaToolSearchToolParam(BetaToolSearchToolParam),
     BetaWebSearchPreviewTool(BetaWebSearchPreviewTool),
     BetaApplyPatchToolParam(BetaApplyPatchToolParam),
+}
+impl<'de> Deserialize<'de> for BetaTool {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom("`BetaTool` discriminator `type` is not a string"),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "function" => serde_json::from_value(value).map(Self::BetaFunctionTool),
+            "file_search" => serde_json::from_value(value).map(Self::BetaFileSearchTool),
+            "computer" => serde_json::from_value(value).map(Self::BetaComputerTool),
+            "computer_use_preview" => {
+                serde_json::from_value(value).map(Self::BetaComputerUsePreviewTool)
+            }
+            "web_search" | "web_search_2025_08_26" => {
+                serde_json::from_value(value).map(Self::BetaWebSearchTool)
+            }
+            "mcp" => serde_json::from_value(value).map(Self::BetaMCPTool),
+            "code_interpreter" => {
+                serde_json::from_value(value).map(Self::BetaCodeInterpreterTool)
+            }
+            "programmatic_tool_calling" => {
+                serde_json::from_value(value).map(Self::BetaProgrammaticToolCallingParam)
+            }
+            "image_generation" => {
+                serde_json::from_value(value).map(Self::BetaImageGenTool)
+            }
+            "local_shell" => {
+                serde_json::from_value(value).map(Self::BetaLocalShellToolParam)
+            }
+            "shell" => {
+                serde_json::from_value(value).map(Self::BetaFunctionShellToolParam)
+            }
+            "custom" => serde_json::from_value(value).map(Self::BetaCustomToolParam),
+            "namespace" => {
+                serde_json::from_value(value).map(Self::BetaNamespaceToolParam)
+            }
+            "tool_search" => {
+                serde_json::from_value(value).map(Self::BetaToolSearchToolParam)
+            }
+            "web_search_preview" | "web_search_preview_2025_03_11" => {
+                serde_json::from_value(value).map(Self::BetaWebSearchPreviewTool)
+            }
+            "apply_patch" => {
+                serde_json::from_value(value).map(Self::BetaApplyPatchToolParam)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!("unknown `type` value `{}` for `BetaTool`", tag),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`BetaTool` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for BetaTool {
     fn default() -> Self {
@@ -27695,12 +29753,51 @@ impl schematic_define::Registration for BetaCustomToolCall {
 }
 ///The execution context that produced this tool call.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaToolCallCaller {
     BetaDirectToolCallCaller(BetaDirectToolCallCaller),
     BetaProgramToolCallCaller(BetaProgramToolCallCaller),
+}
+impl<'de> Deserialize<'de> for BetaToolCallCaller {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaToolCallCaller` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "direct" => serde_json::from_value(value).map(Self::BetaDirectToolCallCaller),
+            "program" => {
+                serde_json::from_value(value).map(Self::BetaProgramToolCallCaller)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaToolCallCaller`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`BetaToolCallCaller` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for BetaToolCallCaller {
     fn default() -> Self {
@@ -27795,13 +29892,57 @@ impl schematic_define::Registration for BetaCustomToolCallOutput {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaFunctionAndCustomToolCallOutput {
     BetaInputTextContent(BetaInputTextContent),
     BetaInputImageContent(BetaInputImageContent),
     BetaInputFileContent(BetaInputFileContent),
+}
+impl<'de> Deserialize<'de> for BetaFunctionAndCustomToolCallOutput {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaFunctionAndCustomToolCallOutput` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "input_text" => serde_json::from_value(value).map(Self::BetaInputTextContent),
+            "input_image" => {
+                serde_json::from_value(value).map(Self::BetaInputImageContent)
+            }
+            "input_file" => serde_json::from_value(value).map(Self::BetaInputFileContent),
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaFunctionAndCustomToolCallOutput`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`BetaFunctionAndCustomToolCallOutput` with `type` `{}`: {}", tag,
+                    error
+                ),
+            ))
+    }
 }
 impl Default for BetaFunctionAndCustomToolCallOutput {
     fn default() -> Self {
@@ -27953,12 +30094,56 @@ impl schematic_define::Registration for BetaInputTextContent {
 }
 ///The execution context that produced this tool call.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaToolCallCallerParam {
     BetaDirectToolCallCallerParam(BetaDirectToolCallCallerParam),
     BetaProgramToolCallCallerParam(BetaProgramToolCallCallerParam),
+}
+impl<'de> Deserialize<'de> for BetaToolCallCallerParam {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaToolCallCallerParam` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "direct" => {
+                serde_json::from_value(value).map(Self::BetaDirectToolCallCallerParam)
+            }
+            "program" => {
+                serde_json::from_value(value).map(Self::BetaProgramToolCallCallerParam)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaToolCallCallerParam`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`BetaToolCallCallerParam` with `type` `{}`: {}", tag, error
+                ),
+            ))
+    }
 }
 impl Default for BetaToolCallCallerParam {
     fn default() -> Self {
@@ -28256,13 +30441,63 @@ impl schematic_define::Registration for BetaApplyPatchToolCallItemParam {
 }
 ///One of the create_file, delete_file, or update_file operations supplied to the apply_patch tool.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaApplyPatchOperationParam {
     BetaApplyPatchCreateFileOperationParam(BetaApplyPatchCreateFileOperationParam),
     BetaApplyPatchDeleteFileOperationParam(BetaApplyPatchDeleteFileOperationParam),
     BetaApplyPatchUpdateFileOperationParam(BetaApplyPatchUpdateFileOperationParam),
+}
+impl<'de> Deserialize<'de> for BetaApplyPatchOperationParam {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaApplyPatchOperationParam` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "create_file" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaApplyPatchCreateFileOperationParam)
+            }
+            "delete_file" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaApplyPatchDeleteFileOperationParam)
+            }
+            "update_file" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaApplyPatchUpdateFileOperationParam)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaApplyPatchOperationParam`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`BetaApplyPatchOperationParam` with `type` `{}`: {}", tag, error
+                ),
+            ))
+    }
 }
 impl Default for BetaApplyPatchOperationParam {
     fn default() -> Self {
@@ -28439,7 +30674,7 @@ impl schematic_define::Registration for BetaFunctionShellCallOutputContentParam 
 }
 ///The exit or timeout outcome associated with this shell call.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaFunctionShellCallOutputOutcomeParam {
@@ -28449,6 +30684,53 @@ pub enum BetaFunctionShellCallOutputOutcomeParam {
     BetaFunctionShellCallOutputExitOutcomeParam(
         BetaFunctionShellCallOutputExitOutcomeParam,
     ),
+}
+impl<'de> Deserialize<'de> for BetaFunctionShellCallOutputOutcomeParam {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaFunctionShellCallOutputOutcomeParam` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "timeout" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaFunctionShellCallOutputTimeoutOutcomeParam)
+            }
+            "exit" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaFunctionShellCallOutputExitOutcomeParam)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaFunctionShellCallOutputOutcomeParam`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`BetaFunctionShellCallOutputOutcomeParam` with `type` `{}`: {}",
+                    tag, error
+                ),
+            ))
+    }
 }
 impl Default for BetaFunctionShellCallOutputOutcomeParam {
     fn default() -> Self {
@@ -29573,7 +31855,7 @@ impl schematic_define::Registration for BetaComputerToolCall {
 `type` discriminator and action-specific fields.*/
 pub type BetaComputerActionList = Vec<BetaComputerAction>;
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaComputerAction {
@@ -29586,6 +31868,52 @@ pub enum BetaComputerAction {
     BetaScrollParam(BetaScrollParam),
     BetaTypeParam(BetaTypeParam),
     BetaWaitParam(BetaWaitParam),
+}
+impl<'de> Deserialize<'de> for BetaComputerAction {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaComputerAction` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "click" => serde_json::from_value(value).map(Self::BetaClickParam),
+            "double_click" => {
+                serde_json::from_value(value).map(Self::BetaDoubleClickAction)
+            }
+            "drag" => serde_json::from_value(value).map(Self::BetaDragParam),
+            "keypress" => serde_json::from_value(value).map(Self::BetaKeyPressAction),
+            "move" => serde_json::from_value(value).map(Self::BetaMoveParam),
+            "screenshot" => serde_json::from_value(value).map(Self::BetaScreenshotParam),
+            "scroll" => serde_json::from_value(value).map(Self::BetaScrollParam),
+            "type" => serde_json::from_value(value).map(Self::BetaTypeParam),
+            "wait" => serde_json::from_value(value).map(Self::BetaWaitParam),
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaComputerAction`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`BetaComputerAction` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for BetaComputerAction {
     fn default() -> Self {
@@ -29933,12 +32261,54 @@ impl schematic_define::Registration for BetaMessagePhase {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaOutputMessageContent {
     BetaOutputTextContent(BetaOutputTextContent),
     BetaRefusalContent(BetaRefusalContent),
+}
+impl<'de> Deserialize<'de> for BetaOutputMessageContent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaOutputMessageContent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "output_text" => {
+                serde_json::from_value(value).map(Self::BetaOutputTextContent)
+            }
+            "refusal" => serde_json::from_value(value).map(Self::BetaRefusalContent),
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaOutputMessageContent`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`BetaOutputMessageContent` with `type` `{}`: {}", tag, error
+                ),
+            ))
+    }
 }
 impl Default for BetaOutputMessageContent {
     fn default() -> Self {
@@ -30031,7 +32401,7 @@ impl schematic_define::Registration for BetaTopLogProb {
 }
 ///An annotation that applies to a span of output text.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaAnnotation {
@@ -30039,6 +32409,51 @@ pub enum BetaAnnotation {
     BetaUrlCitationBody(BetaUrlCitationBody),
     BetaContainerFileCitationBody(BetaContainerFileCitationBody),
     BetaFilePath(BetaFilePath),
+}
+impl<'de> Deserialize<'de> for BetaAnnotation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaAnnotation` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "file_citation" => {
+                serde_json::from_value(value).map(Self::BetaFileCitationBody)
+            }
+            "url_citation" => {
+                serde_json::from_value(value).map(Self::BetaUrlCitationBody)
+            }
+            "container_file_citation" => {
+                serde_json::from_value(value).map(Self::BetaContainerFileCitationBody)
+            }
+            "file_path" => serde_json::from_value(value).map(Self::BetaFilePath),
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaAnnotation`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`BetaAnnotation` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for BetaAnnotation {
     fn default() -> Self {
@@ -30180,13 +32595,53 @@ impl schematic_define::Registration for BetaInputMessage {
 types.*/
 pub type BetaInputMessageContentList = Vec<BetaInputContent>;
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaInputContent {
     BetaInputTextContent(BetaInputTextContent),
     BetaInputImageContent(BetaInputImageContent),
     BetaInputFileContent(BetaInputFileContent),
+}
+impl<'de> Deserialize<'de> for BetaInputContent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaInputContent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "input_text" => serde_json::from_value(value).map(Self::BetaInputTextContent),
+            "input_image" => {
+                serde_json::from_value(value).map(Self::BetaInputImageContent)
+            }
+            "input_file" => serde_json::from_value(value).map(Self::BetaInputFileContent),
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaInputContent`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`BetaInputContent` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for BetaInputContent {
     fn default() -> Self {
@@ -30467,7 +32922,7 @@ impl schematic_define::Registration for BetaResponseItemList {
 }
 ///Content item used to generate a response.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaItemResource {
@@ -30503,6 +32958,127 @@ pub enum BetaItemResource {
     BetaMCPToolCall(BetaMCPToolCall),
     BetaCustomToolCallResource(BetaCustomToolCallResource),
     BetaCustomToolCallOutputResource(BetaCustomToolCallOutputResource),
+}
+impl<'de> Deserialize<'de> for BetaItemResource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaItemResource` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "message" => {
+                if let Ok(decoded) = serde_json::from_value(value.clone()) {
+                    return Ok(Self::BetaInputMessageResource(decoded));
+                }
+                serde_json::from_value(value).map(Self::BetaOutputMessage)
+            }
+            "file_search_call" => {
+                serde_json::from_value(value).map(Self::BetaFileSearchToolCall)
+            }
+            "computer_call" => {
+                serde_json::from_value(value).map(Self::BetaComputerToolCall)
+            }
+            "computer_call_output" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaComputerToolCallOutputResource)
+            }
+            "web_search_call" => {
+                serde_json::from_value(value).map(Self::BetaWebSearchToolCall)
+            }
+            "function_call" => {
+                serde_json::from_value(value).map(Self::BetaFunctionToolCallResource)
+            }
+            "function_call_output" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaFunctionToolCallOutputResource)
+            }
+            "agent_message" => serde_json::from_value(value).map(Self::BetaAgentMessage),
+            "multi_agent_call" => {
+                serde_json::from_value(value).map(Self::BetaMultiAgentCall)
+            }
+            "multi_agent_call_output" => {
+                serde_json::from_value(value).map(Self::BetaMultiAgentCallOutput)
+            }
+            "tool_search_call" => {
+                serde_json::from_value(value).map(Self::BetaToolSearchCall)
+            }
+            "tool_search_output" => {
+                serde_json::from_value(value).map(Self::BetaToolSearchOutput)
+            }
+            "additional_tools" => {
+                serde_json::from_value(value).map(Self::BetaAdditionalTools)
+            }
+            "reasoning" => serde_json::from_value(value).map(Self::BetaReasoningItem),
+            "program" => serde_json::from_value(value).map(Self::BetaProgram),
+            "program_output" => {
+                serde_json::from_value(value).map(Self::BetaProgramOutput)
+            }
+            "compaction" => serde_json::from_value(value).map(Self::BetaCompactionBody),
+            "image_generation_call" => {
+                serde_json::from_value(value).map(Self::BetaImageGenToolCall)
+            }
+            "code_interpreter_call" => {
+                serde_json::from_value(value).map(Self::BetaCodeInterpreterToolCall)
+            }
+            "local_shell_call" => {
+                serde_json::from_value(value).map(Self::BetaLocalShellToolCall)
+            }
+            "local_shell_call_output" => {
+                serde_json::from_value(value).map(Self::BetaLocalShellToolCallOutput)
+            }
+            "shell_call" => {
+                serde_json::from_value(value).map(Self::BetaFunctionShellCall)
+            }
+            "shell_call_output" => {
+                serde_json::from_value(value).map(Self::BetaFunctionShellCallOutput)
+            }
+            "apply_patch_call" => {
+                serde_json::from_value(value).map(Self::BetaApplyPatchToolCall)
+            }
+            "apply_patch_call_output" => {
+                serde_json::from_value(value).map(Self::BetaApplyPatchToolCallOutput)
+            }
+            "mcp_list_tools" => serde_json::from_value(value).map(Self::BetaMCPListTools),
+            "mcp_approval_request" => {
+                serde_json::from_value(value).map(Self::BetaMCPApprovalRequest)
+            }
+            "mcp_approval_response" => {
+                serde_json::from_value(value).map(Self::BetaMCPApprovalResponseResource)
+            }
+            "mcp_call" => serde_json::from_value(value).map(Self::BetaMCPToolCall),
+            "custom_tool_call" => {
+                serde_json::from_value(value).map(Self::BetaCustomToolCallResource)
+            }
+            "custom_tool_call_output" => {
+                serde_json::from_value(value).map(Self::BetaCustomToolCallOutputResource)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaItemResource`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`BetaItemResource` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for BetaItemResource {
     fn default() -> Self {
@@ -31586,7 +34162,7 @@ impl schematic_define::Registration for BetaResponseUsage {
 }
 ///An item representing a message, tool call, tool output, reasoning, or other response element.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaItemField {
@@ -31621,6 +34197,121 @@ pub enum BetaItemField {
     BetaMCPToolCall(BetaMCPToolCall),
     BetaCustomToolCall(BetaCustomToolCall),
     BetaCustomToolCallOutput(BetaCustomToolCallOutput),
+}
+impl<'de> Deserialize<'de> for BetaItemField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaItemField` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "message" => serde_json::from_value(value).map(Self::BetaMessage),
+            "program" => serde_json::from_value(value).map(Self::BetaProgram),
+            "program_output" => {
+                serde_json::from_value(value).map(Self::BetaProgramOutput)
+            }
+            "function_call" => {
+                serde_json::from_value(value).map(Self::BetaFunctionToolCall)
+            }
+            "multi_agent_call" => {
+                serde_json::from_value(value).map(Self::BetaMultiAgentCall)
+            }
+            "multi_agent_call_output" => {
+                serde_json::from_value(value).map(Self::BetaMultiAgentCallOutput)
+            }
+            "tool_search_call" => {
+                serde_json::from_value(value).map(Self::BetaToolSearchCall)
+            }
+            "tool_search_output" => {
+                serde_json::from_value(value).map(Self::BetaToolSearchOutput)
+            }
+            "additional_tools" => {
+                serde_json::from_value(value).map(Self::BetaAdditionalTools)
+            }
+            "agent_message" => serde_json::from_value(value).map(Self::BetaAgentMessage),
+            "function_call_output" => {
+                serde_json::from_value(value).map(Self::BetaFunctionToolCallOutput)
+            }
+            "file_search_call" => {
+                serde_json::from_value(value).map(Self::BetaFileSearchToolCall)
+            }
+            "web_search_call" => {
+                serde_json::from_value(value).map(Self::BetaWebSearchToolCall)
+            }
+            "image_generation_call" => {
+                serde_json::from_value(value).map(Self::BetaImageGenToolCall)
+            }
+            "computer_call" => {
+                serde_json::from_value(value).map(Self::BetaComputerToolCall)
+            }
+            "computer_call_output" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaComputerToolCallOutputResource)
+            }
+            "reasoning" => serde_json::from_value(value).map(Self::BetaReasoningItem),
+            "compaction" => serde_json::from_value(value).map(Self::BetaCompactionBody),
+            "code_interpreter_call" => {
+                serde_json::from_value(value).map(Self::BetaCodeInterpreterToolCall)
+            }
+            "local_shell_call" => {
+                serde_json::from_value(value).map(Self::BetaLocalShellToolCall)
+            }
+            "local_shell_call_output" => {
+                serde_json::from_value(value).map(Self::BetaLocalShellToolCallOutput)
+            }
+            "shell_call" => {
+                serde_json::from_value(value).map(Self::BetaFunctionShellCall)
+            }
+            "shell_call_output" => {
+                serde_json::from_value(value).map(Self::BetaFunctionShellCallOutput)
+            }
+            "apply_patch_call" => {
+                serde_json::from_value(value).map(Self::BetaApplyPatchToolCall)
+            }
+            "apply_patch_call_output" => {
+                serde_json::from_value(value).map(Self::BetaApplyPatchToolCallOutput)
+            }
+            "mcp_list_tools" => serde_json::from_value(value).map(Self::BetaMCPListTools),
+            "mcp_approval_request" => {
+                serde_json::from_value(value).map(Self::BetaMCPApprovalRequest)
+            }
+            "mcp_approval_response" => {
+                serde_json::from_value(value).map(Self::BetaMCPApprovalResponseResource)
+            }
+            "mcp_call" => serde_json::from_value(value).map(Self::BetaMCPToolCall),
+            "custom_tool_call" => {
+                serde_json::from_value(value).map(Self::BetaCustomToolCall)
+            }
+            "custom_tool_call_output" => {
+                serde_json::from_value(value).map(Self::BetaCustomToolCallOutput)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaItemField`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`BetaItemField` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for BetaItemField {
     fn default() -> Self {
@@ -31918,7 +34609,7 @@ impl schematic_define::Registration for BetaPromptCacheOptions {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaOutputItem {
@@ -31953,6 +34644,122 @@ pub enum BetaOutputItem {
     BetaMCPApprovalResponseResource(BetaMCPApprovalResponseResource),
     BetaCustomToolCall(BetaCustomToolCall),
     BetaCustomToolCallOutputResource(BetaCustomToolCallOutputResource),
+}
+impl<'de> Deserialize<'de> for BetaOutputItem {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaOutputItem` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "message" => serde_json::from_value(value).map(Self::BetaOutputMessage),
+            "file_search_call" => {
+                serde_json::from_value(value).map(Self::BetaFileSearchToolCall)
+            }
+            "function_call" => {
+                serde_json::from_value(value).map(Self::BetaFunctionToolCall)
+            }
+            "function_call_output" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaFunctionToolCallOutputResource)
+            }
+            "agent_message" => serde_json::from_value(value).map(Self::BetaAgentMessage),
+            "multi_agent_call" => {
+                serde_json::from_value(value).map(Self::BetaMultiAgentCall)
+            }
+            "multi_agent_call_output" => {
+                serde_json::from_value(value).map(Self::BetaMultiAgentCallOutput)
+            }
+            "web_search_call" => {
+                serde_json::from_value(value).map(Self::BetaWebSearchToolCall)
+            }
+            "computer_call" => {
+                serde_json::from_value(value).map(Self::BetaComputerToolCall)
+            }
+            "computer_call_output" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaComputerToolCallOutputResource)
+            }
+            "reasoning" => serde_json::from_value(value).map(Self::BetaReasoningItem),
+            "program" => serde_json::from_value(value).map(Self::BetaProgram),
+            "program_output" => {
+                serde_json::from_value(value).map(Self::BetaProgramOutput)
+            }
+            "tool_search_call" => {
+                serde_json::from_value(value).map(Self::BetaToolSearchCall)
+            }
+            "tool_search_output" => {
+                serde_json::from_value(value).map(Self::BetaToolSearchOutput)
+            }
+            "additional_tools" => {
+                serde_json::from_value(value).map(Self::BetaAdditionalTools)
+            }
+            "compaction" => serde_json::from_value(value).map(Self::BetaCompactionBody),
+            "image_generation_call" => {
+                serde_json::from_value(value).map(Self::BetaImageGenToolCall)
+            }
+            "code_interpreter_call" => {
+                serde_json::from_value(value).map(Self::BetaCodeInterpreterToolCall)
+            }
+            "local_shell_call" => {
+                serde_json::from_value(value).map(Self::BetaLocalShellToolCall)
+            }
+            "local_shell_call_output" => {
+                serde_json::from_value(value).map(Self::BetaLocalShellToolCallOutput)
+            }
+            "shell_call" => {
+                serde_json::from_value(value).map(Self::BetaFunctionShellCall)
+            }
+            "shell_call_output" => {
+                serde_json::from_value(value).map(Self::BetaFunctionShellCallOutput)
+            }
+            "apply_patch_call" => {
+                serde_json::from_value(value).map(Self::BetaApplyPatchToolCall)
+            }
+            "apply_patch_call_output" => {
+                serde_json::from_value(value).map(Self::BetaApplyPatchToolCallOutput)
+            }
+            "mcp_call" => serde_json::from_value(value).map(Self::BetaMCPToolCall),
+            "mcp_list_tools" => serde_json::from_value(value).map(Self::BetaMCPListTools),
+            "mcp_approval_request" => {
+                serde_json::from_value(value).map(Self::BetaMCPApprovalRequest)
+            }
+            "mcp_approval_response" => {
+                serde_json::from_value(value).map(Self::BetaMCPApprovalResponseResource)
+            }
+            "custom_tool_call" => {
+                serde_json::from_value(value).map(Self::BetaCustomToolCall)
+            }
+            "custom_tool_call_output" => {
+                serde_json::from_value(value).map(Self::BetaCustomToolCallOutputResource)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaOutputItem`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`BetaOutputItem` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for BetaOutputItem {
     fn default() -> Self {
@@ -33215,13 +36022,55 @@ impl schematic_define::Registration for BetaResponseContentPartDoneEvent {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaOutputContent {
     BetaOutputTextContent(BetaOutputTextContent),
     BetaRefusalContent(BetaRefusalContent),
     BetaReasoningTextContent(BetaReasoningTextContent),
+}
+impl<'de> Deserialize<'de> for BetaOutputContent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaOutputContent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "output_text" => {
+                serde_json::from_value(value).map(Self::BetaOutputTextContent)
+            }
+            "refusal" => serde_json::from_value(value).map(Self::BetaRefusalContent),
+            "reasoning_text" => {
+                serde_json::from_value(value).map(Self::BetaReasoningTextContent)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaOutputContent`", tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!("`BetaOutputContent` with `type` `{}`: {}", tag, error),
+            ))
+    }
 }
 impl Default for BetaOutputContent {
     fn default() -> Self {
@@ -33783,13 +36632,93 @@ impl schematic_define::Registration for BetaIncludeEnum {
 }
 ///Server events emitted by the Responses WebSocket server.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaResponsesServerEvent {
     BetaResponseStreamEvent(BetaResponseStreamEvent),
     BetaResponseInjectCreatedEvent(BetaResponseInjectCreatedEvent),
     BetaResponseInjectFailedEvent(BetaResponseInjectFailedEvent),
+}
+impl<'de> Deserialize<'de> for BetaResponsesServerEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaResponsesServerEvent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "response.audio.delta" | "response.audio.done"
+            | "response.audio.transcript.delta" | "response.audio.transcript.done"
+            | "response.code_interpreter_call_code.delta"
+            | "response.code_interpreter_call_code.done"
+            | "response.code_interpreter_call.completed"
+            | "response.code_interpreter_call.in_progress"
+            | "response.code_interpreter_call.interpreting" | "response.completed"
+            | "response.content_part.added" | "response.content_part.done"
+            | "response.created" | "error" | "response.file_search_call.completed"
+            | "response.file_search_call.in_progress"
+            | "response.file_search_call.searching"
+            | "response.function_call_arguments.delta"
+            | "response.function_call_arguments.done" | "response.in_progress"
+            | "response.failed" | "response.incomplete" | "response.output_item.added"
+            | "response.output_item.done" | "response.reasoning_summary_part.added"
+            | "response.reasoning_summary_part.done"
+            | "response.reasoning_summary_text.delta"
+            | "response.reasoning_summary_text.done" | "response.reasoning_text.delta"
+            | "response.reasoning_text.done" | "response.refusal.delta"
+            | "response.refusal.done" | "response.output_text.delta"
+            | "response.output_text.done" | "response.web_search_call.completed"
+            | "response.web_search_call.in_progress"
+            | "response.web_search_call.searching"
+            | "response.image_generation_call.completed"
+            | "response.image_generation_call.generating"
+            | "response.image_generation_call.in_progress"
+            | "response.image_generation_call.partial_image"
+            | "response.mcp_call_arguments.delta" | "response.mcp_call_arguments.done"
+            | "response.mcp_call.completed" | "response.mcp_call.failed"
+            | "response.mcp_call.in_progress" | "response.mcp_list_tools.completed"
+            | "response.mcp_list_tools.failed" | "response.mcp_list_tools.in_progress"
+            | "response.output_text.annotation.added" | "response.queued"
+            | "response.custom_tool_call_input.delta"
+            | "response.custom_tool_call_input.done" => {
+                serde_json::from_value(value).map(Self::BetaResponseStreamEvent)
+            }
+            "response.inject.created" => {
+                serde_json::from_value(value).map(Self::BetaResponseInjectCreatedEvent)
+            }
+            "response.inject.failed" => {
+                serde_json::from_value(value).map(Self::BetaResponseInjectFailedEvent)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaResponsesServerEvent`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`BetaResponsesServerEvent` with `type` `{}`: {}", tag, error
+                ),
+            ))
+    }
 }
 impl Default for BetaResponsesServerEvent {
     fn default() -> Self {
@@ -33866,7 +36795,7 @@ impl schematic_define::Registration for BetaResponseInjectCreatedEvent {
     }
 }
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaResponseStreamEvent {
@@ -33944,6 +36873,237 @@ pub enum BetaResponseStreamEvent {
     BetaResponseCustomToolCallInputDeltaEvent(BetaResponseCustomToolCallInputDeltaEvent),
     BetaResponseCustomToolCallInputDoneEvent(BetaResponseCustomToolCallInputDoneEvent),
 }
+impl<'de> Deserialize<'de> for BetaResponseStreamEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaResponseStreamEvent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "response.audio.delta" => {
+                serde_json::from_value(value).map(Self::BetaResponseAudioDeltaEvent)
+            }
+            "response.audio.done" => {
+                serde_json::from_value(value).map(Self::BetaResponseAudioDoneEvent)
+            }
+            "response.audio.transcript.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseAudioTranscriptDeltaEvent)
+            }
+            "response.audio.transcript.done" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseAudioTranscriptDoneEvent)
+            }
+            "response.code_interpreter_call_code.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseCodeInterpreterCallCodeDeltaEvent)
+            }
+            "response.code_interpreter_call_code.done" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseCodeInterpreterCallCodeDoneEvent)
+            }
+            "response.code_interpreter_call.completed" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseCodeInterpreterCallCompletedEvent)
+            }
+            "response.code_interpreter_call.in_progress" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseCodeInterpreterCallInProgressEvent)
+            }
+            "response.code_interpreter_call.interpreting" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseCodeInterpreterCallInterpretingEvent)
+            }
+            "response.completed" => {
+                serde_json::from_value(value).map(Self::BetaResponseCompletedEvent)
+            }
+            "response.content_part.added" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseContentPartAddedEvent)
+            }
+            "response.content_part.done" => {
+                serde_json::from_value(value).map(Self::BetaResponseContentPartDoneEvent)
+            }
+            "response.created" => {
+                serde_json::from_value(value).map(Self::BetaResponseCreatedEvent)
+            }
+            "error" => serde_json::from_value(value).map(Self::BetaResponseErrorEvent),
+            "response.file_search_call.completed" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseFileSearchCallCompletedEvent)
+            }
+            "response.file_search_call.in_progress" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseFileSearchCallInProgressEvent)
+            }
+            "response.file_search_call.searching" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseFileSearchCallSearchingEvent)
+            }
+            "response.function_call_arguments.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseFunctionCallArgumentsDeltaEvent)
+            }
+            "response.function_call_arguments.done" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseFunctionCallArgumentsDoneEvent)
+            }
+            "response.in_progress" => {
+                serde_json::from_value(value).map(Self::BetaResponseInProgressEvent)
+            }
+            "response.failed" => {
+                serde_json::from_value(value).map(Self::BetaResponseFailedEvent)
+            }
+            "response.incomplete" => {
+                serde_json::from_value(value).map(Self::BetaResponseIncompleteEvent)
+            }
+            "response.output_item.added" => {
+                serde_json::from_value(value).map(Self::BetaResponseOutputItemAddedEvent)
+            }
+            "response.output_item.done" => {
+                serde_json::from_value(value).map(Self::BetaResponseOutputItemDoneEvent)
+            }
+            "response.reasoning_summary_part.added" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseReasoningSummaryPartAddedEvent)
+            }
+            "response.reasoning_summary_part.done" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseReasoningSummaryPartDoneEvent)
+            }
+            "response.reasoning_summary_text.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseReasoningSummaryTextDeltaEvent)
+            }
+            "response.reasoning_summary_text.done" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseReasoningSummaryTextDoneEvent)
+            }
+            "response.reasoning_text.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseReasoningTextDeltaEvent)
+            }
+            "response.reasoning_text.done" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseReasoningTextDoneEvent)
+            }
+            "response.refusal.delta" => {
+                serde_json::from_value(value).map(Self::BetaResponseRefusalDeltaEvent)
+            }
+            "response.refusal.done" => {
+                serde_json::from_value(value).map(Self::BetaResponseRefusalDoneEvent)
+            }
+            "response.output_text.delta" => {
+                serde_json::from_value(value).map(Self::BetaResponseTextDeltaEvent)
+            }
+            "response.output_text.done" => {
+                serde_json::from_value(value).map(Self::BetaResponseTextDoneEvent)
+            }
+            "response.web_search_call.completed" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseWebSearchCallCompletedEvent)
+            }
+            "response.web_search_call.in_progress" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseWebSearchCallInProgressEvent)
+            }
+            "response.web_search_call.searching" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseWebSearchCallSearchingEvent)
+            }
+            "response.image_generation_call.completed" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseImageGenCallCompletedEvent)
+            }
+            "response.image_generation_call.generating" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseImageGenCallGeneratingEvent)
+            }
+            "response.image_generation_call.in_progress" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseImageGenCallInProgressEvent)
+            }
+            "response.image_generation_call.partial_image" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseImageGenCallPartialImageEvent)
+            }
+            "response.mcp_call_arguments.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseMCPCallArgumentsDeltaEvent)
+            }
+            "response.mcp_call_arguments.done" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseMCPCallArgumentsDoneEvent)
+            }
+            "response.mcp_call.completed" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseMCPCallCompletedEvent)
+            }
+            "response.mcp_call.failed" => {
+                serde_json::from_value(value).map(Self::BetaResponseMCPCallFailedEvent)
+            }
+            "response.mcp_call.in_progress" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseMCPCallInProgressEvent)
+            }
+            "response.mcp_list_tools.completed" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseMCPListToolsCompletedEvent)
+            }
+            "response.mcp_list_tools.failed" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseMCPListToolsFailedEvent)
+            }
+            "response.mcp_list_tools.in_progress" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseMCPListToolsInProgressEvent)
+            }
+            "response.output_text.annotation.added" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseOutputTextAnnotationAddedEvent)
+            }
+            "response.queued" => {
+                serde_json::from_value(value).map(Self::BetaResponseQueuedEvent)
+            }
+            "response.custom_tool_call_input.delta" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseCustomToolCallInputDeltaEvent)
+            }
+            "response.custom_tool_call_input.done" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponseCustomToolCallInputDoneEvent)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaResponseStreamEvent`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`BetaResponseStreamEvent` with `type` `{}`: {}", tag, error
+                ),
+            ))
+    }
+}
 impl Default for BetaResponseStreamEvent {
     fn default() -> Self {
         Self::BetaResponseAudioDeltaEvent(Default::default())
@@ -33961,12 +37121,57 @@ impl schematic_define::Registration for BetaResponseStreamEvent {
 }
 ///Client events accepted by the Responses WebSocket server.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaResponsesClientEvent {
     BetaResponsesClientEventResponseCreate(BetaResponsesClientEventResponseCreate),
     BetaResponseInjectEvent(BetaResponseInjectEvent),
+}
+impl<'de> Deserialize<'de> for BetaResponsesClientEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            Some(_) => {
+                return Err(
+                    D::Error::custom(
+                        "`BetaResponsesClientEvent` discriminator `type` is not a string",
+                    ),
+                );
+            }
+            None => return Err(D::Error::missing_field("type")),
+        };
+        let decoded = match tag.as_str() {
+            "response.create" => {
+                serde_json::from_value(value)
+                    .map(Self::BetaResponsesClientEventResponseCreate)
+            }
+            "response.inject" => {
+                serde_json::from_value(value).map(Self::BetaResponseInjectEvent)
+            }
+            _ => {
+                return Err(
+                    D::Error::custom(
+                        format_args!(
+                            "unknown `type` value `{}` for `BetaResponsesClientEvent`",
+                            tag
+                        ),
+                    ),
+                );
+            }
+        };
+        decoded
+            .map_err(|error| D::Error::custom(
+                format_args!(
+                    "`BetaResponsesClientEvent` with `type` `{}`: {}", tag, error
+                ),
+            ))
+    }
 }
 impl Default for BetaResponsesClientEvent {
     fn default() -> Self {

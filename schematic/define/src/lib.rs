@@ -157,7 +157,7 @@ pub use cross_origin::CrossOrigin;
 pub use headers::{ApiKeyEnv, EnvList, EnvMapping, HeaderError, Headers, SensitiveString};
 pub use models::{
     EnumDef, EnumVariant, FieldDef, ModelCatalog, ModelDef, PrimitiveType, StructDef, TypeAlias,
-    TypeRef,
+    TypeRef, UnionDiscriminator,
 };
 pub use oauth::{
     AuthorizationCodeGrant, ClientCredentialsGrant, DeviceCodeGrant, OAuth2ClientAuthMethod,

@@ -4,6 +4,7 @@
 use indexmap::IndexMap;
 use openapiv3::{MediaType, ReferenceOr, Response, Responses, Schema, SchemaKind, StatusCode};
 
+use super::discriminator::resolve_discriminator;
 use super::responses::{JSON_VALUE, reference_from_schema};
 use crate::error_table::{ErrorEntry, StatusMatch};
 use crate::openapi::OpenApiError;
@@ -39,8 +40,10 @@ enum MediaClass {
 /// `application/json` and `application/*+json` are JSON; other `text/*` is
 /// text and anything else binary, each keeping its content type. `*/*` is the
 /// R3c fallback. Several media types under one status are several shapes, and
-/// a JSON `oneOf` separable by its `discriminator` or by array versus object
-/// is several tagged JSON shapes. Exact 400–599 statuses and `4XX`/`5XX` are
+/// a JSON `oneOf`, inline or behind a schema `$ref`, separable by its
+/// `discriminator` or by array versus object is several tagged JSON shapes
+/// (an error status keeps one shape: a referenced union stays its named
+/// schema). Exact 400–599 statuses and `4XX`/`5XX` are
 /// endpoint error entries; a body-less status is an empty shape or entry.
 ///
 /// Identical success shapes across statuses are one shape. When the statuses
@@ -50,7 +53,7 @@ enum MediaClass {
 ///
 /// Reported as diagnostics, never guessed: `default`, 1xx, and 3xx
 /// responses; media ranges other than `*/*`; an inseparable `oneOf` (imported
-/// as one schema); a stream or JSON body without a usable schema (imported as
+/// as its named schema, or `serde_json::Value` when inline); a stream or JSON body without a usable schema (imported as
 /// `serde_json::Value`, a stream ending at connection close); and an error
 /// status whose media types need different shapes (the first is kept).
 ///
@@ -201,19 +204,40 @@ impl Context<'_> {
         }
     }
 
+    /// A `oneOf` behind a `$ref` (through chained references) separates like
+    /// an inline one. When it cannot, a referenced union keeps its named
+    /// schema, which already decodes every member, while an inline one has no
+    /// type to keep and imports as `serde_json::Value`. A reference that does
+    /// not resolve, or is cyclic, keeps its named shape.
     fn json_shapes(&mut self, location: &str, media: &str, entry: &MediaType, resolver: &RefResolver<'_>) -> Vec<SuccessShape> {
-        if let Some(ReferenceOr::Item(schema)) = &entry.schema
-            && let SchemaKind::OneOf { one_of } = &schema.schema_kind {
-            match separate_one_of(schema, one_of, resolver) {
-                Some(members) => return members.into_iter().map(|(reference, tag)| {
+        if let Some(schema) = &entry.schema
+            && let Ok(resolved) = resolver.resolve_schema(schema)
+            && let SchemaKind::OneOf { one_of } = &resolved.schema_kind {
+            if let Some(members) = separate_one_of(resolved, one_of, resolver) {
+                return members.into_iter().map(|(reference, tag)| {
                     let mut shape = with_content_type(ResponseShape::Json(reference), media);
+                    // Every member is JSON, so the generator's kind-derived
+                    // variant names would all collide.
+                    shape.variant = match (&shape.shape, &tag) {
+                        (ResponseShape::Json(crate::TypeRef::Named(name)), _) => Some(name.clone()),
+                        (_, JsonTag::Array) => Some("Array".to_string()),
+                        (_, JsonTag::Object) => Some("Object".to_string()),
+                        _ => None,
+                    };
                     shape.json_tag = Some(tag);
                     shape
-                }).collect(),
-                None => self.warn(location, "the `oneOf` members are separable neither by a `discriminator` nor as one array and one object; \
-                    the body imports as one `serde_json::Value` JSON shape".to_string()),
+                }).collect();
             }
-            return vec![with_content_type(ResponseShape::Json(JSON_VALUE), media)];
+            const INSEPARABLE: &str = "the `oneOf` members are separable neither by a `discriminator` nor as one array and one object";
+            match schema {
+                ReferenceOr::Item(_) => {
+                    self.warn(location, format!("{INSEPARABLE}; the body imports as one `serde_json::Value` JSON shape"));
+                    return vec![with_content_type(ResponseShape::Json(JSON_VALUE), media)];
+                }
+                ReferenceOr::Reference { reference } => {
+                    self.warn(location, format!("{INSEPARABLE} (`{reference}`); the body imports as that one named schema"));
+                }
+            }
         }
         let reference = self.usable_reference(location, entry, resolver, "JSON body", "it decodes as `serde_json::Value`");
         vec![with_content_type(ResponseShape::Json(reference), media)]
@@ -228,6 +252,11 @@ impl Context<'_> {
                 continue;
             };
             let shape = match class {
+                // A named union is already one error type; separating it
+                // would only discard that type.
+                MediaClass::Json if matches!(entry.schema, Some(ReferenceOr::Reference { .. })) => {
+                    ResponseShape::Json(self.usable_reference(&format!("{location}/content/{media}"), entry, resolver, "error body", "it decodes as `serde_json::Value`"))
+                }
                 MediaClass::Json => {
                     let mut shapes = self.json_shapes(&format!("{location}/content/{media}"), &media, entry, resolver);
                     if shapes.len() > 1 {
@@ -281,16 +310,22 @@ fn is_text_schema(schema: Option<&ReferenceOr<Schema>>, resolver: &RefResolver<'
 }
 
 /// The R3b-separable members of a `oneOf`: by its `discriminator` when every
-/// member is a component reference, else by one array and one object.
+/// member is a component reference with exactly one tag value, else by one
+/// array and one object.
+///
+/// Tag values are the ones the component union's generated `Deserialize`
+/// dispatches on (see [`resolve_discriminator`]): a `mapping` key, else the
+/// property's string `enum`, else the component name, so a referenced union
+/// and its inline spelling select the same members.
 fn separate_one_of(schema: &Schema, members: &[ReferenceOr<Schema>], resolver: &RefResolver<'_>) -> Option<Vec<(crate::TypeRef, JsonTag)>> {
     if let Some(discriminator) = &schema.schema_data.discriminator {
-        return members.iter().map(|member| {
-            let ReferenceOr::Reference { reference } = member else { return None };
-            let component = reference.strip_prefix("#/components/schemas/")?;
-            // An unmapped member's value is its component name (OpenAPI 3.0.3).
-            let value = discriminator.mapping.iter().find(|(_, target)| *target == reference || target.as_str() == component)
-                .map_or(component, |(value, _)| value.as_str());
-            let tag = JsonTag::Field { name: discriminator.property_name.clone(), value: serde_json::Value::String(value.to_string()) };
+        if !members.iter().all(|member| matches!(member, ReferenceOr::Reference { .. })) { return None; }
+        // The caller reports the `oneOf` as inseparable; a component union
+        // also reports the member's reason where it imports as a model.
+        let resolved = resolve_discriminator(resolver.document(), discriminator, members, "", &mut vec![])?;
+        return members.iter().zip(&resolved.tags).map(|(member, values)| {
+            let [value] = values.as_slice() else { return None };
+            let tag = JsonTag::Field { name: resolved.property.clone(), value: serde_json::Value::String(value.clone()) };
             Some((reference_from_schema(member, resolver, &mut vec![]), tag))
         }).collect();
     }

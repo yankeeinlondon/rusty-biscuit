@@ -168,6 +168,11 @@ feature; `just test-l2` and CI enable it.
 
 - `oneOf`/`anyOf` over inline schemas produce untagged enums whose variants
   are all `serde_json::Value` (e.g. `MessageStreamEvent`).
+- An imported union decodes by its `discriminator` only when every member
+  resolves a tag value (`mapping`, the property's `enum`, or the component
+  name); otherwise, and for every union without a `discriminator` keyword
+  (e.g. `TextResponseFormatConfiguration`), it is first-match untagged. A
+  defaulted discriminated enum has an empty tag and does not decode again.
 - OpenAPI and Postman exports skip GraphQL operations (`graphql-operation`
   warning); OpenAPI cannot express stream end conditions.
 - Tests cover generation, compile-time structure, and wire behavior against

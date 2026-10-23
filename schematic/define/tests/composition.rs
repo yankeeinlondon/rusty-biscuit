@@ -216,8 +216,8 @@ fn models_catalog_records_compositions_in_order() {
     let age = ctx.register::<Aged>().unwrap();
     ctx.all_of::<Person>([name, age]).unwrap();
     assert_eq!(ctx.models().types, [
-        ModelDef::Alias(TypeAlias { name: "Pet".into(), description: None, target: TypeRef::OneOf(vec![named("Cat"), named("Dog")]) }),
-        ModelDef::Alias(TypeAlias { name: "Person".into(), description: None, target: TypeRef::AllOf(vec![named("Named"), named("Aged")]) }),
+        ModelDef::Alias(TypeAlias { name: "Pet".into(), description: None, target: TypeRef::OneOf(vec![named("Cat"), named("Dog")]), discriminator: None }),
+        ModelDef::Alias(TypeAlias { name: "Person".into(), description: None, target: TypeRef::AllOf(vec![named("Named"), named("Aged")]), discriminator: None }),
     ]);
     let mut bytes = serde_json::to_vec(ctx.models()).unwrap();
     for _ in 0..2 {

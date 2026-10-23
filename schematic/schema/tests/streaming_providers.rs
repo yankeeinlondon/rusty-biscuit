@@ -522,19 +522,29 @@ async fn openai_get_response_json_reply_selects_json_variant() {
 }
 
 /// OpenAI `GetResponse` with `stream=true` replying `text/event-stream`
-/// selects the `Stream` variant, which yields each event and ends cleanly,
-/// with no `EndedEarly`, when the server closes the connection.
+/// selects the `Stream` variant, which yields each event as the alternative
+/// its `type` names, with its payload, and ends cleanly, with no `EndedEarly`,
+/// when the server closes the connection.
 #[tokio::test]
 async fn openai_get_response_sse_ends_cleanly_at_connection_close() {
-    // `BetaResponseStreamEvent` is untagged and tries its variants in
-    // declaration order, and `response.audio.delta` is the first, so these two
-    // events decode as their own variants.
+    // A text delta, the completed response, and an error event each carry the
+    // fields of the audio events listed before them, so a first-match decoder
+    // returns them as audio events.
     let events = concat!(
         "event: response.audio.delta\n",
         r#"data: {"type":"response.audio.delta","sequence_number":1,"delta":"AAEC"}"#,
         "\n\n",
         "event: response.audio.done\n",
         r#"data: {"type":"response.audio.done","sequence_number":2}"#,
+        "\n\n",
+        "event: response.output_text.delta\n",
+        r#"data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"hi","sequence_number":3,"logprobs":[]}"#,
+        "\n\n",
+        "event: response.completed\n",
+        r#"data: {"type":"response.completed","sequence_number":4,"response":{"id":"resp_1","object":"response","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hi","annotations":[]}]}]}}"#,
+        "\n\n",
+        "event: error\n",
+        r#"data: {"type":"error","code":"server_error","message":"The server had an error.","param":null,"sequence_number":5}"#,
         "\n\n",
     );
     let mut server =
@@ -551,7 +561,7 @@ async fn openai_get_response_sse_ends_cleanly_at_connection_close() {
         received.push(event);
     }
 
-    assert_eq!(received.len(), 2, "{received:?}");
+    assert_eq!(received.len(), 5, "{received:?}");
     let Ok(BetaResponseStreamEvent::BetaResponseAudioDeltaEvent(delta)) = &received[0] else {
         panic!("expected the audio delta: {:?}", received[0])
     };
@@ -560,6 +570,25 @@ async fn openai_get_response_sse_ends_cleanly_at_connection_close() {
         panic!("expected the audio done event: {:?}", received[1])
     };
     assert_eq!(done.sequence_number, 2);
+    let Ok(BetaResponseStreamEvent::BetaResponseTextDeltaEvent(text)) = &received[2] else {
+        panic!("expected the text delta: {:?}", received[2])
+    };
+    assert_eq!(
+        (text.item_id.as_str(), text.output_index, text.content_index, text.delta.as_str(), text.sequence_number),
+        ("msg_1", 0, 0, "hi", 3)
+    );
+    assert!(text.logprobs.is_empty());
+    let Ok(BetaResponseStreamEvent::BetaResponseCompletedEvent(completed)) = &received[3] else {
+        panic!("expected the completed response: {:?}", received[3])
+    };
+    let response = serde_json::to_value(&completed.response).expect("the response serializes");
+    assert_eq!((response["id"].as_str(), response["status"].as_str()), (Some("resp_1"), Some("completed")));
+    assert_eq!(response["output"][0]["content"][0]["text"], json!("hi"));
+    let Ok(BetaResponseStreamEvent::BetaResponseErrorEvent(error)) = &received[4] else {
+        panic!("expected the error event: {:?}", received[4])
+    };
+    assert_eq!((error.code.clone(), error.message.as_str(), error.param.clone()), (json!("server_error"), "The server had an error.", Value::Null));
+    assert_eq!(error.sequence_number, 5);
     assert!(!received.iter().any(|item| matches!(item, Err(StreamError::EndedEarly))));
     let request = server.request().await;
     assert!(request.head.starts_with("GET /responses/resp_1?stream=true "), "{}", request.head);

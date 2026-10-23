@@ -56,7 +56,7 @@ pub fn map_all_schemas(
                 .unwrap_or_else(|| sanitize_rust_ident(name));
 
             if let Some(mut model) =
-                map_schema_to_model(&final_name, name, schema_ref, resolver, diagnostics)
+                map_schema_to_model(doc, &final_name, name, schema_ref, resolver, diagnostics)
             {
                 remap_type_refs_in_model(&mut model, &final_by_original);
                 types.push(model);
@@ -163,6 +163,7 @@ fn remap_type_ref(type_ref: &mut TypeRef, mapping: &std::collections::HashMap<St
 }
 
 fn map_schema_to_model(
+    doc: &openapiv3::OpenAPI,
     rust_name: &str,
     original_name: &str,
     schema_ref: &ReferenceOr<Schema>,
@@ -178,6 +179,7 @@ fn map_schema_to_model(
                     description: None,
                     // Raw original name; `remap_type_refs_in_model` resolves it.
                     target: TypeRef::Named(target.to_string()),
+                    discriminator: None,
                 }));
             }
             diagnostics.push(OpenApiDiagnostic::warn(
@@ -208,6 +210,7 @@ fn map_schema_to_model(
                 name: rust_name.to_string(),
                 description,
                 target: TypeRef::Array(Box::new(item_type)),
+                discriminator: None,
             }))
         }
         openapiv3::SchemaKind::Type(openapiv3::Type::String(_)) => {
@@ -215,6 +218,7 @@ fn map_schema_to_model(
                 name: rust_name.to_string(),
                 description,
                 target: TypeRef::Primitive(PrimitiveType::String),
+                discriminator: None,
             }))
         }
         openapiv3::SchemaKind::Type(openapiv3::Type::Integer(_)) => {
@@ -222,6 +226,7 @@ fn map_schema_to_model(
                 name: rust_name.to_string(),
                 description,
                 target: TypeRef::Primitive(PrimitiveType::Integer),
+                discriminator: None,
             }))
         }
         openapiv3::SchemaKind::Type(openapiv3::Type::Number(_)) => {
@@ -229,6 +234,7 @@ fn map_schema_to_model(
                 name: rust_name.to_string(),
                 description,
                 target: TypeRef::Primitive(PrimitiveType::Number),
+                discriminator: None,
             }))
         }
         openapiv3::SchemaKind::Type(openapiv3::Type::Boolean(_)) => {
@@ -236,6 +242,7 @@ fn map_schema_to_model(
                 name: rust_name.to_string(),
                 description,
                 target: TypeRef::Primitive(PrimitiveType::Boolean),
+                discriminator: None,
             }))
         }
         openapiv3::SchemaKind::OneOf { one_of } => {
@@ -243,10 +250,12 @@ fn map_schema_to_model(
                 .iter()
                 .map(|s| map_schema_ref_to_type_ref(s, resolver, diagnostics))
                 .collect();
+            let discriminator = union_discriminator(doc, schema, one_of, original_name, diagnostics);
             Some(ModelDef::Alias(TypeAlias {
                 name: rust_name.to_string(),
                 description,
                 target: TypeRef::OneOf(variants),
+                discriminator,
             }))
         }
         openapiv3::SchemaKind::AnyOf { any_of } => {
@@ -254,10 +263,12 @@ fn map_schema_to_model(
                 .iter()
                 .map(|s| map_schema_ref_to_type_ref(s, resolver, diagnostics))
                 .collect();
+            let discriminator = union_discriminator(doc, schema, any_of, original_name, diagnostics);
             Some(ModelDef::Alias(TypeAlias {
                 name: rust_name.to_string(),
                 description,
                 target: TypeRef::AnyOf(variants),
+                discriminator,
             }))
         }
         openapiv3::SchemaKind::AllOf { all_of } => {
@@ -269,6 +280,7 @@ fn map_schema_to_model(
                 name: rust_name.to_string(),
                 description,
                 target: TypeRef::AllOf(variants),
+                discriminator: None,
             }))
         }
         // JSON Schema (and so OpenAPI 3.1) lets a schema carry `properties`
@@ -291,6 +303,7 @@ fn map_schema_to_model(
             name: rust_name.to_string(),
             description,
             target: TypeRef::Primitive(PrimitiveType::Json),
+            discriminator: None,
         })),
         openapiv3::SchemaKind::Not { .. } => {
             diagnostics.push(OpenApiDiagnostic::warn(
@@ -300,6 +313,20 @@ fn map_schema_to_model(
             None
         }
     }
+}
+
+/// The resolved `discriminator` of the component union `original_name`, if it
+/// declares one.
+fn union_discriminator(
+    doc: &openapiv3::OpenAPI,
+    schema: &Schema,
+    alternatives: &[ReferenceOr<Schema>],
+    original_name: &str,
+    diagnostics: &mut Vec<OpenApiDiagnostic>,
+) -> Option<crate::models::UnionDiscriminator> {
+    let discriminator = schema.schema_data.discriminator.as_ref()?;
+    let location = format!("#/components/schemas/{original_name}");
+    super::discriminator::resolve_discriminator(doc, discriminator, alternatives, &location, diagnostics)
 }
 
 fn map_object_to_struct(

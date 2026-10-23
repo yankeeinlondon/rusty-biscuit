@@ -11,6 +11,7 @@
 //! - [`StructDef`] - Structure definition with fields
 //! - [`EnumDef`] - Enumeration definition with variants
 //! - [`TypeAlias`] - Type alias definition
+//! - [`UnionDiscriminator`] - Property that selects a union alias's alternative
 //! - [`FieldDef`] - Field definition for structs
 //! - [`EnumVariant`] - Variant definition for enums
 //! - [`TypeRef`] - Type reference (primitives, arrays, named types, combinators)
@@ -58,7 +59,7 @@ mod enums;
 mod structs;
 mod type_ref;
 
-pub use aliases::TypeAlias;
+pub use aliases::{TypeAlias, UnionDiscriminator};
 pub use enums::{EnumDef, EnumVariant};
 pub use structs::{FieldDef, StructDef};
 pub use type_ref::{PrimitiveType, TypeRef};
@@ -126,6 +127,7 @@ pub struct ModelCatalog {
 ///     name: "UserId".to_string(),
 ///     description: None,
 ///     target: TypeRef::Primitive(PrimitiveType::String),
+///     discriminator: None,
 /// });
 /// ```
 #[non_exhaustive]
@@ -184,6 +186,7 @@ mod tests {
             name: "Id".to_string(),
             description: None,
             target: TypeRef::Primitive(PrimitiveType::String),
+            discriminator: None,
         });
         assert!(matches!(model, ModelDef::Alias(_)));
     }
@@ -230,6 +233,7 @@ mod tests {
                     name: "UserId".to_string(),
                     description: None,
                     target: TypeRef::Primitive(PrimitiveType::String),
+                    discriminator: None,
                 }),
             ],
         };
@@ -318,6 +322,7 @@ mod tests {
                 name: "UserGroups".to_string(),
                 description: Some("Groups of optional users".to_string()),
                 target: nested_type.clone(),
+                discriminator: None,
             })],
         };
 

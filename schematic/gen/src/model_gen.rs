@@ -10,7 +10,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::models::{
     EnumDef, EnumVariant, FieldDef, ModelCatalog, ModelDef, PrimitiveType, StructDef, TypeAlias,
-    TypeRef,
+    TypeRef, UnionDiscriminator,
 };
 
 use crate::errors::GeneratorError;
@@ -277,7 +277,8 @@ fn generate_variant(def: &EnumVariant, is_default: bool) -> TokenStream {
 /// schema combinator.
 ///
 /// A bare `pub type X = serde_json::Value` would erase the whole shape, so
-/// `oneOf`/`anyOf` become untagged enums and `allOf` becomes a struct that
+/// `oneOf`/`anyOf` become enums (dispatched on their discriminator when the
+/// alias carries one, else untagged) and `allOf` becomes a struct that
 /// flattens its members.
 fn generate_alias_with(def: &TypeAlias, derive_json_schema: bool) -> TokenStream {
     match &def.target {
@@ -300,7 +301,13 @@ fn generate_alias_with(def: &TypeAlias, derive_json_schema: bool) -> TokenStream
     }
 }
 
-/// Emits an untagged enum for a `oneOf` / `anyOf` schema.
+/// Emits an enum for a `oneOf` / `anyOf` schema.
+///
+/// It always serializes untagged: each alternative carries its own
+/// discriminator member. With a discriminator whose tag sets align with the
+/// alternatives, deserialization reads the property and decodes only an
+/// alternative that accepts its value; without one it is serde's untagged
+/// first match.
 fn generate_union_enum(
     def: &TypeAlias,
     variants: &[TypeRef],
@@ -328,17 +335,30 @@ fn generate_union_enum(
     let variant_types: Vec<_> = variants.iter().map(type_ref_to_tokens).collect();
     let first_ident = &variant_idents[0];
 
+    let dispatch = def
+        .discriminator
+        .as_ref()
+        .filter(|discriminator| discriminator.tags.len() == variants.len())
+        .map(|discriminator| discriminated_deserialize(&name, discriminator, &variant_idents));
+    let derives = if dispatch.is_some() {
+        quote! { Debug, Clone, Serialize }
+    } else {
+        quote! { Debug, Clone, Serialize, Deserialize }
+    };
+
     quote! {
         #doc
         // Union variants mirror the spec's shapes and routinely differ in size;
         // boxing them would push an indirection onto every caller for no gain.
         #[allow(clippy::large_enum_variant)]
-        #[derive(Debug, Clone, Serialize, Deserialize)]
+        #[derive(#derives)]
         #schema_derive
         #[serde(untagged)]
         pub enum #name {
             #(#variant_idents(#variant_types),)*
         }
+
+        #dispatch
 
         // Hand-written because `#[derive(Default)]` accepts `#[default]` only on
         // unit variants, and structs holding this type as a required field derive
@@ -346,6 +366,81 @@ fn generate_union_enum(
         impl Default for #name {
             fn default() -> Self {
                 Self::#first_ident(Default::default())
+            }
+        }
+    }
+}
+
+/// A `Deserialize` impl that selects the alternative by its discriminator.
+///
+/// The property is read before any alternative is tried, so a value is never
+/// accepted by an alternative whose tag differs. Alternatives sharing a value
+/// are tried in declaration order. A missing, non-string, or unlisted value is
+/// an error naming the union and the property.
+fn discriminated_deserialize(
+    name: &proc_macro2::Ident,
+    discriminator: &UnionDiscriminator,
+    variant_idents: &[proc_macro2::Ident],
+) -> TokenStream {
+    let property = &discriminator.property;
+    // The messages are literals: format strings escape the spec's spelling.
+    let escaped = property.replace('{', "{{").replace('}', "}}");
+    let not_string = format!("`{name}` discriminator `{property}` is not a string");
+    let unknown = format!("unknown `{escaped}` value `{{}}` for `{name}`");
+    let failed = format!("`{name}` with `{escaped}` `{{}}`: {{}}");
+
+    // Each value's candidate alternatives, in first-seen value order; values
+    // sharing the same candidates share one match arm.
+    let mut candidates: Vec<(&str, Vec<usize>)> = Vec::new();
+    for (index, values) in discriminator.tags.iter().enumerate() {
+        for value in values {
+            match candidates.iter_mut().find(|(seen, _)| *seen == value.as_str()) {
+                Some((_, indexes)) if !indexes.contains(&index) => indexes.push(index),
+                Some(_) => {}
+                None => candidates.push((value.as_str(), vec![index])),
+            }
+        }
+    }
+    let mut arms: Vec<(Vec<&str>, Vec<usize>)> = Vec::new();
+    for (value, indexes) in candidates {
+        match arms.iter_mut().find(|(_, seen)| *seen == indexes) {
+            Some((values, _)) => values.push(value),
+            None => arms.push((vec![value], indexes)),
+        }
+    }
+
+    let arms = arms.iter().map(|(values, indexes)| {
+        let (last, earlier) = indexes.split_last().expect("every arm has a candidate");
+        let earlier = earlier.iter().map(|index| &variant_idents[*index]);
+        let last = &variant_idents[*last];
+        quote! {
+            #(#values)|* => {
+                #(if let Ok(decoded) = serde_json::from_value(value.clone()) {
+                    return Ok(Self::#earlier(decoded));
+                })*
+                serde_json::from_value(value).map(Self::#last)
+            }
+        }
+    });
+
+    quote! {
+        impl<'de> Deserialize<'de> for #name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                use serde::de::Error as _;
+                let value = serde_json::Value::deserialize(deserializer)?;
+                let tag = match value.get(#property) {
+                    Some(serde_json::Value::String(tag)) => tag.clone(),
+                    Some(_) => return Err(D::Error::custom(#not_string)),
+                    None => return Err(D::Error::missing_field(#property)),
+                };
+                let decoded = match tag.as_str() {
+                    #(#arms)*
+                    _ => return Err(D::Error::custom(format_args!(#unknown, tag))),
+                };
+                decoded.map_err(|error| D::Error::custom(format_args!(#failed, tag, error)))
             }
         }
     }
@@ -733,6 +828,7 @@ mod tests {
                 name: "PetId".to_string(),
                 description: Some("A pet identifier".to_string()),
                 target: TypeRef::Primitive(PrimitiveType::String),
+                discriminator: None,
             })],
         };
         let tokens = assemble_model_tokens(&catalog);
@@ -868,6 +964,45 @@ mod tests {
         assert!(result.is_ok());
         let code = tokens.to_string();
         assert!(code.contains("untagged"));
+    }
+
+    fn pet_union(discriminator: Option<UnionDiscriminator>) -> ModelCatalog {
+        ModelCatalog {
+            module_path: None,
+            types: vec![ModelDef::Alias(TypeAlias {
+                name: "Pet".to_string(),
+                description: None,
+                target: TypeRef::OneOf(vec![TypeRef::Named("Cat".to_string()), TypeRef::Named("Dog".to_string())]),
+                discriminator,
+            })],
+        }
+    }
+
+    #[test]
+    fn union_with_discriminator_dispatches_in_a_generated_deserialize() {
+        let discriminator = UnionDiscriminator {
+            property: "kind".to_string(),
+            tags: vec![vec!["cat".to_string()], vec!["dog".to_string(), "hound".to_string()]],
+        };
+        let tokens = assemble_model_tokens(&pet_union(Some(discriminator)));
+        let code = validate_code(&tokens).map(|file| format_code(&file)).expect("valid code");
+
+        assert!(code.contains("#[derive(Debug, Clone, Serialize)]\n#[serde(untagged)]\npub enum Pet"), "{code}");
+        assert!(code.contains("impl<'de> Deserialize<'de> for Pet"), "{code}");
+        assert!(code.contains("value.get(\"kind\")"), "{code}");
+        assert!(code.contains("\"cat\" => serde_json::from_value(value).map(Self::Cat)"), "{code}");
+        assert!(code.contains("\"dog\" | \"hound\" => serde_json::from_value(value).map(Self::Dog)"), "{code}");
+    }
+
+    #[test]
+    fn union_without_or_with_misaligned_discriminator_stays_untagged() {
+        let misaligned = UnionDiscriminator { property: "kind".to_string(), tags: vec![vec!["cat".to_string()]] };
+        for catalog in [pet_union(None), pet_union(Some(misaligned))] {
+            let code = validate_code(&assemble_model_tokens(&catalog)).map(|file| format_code(&file)).expect("valid code");
+
+            assert!(code.contains("#[derive(Debug, Clone, Serialize, Deserialize)]\n#[serde(untagged)]\npub enum Pet"), "{code}");
+            assert!(!code.contains("impl<'de> Deserialize<'de>"), "{code}");
+        }
     }
 
     #[test]

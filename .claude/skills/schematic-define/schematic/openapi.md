@@ -90,6 +90,16 @@ document carries `x-schematic`. Bodies and responses with no named schema
 become `serde_json::Value` (`TypeRef::Primitive(Json)`); render that type path
 with `syn` parsing, never `format_ident!`.
 
+A JSON `oneOf` separable by `discriminator` or array/object becomes one tagged
+shape per member whether inline or behind a schema `$ref` (chains resolved).
+Tags use the same values as the union's dispatching `Deserialize` (mapping
+key, single `enum` value, component name); each shape's `variant` is the
+member's component name (`Array`/`Object` when unnamed). An inseparable
+referenced union keeps `Json(Named)` with a warning; error statuses keep one
+shape (a referenced union stays named). The OpenAI overlay
+(`definitions/src/openai_pagination.rs`) restores `GetConversationItem` to
+`ConversationItem` so the public type does not change.
+
 ### Imported builder assemblies
 
 `--definitions-out` emits fallible `Endpoint`/`RestApi` builder code and a
@@ -118,7 +128,7 @@ fails when the committed module and a fresh import differ.
 | `array` | `Vec<T>` |
 | `object` | Named struct |
 | `object` + `additionalProperties` | `HashMap<String, T>` |
-| `oneOf`/`anyOf` | Enum (untagged) |
+| `oneOf`/`anyOf` | Enum; decoded by its `discriminator` when every member has a tag value, else untagged |
 | `$ref` | Named type reference |
 
 ### Diagnostics

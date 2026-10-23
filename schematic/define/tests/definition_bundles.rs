@@ -167,7 +167,7 @@ fn construction_runs_the_builder_validation() {
 
 #[test]
 fn catalog_must_agree_with_the_bundled_components() {
-    let alias = |name: &str, target: TypeRef| ModelDef::Alias(TypeAlias { name: name.into(), description: None, target });
+    let alias = |name: &str, target: TypeRef| ModelDef::Alias(TypeAlias { name: name.into(), description: None, target, discriminator: None });
     let pet = || alias("Pet", TypeRef::OneOf(vec![TypeRef::Named("Cat".into()), TypeRef::Named("Dog".into())]));
     let catalog = |types: Vec<ModelDef>| ModelCatalog { module_path: None, types };
     let bundle = || DefinitionBundle::new(fixture().0).unwrap();

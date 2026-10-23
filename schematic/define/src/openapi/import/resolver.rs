@@ -56,6 +56,11 @@ impl<'a> RefResolver<'a> {
         }
     }
 
+    /// The document this resolver reads.
+    pub(crate) fn document(&self) -> &'a OpenAPI {
+        self.doc
+    }
+
     /// Resolves a schema reference to its underlying schema.
     ///
     /// ## Arguments

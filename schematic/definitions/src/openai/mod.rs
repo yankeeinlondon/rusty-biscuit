@@ -2508,7 +2508,146 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
                 "/conversations/{conversation_id}/items/{item_id}",
             )
             .describes("Get a single item from a conversation with the given IDs.")
-            .returns_json::<ConversationItem>(ctx)
+            .returns(
+                Success::json(ctx.register::<Message>()?)
+                    .tagged("type", "message")
+                    .variant("Message"),
+            )
+            .returns(
+                Success::json(ctx.register::<FunctionToolCallResource>()?)
+                    .tagged("type", "function_call")
+                    .variant("FunctionToolCallResource"),
+            )
+            .returns(
+                Success::json(ctx.register::<FunctionToolCallOutputResource>()?)
+                    .tagged("type", "function_call_output")
+                    .variant("FunctionToolCallOutputResource"),
+            )
+            .returns(
+                Success::json(ctx.register::<FileSearchToolCall>()?)
+                    .tagged("type", "file_search_call")
+                    .variant("FileSearchToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<WebSearchToolCall>()?)
+                    .tagged("type", "web_search_call")
+                    .variant("WebSearchToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<ImageGenToolCall>()?)
+                    .tagged("type", "image_generation_call")
+                    .variant("ImageGenToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<ComputerToolCall>()?)
+                    .tagged("type", "computer_call")
+                    .variant("ComputerToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<ComputerToolCallOutputResource>()?)
+                    .tagged("type", "computer_call_output")
+                    .variant("ComputerToolCallOutputResource"),
+            )
+            .returns(
+                Success::json(ctx.register::<ToolSearchCall>()?)
+                    .tagged("type", "tool_search_call")
+                    .variant("ToolSearchCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<ToolSearchOutput>()?)
+                    .tagged("type", "tool_search_output")
+                    .variant("ToolSearchOutput"),
+            )
+            .returns(
+                Success::json(ctx.register::<AdditionalTools>()?)
+                    .tagged("type", "additional_tools")
+                    .variant("AdditionalTools"),
+            )
+            .returns(
+                Success::json(ctx.register::<ReasoningItem>()?)
+                    .tagged("type", "reasoning")
+                    .variant("ReasoningItem"),
+            )
+            .returns(
+                Success::json(ctx.register::<Program>()?)
+                    .tagged("type", "program")
+                    .variant("Program"),
+            )
+            .returns(
+                Success::json(ctx.register::<ProgramOutput>()?)
+                    .tagged("type", "program_output")
+                    .variant("ProgramOutput"),
+            )
+            .returns(
+                Success::json(ctx.register::<CompactionBody>()?)
+                    .tagged("type", "compaction")
+                    .variant("CompactionBody"),
+            )
+            .returns(
+                Success::json(ctx.register::<CodeInterpreterToolCall>()?)
+                    .tagged("type", "code_interpreter_call")
+                    .variant("CodeInterpreterToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<LocalShellToolCall>()?)
+                    .tagged("type", "local_shell_call")
+                    .variant("LocalShellToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<LocalShellToolCallOutput>()?)
+                    .tagged("type", "local_shell_call_output")
+                    .variant("LocalShellToolCallOutput"),
+            )
+            .returns(
+                Success::json(ctx.register::<FunctionShellCall>()?)
+                    .tagged("type", "shell_call")
+                    .variant("FunctionShellCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<FunctionShellCallOutput>()?)
+                    .tagged("type", "shell_call_output")
+                    .variant("FunctionShellCallOutput"),
+            )
+            .returns(
+                Success::json(ctx.register::<ApplyPatchToolCall>()?)
+                    .tagged("type", "apply_patch_call")
+                    .variant("ApplyPatchToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<ApplyPatchToolCallOutput>()?)
+                    .tagged("type", "apply_patch_call_output")
+                    .variant("ApplyPatchToolCallOutput"),
+            )
+            .returns(
+                Success::json(ctx.register::<MCPListTools>()?)
+                    .tagged("type", "mcp_list_tools")
+                    .variant("MCPListTools"),
+            )
+            .returns(
+                Success::json(ctx.register::<MCPApprovalRequest>()?)
+                    .tagged("type", "mcp_approval_request")
+                    .variant("MCPApprovalRequest"),
+            )
+            .returns(
+                Success::json(ctx.register::<MCPApprovalResponseResource>()?)
+                    .tagged("type", "mcp_approval_response")
+                    .variant("MCPApprovalResponseResource"),
+            )
+            .returns(
+                Success::json(ctx.register::<MCPToolCall>()?)
+                    .tagged("type", "mcp_call")
+                    .variant("MCPToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<CustomToolCall>()?)
+                    .tagged("type", "custom_tool_call")
+                    .variant("CustomToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<CustomToolCallOutput>()?)
+                    .tagged("type", "custom_tool_call_output")
+                    .variant("CustomToolCallOutput"),
+            )
             .query(ParamDef {
                 name: "include".to_string(),
                 required: false,

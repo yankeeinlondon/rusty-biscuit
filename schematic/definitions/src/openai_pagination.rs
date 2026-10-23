@@ -10,7 +10,9 @@
 //! one success shape per endpoint, the one the importer chose before it read
 //! several (the first JSON shape, else the first shape), and no errors, so an
 //! endpoint's generated success and failure types change only when it is
-//! migrated deliberately. Several streaming endpoints, such as
+//! migrated deliberately. Where the importer separated a referenced union into
+//! one shape per member, its earlier choice was the union itself, so the
+//! overlay restores it (`GetConversationItem` returns `ConversationItem`). Several streaming endpoints, such as
 //! `CreateChatCompletion`, would also need author-chosen names for their
 //! success enums. The one migrated endpoint, `GetResponse`, gets its shapes
 //! from [`stream_get_response`].
@@ -46,8 +48,18 @@ pub fn apply(mut api: RestApi) -> RestApi {
         endpoint.response = shapes.into_iter().nth(kept).into_iter().collect();
         endpoint.errors.clear();
     }
+    keep_conversation_item_union(&mut api);
     stream_get_response(&mut api);
     api
+}
+
+/// The import separates `ConversationItem`, a `type`-discriminated `oneOf`
+/// behind a `$ref`, into one tagged shape per member; the first is only
+/// `Message`. The union already decodes every member by `type`.
+fn keep_conversation_item_union(api: &mut RestApi) {
+    let endpoint = api.endpoints.iter_mut().find(|endpoint| endpoint.id == "GetConversationItem")
+        .expect("OpenAI response overlay names unknown endpoint `GetConversationItem`");
+    endpoint.response = vec![SuccessShape::json(TypeRef::Named("ConversationItem".into()))];
 }
 
 /// `GetResponse` replays a stored response as server-sent events when its

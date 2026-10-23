@@ -530,7 +530,11 @@ fn import_text(document: &OpenAPI, format: ExportFormat) -> OpenApiImportResult 
 
 #[test]
 fn public_import_of_the_exported_json_and_yaml_keeps_shapes_content_types_and_endpoint_errors() {
-    let tagged = |name: &str, value: &str| shape(ResponseShape::Json(named(name)), |s| s.json_tag = Some(JsonTag::Field { name: "type".into(), value: json!(value) }));
+    // Import names each separated member's variant after its component.
+    let tagged = |name: &str, value: &str| shape(ResponseShape::Json(named(name)), |s| {
+        s.json_tag = Some(JsonTag::Field { name: "type".into(), value: json!(value) });
+        s.variant = Some(name.into());
+    });
     let typed = |shape: ResponseShape, content_type: &str| self::shape(shape, |s| s.content_type = Some(content_type.into()));
     let shapes = vec![
         vec![json_shape("Message"), sse(StreamEnd::ConnectionClose), fallback_binary()],
@@ -605,4 +609,223 @@ fn import_reads_only_the_responses_map_so_stream_ends_and_byte_streams_come_back
     for index in 0..2 {
         assert_eq!(operation(&second, index)["responses"]["200"]["content"], operation(&first, index)["responses"]["200"]["content"]);
     }
+}
+
+// ---------------------------------------------------------------------------
+// A `oneOf` behind a schema `$ref` (R28): separated like its inline spelling
+// ---------------------------------------------------------------------------
+
+const UNION_SCHEMA: &str = "/get/responses/200/content/application~1json/schema";
+
+/// The exporter's document for `Get0`, a `type`-discriminated `oneOf` of
+/// `Directory` and `File`, and `Get1`, a `oneOf` of a `File` array and a
+/// `File`, with each union moved to `components.schemas.Reply{index}` when
+/// `referenced_union` and each 200 to `components.responses.Ok{index}` when
+/// `referenced_response`.
+fn union_cell(referenced_union: bool, referenced_response: bool) -> Value {
+    let tagged = |name: &str, value: &str| shape(ResponseShape::Json(named(name)), |s| s.json_tag = Some(JsonTag::Field { name: "type".into(), value: json!(value) }));
+    let listing = shape(ResponseShape::Json(TypeRef::Array(Box::new(named("File")))), |s| s.json_tag = Some(JsonTag::Array));
+    let file = shape(ResponseShape::Json(named("File")), |s| s.json_tag = Some(JsonTag::Object));
+    let mut document = exported(&fixture(vec![vec![tagged("Directory", "dir"), tagged("File", "file")], vec![listing, file]], |_| None));
+    for index in 0..2 {
+        let path = format!("/paths/~1r{index}");
+        if referenced_union {
+            let union = std::mem::replace(document.pointer_mut(&format!("{path}{UNION_SCHEMA}")).unwrap(), reference(&format!("Reply{index}")));
+            document["components"]["schemas"][format!("Reply{index}")] = union;
+        }
+        if referenced_response {
+            let ok = std::mem::replace(document.pointer_mut(&format!("{path}/get/responses/200")).unwrap(), json!({"$ref": format!("#/components/responses/Ok{index}")}));
+            document["components"]["responses"][format!("Ok{index}")] = ok;
+        }
+    }
+    document
+}
+
+/// `document` imported through the public importer from JSON and from YAML
+/// text, with the two results required to agree.
+fn import_both(document: &Value) -> OpenApiImportResult {
+    let from_json = OpenApiImport::new(OpenApiSource::json(document.to_string())).build().unwrap();
+    let from_yaml = OpenApiImport::new(OpenApiSource::yaml(serde_yaml_ng::to_string(document).unwrap())).build().unwrap();
+    assert_eq!(from_json.api, from_yaml.api);
+    assert_eq!(from_json.diagnostics, from_yaml.diagnostics);
+    from_json
+}
+
+fn endpoint_at<'r>(imported: &'r OpenApiImportResult, path: &str) -> &'r Endpoint {
+    imported.api.endpoints.iter().find(|endpoint| endpoint.path == path).unwrap_or_else(|| panic!("no endpoint at {path}"))
+}
+
+fn tags(shapes: &[SuccessShape]) -> Vec<(ResponseShape, Option<JsonTag>)> {
+    shapes.iter().map(|s| (s.shape.clone(), s.json_tag.clone())).collect()
+}
+
+fn type_field(value: &str) -> Option<JsonTag> { Some(JsonTag::Field { name: "type".into(), value: json!(value) }) }
+
+fn union_diagnostics(imported: &OpenApiImportResult) -> Vec<&str> {
+    imported.diagnostics.iter().filter(|d| d.message.contains("`oneOf`")).map(|d| d.message.as_str()).collect()
+}
+
+macro_rules! union_cells {
+    ($($name:ident: union $union:literal, response $response:literal;)*) => {$(
+        #[test]
+        fn $name() {
+            let imported = import_both(&union_cell($union, $response));
+
+            assert_eq!(tags(&endpoint_at(&imported, "/r0").response), vec![
+                (ResponseShape::Json(named("Directory")), type_field("dir")),
+                (ResponseShape::Json(named("File")), type_field("file")),
+            ]);
+            // The exporter writes the listing as an inline array, which has no named type.
+            assert_eq!(tags(&endpoint_at(&imported, "/r1").response), vec![
+                (ResponseShape::Json(TypeRef::Primitive(schematic_define::PrimitiveType::Json)), Some(JsonTag::Array)),
+                (ResponseShape::Json(named("File")), Some(JsonTag::Object)),
+            ]);
+            // Distinct variant names, without which generation rejects the shapes.
+            let variants = |path| endpoint_at(&imported, path).response.iter().map(|s| s.variant.clone()).collect::<Vec<_>>();
+            assert_eq!(variants("/r0"), [Some("Directory".to_string()), Some("File".to_string())]);
+            assert_eq!(variants("/r1"), [Some("Array".to_string()), Some("File".to_string())]);
+            assert!(union_diagnostics(&imported).is_empty(), "{:?}", imported.diagnostics);
+        }
+    )*};
+}
+
+// Rows R1-F2.1-8: each cell checks the discriminator endpoint and the
+// array/object endpoint.
+union_cells! {
+    a_direct_response_separates_an_inline_union: union false, response false;
+    a_direct_response_separates_a_referenced_union: union true, response false;
+    a_referenced_response_separates_an_inline_union: union false, response true;
+    a_referenced_response_separates_a_referenced_union: union true, response true;
+}
+
+/// A one-endpoint document: `GET /r` answering `responses`, with `schemas`
+/// beside `Directory`, `File`, and `Files`.
+fn union_document(schemas: Value, responses: Value) -> Value {
+    let mut components = json!({
+        "Directory": {"type": "object", "properties": {"type": {"type": "string"}}},
+        "File": {"type": "object"},
+        "Files": {"type": "array", "items": {"$ref": "#/components/schemas/File"}},
+    });
+    components.as_object_mut().unwrap().extend(schemas.as_object().unwrap().clone());
+    json!({
+        "openapi": "3.0.3",
+        "info": {"title": "Fixture", "version": "1"},
+        "paths": {"/r": {"get": {"operationId": "Get", "responses": responses}}},
+        "components": {"schemas": components},
+    })
+}
+
+fn ok(schema: Value) -> Value { json!({"200": body("application/json", schema)}) }
+
+#[test]
+fn a_union_behind_chained_references_separates() {
+    let document = union_document(json!({
+        "Reply": reference("Alias"),
+        "Alias": {"oneOf": [reference("Files"), reference("File")]},
+    }), ok(reference("Reply")));
+    let imported = import_both(&document);
+
+    assert_eq!(tags(&endpoint_at(&imported, "/r").response), vec![
+        (ResponseShape::Json(named("Files")), Some(JsonTag::Array)),
+        (ResponseShape::Json(named("File")), Some(JsonTag::Object)),
+    ]);
+    assert!(union_diagnostics(&imported).is_empty(), "{:?}", imported.diagnostics);
+}
+
+#[test]
+fn an_inseparable_referenced_union_keeps_its_named_schema_with_a_located_warning() {
+    let document = union_document(json!({"Reply": {"oneOf": [reference("Directory"), reference("File")]}}), ok(reference("Reply")));
+    let imported = import_both(&document);
+
+    assert_eq!(endpoint_at(&imported, "/r").response, vec![json_shape("Reply")]);
+    let [diagnostic] = imported.diagnostics.iter().filter(|d| d.message.contains("`oneOf`")).collect::<Vec<_>>()[..] else { panic!("{:?}", imported.diagnostics) };
+    assert_eq!(diagnostic.severity, DiagnosticSeverity::Warn);
+    assert_eq!(diagnostic.location, "responses/200/content/application/json");
+    assert!(diagnostic.message.contains("(`#/components/schemas/Reply`); the body imports as that one named schema"), "{}", diagnostic.message);
+}
+
+#[test]
+fn a_self_referential_reference_or_union_keeps_its_named_schema() {
+    let cyclic = union_document(json!({"Cycle": reference("Cycle")}), ok(reference("Cycle")));
+    let imported = import_both(&cyclic);
+    assert_eq!(endpoint_at(&imported, "/r").response, vec![json_shape("Cycle")]);
+
+    let recursive = union_document(json!({"Tree": {
+        "oneOf": [reference("Tree"), reference("File")],
+        "discriminator": {"propertyName": "type"},
+    }}), ok(reference("Tree")));
+    let imported = import_both(&recursive);
+    assert_eq!(endpoint_at(&imported, "/r").response, vec![json_shape("Tree")]);
+    assert_eq!(union_diagnostics(&imported).len(), 1, "{:?}", imported.diagnostics);
+}
+
+/// `Dir` and `Doc` restrict `type` to one `enum` value each, with no `mapping`.
+fn enum_tagged(optional: bool) -> Value {
+    let member = |value: &str| json!({
+        "type": "object",
+        "required": if optional { json!([]) } else { json!(["type"]) },
+        "properties": {"type": {"type": "string", "enum": [value]}},
+    });
+    json!({
+        "Dir": member("dir"),
+        "Doc": member("doc"),
+        "Reply": {"oneOf": [reference("Dir"), reference("Doc")], "discriminator": {"propertyName": "type"}},
+    })
+}
+
+#[test]
+fn an_unmapped_member_is_tagged_with_its_enum_value_inline_and_referenced() {
+    // The values the union's generated `Deserialize` dispatches on (R1-F1),
+    // not the component names.
+    let expected = vec![(ResponseShape::Json(named("Dir")), type_field("dir")), (ResponseShape::Json(named("Doc")), type_field("doc"))];
+    let inline = json!({"oneOf": [reference("Dir"), reference("Doc")], "discriminator": {"propertyName": "type"}});
+    for schema in [inline, reference("Reply")] {
+        let imported = import_both(&union_document(enum_tagged(false), ok(schema.clone())));
+        assert_eq!(tags(&endpoint_at(&imported, "/r").response), expected, "{schema}");
+    }
+}
+
+#[test]
+fn a_member_with_an_optional_tag_leaves_the_union_inseparable() {
+    let referenced = import_both(&union_document(enum_tagged(true), ok(reference("Reply"))));
+    assert_eq!(endpoint_at(&referenced, "/r").response, vec![json_shape("Reply")]);
+    assert_eq!(union_diagnostics(&referenced).len(), 1, "{:?}", referenced.diagnostics);
+
+    let inline = json!({"oneOf": [reference("Dir"), reference("Doc")], "discriminator": {"propertyName": "type"}});
+    let inline = import_both(&union_document(enum_tagged(true), ok(inline)));
+    assert_eq!(endpoint_at(&inline, "/r").response, vec![SuccessShape::new(ResponseShape::Json(TypeRef::Primitive(schematic_define::PrimitiveType::Json)))]);
+}
+
+#[test]
+fn an_error_status_keeps_one_shape_for_a_referenced_or_inline_separable_union() {
+    // R1-F2.9: an error entry holds one shape; a named union already decodes
+    // every member, so it is kept without a diagnostic.
+    let union = json!({"oneOf": [reference("Files"), reference("File")]});
+    let responses = |schema: Value| json!({"200": body("application/json", reference("File")), "404": body("application/json", schema)});
+
+    let referenced = import_both(&union_document(json!({"Reply": union.clone()}), responses(reference("Reply"))));
+    assert_eq!(endpoint_at(&referenced, "/r").errors, vec![ErrorEntry::new(StatusMatch::exact(404), ResponseShape::Json(named("Reply")))]);
+    assert!(union_diagnostics(&referenced).is_empty(), "{:?}", referenced.diagnostics);
+
+    let inline = import_both(&union_document(json!({}), responses(union)));
+    assert_eq!(endpoint_at(&inline, "/r").errors, vec![ErrorEntry::new(StatusMatch::exact(404), ResponseShape::Json(TypeRef::Primitive(schematic_define::PrimitiveType::Json)))]);
+    let [warning] = union_diagnostics(&inline)[..] else { panic!("{:?}", inline.diagnostics) };
+    assert!(warning.contains("an error entry holds one shape"), "{warning}");
+    // Neither form adds a success shape.
+    assert_eq!(endpoint_at(&inline, "/r").response, vec![json_shape("File")]);
+    assert_eq!(endpoint_at(&referenced, "/r").response, vec![json_shape("File")]);
+}
+
+#[test]
+fn a_separated_referenced_union_exports_its_alternatives_and_tags_and_imports_again() {
+    // R1-F2.11: export projects the imported shape list, so the reference
+    // returns as an inline `oneOf` whose mapping names each tag.
+    let imported = import_both(&union_cell(true, true));
+    let document = serde_json::to_value(export(&imported.api, &ExportOptions::new()).unwrap()).unwrap();
+
+    assert_eq!(document.pointer(&format!("/paths/~1r0{UNION_SCHEMA}")).unwrap(), &json!({
+        "oneOf": [reference("Directory"), reference("File")],
+        "discriminator": {"propertyName": "type", "mapping": {"dir": "#/components/schemas/Directory", "file": "#/components/schemas/File"}},
+    }));
+    assert_eq!(endpoint_at(&import_both(&document), "/r0").response, endpoint_at(&imported, "/r0").response);
 }

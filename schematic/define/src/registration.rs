@@ -288,7 +288,7 @@ impl DefinitionContext {
         T::register(self)?;
         let entry = self.entries.iter_mut().find(|e| e.identity == TypeId::of::<T>()).ok_or(DefinitionError::NotLeaf)?;
         entry.structure = Some(structure.clone());
-        self.models.types.push(ModelDef::Alias(TypeAlias { name: entry.name.clone(), description: None, target: structure }));
+        self.models.types.push(ModelDef::Alias(TypeAlias { name: entry.name.clone(), description: None, target: structure, discriminator: None }));
         Ok(entry.descriptor())
     }
     /// Fail assembly with every distinct collision seen so far.

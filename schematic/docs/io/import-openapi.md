@@ -69,7 +69,7 @@ assert_eq!(pet.rust_path.as_deref(), Some("items::Pet")); // `Pet` without modul
 | text / binary body | Raw body with content type |
 | responses | Every 2xx response becomes a success shape and every 400-599 response an endpoint error entry (see [Several success shapes and declared errors](#several-success-shapes-and-declared-errors)) |
 | component / inline schemas | Named models or synthesized model names |
-| oneOf / anyOf | Untagged enum; unnamed members may remain free-form JSON |
+| oneOf / anyOf | Enum with one variant per member, selected by the `discriminator` when every member has a tag value, else untagged (first member that fits); unnamed members may remain free-form JSON (see [Unions and discriminators](#unions-and-discriminators)) |
 | allOf | Merged schema/model according to import support |
 | nullable | Optional Rust representation |
 | bearer, basic, header/query/cookie API key | Existing auth strategy and environment mapping |
@@ -77,6 +77,66 @@ assert_eq!(pet.rust_path.as_deref(), Some("items::Pet")); // `Pet` without modul
 The importer does not implement OpenAPI 3.1. Full provider HTTP fidelity is
 not established by a successful import; compile the generated crate and test
 its wire behavior.
+
+### Unions and discriminators
+
+A component `oneOf` or `anyOf` becomes a Rust enum with one variant per
+member. When the schema declares a `discriminator`, the importer works out
+which values of that property select each member, and the generated enum
+decodes by that value instead of trying members in order:
+
+```yaml
+Pet:
+  oneOf:
+    - $ref: "#/components/schemas/Cat"   # kind: {type: string, enum: [cat]}, required
+    - $ref: "#/components/schemas/Dog"   # no `kind` property
+  discriminator:
+    propertyName: kind
+```
+
+```rust
+let pet: Pet = serde_json::from_str(r#"{"kind":"Dog","bark":true}"#)?; // Pet::Dog
+let err = serde_json::from_str::<Pet>(r#"{"kind":"lizard"}"#);         // Err: unknown `kind` value
+```
+
+A member's values come from the first of these that applies:
+
+1. the `discriminator.mapping` keys that name it (`'#/components/schemas/Cat'`
+   or `Cat`);
+2. the string `enum` of the property, found on the member itself, through a
+   `$ref`, in an `allOf` member, or across a nested union's own members (one
+   value or several);
+3. the member's component name, when it does not declare the property or
+   declares it as an unrestricted string.
+
+```mermaid
+flowchart LR
+    V["decoded JSON value"] --> T{"property present<br/>and a string?"}
+    T -- no --> E["error: missing field / not a string"]
+    T -- yes --> M{"a member accepts<br/>this value?"}
+    M -- no --> U["error: unknown value"]
+    M -- yes --> D["decode that member<br/>(members sharing the value: in order)"]
+```
+
+The decoded value is never handed to a member whose tag differs, and a
+member that rejects its own tagged value is the error. Serialization is
+unchanged: each member already writes its own property.
+
+When some member has no value (it declares the property optional, the
+property is not a string, its `enum` allows `null`, or an inline member
+declares no `enum`), the enum stays untagged and the import reports a warning
+at the union, for example:
+
+```text
+[WARN] #/components/schemas/InputItem - discriminator `type` has no value for `EasyInputMessage` (the property is optional); the union decodes as the first alternative that fits
+```
+
+A union without a `discriminator` keyword is always untagged, even when its
+members happen to carry distinct values of a required property.
+
+The enum's `Default` is its first member's `Default`, whose tag is empty, so
+a defaulted discriminated enum does not decode again; it exists only so a
+struct holding the enum can derive `Default`.
 
 ### Response checks
 
@@ -114,7 +174,7 @@ callers that classify one operation themselves.
 | any other media type | binary shape with that content type |
 | `*/*` | the fallback shape |
 | several media types under one status | one shape each |
-| JSON `oneOf` with a `discriminator`, or of one array and one object | one tagged JSON shape per member |
+| JSON `oneOf` with a `discriminator`, or of one array and one object, inline or behind a schema `$ref` | one tagged JSON shape per member |
 | 204 or no `content` | empty shape |
 | `2XX` | shapes that declare no status, used for every 2xx status no exact key names |
 | exact `400`-`599`, `4XX`, `5XX` | the endpoint's own error entries (never hoisted to the API) |
@@ -125,13 +185,45 @@ statuses carry different shapes (apart from a body-less 204), each shape
 declares the statuses it appears under. A stream's end condition cannot be
 inferred from a media type, so it ends at connection close.
 
+A `oneOf` is recognized wherever the media schema leads: written inline, or
+reached through a `$ref` (or a chain of them) to `components.schemas`. Both
+spellings below import as the same two shapes, `Directory` tagged
+`type: "dir"` and `File` tagged `type: "file"`:
+
+```yaml
+# inline
+schema:
+  oneOf: [{ $ref: "#/components/schemas/Directory" }, { $ref: "#/components/schemas/File" }]
+  discriminator: { propertyName: type, mapping: { dir: "#/components/schemas/Directory", file: "#/components/schemas/File" } }
+# referenced: the same object moved to components.schemas.Reply
+schema: { $ref: "#/components/schemas/Reply" }
+```
+
+A member's tag value is the one the component union's generated
+`Deserialize` dispatches on (see [Unions and discriminators](#unions-and-discriminators)):
+its `mapping` key, else the single value of the property's `enum`, else its
+component name. Each member must be a component `$ref` with exactly one
+value; a member with an optional or non-string property, or several `enum`
+values, leaves the `oneOf` inseparable. Each separated shape is named after
+its member's component, or `Array` / `Object` when the member has no name,
+so the generated success enum has one variant per member.
+
+When a referenced `oneOf` cannot be separated, the body keeps that one named
+schema (the union's own enum, which still decodes every member) with a
+warning. An unresolvable or cyclic reference also keeps its named schema.
+An error status always holds one shape: a referenced union stays its named
+schema there, with no warning.
+
 Each of these imports with a warning naming the API, operation, and what was
 lost, rather than being guessed:
 
 - a `default`, 1xx, or 3xx response (not imported);
 - a media range other than `*/*` (not imported);
 - a `oneOf` neither a discriminator nor array/object separates (one
-  `serde_json::Value` JSON shape);
+  `serde_json::Value` JSON shape when inline, or the referenced named
+  schema);
+- an inline separable `oneOf` on an error status (one `serde_json::Value`
+  JSON shape);
 - a JSON body or stream without a named schema (`serde_json::Value`);
 - an error status whose media types need different shapes (the first is
   kept);
@@ -146,7 +238,7 @@ these facts lost or approximated:
 | --- | --- |
 | an SSE or NDJSON end condition (`[DONE]`, an event, a field) and `keep_end` | the stream ends at connection close, and nothing is kept |
 | a byte stream | a binary shape |
-| a shape's `variant` name | none; the generator names the variant by kind |
+| a shape's `variant` name | not read back; a separated `oneOf` member is named after its component (`Array` / `Object` when unnamed), any other shape by its kind |
 | a shape's `note` | none; it survives only in the exported description |
 | an API's default errors | one exact or class entry per exported status on each endpoint, never on the API |
 | a class expanded because an exact entry supersedes part of it | one exact entry per status |
@@ -189,9 +281,10 @@ The overlay is a `fn(RestApi) -> RestApi` anywhere the module can reach by
 that path. Besides adding facts, an overlay can narrow what the import
 declares: the OpenAI overlay keeps every success shape and error entry only
 for the endpoints it lists, and gives every other endpoint the one shape the
-importer chose before it read several (the first JSON shape, else the first)
-and no errors, so re-importing never changes an unmigrated endpoint's
-generated types. The importer never reads or writes it; it only emits the call, so
+importer chose before it read several (the first JSON shape, else the first;
+for a referenced union the importer now separates, the union itself, as for
+`GetConversationItem` and `ConversationItem`) and no errors, so re-importing
+never changes an unmigrated endpoint's generated types. The importer never reads or writes it; it only emits the call, so
 the factory every client and exporter uses returns the augmented definition:
 
 ```rust

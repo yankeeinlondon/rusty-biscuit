@@ -1,4 +1,5 @@
 mod classify;
+mod discriminator;
 mod parameters;
 mod responses;
 mod schema;

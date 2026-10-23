@@ -579,6 +579,7 @@ fn map_component_schemas(
         name: "JsonValue".to_string(),
         description: Some("Fallback type for unknown or inline payload schemas".to_string()),
         target: TypeRef::Primitive(PrimitiveType::Json),
+        discriminator: None,
     }));
     seen.insert("JsonValue".to_string());
 
@@ -592,6 +593,7 @@ fn map_component_schemas(
                     .and_then(Value::as_str)
                     .map(String::from),
                 target: TypeRef::Primitive(PrimitiveType::Json),
+                discriminator: None,
             }));
         }
     }
@@ -602,6 +604,7 @@ fn map_component_schemas(
                 name: name.clone(),
                 description: Some("Referenced payload schema".to_string()),
                 target: TypeRef::Primitive(PrimitiveType::Json),
+                discriminator: None,
             }));
         }
     }

@@ -260,3 +260,41 @@ fn an_imported_definition_records_the_supplied_request_id_header() {
         assert_eq!(module.contains(r#".request_id_header("x-request-id")"#), expected, "{request_id_header:?}: {module}");
     }
 }
+
+#[test]
+fn a_referenced_separable_union_generates_a_multi_shape_success() {
+    // R28 / R1-F2.10: a `oneOf` behind a schema `$ref` reaches the generator
+    // as several tagged shapes, so the success is an enum decoded by `Shapes`.
+    use schematic_define::openapi::{OpenApiImport, OpenApiSource};
+
+    let document = serde_json::json!({
+        "openapi": "3.0.3",
+        "info": {"title": "Fixture", "version": "1"},
+        "paths": {"/reply": {"get": {"operationId": "GetReply", "responses": {"200": {
+            "description": "x",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Reply"}}},
+        }}}}},
+        "components": {"schemas": {
+            "Directory": {"type": "object"},
+            "File": {"type": "object"},
+            "Reply": {
+                "oneOf": [{"$ref": "#/components/schemas/Directory"}, {"$ref": "#/components/schemas/File"}],
+                "discriminator": {"propertyName": "type", "mapping": {"dir": "#/components/schemas/Directory", "file": "#/components/schemas/File"}},
+            },
+        }},
+    });
+    let imported = OpenApiImport::new(OpenApiSource::json(document.to_string())).build().unwrap();
+    let api = crate::common::components::with_referenced_components(imported.api);
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let src_dir = temp_dir.path().join("src");
+
+    schematic_gen::output::generate_and_write(&api, &src_dir, false).unwrap();
+
+    let module = std::fs::read_dir(&src_dir).unwrap().map(|entry| entry.unwrap().path())
+        .find(|path| path.extension().is_some_and(|ext| ext == "rs") && !["lib.rs", "shared.rs", "prelude.rs"].iter().any(|name| path.ends_with(name)))
+        .expect("the API module");
+    let flat: String = std::fs::read_to_string(&module).unwrap().split_whitespace().collect();
+    assert!(flat.contains("typeSuccess=GetReplyResponse;"), "{flat}");
+    assert!(flat.contains("typeDecoder=schematic_runtime::Shapes<GetReplyResponse>;"), "{flat}");
+    assert!(flat.contains("Directory(Directory)") && flat.contains("File(File)"), "{flat}");
+}
