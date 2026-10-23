@@ -19,6 +19,9 @@ skills_files_updated_during_phase_1:
 packages:
     - biscuit-visualized
     - biscuit-terminal
+    - darkmatter
+    - worktree
+    - sniff
 source_files_during_phase_2:
     - biscuit-visualized/src/Cargo.toml
     - Cargo.lock
@@ -87,6 +90,131 @@ skills_files_updated_during_phase_2:
     - .claude/skills/biscuit-visualized/artifacts-caching.md
     - .claude/skills/biscuit-visualized/rasterization.md
     - .claude/skills/biscuit-terminal/discovery.md
+source_files_during_phase_3:
+    - Cargo.lock
+    - biscuit-visualized/src/Cargo.toml
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/components/git_graph.rs
+    - biscuit-visualized/src/src/components/git_graph/tests.rs
+    - biscuit-visualized/src/src/components/mermaid.rs
+    - biscuit-visualized/src/src/fonts/chain.rs
+    - biscuit-visualized/src/src/fonts/measure.rs
+    - biscuit-visualized/src/src/fonts/mod.rs
+    - biscuit-visualized/src/src/fonts/query.rs
+    - biscuit-visualized/src/src/mermaid/gitgraph.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - biscuit-visualized/src/src/tests/font_chain_tests.rs
+    - biscuit-visualized/src/src/tests/gitgraph_tests.rs
+    - biscuit-visualized/src/src/tests/measure_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_tests.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/newline_tests.rs
+    - biscuit-visualized/src/src/mermaid/gitgraph_layout.rs
+    - biscuit-visualized/src/src/mermaid/postprocess.rs
+    - biscuit-visualized/src/src/tests/cache_identity_tests.rs
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/LICENSES/mermaid/LICENSE
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/LICENSES/merman-LICENSE-APACHE
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/LICENSES/merman-LICENSE-MIT
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/agentflow.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/architecture.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/block.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/c4.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/class.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/cynefin.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/er.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/eventmodeling.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/flowchart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/gantt.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/gitgraph.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/info.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/ishikawa.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/journey.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/kanban.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/mindmap.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/packet.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/pie.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/quadrantchart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/radar.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/railroad.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/requirement.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/sankey.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/sequence.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/state.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/swimlane.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/timeline.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/treeView.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/treemap.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/usecase.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/venn.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/wardley.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/xychart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/empty_branch_merge.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/labeled_merge.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/layout.json
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/layout.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/long_labels.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/observation_1.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/tag_collision_adjacent.mmd
+    - biscuit-visualized/src/src/tests/gitgraph_layout_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_cache_key_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_family_tests.rs
+    - biscuit-visualized/src/src/tests/postprocess_tests.rs
+docs_updated_during_phase_3:
+    - biscuit-visualized/README.md
+    - biscuit-visualized/docs/components/git_graph.md
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - biscuit-visualized/docs/dependencies.md
+    - biscuit-visualized/docs/mermaid-gitgraph.md
+    - biscuit-visualized/docs/merman.md
+    - docs/dependencies.md
+    - biscuit-visualized/src/src/tests/fixtures/merman/README.md
+    - biscuit-visualized/features/2026-10-21-merman/spec.md
+docs_created_during_phase_3:
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/01-default-measurement-clips-labels.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/02-wrapped-labels-lose-line-breaks.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/03-neo-dark-dividers-invisible.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/04-normalize-backslash-n-like-br.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/05-backslash-n-pie-gitgraph-block.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/06-er-attribute-comment-br-clips.md
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/README.md
+skills_files_updated_during_phase_3:
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/artifacts-caching.md
+    - .claude/skills/biscuit-visualized/diagram-components.md
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+source_files_during_phase_4:
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/mermaid/postprocess.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/fonts/measure.rs
+    - biscuit-visualized/src/src/components/mermaid.rs
+    - biscuit-visualized/src/src/tests/html_static_tests.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/postprocess_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_cache_key_tests.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - darkmatter/lib/src/markdown/render_tree/svg_sanitizer.rs
+    - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+    - darkmatter/lib/tests/l1/mermaid_static_svg.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - sniff/cli/tests/l1/snapshots.rs
+docs_updated_during_phase_4:
+    - biscuit-visualized/docs/merman.md
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - worktree/docs/git-graph.md
+    - darkmatter/docs/rendering/mermaid.md
+    - biscuit-terminal/cli/README.md
+    - biscuit-terminal/docs/dependencies.md
+    - biscuit-visualized/features/2026-10-21-merman/plan.md
+    - biscuit-visualized/features/2026-10-21-merman/implementation-log.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+    - .claude/skills/worktree/git-graph.md
+    - .claude/skills/biscuit-terminal/diagrams.md
 ---
 
 # Plan: Merman Rendering
@@ -572,7 +700,7 @@ of Phase 2 Streams A and C.
 
 **Wave 6 — parallel (disjoint modules).**
 
-- [ ] **Merman render path (R-C1, R-C6, R-C8, R-C10, R-C11, R-C15, AC-C7,
+- [x] **Merman render path (R-C1, R-C6, R-C8, R-C10, R-C11, R-C15, AC-C7,
   AC-C9, AC-C10, AC-C15).** In `mermaid/render.rs`: `RenderRequest` with
   `SvgPipeline::resvg_safe()`, our measurer (Wave 5), a **unique diagram id per
   document** (content hash + ordinal, never a fixed string — R-T7/AC-T2).
@@ -591,7 +719,7 @@ of Phase 2 Streams A and C.
       asserting fallback, warning, and elapsed time around the Merman call
       only; parse-error, unsupported, and ZenUML cases; no `foreignObject` in
       rasterized output.
-- [ ] **Cache identity (D41, D63, D70, R-C7, R-P6 prep, AC-C6, AC-C6a,
+- [x] **Cache identity (D41, D63, D70, R-C7, R-P6 prep, AC-C6, AC-C6a,
   AC-P4).** New `MERMAID_BACKEND` value `merman@<12-char rev>+bv1`; key
   inputs: rewritten source, output format, compiled design JSON hash, the
   once-per-process font-set hash, and the **resolved-face identity** of D63.
@@ -614,12 +742,12 @@ of Phase 2 Streams A and C.
       font hashing once across two renders.
     - Record the font-set hash time on macOS in the log against D35's
       500 ms cold limit.
-- [ ] **SVG post-process module (D33, R-M9, AC-M7).** Keep the gradient-stroke
+- [x] **SVG post-process module (D33, R-M9, AC-M7).** Keep the gradient-stroke
   fix and the `sans-serif` default; delete `apply_svg_overrides`,
   `fix_legend_text_baseline`, `fix_pie_text_contrast` when Merman does not
   need them (R-C4); no `overflow:visible` patch. Guard test (R-V10): class and
   ER dividers are painted in the dark theme.
-- [ ] **Upstream issue drafts (D52, D66, R-M11, AC-U1).** Write six
+- [x] **Upstream issue drafts (D52, D66, R-M11, AC-U1).** Write six
   ready-to-paste files in `upstream-issues/` in this spec's folder,
   `01-…md` to `06-…md`, from S1's findings (issues 1–3, 6) and S2's `\n`
   survey (4, 5); issue 6 is the ER attribute comment with `<br/>` clipping by
@@ -629,13 +757,13 @@ of Phase 2 Streams A and C.
 
 **Wave 7 — after Wave 6 and Phase 2 Stream C.**
 
-- [ ] **Pre-parse step 3b (D55, D34, D56, AC-C12).** One step after the font
+- [x] **Pre-parse step 3b (D55, D34, D56, AC-C12).** One step after the font
   chain and **before** the cache key: apply the Wave 4 `\n` lexer, then, for
   gitGraph, measure tags with our measurer and write `commitSpacing` as the
   smallest value giving at least 1 em between adjacent tags, only when tags
   would collide at the default 50 px. A diagram without colliding tags gets
   no `commitSpacing`.
-- [ ] **gitGraph on layout data (R-C4, R-C5, R-C5a, D5, D36, D53, AC-C11,
+- [x] **gitGraph on layout data (R-C4, R-C5, R-C5a, D5, D36, D53, AC-C11,
   AC-C12, AC-C13).** Uses the R-S8 spike's structs as a start.
     - Deserialize `layout_json` into our own structs (Merman's typed structs
       are not re-exported). **Loader matrix** (default: located error,
@@ -667,13 +795,13 @@ of Phase 2 Streams A and C.
 
 **Wave 8 — after Wave 7.**
 
-- [ ] **Remove `mmdr` (R-C3, AC-C2).** Drop the dependency, `image`-feature
+- [x] **Remove `mmdr` (R-C3, AC-C2).** Drop the dependency, `image`-feature
   wiring (`dep:mermaid-rs-renderer`), and dead code; `cargo tree -i
   mermaid-rs-renderer` finds nothing; no ELK crate.
-- [ ] **Triage `biscuit-visualized` tests and snapshots.** Update inline tests
+- [x] **Triage `biscuit-visualized` tests and snapshots.** Update inline tests
   and the `tests/l1` layout-matrix / parity snapshots; every snapshot change is
   reviewed, not blanket-accepted. Fix `///`/`//!` drift in touched modules.
-- [ ] **Docs (shipped and planned).** In `biscuit-visualized/docs/merman.md`,
+- [x] **Docs (shipped and planned).** In `biscuit-visualized/docs/merman.md`,
   `docs/components/mermaid_diagram.md`, and `docs/components/git_graph.md`:
   remove the **planned** markers for what Phases 2–3 shipped (font chain,
   bundled fonts, render path, time budget, cache key, step 3b,
@@ -682,11 +810,11 @@ of Phase 2 Streams A and C.
 
 ### Validation checkpoint 3
 
-- [ ] `just test` and `just lint` pass in `biscuit-visualized`.
-- [ ] AC-C1 (API diff vs `main`: additions only), AC-C2, AC-C6, AC-C6a, AC-C7,
+- [x] `just test` and `just lint` pass in `biscuit-visualized`.
+- [x] AC-C1 (API diff vs `main`: additions only), AC-C2, AC-C6, AC-C6a, AC-C7,
   AC-C9, AC-C10, AC-C11, AC-C12, AC-C13, AC-C15, AC-M6, AC-M7 verified.
-- [ ] Six issue drafts exist in `upstream-issues/` (AC-U1).
-- [ ] A smoke render of every family produces SVG and PNG with the interim
+- [x] Six issue drafts exist in `upstream-issues/` (AC-U1).
+- [x] A smoke render of every family produces SVG and PNG with the interim
   themes.
 
 ---
@@ -699,7 +827,7 @@ Goal: every consumer works on the new backend with tests passing.
 
 **Wave 9 — parallel (one area each), except where a dependency is named.**
 
-- [ ] **`worktree` under D43 (R-C13, R-C14, AC-C4, AC-S6).** Run `just test` in
+- [x] **`worktree` under D43 (R-C13, R-C14, AC-C4, AC-S6).** Run `just test` in
   `worktree/`.
     - Topology assertions (commits, parents, lanes, order, tags) must pass
       unchanged; `tag_overlaps()` passes unchanged with `commitSpacing`.
@@ -713,16 +841,16 @@ Goal: every consumer works on the new backend with tests passing.
       -- worktree/cli/src/commands/git_graph/tests.rs` must be on that list.
     - Edits to the gitGraph test *helper* are pre-authorized.
     - Update `worktree/docs/git-graph.md` where it describes rendering.
-- [ ] **`biscuit-terminal` lib and `bt` (AC-C3).** `just test` and `just test-l2`
+- [x] **`biscuit-terminal` lib and `bt` (AC-C3).** `just test` and `just test-l2`
   (no focus stealing); review changed render-tree/diagram-hook snapshots.
-- [ ] **`sniff` (AC-C3).** `just test`; fix any diagram usage.
-- [ ] **"HTML static" target in `biscuit-visualized` (D60, R-C9a, AC-C8a).**
+- [x] **`sniff` (AC-C3).** `just test`; fix any diagram usage.
+- [x] **"HTML static" target in `biscuit-visualized` (D60, R-C9a, AC-C8a).**
   Additive option on `mermaid::MermaidDiagram`; for it only, the post-process
   rewrites each label's `font-family` to the exact measured face followed by
   the original stack, and allows label overflow. Test: rasterized SVG carries
   neither change.
     - Prerequisite for: the Darkmatter integration test below.
-- [ ] **Darkmatter sanitizer (D37, D64, R-C9, AC-C8, AC-C8b).** In
+- [x] **Darkmatter sanitizer (D37, D64, R-C9, AC-C8, AC-C8b).** In
   `darkmatter/lib/src/markdown/render_tree/svg_sanitizer.rs`:
     - admit Merman's elements and attributes (its single `<style>`, text
       attributes) and nothing broader;
@@ -735,7 +863,7 @@ Goal: every consumer works on the new backend with tests passing.
       each of `dx`, `dy`, `stdDeviation`; `flood-opacity` outside 0–1
       rejected; a non-numeric, non-color attribute rejected; `feImage` and
       `feTurbulence` rejected; existing external-URL negatives unchanged.
-- [ ] **Darkmatter static-SVG path (D14, D37, R-C8, R-V7, AC-C8, AC-C8a).**
+- [x] **Darkmatter static-SVG path (D14, D37, R-C8, R-V7, AC-C8, AC-C8a).**
   After the HTML-static target and the sanitizer tasks.
     - `MermaidMode::Off` unchanged: `<pre class="mermaid">`, no SVG.
     - `MermaidMode::Image` / `BrowserMermaidMode::StaticSvg`: select the
@@ -749,7 +877,7 @@ Goal: every consumer works on the new backend with tests passing.
 
 - [ ] `just test` and `just lint` pass in `biscuit-visualized`,
   `biscuit-terminal`, `darkmatter`, `sniff`, `worktree` (AC-C3).
-- [ ] AC-C4, AC-C8, AC-C8a, AC-C8b, AC-S6 verified; the D43 rewrite list is in
+- [x] AC-C4, AC-C8, AC-C8a, AC-C8b, AC-S6 verified; the D43 rewrite list is in
   the log.
 
 ---

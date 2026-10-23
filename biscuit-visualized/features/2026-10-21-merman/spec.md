@@ -1196,7 +1196,14 @@ replacement inputs that keep what each test checks.
   outcome rules are already set: D43 for `worktree`'s assertions, and the
   bundled font (D40) for Windows, whose goldens use Inter.
 
-### D55. Pipeline: source rewrites before the cache check *(amends D34 and D36)*
+### D55. Pipeline: source rewrites before the cache check *(amends D34 and D36; amended 2026-10-22 during implementation under D72)*
+
+> **Amended during implementation (D72):** tag collisions depend on commit
+> order, lanes, and tag rows, which only a parse gives. Step 3b therefore
+> lays out a gitGraph whose source contains `tag:` once through Merman's
+> `layout_json` at the default spacing, before the cache check; any other
+> diagram, a tagless gitGraph included, reaches the key with no Merman call.
+> The key still covers the rewritten source.
 
 Tag spacing moves out of post-processing (step 8) into a step between the
 inputs and parsing: pipeline step 3b, after the font chain (tag widths need
@@ -1249,7 +1256,13 @@ change, with the goldens re-reviewed (D10). If upstream's key differs in name
 or semantics from `commitSpacing`, the step-3b code adapts in that same
 change. The fork branch is then no longer referenced by the workspace.
 
-### D58. Merman feature set
+### D58. Merman feature set *(amended 2026-10-22 during implementation under D72)*
+
+> **Amended during implementation (D72):** with `math` off, Merman does not
+> draw a math label as text; it refuses the whole diagram
+> (`MissingCapability { Math }`), and its math-renderer hook is crate-private.
+> A diagram with a `$$…$$` label therefore falls back to the code block
+> (D20), which shows the label's source text. `math` stays off.
 
 `default-features = false` with `["svg", "all-diagrams", "layout-cytoscape"]`.
 `png`, `native-fonts`, ELK, and **`math` are off**: math labels show as their
