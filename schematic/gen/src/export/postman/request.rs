@@ -123,17 +123,7 @@ pub(crate) fn build_headers(
     body: Option<&ExportBody>,
     collected: &mut Collected,
 ) -> Vec<PostmanHeader> {
-    let fixed = |key: &String, value: &String| PostmanHeader {
-        key: key.clone(),
-        value: value.clone(),
-        disabled: false,
-        description: None,
-    };
-    let mut headers: Vec<PostmanHeader> = api.headers.iter().map(|(key, value)| fixed(key, value)).collect();
-    for (key, value) in &endpoint.headers {
-        headers.retain(|h| !h.key.eq_ignore_ascii_case(key));
-        headers.push(fixed(key, value));
-    }
+    let mut headers = fixed_headers(api, &endpoint.headers);
     let is_fixed = |headers: &[PostmanHeader], name: &str| headers.iter().any(|h| h.key.eq_ignore_ascii_case(name));
 
     let content_type = match body {
@@ -143,7 +133,7 @@ pub(crate) fn build_headers(
     if let Some(content_type) = content_type
         && !is_fixed(&headers, "Content-Type")
     {
-        headers.push(fixed(&"Content-Type".to_string(), content_type));
+        headers.push(fixed_header("Content-Type", content_type));
     }
 
     let Some(params) = &endpoint.params else {
@@ -194,6 +184,22 @@ pub(crate) fn build_headers(
 
     headers.extend(declared);
     headers
+}
+
+/// The API's fixed headers, each replaced by an `overrides` header of the
+/// same name (case-insensitive), which joins the end. Every request a
+/// collection holds, REST or GraphQL, starts from these.
+pub(crate) fn fixed_headers(api: &RestApi, overrides: &[(String, String)]) -> Vec<PostmanHeader> {
+    let mut headers: Vec<PostmanHeader> = api.headers.iter().map(|(key, value)| fixed_header(key, value)).collect();
+    for (key, value) in overrides {
+        headers.retain(|h| !h.key.eq_ignore_ascii_case(key));
+        headers.push(fixed_header(key, value));
+    }
+    headers
+}
+
+fn fixed_header(key: &str, value: &str) -> PostmanHeader {
+    PostmanHeader { key: key.to_string(), value: value.to_string(), disabled: false, description: None }
 }
 
 /// Builds the body object for a request. A JSON body holds `example`

@@ -357,6 +357,11 @@ The raw JSON body holds:
 }
 ```
 
+Its headers are the API's fixed headers, as on every REST request: an API
+declaring `X-Protocol-Version: 2` sends it with each operation. An operation
+declares no headers of its own, so nothing overrides them; Postman sets the
+JSON `Content-Type` from the raw body's `json` language.
+
 The request saves a `200` response holding `{"data": <example>}` and one
 response per declared HTTP error. When no address rule matches the base URL,
 the generator reports a `graphql-operation` warning and the API's operations

@@ -23,7 +23,7 @@ use schematic_define::graphql::{GraphQlOperation, GraphQlVariables};
 use schematic_gen::diagnostics::{Feature, Output, Severity};
 use schematic_define::openapi::ExportOptions;
 use schematic_gen::export::openapi::build_openapi_grouped;
-use schematic_gen::export::postman::{build_postman_collection, build_postman_environment};
+use schematic_gen::export::postman::{build_postman_collection, build_postman_collection_grouped, build_postman_environment};
 use schematic_gen::pipeline::{BatchScope, GenerateOpts, OpenApiFormat, generate_batch};
 use schematic_gen::validate_openapi;
 use serde_json::{Value, json};
@@ -555,6 +555,7 @@ fn graphql_api(base_url: &str) -> RestApi {
         component("IssuesVars", json!({"type": "object", "required": ["owner"], "properties": {"owner": {"type": "string", "examples": ["octocat"]}, "first": {"type": "integer", "minimum": 1}}})),
     ]);
     fixture.base_url = base_url.to_string();
+    fixture.headers = vec![("X-Protocol-Version".into(), "2".into())];
     let mut surface = GraphQlSurface::new(AddressRule::github());
     surface.operations = vec![viewer, issues];
     fixture.graphql = Some(surface);
@@ -604,6 +605,62 @@ fn graphql_operations_are_runnable_posts_and_openapi_skips_each_by_name() {
     assert_eq!(skips, [(Severity::Warning, Some("Viewer".to_string())), (Severity::Warning, Some("Issues".to_string()))]);
     // Postman carries them, so it reports none.
     assert!(schematic_gen::validate_postman(&[&fixture]).iter().all(|d| d.feature != Feature::GraphQlOperation));
+}
+
+/// Each request as `(name, URL, X-Protocol-Version value)`; the URL names
+/// the member's base-URL or GraphQL-address variable.
+fn protocol_versions(collection: &Value) -> Vec<(String, String, Option<String>)> {
+    requests(collection)
+        .into_iter()
+        .map(|item| {
+            let version = headers(item).into_iter().find(|(key, _, _)| key.eq_ignore_ascii_case("X-Protocol-Version")).map(|(_, value, _)| value);
+            (item["name"].as_str().unwrap().into(), item["request"]["url"]["raw"].as_str().unwrap().into(), version)
+        })
+        .collect()
+}
+
+#[test]
+fn every_rest_and_graphql_request_carries_the_api_fixed_headers() {
+    let fixture = graphql_api("https://hub.example/api/v3");
+    let collection = collection_of(&fixture);
+    let version = Some("2".to_string());
+    assert_eq!(
+        protocol_versions(&collection),
+        [
+            ("GetUser".to_string(), "{{baseUrl}}/user".to_string(), version.clone()),
+            ("Viewer".to_string(), "{{graphqlUrl}}".to_string(), version.clone()),
+            ("Issues".to_string(), "{{graphqlUrl}}".to_string(), version),
+        ]
+    );
+    // A fixed header joins the body's media type, not replaces it.
+    assert_eq!(request(&collection, "Issues")["request"]["body"]["options"]["raw"]["language"], "json");
+}
+
+#[test]
+fn every_shared_module_member_request_carries_its_own_fixed_headers() {
+    let mut first = graphql_api("https://hub.example/api/v3");
+    first.module_path = Some("hub".into());
+    let mut second = graphql_api("https://ghe.example/api/v3");
+    second.name = "Enterprise".into();
+    second.module_path = Some("hub".into());
+    second.headers = vec![("x-protocol-version".into(), "3".into())];
+    let collection = serde_json::to_value(build_postman_collection_grouped(&[&first, &second], "hub")).unwrap();
+    validate_postman_json(&collection).unwrap_or_else(|errors| panic!("{errors:#?}"));
+
+    let mut versions = protocol_versions(&collection);
+    versions.sort();
+    let row = |name: &str, url: &str, version: &str| (name.to_string(), url.to_string(), Some(version.to_string()));
+    assert_eq!(
+        versions,
+        [
+            row("GetUser (Enterprise)", "{{baseUrl2}}/user", "3"),
+            row("GetUser (Hub)", "{{baseUrl}}/user", "2"),
+            row("Issues", "{{graphqlUrl2}}", "3"),
+            row("Issues", "{{graphqlUrl}}", "2"),
+            row("Viewer", "{{graphqlUrl2}}", "3"),
+            row("Viewer", "{{graphqlUrl}}", "2"),
+        ]
+    );
 }
 
 #[test]

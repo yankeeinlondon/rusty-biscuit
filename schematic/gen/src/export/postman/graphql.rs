@@ -5,7 +5,8 @@
 //! base URL by the surface's address rules. The JSON body is `query` (the
 //! authored document), `operationName` when the operation declares one, and
 //! `variables`: an example of the registered variables type, or `{}` for an
-//! operation without variables.
+//! operation without variables. The headers are the API's fixed headers;
+//! an operation declares none of its own.
 
 use schematic_define::graphql::{GraphQlOperation, GraphQlVariables};
 use schematic_define::AddressRule;
@@ -16,7 +17,7 @@ use crate::export::body::ExportBody;
 
 use super::auth::build_collection_auth;
 use super::item::Member;
-use super::request::build_body;
+use super::request::{build_body, fixed_headers};
 use super::responses::{json_response, saved_responses};
 use super::types::*;
 use super::variables::{Collected, reference};
@@ -127,7 +128,7 @@ fn operation_item(operation: &GraphQlOperation, member: &Member<'_>, address_var
             method: "POST".to_string(),
             url: PostmanUrl { raw: raw.clone(), host: vec![raw], path: Vec::new(), query: Vec::new(), variable: Vec::new() },
             auth: if member.request_level_auth { build_collection_auth(&member.auth) } else { None },
-            header: Vec::new(),
+            header: fixed_headers(api, &[]),
             body: Some(build_body(&json_body, Some(&Value::Object(body)))),
             description: (!operation.description.is_empty()).then(|| operation.description.clone()),
         }),
