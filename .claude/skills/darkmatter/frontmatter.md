@@ -72,8 +72,12 @@ let meta: PostMeta = md.fm_parse()?;
 
 ## CLI Operations
 
-Use `md frontmatter get`, `set`, and `rm` for structured changes. These commands
-parse and serialize frontmatter rather than editing YAML as text. When a
+Use `md frontmatter get`, `set`, and `rm` for structured changes. `set` and
+`rm` compute the edited document from the parsed frontmatter, then splice only
+the changed top-level properties into the loaded source with
+`restore_properties_text` (`Markdown::source_text()` is the loaded text), so
+every other byte is kept. When that editor refuses the source (an indented
+root, an ambiguous edit), they fall back to re-serializing the whole document. When a
 document carries a managed `hash:` property, use the command's normal write
 path so Darkmatter can keep the stored hash consistent.
 

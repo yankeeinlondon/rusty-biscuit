@@ -323,6 +323,14 @@ impl Markdown {
         self.loaded.as_deref()
     }
 
+    /// The exact text this document was parsed from, or `None` for a document
+    /// constructed in memory. Later edits to the frontmatter or body do not
+    /// change it, so a writer can splice its edits into the original bytes
+    /// with [`hash::restore_properties_text`] instead of re-serializing.
+    pub fn source_text(&self) -> Option<&str> {
+        self.loaded.as_deref().map(|loaded| &*loaded.text)
+    }
+
     fn with_loaded_text(mut self, text: String) -> Self {
         self.loaded = Some(std::sync::Arc::new(LoadedSource {
             text: text.into(),
