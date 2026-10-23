@@ -23,7 +23,7 @@ status: draft-spec
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
-review_iterations: 0
+review_iterations: 2
 clarified: false
 implemented: true
 human_review: false
@@ -35,6 +35,7 @@ refresh_required: true
 related: []
 next_spec: 2026-10-18-schematic-fidelity-polish
 implemented_by: "claude/opus"
+completed: true
 ---
 
 # Schematic WebSocket
