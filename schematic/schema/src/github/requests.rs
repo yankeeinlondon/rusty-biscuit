@@ -16,11 +16,10 @@ use super::{GitHub, GitHubApi};
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::GetRepositoryRequest;
 ///
-/// let request = GetRepositoryRequest::new("owner_value", "repo_value")
-///;
+/// let request = GetRepositoryRequest::new("owner_value", "repo_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRepositoryRequest {
@@ -78,12 +77,11 @@ impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::GetGitTreeRequest;
 ///
 /// let request = GetGitTreeRequest::new("owner_value", "repo_value", "tree_sha_value")
-///     .with_recursive(/* value */)
-///;
+///     .with_recursive(true);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetGitTreeRequest {
@@ -160,11 +158,10 @@ impl schematic_runtime::EndpointSpec for GetGitTreeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::GetRepositoryContentRawRequest;
 ///
-/// let request = GetRepositoryContentRawRequest::new("owner_value", "repo_value", "path_value")
-///;
+/// let request = GetRepositoryContentRawRequest::new("owner_value", "repo_value", "path_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRepositoryContentRawRequest {
@@ -316,14 +313,13 @@ impl ::core::fmt::Display for ListPullRequestsRequestDirection {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::github::ListPullRequestsRequest;
+/// ```no_run
+/// use schematic_schema::github::{ListPullRequestsRequest, ListPullRequestsRequestState, ListPullRequestsRequestSort, ListPullRequestsRequestDirection};
 ///
 /// let request = ListPullRequestsRequest::new("owner_value", "repo_value")
-///     .with_state(/* value */)
-///     .with_sort(/* value */)
-///     .with_direction(/* value */)
-///;
+///     .with_state(ListPullRequestsRequestState::Open)
+///     .with_sort(ListPullRequestsRequestSort::Created)
+///     .with_direction(ListPullRequestsRequestDirection::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPullRequestsRequest {
@@ -414,11 +410,10 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::ListPullRequestFilesRequest;
 ///
-/// let request = ListPullRequestFilesRequest::new("owner_value", "repo_value", "pull_number_value")
-///;
+/// let request = ListPullRequestFilesRequest::new("owner_value", "repo_value", "pull_number_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPullRequestFilesRequest {
@@ -567,14 +562,13 @@ impl ::core::fmt::Display for ListIssuesRequestDirection {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::github::ListIssuesRequest;
+/// ```no_run
+/// use schematic_schema::github::{ListIssuesRequest, ListIssuesRequestState, ListIssuesRequestSort, ListIssuesRequestDirection};
 ///
 /// let request = ListIssuesRequest::new("owner_value", "repo_value")
-///     .with_state(/* value */)
-///     .with_sort(/* value */)
-///     .with_direction(/* value */)
-///;
+///     .with_state(ListIssuesRequestState::Open)
+///     .with_sort(ListIssuesRequestSort::Created)
+///     .with_direction(ListIssuesRequestDirection::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssuesRequest {
@@ -665,11 +659,10 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::GetIssueRequest;
 ///
-/// let request = GetIssueRequest::new("owner_value", "repo_value", "issue_number_value")
-///;
+/// let request = GetIssueRequest::new("owner_value", "repo_value", "issue_number_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetIssueRequest {
@@ -735,11 +728,10 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::ListIssueCommentsRequest;
 ///
-/// let request = ListIssueCommentsRequest::new("owner_value", "repo_value", "issue_number_value")
-///;
+/// let request = ListIssueCommentsRequest::new("owner_value", "repo_value", "issue_number_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueCommentsRequest {
@@ -805,11 +797,10 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::ListIssueTimelineRequest;
 ///
-/// let request = ListIssueTimelineRequest::new("owner_value", "repo_value", "issue_number_value")
-///;
+/// let request = ListIssueTimelineRequest::new("owner_value", "repo_value", "issue_number_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueTimelineRequest {
@@ -875,11 +866,10 @@ impl schematic_runtime::EndpointSpec for ListIssueTimelineRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::ListTagsRequest;
 ///
-/// let request = ListTagsRequest::new("owner_value", "repo_value")
-///;
+/// let request = ListTagsRequest::new("owner_value", "repo_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTagsRequest {
@@ -937,11 +927,10 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::ListReleasesRequest;
 ///
-/// let request = ListReleasesRequest::new("owner_value", "repo_value")
-///;
+/// let request = ListReleasesRequest::new("owner_value", "repo_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListReleasesRequest {
@@ -999,11 +988,10 @@ impl schematic_runtime::EndpointSpec for ListReleasesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::GetTagReferenceRequest;
 ///
-/// let request = GetTagReferenceRequest::new("owner_value", "repo_value", "tag_value")
-///;
+/// let request = GetTagReferenceRequest::new("owner_value", "repo_value", "tag_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetTagReferenceRequest {
@@ -1067,11 +1055,10 @@ impl schematic_runtime::EndpointSpec for GetTagReferenceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::GetBranchReferenceRequest;
 ///
-/// let request = GetBranchReferenceRequest::new("owner_value", "repo_value", "branch_value")
-///;
+/// let request = GetBranchReferenceRequest::new("owner_value", "repo_value", "branch_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetBranchReferenceRequest {
@@ -1135,11 +1122,10 @@ impl schematic_runtime::EndpointSpec for GetBranchReferenceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::GetAnnotatedTagRequest;
 ///
-/// let request = GetAnnotatedTagRequest::new("owner_value", "repo_value", "tag_sha_value")
-///;
+/// let request = GetAnnotatedTagRequest::new("owner_value", "repo_value", "tag_sha_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetAnnotatedTagRequest {
@@ -1278,14 +1264,13 @@ impl ::core::fmt::Display for ListWorkflowRunsRequestStatus {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::github::ListWorkflowRunsRequest;
+/// ```no_run
+/// use schematic_schema::github::{ListWorkflowRunsRequest, ListWorkflowRunsRequestStatus};
 ///
 /// let request = ListWorkflowRunsRequest::new("owner_value", "repo_value")
-///     .with_status(/* value */)
-///     .with_branch(/* value */)
-///     .with_event(/* value */)
-///;
+///     .with_status(ListWorkflowRunsRequestStatus::Completed)
+///     .with_branch("branch_value".to_string())
+///     .with_event("event_value".to_string());
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListWorkflowRunsRequest {
@@ -1475,14 +1460,13 @@ impl ::core::fmt::Display for ListOrgReposRequestDirection {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::github::ListOrgReposRequest;
+/// ```no_run
+/// use schematic_schema::github::{ListOrgReposRequest, ListOrgReposRequestRepoType, ListOrgReposRequestSort, ListOrgReposRequestDirection};
 ///
 /// let request = ListOrgReposRequest::new("org_value")
-///     .with_repo_type(/* value */)
-///     .with_sort(/* value */)
-///     .with_direction(/* value */)
-///;
+///     .with_repo_type(ListOrgReposRequestRepoType::All)
+///     .with_sort(ListOrgReposRequestSort::Created)
+///     .with_direction(ListOrgReposRequestDirection::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListOrgReposRequest {

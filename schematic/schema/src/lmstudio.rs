@@ -22,24 +22,27 @@
 //!
 //! ## Examples
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::lmstudio::ListModelsRequest;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = LmStudio::new();
-//!     let data = client.list_models().await?;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = LmStudio::new();
+//! let data = client.list_models().await?;
 //!
-//!     // the whole response: status, headers, and request id as well
-//!     let response = client.list_models().full().await?;
-//!     println!("{}", response.meta);
-//!     Ok(())
-//! }
+//! // the same request, built as a typed request and sent
+//! let data = client.send(ListModelsRequest::default()).await?;
+//!
+//! // the whole response: status, headers, and request id as well
+//! let response = client.list_models().full().await?;
+//! println!("{}", response.meta);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ### Override Base URL
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
 //!
 //! let client = LmStudio::new().base_url("https://staging.example.com/v1");
@@ -95,12 +98,11 @@ impl Default for LmStudio {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::lmstudio::ChatRequest;
 ///
 /// let body: ::schematic_definitions::lmstudio::ChatBody = Default::default();
-/// let request = ChatRequest::new(body)
-///;
+/// let request = ChatRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatRequest {
@@ -205,11 +207,10 @@ impl schematic_runtime::EndpointSpec for ChatRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::lmstudio::ListModelsRequest;
 ///
-/// let request = ListModelsRequest::default()
-///;
+/// let request = ListModelsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
@@ -241,12 +242,11 @@ impl schematic_runtime::EndpointSpec for ListModelsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::lmstudio::LoadModelRequest;
 ///
 /// let body: ::schematic_definitions::lmstudio::LoadModelBody = Default::default();
-/// let request = LoadModelRequest::new(body)
-///;
+/// let request = LoadModelRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LoadModelRequest {
@@ -299,12 +299,11 @@ impl schematic_runtime::EndpointSpec for LoadModelRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::lmstudio::UnloadModelRequest;
 ///
 /// let body: ::schematic_definitions::lmstudio::UnloadModelBody = Default::default();
-/// let request = UnloadModelRequest::new(body)
-///;
+/// let request = UnloadModelRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnloadModelRequest {
@@ -357,12 +356,11 @@ impl schematic_runtime::EndpointSpec for UnloadModelRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::lmstudio::DownloadModelRequest;
 ///
 /// let body: ::schematic_definitions::lmstudio::DownloadModelBody = Default::default();
-/// let request = DownloadModelRequest::new(body)
-///;
+/// let request = DownloadModelRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DownloadModelRequest {
@@ -416,12 +414,11 @@ impl schematic_runtime::EndpointSpec for DownloadModelRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::lmstudio::GetDownloadStatusRequest;
 ///
 /// let body: ::schematic_definitions::lmstudio::DownloadStatusBody = Default::default();
-/// let request = GetDownloadStatusRequest::new(body)
-///;
+/// let request = GetDownloadStatusRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDownloadStatusRequest {

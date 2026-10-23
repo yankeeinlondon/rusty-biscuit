@@ -6,14 +6,13 @@ use super::{GitLab, GitLabApi};
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::ListRepositoryTreeRequest;
 ///
 /// let request = ListRepositoryTreeRequest::new("id_value")
-///     .with_recursive(/* value */)
-///     .with_git_ref(/* value */)
-///     .with_path(/* value */)
-///;
+///     .with_recursive(true)
+///     .with_git_ref("git_ref_value".to_string())
+///     .with_path("path_value".to_string());
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRepositoryTreeRequest {
@@ -111,11 +110,10 @@ impl schematic_runtime::EndpointSpec for ListRepositoryTreeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::GetRepositoryFileRequest;
 ///
-/// let request = GetRepositoryFileRequest::new("id_value", "file_path_value", "ref_value")
-///;
+/// let request = GetRepositoryFileRequest::new("id_value", "file_path_value", "ref_value");
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetRepositoryFileRequest {
@@ -177,11 +175,10 @@ impl schematic_runtime::EndpointSpec for GetRepositoryFileRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::GetProjectRequest;
 ///
-/// let request = GetProjectRequest::new("id_value")
-///;
+/// let request = GetProjectRequest::new("id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetProjectRequest {
@@ -325,16 +322,15 @@ impl ::core::fmt::Display for ListGroupProjectsRequestSort {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::gitlab::ListGroupProjectsRequest;
+/// ```no_run
+/// use schematic_schema::gitlab::{ListGroupProjectsRequest, ListGroupProjectsRequestVisibility, ListGroupProjectsRequestOrderBy, ListGroupProjectsRequestSort};
 ///
 /// let request = ListGroupProjectsRequest::new("id_value")
-///     .with_archived(/* value */)
-///     .with_visibility(/* value */)
-///     .with_order_by(/* value */)
-///     .with_sort(/* value */)
-///     .with_include_subgroups(/* value */)
-///;
+///     .with_archived(true)
+///     .with_visibility(ListGroupProjectsRequestVisibility::Public)
+///     .with_order_by(ListGroupProjectsRequestOrderBy::Id)
+///     .with_sort(ListGroupProjectsRequestSort::Asc)
+///     .with_include_subgroups(true);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListGroupProjectsRequest {
@@ -458,11 +454,10 @@ impl schematic_runtime::EndpointSpec for ListGroupProjectsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::GetBranchRequest;
 ///
-/// let request = GetBranchRequest::new("id_value", "branch_value")
-///;
+/// let request = GetBranchRequest::new("id_value", "branch_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetBranchRequest {
@@ -542,12 +537,11 @@ impl ::core::fmt::Display for ListMergeRequestsRequestState {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::gitlab::ListMergeRequestsRequest;
+/// ```no_run
+/// use schematic_schema::gitlab::{ListMergeRequestsRequest, ListMergeRequestsRequestState};
 ///
 /// let request = ListMergeRequestsRequest::new("id_value")
-///     .with_state(/* value */)
-///;
+///     .with_state(ListMergeRequestsRequestState::Opened);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListMergeRequestsRequest {
@@ -613,11 +607,10 @@ impl schematic_runtime::EndpointSpec for ListMergeRequestsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::GetMergeRequestRequest;
 ///
-/// let request = GetMergeRequestRequest::new("id_value", "merge_request_iid_value")
-///;
+/// let request = GetMergeRequestRequest::new("id_value", "merge_request_iid_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetMergeRequestRequest {
@@ -666,11 +659,10 @@ impl schematic_runtime::EndpointSpec for GetMergeRequestRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::ListMergeRequestCommitsRequest;
 ///
-/// let request = ListMergeRequestCommitsRequest::new("id_value", "merge_request_iid_value")
-///;
+/// let request = ListMergeRequestCommitsRequest::new("id_value", "merge_request_iid_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListMergeRequestCommitsRequest {
@@ -719,11 +711,10 @@ impl schematic_runtime::EndpointSpec for ListMergeRequestCommitsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::ListMergeRequestChangesRequest;
 ///
-/// let request = ListMergeRequestChangesRequest::new("id_value", "merge_request_iid_value")
-///;
+/// let request = ListMergeRequestChangesRequest::new("id_value", "merge_request_iid_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListMergeRequestChangesRequest {
@@ -801,12 +792,11 @@ impl ::core::fmt::Display for ListIssuesRequestState {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::gitlab::ListIssuesRequest;
+/// ```no_run
+/// use schematic_schema::gitlab::{ListIssuesRequest, ListIssuesRequestState};
 ///
 /// let request = ListIssuesRequest::new("id_value")
-///     .with_state(/* value */)
-///;
+///     .with_state(ListIssuesRequestState::Opened);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssuesRequest {
@@ -872,11 +862,10 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::GetIssueRequest;
 ///
-/// let request = GetIssueRequest::new("id_value", "issue_iid_value")
-///;
+/// let request = GetIssueRequest::new("id_value", "issue_iid_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetIssueRequest {
@@ -923,11 +912,10 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::ListIssueNotesRequest;
 ///
-/// let request = ListIssueNotesRequest::new("id_value", "issue_iid_value")
-///;
+/// let request = ListIssueNotesRequest::new("id_value", "issue_iid_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueNotesRequest {
@@ -976,11 +964,10 @@ impl schematic_runtime::EndpointSpec for ListIssueNotesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::ListIssueParticipantsRequest;
 ///
-/// let request = ListIssueParticipantsRequest::new("id_value", "issue_iid_value")
-///;
+/// let request = ListIssueParticipantsRequest::new("id_value", "issue_iid_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueParticipantsRequest {
@@ -1029,11 +1016,10 @@ impl schematic_runtime::EndpointSpec for ListIssueParticipantsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::ListTagsRequest;
 ///
-/// let request = ListTagsRequest::new("id_value")
-///;
+/// let request = ListTagsRequest::new("id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTagsRequest {
@@ -1086,11 +1072,10 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::GetTagRequest;
 ///
-/// let request = GetTagRequest::new("id_value", "tag_name_value")
-///;
+/// let request = GetTagRequest::new("id_value", "tag_name_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetTagRequest {
@@ -1137,11 +1122,10 @@ impl schematic_runtime::EndpointSpec for GetTagRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::ListReleasesRequest;
 ///
-/// let request = ListReleasesRequest::new("id_value")
-///;
+/// let request = ListReleasesRequest::new("id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListReleasesRequest {
@@ -1194,11 +1178,10 @@ impl schematic_runtime::EndpointSpec for ListReleasesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::GetReleaseRequest;
 ///
-/// let request = GetReleaseRequest::new("id_value", "tag_name_value")
-///;
+/// let request = GetReleaseRequest::new("id_value", "tag_name_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetReleaseRequest {
@@ -1245,11 +1228,10 @@ impl schematic_runtime::EndpointSpec for GetReleaseRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitlab::GetLatestReleaseRequest;
 ///
-/// let request = GetLatestReleaseRequest::new("id_value")
-///;
+/// let request = GetLatestReleaseRequest::new("id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetLatestReleaseRequest {
@@ -1362,15 +1344,14 @@ impl ::core::fmt::Display for ListProjectPipelinesRequestStatus {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::gitlab::ListProjectPipelinesRequest;
+/// ```no_run
+/// use schematic_schema::gitlab::{ListProjectPipelinesRequest, ListProjectPipelinesRequestStatus};
 ///
 /// let request = ListProjectPipelinesRequest::new("id_value")
-///     .with_status(/* value */)
-///     .with_source(/* value */)
-///     .with_git_ref(/* value */)
-///     .with_sha(/* value */)
-///;
+///     .with_status(ListProjectPipelinesRequestStatus::Created)
+///     .with_source("source_value".to_string())
+///     .with_git_ref("git_ref_value".to_string())
+///     .with_sha("sha_value".to_string());
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectPipelinesRequest {

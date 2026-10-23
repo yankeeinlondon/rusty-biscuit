@@ -6,11 +6,7 @@
 //! feature is enabled, and the runtime types every call uses. Request, call, and response
 //! types are **not** re-exported here to avoid naming conflicts. An
 //! endpoint method needs none of them imported; when one must be
-//! named, import it from its API module:
-//!
-//! ```text
-//! use schematic_schema::openai::{ListModelsCall, ListModelsRequest, ListModelsResponse};
-//! ```
+//! named, import it from its API module.
 //!
 //! ## Re-exports
 //!
@@ -65,16 +61,44 @@
 //! [`Credential`], [`Deadline`], [`FullCall`], [`OriginPolicy`],
 //! [`Response`], [`RawResponse`], and [`TransportError`] from
 //! [`schematic_runtime`].
-//!
-//! ## Examples
-//!
-//! ```text
-//! use schematic_schema::prelude::*;
-//!
-//! let client = OpenAI::new();
-//! let model = client.retrieve_model("gpt-4").await?;
-//! println!("{}", model.id);
-//! ```
+#![cfg_attr(feature = "anthropic", doc = "")]
+#![cfg_attr(feature = "anthropic", doc = " ## Examples")]
+#![cfg_attr(feature = "anthropic", doc = "")]
+#![cfg_attr(feature = "anthropic", doc = " ```no_run")]
+#![cfg_attr(feature = "anthropic", doc = " use schematic_schema::prelude::*;")]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " use schematic_schema::anthropic::ListModelsRequest;"
+)]
+#![cfg_attr(feature = "anthropic", doc = "")]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " # async fn example() -> Result<(), Box<dyn std::error::Error>> {"
+)]
+#![cfg_attr(feature = "anthropic", doc = " let client = Anthropic::new();")]
+#![cfg_attr(feature = "anthropic", doc = " let data = client.list_models().await?;")]
+#![cfg_attr(feature = "anthropic", doc = "")]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " // the same request, built as a typed request and sent"
+)]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " let data = client.send(ListModelsRequest::default()).await?;"
+)]
+#![cfg_attr(feature = "anthropic", doc = "")]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " // the whole response: status, headers, and request id as well"
+)]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " let response = client.list_models().full().await?;"
+)]
+#![cfg_attr(feature = "anthropic", doc = " println!(\"{}\", response.meta);")]
+#![cfg_attr(feature = "anthropic", doc = " # Ok(())")]
+#![cfg_attr(feature = "anthropic", doc = " # }")]
+#![cfg_attr(feature = "anthropic", doc = " ```")]
 pub use schematic_runtime::{
     Call, CallError, CallOptions, Credential, Deadline, FullCall, OriginPolicy,
     RawResponse, Response, TransportError,

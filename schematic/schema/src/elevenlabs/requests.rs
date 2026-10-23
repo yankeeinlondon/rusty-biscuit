@@ -7,12 +7,11 @@ use super::{ElevenLabs, ElevenLabsApi};
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::CreateSpeechRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::CreateSpeechBody = Default::default();
-/// let request = CreateSpeechRequest::new("voice_id_value", body)
-///;
+/// let request = CreateSpeechRequest::new("voice_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSpeechRequest {
@@ -68,12 +67,11 @@ impl schematic_runtime::EndpointSpec for CreateSpeechRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::StreamSpeechRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::CreateSpeechBody = Default::default();
-/// let request = StreamSpeechRequest::new("voice_id_value", body)
-///;
+/// let request = StreamSpeechRequest::new("voice_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StreamSpeechRequest {
@@ -130,12 +128,11 @@ impl schematic_runtime::EndpointSpec for StreamSpeechRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::CreateSpeechWithTimestampsRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::CreateSpeechBody = Default::default();
-/// let request = CreateSpeechWithTimestampsRequest::new("voice_id_value", body)
-///;
+/// let request = CreateSpeechWithTimestampsRequest::new("voice_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSpeechWithTimestampsRequest {
@@ -194,12 +191,11 @@ impl schematic_runtime::EndpointSpec for CreateSpeechWithTimestampsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::StreamSpeechWithTimestampsRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::CreateSpeechBody = Default::default();
-/// let request = StreamSpeechWithTimestampsRequest::new("voice_id_value", body)
-///;
+/// let request = StreamSpeechWithTimestampsRequest::new("voice_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StreamSpeechWithTimestampsRequest {
@@ -261,13 +257,12 @@ impl schematic_runtime::EndpointSpec for StreamSpeechWithTimestampsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::ListVoicesRequest;
 ///
 /// let request = ListVoicesRequest::default()
-///     .with_page_size(/* value */)
-///     .with_page_token(/* value */)
-///;
+///     .with_page_size(1)
+///     .with_page_token("page_token_value".to_string());
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListVoicesRequest {
@@ -329,11 +324,10 @@ impl schematic_runtime::EndpointSpec for ListVoicesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::GetVoiceRequest;
 ///
-/// let request = GetVoiceRequest::new("voice_id_value")
-///;
+/// let request = GetVoiceRequest::new("voice_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetVoiceRequest {
@@ -388,11 +382,10 @@ impl schematic_runtime::EndpointSpec for GetVoiceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::DeleteVoiceRequest;
 ///
-/// let request = DeleteVoiceRequest::new("voice_id_value")
-///;
+/// let request = DeleteVoiceRequest::new("voice_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteVoiceRequest {
@@ -447,11 +440,10 @@ impl schematic_runtime::EndpointSpec for DeleteVoiceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::GetDefaultVoiceSettingsRequest;
 ///
-/// let request = GetDefaultVoiceSettingsRequest::default()
-///;
+/// let request = GetDefaultVoiceSettingsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDefaultVoiceSettingsRequest {}
@@ -483,11 +475,10 @@ impl schematic_runtime::EndpointSpec for GetDefaultVoiceSettingsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::GetVoiceSettingsRequest;
 ///
-/// let request = GetVoiceSettingsRequest::new("voice_id_value")
-///;
+/// let request = GetVoiceSettingsRequest::new("voice_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetVoiceSettingsRequest {
@@ -542,12 +533,11 @@ impl schematic_runtime::EndpointSpec for GetVoiceSettingsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::UpdateVoiceSettingsRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::VoiceSettings = Default::default();
-/// let request = UpdateVoiceSettingsRequest::new("voice_id_value", body)
-///;
+/// let request = UpdateVoiceSettingsRequest::new("voice_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateVoiceSettingsRequest {
@@ -606,11 +596,10 @@ impl schematic_runtime::EndpointSpec for UpdateVoiceSettingsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::GetVoiceSampleAudioRequest;
 ///
-/// let request = GetVoiceSampleAudioRequest::new("voice_id_value", "sample_id_value")
-///;
+/// let request = GetVoiceSampleAudioRequest::new("voice_id_value", "sample_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetVoiceSampleAudioRequest {
@@ -657,11 +646,10 @@ impl schematic_runtime::EndpointSpec for GetVoiceSampleAudioRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::DeleteVoiceSampleRequest;
 ///
-/// let request = DeleteVoiceSampleRequest::new("voice_id_value", "sample_id_value")
-///;
+/// let request = DeleteVoiceSampleRequest::new("voice_id_value", "sample_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteVoiceSampleRequest {
@@ -736,15 +724,11 @@ impl AddVoiceSampleForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::{AddVoiceSampleRequest, AddVoiceSampleForm};
 ///
-/// let body = AddVoiceSampleForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = AddVoiceSampleRequest::new("voice_id_value", body)
-///;
+/// let body: AddVoiceSampleForm = Default::default();
+/// let request = AddVoiceSampleRequest::new("voice_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AddVoiceSampleRequest {
@@ -792,11 +776,10 @@ impl schematic_runtime::EndpointSpec for AddVoiceSampleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::ListSharedVoicesRequest;
 ///
-/// let request = ListSharedVoicesRequest::default()
-///;
+/// let request = ListSharedVoicesRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSharedVoicesRequest {}
@@ -828,12 +811,11 @@ impl schematic_runtime::EndpointSpec for ListSharedVoicesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::AddSharedVoiceRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::AddSharedVoiceBody = Default::default();
-/// let request = AddSharedVoiceRequest::new("public_user_id_value", "voice_id_value", body)
-///;
+/// let request = AddSharedVoiceRequest::new("public_user_id_value", "voice_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AddSharedVoiceRequest {
@@ -896,12 +878,11 @@ impl schematic_runtime::EndpointSpec for AddSharedVoiceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::CreatePvcVoiceRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::CreatePvcVoiceBody = Default::default();
-/// let request = CreatePvcVoiceRequest::new(body)
-///;
+/// let request = CreatePvcVoiceRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreatePvcVoiceRequest {
@@ -955,12 +936,11 @@ impl schematic_runtime::EndpointSpec for CreatePvcVoiceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::UpdatePvcVoiceRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::CreatePvcVoiceBody = Default::default();
-/// let request = UpdatePvcVoiceRequest::new("voice_id_value", body)
-///;
+/// let request = UpdatePvcVoiceRequest::new("voice_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdatePvcVoiceRequest {
@@ -1018,12 +998,11 @@ impl schematic_runtime::EndpointSpec for UpdatePvcVoiceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::TrainPvcVoiceRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::TrainPvcVoiceBody = Default::default();
-/// let request = TrainPvcVoiceRequest::new("voice_id_value", body)
-///;
+/// let request = TrainPvcVoiceRequest::new("voice_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TrainPvcVoiceRequest {
@@ -1081,12 +1060,11 @@ impl schematic_runtime::EndpointSpec for TrainPvcVoiceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::CreateSoundEffectRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::CreateSoundEffectBody = Default::default();
-/// let request = CreateSoundEffectRequest::new(body)
-///;
+/// let request = CreateSoundEffectRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSoundEffectRequest {
@@ -1140,11 +1118,10 @@ impl schematic_runtime::EndpointSpec for CreateSoundEffectRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::ListModelsRequest;
 ///
-/// let request = ListModelsRequest::default()
-///;
+/// let request = ListModelsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
@@ -1176,11 +1153,10 @@ impl schematic_runtime::EndpointSpec for ListModelsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::CreateSingleUseTokenRequest;
 ///
-/// let request = CreateSingleUseTokenRequest::new("token_type_value")
-///;
+/// let request = CreateSingleUseTokenRequest::new("token_type_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSingleUseTokenRequest {
@@ -1237,11 +1213,10 @@ impl schematic_runtime::EndpointSpec for CreateSingleUseTokenRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::GetHistoryRequest;
 ///
-/// let request = GetHistoryRequest::default()
-///;
+/// let request = GetHistoryRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetHistoryRequest {}
@@ -1273,11 +1248,10 @@ impl schematic_runtime::EndpointSpec for GetHistoryRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::GetHistoryItemRequest;
 ///
-/// let request = GetHistoryItemRequest::new("history_item_id_value")
-///;
+/// let request = GetHistoryItemRequest::new("history_item_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetHistoryItemRequest {
@@ -1334,11 +1308,10 @@ impl schematic_runtime::EndpointSpec for GetHistoryItemRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::DeleteHistoryItemRequest;
 ///
-/// let request = DeleteHistoryItemRequest::new("history_item_id_value")
-///;
+/// let request = DeleteHistoryItemRequest::new("history_item_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteHistoryItemRequest {
@@ -1395,11 +1368,10 @@ impl schematic_runtime::EndpointSpec for DeleteHistoryItemRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::GetHistoryItemAudioRequest;
 ///
-/// let request = GetHistoryItemAudioRequest::new("history_item_id_value")
-///;
+/// let request = GetHistoryItemAudioRequest::new("history_item_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetHistoryItemAudioRequest {
@@ -1455,12 +1427,11 @@ impl schematic_runtime::EndpointSpec for GetHistoryItemAudioRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::DownloadHistoryItemsRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::DownloadHistoryBody = Default::default();
-/// let request = DownloadHistoryItemsRequest::new(body)
-///;
+/// let request = DownloadHistoryItemsRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DownloadHistoryItemsRequest {
@@ -1512,11 +1483,10 @@ impl schematic_runtime::EndpointSpec for DownloadHistoryItemsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::GetUsageStatsRequest;
 ///
-/// let request = GetUsageStatsRequest::default()
-///;
+/// let request = GetUsageStatsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetUsageStatsRequest {}
@@ -1548,11 +1518,10 @@ impl schematic_runtime::EndpointSpec for GetUsageStatsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::GetUserRequest;
 ///
-/// let request = GetUserRequest::default()
-///;
+/// let request = GetUserRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetUserRequest {}
@@ -1584,11 +1553,10 @@ impl schematic_runtime::EndpointSpec for GetUserRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::GetUserSubscriptionRequest;
 ///
-/// let request = GetUserSubscriptionRequest::default()
-///;
+/// let request = GetUserSubscriptionRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetUserSubscriptionRequest {}
@@ -1620,11 +1588,10 @@ impl schematic_runtime::EndpointSpec for GetUserSubscriptionRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::GetResourceRequest;
 ///
-/// let request = GetResourceRequest::new("resource_id_value")
-///;
+/// let request = GetResourceRequest::new("resource_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetResourceRequest {
@@ -1682,12 +1649,11 @@ impl schematic_runtime::EndpointSpec for GetResourceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::ShareResourceRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::ShareResourceBody = Default::default();
-/// let request = ShareResourceRequest::new("resource_id_value", body)
-///;
+/// let request = ShareResourceRequest::new("resource_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ShareResourceRequest {
@@ -1746,12 +1712,11 @@ impl schematic_runtime::EndpointSpec for ShareResourceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::UnshareResourceRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::UnshareResourceBody = Default::default();
-/// let request = UnshareResourceRequest::new("resource_id_value", body)
-///;
+/// let request = UnshareResourceRequest::new("resource_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnshareResourceRequest {
@@ -1810,12 +1775,11 @@ impl schematic_runtime::EndpointSpec for UnshareResourceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::CopyResourceToWorkspaceRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::CopyResourceBody = Default::default();
-/// let request = CopyResourceToWorkspaceRequest::new("resource_id_value", body)
-///;
+/// let request = CopyResourceToWorkspaceRequest::new("resource_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CopyResourceToWorkspaceRequest {
@@ -1874,11 +1838,10 @@ impl schematic_runtime::EndpointSpec for CopyResourceToWorkspaceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::ListServiceAccountsRequest;
 ///
-/// let request = ListServiceAccountsRequest::default()
-///;
+/// let request = ListServiceAccountsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListServiceAccountsRequest {}
@@ -1910,11 +1873,10 @@ impl schematic_runtime::EndpointSpec for ListServiceAccountsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::ListServiceAccountApiKeysRequest;
 ///
-/// let request = ListServiceAccountApiKeysRequest::new("service_account_user_id_value")
-///;
+/// let request = ListServiceAccountApiKeysRequest::new("service_account_user_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListServiceAccountApiKeysRequest {
@@ -1974,12 +1936,11 @@ impl schematic_runtime::EndpointSpec for ListServiceAccountApiKeysRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::CreateApiKeyRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::CreateApiKeyBody = Default::default();
-/// let request = CreateApiKeyRequest::new("service_account_user_id_value", body)
-///;
+/// let request = CreateApiKeyRequest::new("service_account_user_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateApiKeyRequest {
@@ -2038,12 +1999,11 @@ impl schematic_runtime::EndpointSpec for CreateApiKeyRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::UpdateApiKeyRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::UpdateApiKeyBody = Default::default();
-/// let request = UpdateApiKeyRequest::new("service_account_user_id_value", "api_key_id_value", body)
-///;
+/// let request = UpdateApiKeyRequest::new("service_account_user_id_value", "api_key_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateApiKeyRequest {
@@ -2107,11 +2067,10 @@ impl schematic_runtime::EndpointSpec for UpdateApiKeyRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::DeleteApiKeyRequest;
 ///
-/// let request = DeleteApiKeyRequest::new("service_account_user_id_value", "api_key_id_value")
-///;
+/// let request = DeleteApiKeyRequest::new("service_account_user_id_value", "api_key_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteApiKeyRequest {
@@ -2164,11 +2123,10 @@ impl schematic_runtime::EndpointSpec for DeleteApiKeyRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::ListWebhooksRequest;
 ///
-/// let request = ListWebhooksRequest::default()
-///;
+/// let request = ListWebhooksRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListWebhooksRequest {}
@@ -2200,12 +2158,11 @@ impl schematic_runtime::EndpointSpec for ListWebhooksRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::CreateWebhookRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::CreateWebhookBody = Default::default();
-/// let request = CreateWebhookRequest::new(body)
-///;
+/// let request = CreateWebhookRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateWebhookRequest {
@@ -2259,12 +2216,11 @@ impl schematic_runtime::EndpointSpec for CreateWebhookRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::UpdateWebhookRequest;
 ///
 /// let body: ::schematic_definitions::elevenlabs::UpdateWebhookBody = Default::default();
-/// let request = UpdateWebhookRequest::new("webhook_id_value", body)
-///;
+/// let request = UpdateWebhookRequest::new("webhook_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateWebhookRequest {
@@ -2323,11 +2279,10 @@ impl schematic_runtime::EndpointSpec for UpdateWebhookRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::elevenlabs::DeleteWebhookRequest;
 ///
-/// let request = DeleteWebhookRequest::new("webhook_id_value")
-///;
+/// let request = DeleteWebhookRequest::new("webhook_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteWebhookRequest {

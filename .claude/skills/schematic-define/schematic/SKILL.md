@@ -120,7 +120,8 @@ endpoints declare stream shapes and generate `Sse`/`Ndjson` codecs yielding
 Run `just test`, `just lint`, and `just doctest` in schematic. The L1 generation
 guard compiles fresh output and sends through the runtime against wiremock.
 `just test-schema` separately checks committed generated clients, pager calls,
-and compile-fail fixtures; CI does not build schematic-schema. L2 terminal tests
+and compile-fail fixtures, and `just doctest-schema` (part of `just doctest`)
+compiles their doc examples; CI does not build schematic-schema. L2 terminal tests
 use `just test-l2` with the internal terminal-tests feature and no-focus harness.
 The generator build script reserves an 8 MiB Windows main-thread stack for
 catalog assembly (MSVC and GNU); retain it when changing CLI build settings.

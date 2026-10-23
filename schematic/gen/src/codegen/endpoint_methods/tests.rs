@@ -582,11 +582,25 @@ fn example_invocation_passes_path_parameters_and_the_body() {
     let api = widgets();
     let invocation = |id: &str| {
         let endpoint = api.endpoints.iter().find(|endpoint| endpoint.id == id).unwrap();
-        example_invocation(&api, endpoint, "client")
+        example_call(&api, endpoint).method_call("client", "body")
     };
     assert_eq!(invocation("GetWidget"), r#"client.get_widget("owner", "widget_id")"#);
     assert_eq!(invocation("CreateWidget"), r#"client.create_widget("owner", body)"#);
     assert_eq!(invocation("New"), "client.new_endpoint()");
+}
+
+#[test]
+fn example_typed_send_builds_the_request_the_endpoint_method_builds() {
+    let api = widgets();
+    let example = |id: &str| example_call(&api, api.endpoints.iter().find(|endpoint| endpoint.id == id).unwrap());
+
+    let create = example("CreateWidget");
+    assert_eq!(create.typed_send("client", "body.clone()"), r#"client.send(CreateWidgetRequest::new("owner", body.clone()))"#);
+    assert_eq!(create.method_call("client", "body.clone()"), r#"client.create_widget("owner", body.clone())"#);
+    assert!(create.body_type.is_some());
+    let new = example("New");
+    assert_eq!(new.typed_send("client", "body"), "client.send(NewRequest::default())");
+    assert_eq!(new.body_type, None);
 }
 
 #[test]
@@ -624,7 +638,7 @@ fn required_query_values_are_method_arguments_and_optional_ones_typed_setters() 
     assert!(docs.contains("- `since: i64`: the required `since` query parameter"), "{docs}");
     assert!(docs.contains("- `scope: SearchRequestScope`: the required `scope` query parameter"), "{docs}");
     assert_eq!(
-        example_invocation(&api, &api.endpoints[0], "client"),
+        example_call(&api, &api.endpoints[0]).method_call("client", "body"),
         r#"client.search("org", 1, SearchRequestScope::All, body)"#
     );
 }
@@ -744,7 +758,10 @@ fn typed_path_arguments_follow_the_template_with_their_declared_types() {
     let docs = fn_docs(&code, "Cells", "get_cell");
     assert!(docs.contains(&" - `row: i64`: the `{row}` path parameter".to_string()), "{docs:?}");
     assert!(docs.contains(&" - `kind: GetCellRequestKind`: the `{kind}` path parameter".to_string()), "{docs:?}");
-    assert_eq!(example_invocation(&api, &api.endpoints[0], "client"), "client.get_cell(1, GetCellRequestKind::A1)");
+    let example = example_call(&api, &api.endpoints[0]);
+    assert_eq!(example.method_call("client", "body"), "client.get_cell(1, GetCellRequestKind::A1)");
+    assert_eq!(example.typed_send("client", "body"), "client.send(GetCellRequest::new(1, GetCellRequestKind::A1))");
+    assert_eq!(example.imports, ["GetCellRequest", "GetCellRequestKind"]);
 }
 
 #[test]

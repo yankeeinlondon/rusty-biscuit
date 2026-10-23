@@ -89,14 +89,16 @@ pub fn assemble_lib_rs(apis: &[&RestApi], registrations: &[ApiRegistration]) -> 
         })
         .collect();
 
-    let example_api = apis
-        .iter()
-        .find(|api| api.endpoints.iter().any(|ep| ep.method == RestMethod::Get))
-        .or_else(|| apis.first());
-
-    let quick_start_example = build_quick_start_example(example_api);
-
-    let quick_start_tokens: TokenStream = quick_start_example.parse().unwrap_or_default();
+    let example_api = example_api(apis);
+    let quick_start_lines = quick_start_lines(example_api);
+    // The example compiles only where its API's module does.
+    let quick_start_tokens: TokenStream = match example_api {
+        Some(api) => {
+            let module = resolve_module_name(api);
+            quick_start_lines.iter().map(|line| feature_doc(&module, line)).collect()
+        }
+        None => quick_start_lines.iter().map(|line| quote! { #![doc = #line] }).collect(),
+    };
     let runtime_compatibility = runtime_compatibility();
 
     quote! {
@@ -127,8 +129,6 @@ pub fn assemble_lib_rs(apis: &[&RestApi], registrations: &[ApiRegistration]) -> 
         //! | Module | API | Description |
         //! |--------|-----|-------------|
         #ws_table_tokens
-        //!
-        //! ## Quick Start
         //!
         #quick_start_tokens
         //!
@@ -233,15 +233,11 @@ pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) 
         .collect();
     let api_table = api_rows.join("\n");
 
-    let example_api = apis
-        .iter()
-        .find(|api| api.endpoints.iter().any(|ep| ep.method == RestMethod::Get))
-        .or_else(|| apis.first());
-
-    let quick_start_example = build_quick_start_example(example_api);
-
     let api_table_tokens: TokenStream = api_table.parse().unwrap_or_default();
-    let quick_start_tokens: TokenStream = quick_start_example.parse().unwrap_or_default();
+    let quick_start_tokens: TokenStream = quick_start_lines(example_api(apis))
+        .iter()
+        .map(|line| quote! { #![doc = #line] })
+        .collect();
 
     let runtime_compatibility = runtime_compatibility();
 
@@ -256,8 +252,6 @@ pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) 
         //! | Module | API | Description | Auth |
         //! |--------|-----|-------------|------|
         #api_table_tokens
-        //!
-        //! ## Quick Start
         //!
         #quick_start_tokens
 
@@ -274,35 +268,35 @@ pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) 
     }
 }
 
-fn build_quick_start_example(example_api: Option<&&RestApi>) -> String {
-    let Some(api) = example_api else {
-        return String::from(
-            r#"//! ```text
-//! use schematic_schema::prelude::*;
-//! ```"#,
-        );
-    };
-    let api_name = &api.name;
-    let Some(endpoint) = api.endpoints.iter().find(|ep| ep.method == RestMethod::Get) else {
-        return format!(
-            r#"//! ```text
-//! use schematic_schema::prelude::*;
-//!
-//! let client = {api_name}::new();
-//! ```"#
-        );
-    };
-    let call = crate::codegen::endpoint_methods::example_invocation(api, endpoint, "client");
-    format!(
-        r#"//! ```text
-//! use schematic_schema::prelude::*;
-//!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {{
-//!     let client = {api_name}::new();
-//!     let data = {call}.await?;
-//!     Ok(())
-//! }}
-//! ```"#
-    )
+/// The API the crate-level and prelude examples use: the first with a GET
+/// endpoint, or else the first.
+pub(crate) fn example_api<'a>(apis: &[&'a RestApi]) -> Option<&'a RestApi> {
+    apis.iter()
+        .find(|api| api.endpoints.iter().any(|ep| ep.method == RestMethod::Get))
+        .or_else(|| apis.first())
+        .copied()
+}
+
+/// The doc lines, each with its leading space, of the Quick Start section:
+/// a `no_run` client example of `api`.
+fn quick_start_lines(api: Option<&RestApi>) -> Vec<String> {
+    let mut lines = vec!["## Quick Start".to_string(), String::new()];
+    lines.extend(client_example(api));
+    lines.into_iter().map(|line| if line.is_empty() { line } else { format!(" {line}") }).collect()
+}
+
+/// The Markdown lines of a `no_run` example calling `api`'s example
+/// endpoint, or creating its client when it has no endpoint.
+pub(crate) fn client_example(api: Option<&RestApi>) -> Vec<String> {
+    use crate::codegen::module_docs::{client_example_lines, example_endpoint};
+
+    let mut lines = vec!["```no_run".to_string(), "use schematic_schema::prelude::*;".to_string()];
+    if let Some(api) = api {
+        if let Some(endpoint) = example_endpoint(api) {
+            return client_example_lines(api, endpoint);
+        }
+        lines.extend([String::new(), format!("let client = {}::new();", api.name)]);
+    }
+    lines.push("```".to_string());
+    lines
 }

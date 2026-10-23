@@ -88,11 +88,54 @@ pub fn generate_endpoint_methods(api: &RestApi) -> TokenStream {
     }
 }
 
-/// How a caller calls `endpoint` on a client bound to `client`, for docs:
-/// `client.get_item("item_id")`, with each untyped path parameter's name as
-/// its value, a plausible value of each typed path and required query
-/// parameter, and `body` for a body.
-pub(crate) fn example_invocation(api: &RestApi, endpoint: &Endpoint, client: &str) -> String {
+/// A documentation example of one endpoint call, which a doc can spell as
+/// the endpoint method or as the typed send of the request that method
+/// builds.
+pub(crate) struct ExampleCall {
+    method: String,
+    request_type: String,
+    /// The path and required query values, without the body.
+    args: Vec<String>,
+    /// The request type and every enum an argument names; the example
+    /// imports them from the API's module.
+    pub imports: Vec<String>,
+    /// The type of the body argument, when the endpoint takes one.
+    pub body_type: Option<String>,
+}
+
+impl ExampleCall {
+    fn args(&self, body: &str) -> String {
+        let mut args = self.args.clone();
+        if self.body_type.is_some() {
+            args.push(body.to_string());
+        }
+        args.join(", ")
+    }
+
+    /// `client.get_item("item_id")`: the endpoint method, called on
+    /// `client` with each untyped path parameter's name as its value, a
+    /// plausible value of each typed path and required query parameter, and
+    /// `body` as the body.
+    pub fn method_call(&self, client: &str, body: &str) -> String {
+        format!("{client}.{}({})", self.method, self.args(body))
+    }
+
+    /// `client.send(GetItemRequest::new("item_id"))`: the request the
+    /// endpoint method builds from the same arguments.
+    pub fn typed_send(&self, client: &str, body: &str) -> String {
+        let args = self.args(body);
+        if args.is_empty() {
+            format!("{client}.send({}::default())", self.request_type)
+        } else {
+            format!("{client}.send({}::new({args}))", self.request_type)
+        }
+    }
+}
+
+/// The [`ExampleCall`] of `endpoint`.
+pub(crate) fn example_call(api: &RestApi, endpoint: &Endpoint) -> ExampleCall {
+    use crate::codegen::request_structs::path_params::PathValue;
+
     let names = resolve_names(api);
     let (_, names) = api
         .endpoints
@@ -100,8 +143,17 @@ pub(crate) fn example_invocation(api: &RestApi, endpoint: &Endpoint, client: &st
         .zip(&names.endpoints)
         .find(|(candidate, _)| candidate.id == endpoint.id)
         .expect("the endpoint belongs to the API");
+    let mut imports = vec![names.request_type.clone()];
     let mut args: Vec<String> = match typed_path_fields(endpoint, &names.request_type) {
-        Some(fields) => fields.iter().map(|field| field.example_arg()).collect(),
+        Some(fields) => fields
+            .iter()
+            .map(|field| {
+                if let PathValue::Enum { type_name, .. } = &field.value {
+                    imports.push(type_name.clone());
+                }
+                field.example_arg()
+            })
+            .collect(),
         None => extract_path_params(&endpoint.path)
             .into_iter()
             .map(|param| format!("\"{}\"", param_field_name(param)))
@@ -110,16 +162,23 @@ pub(crate) fn example_invocation(api: &RestApi, endpoint: &Endpoint, client: &st
     // Adopted pagination parameters are never arguments.
     let endpoint = crate::codegen::pagination::pager_view(api, endpoint);
     let endpoint = endpoint.as_ref();
-    args.extend(
-        extract_query_params(&endpoint.params, &names.request_type)
-            .iter()
-            .filter(|param| param.required)
-            .map(|param| query_example_arg(param).0),
-    );
-    if request_body_type_name(api, endpoint).is_some() {
-        args.push("body".to_string());
+    for param in extract_query_params(&endpoint.params, &names.request_type)
+        .iter()
+        .filter(|param| param.required)
+    {
+        let (arg, import) = query_example_arg(param);
+        args.push(arg);
+        imports.extend(import);
     }
-    format!("{client}.{}({})", names.method, args.join(", "))
+    let mut unique = std::collections::HashSet::new();
+    imports.retain(|import| unique.insert(import.clone()));
+    ExampleCall {
+        method: names.method.clone(),
+        request_type: names.request_type.clone(),
+        args,
+        imports,
+        body_type: request_body_type_name(api, endpoint),
+    }
 }
 
 /// The type a setter takes: the type of the request's `with_*` method.

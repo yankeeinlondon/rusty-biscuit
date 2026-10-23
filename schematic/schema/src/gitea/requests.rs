@@ -6,11 +6,10 @@ use super::{Gitea, GiteaApi};
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitea::GetRepositoryRequest;
 ///
-/// let request = GetRepositoryRequest::new("owner_value", "repo_value")
-///;
+/// let request = GetRepositoryRequest::new("owner_value", "repo_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRepositoryRequest {
@@ -59,12 +58,11 @@ impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitea::GetGitTreeRequest;
 ///
 /// let request = GetGitTreeRequest::new("owner_value", "repo_value", "sha_value")
-///     .with_recursive(/* value */)
-///;
+///     .with_recursive(true);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetGitTreeRequest {
@@ -132,11 +130,10 @@ impl schematic_runtime::EndpointSpec for GetGitTreeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitea::GetRepositoryContentRawRequest;
 ///
-/// let request = GetRepositoryContentRawRequest::new("owner_value", "repo_value", "filepath_value")
-///;
+/// let request = GetRepositoryContentRawRequest::new("owner_value", "repo_value", "filepath_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRepositoryContentRawRequest {
@@ -260,13 +257,12 @@ impl ::core::fmt::Display for ListPullRequestsRequestSort {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::gitea::ListPullRequestsRequest;
+/// ```no_run
+/// use schematic_schema::gitea::{ListPullRequestsRequest, ListPullRequestsRequestState, ListPullRequestsRequestSort};
 ///
 /// let request = ListPullRequestsRequest::new("owner_value", "repo_value")
-///     .with_state(/* value */)
-///     .with_sort(/* value */)
-///;
+///     .with_state(ListPullRequestsRequestState::Open)
+///     .with_sort(ListPullRequestsRequestSort::Oldest);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPullRequestsRequest {
@@ -337,11 +333,10 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitea::ListPullRequestFilesRequest;
 ///
-/// let request = ListPullRequestFilesRequest::new("owner_value", "repo_value", "index_value")
-///;
+/// let request = ListPullRequestFilesRequest::new("owner_value", "repo_value", "index_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPullRequestFilesRequest {
@@ -456,13 +451,12 @@ impl ::core::fmt::Display for ListIssuesRequestIssueType {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::gitea::ListIssuesRequest;
+/// ```no_run
+/// use schematic_schema::gitea::{ListIssuesRequest, ListIssuesRequestState, ListIssuesRequestIssueType};
 ///
 /// let request = ListIssuesRequest::new("owner_value", "repo_value")
-///     .with_state(/* value */)
-///     .with_issue_type(/* value */)
-///;
+///     .with_state(ListIssuesRequestState::Open)
+///     .with_issue_type(ListIssuesRequestIssueType::Issues);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssuesRequest {
@@ -533,11 +527,10 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitea::GetIssueRequest;
 ///
-/// let request = GetIssueRequest::new("owner_value", "repo_value", "index_value")
-///;
+/// let request = GetIssueRequest::new("owner_value", "repo_value", "index_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetIssueRequest {
@@ -592,11 +585,10 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitea::ListIssueCommentsRequest;
 ///
-/// let request = ListIssueCommentsRequest::new("owner_value", "repo_value", "index_value")
-///;
+/// let request = ListIssueCommentsRequest::new("owner_value", "repo_value", "index_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueCommentsRequest {
@@ -653,11 +645,10 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitea::ListIssueTimelineRequest;
 ///
-/// let request = ListIssueTimelineRequest::new("owner_value", "repo_value", "index_value")
-///;
+/// let request = ListIssueTimelineRequest::new("owner_value", "repo_value", "index_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueTimelineRequest {
@@ -714,11 +705,10 @@ impl schematic_runtime::EndpointSpec for ListIssueTimelineRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitea::ListTagsRequest;
 ///
-/// let request = ListTagsRequest::new("owner_value", "repo_value")
-///;
+/// let request = ListTagsRequest::new("owner_value", "repo_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTagsRequest {
@@ -767,13 +757,12 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitea::ListReleasesRequest;
 ///
 /// let request = ListReleasesRequest::new("owner_value", "repo_value")
-///     .with_draft(/* value */)
-///     .with_pre_release(/* value */)
-///;
+///     .with_draft(true)
+///     .with_pre_release(true);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListReleasesRequest {
@@ -844,11 +833,10 @@ impl schematic_runtime::EndpointSpec for ListReleasesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitea::GetBranchRequest;
 ///
-/// let request = GetBranchRequest::new("owner_value", "repo_value", "branch_value")
-///;
+/// let request = GetBranchRequest::new("owner_value", "repo_value", "branch_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetBranchRequest {
@@ -903,11 +891,10 @@ impl schematic_runtime::EndpointSpec for GetBranchRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitea::GetTagReferenceRequest;
 ///
-/// let request = GetTagReferenceRequest::new("owner_value", "repo_value", "git_ref_value")
-///;
+/// let request = GetTagReferenceRequest::new("owner_value", "repo_value", "git_ref_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetTagReferenceRequest {
@@ -964,11 +951,10 @@ impl schematic_runtime::EndpointSpec for GetTagReferenceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitea::GetAnnotatedTagRequest;
 ///
-/// let request = GetAnnotatedTagRequest::new("owner_value", "repo_value", "sha_value")
-///;
+/// let request = GetAnnotatedTagRequest::new("owner_value", "repo_value", "sha_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetAnnotatedTagRequest {
@@ -1025,11 +1011,10 @@ impl schematic_runtime::EndpointSpec for GetAnnotatedTagRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::gitea::ListOrgReposRequest;
 ///
-/// let request = ListOrgReposRequest::new("org_value")
-///;
+/// let request = ListOrgReposRequest::new("org_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListOrgReposRequest {

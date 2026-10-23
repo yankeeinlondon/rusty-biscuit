@@ -7,7 +7,7 @@ use schematic_define::RestApi;
 use schematic_definitions::naming::resolve_module_name;
 use schematic_definitions::registry::ApiRegistration;
 
-use super::lib_rs::feature_doc;
+use super::lib_rs::{client_example, example_api, feature_doc};
 use crate::output::ws_modules::{ws_helper_name, ws_registrations};
 
 /// Assembles the prelude.rs content for the schema crate, exporting the
@@ -55,6 +55,21 @@ pub fn assemble_prelude(apis: &[&RestApi], registrations: &[ApiRegistration]) ->
         })
         .collect();
 
+    // The example compiles only where its API's module does.
+    let example_tokens: TokenStream = match example_api(apis) {
+        Some(api) => {
+            let module = resolve_module_name(api);
+            let mut lines = vec![String::new(), " ## Examples".to_string(), String::new()];
+            lines.extend(
+                client_example(Some(api))
+                    .into_iter()
+                    .map(|line| if line.is_empty() { line } else { format!(" {line}") }),
+            );
+            lines.iter().map(|line| feature_doc(&module, line)).collect()
+        }
+        None => TokenStream::new(),
+    };
+
     quote! {
         //! Convenient re-exports for working with generated API clients.
         //!
@@ -62,11 +77,7 @@ pub fn assemble_prelude(apis: &[&RestApi], registrations: &[ApiRegistration]) ->
         //! feature is enabled, and the runtime types every call uses. Request, call, and response
         //! types are **not** re-exported here to avoid naming conflicts. An
         //! endpoint method needs none of them imported; when one must be
-        //! named, import it from its API module:
-        //!
-        //! ```text
-        //! use schematic_schema::openai::{ListModelsCall, ListModelsRequest, ListModelsResponse};
-        //! ```
+        //! named, import it from its API module.
         //!
         //! ## Re-exports
         //!
@@ -82,16 +93,7 @@ pub fn assemble_prelude(apis: &[&RestApi], registrations: &[ApiRegistration]) ->
         //! [`Credential`], [`Deadline`], [`FullCall`], [`OriginPolicy`],
         //! [`Response`], [`RawResponse`], and [`TransportError`] from
         //! [`schematic_runtime`].
-        //!
-        //! ## Examples
-        //!
-        //! ```text
-        //! use schematic_schema::prelude::*;
-        //!
-        //! let client = OpenAI::new();
-        //! let model = client.retrieve_model("gpt-4").await?;
-        //! println!("{}", model.id);
-        //! ```
+        #example_tokens
 
         pub use schematic_runtime::{
             Call, CallError, CallOptions, Credential, Deadline, FullCall, OriginPolicy, RawResponse,

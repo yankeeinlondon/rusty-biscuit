@@ -7,11 +7,10 @@ use super::{Bitbucket, BitbucketApi};
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::GetRepositoryRequest;
 ///
-/// let request = GetRepositoryRequest::new("workspace_value", "repo_slug_value")
-///;
+/// let request = GetRepositoryRequest::new("workspace_value", "repo_slug_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRepositoryRequest {
@@ -60,13 +59,12 @@ impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::GetSourceRequest;
 ///
 /// let request = GetSourceRequest::new("workspace_value", "repo_slug_value", "commit_value", "path_value")
-///     .with_page(/* value */)
-///     .with_pagelen(/* value */)
-///;
+///     .with_page(1)
+///     .with_pagelen(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetSourceRequest {
@@ -193,13 +191,12 @@ impl schematic_runtime::EndpointSpec for GetSourceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListPullRequestsRequest;
 ///
 /// let request = ListPullRequestsRequest::new("workspace_value", "repo_slug_value")
-///     .with_page(/* value */)
-///     .with_state(/* value */)
-///;
+///     .with_page(1)
+///     .with_state("state_value".to_string());
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPullRequestsRequest {
@@ -274,11 +271,10 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::GetPullRequestRequest;
 ///
-/// let request = GetPullRequestRequest::new("workspace_value", "repo_slug_value", "id_value")
-///;
+/// let request = GetPullRequestRequest::new("workspace_value", "repo_slug_value", "id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetPullRequestRequest {
@@ -335,12 +331,11 @@ impl schematic_runtime::EndpointSpec for GetPullRequestRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListPullRequestCommentsRequest;
 ///
 /// let request = ListPullRequestCommentsRequest::new("workspace_value", "repo_slug_value", "id_value")
-///     .with_page(/* value */)
-///;
+///     .with_page(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPullRequestCommentsRequest {
@@ -412,12 +407,11 @@ impl schematic_runtime::EndpointSpec for ListPullRequestCommentsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListIssuesRequest;
 ///
 /// let request = ListIssuesRequest::new("workspace_value", "repo_slug_value")
-///     .with_page(/* value */)
-///;
+///     .with_page(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssuesRequest {
@@ -481,11 +475,10 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::GetIssueRequest;
 ///
-/// let request = GetIssueRequest::new("workspace_value", "repo_slug_value", "id_value")
-///;
+/// let request = GetIssueRequest::new("workspace_value", "repo_slug_value", "id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetIssueRequest {
@@ -540,12 +533,11 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListIssueCommentsRequest;
 ///
 /// let request = ListIssueCommentsRequest::new("workspace_value", "repo_slug_value", "id_value")
-///     .with_page(/* value */)
-///;
+///     .with_page(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueCommentsRequest {
@@ -617,12 +609,11 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListIssueChangesRequest;
 ///
 /// let request = ListIssueChangesRequest::new("workspace_value", "repo_slug_value", "id_value")
-///     .with_page(/* value */)
-///;
+///     .with_page(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueChangesRequest {
@@ -694,11 +685,10 @@ impl schematic_runtime::EndpointSpec for ListIssueChangesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::GetBranchRequest;
 ///
-/// let request = GetBranchRequest::new("workspace_value", "repo_slug_value", "name_value")
-///;
+/// let request = GetBranchRequest::new("workspace_value", "repo_slug_value", "name_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetBranchRequest {
@@ -753,12 +743,11 @@ impl schematic_runtime::EndpointSpec for GetBranchRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListTagsRequest;
 ///
 /// let request = ListTagsRequest::new("workspace_value", "repo_slug_value")
-///     .with_page(/* value */)
-///;
+///     .with_page(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTagsRequest {
@@ -822,11 +811,10 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::GetTagRequest;
 ///
-/// let request = GetTagRequest::new("workspace_value", "repo_slug_value", "name_value")
-///;
+/// let request = GetTagRequest::new("workspace_value", "repo_slug_value", "name_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetTagRequest {
@@ -881,12 +869,11 @@ impl schematic_runtime::EndpointSpec for GetTagRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListDownloadsRequest;
 ///
 /// let request = ListDownloadsRequest::new("workspace_value", "repo_slug_value")
-///     .with_page(/* value */)
-///;
+///     .with_page(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListDownloadsRequest {
@@ -950,11 +937,10 @@ impl schematic_runtime::EndpointSpec for ListDownloadsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::GetDownloadRequest;
 ///
-/// let request = GetDownloadRequest::new("workspace_value", "repo_slug_value", "filename_value")
-///;
+/// let request = GetDownloadRequest::new("workspace_value", "repo_slug_value", "filename_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDownloadRequest {
@@ -1009,12 +995,11 @@ impl schematic_runtime::EndpointSpec for GetDownloadRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListWorkspaceReposRequest;
 ///
 /// let request = ListWorkspaceReposRequest::new("workspace_value")
-///     .with_page(/* value */)
-///;
+///     .with_page(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListWorkspaceReposRequest {

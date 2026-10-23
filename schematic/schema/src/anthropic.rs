@@ -20,24 +20,27 @@
 //!
 //! ## Examples
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::anthropic::ListModelsRequest;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = Anthropic::new();
-//!     let data = client.list_models().await?;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = Anthropic::new();
+//! let data = client.list_models().await?;
 //!
-//!     // the whole response: status, headers, and request id as well
-//!     let response = client.list_models().full().await?;
-//!     println!("{}", response.meta);
-//!     Ok(())
-//! }
+//! // the same request, built as a typed request and sent
+//! let data = client.send(ListModelsRequest::default()).await?;
+//!
+//! // the whole response: status, headers, and request id as well
+//! let response = client.list_models().full().await?;
+//! println!("{}", response.meta);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ### Override Base URL
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
 //!
 //! let client = Anthropic::new().base_url("https://staging.example.com/v1");
@@ -106,12 +109,11 @@ impl Default for Anthropic {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::anthropic::CreateMessageRequest;
 ///
 /// let body: ::schematic_definitions::anthropic::CreateMessageBody = Default::default();
-/// let request = CreateMessageRequest::new(body)
-///;
+/// let request = CreateMessageRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateMessageRequest {
@@ -218,12 +220,11 @@ impl schematic_runtime::EndpointSpec for CreateMessageRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::anthropic::CountTokensRequest;
 ///
 /// let body: ::schematic_definitions::anthropic::CountTokensBody = Default::default();
-/// let request = CountTokensRequest::new(body)
-///;
+/// let request = CountTokensRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CountTokensRequest {
@@ -276,11 +277,10 @@ impl schematic_runtime::EndpointSpec for CountTokensRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::anthropic::ListModelsRequest;
 ///
-/// let request = ListModelsRequest::default()
-///;
+/// let request = ListModelsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
@@ -312,11 +312,10 @@ impl schematic_runtime::EndpointSpec for ListModelsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::anthropic::RetrieveModelRequest;
 ///
-/// let request = RetrieveModelRequest::new("model_id_value")
-///;
+/// let request = RetrieveModelRequest::new("model_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveModelRequest {

@@ -7,12 +7,11 @@ use super::{OpenAI, OpenAIApi};
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateSpeechRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateSpeechRequest2 = Default::default();
-/// let request = CreateSpeechRequest::new(body)
-///;
+/// let request = CreateSpeechRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSpeechRequest {
@@ -202,15 +201,11 @@ impl CreateTranscriptionForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::{CreateTranscriptionRequest, CreateTranscriptionForm};
 ///
-/// let body = CreateTranscriptionForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = CreateTranscriptionRequest::new(body)
-///;
+/// let body: CreateTranscriptionForm = Default::default();
+/// let request = CreateTranscriptionRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateTranscriptionRequest {
@@ -308,15 +303,11 @@ impl CreateTranslationForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::{CreateTranslationRequest, CreateTranslationForm};
 ///
-/// let body = CreateTranslationForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = CreateTranslationRequest::new(body)
-///;
+/// let body: CreateTranslationForm = Default::default();
+/// let request = CreateTranslationRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateTranslationRequest {
@@ -360,11 +351,10 @@ impl schematic_runtime::EndpointSpec for CreateTranslationRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListVoiceConsentsRequest;
 ///
-/// let request = ListVoiceConsentsRequest::default()
-///;
+/// let request = ListVoiceConsentsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListVoiceConsentsRequest {}
@@ -436,15 +426,11 @@ impl CreateVoiceConsentForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::{CreateVoiceConsentRequest, CreateVoiceConsentForm};
 ///
-/// let body = CreateVoiceConsentForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = CreateVoiceConsentRequest::new(body)
-///;
+/// let body: CreateVoiceConsentForm = Default::default();
+/// let request = CreateVoiceConsentRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateVoiceConsentRequest {
@@ -490,11 +476,10 @@ impl schematic_runtime::EndpointSpec for CreateVoiceConsentRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetVoiceConsentRequest;
 ///
-/// let request = GetVoiceConsentRequest::new("consent_id_value")
-///;
+/// let request = GetVoiceConsentRequest::new("consent_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetVoiceConsentRequest {
@@ -552,12 +537,11 @@ impl schematic_runtime::EndpointSpec for GetVoiceConsentRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateVoiceConsentRequest;
 ///
 /// let body: ::schematic_definitions::openai::UpdateVoiceConsentRequest2 = Default::default();
-/// let request = UpdateVoiceConsentRequest::new("consent_id_value", body)
-///;
+/// let request = UpdateVoiceConsentRequest::new("consent_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateVoiceConsentRequest {
@@ -616,11 +600,10 @@ impl schematic_runtime::EndpointSpec for UpdateVoiceConsentRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteVoiceConsentRequest;
 ///
-/// let request = DeleteVoiceConsentRequest::new("consent_id_value")
-///;
+/// let request = DeleteVoiceConsentRequest::new("consent_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteVoiceConsentRequest {
@@ -718,15 +701,11 @@ impl CreateVoiceForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::{CreateVoiceRequest, CreateVoiceForm};
 ///
-/// let body = CreateVoiceForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = CreateVoiceRequest::new(body)
-///;
+/// let body: CreateVoiceForm = Default::default();
+/// let request = CreateVoiceRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateVoiceRequest {
@@ -772,11 +751,10 @@ impl schematic_runtime::EndpointSpec for CreateVoiceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListBatchesRequest;
 ///
-/// let request = ListBatchesRequest::default()
-///;
+/// let request = ListBatchesRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListBatchesRequest {}
@@ -808,12 +786,11 @@ impl schematic_runtime::EndpointSpec for ListBatchesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateBatchRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateBatchRequest2 = Default::default();
-/// let request = CreateBatchRequest::new(body)
-///;
+/// let request = CreateBatchRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateBatchRequest {
@@ -864,11 +841,10 @@ impl schematic_runtime::EndpointSpec for CreateBatchRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveBatchRequest;
 ///
-/// let request = RetrieveBatchRequest::new("batch_id_value")
-///;
+/// let request = RetrieveBatchRequest::new("batch_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveBatchRequest {
@@ -921,11 +897,10 @@ impl schematic_runtime::EndpointSpec for RetrieveBatchRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CancelBatchRequest;
 ///
-/// let request = CancelBatchRequest::new("batch_id_value")
-///;
+/// let request = CancelBatchRequest::new("batch_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CancelBatchRequest {
@@ -1003,13 +978,12 @@ impl ::core::fmt::Display for ListChatCompletionsRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListChatCompletionsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListChatCompletionsRequest, ListChatCompletionsRequestOrder};
 ///
 /// let request = ListChatCompletionsRequest::default()
-///     .with_model(/* value */)
-///     .with_order(/* value */)
-///;
+///     .with_model("model_value".to_string())
+///     .with_order(ListChatCompletionsRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListChatCompletionsRequest {
@@ -1068,12 +1042,11 @@ impl schematic_runtime::EndpointSpec for ListChatCompletionsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateChatCompletionRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateChatCompletionRequest2 = Default::default();
-/// let request = CreateChatCompletionRequest::new(body)
-///;
+/// let request = CreateChatCompletionRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateChatCompletionRequest {
@@ -1131,11 +1104,10 @@ impl schematic_runtime::EndpointSpec for CreateChatCompletionRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetChatCompletionRequest;
 ///
-/// let request = GetChatCompletionRequest::new("completion_id_value")
-///;
+/// let request = GetChatCompletionRequest::new("completion_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetChatCompletionRequest {
@@ -1192,12 +1164,11 @@ impl schematic_runtime::EndpointSpec for GetChatCompletionRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateChatCompletionRequest;
 ///
 /// let body: ::serde_json::Value = Default::default();
-/// let request = UpdateChatCompletionRequest::new("completion_id_value", body)
-///;
+/// let request = UpdateChatCompletionRequest::new("completion_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateChatCompletionRequest {
@@ -1252,11 +1223,10 @@ impl schematic_runtime::EndpointSpec for UpdateChatCompletionRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteChatCompletionRequest;
 ///
-/// let request = DeleteChatCompletionRequest::new("completion_id_value")
-///;
+/// let request = DeleteChatCompletionRequest::new("completion_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteChatCompletionRequest {
@@ -1338,12 +1308,11 @@ impl ::core::fmt::Display for GetChatCompletionMessagesRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::GetChatCompletionMessagesRequest;
+/// ```no_run
+/// use schematic_schema::openai::{GetChatCompletionMessagesRequest, GetChatCompletionMessagesRequestOrder};
 ///
 /// let request = GetChatCompletionMessagesRequest::new("completion_id_value")
-///     .with_order(/* value */)
-///;
+///     .with_order(GetChatCompletionMessagesRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetChatCompletionMessagesRequest {
@@ -1416,12 +1385,11 @@ impl schematic_runtime::EndpointSpec for GetChatCompletionMessagesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateCompletionRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateCompletionRequest2 = Default::default();
-/// let request = CreateCompletionRequest::new(body)
-///;
+/// let request = CreateCompletionRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateCompletionRequest {
@@ -1500,13 +1468,12 @@ impl ::core::fmt::Display for ListContainersRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListContainersRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListContainersRequest, ListContainersRequestOrder};
 ///
 /// let request = ListContainersRequest::default()
-///     .with_order(/* value */)
-///     .with_name(/* value */)
-///;
+///     .with_order(ListContainersRequestOrder::Asc)
+///     .with_name("name_value".to_string());
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListContainersRequest {
@@ -1566,12 +1533,11 @@ impl schematic_runtime::EndpointSpec for ListContainersRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateContainerRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateContainerBody = Default::default();
-/// let request = CreateContainerRequest::new(body)
-///;
+/// let request = CreateContainerRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateContainerRequest {
@@ -1625,11 +1591,10 @@ impl schematic_runtime::EndpointSpec for CreateContainerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveContainerRequest;
 ///
-/// let request = RetrieveContainerRequest::new("container_id_value")
-///;
+/// let request = RetrieveContainerRequest::new("container_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveContainerRequest {
@@ -1686,11 +1651,10 @@ impl schematic_runtime::EndpointSpec for RetrieveContainerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteContainerRequest;
 ///
-/// let request = DeleteContainerRequest::new("container_id_value")
-///;
+/// let request = DeleteContainerRequest::new("container_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteContainerRequest {
@@ -1770,12 +1734,11 @@ impl ::core::fmt::Display for ListContainerFilesRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListContainerFilesRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListContainerFilesRequest, ListContainerFilesRequestOrder};
 ///
 /// let request = ListContainerFilesRequest::new("container_id_value")
-///     .with_order(/* value */)
-///;
+///     .with_order(ListContainerFilesRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListContainerFilesRequest {
@@ -1848,12 +1811,11 @@ impl schematic_runtime::EndpointSpec for ListContainerFilesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateContainerFileRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateContainerFileBody = Default::default();
-/// let request = CreateContainerFileRequest::new("container_id_value", body)
-///;
+/// let request = CreateContainerFileRequest::new("container_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateContainerFileRequest {
@@ -1911,11 +1873,10 @@ impl schematic_runtime::EndpointSpec for CreateContainerFileRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveContainerFileRequest;
 ///
-/// let request = RetrieveContainerFileRequest::new("container_id_value", "file_id_value")
-///;
+/// let request = RetrieveContainerFileRequest::new("container_id_value", "file_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveContainerFileRequest {
@@ -1964,11 +1925,10 @@ impl schematic_runtime::EndpointSpec for RetrieveContainerFileRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteContainerFileRequest;
 ///
-/// let request = DeleteContainerFileRequest::new("container_id_value", "file_id_value")
-///;
+/// let request = DeleteContainerFileRequest::new("container_id_value", "file_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteContainerFileRequest {
@@ -2015,11 +1975,10 @@ impl schematic_runtime::EndpointSpec for DeleteContainerFileRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveContainerFileContentRequest;
 ///
-/// let request = RetrieveContainerFileContentRequest::new("container_id_value", "file_id_value")
-///;
+/// let request = RetrieveContainerFileContentRequest::new("container_id_value", "file_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveContainerFileContentRequest {
@@ -2091,12 +2050,11 @@ impl ::core::fmt::Display for ListConversationItemsRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListConversationItemsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListConversationItemsRequest, ListConversationItemsRequestOrder};
 ///
 /// let request = ListConversationItemsRequest::new("conversation_id_value")
-///     .with_order(/* value */)
-///;
+///     .with_order(ListConversationItemsRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListConversationItemsRequest {
@@ -2172,12 +2130,11 @@ impl schematic_runtime::EndpointSpec for ListConversationItemsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateConversationItemsRequest;
 ///
 /// let body: ::serde_json::Value = Default::default();
-/// let request = CreateConversationItemsRequest::new("conversation_id_value", body)
-///;
+/// let request = CreateConversationItemsRequest::new("conversation_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateConversationItemsRequest {
@@ -2233,11 +2190,10 @@ impl schematic_runtime::EndpointSpec for CreateConversationItemsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetConversationItemRequest;
 ///
-/// let request = GetConversationItemRequest::new("conversation_id_value", "item_id_value")
-///;
+/// let request = GetConversationItemRequest::new("conversation_id_value", "item_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetConversationItemRequest {
@@ -2286,11 +2242,10 @@ impl schematic_runtime::EndpointSpec for GetConversationItemRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteConversationItemRequest;
 ///
-/// let request = DeleteConversationItemRequest::new("conversation_id_value", "item_id_value")
-///;
+/// let request = DeleteConversationItemRequest::new("conversation_id_value", "item_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteConversationItemRequest {
@@ -2339,12 +2294,11 @@ impl schematic_runtime::EndpointSpec for DeleteConversationItemRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateEmbeddingRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateEmbeddingRequest2 = Default::default();
-/// let request = CreateEmbeddingRequest::new(body)
-///;
+/// let request = CreateEmbeddingRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateEmbeddingRequest {
@@ -2448,13 +2402,12 @@ impl ::core::fmt::Display for ListEvalsRequestOrderBy {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListEvalsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListEvalsRequest, ListEvalsRequestOrder, ListEvalsRequestOrderBy};
 ///
 /// let request = ListEvalsRequest::default()
-///     .with_order(/* value */)
-///     .with_order_by(/* value */)
-///;
+///     .with_order(ListEvalsRequestOrder::Asc)
+///     .with_order_by(ListEvalsRequestOrderBy::CreatedAt);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListEvalsRequest {
@@ -2516,12 +2469,11 @@ impl schematic_runtime::EndpointSpec for ListEvalsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateEvalRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateEvalRequest2 = Default::default();
-/// let request = CreateEvalRequest::new(body)
-///;
+/// let request = CreateEvalRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateEvalRequest {
@@ -2572,11 +2524,10 @@ impl schematic_runtime::EndpointSpec for CreateEvalRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetEvalRequest;
 ///
-/// let request = GetEvalRequest::new("eval_id_value")
-///;
+/// let request = GetEvalRequest::new("eval_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetEvalRequest {
@@ -2625,12 +2576,11 @@ impl schematic_runtime::EndpointSpec for GetEvalRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateEvalRequest;
 ///
 /// let body: ::serde_json::Value = Default::default();
-/// let request = UpdateEvalRequest::new("eval_id_value", body)
-///;
+/// let request = UpdateEvalRequest::new("eval_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateEvalRequest {
@@ -2681,11 +2631,10 @@ impl schematic_runtime::EndpointSpec for UpdateEvalRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteEvalRequest;
 ///
-/// let request = DeleteEvalRequest::new("eval_id_value")
-///;
+/// let request = DeleteEvalRequest::new("eval_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteEvalRequest {
@@ -2796,13 +2745,12 @@ impl ::core::fmt::Display for GetEvalRunsRequestStatus {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::GetEvalRunsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{GetEvalRunsRequest, GetEvalRunsRequestOrder, GetEvalRunsRequestStatus};
 ///
 /// let request = GetEvalRunsRequest::new("eval_id_value")
-///     .with_order(/* value */)
-///     .with_status(/* value */)
-///;
+///     .with_order(GetEvalRunsRequestOrder::Asc)
+///     .with_status(GetEvalRunsRequestStatus::Queued);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetEvalRunsRequest {
@@ -2885,12 +2833,11 @@ impl schematic_runtime::EndpointSpec for GetEvalRunsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateEvalRunRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateEvalRunRequest2 = Default::default();
-/// let request = CreateEvalRunRequest::new("eval_id_value", body)
-///;
+/// let request = CreateEvalRunRequest::new("eval_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateEvalRunRequest {
@@ -2946,11 +2893,10 @@ impl schematic_runtime::EndpointSpec for CreateEvalRunRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetEvalRunRequest;
 ///
-/// let request = GetEvalRunRequest::new("eval_id_value", "run_id_value")
-///;
+/// let request = GetEvalRunRequest::new("eval_id_value", "run_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetEvalRunRequest {
@@ -2997,11 +2943,10 @@ impl schematic_runtime::EndpointSpec for GetEvalRunRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CancelEvalRunRequest;
 ///
-/// let request = CancelEvalRunRequest::new("eval_id_value", "run_id_value")
-///;
+/// let request = CancelEvalRunRequest::new("eval_id_value", "run_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CancelEvalRunRequest {
@@ -3048,11 +2993,10 @@ impl schematic_runtime::EndpointSpec for CancelEvalRunRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteEvalRunRequest;
 ///
-/// let request = DeleteEvalRunRequest::new("eval_id_value", "run_id_value")
-///;
+/// let request = DeleteEvalRunRequest::new("eval_id_value", "run_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteEvalRunRequest {
@@ -3149,13 +3093,12 @@ impl ::core::fmt::Display for GetEvalRunOutputItemsRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::GetEvalRunOutputItemsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{GetEvalRunOutputItemsRequest, GetEvalRunOutputItemsRequestStatus, GetEvalRunOutputItemsRequestOrder};
 ///
 /// let request = GetEvalRunOutputItemsRequest::new("eval_id_value", "run_id_value")
-///     .with_status(/* value */)
-///     .with_order(/* value */)
-///;
+///     .with_status(GetEvalRunOutputItemsRequestStatus::Fail)
+///     .with_order(GetEvalRunOutputItemsRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetEvalRunOutputItemsRequest {
@@ -3228,11 +3171,10 @@ impl schematic_runtime::EndpointSpec for GetEvalRunOutputItemsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetEvalRunOutputItemRequest;
 ///
-/// let request = GetEvalRunOutputItemRequest::new("eval_id_value", "run_id_value", "output_item_id_value")
-///;
+/// let request = GetEvalRunOutputItemRequest::new("eval_id_value", "run_id_value", "output_item_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetEvalRunOutputItemRequest {
@@ -3314,13 +3256,12 @@ impl ::core::fmt::Display for ListFilesRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListFilesRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListFilesRequest, ListFilesRequestOrder};
 ///
 /// let request = ListFilesRequest::default()
-///     .with_purpose(/* value */)
-///     .with_order(/* value */)
-///;
+///     .with_purpose("purpose_value".to_string())
+///     .with_order(ListFilesRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListFilesRequest {
@@ -3422,15 +3363,11 @@ impl CreateFileForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::{CreateFileRequest, CreateFileForm};
 ///
-/// let body = CreateFileForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = CreateFileRequest::new(body)
-///;
+/// let body: CreateFileForm = Default::default();
+/// let request = CreateFileRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateFileRequest {
@@ -3474,11 +3411,10 @@ impl schematic_runtime::EndpointSpec for CreateFileRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveFileRequest;
 ///
-/// let request = RetrieveFileRequest::new("file_id_value")
-///;
+/// let request = RetrieveFileRequest::new("file_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveFileRequest {
@@ -3527,11 +3463,10 @@ impl schematic_runtime::EndpointSpec for RetrieveFileRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteFileRequest;
 ///
-/// let request = DeleteFileRequest::new("file_id_value")
-///;
+/// let request = DeleteFileRequest::new("file_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteFileRequest {
@@ -3582,11 +3517,10 @@ impl schematic_runtime::EndpointSpec for DeleteFileRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DownloadFileRequest;
 ///
-/// let request = DownloadFileRequest::new("file_id_value")
-///;
+/// let request = DownloadFileRequest::new("file_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DownloadFileRequest {
@@ -3637,12 +3571,11 @@ impl schematic_runtime::EndpointSpec for DownloadFileRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RunGraderRequest;
 ///
 /// let body: ::schematic_definitions::openai::RunGraderRequest2 = Default::default();
-/// let request = RunGraderRequest::new(body)
-///;
+/// let request = RunGraderRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RunGraderRequest {
@@ -3695,12 +3628,11 @@ impl schematic_runtime::EndpointSpec for RunGraderRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ValidateGraderRequest;
 ///
 /// let body: ::schematic_definitions::openai::ValidateGraderRequest2 = Default::default();
-/// let request = ValidateGraderRequest::new(body)
-///;
+/// let request = ValidateGraderRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ValidateGraderRequest {
@@ -3779,13 +3711,12 @@ impl ::core::fmt::Display for ListFineTuningCheckpointPermissionsRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListFineTuningCheckpointPermissionsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListFineTuningCheckpointPermissionsRequest, ListFineTuningCheckpointPermissionsRequestOrder};
 ///
 /// let request = ListFineTuningCheckpointPermissionsRequest::new("fine_tuned_model_checkpoint_value")
-///     .with_project_id(/* value */)
-///     .with_order(/* value */)
-///;
+///     .with_project_id("project_id_value".to_string())
+///     .with_order(ListFineTuningCheckpointPermissionsRequestOrder::Ascending);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListFineTuningCheckpointPermissionsRequest {
@@ -3874,12 +3805,11 @@ impl schematic_runtime::EndpointSpec for ListFineTuningCheckpointPermissionsRequ
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateFineTuningCheckpointPermissionRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateFineTuningCheckpointPermissionRequest2 = Default::default();
-/// let request = CreateFineTuningCheckpointPermissionRequest::new("fine_tuned_model_checkpoint_value", body)
-///;
+/// let request = CreateFineTuningCheckpointPermissionRequest::new("fine_tuned_model_checkpoint_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateFineTuningCheckpointPermissionRequest {
@@ -3938,11 +3868,10 @@ impl schematic_runtime::EndpointSpec for CreateFineTuningCheckpointPermissionReq
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteFineTuningCheckpointPermissionRequest;
 ///
-/// let request = DeleteFineTuningCheckpointPermissionRequest::new("fine_tuned_model_checkpoint_value", "permission_id_value")
-///;
+/// let request = DeleteFineTuningCheckpointPermissionRequest::new("fine_tuned_model_checkpoint_value", "permission_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteFineTuningCheckpointPermissionRequest {
@@ -3995,11 +3924,10 @@ impl schematic_runtime::EndpointSpec for DeleteFineTuningCheckpointPermissionReq
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListPaginatedFineTuningJobsRequest;
 ///
-/// let request = ListPaginatedFineTuningJobsRequest::default()
-///;
+/// let request = ListPaginatedFineTuningJobsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPaginatedFineTuningJobsRequest {}
@@ -4031,12 +3959,11 @@ impl schematic_runtime::EndpointSpec for ListPaginatedFineTuningJobsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateFineTuningJobRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateFineTuningJobRequest2 = Default::default();
-/// let request = CreateFineTuningJobRequest::new(body)
-///;
+/// let request = CreateFineTuningJobRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateFineTuningJobRequest {
@@ -4092,11 +4019,10 @@ impl schematic_runtime::EndpointSpec for CreateFineTuningJobRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveFineTuningJobRequest;
 ///
-/// let request = RetrieveFineTuningJobRequest::new("fine_tuning_job_id_value")
-///;
+/// let request = RetrieveFineTuningJobRequest::new("fine_tuning_job_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveFineTuningJobRequest {
@@ -4154,11 +4080,10 @@ impl schematic_runtime::EndpointSpec for RetrieveFineTuningJobRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CancelFineTuningJobRequest;
 ///
-/// let request = CancelFineTuningJobRequest::new("fine_tuning_job_id_value")
-///;
+/// let request = CancelFineTuningJobRequest::new("fine_tuning_job_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CancelFineTuningJobRequest {
@@ -4216,11 +4141,10 @@ impl schematic_runtime::EndpointSpec for CancelFineTuningJobRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListFineTuningJobCheckpointsRequest;
 ///
-/// let request = ListFineTuningJobCheckpointsRequest::new("fine_tuning_job_id_value")
-///;
+/// let request = ListFineTuningJobCheckpointsRequest::new("fine_tuning_job_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListFineTuningJobCheckpointsRequest {
@@ -4278,11 +4202,10 @@ impl schematic_runtime::EndpointSpec for ListFineTuningJobCheckpointsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListFineTuningEventsRequest;
 ///
-/// let request = ListFineTuningEventsRequest::new("fine_tuning_job_id_value")
-///;
+/// let request = ListFineTuningEventsRequest::new("fine_tuning_job_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListFineTuningEventsRequest {
@@ -4340,11 +4263,10 @@ impl schematic_runtime::EndpointSpec for ListFineTuningEventsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::PauseFineTuningJobRequest;
 ///
-/// let request = PauseFineTuningJobRequest::new("fine_tuning_job_id_value")
-///;
+/// let request = PauseFineTuningJobRequest::new("fine_tuning_job_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PauseFineTuningJobRequest {
@@ -4402,11 +4324,10 @@ impl schematic_runtime::EndpointSpec for PauseFineTuningJobRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ResumeFineTuningJobRequest;
 ///
-/// let request = ResumeFineTuningJobRequest::new("fine_tuning_job_id_value")
-///;
+/// let request = ResumeFineTuningJobRequest::new("fine_tuning_job_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResumeFineTuningJobRequest {
@@ -4464,12 +4385,11 @@ impl schematic_runtime::EndpointSpec for ResumeFineTuningJobRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateImageEditRequest;
 ///
 /// let body: ::schematic_definitions::openai::EditImageBodyJsonParam = Default::default();
-/// let request = CreateImageEditRequest::new(body)
-///;
+/// let request = CreateImageEditRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateImageEditRequest {
@@ -4523,12 +4443,11 @@ impl schematic_runtime::EndpointSpec for CreateImageEditRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateImageRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateImageRequest2 = Default::default();
-/// let request = CreateImageRequest::new(body)
-///;
+/// let request = CreateImageRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateImageRequest {
@@ -4643,15 +4562,11 @@ impl CreateImageVariationForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::{CreateImageVariationRequest, CreateImageVariationForm};
 ///
-/// let body = CreateImageVariationForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = CreateImageVariationRequest::new(body)
-///;
+/// let body: CreateImageVariationForm = Default::default();
+/// let request = CreateImageVariationRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateImageVariationRequest {
@@ -4697,11 +4612,10 @@ impl schematic_runtime::EndpointSpec for CreateImageVariationRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListModelsRequest;
 ///
-/// let request = ListModelsRequest::default()
-///;
+/// let request = ListModelsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
@@ -4733,11 +4647,10 @@ impl schematic_runtime::EndpointSpec for ListModelsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveModelRequest;
 ///
-/// let request = RetrieveModelRequest::new("model_value")
-///;
+/// let request = RetrieveModelRequest::new("model_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveModelRequest {
@@ -4786,11 +4699,10 @@ impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteModelRequest;
 ///
-/// let request = DeleteModelRequest::new("model_value")
-///;
+/// let request = DeleteModelRequest::new("model_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteModelRequest {
@@ -4841,12 +4753,11 @@ impl schematic_runtime::EndpointSpec for DeleteModelRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateModerationRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateModerationRequest2 = Default::default();
-/// let request = CreateModerationRequest::new(body)
-///;
+/// let request = CreateModerationRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateModerationRequest {
@@ -4925,12 +4836,11 @@ impl ::core::fmt::Display for AdminApiKeysListRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::AdminApiKeysListRequest;
+/// ```no_run
+/// use schematic_schema::openai::{AdminApiKeysListRequest, AdminApiKeysListRequestOrder};
 ///
 /// let request = AdminApiKeysListRequest::default()
-///     .with_order(/* value */)
-///;
+///     .with_order(AdminApiKeysListRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AdminApiKeysListRequest {
@@ -4977,12 +4887,11 @@ impl schematic_runtime::EndpointSpec for AdminApiKeysListRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::AdminApiKeysCreateRequest;
 ///
 /// let body: ::serde_json::Value = Default::default();
-/// let request = AdminApiKeysCreateRequest::new(body)
-///;
+/// let request = AdminApiKeysCreateRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AdminApiKeysCreateRequest {
@@ -5035,11 +4944,10 @@ impl schematic_runtime::EndpointSpec for AdminApiKeysCreateRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::AdminApiKeysGetRequest;
 ///
-/// let request = AdminApiKeysGetRequest::new("key_id_value")
-///;
+/// let request = AdminApiKeysGetRequest::new("key_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AdminApiKeysGetRequest {
@@ -5091,11 +4999,10 @@ impl schematic_runtime::EndpointSpec for AdminApiKeysGetRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::AdminApiKeysDeleteRequest;
 ///
-/// let request = AdminApiKeysDeleteRequest::new("key_id_value")
-///;
+/// let request = AdminApiKeysDeleteRequest::new("key_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AdminApiKeysDeleteRequest {
@@ -5147,16 +5054,15 @@ impl schematic_runtime::EndpointSpec for AdminApiKeysDeleteRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListAuditLogsRequest;
 ///
 /// let request = ListAuditLogsRequest::default()
-///     .with_project_ids__(/* value */)
-///     .with_actor_ids__(/* value */)
-///     .with_actor_emails__(/* value */)
-///     .with_resource_ids__(/* value */)
-///     .with_tenant_only(/* value */)
-///;
+///     .with_project_ids__(vec!["project_ids[]_value".to_string()])
+///     .with_actor_ids__(vec!["actor_ids[]_value".to_string()])
+///     .with_actor_emails__(vec!["actor_emails[]_value".to_string()])
+///     .with_resource_ids__(vec!["resource_ids[]_value".to_string()])
+///     .with_tenant_only(true);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuditLogsRequest {
@@ -5300,12 +5206,11 @@ impl ::core::fmt::Display for ListOrganizationCertificatesRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListOrganizationCertificatesRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListOrganizationCertificatesRequest, ListOrganizationCertificatesRequestOrder};
 ///
 /// let request = ListOrganizationCertificatesRequest::default()
-///     .with_order(/* value */)
-///;
+///     .with_order(ListOrganizationCertificatesRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListOrganizationCertificatesRequest {
@@ -5358,12 +5263,11 @@ impl schematic_runtime::EndpointSpec for ListOrganizationCertificatesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UploadCertificateRequest;
 ///
 /// let body: ::schematic_definitions::openai::UploadCertificateRequest2 = Default::default();
-/// let request = UploadCertificateRequest::new(body)
-///;
+/// let request = UploadCertificateRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UploadCertificateRequest {
@@ -5417,12 +5321,11 @@ impl schematic_runtime::EndpointSpec for UploadCertificateRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ActivateOrganizationCertificatesRequest;
 ///
 /// let body: ::schematic_definitions::openai::ToggleCertificatesRequest = Default::default();
-/// let request = ActivateOrganizationCertificatesRequest::new(body)
-///;
+/// let request = ActivateOrganizationCertificatesRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ActivateOrganizationCertificatesRequest {
@@ -5478,12 +5381,11 @@ impl schematic_runtime::EndpointSpec for ActivateOrganizationCertificatesRequest
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeactivateOrganizationCertificatesRequest;
 ///
 /// let body: ::schematic_definitions::openai::ToggleCertificatesRequest = Default::default();
-/// let request = DeactivateOrganizationCertificatesRequest::new(body)
-///;
+/// let request = DeactivateOrganizationCertificatesRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeactivateOrganizationCertificatesRequest {
@@ -5560,12 +5462,11 @@ impl ::core::fmt::Display for GetCertificateRequestInclude {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::GetCertificateRequest;
+/// ```no_run
+/// use schematic_schema::openai::{GetCertificateRequest, GetCertificateRequestInclude};
 ///
 /// let request = GetCertificateRequest::new("certificate_id_value")
-///     .with_include(/* value */)
-///;
+///     .with_include(vec![GetCertificateRequestInclude::Content]);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetCertificateRequest {
@@ -5641,12 +5542,11 @@ impl schematic_runtime::EndpointSpec for GetCertificateRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ModifyCertificateRequest;
 ///
 /// let body: ::schematic_definitions::openai::ModifyCertificateRequest2 = Default::default();
-/// let request = ModifyCertificateRequest::new("certificate_id_value", body)
-///;
+/// let request = ModifyCertificateRequest::new("certificate_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ModifyCertificateRequest {
@@ -5703,11 +5603,10 @@ impl schematic_runtime::EndpointSpec for ModifyCertificateRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteCertificateRequest;
 ///
-/// let request = DeleteCertificateRequest::new("certificate_id_value")
-///;
+/// let request = DeleteCertificateRequest::new("certificate_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteCertificateRequest {
@@ -5815,16 +5714,15 @@ impl ::core::fmt::Display for UsageCostsRequestGroupBy {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::UsageCostsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{UsageCostsRequest, UsageCostsRequestBucketWidth, UsageCostsRequestGroupBy};
 ///
 /// let request = UsageCostsRequest::new(1)
-///     .with_end_time(/* value */)
-///     .with_bucket_width(/* value */)
-///     .with_project_ids(/* value */)
-///     .with_api_key_ids(/* value */)
-///     .with_group_by(/* value */)
-///;
+///     .with_end_time(1)
+///     .with_bucket_width(UsageCostsRequestBucketWidth::V1d)
+///     .with_project_ids(vec!["project_ids_value".to_string()])
+///     .with_api_key_ids(vec!["api_key_ids_value".to_string()])
+///     .with_group_by(vec![UsageCostsRequestGroupBy::ProjectId]);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageCostsRequest {
@@ -5944,11 +5842,10 @@ impl schematic_runtime::EndpointSpec for UsageCostsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveOrganizationDataRetentionRequest;
 ///
-/// let request = RetrieveOrganizationDataRetentionRequest::default()
-///;
+/// let request = RetrieveOrganizationDataRetentionRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveOrganizationDataRetentionRequest {}
@@ -5980,12 +5877,11 @@ impl schematic_runtime::EndpointSpec for RetrieveOrganizationDataRetentionReques
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateOrganizationDataRetentionRequest;
 ///
 /// let body: ::schematic_definitions::openai::UpdateOrganizationDataRetentionBody = Default::default();
-/// let request = UpdateOrganizationDataRetentionRequest::new(body)
-///;
+/// let request = UpdateOrganizationDataRetentionRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateOrganizationDataRetentionRequest {
@@ -6068,12 +5964,11 @@ impl ::core::fmt::Display for ListGroupsRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListGroupsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListGroupsRequest, ListGroupsRequestOrder};
 ///
 /// let request = ListGroupsRequest::default()
-///     .with_order(/* value */)
-///;
+///     .with_order(ListGroupsRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListGroupsRequest {
@@ -6122,12 +6017,11 @@ impl schematic_runtime::EndpointSpec for ListGroupsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateGroupRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateGroupBody = Default::default();
-/// let request = CreateGroupRequest::new(body)
-///;
+/// let request = CreateGroupRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateGroupRequest {
@@ -6180,11 +6074,10 @@ impl schematic_runtime::EndpointSpec for CreateGroupRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveGroupRequest;
 ///
-/// let request = RetrieveGroupRequest::new("group_id_value")
-///;
+/// let request = RetrieveGroupRequest::new("group_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveGroupRequest {
@@ -6239,12 +6132,11 @@ impl schematic_runtime::EndpointSpec for RetrieveGroupRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateGroupRequest;
 ///
 /// let body: ::schematic_definitions::openai::UpdateGroupBody = Default::default();
-/// let request = UpdateGroupRequest::new("group_id_value", body)
-///;
+/// let request = UpdateGroupRequest::new("group_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateGroupRequest {
@@ -6302,11 +6194,10 @@ impl schematic_runtime::EndpointSpec for UpdateGroupRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteGroupRequest;
 ///
-/// let request = DeleteGroupRequest::new("group_id_value")
-///;
+/// let request = DeleteGroupRequest::new("group_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteGroupRequest {
@@ -6386,12 +6277,11 @@ impl ::core::fmt::Display for ListGroupRoleAssignmentsRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListGroupRoleAssignmentsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListGroupRoleAssignmentsRequest, ListGroupRoleAssignmentsRequestOrder};
 ///
 /// let request = ListGroupRoleAssignmentsRequest::new("group_id_value")
-///     .with_order(/* value */)
-///;
+///     .with_order(ListGroupRoleAssignmentsRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListGroupRoleAssignmentsRequest {
@@ -6464,12 +6354,11 @@ impl schematic_runtime::EndpointSpec for ListGroupRoleAssignmentsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::AssignGroupRoleRequest;
 ///
 /// let body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody = Default::default();
-/// let request = AssignGroupRoleRequest::new("group_id_value", body)
-///;
+/// let request = AssignGroupRoleRequest::new("group_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AssignGroupRoleRequest {
@@ -6528,11 +6417,10 @@ impl schematic_runtime::EndpointSpec for AssignGroupRoleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveGroupRoleRequest;
 ///
-/// let request = RetrieveGroupRoleRequest::new("group_id_value", "role_id_value")
-///;
+/// let request = RetrieveGroupRoleRequest::new("group_id_value", "role_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveGroupRoleRequest {
@@ -6581,11 +6469,10 @@ impl schematic_runtime::EndpointSpec for RetrieveGroupRoleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UnassignGroupRoleRequest;
 ///
-/// let request = UnassignGroupRoleRequest::new("group_id_value", "role_id_value")
-///;
+/// let request = UnassignGroupRoleRequest::new("group_id_value", "role_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnassignGroupRoleRequest {
@@ -6659,12 +6546,11 @@ impl ::core::fmt::Display for ListGroupUsersRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListGroupUsersRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListGroupUsersRequest, ListGroupUsersRequestOrder};
 ///
 /// let request = ListGroupUsersRequest::new("group_id_value")
-///     .with_order(/* value */)
-///;
+///     .with_order(ListGroupUsersRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListGroupUsersRequest {
@@ -6737,12 +6623,11 @@ impl schematic_runtime::EndpointSpec for ListGroupUsersRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::AddGroupUserRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateGroupUserBody = Default::default();
-/// let request = AddGroupUserRequest::new("group_id_value", body)
-///;
+/// let request = AddGroupUserRequest::new("group_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AddGroupUserRequest {
@@ -6801,11 +6686,10 @@ impl schematic_runtime::EndpointSpec for AddGroupUserRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveGroupUserRequest;
 ///
-/// let request = RetrieveGroupUserRequest::new("group_id_value", "user_id_value")
-///;
+/// let request = RetrieveGroupUserRequest::new("group_id_value", "user_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveGroupUserRequest {
@@ -6854,11 +6738,10 @@ impl schematic_runtime::EndpointSpec for RetrieveGroupUserRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RemoveGroupUserRequest;
 ///
-/// let request = RemoveGroupUserRequest::new("group_id_value", "user_id_value")
-///;
+/// let request = RemoveGroupUserRequest::new("group_id_value", "user_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RemoveGroupUserRequest {
@@ -6907,11 +6790,10 @@ impl schematic_runtime::EndpointSpec for RemoveGroupUserRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListInvitesRequest;
 ///
-/// let request = ListInvitesRequest::default()
-///;
+/// let request = ListInvitesRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListInvitesRequest {}
@@ -6943,12 +6825,11 @@ impl schematic_runtime::EndpointSpec for ListInvitesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::InviteUserRequest;
 ///
 /// let body: ::schematic_definitions::openai::InviteRequest = Default::default();
-/// let request = InviteUserRequest::new(body)
-///;
+/// let request = InviteUserRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InviteUserRequest {
@@ -6999,11 +6880,10 @@ impl schematic_runtime::EndpointSpec for InviteUserRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveInviteRequest;
 ///
-/// let request = RetrieveInviteRequest::new("invite_id_value")
-///;
+/// let request = RetrieveInviteRequest::new("invite_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveInviteRequest {
@@ -7058,11 +6938,10 @@ impl schematic_runtime::EndpointSpec for RetrieveInviteRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteInviteRequest;
 ///
-/// let request = DeleteInviteRequest::new("invite_id_value")
-///;
+/// let request = DeleteInviteRequest::new("invite_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteInviteRequest {
@@ -7119,12 +6998,11 @@ impl schematic_runtime::EndpointSpec for DeleteInviteRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListProjectsRequest;
 ///
 /// let request = ListProjectsRequest::default()
-///     .with_include_archived(/* value */)
-///;
+///     .with_include_archived(true);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectsRequest {
@@ -7173,12 +7051,11 @@ impl schematic_runtime::EndpointSpec for ListProjectsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateProjectRequest;
 ///
 /// let body: ::schematic_definitions::openai::ProjectCreateRequest = Default::default();
-/// let request = CreateProjectRequest::new(body)
-///;
+/// let request = CreateProjectRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateProjectRequest {
@@ -7230,11 +7107,10 @@ impl schematic_runtime::EndpointSpec for CreateProjectRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveProjectRequest;
 ///
-/// let request = RetrieveProjectRequest::new("project_id_value")
-///;
+/// let request = RetrieveProjectRequest::new("project_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveProjectRequest {
@@ -7290,12 +7166,11 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ModifyProjectRequest;
 ///
 /// let body: ::schematic_definitions::openai::ProjectUpdateRequest = Default::default();
-/// let request = ModifyProjectRequest::new("project_id_value", body)
-///;
+/// let request = ModifyProjectRequest::new("project_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ModifyProjectRequest {
@@ -7381,12 +7256,11 @@ impl ::core::fmt::Display for ListProjectApiKeysRequestOwnerProjectAccess {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListProjectApiKeysRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListProjectApiKeysRequest, ListProjectApiKeysRequestOwnerProjectAccess};
 ///
 /// let request = ListProjectApiKeysRequest::new("project_id_value")
-///     .with_owner_project_access(/* value */)
-///;
+///     .with_owner_project_access(ListProjectApiKeysRequestOwnerProjectAccess::Active);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectApiKeysRequest {
@@ -7463,11 +7337,10 @@ impl schematic_runtime::EndpointSpec for ListProjectApiKeysRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveProjectApiKeyRequest;
 ///
-/// let request = RetrieveProjectApiKeyRequest::new("project_id_value", "api_key_id_value")
-///;
+/// let request = RetrieveProjectApiKeyRequest::new("project_id_value", "api_key_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveProjectApiKeyRequest {
@@ -7516,11 +7389,10 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectApiKeyRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteProjectApiKeyRequest;
 ///
-/// let request = DeleteProjectApiKeyRequest::new("project_id_value", "api_key_id_value")
-///;
+/// let request = DeleteProjectApiKeyRequest::new("project_id_value", "api_key_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteProjectApiKeyRequest {
@@ -7569,11 +7441,10 @@ impl schematic_runtime::EndpointSpec for DeleteProjectApiKeyRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ArchiveProjectRequest;
 ///
-/// let request = ArchiveProjectRequest::new("project_id_value")
-///;
+/// let request = ArchiveProjectRequest::new("project_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ArchiveProjectRequest {
@@ -7654,12 +7525,11 @@ impl ::core::fmt::Display for ListProjectCertificatesRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListProjectCertificatesRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListProjectCertificatesRequest, ListProjectCertificatesRequestOrder};
 ///
 /// let request = ListProjectCertificatesRequest::new("project_id_value")
-///     .with_order(/* value */)
-///;
+///     .with_order(ListProjectCertificatesRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectCertificatesRequest {
@@ -7733,12 +7603,11 @@ impl schematic_runtime::EndpointSpec for ListProjectCertificatesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ActivateProjectCertificatesRequest;
 ///
 /// let body: ::schematic_definitions::openai::ToggleCertificatesRequest = Default::default();
-/// let request = ActivateProjectCertificatesRequest::new("project_id_value", body)
-///;
+/// let request = ActivateProjectCertificatesRequest::new("project_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ActivateProjectCertificatesRequest {
@@ -7797,12 +7666,11 @@ impl schematic_runtime::EndpointSpec for ActivateProjectCertificatesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeactivateProjectCertificatesRequest;
 ///
 /// let body: ::schematic_definitions::openai::ToggleCertificatesRequest = Default::default();
-/// let request = DeactivateProjectCertificatesRequest::new("project_id_value", body)
-///;
+/// let request = DeactivateProjectCertificatesRequest::new("project_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeactivateProjectCertificatesRequest {
@@ -7861,11 +7729,10 @@ impl schematic_runtime::EndpointSpec for DeactivateProjectCertificatesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveProjectDataRetentionRequest;
 ///
-/// let request = RetrieveProjectDataRetentionRequest::new("project_id_value")
-///;
+/// let request = RetrieveProjectDataRetentionRequest::new("project_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveProjectDataRetentionRequest {
@@ -7923,12 +7790,11 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectDataRetentionRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateProjectDataRetentionRequest;
 ///
 /// let body: ::schematic_definitions::openai::UpdateProjectDataRetentionBody = Default::default();
-/// let request = UpdateProjectDataRetentionRequest::new("project_id_value", body)
-///;
+/// let request = UpdateProjectDataRetentionRequest::new("project_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateProjectDataRetentionRequest {
@@ -8012,12 +7878,11 @@ impl ::core::fmt::Display for ListProjectGroupsRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListProjectGroupsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListProjectGroupsRequest, ListProjectGroupsRequestOrder};
 ///
 /// let request = ListProjectGroupsRequest::new("project_id_value")
-///     .with_order(/* value */)
-///;
+///     .with_order(ListProjectGroupsRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectGroupsRequest {
@@ -8090,12 +7955,11 @@ impl schematic_runtime::EndpointSpec for ListProjectGroupsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::AddProjectGroupRequest;
 ///
 /// let body: ::schematic_definitions::openai::InviteProjectGroupBody = Default::default();
-/// let request = AddProjectGroupRequest::new("project_id_value", body)
-///;
+/// let request = AddProjectGroupRequest::new("project_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AddProjectGroupRequest {
@@ -8179,12 +8043,11 @@ impl ::core::fmt::Display for RetrieveProjectGroupRequestGroupType {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::RetrieveProjectGroupRequest;
+/// ```no_run
+/// use schematic_schema::openai::{RetrieveProjectGroupRequest, RetrieveProjectGroupRequestGroupType};
 ///
 /// let request = RetrieveProjectGroupRequest::new("project_id_value", "group_id_value")
-///     .with_group_type(/* value */)
-///;
+///     .with_group_type(RetrieveProjectGroupRequestGroupType::Group);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveProjectGroupRequest {
@@ -8247,11 +8110,10 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectGroupRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RemoveProjectGroupRequest;
 ///
-/// let request = RemoveProjectGroupRequest::new("project_id_value", "group_id_value")
-///;
+/// let request = RemoveProjectGroupRequest::new("project_id_value", "group_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RemoveProjectGroupRequest {
@@ -8300,11 +8162,10 @@ impl schematic_runtime::EndpointSpec for RemoveProjectGroupRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveProjectHostedToolPermissionsRequest;
 ///
-/// let request = RetrieveProjectHostedToolPermissionsRequest::new("project_id_value")
-///;
+/// let request = RetrieveProjectHostedToolPermissionsRequest::new("project_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveProjectHostedToolPermissionsRequest {
@@ -8362,12 +8223,11 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectHostedToolPermissionsReq
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateProjectHostedToolPermissionsRequest;
 ///
 /// let body: ::schematic_definitions::openai::ProjectHostedToolPermissionsUpdateRequest = Default::default();
-/// let request = UpdateProjectHostedToolPermissionsRequest::new("project_id_value", body)
-///;
+/// let request = UpdateProjectHostedToolPermissionsRequest::new("project_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateProjectHostedToolPermissionsRequest {
@@ -8426,11 +8286,10 @@ impl schematic_runtime::EndpointSpec for UpdateProjectHostedToolPermissionsReque
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveProjectModelPermissionsRequest;
 ///
-/// let request = RetrieveProjectModelPermissionsRequest::new("project_id_value")
-///;
+/// let request = RetrieveProjectModelPermissionsRequest::new("project_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveProjectModelPermissionsRequest {
@@ -8488,12 +8347,11 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectModelPermissionsRequest 
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateProjectModelPermissionsRequest;
 ///
 /// let body: ::schematic_definitions::openai::ProjectModelPermissionsUpdateRequest = Default::default();
-/// let request = UpdateProjectModelPermissionsRequest::new("project_id_value", body)
-///;
+/// let request = UpdateProjectModelPermissionsRequest::new("project_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateProjectModelPermissionsRequest {
@@ -8552,11 +8410,10 @@ impl schematic_runtime::EndpointSpec for UpdateProjectModelPermissionsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteProjectModelPermissionsRequest;
 ///
-/// let request = DeleteProjectModelPermissionsRequest::new("project_id_value")
-///;
+/// let request = DeleteProjectModelPermissionsRequest::new("project_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteProjectModelPermissionsRequest {
@@ -8614,11 +8471,10 @@ impl schematic_runtime::EndpointSpec for DeleteProjectModelPermissionsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListProjectRateLimitsRequest;
 ///
-/// let request = ListProjectRateLimitsRequest::new("project_id_value")
-///;
+/// let request = ListProjectRateLimitsRequest::new("project_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectRateLimitsRequest {
@@ -8676,12 +8532,11 @@ impl schematic_runtime::EndpointSpec for ListProjectRateLimitsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateProjectRateLimitsRequest;
 ///
 /// let body: ::schematic_definitions::openai::ProjectRateLimitUpdateRequest = Default::default();
-/// let request = UpdateProjectRateLimitsRequest::new("project_id_value", "rate_limit_id_value", body)
-///;
+/// let request = UpdateProjectRateLimitsRequest::new("project_id_value", "rate_limit_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateProjectRateLimitsRequest {
@@ -8745,11 +8600,10 @@ impl schematic_runtime::EndpointSpec for UpdateProjectRateLimitsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListProjectServiceAccountsRequest;
 ///
-/// let request = ListProjectServiceAccountsRequest::new("project_id_value")
-///;
+/// let request = ListProjectServiceAccountsRequest::new("project_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectServiceAccountsRequest {
@@ -8807,12 +8661,11 @@ impl schematic_runtime::EndpointSpec for ListProjectServiceAccountsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateProjectServiceAccountRequest;
 ///
 /// let body: ::schematic_definitions::openai::ProjectServiceAccountCreateRequest = Default::default();
-/// let request = CreateProjectServiceAccountRequest::new("project_id_value", body)
-///;
+/// let request = CreateProjectServiceAccountRequest::new("project_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateProjectServiceAccountRequest {
@@ -8871,11 +8724,10 @@ impl schematic_runtime::EndpointSpec for CreateProjectServiceAccountRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveProjectServiceAccountRequest;
 ///
-/// let request = RetrieveProjectServiceAccountRequest::new("project_id_value", "service_account_id_value")
-///;
+/// let request = RetrieveProjectServiceAccountRequest::new("project_id_value", "service_account_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveProjectServiceAccountRequest {
@@ -8928,12 +8780,11 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectServiceAccountRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateProjectServiceAccountRequest;
 ///
 /// let body: ::schematic_definitions::openai::UpdateProjectServiceAccountBody = Default::default();
-/// let request = UpdateProjectServiceAccountRequest::new("project_id_value", "service_account_id_value", body)
-///;
+/// let request = UpdateProjectServiceAccountRequest::new("project_id_value", "service_account_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateProjectServiceAccountRequest {
@@ -8997,11 +8848,10 @@ impl schematic_runtime::EndpointSpec for UpdateProjectServiceAccountRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteProjectServiceAccountRequest;
 ///
-/// let request = DeleteProjectServiceAccountRequest::new("project_id_value", "service_account_id_value")
-///;
+/// let request = DeleteProjectServiceAccountRequest::new("project_id_value", "service_account_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteProjectServiceAccountRequest {
@@ -9079,12 +8929,11 @@ impl ::core::fmt::Display for ListProjectSpendAlertsRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListProjectSpendAlertsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListProjectSpendAlertsRequest, ListProjectSpendAlertsRequestOrder};
 ///
 /// let request = ListProjectSpendAlertsRequest::new("project_id_value")
-///     .with_order(/* value */)
-///;
+///     .with_order(ListProjectSpendAlertsRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectSpendAlertsRequest {
@@ -9157,12 +9006,11 @@ impl schematic_runtime::EndpointSpec for ListProjectSpendAlertsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateProjectSpendAlertRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateSpendAlertBody = Default::default();
-/// let request = CreateProjectSpendAlertRequest::new("project_id_value", body)
-///;
+/// let request = CreateProjectSpendAlertRequest::new("project_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateProjectSpendAlertRequest {
@@ -9221,11 +9069,10 @@ impl schematic_runtime::EndpointSpec for CreateProjectSpendAlertRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveProjectSpendAlertRequest;
 ///
-/// let request = RetrieveProjectSpendAlertRequest::new("project_id_value", "alert_id_value")
-///;
+/// let request = RetrieveProjectSpendAlertRequest::new("project_id_value", "alert_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveProjectSpendAlertRequest {
@@ -9274,12 +9121,11 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectSpendAlertRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateProjectSpendAlertRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateSpendAlertBody = Default::default();
-/// let request = UpdateProjectSpendAlertRequest::new("project_id_value", "alert_id_value", body)
-///;
+/// let request = UpdateProjectSpendAlertRequest::new("project_id_value", "alert_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateProjectSpendAlertRequest {
@@ -9342,11 +9188,10 @@ impl schematic_runtime::EndpointSpec for UpdateProjectSpendAlertRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteProjectSpendAlertRequest;
 ///
-/// let request = DeleteProjectSpendAlertRequest::new("project_id_value", "alert_id_value")
-///;
+/// let request = DeleteProjectSpendAlertRequest::new("project_id_value", "alert_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteProjectSpendAlertRequest {
@@ -9395,11 +9240,10 @@ impl schematic_runtime::EndpointSpec for DeleteProjectSpendAlertRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListProjectUsersRequest;
 ///
-/// let request = ListProjectUsersRequest::new("project_id_value")
-///;
+/// let request = ListProjectUsersRequest::new("project_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectUsersRequest {
@@ -9457,12 +9301,11 @@ impl schematic_runtime::EndpointSpec for ListProjectUsersRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateProjectUserRequest;
 ///
 /// let body: ::schematic_definitions::openai::ProjectUserCreateRequest = Default::default();
-/// let request = CreateProjectUserRequest::new("project_id_value", body)
-///;
+/// let request = CreateProjectUserRequest::new("project_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateProjectUserRequest {
@@ -9519,11 +9362,10 @@ impl schematic_runtime::EndpointSpec for CreateProjectUserRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveProjectUserRequest;
 ///
-/// let request = RetrieveProjectUserRequest::new("project_id_value", "user_id_value")
-///;
+/// let request = RetrieveProjectUserRequest::new("project_id_value", "user_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveProjectUserRequest {
@@ -9570,12 +9412,11 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectUserRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ModifyProjectUserRequest;
 ///
 /// let body: ::schematic_definitions::openai::ProjectUserUpdateRequest = Default::default();
-/// let request = ModifyProjectUserRequest::new("project_id_value", "user_id_value", body)
-///;
+/// let request = ModifyProjectUserRequest::new("project_id_value", "user_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ModifyProjectUserRequest {
@@ -9636,11 +9477,10 @@ impl schematic_runtime::EndpointSpec for ModifyProjectUserRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteProjectUserRequest;
 ///
-/// let request = DeleteProjectUserRequest::new("project_id_value", "user_id_value")
-///;
+/// let request = DeleteProjectUserRequest::new("project_id_value", "user_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteProjectUserRequest {
@@ -9714,12 +9554,11 @@ impl ::core::fmt::Display for ListRolesRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListRolesRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListRolesRequest, ListRolesRequestOrder};
 ///
 /// let request = ListRolesRequest::default()
-///     .with_order(/* value */)
-///;
+///     .with_order(ListRolesRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRolesRequest {
@@ -9768,12 +9607,11 @@ impl schematic_runtime::EndpointSpec for ListRolesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateRoleRequest;
 ///
 /// let body: ::schematic_definitions::openai::PublicCreateOrganizationRoleBody = Default::default();
-/// let request = CreateRoleRequest::new(body)
-///;
+/// let request = CreateRoleRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRoleRequest {
@@ -9829,11 +9667,10 @@ impl schematic_runtime::EndpointSpec for CreateRoleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveRoleRequest;
 ///
-/// let request = RetrieveRoleRequest::new("role_id_value")
-///;
+/// let request = RetrieveRoleRequest::new("role_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveRoleRequest {
@@ -9884,12 +9721,11 @@ impl schematic_runtime::EndpointSpec for RetrieveRoleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateRoleRequest;
 ///
 /// let body: ::schematic_definitions::openai::PublicUpdateOrganizationRoleBody = Default::default();
-/// let request = UpdateRoleRequest::new("role_id_value", body)
-///;
+/// let request = UpdateRoleRequest::new("role_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateRoleRequest {
@@ -9945,11 +9781,10 @@ impl schematic_runtime::EndpointSpec for UpdateRoleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteRoleRequest;
 ///
-/// let request = DeleteRoleRequest::new("role_id_value")
-///;
+/// let request = DeleteRoleRequest::new("role_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteRoleRequest {
@@ -10027,12 +9862,11 @@ impl ::core::fmt::Display for ListOrganizationSpendAlertsRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListOrganizationSpendAlertsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListOrganizationSpendAlertsRequest, ListOrganizationSpendAlertsRequestOrder};
 ///
 /// let request = ListOrganizationSpendAlertsRequest::default()
-///     .with_order(/* value */)
-///;
+///     .with_order(ListOrganizationSpendAlertsRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListOrganizationSpendAlertsRequest {
@@ -10081,12 +9915,11 @@ impl schematic_runtime::EndpointSpec for ListOrganizationSpendAlertsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateOrganizationSpendAlertRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateSpendAlertBody = Default::default();
-/// let request = CreateOrganizationSpendAlertRequest::new(body)
-///;
+/// let request = CreateOrganizationSpendAlertRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateOrganizationSpendAlertRequest {
@@ -10140,11 +9973,10 @@ impl schematic_runtime::EndpointSpec for CreateOrganizationSpendAlertRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveOrganizationSpendAlertRequest;
 ///
-/// let request = RetrieveOrganizationSpendAlertRequest::new("alert_id_value")
-///;
+/// let request = RetrieveOrganizationSpendAlertRequest::new("alert_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveOrganizationSpendAlertRequest {
@@ -10200,12 +10032,11 @@ impl schematic_runtime::EndpointSpec for RetrieveOrganizationSpendAlertRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateOrganizationSpendAlertRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateSpendAlertBody = Default::default();
-/// let request = UpdateOrganizationSpendAlertRequest::new("alert_id_value", body)
-///;
+/// let request = UpdateOrganizationSpendAlertRequest::new("alert_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateOrganizationSpendAlertRequest {
@@ -10264,11 +10095,10 @@ impl schematic_runtime::EndpointSpec for UpdateOrganizationSpendAlertRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteOrganizationSpendAlertRequest;
 ///
-/// let request = DeleteOrganizationSpendAlertRequest::new("alert_id_value")
-///;
+/// let request = DeleteOrganizationSpendAlertRequest::new("alert_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteOrganizationSpendAlertRequest {
@@ -10386,18 +10216,17 @@ impl ::core::fmt::Display for UsageAudioSpeechesRequestGroupBy {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::UsageAudioSpeechesRequest;
+/// ```no_run
+/// use schematic_schema::openai::{UsageAudioSpeechesRequest, UsageAudioSpeechesRequestBucketWidth, UsageAudioSpeechesRequestGroupBy};
 ///
 /// let request = UsageAudioSpeechesRequest::new(1)
-///     .with_end_time(/* value */)
-///     .with_bucket_width(/* value */)
-///     .with_project_ids(/* value */)
-///     .with_user_ids(/* value */)
-///     .with_api_key_ids(/* value */)
-///     .with_models(/* value */)
-///     .with_group_by(/* value */)
-///;
+///     .with_end_time(1)
+///     .with_bucket_width(UsageAudioSpeechesRequestBucketWidth::V1m)
+///     .with_project_ids(vec!["project_ids_value".to_string()])
+///     .with_user_ids(vec!["user_ids_value".to_string()])
+///     .with_api_key_ids(vec!["api_key_ids_value".to_string()])
+///     .with_models(vec!["models_value".to_string()])
+///     .with_group_by(vec![UsageAudioSpeechesRequestGroupBy::ProjectId]);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageAudioSpeechesRequest {
@@ -10617,18 +10446,17 @@ impl ::core::fmt::Display for UsageAudioTranscriptionsRequestGroupBy {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::UsageAudioTranscriptionsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{UsageAudioTranscriptionsRequest, UsageAudioTranscriptionsRequestBucketWidth, UsageAudioTranscriptionsRequestGroupBy};
 ///
 /// let request = UsageAudioTranscriptionsRequest::new(1)
-///     .with_end_time(/* value */)
-///     .with_bucket_width(/* value */)
-///     .with_project_ids(/* value */)
-///     .with_user_ids(/* value */)
-///     .with_api_key_ids(/* value */)
-///     .with_models(/* value */)
-///     .with_group_by(/* value */)
-///;
+///     .with_end_time(1)
+///     .with_bucket_width(UsageAudioTranscriptionsRequestBucketWidth::V1m)
+///     .with_project_ids(vec!["project_ids_value".to_string()])
+///     .with_user_ids(vec!["user_ids_value".to_string()])
+///     .with_api_key_ids(vec!["api_key_ids_value".to_string()])
+///     .with_models(vec!["models_value".to_string()])
+///     .with_group_by(vec![UsageAudioTranscriptionsRequestGroupBy::ProjectId]);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageAudioTranscriptionsRequest {
@@ -10836,15 +10664,14 @@ impl ::core::fmt::Display for UsageCodeInterpreterSessionsRequestGroupBy {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::UsageCodeInterpreterSessionsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{UsageCodeInterpreterSessionsRequest, UsageCodeInterpreterSessionsRequestBucketWidth, UsageCodeInterpreterSessionsRequestGroupBy};
 ///
 /// let request = UsageCodeInterpreterSessionsRequest::new(1)
-///     .with_end_time(/* value */)
-///     .with_bucket_width(/* value */)
-///     .with_project_ids(/* value */)
-///     .with_group_by(/* value */)
-///;
+///     .with_end_time(1)
+///     .with_bucket_width(UsageCodeInterpreterSessionsRequestBucketWidth::V1m)
+///     .with_project_ids(vec!["project_ids_value".to_string()])
+///     .with_group_by(vec![UsageCodeInterpreterSessionsRequestGroupBy::ProjectId]);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageCodeInterpreterSessionsRequest {
@@ -11024,19 +10851,18 @@ impl ::core::fmt::Display for UsageCompletionsRequestGroupBy {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::UsageCompletionsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{UsageCompletionsRequest, UsageCompletionsRequestBucketWidth, UsageCompletionsRequestGroupBy};
 ///
 /// let request = UsageCompletionsRequest::new(1)
-///     .with_end_time(/* value */)
-///     .with_bucket_width(/* value */)
-///     .with_project_ids(/* value */)
-///     .with_user_ids(/* value */)
-///     .with_api_key_ids(/* value */)
-///     .with_models(/* value */)
-///     .with_batch(/* value */)
-///     .with_group_by(/* value */)
-///;
+///     .with_end_time(1)
+///     .with_bucket_width(UsageCompletionsRequestBucketWidth::V1m)
+///     .with_project_ids(vec!["project_ids_value".to_string()])
+///     .with_user_ids(vec!["user_ids_value".to_string()])
+///     .with_api_key_ids(vec!["api_key_ids_value".to_string()])
+///     .with_models(vec!["models_value".to_string()])
+///     .with_batch(true)
+///     .with_group_by(vec![UsageCompletionsRequestGroupBy::ProjectId]);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageCompletionsRequest {
@@ -11265,18 +11091,17 @@ impl ::core::fmt::Display for UsageEmbeddingsRequestGroupBy {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::UsageEmbeddingsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{UsageEmbeddingsRequest, UsageEmbeddingsRequestBucketWidth, UsageEmbeddingsRequestGroupBy};
 ///
 /// let request = UsageEmbeddingsRequest::new(1)
-///     .with_end_time(/* value */)
-///     .with_bucket_width(/* value */)
-///     .with_project_ids(/* value */)
-///     .with_user_ids(/* value */)
-///     .with_api_key_ids(/* value */)
-///     .with_models(/* value */)
-///     .with_group_by(/* value */)
-///;
+///     .with_end_time(1)
+///     .with_bucket_width(UsageEmbeddingsRequestBucketWidth::V1m)
+///     .with_project_ids(vec!["project_ids_value".to_string()])
+///     .with_user_ids(vec!["user_ids_value".to_string()])
+///     .with_api_key_ids(vec!["api_key_ids_value".to_string()])
+///     .with_models(vec!["models_value".to_string()])
+///     .with_group_by(vec![UsageEmbeddingsRequestGroupBy::ProjectId]);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageEmbeddingsRequest {
@@ -11493,18 +11318,17 @@ impl ::core::fmt::Display for UsageFileSearchCallsRequestGroupBy {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::UsageFileSearchCallsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{UsageFileSearchCallsRequest, UsageFileSearchCallsRequestBucketWidth, UsageFileSearchCallsRequestGroupBy};
 ///
 /// let request = UsageFileSearchCallsRequest::new(1)
-///     .with_end_time(/* value */)
-///     .with_bucket_width(/* value */)
-///     .with_project_ids(/* value */)
-///     .with_user_ids(/* value */)
-///     .with_api_key_ids(/* value */)
-///     .with_vector_store_ids(/* value */)
-///     .with_group_by(/* value */)
-///;
+///     .with_end_time(1)
+///     .with_bucket_width(UsageFileSearchCallsRequestBucketWidth::V1m)
+///     .with_project_ids(vec!["project_ids_value".to_string()])
+///     .with_user_ids(vec!["user_ids_value".to_string()])
+///     .with_api_key_ids(vec!["api_key_ids_value".to_string()])
+///     .with_vector_store_ids(vec!["vector_store_ids_value".to_string()])
+///     .with_group_by(vec![UsageFileSearchCallsRequestGroupBy::ProjectId]);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageFileSearchCallsRequest {
@@ -11798,20 +11622,19 @@ impl ::core::fmt::Display for UsageImagesRequestGroupBy {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::UsageImagesRequest;
+/// ```no_run
+/// use schematic_schema::openai::{UsageImagesRequest, UsageImagesRequestBucketWidth, UsageImagesRequestSources, UsageImagesRequestSizes, UsageImagesRequestGroupBy};
 ///
 /// let request = UsageImagesRequest::new(1)
-///     .with_end_time(/* value */)
-///     .with_bucket_width(/* value */)
-///     .with_sources(/* value */)
-///     .with_sizes(/* value */)
-///     .with_project_ids(/* value */)
-///     .with_user_ids(/* value */)
-///     .with_api_key_ids(/* value */)
-///     .with_models(/* value */)
-///     .with_group_by(/* value */)
-///;
+///     .with_end_time(1)
+///     .with_bucket_width(UsageImagesRequestBucketWidth::V1m)
+///     .with_sources(vec![UsageImagesRequestSources::ImageGeneration])
+///     .with_sizes(vec![UsageImagesRequestSizes::V256x256])
+///     .with_project_ids(vec!["project_ids_value".to_string()])
+///     .with_user_ids(vec!["user_ids_value".to_string()])
+///     .with_api_key_ids(vec!["api_key_ids_value".to_string()])
+///     .with_models(vec!["models_value".to_string()])
+///     .with_group_by(vec![UsageImagesRequestGroupBy::ProjectId]);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageImagesRequest {
@@ -12057,18 +11880,17 @@ impl ::core::fmt::Display for UsageModerationsRequestGroupBy {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::UsageModerationsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{UsageModerationsRequest, UsageModerationsRequestBucketWidth, UsageModerationsRequestGroupBy};
 ///
 /// let request = UsageModerationsRequest::new(1)
-///     .with_end_time(/* value */)
-///     .with_bucket_width(/* value */)
-///     .with_project_ids(/* value */)
-///     .with_user_ids(/* value */)
-///     .with_api_key_ids(/* value */)
-///     .with_models(/* value */)
-///     .with_group_by(/* value */)
-///;
+///     .with_end_time(1)
+///     .with_bucket_width(UsageModerationsRequestBucketWidth::V1m)
+///     .with_project_ids(vec!["project_ids_value".to_string()])
+///     .with_user_ids(vec!["user_ids_value".to_string()])
+///     .with_api_key_ids(vec!["api_key_ids_value".to_string()])
+///     .with_models(vec!["models_value".to_string()])
+///     .with_group_by(vec![UsageModerationsRequestGroupBy::ProjectId]);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageModerationsRequest {
@@ -12273,15 +12095,14 @@ impl ::core::fmt::Display for UsageVectorStoresRequestGroupBy {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::UsageVectorStoresRequest;
+/// ```no_run
+/// use schematic_schema::openai::{UsageVectorStoresRequest, UsageVectorStoresRequestBucketWidth, UsageVectorStoresRequestGroupBy};
 ///
 /// let request = UsageVectorStoresRequest::new(1)
-///     .with_end_time(/* value */)
-///     .with_bucket_width(/* value */)
-///     .with_project_ids(/* value */)
-///     .with_group_by(/* value */)
-///;
+///     .with_end_time(1)
+///     .with_bucket_width(UsageVectorStoresRequestBucketWidth::V1m)
+///     .with_project_ids(vec!["project_ids_value".to_string()])
+///     .with_group_by(vec![UsageVectorStoresRequestGroupBy::ProjectId]);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageVectorStoresRequest {
@@ -12483,19 +12304,18 @@ impl ::core::fmt::Display for UsageWebSearchCallsRequestGroupBy {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::UsageWebSearchCallsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{UsageWebSearchCallsRequest, UsageWebSearchCallsRequestBucketWidth, UsageWebSearchCallsRequestContextLevels, UsageWebSearchCallsRequestGroupBy};
 ///
 /// let request = UsageWebSearchCallsRequest::new(1)
-///     .with_end_time(/* value */)
-///     .with_bucket_width(/* value */)
-///     .with_project_ids(/* value */)
-///     .with_user_ids(/* value */)
-///     .with_api_key_ids(/* value */)
-///     .with_models(/* value */)
-///     .with_context_levels(/* value */)
-///     .with_group_by(/* value */)
-///;
+///     .with_end_time(1)
+///     .with_bucket_width(UsageWebSearchCallsRequestBucketWidth::V1m)
+///     .with_project_ids(vec!["project_ids_value".to_string()])
+///     .with_user_ids(vec!["user_ids_value".to_string()])
+///     .with_api_key_ids(vec!["api_key_ids_value".to_string()])
+///     .with_models(vec!["models_value".to_string()])
+///     .with_context_levels(vec![UsageWebSearchCallsRequestContextLevels::Low])
+///     .with_group_by(vec![UsageWebSearchCallsRequestGroupBy::ProjectId]);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageWebSearchCallsRequest {
@@ -12672,12 +12492,11 @@ impl schematic_runtime::EndpointSpec for UsageWebSearchCallsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListUsersRequest;
 ///
 /// let request = ListUsersRequest::default()
-///     .with_emails(/* value */)
-///;
+///     .with_emails(vec!["emails_value".to_string()]);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListUsersRequest {
@@ -12731,11 +12550,10 @@ impl schematic_runtime::EndpointSpec for ListUsersRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveUserRequest;
 ///
-/// let request = RetrieveUserRequest::new("user_id_value")
-///;
+/// let request = RetrieveUserRequest::new("user_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveUserRequest {
@@ -12786,12 +12604,11 @@ impl schematic_runtime::EndpointSpec for RetrieveUserRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ModifyUserRequest;
 ///
 /// let body: ::schematic_definitions::openai::UserRoleUpdateRequest = Default::default();
-/// let request = ModifyUserRequest::new("user_id_value", body)
-///;
+/// let request = ModifyUserRequest::new("user_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ModifyUserRequest {
@@ -12847,11 +12664,10 @@ impl schematic_runtime::EndpointSpec for ModifyUserRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteUserRequest;
 ///
-/// let request = DeleteUserRequest::new("user_id_value")
-///;
+/// let request = DeleteUserRequest::new("user_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteUserRequest {
@@ -12929,12 +12745,11 @@ impl ::core::fmt::Display for ListUserRoleAssignmentsRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListUserRoleAssignmentsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListUserRoleAssignmentsRequest, ListUserRoleAssignmentsRequestOrder};
 ///
 /// let request = ListUserRoleAssignmentsRequest::new("user_id_value")
-///     .with_order(/* value */)
-///;
+///     .with_order(ListUserRoleAssignmentsRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListUserRoleAssignmentsRequest {
@@ -13007,12 +12822,11 @@ impl schematic_runtime::EndpointSpec for ListUserRoleAssignmentsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::AssignUserRoleRequest;
 ///
 /// let body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody = Default::default();
-/// let request = AssignUserRoleRequest::new("user_id_value", body)
-///;
+/// let request = AssignUserRoleRequest::new("user_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AssignUserRoleRequest {
@@ -13071,11 +12885,10 @@ impl schematic_runtime::EndpointSpec for AssignUserRoleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveUserRoleRequest;
 ///
-/// let request = RetrieveUserRoleRequest::new("user_id_value", "role_id_value")
-///;
+/// let request = RetrieveUserRoleRequest::new("user_id_value", "role_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveUserRoleRequest {
@@ -13124,11 +12937,10 @@ impl schematic_runtime::EndpointSpec for RetrieveUserRoleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UnassignUserRoleRequest;
 ///
-/// let request = UnassignUserRoleRequest::new("user_id_value", "role_id_value")
-///;
+/// let request = UnassignUserRoleRequest::new("user_id_value", "role_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnassignUserRoleRequest {
@@ -13202,12 +13014,11 @@ impl ::core::fmt::Display for ListProjectGroupRoleAssignmentsRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListProjectGroupRoleAssignmentsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListProjectGroupRoleAssignmentsRequest, ListProjectGroupRoleAssignmentsRequestOrder};
 ///
 /// let request = ListProjectGroupRoleAssignmentsRequest::new("project_id_value", "group_id_value")
-///     .with_order(/* value */)
-///;
+///     .with_order(ListProjectGroupRoleAssignmentsRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectGroupRoleAssignmentsRequest {
@@ -13270,12 +13081,11 @@ impl schematic_runtime::EndpointSpec for ListProjectGroupRoleAssignmentsRequest 
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::AssignProjectGroupRoleRequest;
 ///
 /// let body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody = Default::default();
-/// let request = AssignProjectGroupRoleRequest::new("project_id_value", "group_id_value", body)
-///;
+/// let request = AssignProjectGroupRoleRequest::new("project_id_value", "group_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AssignProjectGroupRoleRequest {
@@ -13338,11 +13148,10 @@ impl schematic_runtime::EndpointSpec for AssignProjectGroupRoleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveProjectGroupRoleRequest;
 ///
-/// let request = RetrieveProjectGroupRoleRequest::new("project_id_value", "group_id_value", "role_id_value")
-///;
+/// let request = RetrieveProjectGroupRoleRequest::new("project_id_value", "group_id_value", "role_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveProjectGroupRoleRequest {
@@ -13399,11 +13208,10 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectGroupRoleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UnassignProjectGroupRoleRequest;
 ///
-/// let request = UnassignProjectGroupRoleRequest::new("project_id_value", "group_id_value", "role_id_value")
-///;
+/// let request = UnassignProjectGroupRoleRequest::new("project_id_value", "group_id_value", "role_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnassignProjectGroupRoleRequest {
@@ -13485,12 +13293,11 @@ impl ::core::fmt::Display for ListProjectRolesRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListProjectRolesRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListProjectRolesRequest, ListProjectRolesRequestOrder};
 ///
 /// let request = ListProjectRolesRequest::new("project_id_value")
-///     .with_order(/* value */)
-///;
+///     .with_order(ListProjectRolesRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectRolesRequest {
@@ -13562,12 +13369,11 @@ impl schematic_runtime::EndpointSpec for ListProjectRolesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateProjectRoleRequest;
 ///
 /// let body: ::schematic_definitions::openai::PublicCreateOrganizationRoleBody = Default::default();
-/// let request = CreateProjectRoleRequest::new("project_id_value", body)
-///;
+/// let request = CreateProjectRoleRequest::new("project_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateProjectRoleRequest {
@@ -13623,11 +13429,10 @@ impl schematic_runtime::EndpointSpec for CreateProjectRoleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveProjectRoleRequest;
 ///
-/// let request = RetrieveProjectRoleRequest::new("project_id_value", "role_id_value")
-///;
+/// let request = RetrieveProjectRoleRequest::new("project_id_value", "role_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveProjectRoleRequest {
@@ -13674,12 +13479,11 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectRoleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateProjectRoleRequest;
 ///
 /// let body: ::schematic_definitions::openai::PublicUpdateOrganizationRoleBody = Default::default();
-/// let request = UpdateProjectRoleRequest::new("project_id_value", "role_id_value", body)
-///;
+/// let request = UpdateProjectRoleRequest::new("project_id_value", "role_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateProjectRoleRequest {
@@ -13740,11 +13544,10 @@ impl schematic_runtime::EndpointSpec for UpdateProjectRoleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteProjectRoleRequest;
 ///
-/// let request = DeleteProjectRoleRequest::new("project_id_value", "role_id_value")
-///;
+/// let request = DeleteProjectRoleRequest::new("project_id_value", "role_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteProjectRoleRequest {
@@ -13818,12 +13621,11 @@ impl ::core::fmt::Display for ListProjectUserRoleAssignmentsRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListProjectUserRoleAssignmentsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListProjectUserRoleAssignmentsRequest, ListProjectUserRoleAssignmentsRequestOrder};
 ///
 /// let request = ListProjectUserRoleAssignmentsRequest::new("project_id_value", "user_id_value")
-///     .with_order(/* value */)
-///;
+///     .with_order(ListProjectUserRoleAssignmentsRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectUserRoleAssignmentsRequest {
@@ -13886,12 +13688,11 @@ impl schematic_runtime::EndpointSpec for ListProjectUserRoleAssignmentsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::AssignProjectUserRoleRequest;
 ///
 /// let body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody = Default::default();
-/// let request = AssignProjectUserRoleRequest::new("project_id_value", "user_id_value", body)
-///;
+/// let request = AssignProjectUserRoleRequest::new("project_id_value", "user_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AssignProjectUserRoleRequest {
@@ -13954,11 +13755,10 @@ impl schematic_runtime::EndpointSpec for AssignProjectUserRoleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveProjectUserRoleRequest;
 ///
-/// let request = RetrieveProjectUserRoleRequest::new("project_id_value", "user_id_value", "role_id_value")
-///;
+/// let request = RetrieveProjectUserRoleRequest::new("project_id_value", "user_id_value", "role_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveProjectUserRoleRequest {
@@ -14015,11 +13815,10 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectUserRoleRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UnassignProjectUserRoleRequest;
 ///
-/// let request = UnassignProjectUserRoleRequest::new("project_id_value", "user_id_value", "role_id_value")
-///;
+/// let request = UnassignProjectUserRoleRequest::new("project_id_value", "user_id_value", "role_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnassignProjectUserRoleRequest {
@@ -14108,15 +13907,11 @@ impl CreateRealtimeCallForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::{CreateRealtimeCallRequest, CreateRealtimeCallForm};
 ///
-/// let body = CreateRealtimeCallForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = CreateRealtimeCallRequest::new(body)
-///;
+/// let body: CreateRealtimeCallForm = Default::default();
+/// let request = CreateRealtimeCallRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRealtimeCallRequest {
@@ -14160,12 +13955,11 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeCallRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::AcceptRealtimeCallRequest;
 ///
 /// let body: ::schematic_definitions::openai::RealtimeSessionCreateRequestGA = Default::default();
-/// let request = AcceptRealtimeCallRequest::new("call_id_value", body)
-///;
+/// let request = AcceptRealtimeCallRequest::new("call_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AcceptRealtimeCallRequest {
@@ -14221,11 +14015,10 @@ impl schematic_runtime::EndpointSpec for AcceptRealtimeCallRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::HangupRealtimeCallRequest;
 ///
-/// let request = HangupRealtimeCallRequest::new("call_id_value")
-///;
+/// let request = HangupRealtimeCallRequest::new("call_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HangupRealtimeCallRequest {
@@ -14276,12 +14069,11 @@ impl schematic_runtime::EndpointSpec for HangupRealtimeCallRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ReferRealtimeCallRequest;
 ///
 /// let body: ::schematic_definitions::openai::RealtimeCallReferRequest = Default::default();
-/// let request = ReferRealtimeCallRequest::new("call_id_value", body)
-///;
+/// let request = ReferRealtimeCallRequest::new("call_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ReferRealtimeCallRequest {
@@ -14337,12 +14129,11 @@ impl schematic_runtime::EndpointSpec for ReferRealtimeCallRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RejectRealtimeCallRequest;
 ///
 /// let body: ::schematic_definitions::openai::RealtimeCallRejectRequest = Default::default();
-/// let request = RejectRealtimeCallRequest::new("call_id_value", body)
-///;
+/// let request = RejectRealtimeCallRequest::new("call_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RejectRealtimeCallRequest {
@@ -14398,12 +14189,11 @@ impl schematic_runtime::EndpointSpec for RejectRealtimeCallRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateRealtimeClientSecretRequest;
 ///
 /// let body: ::schematic_definitions::openai::RealtimeCreateClientSecretRequest = Default::default();
-/// let request = CreateRealtimeClientSecretRequest::new(body)
-///;
+/// let request = CreateRealtimeClientSecretRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRealtimeClientSecretRequest {
@@ -14461,12 +14251,11 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeClientSecretRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateRealtimeSessionRequest;
 ///
 /// let body: ::schematic_definitions::openai::RealtimeSessionCreateRequest = Default::default();
-/// let request = CreateRealtimeSessionRequest::new(body)
-///;
+/// let request = CreateRealtimeSessionRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRealtimeSessionRequest {
@@ -14524,12 +14313,11 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeSessionRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateRealtimeTranscriptionSessionRequest;
 ///
 /// let body: ::schematic_definitions::openai::RealtimeTranscriptionSessionCreateRequest = Default::default();
-/// let request = CreateRealtimeTranscriptionSessionRequest::new(body)
-///;
+/// let request = CreateRealtimeTranscriptionSessionRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRealtimeTranscriptionSessionRequest {
@@ -14587,12 +14375,11 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranscriptionSessionReque
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateRealtimeTranslationClientSecretRequest;
 ///
 /// let body: ::schematic_definitions::openai::RealtimeTranslationClientSecretCreateRequest = Default::default();
-/// let request = CreateRealtimeTranslationClientSecretRequest::new(body)
-///;
+/// let request = CreateRealtimeTranslationClientSecretRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRealtimeTranslationClientSecretRequest {
@@ -14650,14 +14437,13 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranslationClientSecretRe
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateResponseRequest;
 ///
 /// let body: ::schematic_definitions::openai::BetaCreateResponse = Default::default();
 /// let request = CreateResponseRequest::new(body)
-///     .with_beta(/* value */)
-///     .with_openai_beta(/* value */)
-///;
+///     .with_beta(true)
+///     .with_openai_beta(vec!["responses_multi_agent=v1".to_string()]);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateResponseRequest {
@@ -14746,16 +14532,15 @@ impl schematic_runtime::EndpointSpec for CreateResponseRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetResponseRequest;
 ///
 /// let request = GetResponseRequest::new("response_id_value")
-///     .with_stream(/* value */)
-///     .with_starting_after(/* value */)
-///     .with_include_obfuscation(/* value */)
-///     .with_beta(/* value */)
-///     .with_openai_beta(/* value */)
-///;
+///     .with_stream(true)
+///     .with_starting_after(1)
+///     .with_include_obfuscation(true)
+///     .with_beta(true)
+///     .with_openai_beta(vec!["responses_multi_agent=v1".to_string()]);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetResponseRequest {
@@ -14943,13 +14728,12 @@ impl schematic_runtime::EndpointSpec for GetResponseRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteResponseRequest;
 ///
 /// let request = DeleteResponseRequest::new("response_id_value")
-///     .with_beta(/* value */)
-///     .with_openai_beta(/* value */)
-///;
+///     .with_beta(true)
+///     .with_openai_beta(vec!["responses_multi_agent=v1".to_string()]);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteResponseRequest {
@@ -15039,13 +14823,12 @@ impl schematic_runtime::EndpointSpec for DeleteResponseRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CancelResponseRequest;
 ///
 /// let request = CancelResponseRequest::new("response_id_value")
-///     .with_beta(/* value */)
-///     .with_openai_beta(/* value */)
-///;
+///     .with_beta(true)
+///     .with_openai_beta(vec!["responses_multi_agent=v1".to_string()]);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CancelResponseRequest {
@@ -15162,14 +14945,13 @@ impl ::core::fmt::Display for ListInputItemsRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListInputItemsRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListInputItemsRequest, ListInputItemsRequestOrder};
 ///
 /// let request = ListInputItemsRequest::new("response_id_value")
-///     .with_order(/* value */)
-///     .with_beta(/* value */)
-///     .with_openai_beta(/* value */)
-///;
+///     .with_order(ListInputItemsRequestOrder::Asc)
+///     .with_beta(true)
+///     .with_openai_beta(vec!["responses_multi_agent=v1".to_string()]);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListInputItemsRequest {
@@ -15278,12 +15060,11 @@ impl schematic_runtime::EndpointSpec for ListInputItemsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateUploadRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateUploadRequest2 = Default::default();
-/// let request = CreateUploadRequest::new(body)
-///;
+/// let request = CreateUploadRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateUploadRequest {
@@ -15335,11 +15116,10 @@ impl schematic_runtime::EndpointSpec for CreateUploadRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CancelUploadRequest;
 ///
-/// let request = CancelUploadRequest::new("upload_id_value")
-///;
+/// let request = CancelUploadRequest::new("upload_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CancelUploadRequest {
@@ -15394,12 +15174,11 @@ impl schematic_runtime::EndpointSpec for CancelUploadRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CompleteUploadRequest;
 ///
 /// let body: ::schematic_definitions::openai::CompleteUploadRequest2 = Default::default();
-/// let request = CompleteUploadRequest::new("upload_id_value", body)
-///;
+/// let request = CompleteUploadRequest::new("upload_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompleteUploadRequest {
@@ -15472,15 +15251,11 @@ impl AddUploadPartForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::{AddUploadPartRequest, AddUploadPartForm};
 ///
-/// let body = AddUploadPartForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = AddUploadPartRequest::new("upload_id_value", body)
-///;
+/// let body: AddUploadPartForm = Default::default();
+/// let request = AddUploadPartRequest::new("upload_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AddUploadPartRequest {
@@ -15551,12 +15326,11 @@ impl ::core::fmt::Display for ListVectorStoresRequestOrder {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListVectorStoresRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListVectorStoresRequest, ListVectorStoresRequestOrder};
 ///
 /// let request = ListVectorStoresRequest::default()
-///     .with_order(/* value */)
-///;
+///     .with_order(ListVectorStoresRequestOrder::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListVectorStoresRequest {
@@ -15606,12 +15380,11 @@ impl schematic_runtime::EndpointSpec for ListVectorStoresRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateVectorStoreRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateVectorStoreRequest2 = Default::default();
-/// let request = CreateVectorStoreRequest::new(body)
-///;
+/// let request = CreateVectorStoreRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateVectorStoreRequest {
@@ -15667,11 +15440,10 @@ impl schematic_runtime::EndpointSpec for CreateVectorStoreRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetVectorStoreRequest;
 ///
-/// let request = GetVectorStoreRequest::new("vector_store_id_value")
-///;
+/// let request = GetVectorStoreRequest::new("vector_store_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetVectorStoreRequest {
@@ -15728,12 +15500,11 @@ impl schematic_runtime::EndpointSpec for GetVectorStoreRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ModifyVectorStoreRequest;
 ///
 /// let body: ::schematic_definitions::openai::UpdateVectorStoreRequest = Default::default();
-/// let request = ModifyVectorStoreRequest::new("vector_store_id_value", body)
-///;
+/// let request = ModifyVectorStoreRequest::new("vector_store_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ModifyVectorStoreRequest {
@@ -15791,11 +15562,10 @@ impl schematic_runtime::EndpointSpec for ModifyVectorStoreRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteVectorStoreRequest;
 ///
-/// let request = DeleteVectorStoreRequest::new("vector_store_id_value")
-///;
+/// let request = DeleteVectorStoreRequest::new("vector_store_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteVectorStoreRequest {
@@ -15852,12 +15622,11 @@ impl schematic_runtime::EndpointSpec for DeleteVectorStoreRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateVectorStoreFileBatchRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateVectorStoreFileBatchRequest2 = Default::default();
-/// let request = CreateVectorStoreFileBatchRequest::new("vector_store_id_value", body)
-///;
+/// let request = CreateVectorStoreFileBatchRequest::new("vector_store_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateVectorStoreFileBatchRequest {
@@ -15916,11 +15685,10 @@ impl schematic_runtime::EndpointSpec for CreateVectorStoreFileBatchRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetVectorStoreFileBatchRequest;
 ///
-/// let request = GetVectorStoreFileBatchRequest::new("vector_store_id_value", "batch_id_value")
-///;
+/// let request = GetVectorStoreFileBatchRequest::new("vector_store_id_value", "batch_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetVectorStoreFileBatchRequest {
@@ -15970,11 +15738,10 @@ impl schematic_runtime::EndpointSpec for GetVectorStoreFileBatchRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CancelVectorStoreFileBatchRequest;
 ///
-/// let request = CancelVectorStoreFileBatchRequest::new("vector_store_id_value", "batch_id_value")
-///;
+/// let request = CancelVectorStoreFileBatchRequest::new("vector_store_id_value", "batch_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CancelVectorStoreFileBatchRequest {
@@ -16082,13 +15849,12 @@ impl ::core::fmt::Display for ListFilesInVectorStoreBatchRequestFilter {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListFilesInVectorStoreBatchRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListFilesInVectorStoreBatchRequest, ListFilesInVectorStoreBatchRequestOrder, ListFilesInVectorStoreBatchRequestFilter};
 ///
 /// let request = ListFilesInVectorStoreBatchRequest::new("vector_store_id_value", "batch_id_value")
-///     .with_order(/* value */)
-///     .with_filter(/* value */)
-///;
+///     .with_order(ListFilesInVectorStoreBatchRequestOrder::Asc)
+///     .with_filter(ListFilesInVectorStoreBatchRequestFilter::InProgress);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListFilesInVectorStoreBatchRequest {
@@ -16222,13 +15988,12 @@ impl ::core::fmt::Display for ListVectorStoreFilesRequestFilter {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::openai::ListVectorStoreFilesRequest;
+/// ```no_run
+/// use schematic_schema::openai::{ListVectorStoreFilesRequest, ListVectorStoreFilesRequestOrder, ListVectorStoreFilesRequestFilter};
 ///
 /// let request = ListVectorStoreFilesRequest::new("vector_store_id_value")
-///     .with_order(/* value */)
-///     .with_filter(/* value */)
-///;
+///     .with_order(ListVectorStoreFilesRequestOrder::Asc)
+///     .with_filter(ListVectorStoreFilesRequestFilter::InProgress);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListVectorStoreFilesRequest {
@@ -16315,12 +16080,11 @@ impl schematic_runtime::EndpointSpec for ListVectorStoreFilesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateVectorStoreFileRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateVectorStoreFileRequest2 = Default::default();
-/// let request = CreateVectorStoreFileRequest::new("vector_store_id_value", body)
-///;
+/// let request = CreateVectorStoreFileRequest::new("vector_store_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateVectorStoreFileRequest {
@@ -16379,11 +16143,10 @@ impl schematic_runtime::EndpointSpec for CreateVectorStoreFileRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetVectorStoreFileRequest;
 ///
-/// let request = GetVectorStoreFileRequest::new("vector_store_id_value", "file_id_value")
-///;
+/// let request = GetVectorStoreFileRequest::new("vector_store_id_value", "file_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetVectorStoreFileRequest {
@@ -16432,12 +16195,11 @@ impl schematic_runtime::EndpointSpec for GetVectorStoreFileRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateVectorStoreFileAttributesRequest;
 ///
 /// let body: ::schematic_definitions::openai::UpdateVectorStoreFileAttributesRequest2 = Default::default();
-/// let request = UpdateVectorStoreFileAttributesRequest::new("vector_store_id_value", "file_id_value", body)
-///;
+/// let request = UpdateVectorStoreFileAttributesRequest::new("vector_store_id_value", "file_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateVectorStoreFileAttributesRequest {
@@ -16500,11 +16262,10 @@ impl schematic_runtime::EndpointSpec for UpdateVectorStoreFileAttributesRequest 
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteVectorStoreFileRequest;
 ///
-/// let request = DeleteVectorStoreFileRequest::new("vector_store_id_value", "file_id_value")
-///;
+/// let request = DeleteVectorStoreFileRequest::new("vector_store_id_value", "file_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteVectorStoreFileRequest {
@@ -16553,11 +16314,10 @@ impl schematic_runtime::EndpointSpec for DeleteVectorStoreFileRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveVectorStoreFileContentRequest;
 ///
-/// let request = RetrieveVectorStoreFileContentRequest::new("vector_store_id_value", "file_id_value")
-///;
+/// let request = RetrieveVectorStoreFileContentRequest::new("vector_store_id_value", "file_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveVectorStoreFileContentRequest {
@@ -16607,12 +16367,11 @@ impl schematic_runtime::EndpointSpec for RetrieveVectorStoreFileContentRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::SearchVectorStoreRequest;
 ///
 /// let body: ::schematic_definitions::openai::VectorStoreSearchRequest = Default::default();
-/// let request = SearchVectorStoreRequest::new("vector_store_id_value", body)
-///;
+/// let request = SearchVectorStoreRequest::new("vector_store_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SearchVectorStoreRequest {
@@ -16671,12 +16430,11 @@ impl schematic_runtime::EndpointSpec for SearchVectorStoreRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateConversationRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateConversationBody = Default::default();
-/// let request = CreateConversationRequest::new(body)
-///;
+/// let request = CreateConversationRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateConversationRequest {
@@ -16730,11 +16488,10 @@ impl schematic_runtime::EndpointSpec for CreateConversationRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetConversationRequest;
 ///
-/// let request = GetConversationRequest::new("conversation_id_value")
-///;
+/// let request = GetConversationRequest::new("conversation_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetConversationRequest {
@@ -16791,12 +16548,11 @@ impl schematic_runtime::EndpointSpec for GetConversationRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateConversationRequest;
 ///
 /// let body: ::schematic_definitions::openai::UpdateConversationBody = Default::default();
-/// let request = UpdateConversationRequest::new("conversation_id_value", body)
-///;
+/// let request = UpdateConversationRequest::new("conversation_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateConversationRequest {
@@ -16854,11 +16610,10 @@ impl schematic_runtime::EndpointSpec for UpdateConversationRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteConversationRequest;
 ///
-/// let request = DeleteConversationRequest::new("conversation_id_value")
-///;
+/// let request = DeleteConversationRequest::new("conversation_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteConversationRequest {
@@ -16915,11 +16670,10 @@ impl schematic_runtime::EndpointSpec for DeleteConversationRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetorganizationspendlimitRequest;
 ///
-/// let request = GetorganizationspendlimitRequest::default()
-///;
+/// let request = GetorganizationspendlimitRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetorganizationspendlimitRequest {}
@@ -16951,12 +16705,11 @@ impl schematic_runtime::EndpointSpec for GetorganizationspendlimitRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateorganizationspendlimitRequest;
 ///
 /// let body: ::schematic_definitions::openai::UpdateOrganizationSpendLimitBody = Default::default();
-/// let request = UpdateorganizationspendlimitRequest::new(body)
-///;
+/// let request = UpdateorganizationspendlimitRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateorganizationspendlimitRequest {
@@ -17014,11 +16767,10 @@ impl schematic_runtime::EndpointSpec for UpdateorganizationspendlimitRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteorganizationspendlimitRequest;
 ///
-/// let request = DeleteorganizationspendlimitRequest::default()
-///;
+/// let request = DeleteorganizationspendlimitRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteorganizationspendlimitRequest {}
@@ -17050,11 +16802,10 @@ impl schematic_runtime::EndpointSpec for DeleteorganizationspendlimitRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetprojectspendlimitRequest;
 ///
-/// let request = GetprojectspendlimitRequest::new("project_id_value")
-///;
+/// let request = GetprojectspendlimitRequest::new("project_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetprojectspendlimitRequest {
@@ -17112,12 +16863,11 @@ impl schematic_runtime::EndpointSpec for GetprojectspendlimitRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateprojectspendlimitRequest;
 ///
 /// let body: ::schematic_definitions::openai::UpdateProjectSpendLimitBody = Default::default();
-/// let request = UpdateprojectspendlimitRequest::new("project_id_value", body)
-///;
+/// let request = UpdateprojectspendlimitRequest::new("project_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateprojectspendlimitRequest {
@@ -17176,11 +16926,10 @@ impl schematic_runtime::EndpointSpec for UpdateprojectspendlimitRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteprojectspendlimitRequest;
 ///
-/// let request = DeleteprojectspendlimitRequest::new("project_id_value")
-///;
+/// let request = DeleteprojectspendlimitRequest::new("project_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteprojectspendlimitRequest {
@@ -17238,12 +16987,11 @@ impl schematic_runtime::EndpointSpec for DeleteprojectspendlimitRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateanAPIkeyforaserviceaccountRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateProjectServiceAccountApiKeyBody = Default::default();
-/// let request = CreateanAPIkeyforaserviceaccountRequest::new("project_id_value", "service_account_id_value", body)
-///;
+/// let request = CreateanAPIkeyforaserviceaccountRequest::new("project_id_value", "service_account_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateanAPIkeyforaserviceaccountRequest {
@@ -17324,15 +17072,11 @@ impl CreatecontentprovenancecheckForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::{CreatecontentprovenancecheckRequest, CreatecontentprovenancecheckForm};
 ///
-/// let body = CreatecontentprovenancecheckForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = CreatecontentprovenancecheckRequest::new(body)
-///;
+/// let body: CreatecontentprovenancecheckForm = Default::default();
+/// let request = CreatecontentprovenancecheckRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreatecontentprovenancecheckRequest {
@@ -17378,11 +17122,10 @@ impl schematic_runtime::EndpointSpec for CreatecontentprovenancecheckRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListVideosRequest;
 ///
-/// let request = ListVideosRequest::default()
-///;
+/// let request = ListVideosRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListVideosRequest {}
@@ -17414,12 +17157,11 @@ impl schematic_runtime::EndpointSpec for ListVideosRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateVideoRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateVideoJsonBody = Default::default();
-/// let request = CreateVideoRequest::new(body)
-///;
+/// let request = CreateVideoRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateVideoRequest {
@@ -17499,15 +17241,11 @@ impl CreateVideoCharacterForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::{CreateVideoCharacterRequest, CreateVideoCharacterForm};
 ///
-/// let body = CreateVideoCharacterForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = CreateVideoCharacterRequest::new(body)
-///;
+/// let body: CreateVideoCharacterForm = Default::default();
+/// let request = CreateVideoCharacterRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateVideoCharacterRequest {
@@ -17553,11 +17291,10 @@ impl schematic_runtime::EndpointSpec for CreateVideoCharacterRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetVideoCharacterRequest;
 ///
-/// let request = GetVideoCharacterRequest::new("character_id_value")
-///;
+/// let request = GetVideoCharacterRequest::new("character_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetVideoCharacterRequest {
@@ -17614,12 +17351,11 @@ impl schematic_runtime::EndpointSpec for GetVideoCharacterRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateVideoEditRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateVideoEditJsonBody = Default::default();
-/// let request = CreateVideoEditRequest::new(body)
-///;
+/// let request = CreateVideoEditRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateVideoEditRequest {
@@ -17673,12 +17409,11 @@ impl schematic_runtime::EndpointSpec for CreateVideoEditRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateVideoExtendRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateVideoExtendJsonBody = Default::default();
-/// let request = CreateVideoExtendRequest::new(body)
-///;
+/// let request = CreateVideoExtendRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateVideoExtendRequest {
@@ -17734,11 +17469,10 @@ impl schematic_runtime::EndpointSpec for CreateVideoExtendRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetVideoRequest;
 ///
-/// let request = GetVideoRequest::new("video_id_value")
-///;
+/// let request = GetVideoRequest::new("video_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetVideoRequest {
@@ -17793,11 +17527,10 @@ impl schematic_runtime::EndpointSpec for GetVideoRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteVideoRequest;
 ///
-/// let request = DeleteVideoRequest::new("video_id_value")
-///;
+/// let request = DeleteVideoRequest::new("video_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteVideoRequest {
@@ -17852,11 +17585,10 @@ impl schematic_runtime::EndpointSpec for DeleteVideoRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::RetrieveVideoContentRequest;
 ///
-/// let request = RetrieveVideoContentRequest::new("video_id_value")
-///;
+/// let request = RetrieveVideoContentRequest::new("video_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveVideoContentRequest {
@@ -17909,12 +17641,11 @@ impl schematic_runtime::EndpointSpec for RetrieveVideoContentRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateVideoRemixRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateVideoRemixBody = Default::default();
-/// let request = CreateVideoRemixRequest::new("video_id_value", body)
-///;
+/// let request = CreateVideoRemixRequest::new("video_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateVideoRemixRequest {
@@ -17972,14 +17703,13 @@ impl schematic_runtime::EndpointSpec for CreateVideoRemixRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetinputtokencountsRequest;
 ///
 /// let body: ::schematic_definitions::openai::BetaTokenCountsBody = Default::default();
 /// let request = GetinputtokencountsRequest::new(body)
-///     .with_beta(/* value */)
-///     .with_openai_beta(/* value */)
-///;
+///     .with_beta(true)
+///     .with_openai_beta(vec!["responses_multi_agent=v1".to_string()]);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetinputtokencountsRequest {
@@ -18068,14 +17798,13 @@ impl schematic_runtime::EndpointSpec for GetinputtokencountsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CompactconversationRequest;
 ///
 /// let body: ::schematic_definitions::openai::BetaCompactResponseMethodPublicBody = Default::default();
 /// let request = CompactconversationRequest::new(body)
-///     .with_beta(/* value */)
-///     .with_openai_beta(/* value */)
-///;
+///     .with_beta(true)
+///     .with_openai_beta(vec!["responses_multi_agent=v1".to_string()]);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompactconversationRequest {
@@ -18168,11 +17897,10 @@ impl schematic_runtime::EndpointSpec for CompactconversationRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListSkillsRequest;
 ///
-/// let request = ListSkillsRequest::default()
-///;
+/// let request = ListSkillsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSkillsRequest {}
@@ -18204,12 +17932,11 @@ impl schematic_runtime::EndpointSpec for ListSkillsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateSkillRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateSkillBody = Default::default();
-/// let request = CreateSkillRequest::new(body)
-///;
+/// let request = CreateSkillRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSkillRequest {
@@ -18262,11 +17989,10 @@ impl schematic_runtime::EndpointSpec for CreateSkillRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetSkillRequest;
 ///
-/// let request = GetSkillRequest::new("skill_id_value")
-///;
+/// let request = GetSkillRequest::new("skill_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetSkillRequest {
@@ -18321,12 +18047,11 @@ impl schematic_runtime::EndpointSpec for GetSkillRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::UpdateSkillDefaultVersionRequest;
 ///
 /// let body: ::schematic_definitions::openai::SetDefaultSkillVersionBody = Default::default();
-/// let request = UpdateSkillDefaultVersionRequest::new("skill_id_value", body)
-///;
+/// let request = UpdateSkillDefaultVersionRequest::new("skill_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateSkillDefaultVersionRequest {
@@ -18384,11 +18109,10 @@ impl schematic_runtime::EndpointSpec for UpdateSkillDefaultVersionRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteSkillRequest;
 ///
-/// let request = DeleteSkillRequest::new("skill_id_value")
-///;
+/// let request = DeleteSkillRequest::new("skill_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteSkillRequest {
@@ -18443,11 +18167,10 @@ impl schematic_runtime::EndpointSpec for DeleteSkillRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetSkillContentRequest;
 ///
-/// let request = GetSkillContentRequest::new("skill_id_value")
-///;
+/// let request = GetSkillContentRequest::new("skill_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetSkillContentRequest {
@@ -18500,11 +18223,10 @@ impl schematic_runtime::EndpointSpec for GetSkillContentRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListSkillVersionsRequest;
 ///
-/// let request = ListSkillVersionsRequest::new("skill_id_value")
-///;
+/// let request = ListSkillVersionsRequest::new("skill_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSkillVersionsRequest {
@@ -18559,12 +18281,11 @@ impl schematic_runtime::EndpointSpec for ListSkillVersionsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateSkillVersionRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateSkillVersionBody = Default::default();
-/// let request = CreateSkillVersionRequest::new("skill_id_value", body)
-///;
+/// let request = CreateSkillVersionRequest::new("skill_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSkillVersionRequest {
@@ -18622,11 +18343,10 @@ impl schematic_runtime::EndpointSpec for CreateSkillVersionRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetSkillVersionRequest;
 ///
-/// let request = GetSkillVersionRequest::new("skill_id_value", "version_value")
-///;
+/// let request = GetSkillVersionRequest::new("skill_id_value", "version_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetSkillVersionRequest {
@@ -18675,11 +18395,10 @@ impl schematic_runtime::EndpointSpec for GetSkillVersionRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteSkillVersionRequest;
 ///
-/// let request = DeleteSkillVersionRequest::new("skill_id_value", "version_value")
-///;
+/// let request = DeleteSkillVersionRequest::new("skill_id_value", "version_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteSkillVersionRequest {
@@ -18728,11 +18447,10 @@ impl schematic_runtime::EndpointSpec for DeleteSkillVersionRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetSkillVersionContentRequest;
 ///
-/// let request = GetSkillVersionContentRequest::new("skill_id_value", "version_value")
-///;
+/// let request = GetSkillVersionContentRequest::new("skill_id_value", "version_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetSkillVersionContentRequest {
@@ -18779,11 +18497,10 @@ impl schematic_runtime::EndpointSpec for GetSkillVersionContentRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CancelChatSessionMethodRequest;
 ///
-/// let request = CancelChatSessionMethodRequest::new("session_id_value")
-///;
+/// let request = CancelChatSessionMethodRequest::new("session_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CancelChatSessionMethodRequest {
@@ -18841,12 +18558,11 @@ impl schematic_runtime::EndpointSpec for CancelChatSessionMethodRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::CreateChatSessionMethodRequest;
 ///
 /// let body: ::schematic_definitions::openai::CreateChatSessionBody = Default::default();
-/// let request = CreateChatSessionMethodRequest::new(body)
-///;
+/// let request = CreateChatSessionMethodRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateChatSessionMethodRequest {
@@ -18900,11 +18616,10 @@ impl schematic_runtime::EndpointSpec for CreateChatSessionMethodRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListThreadItemsMethodRequest;
 ///
-/// let request = ListThreadItemsMethodRequest::new("thread_id_value")
-///;
+/// let request = ListThreadItemsMethodRequest::new("thread_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListThreadItemsMethodRequest {
@@ -18962,11 +18677,10 @@ impl schematic_runtime::EndpointSpec for ListThreadItemsMethodRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::GetThreadMethodRequest;
 ///
-/// let request = GetThreadMethodRequest::new("thread_id_value")
-///;
+/// let request = GetThreadMethodRequest::new("thread_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetThreadMethodRequest {
@@ -19023,11 +18737,10 @@ impl schematic_runtime::EndpointSpec for GetThreadMethodRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::DeleteThreadMethodRequest;
 ///
-/// let request = DeleteThreadMethodRequest::new("thread_id_value")
-///;
+/// let request = DeleteThreadMethodRequest::new("thread_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteThreadMethodRequest {
@@ -19084,12 +18797,11 @@ impl schematic_runtime::EndpointSpec for DeleteThreadMethodRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::openai::ListThreadsMethodRequest;
 ///
 /// let request = ListThreadsMethodRequest::default()
-///     .with_user(/* value */)
-///;
+///     .with_user("user_value".to_string());
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListThreadsMethodRequest {

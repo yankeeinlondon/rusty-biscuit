@@ -6,11 +6,10 @@ use super::{HuggingFaceHub, HuggingFaceHubApi};
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::ListModelsRequest;
 ///
-/// let request = ListModelsRequest::default()
-///;
+/// let request = ListModelsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
@@ -42,11 +41,10 @@ impl schematic_runtime::EndpointSpec for ListModelsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::GetModelRequest;
 ///
-/// let request = GetModelRequest::new("repo_id_value")
-///;
+/// let request = GetModelRequest::new("repo_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetModelRequest {
@@ -97,11 +95,10 @@ impl schematic_runtime::EndpointSpec for GetModelRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::ListModelFilesRequest;
 ///
-/// let request = ListModelFilesRequest::new("repo_id_value", "revision_value")
-///;
+/// let request = ListModelFilesRequest::new("repo_id_value", "revision_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelFilesRequest {
@@ -150,11 +147,10 @@ impl schematic_runtime::EndpointSpec for ListModelFilesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::GetModelFileRequest;
 ///
-/// let request = GetModelFileRequest::new("repo_id_value", "revision_value", "path_value")
-///;
+/// let request = GetModelFileRequest::new("repo_id_value", "revision_value", "path_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetModelFileRequest {
@@ -210,11 +206,10 @@ impl schematic_runtime::EndpointSpec for GetModelFileRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::ListModelCommitsRequest;
 ///
-/// let request = ListModelCommitsRequest::new("repo_id_value", "revision_value")
-///;
+/// let request = ListModelCommitsRequest::new("repo_id_value", "revision_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelCommitsRequest {
@@ -263,11 +258,10 @@ impl schematic_runtime::EndpointSpec for ListModelCommitsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::GetModelReadmeRequest;
 ///
-/// let request = GetModelReadmeRequest::new("repo_id_value", "revision_value")
-///;
+/// let request = GetModelReadmeRequest::new("repo_id_value", "revision_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetModelReadmeRequest {
@@ -314,11 +308,10 @@ impl schematic_runtime::EndpointSpec for GetModelReadmeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::ListModelDiscussionsRequest;
 ///
-/// let request = ListModelDiscussionsRequest::new("repo_id_value")
-///;
+/// let request = ListModelDiscussionsRequest::new("repo_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelDiscussionsRequest {
@@ -369,11 +362,10 @@ impl schematic_runtime::EndpointSpec for ListModelDiscussionsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::GetModelCardRequest;
 ///
-/// let request = GetModelCardRequest::new("repo_id_value", "revision_value")
-///;
+/// let request = GetModelCardRequest::new("repo_id_value", "revision_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetModelCardRequest {
@@ -420,11 +412,10 @@ impl schematic_runtime::EndpointSpec for GetModelCardRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::ListDatasetsRequest;
 ///
-/// let request = ListDatasetsRequest::default()
-///;
+/// let request = ListDatasetsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListDatasetsRequest {}
@@ -456,11 +447,10 @@ impl schematic_runtime::EndpointSpec for ListDatasetsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::GetDatasetRequest;
 ///
-/// let request = GetDatasetRequest::new("repo_id_value")
-///;
+/// let request = GetDatasetRequest::new("repo_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDatasetRequest {
@@ -511,11 +501,10 @@ impl schematic_runtime::EndpointSpec for GetDatasetRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::ListDatasetFilesRequest;
 ///
-/// let request = ListDatasetFilesRequest::new("repo_id_value", "revision_value")
-///;
+/// let request = ListDatasetFilesRequest::new("repo_id_value", "revision_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListDatasetFilesRequest {
@@ -564,11 +553,10 @@ impl schematic_runtime::EndpointSpec for ListDatasetFilesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::GetDatasetFileRequest;
 ///
-/// let request = GetDatasetFileRequest::new("repo_id_value", "revision_value", "path_value")
-///;
+/// let request = GetDatasetFileRequest::new("repo_id_value", "revision_value", "path_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDatasetFileRequest {
@@ -624,11 +612,10 @@ impl schematic_runtime::EndpointSpec for GetDatasetFileRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::ListDatasetCommitsRequest;
 ///
-/// let request = ListDatasetCommitsRequest::new("repo_id_value", "revision_value")
-///;
+/// let request = ListDatasetCommitsRequest::new("repo_id_value", "revision_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListDatasetCommitsRequest {
@@ -677,11 +664,10 @@ impl schematic_runtime::EndpointSpec for ListDatasetCommitsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::GetDatasetReadmeRequest;
 ///
-/// let request = GetDatasetReadmeRequest::new("repo_id_value", "revision_value")
-///;
+/// let request = GetDatasetReadmeRequest::new("repo_id_value", "revision_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDatasetReadmeRequest {
@@ -728,11 +714,10 @@ impl schematic_runtime::EndpointSpec for GetDatasetReadmeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::ListSpacesRequest;
 ///
-/// let request = ListSpacesRequest::default()
-///;
+/// let request = ListSpacesRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSpacesRequest {}
@@ -764,11 +749,10 @@ impl schematic_runtime::EndpointSpec for ListSpacesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::GetSpaceRequest;
 ///
-/// let request = GetSpaceRequest::new("repo_id_value")
-///;
+/// let request = GetSpaceRequest::new("repo_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetSpaceRequest {
@@ -819,11 +803,10 @@ impl schematic_runtime::EndpointSpec for GetSpaceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::ListSpaceFilesRequest;
 ///
-/// let request = ListSpaceFilesRequest::new("repo_id_value", "revision_value")
-///;
+/// let request = ListSpaceFilesRequest::new("repo_id_value", "revision_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSpaceFilesRequest {
@@ -872,11 +855,10 @@ impl schematic_runtime::EndpointSpec for ListSpaceFilesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::GetSpaceFileRequest;
 ///
-/// let request = GetSpaceFileRequest::new("repo_id_value", "revision_value", "path_value")
-///;
+/// let request = GetSpaceFileRequest::new("repo_id_value", "revision_value", "path_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetSpaceFileRequest {
@@ -932,12 +914,11 @@ impl schematic_runtime::EndpointSpec for GetSpaceFileRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::CreateRepoRequest;
 ///
 /// let body: ::schematic_definitions::huggingface::CreateRepoBody = Default::default();
-/// let request = CreateRepoRequest::new(body)
-///;
+/// let request = CreateRepoRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRepoRequest {
@@ -990,12 +971,11 @@ impl schematic_runtime::EndpointSpec for CreateRepoRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::DeleteRepoRequest;
 ///
 /// let body: ::schematic_definitions::huggingface::DeleteRepoBody = Default::default();
-/// let request = DeleteRepoRequest::new(body)
-///;
+/// let request = DeleteRepoRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteRepoRequest {
@@ -1048,12 +1028,11 @@ impl schematic_runtime::EndpointSpec for DeleteRepoRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::UpdateRepoSettingsRequest;
 ///
 /// let body: ::schematic_definitions::huggingface::UpdateRepoSettingsBody = Default::default();
-/// let request = UpdateRepoSettingsRequest::new("repo_type_value", "repo_id_value", body)
-///;
+/// let request = UpdateRepoSettingsRequest::new("repo_type_value", "repo_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateRepoSettingsRequest {
@@ -1116,12 +1095,11 @@ impl schematic_runtime::EndpointSpec for UpdateRepoSettingsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::MoveRepoRequest;
 ///
 /// let body: ::schematic_definitions::huggingface::MoveRepoBody = Default::default();
-/// let request = MoveRepoRequest::new(body)
-///;
+/// let request = MoveRepoRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MoveRepoRequest {
@@ -1174,11 +1152,10 @@ impl schematic_runtime::EndpointSpec for MoveRepoRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::WhoAmIRequest;
 ///
-/// let request = WhoAmIRequest::default()
-///;
+/// let request = WhoAmIRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WhoAmIRequest {}
@@ -1210,11 +1187,10 @@ impl schematic_runtime::EndpointSpec for WhoAmIRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::GetUserRequest;
 ///
-/// let request = GetUserRequest::new("username_value")
-///;
+/// let request = GetUserRequest::new("username_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetUserRequest {
@@ -1269,11 +1245,10 @@ impl schematic_runtime::EndpointSpec for GetUserRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::ListUserReposRequest;
 ///
-/// let request = ListUserReposRequest::new("username_value")
-///;
+/// let request = ListUserReposRequest::new("username_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListUserReposRequest {
@@ -1328,11 +1303,10 @@ impl schematic_runtime::EndpointSpec for ListUserReposRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::huggingface::GetUserCollectionsRequest;
 ///
-/// let request = GetUserCollectionsRequest::new("username_value")
-///;
+/// let request = GetUserCollectionsRequest::new("username_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetUserCollectionsRequest {

@@ -6,11 +6,10 @@ use super::{EmqxBasic, EmqxBasicApi, EmqxBearer, EmqxBearerApi};
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListNodesBasicRequest;
 ///
-/// let request = ListNodesBasicRequest::default()
-///;
+/// let request = ListNodesBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListNodesBasicRequest {}
@@ -42,11 +41,10 @@ impl schematic_runtime::EndpointSpec for ListNodesBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetNodeBasicRequest;
 ///
-/// let request = GetNodeBasicRequest::new("node_value")
-///;
+/// let request = GetNodeBasicRequest::new("node_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetNodeBasicRequest {
@@ -95,11 +93,10 @@ impl schematic_runtime::EndpointSpec for GetNodeBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetClusterBasicRequest;
 ///
-/// let request = GetClusterBasicRequest::default()
-///;
+/// let request = GetClusterBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetClusterBasicRequest {}
@@ -129,11 +126,10 @@ impl schematic_runtime::EndpointSpec for GetClusterBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListListenersBasicRequest;
 ///
-/// let request = ListListenersBasicRequest::default()
-///;
+/// let request = ListListenersBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListListenersBasicRequest {}
@@ -165,11 +161,10 @@ impl schematic_runtime::EndpointSpec for ListListenersBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetListenerBasicRequest;
 ///
-/// let request = GetListenerBasicRequest::new("id_value")
-///;
+/// let request = GetListenerBasicRequest::new("id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetListenerBasicRequest {
@@ -218,11 +213,10 @@ impl schematic_runtime::EndpointSpec for GetListenerBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListMetricsBasicRequest;
 ///
-/// let request = ListMetricsBasicRequest::default()
-///;
+/// let request = ListMetricsBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListMetricsBasicRequest {}
@@ -254,11 +248,10 @@ impl schematic_runtime::EndpointSpec for ListMetricsBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListStatsBasicRequest;
 ///
-/// let request = ListStatsBasicRequest::default()
-///;
+/// let request = ListStatsBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListStatsBasicRequest {}
@@ -290,11 +283,10 @@ impl schematic_runtime::EndpointSpec for ListStatsBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetPrometheusBasicRequest;
 ///
-/// let request = GetPrometheusBasicRequest::default()
-///;
+/// let request = GetPrometheusBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetPrometheusBasicRequest {}
@@ -324,11 +316,10 @@ impl schematic_runtime::EndpointSpec for GetPrometheusBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListAlarmsBasicRequest;
 ///
-/// let request = ListAlarmsBasicRequest::default()
-///;
+/// let request = ListAlarmsBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAlarmsBasicRequest {}
@@ -360,11 +351,10 @@ impl schematic_runtime::EndpointSpec for ListAlarmsBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListClientsBasicRequest;
 ///
-/// let request = ListClientsBasicRequest::default()
-///;
+/// let request = ListClientsBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListClientsBasicRequest {}
@@ -396,11 +386,10 @@ impl schematic_runtime::EndpointSpec for ListClientsBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetClientBasicRequest;
 ///
-/// let request = GetClientBasicRequest::new("clientid_value")
-///;
+/// let request = GetClientBasicRequest::new("clientid_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetClientBasicRequest {
@@ -453,11 +442,10 @@ impl schematic_runtime::EndpointSpec for GetClientBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::DisconnectClientBasicRequest;
 ///
-/// let request = DisconnectClientBasicRequest::new("clientid_value")
-///;
+/// let request = DisconnectClientBasicRequest::new("clientid_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DisconnectClientBasicRequest {
@@ -510,12 +498,11 @@ impl schematic_runtime::EndpointSpec for DisconnectClientBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::SubscribeClientBasicRequest;
 ///
 /// let body: ::schematic_definitions::emqx::SubscribeBody = Default::default();
-/// let request = SubscribeClientBasicRequest::new("clientid_value", body)
-///;
+/// let request = SubscribeClientBasicRequest::new("clientid_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SubscribeClientBasicRequest {
@@ -571,12 +558,11 @@ impl schematic_runtime::EndpointSpec for SubscribeClientBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::UnsubscribeClientBasicRequest;
 ///
 /// let body: ::schematic_definitions::emqx::SubscribeBody = Default::default();
-/// let request = UnsubscribeClientBasicRequest::new("clientid_value", body)
-///;
+/// let request = UnsubscribeClientBasicRequest::new("clientid_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnsubscribeClientBasicRequest {
@@ -632,11 +618,10 @@ impl schematic_runtime::EndpointSpec for UnsubscribeClientBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListSubscriptionsBasicRequest;
 ///
-/// let request = ListSubscriptionsBasicRequest::default()
-///;
+/// let request = ListSubscriptionsBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSubscriptionsBasicRequest {}
@@ -668,12 +653,11 @@ impl schematic_runtime::EndpointSpec for ListSubscriptionsBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::PublishBasicRequest;
 ///
 /// let body: ::schematic_definitions::emqx::PublishBody = Default::default();
-/// let request = PublishBasicRequest::new(body)
-///;
+/// let request = PublishBasicRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PublishBasicRequest {
@@ -724,12 +708,11 @@ impl schematic_runtime::EndpointSpec for PublishBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::PublishBulkBasicRequest;
 ///
 /// let body: ::schematic_definitions::emqx::PublishBatchBody = Default::default();
-/// let request = PublishBulkBasicRequest::new(body)
-///;
+/// let request = PublishBulkBasicRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PublishBulkBasicRequest {
@@ -780,11 +763,10 @@ impl schematic_runtime::EndpointSpec for PublishBulkBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListTopicsBasicRequest;
 ///
-/// let request = ListTopicsBasicRequest::default()
-///;
+/// let request = ListTopicsBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTopicsBasicRequest {}
@@ -816,11 +798,10 @@ impl schematic_runtime::EndpointSpec for ListTopicsBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListRetainedBasicRequest;
 ///
-/// let request = ListRetainedBasicRequest::default()
-///;
+/// let request = ListRetainedBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRetainedBasicRequest {}
@@ -852,11 +833,10 @@ impl schematic_runtime::EndpointSpec for ListRetainedBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetRetainedBasicRequest;
 ///
-/// let request = GetRetainedBasicRequest::new("topic_value")
-///;
+/// let request = GetRetainedBasicRequest::new("topic_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRetainedBasicRequest {
@@ -909,11 +889,10 @@ impl schematic_runtime::EndpointSpec for GetRetainedBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::DeleteRetainedBasicRequest;
 ///
-/// let request = DeleteRetainedBasicRequest::new("topic_value")
-///;
+/// let request = DeleteRetainedBasicRequest::new("topic_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteRetainedBasicRequest {
@@ -964,11 +943,10 @@ impl schematic_runtime::EndpointSpec for DeleteRetainedBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListRulesBasicRequest;
 ///
-/// let request = ListRulesBasicRequest::default()
-///;
+/// let request = ListRulesBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRulesBasicRequest {}
@@ -1000,12 +978,11 @@ impl schematic_runtime::EndpointSpec for ListRulesBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::CreateRuleBasicRequest;
 ///
 /// let body: ::schematic_definitions::emqx::CreateRuleBody = Default::default();
-/// let request = CreateRuleBasicRequest::new(body)
-///;
+/// let request = CreateRuleBasicRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRuleBasicRequest {
@@ -1056,11 +1033,10 @@ impl schematic_runtime::EndpointSpec for CreateRuleBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetRuleBasicRequest;
 ///
-/// let request = GetRuleBasicRequest::new("id_value")
-///;
+/// let request = GetRuleBasicRequest::new("id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRuleBasicRequest {
@@ -1109,12 +1085,11 @@ impl schematic_runtime::EndpointSpec for GetRuleBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::UpdateRuleBasicRequest;
 ///
 /// let body: ::schematic_definitions::emqx::CreateRuleBody = Default::default();
-/// let request = UpdateRuleBasicRequest::new("id_value", body)
-///;
+/// let request = UpdateRuleBasicRequest::new("id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateRuleBasicRequest {
@@ -1165,11 +1140,10 @@ impl schematic_runtime::EndpointSpec for UpdateRuleBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::DeleteRuleBasicRequest;
 ///
-/// let request = DeleteRuleBasicRequest::new("id_value")
-///;
+/// let request = DeleteRuleBasicRequest::new("id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteRuleBasicRequest {
@@ -1218,12 +1192,11 @@ impl schematic_runtime::EndpointSpec for DeleteRuleBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::TestRuleBasicRequest;
 ///
 /// let body: ::schematic_definitions::emqx::TestRuleBody = Default::default();
-/// let request = TestRuleBasicRequest::new("id_value", body)
-///;
+/// let request = TestRuleBasicRequest::new("id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TestRuleBasicRequest {
@@ -1276,11 +1249,10 @@ impl schematic_runtime::EndpointSpec for TestRuleBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListAuthenticatorsBasicRequest;
 ///
-/// let request = ListAuthenticatorsBasicRequest::default()
-///;
+/// let request = ListAuthenticatorsBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthenticatorsBasicRequest {}
@@ -1312,11 +1284,10 @@ impl schematic_runtime::EndpointSpec for ListAuthenticatorsBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetAuthenticatorBasicRequest;
 ///
-/// let request = GetAuthenticatorBasicRequest::new("id_value")
-///;
+/// let request = GetAuthenticatorBasicRequest::new("id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetAuthenticatorBasicRequest {
@@ -1369,11 +1340,10 @@ impl schematic_runtime::EndpointSpec for GetAuthenticatorBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListAuthUsersBasicRequest;
 ///
-/// let request = ListAuthUsersBasicRequest::new("id_value")
-///;
+/// let request = ListAuthUsersBasicRequest::new("id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthUsersBasicRequest {
@@ -1426,12 +1396,11 @@ impl schematic_runtime::EndpointSpec for ListAuthUsersBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::CreateAuthUserBasicRequest;
 ///
 /// let body: ::schematic_definitions::emqx::CreateAuthUserBody = Default::default();
-/// let request = CreateAuthUserBasicRequest::new("id_value", body)
-///;
+/// let request = CreateAuthUserBasicRequest::new("id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateAuthUserBasicRequest {
@@ -1484,11 +1453,10 @@ impl schematic_runtime::EndpointSpec for CreateAuthUserBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::DeleteAuthUserBasicRequest;
 ///
-/// let request = DeleteAuthUserBasicRequest::new("id_value", "user_id_value")
-///;
+/// let request = DeleteAuthUserBasicRequest::new("id_value", "user_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteAuthUserBasicRequest {
@@ -1535,11 +1503,10 @@ impl schematic_runtime::EndpointSpec for DeleteAuthUserBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListAuthzSourcesBasicRequest;
 ///
-/// let request = ListAuthzSourcesBasicRequest::default()
-///;
+/// let request = ListAuthzSourcesBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthzSourcesBasicRequest {}
@@ -1571,11 +1538,10 @@ impl schematic_runtime::EndpointSpec for ListAuthzSourcesBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListBannedBasicRequest;
 ///
-/// let request = ListBannedBasicRequest::default()
-///;
+/// let request = ListBannedBasicRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListBannedBasicRequest {}
@@ -1607,12 +1573,11 @@ impl schematic_runtime::EndpointSpec for ListBannedBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::CreateBanBasicRequest;
 ///
 /// let body: ::schematic_definitions::emqx::CreateBanBody = Default::default();
-/// let request = CreateBanBasicRequest::new(body)
-///;
+/// let request = CreateBanBasicRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateBanBasicRequest {
@@ -1663,11 +1628,10 @@ impl schematic_runtime::EndpointSpec for CreateBanBasicRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::DeleteBanBasicRequest;
 ///
-/// let request = DeleteBanBasicRequest::new("ban_type_value", "who_value")
-///;
+/// let request = DeleteBanBasicRequest::new("ban_type_value", "who_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteBanBasicRequest {
@@ -3990,12 +3954,11 @@ impl EmqxBasic {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::LoginBearerRequest;
 ///
 /// let body: ::schematic_definitions::emqx::LoginBody = Default::default();
-/// let request = LoginBearerRequest::new(body)
-///;
+/// let request = LoginBearerRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LoginBearerRequest {
@@ -4046,11 +4009,10 @@ impl schematic_runtime::EndpointSpec for LoginBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::LogoutBearerRequest;
 ///
-/// let request = LogoutBearerRequest::default()
-///;
+/// let request = LogoutBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LogoutBearerRequest {}
@@ -4080,11 +4042,10 @@ impl schematic_runtime::EndpointSpec for LogoutBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListNodesBearerRequest;
 ///
-/// let request = ListNodesBearerRequest::default()
-///;
+/// let request = ListNodesBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListNodesBearerRequest {}
@@ -4116,11 +4077,10 @@ impl schematic_runtime::EndpointSpec for ListNodesBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetNodeBearerRequest;
 ///
-/// let request = GetNodeBearerRequest::new("node_value")
-///;
+/// let request = GetNodeBearerRequest::new("node_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetNodeBearerRequest {
@@ -4169,11 +4129,10 @@ impl schematic_runtime::EndpointSpec for GetNodeBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetClusterBearerRequest;
 ///
-/// let request = GetClusterBearerRequest::default()
-///;
+/// let request = GetClusterBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetClusterBearerRequest {}
@@ -4203,11 +4162,10 @@ impl schematic_runtime::EndpointSpec for GetClusterBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListListenersBearerRequest;
 ///
-/// let request = ListListenersBearerRequest::default()
-///;
+/// let request = ListListenersBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListListenersBearerRequest {}
@@ -4239,11 +4197,10 @@ impl schematic_runtime::EndpointSpec for ListListenersBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetListenerBearerRequest;
 ///
-/// let request = GetListenerBearerRequest::new("id_value")
-///;
+/// let request = GetListenerBearerRequest::new("id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetListenerBearerRequest {
@@ -4292,11 +4249,10 @@ impl schematic_runtime::EndpointSpec for GetListenerBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListMetricsBearerRequest;
 ///
-/// let request = ListMetricsBearerRequest::default()
-///;
+/// let request = ListMetricsBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListMetricsBearerRequest {}
@@ -4328,11 +4284,10 @@ impl schematic_runtime::EndpointSpec for ListMetricsBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListStatsBearerRequest;
 ///
-/// let request = ListStatsBearerRequest::default()
-///;
+/// let request = ListStatsBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListStatsBearerRequest {}
@@ -4364,11 +4319,10 @@ impl schematic_runtime::EndpointSpec for ListStatsBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetPrometheusBearerRequest;
 ///
-/// let request = GetPrometheusBearerRequest::default()
-///;
+/// let request = GetPrometheusBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetPrometheusBearerRequest {}
@@ -4398,11 +4352,10 @@ impl schematic_runtime::EndpointSpec for GetPrometheusBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListAlarmsBearerRequest;
 ///
-/// let request = ListAlarmsBearerRequest::default()
-///;
+/// let request = ListAlarmsBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAlarmsBearerRequest {}
@@ -4434,11 +4387,10 @@ impl schematic_runtime::EndpointSpec for ListAlarmsBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListClientsBearerRequest;
 ///
-/// let request = ListClientsBearerRequest::default()
-///;
+/// let request = ListClientsBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListClientsBearerRequest {}
@@ -4470,11 +4422,10 @@ impl schematic_runtime::EndpointSpec for ListClientsBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetClientBearerRequest;
 ///
-/// let request = GetClientBearerRequest::new("clientid_value")
-///;
+/// let request = GetClientBearerRequest::new("clientid_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetClientBearerRequest {
@@ -4527,11 +4478,10 @@ impl schematic_runtime::EndpointSpec for GetClientBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::DisconnectClientBearerRequest;
 ///
-/// let request = DisconnectClientBearerRequest::new("clientid_value")
-///;
+/// let request = DisconnectClientBearerRequest::new("clientid_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DisconnectClientBearerRequest {
@@ -4584,12 +4534,11 @@ impl schematic_runtime::EndpointSpec for DisconnectClientBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::SubscribeClientBearerRequest;
 ///
 /// let body: ::schematic_definitions::emqx::SubscribeBody = Default::default();
-/// let request = SubscribeClientBearerRequest::new("clientid_value", body)
-///;
+/// let request = SubscribeClientBearerRequest::new("clientid_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SubscribeClientBearerRequest {
@@ -4645,12 +4594,11 @@ impl schematic_runtime::EndpointSpec for SubscribeClientBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::UnsubscribeClientBearerRequest;
 ///
 /// let body: ::schematic_definitions::emqx::SubscribeBody = Default::default();
-/// let request = UnsubscribeClientBearerRequest::new("clientid_value", body)
-///;
+/// let request = UnsubscribeClientBearerRequest::new("clientid_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnsubscribeClientBearerRequest {
@@ -4706,11 +4654,10 @@ impl schematic_runtime::EndpointSpec for UnsubscribeClientBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListSubscriptionsBearerRequest;
 ///
-/// let request = ListSubscriptionsBearerRequest::default()
-///;
+/// let request = ListSubscriptionsBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSubscriptionsBearerRequest {}
@@ -4742,12 +4689,11 @@ impl schematic_runtime::EndpointSpec for ListSubscriptionsBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::PublishBearerRequest;
 ///
 /// let body: ::schematic_definitions::emqx::PublishBody = Default::default();
-/// let request = PublishBearerRequest::new(body)
-///;
+/// let request = PublishBearerRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PublishBearerRequest {
@@ -4798,12 +4744,11 @@ impl schematic_runtime::EndpointSpec for PublishBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::PublishBulkBearerRequest;
 ///
 /// let body: ::schematic_definitions::emqx::PublishBatchBody = Default::default();
-/// let request = PublishBulkBearerRequest::new(body)
-///;
+/// let request = PublishBulkBearerRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PublishBulkBearerRequest {
@@ -4854,11 +4799,10 @@ impl schematic_runtime::EndpointSpec for PublishBulkBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListTopicsBearerRequest;
 ///
-/// let request = ListTopicsBearerRequest::default()
-///;
+/// let request = ListTopicsBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTopicsBearerRequest {}
@@ -4890,11 +4834,10 @@ impl schematic_runtime::EndpointSpec for ListTopicsBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListRetainedBearerRequest;
 ///
-/// let request = ListRetainedBearerRequest::default()
-///;
+/// let request = ListRetainedBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRetainedBearerRequest {}
@@ -4926,11 +4869,10 @@ impl schematic_runtime::EndpointSpec for ListRetainedBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetRetainedBearerRequest;
 ///
-/// let request = GetRetainedBearerRequest::new("topic_value")
-///;
+/// let request = GetRetainedBearerRequest::new("topic_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRetainedBearerRequest {
@@ -4983,11 +4925,10 @@ impl schematic_runtime::EndpointSpec for GetRetainedBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::DeleteRetainedBearerRequest;
 ///
-/// let request = DeleteRetainedBearerRequest::new("topic_value")
-///;
+/// let request = DeleteRetainedBearerRequest::new("topic_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteRetainedBearerRequest {
@@ -5038,11 +4979,10 @@ impl schematic_runtime::EndpointSpec for DeleteRetainedBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListRulesBearerRequest;
 ///
-/// let request = ListRulesBearerRequest::default()
-///;
+/// let request = ListRulesBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRulesBearerRequest {}
@@ -5074,12 +5014,11 @@ impl schematic_runtime::EndpointSpec for ListRulesBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::CreateRuleBearerRequest;
 ///
 /// let body: ::schematic_definitions::emqx::CreateRuleBody = Default::default();
-/// let request = CreateRuleBearerRequest::new(body)
-///;
+/// let request = CreateRuleBearerRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRuleBearerRequest {
@@ -5130,11 +5069,10 @@ impl schematic_runtime::EndpointSpec for CreateRuleBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetRuleBearerRequest;
 ///
-/// let request = GetRuleBearerRequest::new("id_value")
-///;
+/// let request = GetRuleBearerRequest::new("id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRuleBearerRequest {
@@ -5183,12 +5121,11 @@ impl schematic_runtime::EndpointSpec for GetRuleBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::UpdateRuleBearerRequest;
 ///
 /// let body: ::schematic_definitions::emqx::CreateRuleBody = Default::default();
-/// let request = UpdateRuleBearerRequest::new("id_value", body)
-///;
+/// let request = UpdateRuleBearerRequest::new("id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateRuleBearerRequest {
@@ -5239,11 +5176,10 @@ impl schematic_runtime::EndpointSpec for UpdateRuleBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::DeleteRuleBearerRequest;
 ///
-/// let request = DeleteRuleBearerRequest::new("id_value")
-///;
+/// let request = DeleteRuleBearerRequest::new("id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteRuleBearerRequest {
@@ -5292,12 +5228,11 @@ impl schematic_runtime::EndpointSpec for DeleteRuleBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::TestRuleBearerRequest;
 ///
 /// let body: ::schematic_definitions::emqx::TestRuleBody = Default::default();
-/// let request = TestRuleBearerRequest::new("id_value", body)
-///;
+/// let request = TestRuleBearerRequest::new("id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TestRuleBearerRequest {
@@ -5350,11 +5285,10 @@ impl schematic_runtime::EndpointSpec for TestRuleBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListAuthenticatorsBearerRequest;
 ///
-/// let request = ListAuthenticatorsBearerRequest::default()
-///;
+/// let request = ListAuthenticatorsBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthenticatorsBearerRequest {}
@@ -5386,11 +5320,10 @@ impl schematic_runtime::EndpointSpec for ListAuthenticatorsBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::GetAuthenticatorBearerRequest;
 ///
-/// let request = GetAuthenticatorBearerRequest::new("id_value")
-///;
+/// let request = GetAuthenticatorBearerRequest::new("id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetAuthenticatorBearerRequest {
@@ -5443,11 +5376,10 @@ impl schematic_runtime::EndpointSpec for GetAuthenticatorBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListAuthUsersBearerRequest;
 ///
-/// let request = ListAuthUsersBearerRequest::new("id_value")
-///;
+/// let request = ListAuthUsersBearerRequest::new("id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthUsersBearerRequest {
@@ -5500,12 +5432,11 @@ impl schematic_runtime::EndpointSpec for ListAuthUsersBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::CreateAuthUserBearerRequest;
 ///
 /// let body: ::schematic_definitions::emqx::CreateAuthUserBody = Default::default();
-/// let request = CreateAuthUserBearerRequest::new("id_value", body)
-///;
+/// let request = CreateAuthUserBearerRequest::new("id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateAuthUserBearerRequest {
@@ -5558,11 +5489,10 @@ impl schematic_runtime::EndpointSpec for CreateAuthUserBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::DeleteAuthUserBearerRequest;
 ///
-/// let request = DeleteAuthUserBearerRequest::new("id_value", "user_id_value")
-///;
+/// let request = DeleteAuthUserBearerRequest::new("id_value", "user_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteAuthUserBearerRequest {
@@ -5609,11 +5539,10 @@ impl schematic_runtime::EndpointSpec for DeleteAuthUserBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListAuthzSourcesBearerRequest;
 ///
-/// let request = ListAuthzSourcesBearerRequest::default()
-///;
+/// let request = ListAuthzSourcesBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthzSourcesBearerRequest {}
@@ -5645,11 +5574,10 @@ impl schematic_runtime::EndpointSpec for ListAuthzSourcesBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::ListBannedBearerRequest;
 ///
-/// let request = ListBannedBearerRequest::default()
-///;
+/// let request = ListBannedBearerRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListBannedBearerRequest {}
@@ -5681,12 +5609,11 @@ impl schematic_runtime::EndpointSpec for ListBannedBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::CreateBanBearerRequest;
 ///
 /// let body: ::schematic_definitions::emqx::CreateBanBody = Default::default();
-/// let request = CreateBanBearerRequest::new(body)
-///;
+/// let request = CreateBanBearerRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateBanBearerRequest {
@@ -5737,11 +5664,10 @@ impl schematic_runtime::EndpointSpec for CreateBanBearerRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::emqx::DeleteBanBearerRequest;
 ///
-/// let request = DeleteBanBearerRequest::new("ban_type_value", "who_value")
-///;
+/// let request = DeleteBanBearerRequest::new("ban_type_value", "who_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteBanBearerRequest {

@@ -6,12 +6,11 @@ use super::{OllamaNative, OllamaNativeApi, OllamaOpenAI, OllamaOpenAIApi};
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::GenerateNativeRequest;
 ///
 /// let body: ::schematic_definitions::ollama::GenerateBody = Default::default();
-/// let request = GenerateNativeRequest::new(body)
-///;
+/// let request = GenerateNativeRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GenerateNativeRequest {
@@ -119,12 +118,11 @@ impl schematic_runtime::EndpointSpec for GenerateNativeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::ChatNativeRequest;
 ///
 /// let body: ::schematic_definitions::ollama::ChatBody = Default::default();
-/// let request = ChatNativeRequest::new(body)
-///;
+/// let request = ChatNativeRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatNativeRequest {
@@ -230,12 +228,11 @@ impl schematic_runtime::EndpointSpec for ChatNativeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::EmbeddingsNativeRequest;
 ///
 /// let body: ::schematic_definitions::ollama::EmbeddingsBody = Default::default();
-/// let request = EmbeddingsNativeRequest::new(body)
-///;
+/// let request = EmbeddingsNativeRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EmbeddingsNativeRequest {
@@ -288,11 +285,10 @@ impl schematic_runtime::EndpointSpec for EmbeddingsNativeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::ListModelsNativeRequest;
 ///
-/// let request = ListModelsNativeRequest::default()
-///;
+/// let request = ListModelsNativeRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsNativeRequest {}
@@ -324,12 +320,11 @@ impl schematic_runtime::EndpointSpec for ListModelsNativeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::ShowModelNativeRequest;
 ///
 /// let body: ::schematic_definitions::ollama::ShowModelBody = Default::default();
-/// let request = ShowModelNativeRequest::new(body)
-///;
+/// let request = ShowModelNativeRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ShowModelNativeRequest {
@@ -382,12 +377,11 @@ impl schematic_runtime::EndpointSpec for ShowModelNativeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::PullModelNativeRequest;
 ///
 /// let body: ::schematic_definitions::ollama::PullModelBody = Default::default();
-/// let request = PullModelNativeRequest::new(body)
-///;
+/// let request = PullModelNativeRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PullModelNativeRequest {
@@ -495,12 +489,11 @@ impl schematic_runtime::EndpointSpec for PullModelNativeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::PushModelNativeRequest;
 ///
 /// let body: ::schematic_definitions::ollama::PushModelBody = Default::default();
-/// let request = PushModelNativeRequest::new(body)
-///;
+/// let request = PushModelNativeRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PushModelNativeRequest {
@@ -608,12 +601,11 @@ impl schematic_runtime::EndpointSpec for PushModelNativeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::CopyModelNativeRequest;
 ///
 /// let body: ::schematic_definitions::ollama::CopyModelBody = Default::default();
-/// let request = CopyModelNativeRequest::new(body)
-///;
+/// let request = CopyModelNativeRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CopyModelNativeRequest {
@@ -664,12 +656,11 @@ impl schematic_runtime::EndpointSpec for CopyModelNativeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::DeleteModelNativeRequest;
 ///
 /// let body: ::schematic_definitions::ollama::DeleteModelBody = Default::default();
-/// let request = DeleteModelNativeRequest::new(body)
-///;
+/// let request = DeleteModelNativeRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteModelNativeRequest {
@@ -721,12 +712,11 @@ impl schematic_runtime::EndpointSpec for DeleteModelNativeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::CreateModelNativeRequest;
 ///
 /// let body: ::schematic_definitions::ollama::CreateModelBody = Default::default();
-/// let request = CreateModelNativeRequest::new(body)
-///;
+/// let request = CreateModelNativeRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateModelNativeRequest {
@@ -835,11 +825,10 @@ impl schematic_runtime::EndpointSpec for CreateModelNativeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::ListRunningModelsNativeRequest;
 ///
-/// let request = ListRunningModelsNativeRequest::default()
-///;
+/// let request = ListRunningModelsNativeRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRunningModelsNativeRequest {}
@@ -1591,12 +1580,11 @@ impl OllamaNative {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::ChatCompletionsOaiRequest;
 ///
 /// let body: ::schematic_definitions::ollama::OpenAIChatCompletionRequest = Default::default();
-/// let request = ChatCompletionsOaiRequest::new(body)
-///;
+/// let request = ChatCompletionsOaiRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatCompletionsOaiRequest {
@@ -1705,12 +1693,11 @@ impl schematic_runtime::EndpointSpec for ChatCompletionsOaiRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::CompletionsOaiRequest;
 ///
 /// let body: ::schematic_definitions::ollama::OpenAICompletionRequest = Default::default();
-/// let request = CompletionsOaiRequest::new(body)
-///;
+/// let request = CompletionsOaiRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompletionsOaiRequest {
@@ -1817,12 +1804,11 @@ impl schematic_runtime::EndpointSpec for CompletionsOaiRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::EmbeddingsOaiRequest;
 ///
 /// let body: ::schematic_definitions::ollama::OpenAIEmbeddingRequest = Default::default();
-/// let request = EmbeddingsOaiRequest::new(body)
-///;
+/// let request = EmbeddingsOaiRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EmbeddingsOaiRequest {
@@ -1876,11 +1862,10 @@ impl schematic_runtime::EndpointSpec for EmbeddingsOaiRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::ollama::ListModelsOaiRequest;
 ///
-/// let request = ListModelsOaiRequest::default()
-///;
+/// let request = ListModelsOaiRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsOaiRequest {}

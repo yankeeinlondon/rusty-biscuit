@@ -118,18 +118,43 @@
     doc = " | [`samsung_smart_tv_remote_ws`] | [`SamsungSmartTvRemote`](samsung_smart_tv_remote_ws::define_api) | Samsung Smart TV Remote Control WebSocket API definition |"
 )]
 //!
-//! ## Quick Start
-//!
-//! ```text
-//! use schematic_schema::prelude::*;
-//!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = Anthropic::new();
-//!     let data = client.list_models().await?;
-//!     Ok(())
-//! }
-//! ```
+#![cfg_attr(feature = "anthropic", doc = " ## Quick Start")]
+#![cfg_attr(feature = "anthropic", doc = "")]
+#![cfg_attr(feature = "anthropic", doc = " ```no_run")]
+#![cfg_attr(feature = "anthropic", doc = " use schematic_schema::prelude::*;")]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " use schematic_schema::anthropic::ListModelsRequest;"
+)]
+#![cfg_attr(feature = "anthropic", doc = "")]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " # async fn example() -> Result<(), Box<dyn std::error::Error>> {"
+)]
+#![cfg_attr(feature = "anthropic", doc = " let client = Anthropic::new();")]
+#![cfg_attr(feature = "anthropic", doc = " let data = client.list_models().await?;")]
+#![cfg_attr(feature = "anthropic", doc = "")]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " // the same request, built as a typed request and sent"
+)]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " let data = client.send(ListModelsRequest::default()).await?;"
+)]
+#![cfg_attr(feature = "anthropic", doc = "")]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " // the whole response: status, headers, and request id as well"
+)]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " let response = client.list_models().full().await?;"
+)]
+#![cfg_attr(feature = "anthropic", doc = " println!(\"{}\", response.meta);")]
+#![cfg_attr(feature = "anthropic", doc = " # Ok(())")]
+#![cfg_attr(feature = "anthropic", doc = " # }")]
+#![cfg_attr(feature = "anthropic", doc = " ```")]
 //!
 //! ## Results
 //!

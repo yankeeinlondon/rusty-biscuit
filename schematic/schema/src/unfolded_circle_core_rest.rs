@@ -29,24 +29,27 @@
 //!
 //! ## Examples
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::unfolded_circle_core_rest::GetSystemInfoCoreRestRequest;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = UnfoldedCircleCoreRest::new();
-//!     let data = client.get_system_info().await?;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = UnfoldedCircleCoreRest::new();
+//! let data = client.get_system_info().await?;
 //!
-//!     // the whole response: status, headers, and request id as well
-//!     let response = client.get_system_info().full().await?;
-//!     println!("{}", response.meta);
-//!     Ok(())
-//! }
+//! // the same request, built as a typed request and sent
+//! let data = client.send(GetSystemInfoCoreRestRequest::default()).await?;
+//!
+//! // the whole response: status, headers, and request id as well
+//! let response = client.get_system_info().full().await?;
+//! println!("{}", response.meta);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ### Override Base URL
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
 //!
 //! let client = UnfoldedCircleCoreRest::new().base_url("https://staging.example.com/v1");
@@ -110,12 +113,11 @@ impl Default for UnfoldedCircleCoreRest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::LoginCoreRestRequest;
 ///
 /// let body: ::schematic_definitions::unfolded_circle::core_rest::LoginRequest = Default::default();
-/// let request = LoginCoreRestRequest::new(body)
-///;
+/// let request = LoginCoreRestRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LoginCoreRestRequest {
@@ -173,11 +175,10 @@ impl schematic_runtime::EndpointSpec for LoginCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::LogoutCoreRestRequest;
 ///
-/// let request = LogoutCoreRestRequest::default()
-///;
+/// let request = LogoutCoreRestRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LogoutCoreRestRequest {}
@@ -207,11 +208,10 @@ impl schematic_runtime::EndpointSpec for LogoutCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::GetSystemInfoCoreRestRequest;
 ///
-/// let request = GetSystemInfoCoreRestRequest::default()
-///;
+/// let request = GetSystemInfoCoreRestRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetSystemInfoCoreRestRequest {}
@@ -243,11 +243,10 @@ impl schematic_runtime::EndpointSpec for GetSystemInfoCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::ExportBackupCoreRestRequest;
 ///
-/// let request = ExportBackupCoreRestRequest::default()
-///;
+/// let request = ExportBackupCoreRestRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExportBackupCoreRestRequest {}
@@ -293,15 +292,11 @@ impl RestoreBackupForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::{RestoreBackupCoreRestRequest, RestoreBackupForm};
 ///
-/// let body = RestoreBackupForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = RestoreBackupCoreRestRequest::new(body)
-///;
+/// let body: RestoreBackupForm = Default::default();
+/// let request = RestoreBackupCoreRestRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RestoreBackupCoreRestRequest {
@@ -367,15 +362,11 @@ impl UploadResourceForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::{UploadResourceCoreRestRequest, UploadResourceForm};
 ///
-/// let body = UploadResourceForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = UploadResourceCoreRestRequest::new("resource_type_value", body)
-///;
+/// let body: UploadResourceForm = Default::default();
+/// let request = UploadResourceCoreRestRequest::new("resource_type_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UploadResourceCoreRestRequest {
@@ -427,11 +418,10 @@ impl schematic_runtime::EndpointSpec for UploadResourceCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::GetResourceCoreRestRequest;
 ///
-/// let request = GetResourceCoreRestRequest::new("resource_type_value", "resource_id_value")
-///;
+/// let request = GetResourceCoreRestRequest::new("resource_type_value", "resource_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetResourceCoreRestRequest {
@@ -497,15 +487,11 @@ impl InstallCustomIntegrationForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::{InstallCustomIntegrationCoreRestRequest, InstallCustomIntegrationForm};
 ///
-/// let body = InstallCustomIntegrationForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = InstallCustomIntegrationCoreRestRequest::new(body)
-///;
+/// let body: InstallCustomIntegrationForm = Default::default();
+/// let request = InstallCustomIntegrationCoreRestRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InstallCustomIntegrationCoreRestRequest {
@@ -567,15 +553,11 @@ impl UploadCustomIrCodeSetForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::{UploadCustomIrCodeSetCoreRestRequest, UploadCustomIrCodeSetForm};
 ///
-/// let body = UploadCustomIrCodeSetForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = UploadCustomIrCodeSetCoreRestRequest::new("code_set_id_value", body)
-///;
+/// let body: UploadCustomIrCodeSetForm = Default::default();
+/// let request = UploadCustomIrCodeSetCoreRestRequest::new("code_set_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UploadCustomIrCodeSetCoreRestRequest {
@@ -639,15 +621,11 @@ impl InstallCustomComponentForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::{InstallCustomComponentCoreRestRequest, InstallCustomComponentForm};
 ///
-/// let body = InstallCustomComponentForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = InstallCustomComponentCoreRestRequest::new("custom_component_value", body)
-///;
+/// let body: InstallCustomComponentForm = Default::default();
+/// let request = InstallCustomComponentCoreRestRequest::new("custom_component_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InstallCustomComponentCoreRestRequest {
@@ -699,11 +677,10 @@ impl schematic_runtime::EndpointSpec for InstallCustomComponentCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::QueryLogsTextCoreRestRequest;
 ///
-/// let request = QueryLogsTextCoreRestRequest::default()
-///;
+/// let request = QueryLogsTextCoreRestRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct QueryLogsTextCoreRestRequest {}

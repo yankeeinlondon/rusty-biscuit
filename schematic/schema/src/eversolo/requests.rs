@@ -6,11 +6,10 @@ use super::{Eversolo, EversoloApi};
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::DeviceGetModelRequest;
 ///
-/// let request = DeviceGetModelRequest::default()
-///;
+/// let request = DeviceGetModelRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeviceGetModelRequest {}
@@ -42,11 +41,10 @@ impl schematic_runtime::EndpointSpec for DeviceGetModelRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::RemoteSendKeyRequest;
 ///
-/// let request = RemoteSendKeyRequest::new("key_value")
-///;
+/// let request = RemoteSendKeyRequest::new("key_value");
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteSendKeyRequest {
@@ -94,11 +92,10 @@ impl schematic_runtime::EndpointSpec for RemoteSendKeyRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::RemoteInputTextRequest;
 ///
-/// let request = RemoteInputTextRequest::new("text_value")
-///;
+/// let request = RemoteInputTextRequest::new("text_value");
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteInputTextRequest {
@@ -146,11 +143,10 @@ impl schematic_runtime::EndpointSpec for RemoteInputTextRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::MusicGetStateRequest;
 ///
-/// let request = MusicGetStateRequest::default()
-///;
+/// let request = MusicGetStateRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MusicGetStateRequest {}
@@ -182,11 +178,10 @@ impl schematic_runtime::EndpointSpec for MusicGetStateRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::MusicPlayOrPauseRequest;
 ///
-/// let request = MusicPlayOrPauseRequest::default()
-///;
+/// let request = MusicPlayOrPauseRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MusicPlayOrPauseRequest {}
@@ -218,11 +213,10 @@ impl schematic_runtime::EndpointSpec for MusicPlayOrPauseRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::MusicPlayNextRequest;
 ///
-/// let request = MusicPlayNextRequest::default()
-///;
+/// let request = MusicPlayNextRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MusicPlayNextRequest {}
@@ -254,11 +248,10 @@ impl schematic_runtime::EndpointSpec for MusicPlayNextRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::MusicPlayLastRequest;
 ///
-/// let request = MusicPlayLastRequest::default()
-///;
+/// let request = MusicPlayLastRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MusicPlayLastRequest {}
@@ -290,11 +283,10 @@ impl schematic_runtime::EndpointSpec for MusicPlayLastRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::MusicSeekToRequest;
 ///
-/// let request = MusicSeekToRequest::new(1)
-///;
+/// let request = MusicSeekToRequest::new(1);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MusicSeekToRequest {
@@ -342,11 +334,10 @@ impl schematic_runtime::EndpointSpec for MusicSeekToRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::MusicGetInputOutputListRequest;
 ///
-/// let request = MusicGetInputOutputListRequest::default()
-///;
+/// let request = MusicGetInputOutputListRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MusicGetInputOutputListRequest {}
@@ -378,11 +369,10 @@ impl schematic_runtime::EndpointSpec for MusicGetInputOutputListRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::MusicSetInputRequest;
 ///
-/// let request = MusicSetInputRequest::new("tag_value")
-///;
+/// let request = MusicSetInputRequest::new("tag_value");
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MusicSetInputRequest {
@@ -430,11 +420,10 @@ impl schematic_runtime::EndpointSpec for MusicSetInputRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::MusicSetOutputRequest;
 ///
-/// let request = MusicSetOutputRequest::new("tag_value")
-///;
+/// let request = MusicSetOutputRequest::new("tag_value");
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MusicSetOutputRequest {
@@ -482,11 +471,10 @@ impl schematic_runtime::EndpointSpec for MusicSetOutputRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::MusicSetVolumeRequest;
 ///
-/// let request = MusicSetVolumeRequest::new(1)
-///;
+/// let request = MusicSetVolumeRequest::new(1);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MusicSetVolumeRequest {
@@ -534,11 +522,10 @@ impl schematic_runtime::EndpointSpec for MusicSetVolumeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::MusicSetMuteRequest;
 ///
-/// let request = MusicSetMuteRequest::new(1)
-///;
+/// let request = MusicSetMuteRequest::new(1);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MusicSetMuteRequest {
@@ -587,11 +574,10 @@ impl schematic_runtime::EndpointSpec for MusicSetMuteRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::PowerGetOptionsRequest;
 ///
-/// let request = PowerGetOptionsRequest::default()
-///;
+/// let request = PowerGetOptionsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PowerGetOptionsRequest {}
@@ -623,11 +609,10 @@ impl schematic_runtime::EndpointSpec for PowerGetOptionsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::PowerSetOptionRequest;
 ///
-/// let request = PowerSetOptionRequest::new("tag_value")
-///;
+/// let request = PowerSetOptionRequest::new("tag_value");
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PowerSetOptionRequest {
@@ -675,11 +660,10 @@ impl schematic_runtime::EndpointSpec for PowerSetOptionRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::SystemGetScreenBrightnessRequest;
 ///
-/// let request = SystemGetScreenBrightnessRequest::default()
-///;
+/// let request = SystemGetScreenBrightnessRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SystemGetScreenBrightnessRequest {}
@@ -711,11 +695,10 @@ impl schematic_runtime::EndpointSpec for SystemGetScreenBrightnessRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::SystemSetScreenBrightnessRequest;
 ///
-/// let request = SystemSetScreenBrightnessRequest::new(1)
-///;
+/// let request = SystemSetScreenBrightnessRequest::new(1);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemSetScreenBrightnessRequest {
@@ -763,11 +746,10 @@ impl schematic_runtime::EndpointSpec for SystemSetScreenBrightnessRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::SystemGetKnobBrightnessRequest;
 ///
-/// let request = SystemGetKnobBrightnessRequest::default()
-///;
+/// let request = SystemGetKnobBrightnessRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SystemGetKnobBrightnessRequest {}
@@ -799,11 +781,10 @@ impl schematic_runtime::EndpointSpec for SystemGetKnobBrightnessRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::SystemSetKnobBrightnessRequest;
 ///
-/// let request = SystemSetKnobBrightnessRequest::new(1)
-///;
+/// let request = SystemSetKnobBrightnessRequest::new(1);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemSetKnobBrightnessRequest {
@@ -851,11 +832,10 @@ impl schematic_runtime::EndpointSpec for SystemSetKnobBrightnessRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::SystemGetVuModeListRequest;
 ///
-/// let request = SystemGetVuModeListRequest::default()
-///;
+/// let request = SystemGetVuModeListRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SystemGetVuModeListRequest {}
@@ -887,11 +867,10 @@ impl schematic_runtime::EndpointSpec for SystemGetVuModeListRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::SystemSetVuModeRequest;
 ///
-/// let request = SystemSetVuModeRequest::new(1)
-///;
+/// let request = SystemSetVuModeRequest::new(1);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemSetVuModeRequest {
@@ -939,11 +918,10 @@ impl schematic_runtime::EndpointSpec for SystemSetVuModeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::SystemGetSpectrumModeListRequest;
 ///
-/// let request = SystemGetSpectrumModeListRequest::default()
-///;
+/// let request = SystemGetSpectrumModeListRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SystemGetSpectrumModeListRequest {}
@@ -975,11 +953,10 @@ impl schematic_runtime::EndpointSpec for SystemGetSpectrumModeListRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::SystemSetSpectrumModeRequest;
 ///
-/// let request = SystemSetSpectrumModeRequest::new(1)
-///;
+/// let request = SystemSetSpectrumModeRequest::new(1);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemSetSpectrumModeRequest {
@@ -1027,11 +1004,10 @@ impl schematic_runtime::EndpointSpec for SystemSetSpectrumModeRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::eversolo::SystemChangeVuDisplayRequest;
 ///
-/// let request = SystemChangeVuDisplayRequest::new(1)
-///;
+/// let request = SystemChangeVuDisplayRequest::new(1);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemChangeVuDisplayRequest {

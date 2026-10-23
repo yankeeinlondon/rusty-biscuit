@@ -56,6 +56,12 @@ impl<'a> ModuleDocBuilder<'a> {
     /// The generated tokens are `//!` style line doc comments rather than
     /// `#![doc = "..."]` attributes, for consistency with hand-written code.
     pub fn build(&self) -> TokenStream {
+        lines_to_doc_comments(&self.markdown())
+    }
+
+    /// The module documentation as Markdown: the introduction, then the
+    /// `##` sections.
+    pub(crate) fn markdown(&self) -> String {
         let intro = self.intro_paragraph();
         let auth_section = self.auth_section();
         let features_section = self.features_section();
@@ -63,17 +69,14 @@ impl<'a> ModuleDocBuilder<'a> {
         let example_section = self.example_section();
 
         // Combine all sections with blank lines between them
-        let full_doc = format!(
+        format!(
             "{}\n\n{}\n\n{}\n\n{}{}",
             intro.trim(),
             auth_section.trim(),
             features_section.trim(),
             metadata_section,
             example_section.trim()
-        );
-
-        // Convert to //! style line comments
-        lines_to_doc_comments(&full_doc)
+        )
     }
 
     /// Generates the introduction paragraph.
@@ -212,20 +215,11 @@ impl<'a> ModuleDocBuilder<'a> {
     /// Creates a usage example using the first GET endpoint, or the first
     /// endpoint if no GET endpoint exists.
     fn example_section(&self) -> String {
-        // Find first GET endpoint, or fallback to first endpoint
-        let endpoint = self
-            .api
-            .endpoints
-            .iter()
-            .find(|e| e.method == RestMethod::Get)
-            .or_else(|| self.api.endpoints.first());
-
-        let Some(endpoint) = endpoint else {
+        let Some(endpoint) = example_endpoint(self.api) else {
             return "## Example\n\nNo endpoints available for example.".to_string();
         };
 
         let api_name = &self.api.name;
-        let call = crate::codegen::endpoint_methods::example_invocation(self.api, endpoint, "client");
         let custom_base_url = if self.api.base_url == "http://192.168.1.1:9529" {
             "http://192.168.1.50:9529"
         } else {
@@ -235,30 +229,78 @@ impl<'a> ModuleDocBuilder<'a> {
         format!(
             r#"## Examples
 
-```text
-use schematic_schema::prelude::*;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {{
-    let client = {api_name}::new();
-    let data = {call}.await?;
-
-    // the whole response: status, headers, and request id as well
-    let response = {call}.full().await?;
-    println!("{{}}", response.meta);
-    Ok(())
-}}
-```
+{}
 
 ### Override Base URL
 
-```text
+```no_run
 use schematic_schema::prelude::*;
 
 let client = {api_name}::new().base_url("{custom_base_url}");
-```"#
+```"#,
+            client_example_lines(self.api, endpoint).join("\n")
         )
     }
+}
+
+/// The endpoint a doc example calls: `api`'s first GET endpoint, or else
+/// its first endpoint.
+pub(crate) fn example_endpoint(api: &RestApi) -> Option<&schematic_define::Endpoint> {
+    api.endpoints
+        .iter()
+        .find(|endpoint| endpoint.method == RestMethod::Get)
+        .or_else(|| api.endpoints.first())
+}
+
+/// The lines of a `no_run` doctest that calls `endpoint` of `api` through
+/// its endpoint method and as a typed `client.send(Request::new(..))`, then
+/// reads the whole response.
+///
+/// The example imports the request type, and any enum an argument names,
+/// from the API's module in `schematic_schema`, so it compiles wherever that
+/// module's feature is enabled.
+pub(crate) fn client_example_lines(api: &RestApi, endpoint: &schematic_define::Endpoint) -> Vec<String> {
+    let call = crate::codegen::endpoint_methods::example_call(api, endpoint);
+    let module = schematic_definitions::naming::resolve_module_name(api);
+    let mut imports = call.imports.clone();
+    // A generated form struct lives in the API's module; every other body
+    // type is a std type or spelled from the crate root.
+    if let Some(body) = &call.body_type
+        && !matches!(body.as_str(), "String" | "Vec<u8>")
+        && body.chars().all(|c| c.is_alphanumeric() || c == '_')
+    {
+        imports.push(body.clone());
+    }
+    let import = match imports.as_slice() {
+        [only] => only.clone(),
+        _ => format!("{{{}}}", imports.join(", ")),
+    };
+
+    let mut lines = vec![
+        "```no_run".to_string(),
+        "use schematic_schema::prelude::*;".to_string(),
+        format!("use schematic_schema::{module}::{import};"),
+        String::new(),
+        "# async fn example() -> Result<(), Box<dyn std::error::Error>> {".to_string(),
+        format!("let client = {}::new();", api.name),
+    ];
+    if let Some(body) = &call.body_type {
+        lines.push(format!("let body: {body} = Default::default();"));
+    }
+    lines.extend([
+        format!("let data = {}.await?;", call.method_call("client", "body.clone()")),
+        String::new(),
+        "// the same request, built as a typed request and sent".to_string(),
+        format!("let data = {}.await?;", call.typed_send("client", "body.clone()")),
+        String::new(),
+        "// the whole response: status, headers, and request id as well".to_string(),
+        format!("let response = {}.full().await?;", call.method_call("client", "body")),
+        "println!(\"{}\", response.meta);".to_string(),
+        "# Ok(())".to_string(),
+        "# }".to_string(),
+        "```".to_string(),
+    ]);
+    lines
 }
 
 /// Converts a multi-line documentation string into `//!` style line comments.
@@ -541,17 +583,10 @@ mod tests {
     }
 
     #[test]
-    fn build_preserves_code_block_indentation() {
-        let api = make_test_api();
-        let builder = ModuleDocBuilder::new(&api);
-        let tokens = builder.build();
-        let code = tokens.to_string();
+    fn doc_comments_preserve_code_block_indentation() {
+        let code = lines_to_doc_comments("```no_run\nfn f() {\n    body();\n}\n```").to_string();
 
-        // The code block should have indented lines preserved
-        assert!(
-            code.contains("    let client"),
-            "Expected indented 'let client' in code block"
-        );
+        assert!(code.contains("\"     body();\""), "{code}");
     }
 
     /// The module doc text, one entry per `//!` line.
@@ -568,6 +603,40 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn the_example_is_a_no_run_doctest_calling_the_method_and_the_typed_send() {
+        let docs = doc_text(&make_test_api());
+
+        let expected = " ```no_run
+ use schematic_schema::prelude::*;
+ use schematic_schema::test::ListItemsRequest;
+
+ # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+ let client = TestApi::new();
+ let data = client.list_items().await?;
+
+ // the same request, built as a typed request and sent
+ let data = client.send(ListItemsRequest::default()).await?;
+";
+        assert!(docs.contains(expected), "{docs}");
+        assert!(!docs.contains("```text") && !docs.contains("tokio::main"), "{docs}");
+    }
+
+    #[test]
+    fn an_example_with_a_body_binds_a_default_body_and_clones_it_until_its_last_use() {
+        let mut api = make_test_api();
+        api.endpoints[0].method = RestMethod::Post;
+        api.endpoints[0].request = Some(schematic_define::ApiRequest::text("text/plain"));
+
+        let docs = doc_text(&api);
+
+        assert!(docs.contains(" let body: String = Default::default();"), "{docs}");
+        assert!(docs.contains(" use schematic_schema::test::ListItemsRequest;"), "a std body type is not imported: {docs}");
+        assert!(docs.contains(" let data = client.list_items(body.clone()).await?;"), "{docs}");
+        assert!(docs.contains(" let data = client.send(ListItemsRequest::new(body.clone())).await?;"), "{docs}");
+        assert!(docs.contains(" let response = client.list_items(body).full().await?;"), "{docs}");
     }
 
     #[test]

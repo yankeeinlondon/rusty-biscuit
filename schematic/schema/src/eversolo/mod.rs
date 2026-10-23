@@ -38,24 +38,27 @@
 //!
 //! ## Examples
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::eversolo::DeviceGetModelRequest;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = Eversolo::new();
-//!     let data = client.device_get_model().await?;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = Eversolo::new();
+//! let data = client.device_get_model().await?;
 //!
-//!     // the whole response: status, headers, and request id as well
-//!     let response = client.device_get_model().full().await?;
-//!     println!("{}", response.meta);
-//!     Ok(())
-//! }
+//! // the same request, built as a typed request and sent
+//! let data = client.send(DeviceGetModelRequest::default()).await?;
+//!
+//! // the whole response: status, headers, and request id as well
+//! let response = client.device_get_model().full().await?;
+//! println!("{}", response.meta);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ### Override Base URL
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
 //!
 //! let client = Eversolo::new().base_url("http://192.168.1.50:9529");

@@ -173,40 +173,38 @@ pub fn assemble_combined_api_module(apis: &[&RestApi]) -> TokenStream {
     }
 }
 
-/// Builds combined module documentation for multiple APIs sharing a module.
+/// Builds combined module documentation for multiple APIs sharing a module:
+/// a summary naming every API, then one `##` section per API holding the
+/// documentation its own module would have, each heading one level deeper.
 fn build_combined_module_docs(apis: &[&RestApi]) -> TokenStream {
-    use crate::codegen::request_structs::endpoint_docs::{rate_limit_lines, retry_guidance_lines};
-
-    let mut doc_parts: Vec<String> = Vec::new();
-
-    for (i, api) in apis.iter().enumerate() {
-        if i > 0 {
-            doc_parts.push("---".to_string());
-            doc_parts.push(String::new());
-        }
-
-        let name = &api.name;
-        let desc = &api.description;
-        let intro = if let Some(docs_url) = &api.docs_url {
-            format!(
-                "Generated API client for [{}]({}).\n\n{}",
-                name, docs_url, desc
-            )
-        } else {
-            format!("Generated API client for {}.\n\n{}", name, desc)
-        };
-
-        doc_parts.push(intro);
-        if let Some(rate_limit) = &api.rate_limit {
-            doc_parts.push(rate_limit_lines(rate_limit).join("\n"));
-        }
-        if let Some(guidance) = &api.retry_guidance {
-            doc_parts.push(retry_guidance_lines(guidance).join("\n"));
-        }
+    let mut names: Vec<String> = apis.iter().map(|api| format!("[`{}`]", api.name)).collect();
+    let last = names.pop().unwrap_or_default();
+    let names = match names.len() {
+        0 => last,
+        1 => format!("{} and {last}", names[0]),
+        _ => format!("{}, and {last}", names.join(", ")),
+    };
+    let mut doc = format!("Generated API clients for {names}, which share this module.");
+    for api in apis {
+        doc.push_str(&format!("\n\n## {}\n\n", api.name));
+        doc.push_str(&demote_headings(&ModuleDocBuilder::new(api).markdown()));
     }
+    crate::codegen::lines_to_doc_comments(&doc)
+}
 
-    let full_doc = doc_parts.join("\n\n");
-    crate::codegen::lines_to_doc_comments(&full_doc)
+/// `markdown` with every heading outside a code fence one level deeper.
+fn demote_headings(markdown: &str) -> String {
+    let mut in_fence = false;
+    markdown
+        .lines()
+        .map(|line| {
+            if line.starts_with("```") {
+                in_fence = !in_fence;
+            }
+            if !in_fence && line.starts_with('#') { format!("#{line}") } else { line.to_string() }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Assembles a single API module split into submodules for large APIs.
@@ -330,6 +328,16 @@ mod tests {
         assert!(docs.contains("Retry guidance") && docs.contains("429"), "{docs}");
         assert_eq!(docs.matches("Rate limit").count(), 1, "{docs}");
         assert_eq!(docs.matches("Retry guidance").count(), 1, "{docs}");
+    }
+
+    #[test]
+    fn demoted_headings_leave_hidden_doctest_lines_alone() {
+        let markdown = "Intro\n\n## Examples\n\n```no_run\n# async fn example() {\n# }\n```\n\n### Override Base URL";
+
+        assert_eq!(
+            super::demote_headings(markdown),
+            "Intro\n\n### Examples\n\n```no_run\n# async fn example() {\n# }\n```\n\n#### Override Base URL"
+        );
     }
 
     #[test]

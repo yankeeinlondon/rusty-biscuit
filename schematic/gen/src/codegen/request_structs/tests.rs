@@ -364,12 +364,9 @@ fn generates_example_with_default_for_no_required_fields() {
         "Expected default() usage for empty struct, got:\n{}",
         code
     );
-    // Should be in ignore code block
-    assert!(
-        code.contains("```text"),
-        "Expected ignore code fence, got:\n{}",
-        code
-    );
+    assert!(code.contains("let request = ListModelsRequest::default();"), "the statement ends on its own line:\n{code}");
+    assert!(code.contains("```no_run"), "Expected a no_run doctest, got:\n{code}");
+    assert!(!code.contains("///;"), "{code}");
 }
 
 #[test]
@@ -421,17 +418,13 @@ fn generates_example_with_body_construction() {
         "Expected body type in import, got:\n{}",
         code
     );
-    // Should show Default pattern for body
     assert!(
-        code.contains("..Default::default()"),
-        "Expected ..Default::default() pattern, got:\n{}",
-        code
+        code.contains("use schematic_schema::api::{CreateCompletionRequest, CreateCompletionBody};"),
+        "a body type named from the module is imported, got:\n{code}"
     );
-    // Should show body construction
     assert!(
-        code.contains("let body = CreateCompletionBody {"),
-        "Expected body construction, got:\n{}",
-        code
+        code.contains("let body: CreateCompletionBody = Default::default();"),
+        "Expected body construction, got:\n{code}"
     );
     // Should use new() with body
     assert!(
@@ -1362,7 +1355,7 @@ fn explicit_rust_parameter_name_preserves_wire_query_and_ordinary_setters() {
 fn qualified_and_container_body_examples_are_valid_rust() {
     for body in ["::schematic_definitions::openai::BetaCreateResponse", "::serde_json::Value", "::std::vec::Vec<::schematic_definitions::openai::Model>"] {
         let lines = generate_doc_example("CreateResponseRequest", &PathExample { args: vec![], imports: vec![] }, &[], true, Some(body), Some("openai"));
-        let start = lines.iter().position(|line| line.trim() == "```text").unwrap();
+        let start = lines.iter().position(|line| line.trim() == "```no_run").unwrap();
         let source = lines[start + 1..].iter().take_while(|line| line.trim() != "```").cloned().collect::<Vec<_>>().join("\n");
         syn::parse_file(&format!("fn example() {{\n{source}\n}}"))
             .unwrap_or_else(|error| panic!("invalid example for {body}: {error}\n{source}"));
@@ -1792,4 +1785,52 @@ fn a_definition_adopting_nothing_new_generates_unchanged_docs() {
     let code = generated(&endpoint);
 
     assert!(code.contains("/// Request for `ListModels` endpoint.\n///\n/// ## Example\n"), "{code}");
+}
+
+/// The doc example's code, between its fence lines.
+fn doc_example_source(code: &str) -> String {
+    let lines: Vec<&str> = code.lines().map(|line| line.trim_start().trim_start_matches("///")).collect();
+    let start = lines.iter().position(|line| line.trim() == "```no_run").expect("a no_run example");
+    lines[start + 1..].iter().take_while(|line| line.trim() != "```").copied().collect::<Vec<_>>().join("\n")
+}
+
+#[test]
+fn optional_parameters_get_setter_calls_with_values_of_their_types() {
+    let mut endpoint = endpoint_with_named_params(
+        vec![named_param("X-Trace-Id", QueryParamType::String), named_param("X-Ids", QueryParamType::Array(Box::new(QueryParamType::Integer)))],
+        vec![named_param("session", QueryParamType::Boolean)],
+    );
+    let mut query = vec![
+        named_param("q", QueryParamType::String),
+        named_param("order", QueryParamType::Enum(vec!["asc".into(), "desc".into()])),
+        named_param("limit", QueryParamType::Integer),
+    ];
+    for param in &mut query {
+        param.required = false;
+    }
+    endpoint.params.as_mut().unwrap().query = query;
+    let code = format_generated_code(&generate_request_struct_with_options(
+        &crate::test_utils::api_for(&endpoint),
+        &endpoint,
+        "Request",
+        Some("fixture"),
+        "Api",
+    ))
+    .unwrap();
+    let source = doc_example_source(&code);
+
+    assert!(source.contains("use schematic_schema::fixture::{SearchRequest, SearchRequestOrder};"), "{source}");
+    for setter in [
+        r#".with_q("q_value".to_string())"#,
+        ".with_order(SearchRequestOrder::Asc)",
+        ".with_limit(1)",
+        r#".with_x_trace_id("X-Trace-Id_value".to_string())"#,
+        ".with_x_ids(vec![1])",
+        ".with_session(true);",
+    ] {
+        assert!(source.contains(setter), "missing `{setter}`:\n{source}");
+    }
+    assert!(!source.contains("/* value */"), "{source}");
+    syn::parse_file(&format!("fn example() {{\n{}\n}}", source.replace("use ", "// use ")))
+        .unwrap_or_else(|error| panic!("invalid example: {error}\n{source}"));
 }

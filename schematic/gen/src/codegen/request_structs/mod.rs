@@ -397,116 +397,107 @@ fn typed_path_example(fields: &[PathField]) -> PathExample {
     PathExample { args: fields.iter().map(PathField::example_arg).collect(), imports }
 }
 
+/// A plausible value for the `with_*` setter of the optional parameter
+/// `param`, and the enum it names, if any.
+fn setter_example_arg(param: &QueryParamInfo) -> (String, Option<String>) {
+    match &param.shape {
+        // `new()` takes a single string as `impl Into<String>`; the setter
+        // takes `String`.
+        Some(shape) if shape.is_text() => {
+            let (arg, import) = query_example_arg(param);
+            (format!("{arg}.to_string()"), import)
+        }
+        Some(_) => query_example_arg(param),
+        None => (named_param_example(&param.name, &param.param_type), None),
+    }
+}
+
+/// A value of the type `query_param_type_to_rust_type` gives a header or
+/// cookie parameter named `name`.
+fn named_param_example(name: &str, param_type: &schematic_define::QueryParamType) -> String {
+    use schematic_define::QueryParamType;
+
+    match param_type {
+        QueryParamType::String => format!("{:?}.to_string()", format!("{name}_value")),
+        QueryParamType::Integer => "1".to_string(),
+        QueryParamType::Number => "1.5".to_string(),
+        QueryParamType::Boolean => "true".to_string(),
+        QueryParamType::Enum(values) => {
+            format!("{:?}.to_string()", values.first().map_or("value", String::as_str))
+        }
+        QueryParamType::Array(inner) => format!("vec![{}]", named_param_example(name, inner)),
+        _ => "Default::default()".to_string(),
+    }
+}
+
 /// Generates the doc lines of the example section, starting with the blank
 /// line that separates it from the summary.
 ///
-/// The example shows how to instantiate the request struct:
-/// - For structs with no required fields: uses `Default::default()`
-/// - For structs with path or required query params: uses `new()` with them
-/// - For structs with body: uses `new()` with body (and optional params)
-/// - Optional params use builder-style `with_*` methods
+/// The example is a `no_run` doctest that builds the request: with
+/// `default()` when it takes no arguments, otherwise with `new()` taking the
+/// path and required query values and the body (a `Default` value of the
+/// body type), then one `with_*` call per optional parameter.
 fn generate_doc_example(
     struct_name: &str,
     path: &PathExample,
-    query_params: &[QueryParamInfo],
+    optional_params: &[QueryParamInfo],
     has_body: bool,
     body_type: Option<&str>,
     module_path: Option<&str>,
 ) -> Vec<String> {
-    let path_params = &path.args;
+    let mod_path = module_path.unwrap_or("api");
+    let mut imports = vec![struct_name.to_string()];
+    imports.extend(path.imports.iter().cloned());
+    let setters: Vec<(String, String)> = optional_params
+        .iter()
+        .map(|param| {
+            let (value, import) = setter_example_arg(param);
+            imports.extend(import);
+            (param.field_name(), value)
+        })
+        .collect();
+    let body_type = body_type.filter(|_| has_body);
+    // A generated form struct lives in the API's module; every other body
+    // type is a std type or spelled from the crate root.
+    if let Some(body) = body_type
+        && !matches!(body, "String" | "Vec<u8>")
+        && body.chars().all(|c| c.is_alphanumeric() || c == '_')
+    {
+        imports.push(body.to_string());
+    }
+    let mut unique = std::collections::HashSet::new();
+    imports.retain(|import| unique.insert(import.clone()));
+
+    let use_line = match imports.as_slice() {
+        [only] => format!(" use schematic_schema::{mod_path}::{only};"),
+        _ => format!(" use schematic_schema::{mod_path}::{{{}}};", imports.join(", ")),
+    };
     let mut lines = vec![
         String::new(),
         " ## Example".to_string(),
         String::new(),
-        " ```text".to_string(),
+        " ```no_run".to_string(),
+        use_line,
+        String::new(),
     ];
 
-    // Build the module path for use statement
-    let mod_path = module_path.unwrap_or("api");
-    let request_import = if path.imports.is_empty() {
-        format!(" use schematic_schema::{mod_path}::{struct_name};")
-    } else {
-        format!(" use schematic_schema::{mod_path}::{{{struct_name}, {}}};", path.imports.join(", "))
-    };
-
-    // Generate appropriate example based on struct configuration
-    if has_body {
-        let body_ty = body_type.unwrap_or("Body");
-
-        // Raw text and binary bodies are std types: nothing to import.
-        match body_ty {
-            "String" | "Vec<u8>" => {
-                lines.push(request_import.clone());
-                lines.push(String::new());
-                lines.push(format!(" let body: {body_ty} = Default::default();"));
-            }
-            _ if body_ty.starts_with("::") => {
-                lines.push(request_import.clone());
-                lines.push(String::new());
-                lines.push(format!(" let body: {body_ty} = Default::default();"));
-            }
-            _ => {
-                let mut imports = vec![struct_name.to_string()];
-                imports.extend(path.imports.iter().cloned());
-                imports.push(body_ty.to_string());
-                lines.push(format!(" use schematic_schema::{mod_path}::{{{}}};", imports.join(", ")));
-                lines.push(String::new());
-
-                // Show body construction with ..Default::default() pattern
-                lines.push(format!(" let body = {body_ty} {{"));
-                lines.push("     // ... set required fields ...".to_string());
-                lines.push("     ..Default::default()".to_string());
-                lines.push(" };".to_string());
-            }
-        }
-
-        // Show request construction
-        if path_params.is_empty() {
-            lines.push(format!(" let request = {struct_name}::new(body)"));
-        } else {
-            // Include path params in new() call
-            let args = path_params.join(", ");
-            lines.push(format!(" let request = {struct_name}::new({args}, body)"));
-        }
-
-        // Add query param builder calls
-        for qp in query_params {
-            let snake_name = qp.field_name();
-            lines.push(format!("     .with_{}(/* value */)", snake_name));
-        }
-        lines.push(";".to_string());
-    } else if !path_params.is_empty() {
-        // Path or required query params - use new()
-        lines.push(request_import);
-        lines.push(String::new());
-
-        let args = path_params.join(", ");
-        lines.push(format!(" let request = {struct_name}::new({args})"));
-
-        // Add query param builder calls
-        for qp in query_params {
-            lines.push(format!(
-                "     .with_{}(/* value */)",
-                qp.field_name()
-            ));
-        }
-        lines.push(";".to_string());
-    } else {
-        // No required fields - use default()
-        lines.push(format!(" use schematic_schema::{mod_path}::{struct_name};"));
-        lines.push(String::new());
-        lines.push(format!(" let request = {struct_name}::default()"));
-
-        // Add query param builder calls
-        for qp in query_params {
-            lines.push(format!(
-                "     .with_{}(/* value */)",
-                qp.field_name()
-            ));
-        }
-        lines.push(";".to_string());
+    let mut args = path.args.clone();
+    if let Some(body) = body_type {
+        lines.push(format!(" let body: {body} = Default::default();"));
+        args.push("body".to_string());
     }
-
+    let constructor = if args.is_empty() {
+        "default()".to_string()
+    } else {
+        format!("new({})", args.join(", "))
+    };
+    lines.push(format!(" let request = {struct_name}::{constructor}"));
+    for (field, value) in setters {
+        lines.push(format!("     .with_{field}({value})"));
+    }
+    if let Some(last) = lines.last_mut() {
+        last.push(';');
+    }
     lines.push(" ```".to_string());
 
     lines

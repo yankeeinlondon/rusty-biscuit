@@ -633,6 +633,45 @@ When any endpoint authenticates differently, the API struct's `new()` docs
 also say that a public endpoint sends no credential and that a replacement
 refuses a send which resolves none.
 
+### Examples in the generated docs
+
+Every code example the generator writes into the crate is a `no_run`
+doctest: it is compiled, never run, so it cannot drift from the generated API
+without failing `just doctest`. No example names a method the client lacks.
+
+| Where | What the example shows |
+| --- | --- |
+| each request type | building the request: `default()` when it takes no values, otherwise `new(..)` with the path values, the required query values, and a `Default` body, then one `with_*` call per optional parameter with a sample value of its type |
+| each API's module | calling the first GET endpoint (or the first endpoint) through its endpoint method, then as the typed request `client.send({Name}Request::new(..))`, then `.full()` for the whole response; and overriding the base URL |
+| crate root `## Quick Start`, prelude `## Examples` | the same module example for the first API with a GET endpoint, shown only when that API's module feature is enabled |
+
+For example, the GitHub module's docs carry this example; the generated
+doctest hides the `async fn` wrapper lines with `#`:
+
+```rust
+use schematic_schema::prelude::*;
+use schematic_schema::github::GetRepositoryRequest;
+
+async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    let client = GitHub::new();
+    let data = client.get_repository("owner", "repo").await?;
+
+    // the same request, built as a typed request and sent
+    let data = client.send(GetRepositoryRequest::new("owner", "repo")).await?;
+    Ok(())
+}
+```
+
+A module shared by several APIs (`emqx`, `ollama`, `artificial_analysis`)
+opens with a sentence naming each API, then gives each one a `## {Api}`
+section holding the docs its own module would have (authentication,
+endpoint list, rate limit, examples), with every heading one level deeper.
+
+`just doctest` compiles the committed crate's examples twice through
+`just doctest-schema`: with the default features, and with only the shared
+`emqx` module enabled, which proves no example outside a module's own docs
+imports a disabled module.
+
 ## Using Generated Code
 
 ```rust
