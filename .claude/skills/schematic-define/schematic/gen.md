@@ -282,6 +282,17 @@ Grouped OpenAPI documents are built in memory for every module before any is
 written (`export::openapi::build_openapi_grouped`); a later group member's
 clashing `operationId` gets its API-name prefix, and the final
 `operation_id_diagnostics` scan rejects any duplicate that remains.
+Every Rust run also lowers the five shipped WebSocket definitions
+(`output::ws_modules::validate_ws_definition_modules`) and reports their
+findings on the Rust output as `feature=websocket-definition`, the message
+starting with the definition path (`endpoints/{id}/path/...`): an error
+blocks the Rust output (no WS module is dropped silently any more), a
+warning does not (for example a `base_url` whose last segment repeats the
+endpoint path's first segment), and info notes print only with `-v`. Test a
+fixture `WebSocketApi` with `validate_ws_apis` / `render_ws_api_module`;
+the fresh-output guard compiles a rendered fixture module through
+`FreshCrate::add_module` (Bearer host; handshake path/query encoding).
+WebSocket definition rules: `websocket.md`.
 Full rules: `schematic/docs/generation/validation.md`.
 
 ```bash

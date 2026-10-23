@@ -22,6 +22,7 @@ that describe `schematic-define` behavior. Code generation lives in
 | [`schematic/openapi.md`](./schematic/openapi.md) | OpenAPI import/export, `x-schematic`, imported builder assemblies |
 | [`schematic/definitions.md`](./schematic/definitions.md) | Shipped APIs and facts that drift |
 | [`schematic/headers.md`](./schematic/headers.md) | `Headers` (WebSocket clients only), `SensitiveString`, `EnvList`, `EnvMapping` |
+| [`schematic/websocket.md`](./schematic/websocket.md) | `WebSocketApi` roles, client-relative directions, selectors/fallback, `responds_with`, handshake params, hints, JSON form |
 
 ## High-Signal Rules
 

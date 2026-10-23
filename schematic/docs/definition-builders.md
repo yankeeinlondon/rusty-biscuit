@@ -239,6 +239,7 @@ The public defaults below remain meaningful; the audit test checks the shipped s
 | `ConnectionLifecycle` | Empty optional lifecycle messages are valid. |
 | `WebSocketEndpoint` | Retained for existing incremental WebSocket construction, which is outside this REST migration. Its empty id still needs authoring before generation. |
 | `FrameFormat`, `RequestIdType` | JSON text frames / u64 request ids are complete established defaults. |
+| `EndpointRole` | `Client` is the documented meaning of an absent role: an endpoint generates a client unless it declares `host` or `both`. |
 | `WebSocketRuntimeHints`, `WebSocketEndpointHints` | No optional hints is valid. |
 | `SchematicDocExtension`, `SchematicSchemaExtension` | All optional extension metadata may be absent. |
 | `ExportOptions`, `ExportFormat`, `OpenApiImportOptions` | Complete tooling options with established defaults. |

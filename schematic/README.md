@@ -107,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [Import OpenAPI](docs/io/import-openapi.md), [export OpenAPI](docs/io/export-openapi.md), or [export Postman](docs/io/export-postman.md).
 - [Save a definition as a self-contained bundle](docs/io/definition-bundles.md) and export from the file alone.
 - [Understand generated requests](docs/generation/request-side.md), [validation](docs/generation/validation.md), and [partial generation](docs/generation/partial-generation.md).
-- [Use WebSocket headers](docs/headers/README.md).
+- [Define a WebSocket API](docs/websocket-definitions.md) and [use WebSocket headers](docs/headers/README.md).
 
 ## License
 

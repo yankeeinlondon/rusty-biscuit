@@ -138,6 +138,7 @@ The same fields are available to code as
 | `header-parameter`, `cookie-parameter`: the type is an array of arrays | ✓ | | | error |
 | `query-parameter`: a query parameter's type, style, and `explode` have no Rust serialization (see below) | ✓ | | | warning when optional (the parameter is left out of the request type), error when required |
 | `query-parameter`: a query enum declares no values | ✓ | | | error |
+| `websocket-definition`: a shipped WebSocket definition cannot be lowered into its module (see [WebSocket definitions](#websocket-definitions)) | ✓ | | | error, or warning for a repeated base/path segment and other non-blocking findings |
 | `generated-name-collision`: two values of a query or path enum generate one variant, or a generated enum's name is already emitted in the module | ✓ | | | error |
 | `pagination-strategy`: a pagination strategy is malformed, alone or on its endpoint (see below) | ✓ | | | error |
 | `pagination-exception`: an endpoint collection has an unusable item selector, item type, item location, or alternates | ✓ | | | error |
@@ -393,7 +394,18 @@ the original endpoint ids.
 
 A repeated segment such as `/api/api/items` is never an error by itself: a
 base URL ending in `/api` joined with a path starting `/api` can be correct.
-`schematic-gen` does not judge base-plus-path composition.
+For REST APIs `schematic-gen` does not judge base-plus-path composition.
+
+A WebSocket endpoint gets one **warning** when the last segment of its API's
+`base_url` path is exactly the first segment of the endpoint path, because
+the handshake URL then repeats it:
+
+```text
+[WARN] severity=warning api=Example endpoint=Live feature=websocket-definition output=rust: endpoints/Live/path: base_url `ws://host/ws` ends with segment `ws` and path `/ws` starts with it; the composed URL repeats `/ws/ws`
+```
+
+Only whole segments count: `ws://host/api` with `/apikeys`, or with
+`/v1/api`, reports nothing. The warning never blocks the Rust output.
 
 ### Embedded queries
 
@@ -433,6 +445,43 @@ reports an error. `export::openapi::build_openapi_grouped` returns a module's
 finished document without writing it, after the group checks above;
 `write_openapi_document` writes a built document.
 
-**Planned:** WebSocket definitions are not validated yet. When they are,
-they will report through the same `ValidationDiagnostic`, `Severity`,
-`Feature`, and `Output` types rather than a separate format.
+## WebSocket definitions
+
+Every Rust run writes a module for each shipped WebSocket definition (the
+`*_ws.rs` files), so `generate` and `validate` both lower those definitions
+and report what they find on the **Rust** output, through the same
+`ValidationDiagnostic` format, with the feature id `websocket-definition`.
+The message starts with where in the definition the finding is:
+
+```text
+[ERROR] severity=error api=Example endpoint=Live feature=websocket-definition output=rust: endpoints/Live/params/path/stray: path parameter `stray` has no `{stray}` placeholder in `/live/{room}`
+```
+
+- an **error** blocks the Rust output like any other Rust error; every
+  finding of that definition is reported, not only the first, and no module
+  is silently left out. Errors are:
+  - an empty API name or `base_url`, or an empty endpoint id
+  - an endpoint path that does not start with `/`, names its own origin, or
+    embeds a query or fragment
+  - a typed path parameter without its placeholder, a placeholder missing
+    from a non-empty `params.path`, or a path parameter that is not a
+    required `simple` scalar
+  - a query parameter declared twice, an enum or JSON query value, or a
+    query style the REST rules cannot send; any header or cookie parameter
+  - empty correlation field paths, an empty `responds_with`, an empty
+    selector field, an empty auth-flow name or indicator, and a zero
+    correlation timeout, heartbeat interval, or heartbeat timeout
+
+  See [WebSocket definitions](../websocket-definitions.md) for the rules
+  behind each one
+- a **warning** (for example the [repeated segment](#repeated-path-segments)
+  above, or an endpoint with no messages) is printed and generation goes on
+- **info** notes, such as a correlation strategy inferred from message
+  names, have no severity in the shared format; they print only in a
+  verbose run (`-v`), labeled `[INFO]` and `severity=info`
+
+From code, `output::ws_modules::validate_ws_apis` returns the diagnostics and
+the info notes for any WebSocket definitions, and
+`output::ws_modules::render_ws_api_module` renders one definition's module,
+returning `GeneratorError::Validation` for the Rust output when it has an
+error.

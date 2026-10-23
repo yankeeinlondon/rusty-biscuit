@@ -96,7 +96,10 @@ The schema recipe checks the committed generated crate, including paging and
 compiler diagnostics. Current artifact tests compare complete Rust, OpenAPI, and Postman file sets
 and bytes. Loopback HTTP fixtures assert generated
 wire requests, credentials, codecs, hooks, and paging behavior; they make no live
-provider requests. This evidence establishes generated behavior against recorded
+provider requests. Generated WebSocket clients are tested against a scriptable
+loopback WebSocket server (`schematic/schema/tests/ws_mock/`) that records each
+upgrade request (path, query, headers) and can accept, refuse, redirect, stall,
+send frames, or drop a connection after a number of frames. This evidence establishes generated behavior against recorded
 contracts, not the current behavior of every remote service.
 
 When changing a response, check the endpoint's success type and codec:
