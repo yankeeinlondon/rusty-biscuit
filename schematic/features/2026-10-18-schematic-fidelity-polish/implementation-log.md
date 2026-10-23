@@ -228,12 +228,145 @@ docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
     - .claude/skills/schematic-define/schematic/gen.md
 message_to_agent: |-
-  Phase 7 (module feature flags) is complete; read "## Phase 7" in implementation-log.md.
+  Phase 9 (runnable Postman artifacts) is complete; read "## Phase 9" in implementation-log.md.
 
-  - schematic-schema now has one Cargo feature per module group (named for the module, default = all). lib.rs gates each `pub mod` and its doc-table row, prelude.rs each re-export and doc line, with `#[cfg(feature = "<module>")]`; ws_shared compiles under any WS feature. futures-util, thiserror, tokio-tungstenite are optional and enabled only by WS features.
-  - The manifest comes from `cargo_gen::ModuleFeatures::new(registry, registrations)`; generate_cargo_toml / generate_cargo_toml_with_paths / write_cargo_toml take `&ModuleFeatures`.
-  - Phase 8 (compiled docs): the crate-level Quick Start and the prelude example are still `text` fences naming one API (Anthropic / OpenAI). When they become no_run doctests they compile only with that module's feature; doctests run with default features, but a selected-feature doc check needs the example gated (e.g. `#![cfg_attr(feature = "...", doc = ...)]`, as the table rows are) or written against a module the check enables.
-  - Phase 6 changes are still uncommitted in this worktree alongside Phase 7.
+  - Example values come from `schematic_gen::export::examples::ExampleSource` (P10-c over `RestApi::schemas`, validated with `jsonschema` 0.55, now a normal `schematic-gen` dependency, through one prepared `Registry` per API). Reuse it rather than writing another example generator; it is format-neutral (`example(&TypeRef)`, `check(&TypeRef, &Value)`). For the AsyncAPI phase, note that WebSocket payloads have no JSON schemas (D12), so it does not apply there yet.
+  - Compile validators against a prepared registry, never per reference from the whole component document: the OpenAI corpus went from 5.2 s to 0.78 s that way (L1 budget is 5 s).
+  - `GenerateOpts` gained `postman_environment: bool`; every struct literal must set it. The `just generate` recipes pass `--postman-environment`, and `schematic/postman/` now holds 15 collections plus 15 environments (drift-checked).
+  - Postman no longer skips GraphQL; only OpenAPI reports `graphql-operation` per operation. `Feature::SchemaComposition` was removed and `Feature::ExampleValue` added.
+  - `schematic/schema/src` changes in the working tree are Phase 8's (still uncommitted when Phase 9 ran); Phase 9 changed no generated Rust or OpenAPI output.
+source_files_during_phase_8:
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/tests.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/justfile
+    - schematic/schema/src/anthropic.rs
+    - schematic/schema/src/artificial_analysis.rs
+    - schematic/schema/src/bitbucket/mod.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/elevenlabs/mod.rs
+    - schematic/schema/src/elevenlabs/requests.rs
+    - schematic/schema/src/emqx/mod.rs
+    - schematic/schema/src/emqx/requests.rs
+    - schematic/schema/src/eversolo/mod.rs
+    - schematic/schema/src/eversolo/requests.rs
+    - schematic/schema/src/gitea/mod.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/mod.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/mod.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/schema/src/huggingface/mod.rs
+    - schematic/schema/src/huggingface/requests.rs
+    - schematic/schema/src/lib.rs
+    - schematic/schema/src/lmstudio.rs
+    - schematic/schema/src/ollama/mod.rs
+    - schematic/schema/src/ollama/requests.rs
+    - schematic/schema/src/openai/mod.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/src/prelude.rs
+    - schematic/schema/src/samsung_smart_tv.rs
+    - schematic/schema/src/unfolded_circle_core_rest.rs
+    - schematic/gen/tests/l1/generated_docs.rs
+docs_updated_during_phase_8:
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/workflow.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_9:
+    - schematic/gen/Cargo.toml
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/export/auth.rs
+    - schematic/gen/src/export/body.rs
+    - schematic/gen/src/export/examples.rs
+    - schematic/gen/src/export/examples/tests.rs
+    - schematic/gen/src/export/mod.rs
+    - schematic/gen/src/export/postman/auth.rs
+    - schematic/gen/src/export/postman/collection.rs
+    - schematic/gen/src/export/postman/environment.rs
+    - schematic/gen/src/export/postman/examples.rs
+    - schematic/gen/src/export/postman/graphql.rs
+    - schematic/gen/src/export/postman/item.rs
+    - schematic/gen/src/export/postman/mod.rs
+    - schematic/gen/src/export/postman/request.rs
+    - schematic/gen/src/export/postman/responses.rs
+    - schematic/gen/src/export/postman/tests.rs
+    - schematic/gen/src/export/postman/types.rs
+    - schematic/gen/src/export/postman/variables.rs
+    - schematic/gen/src/export/vocabulary.rs
+    - schematic/gen/src/main.rs
+    - schematic/gen/src/pipeline.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/fixtures/postman/golden/api_key_query_auth.json
+    - schematic/gen/tests/fixtures/postman/golden/auth_variables_openai.json
+    - schematic/gen/tests/fixtures/postman/golden/file_upload_elevenlabs.json
+    - schematic/gen/tests/fixtures/postman/golden/grouped_module_ollama.json
+    - schematic/gen/tests/fixtures/postman/golden/mixed_auth_emqx.json
+    - schematic/gen/tests/fixtures/postman/golden/oauth2_grants.json
+    - schematic/gen/tests/fixtures/postman/golden/path_query_params_github.json
+    - schematic/gen/tests/l1/api_inventory.rs
+    - schematic/gen/tests/l1/artifact_drift.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/module_naming.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/gen/tests/l1/pagination_validation.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/postman_golden.rs
+    - schematic/gen/tests/l1/postman_runnable.rs
+    - schematic/gen/tests/l1/response_adapters.rs
+    - schematic/gen/tests/l1/vocabulary_exports.rs
+    - schematic/justfile
+    - schematic/postman/anthropic.postman_collection.json
+    - schematic/postman/anthropic.postman_environment.json
+    - schematic/postman/artificial_analysis.postman_collection.json
+    - schematic/postman/artificial_analysis.postman_environment.json
+    - schematic/postman/bitbucket.postman_collection.json
+    - schematic/postman/bitbucket.postman_environment.json
+    - schematic/postman/elevenlabs.postman_collection.json
+    - schematic/postman/elevenlabs.postman_environment.json
+    - schematic/postman/emqx.postman_collection.json
+    - schematic/postman/emqx.postman_environment.json
+    - schematic/postman/eversolo.postman_collection.json
+    - schematic/postman/eversolo.postman_environment.json
+    - schematic/postman/gitea.postman_collection.json
+    - schematic/postman/gitea.postman_environment.json
+    - schematic/postman/github.postman_collection.json
+    - schematic/postman/github.postman_environment.json
+    - schematic/postman/gitlab.postman_collection.json
+    - schematic/postman/gitlab.postman_environment.json
+    - schematic/postman/huggingface.postman_collection.json
+    - schematic/postman/huggingface.postman_environment.json
+    - schematic/postman/lmstudio.postman_collection.json
+    - schematic/postman/lmstudio.postman_environment.json
+    - schematic/postman/ollama.postman_collection.json
+    - schematic/postman/ollama.postman_environment.json
+    - schematic/postman/openai.postman_collection.json
+    - schematic/postman/openai.postman_environment.json
+    - schematic/postman/samsung_smart_tv.postman_collection.json
+    - schematic/postman/samsung_smart_tv.postman_environment.json
+    - schematic/postman/unfolded_circle_core_rest.postman_collection.json
+    - schematic/postman/unfolded_circle_core_rest.postman_environment.json
+docs_updated_during_phase_9:
+    - schematic/docs/dependencies.md
+    - schematic/docs/generation/partial-generation.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/generation/workflow.md
+    - schematic/docs/graphql.md
+    - schematic/docs/io/export-postman.md
+    - schematic/docs/typed-registration.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/responses.md
 ---
 
 # Implementation Log for 2026-10-18-schematic-fidelity-polish (13 phases)
@@ -1878,3 +2011,422 @@ Phase 7 status: checkpoint met. Selected builds expose exactly their groups,
 features are additive, the WebSocket transport is gated, full and partial
 generation write the same manifest, all eight dependents build and pass
 unchanged, and the common phase checks pass.
+
+## Phase 8
+
+Compile honest generated documentation (R38–R41, R51). Implemented directly
+by the orchestrator without subagents: the write set (four generator
+emitters, the regenerated crate, the recipe, and the tests) is one integrated
+change. The `os` skill was not needed: no path, process, or
+`#[cfg(target_os)]` code changed.
+
+### Measured before the change (HEAD `b0721ec6c`, committed `schema/src`)
+
+- 566 doc fences, all `text`: 539 request-type examples, 13 module
+  examples plus 12 base-URL examples (the three combined modules had none), the
+  crate Quick Start, and the prelude's import and example fences.
+- 539 `///;` lines: `generate_doc_example` pushed the statement's `;` as its
+  own doc line (`lines.push(";")`, missing the leading space).
+- Request examples did not compile: optional setters were
+  `.with_x(/* value */)`; form bodies used `Form { // ... ..Default::default() }`.
+- Module and Quick Start examples used `#[tokio::main]` (the generated crate's
+  `tokio` has no `rt-multi-thread`), passed an unbound `body` for a body
+  endpoint, and did not import enum argument types. The prelude example
+  `await`ed outside an async fn and named `OpenAI` unconditionally.
+- R39 `client.list_models()`: the method exists now —
+  `2026-10-12-schematic-endpoint-methods` generates one method per endpoint
+  (Phase 1 D1). Every `client.<m>(` in the old docs named an existing method;
+  the R39 symptom was already gone upstream.
+- R40 `AuthStrategy::ApiKey` literal: no generated file contains one. The only
+  copies of the old literal-bearing doc examples are in
+  `gen/src/codegen/api_struct/{constructors,variant,fields,request_method}.rs`,
+  which no `mod` declares (orphaned, never compiled). Left in place as
+  out-of-scope cleanup; logged for review.
+- R51: the three combined modules (`artificial_analysis`, `emqx`, `ollama`;
+  the spec named emqx, Phase 1 found ollama, `artificial_analysis` also shares
+  one) lost every member's `## Authentication`, `## Features`, `## Examples`.
+
+### Wave 16: Documentation generation (R38–R41, R51)
+
+- `codegen/request_structs/mod.rs`: `generate_doc_example` emits a
+  `no_run` fence; the `;` ends the last statement line; every optional query,
+  header, and cookie parameter gets a setter value of its type
+  (`setter_example_arg`/`named_param_example`: `"x_value".to_string()`, `1`,
+  `1.5`, `true`, the first enum variant, `vec![..]`), and its enum is
+  imported; the body is `let body: T = Default::default();` with a bare form
+  type imported from the module.
+- `codegen/endpoint_methods/mod.rs`: `example_invocation` became
+  `example_call(api, endpoint) -> ExampleCall`, which renders the method call
+  and the typed send `client.send({Request}::new(..))` from the same
+  arguments the endpoint method passes to `new`/`default`, and lists the
+  request type and enum argument types to import.
+- `codegen/module_docs.rs`: `ModuleDocBuilder::markdown()`; the example
+  section uses the shared `client_example_lines` (prelude + request import,
+  async wrapper in hidden `#` lines, method call, typed send, `.full()`;
+  a body endpoint binds a default body and clones it until its last use);
+  base-URL example is `no_run`.
+- `output/assemble/api.rs`: combined module docs open with
+  "Generated API clients for [`A`] and [`B`], which share this module." and
+  give each API a `## {Api}` section holding its own `markdown()` with
+  headings demoted outside code fences (hidden `# ` doctest lines are left
+  alone).
+- `output/assemble/lib_rs.rs`, `prelude.rs`: the Quick Start (heading
+  included) and the prelude `## Examples` are the same client example of
+  `example_api` (first API with a GET endpoint), each line gated
+  `#![cfg_attr(feature = "<module>", doc = ..)]`. The prelude's hard-coded
+  `openai::{ListModelsCall, …}` import fence was removed (its prose kept).
+  The standalone import assembler emits the Quick Start ungated.
+- Regenerated with `just generate`: only `schema/src/**` changed (577 `no_run`
+  fences, 0 `text`, 0 `///;`); OpenAPI and Postman unchanged.
+- No endpoint wrappers were added.
+- adopted default: P10-g / D53 stays recorded as superseded upstream (Phase 1
+  adopted default); the docs show the endpoint method first and
+  `client.send(Request::new(..))` as the typed alternative, as R39 asks
+  (source: contracts D1, Phase 1 log).
+- adopted default: the gated crate and prelude examples drop out entirely
+  (heading included) when the example API's module is disabled, rather than
+  falling back to another API (source: R38 "docs do not import disabled
+  modules"; simplest rule).
+
+### Wave 17: Doctest integration (R38)
+
+- `schematic/justfile`: new `doctest-schema` (`cargo test --doc
+  --manifest-path schema/Cargo.toml`, then the same with
+  `--no-default-features --features emqx`); `just doctest` calls it. Results:
+  577 passed (default, 12 s warm), 78 passed (`emqx` alone, which leaves out
+  the gated anthropic Quick Start and prelude example). Manual extra
+  selections: `anthropic` 8 passed, `elevenlabs_ws` 0 (no REST docs) passed.
+- `generated_docs::slow_generated_doc_examples_compile_with_default_and_selected_features`
+  (F3, fresh-output crate of the real 18 REST + 5 WS APIs, offline and
+  locked): `cargo test --doc` default and `emqx`-only both succeed with a
+  non-zero passed count. 23 s warm; in the `schematic-fresh-output` group.
+- `just lint-schema`: clean. `just test-schema`: 152 passed.
+- Observation, not changed: `RUSTDOCFLAGS=-D warnings cargo doc` on the
+  committed crate reports `rustdoc::bare_urls` for URLs inside definition
+  descriptions (artificial_analysis, openai) in `lib.rs` table rows (present
+  before this phase) and now also in the combined `artificial_analysis` member
+  sections, which repeat each member's description. Fixing them is a
+  definitions text change; plain `cargo doc` only warns.
+
+### Requirement → test mapping
+
+| Behavior | Test |
+| --- | --- |
+| R38 every generated fence is `no_run` (fresh real output) | `generated_docs::the_shipped_crate_docs_hold_only_compilable_examples_of_existing_methods` (F2, `generate_and_write_all` into a temp dir) |
+| R38/R40 examples compile, default and a selected module | `generated_docs::slow_generated_doc_examples_compile_with_default_and_selected_features` (F3); `just doctest-schema` on the committed crate |
+| R39 every `client.<m>(` exists on the module's client or `api_client!` | same fast test (per module; crate root/prelude against all modules) + `generated_docs::the_client_call_scan_reports_a_method_the_module_lacks` (scanner control) |
+| R41 no `///;` / `;`-only doc line | same fast test; `request_structs::tests::generates_example_with_default_for_no_required_fields` (`;` on the statement line) |
+| optional setters get typed values, enum imported, example parses | `request_structs::tests::optional_parameters_get_setter_calls_with_values_of_their_types` |
+| body example: typed default body, bare type imported | `request_structs::tests::generates_example_with_body_construction`, `qualified_and_container_body_examples_are_valid_rust` |
+| typed send mirrors the endpoint method's request construction | `endpoint_methods::tests::{example_typed_send_builds_the_request_the_endpoint_method_builds, typed_path_arguments_follow_the_template_with_their_declared_types}` |
+| module example: no_run, method + typed send, no `tokio::main`; body bound and cloned | `module_docs::tests::{the_example_is_a_no_run_doctest_calling_the_method_and_the_typed_send, an_example_with_a_body_binds_a_default_body_and_clones_it_until_its_last_use}` |
+| R51 each combined module (emqx, ollama, artificial_analysis) has a section per member with auth/features/examples, every endpoint, its `::new()`; emqx Basic `EMQX_API_KEY`/`EMQX_API_SECRET`, Bearer `EMQX_TOKEN` + `Login` | `generated_docs::a_shared_module_documents_every_member_api` |
+| heading demotion skips fenced hidden lines | `output::assemble::api::tests::demoted_headings_leave_hidden_doctest_lines_alone` |
+| committed crate is the generator's | `artifact_drift::generated_rust_artifacts_are_up_to_date` |
+
+Regression proof: with this phase's `gen/src` changes reverted
+(`git diff` saved, `git checkout gen/src`, run, `git apply`), both new fast
+`generated_docs` tests fail — the fence check at `anthropic.rs:23` (a `text`
+fence) and the R51 check at "artificial_analysis: no section for
+ArtificialAnalysisData" — and pass with the change. The R41 assertion runs
+after the fence assertion in the same test; the old output's 539 `///;` lines
+are recorded above. Input robustness matrix: not applicable (no reader of a
+file format or configuration changed; docs are written, not read). All new
+tests are L1 in `gen/tests/l1/generated_docs.rs`, declared `mod
+generated_docs` in `main.rs`, and unit tests in their modules; the `slow_`
+test runs in `just test-fresh-output` (part of `just test`).
+
+### Gates (Phase 8)
+
+- `just lint` (schematic): clean (one clippy `match` → `if let`
+  finding in the new `client_example` fixed before the clean run).
+- `just test` (schematic): 2884 passed (4 slow, the existing
+  `schematic-runtime` TLS tests), 22 skipped; fresh-output 16 passed
+  (including the new slow doctest test, 94 s for the group); compile-fail 1
+  passed. No failures, no reruns.
+- `just check-tier-coverage schematic`: 0 stranded.
+- `just lint-schema`: clean. `just test-schema`: 152 passed.
+  `just doctest-schema`: 577 + 78 passed.
+- Dependents (only doc comments of `schematic-schema` changed, so their
+  compiled code is unchanged): `cargo build -p sniff -p biscuit-speaks -p
+  model-citizen -p homelab -p eversolo-integration -p arcam-amp-integration
+  -p sony-receiver-integration -p unfolded-integration-helper --all-targets`
+  succeeded with no warnings; scoped `sniff` `test(/remote/)` 75 passed,
+  `biscuit-speaks` `test(/elevenlabs/)` 48 passed. No dependent source or
+  manifest changed.
+- Scope calculator (`git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages: [schematic-gen, test-toolkit, darkmatter, schematic-define]`,
+  `change_class: package`; not used to skip anything, both gates ran.
+- Cross-OS check: not run. The change is doc text emitted by the generator,
+  a bash `just` recipe that only calls `cargo test --doc`, and tests that read
+  generated files through `Path` APIs; no filesystem path handling, process,
+  or OS-specific code changed. The new slow test reuses the fresh-output
+  mechanism, whose OS handling is unchanged.
+
+Phase 8 status: checkpoint met. Real Rust examples compile under the default
+features and a selected module, every shared module documents each member
+API, and no missing method, incomplete literal, or `///;` line remains.
+Generated source changes come only from generator changes (`just generate`).
+
+## Phase 9
+
+Implementer: claude/opus (Opus 5.5), 2026-10-23, macOS host. Phase 8's
+changes were still uncommitted when this phase began; this phase's files are
+listed separately in `source_files_during_phase_9`.
+
+### Wave 18: Schema example engine
+
+- New `schematic-gen` module `export::examples` (`ExampleSource`,
+  `ExampleError`). It reads `RestApi::schemas`, the original registered
+  components (not their OpenAPI conversion), rewrites OpenAPI 3.0
+  `nullable: true` into a `null` type member (the Phase 1 spike's finding),
+  and registers the whole component document once per API in a prepared
+  `jsonschema::Registry` (Draft 2020-12, offline). Validators reference any
+  subschema by `https://schematic.invalid/components#<pointer>` and are cached
+  per pointer.
+- P10-c order: first `examples` entry, `example`, `default`, `const`, each
+  `enum` value, then a typed placeholder (`"string"`, `0`, `false`, format
+  placeholders such as `2000-01-01T00:00:00Z`, moved into
+  `minimum`/`exclusiveMinimum`/`maximum`/`multipleOf`/`minLength`/`maxLength`).
+  Every authored candidate is validated before use. Objects hold required
+  properties plus those declaring an example/default; `allOf` members merge
+  (then the merged schema is built in full, including its own `oneOf`);
+  `oneOf`/`anyOf` branches are tried in order and accepted only when the
+  value validates against the whole schema. A component expanding inside
+  itself more than three times fails; optional properties drop the failure
+  and nullable members fall back to `null`. The final value is validated
+  against the reference's own schema; any failure is an `ExampleError` with
+  the schema path, never an emitted value.
+- Probe over every JSON reference of every shipped API (644 references):
+  first run 12 failures (inline `$ref`s containing `<`/`>` not
+  percent-encoded; an `allOf` wrapper around a `oneOf` enum skipped the
+  composition), both fixed; second run 0 failures in 0.67 s (debug).
+- adopted default: `jsonschema` 0.55 (`default-features = false`) moves from
+  `schematic-gen` dev-dependencies to dependencies, because validation
+  happens in the generator before emission, not only in tests (source: plan
+  P10-k "Reuse jsonschema … already present"; no new crate).
+- Finding: the Draft 2020-12 validator rejects OpenAPI 3.0's boolean
+  `exclusiveMinimum` at compile time, so such a schema yields a diagnostic
+  (test `a_schema_the_validator_cannot_compile_is_a_diagnostic`). No
+  registered schema uses it (schemars emits 2020-12 bounds).
+
+### Wave 19: Postman mappings
+
+All three tasks were implemented directly by the phase agent (no
+subagents): the request, environment, and response builders share
+`postman/item.rs`, `postman/types.rs`, and the new `Collected` sink, so a
+disjoint split would have raced on them.
+
+- **Request bodies (R19).** `item.rs` builds a JSON body from
+  `ExampleSource::example(reference)`, pretty-printed. A failure leaves `raw`
+  empty (never `{}`) and records an `example-value` warning (new
+  `Feature::ExampleValue`). `validate_postman` adds
+  `export::postman::export_diagnostics(api)`, which builds the single-API
+  collection once more to collect them, so one code path decides both the
+  emitted value and its diagnostic.
+- **OAuth2 (R22).** New `ExportAuth::OAuth2 { config, client_id_var,
+  client_secret_var }`. Both `map_auth` (API `AuthStrategy::OAuth2`, which
+  previously exported as `bearer`) and `map_method` (endpoint policies) map
+  to it. Postman `oauth2` attributes: `grant_type`
+  (`authorization_code_with_pkce` / `client_credentials`), `authUrl`,
+  `accessTokenUrl`, `challengeAlgorithm: S256`, space-joined `scope`,
+  `clientId`/`clientSecret` variables (no secret for a public client),
+  `client_authentication` (`header` for `ClientSecretBasic`, else `body`),
+  `addTokenTo: header`. Device code: Postman has no such grant, so it carries
+  `accessTokenUrl`, `scope`, and `accessToken: {{oauth2AccessToken}}`, and
+  the Postman output now reports an `oauth2-grant` warning. Revocation URLs
+  have no Postman attribute (logged, not exported).
+- **Text and binary (R23).** `ExportBody::Binary` now carries its content
+  type. Text is `raw`/`text` and binary is `file` mode, each with a
+  `Content-Type` header unless a fixed header already sets one.
+- **Headers, query, cookies (R24).** Values are collection variables named
+  `{location}_{name}` (`path_owner`, `query_q`, `header_X-Trace`,
+  `cookie_session`; non-`[A-Za-z0-9_-]` → `_`).
+  - adopted default: the location prefix is the collision rule: a parameter
+    variable can never equal a base-URL or credential variable (source:
+    plan Wave 19 "Respect … collisions"; the spec names no scheme).
+  - Optional query entries and headers are `disabled` (ParamDef has no
+    example/default field, so no optional parameter is ever valued).
+  - Precedence: fixed headers win over same-named header parameters;
+    `Authorization` (bearer/Basic/OAuth2), the API-key header, and `Cookie`
+    are excluded from header parameters; a query or cookie parameter that
+    the API key uses is excluded.
+  - Cookies merge into ONE `Cookie` header joined by `; ` (the runtime's
+    `cookies.join("; ")` in `runtime/src/client.rs`). It holds the required
+    cookies and its description lists the optional ones; when every cookie
+    is optional it holds them all and is disabled. A fixed `Cookie` header
+    wins.
+    - adopted default: optional cookies are named in the description rather
+      than enabled, so one header stays the only cookie entry (source: R24
+      "Merge cookies into one Cookie header" + "Disable optional
+      parameters").
+  - Known gap, logged: values are Postman variables, so the runtime's
+    percent-encoding of cookie values cannot be applied; the docs tell users
+    to enter encoded values.
+- **GraphQL (R55).** `postman/graphql.rs`: one `POST` per operation in a
+  `GraphQL` folder, URL `{{graphqlUrl}}` (member-numbered), valued with the
+  address derived by the surface's rules from the base URL. The derivation
+  mirrors `schematic_runtime::graphql::derive_address`: whole segments,
+  trailing slash ignored, first matching rule. The body is `{query,
+  operationName?, variables}`, with `variables` from the example engine or
+  `{}` for `Unit` (the spec's R55 wording; the runtime omits `variables` for
+  `Unit`, D-27; Postman sending `{}` is harmless). A saved `200` holds
+  `{"data": <example>}` plus declared HTTP errors. No address match produces
+  a `graphql-operation` warning and leaves the operations out. The Postman
+  `graphql_skips` warning was removed; OpenAPI keeps its per-operation skip
+  warning (verified by test).
+- **Environments (R20).** `postman/environment.rs`, from the built
+  collection: one value per collection variable in collection order. Base
+  URLs and GraphQL addresses are valued; credentials and `secret`
+  parameters are typed `secret` and empty; nothing is read from the host.
+  `GenerateOpts::postman_environment` / CLI `--postman-environment` (the
+  explicit optional switch). The publisher counts `*.postman_environment.json`
+  as owned only when requested, so a run without the switch never deletes
+  them. The justfile `generate`, `generate-one`, and `generate-postman`
+  recipes pass the switch, so environments are committed and drift-checked.
+  - adopted default: shared-module members get their own base-URL variable
+    (`baseUrl`, `baseUrl2`, … even for an equal URL) and API-name-suffixed
+    credentials (`username_EmqxBasic`, `bearerToken_EmqxBearer`); a shared
+    module therefore has collection-level auth only when no member
+    authenticates (source: R20 "distinct server/auth variables for members
+    of shared-module collections"). Endpoint-override variables get the
+    member suffix after the endpoint suffix.
+- **Saved responses (R21).** `postman/responses.rs`: one per success shape,
+  then one per effective error entry.
+  - Success status: the first declared status, else 204 for an empty shape
+    and 200 otherwise.
+  - Error ranges are saved under the lowest status that `ErrorTable::lookup`
+    still resolves to that entry, so narrower overrides keep theirs; a fully
+    shadowed range is not saved.
+  - Bodies: JSON (with a `json_tag` field applied and re-validated), text
+    `string`, a binary placeholder `<binary {media} body; not representable
+    as an example>`, none for empty shapes.
+  - Streams: SSE is one item frame plus its terminator (`data: [DONE]`;
+    `event: name` with `data: {}` when consumed, or the item when `keep`; an
+    item with the end field set). NDJSON is one item line plus a field-value
+    terminator line. Bytes uses the binary placeholder.
+  - Response `Content-Type` is the shape's media type.
+- Removed: the Postman `schema-composition` warning and
+  `Feature::SchemaComposition` (compositions are now exemplified or
+  reported as `example-value`), `vocabulary::composition_keyword`, and the
+  placeholder `postman/examples.rs`.
+
+### Wave 20: Postman integration
+
+- Regenerated with `just generate`. 15 collections changed and 15
+  environments were added; `schema/src` and `openapi/` are unchanged by this
+  phase (Rust and OpenAPI generation read no Postman code; regenerating
+  after the OAuth2 fix left the Postman tree's md5 identical). No shipped API
+  uses OAuth2, so that fix changes no committed artifact.
+- Generation reported no `output=postman` warning: every shipped JSON
+  request, saved response, stream frame, and error body has a valid
+  generated example. There are no authored examples and no accepted gaps.
+- Three representative generated examples, for author review:
+  1. Anthropic `CreateMessage` request body:
+     `{"max_tokens": 0, "messages": [], "model": "string"}`; its SSE saved
+     response is `data: {"message":{…},"type":"message_start"}` followed by
+     `event: message_stop` / `data: {}`.
+  2. GitHub `GetRepository` 200 response: required fields only; nullable
+     ones are `null`, strings `"string"`, and `owner` is
+     `{"login": "string", …nulls}`.
+  3. Ollama `Chat` NDJSON response: `{"error":"string"}` then
+     `{"done":true,"error":"string"}`. The item type's first `anyOf` branch
+     is the error shape, which is valid but not representative ("validate
+     but mislead", spec risks).
+- Observation (outside scope, logged): OpenAI `CreateChatCompletion`'s body
+  example is `{}` because the imported `CreateChatCompletionRequest2`
+  component registers no `required` list; that is a definition-import
+  fidelity gap, not an exporter defect.
+
+### Requirement-to-test mapping (Phase 9)
+
+All new tests are L1 (no tier marker) in declared targets: the `schematic-gen`
+lib unit tests and the `l1` binary (`postman_runnable` declared in
+`tests/l1/main.rs`). Boundary: the crate's public export API and
+`generate_batch` publishing to a temp dir (F2). Shipped-artifact checks read
+in-process builds that `artifact_drift` proves byte-equal to the committed
+files.
+
+| Requirement | Tests |
+| --- | --- |
+| R19 / P10-c engine: priority order, invalid authored values skipped, bounds/formats, allOf merge + unsatisfiable allOf, oneOf exclusivity vs anyOf, unsatisfiable oneOf, depth-3 recursion (optional omitted, nullable → null, required → diagnostic), pattern → diagnostic, uncompilable schema → diagnostic, unresolved ref, wrapper refs and `<>` names, determinism | `export::examples::tests::*` (12) |
+| R19 every shipped JSON request validates against the original registered schema (independent test-side validator) | `postman_runnable::every_shipped_example_validates::{15 modules}` + guard `the_validated_module_list_is_every_shipped_module` |
+| R19 no shipped example gap; same bytes twice | `postman_runnable::shipped_collections_report_no_example_gaps_and_build_the_same_bytes_twice` |
+| R19 failure → empty body + named diagnostic (endpoint, schema path), never invalid JSON | `postman_runnable::json_request_bodies_hold_a_validated_example_or_nothing`, `vocabulary_exports::postman_builds_composed_examples_or_reports_why_not`, `validation::tests::a_dangling_reference_names_the_api_endpoint_and_name_for_rust_and_openapi` |
+| R20 optional environment switch (absent → no file; present → file), collection unchanged by the switch, every reference declared, credentials/secret params empty + `secret` | `postman_runnable::the_environment_is_optional_and_declares_every_collection_variable_with_empty_credentials` |
+| R20 shipped environments mirror collections; shared-module members distinct (emqx) | `postman_runnable::shipped_environments_mirror_their_collections_with_separate_shared_module_members`, `postman::tests::grouped_members_get_their_own_server_and_credential_variables` |
+| R20 environments drift-checked; committed variable completeness | `artifact_drift::generated_postman_artifacts_are_up_to_date` (now also environments), `postman_var_consistency::*`, `module_naming::every_shipped_artifact_is_named_by_the_resolver` |
+| R21 success media types, statuses, variant names, empty/binary/text bodies, error range under narrower override, API-level error, each JSON body validated | `postman_runnable::saved_responses_cover_each_success_media_type_and_declared_error` |
+| R21 finite streams (SSE marker, consumed named event, NDJSON field terminator, bytes) validated per frame; invalid terminator → diagnostic, no body | `postman_runnable::stream_examples_are_finite_and_end_with_their_terminator` |
+| R22 OAuth2 golden: PKCE grant/URLs/scopes, client-credentials override with endpoint-suffixed variables, device code | `postman_golden::golden_oauth2_grants` (+ fixture `oauth2_grants.json`, Postman v2.1 schema-validated) |
+| R23 text/binary modes and Content-Type, fixed header precedence | `postman_runnable::text_and_binary_bodies_keep_their_declared_content_type`, `postman::tests::{body_text, body_binary, body_json}` |
+| R24 header/query/cookie variables, optional disabled, one merged Cookie header, constant precedence, credential exclusions (header/query/cookie API key, Authorization), all-optional cookies | `postman_runnable::parameters_become_declared_variables_with_constant_and_credential_precedence`, `output_validation::header_and_cookie_parameters_reach_every_postman_writer` |
+| R24 parameter/credential variable collisions | `postman_runnable::parameter_variables_never_collide_with_server_or_credential_variables` |
+| R55 GraphQL: one POST per operation, derived URL variable (ReplaceSuffix with prefix + trailing slash), body keys, typed variables example vs `{}`, data response; OpenAPI no path + one named diagnostic each; Postman no skip | `postman_runnable::graphql_operations_are_runnable_posts_and_openapi_skips_each_by_name`, `response_adapters::openapi_skips_graphql_operations_with_a_warning_and_postman_runs_them` |
+| R55 address with no matching rule → diagnostic, operations left out | `postman_runnable::a_graphql_address_no_rule_derives_is_reported_and_its_operations_left_out` |
+
+Updated for changed behavior (old assertions encoded the replaced output):
+`postman::tests` (grouped variables, body/url signatures),
+`postman_golden` (6 fixtures re-blessed; diffs reviewed: suffixed
+member credentials, `baseUrl2`, saved responses, parameter variables),
+`vocabulary_exports` (path variable values, variable keys, composition
+test), `output_validation`, `module_naming`, `artifact_drift`.
+
+Input robustness matrix: not applicable. This phase changes writers
+(Postman collection/environment/example output), not a reader of a file
+format or configuration.
+
+### Gates (Phase 9)
+
+- `just lint` (schematic): first run failed on clippy `match_overlapping_arm`
+  in `responses.rs` (`200..=299` after `200`); fixed with guards; clean
+  (exit 0) after the last edit.
+- `just test` (schematic): first run stopped at
+  `response_adapters::both_exporters_skip_graphql_operations_with_a_warning`
+  (it encoded the removed Postman GraphQL skip); rewritten as
+  `openapi_skips_graphql_operations_with_a_warning_and_postman_runs_them`.
+  Second run: 2923 passed (4 slow, the existing `schematic-runtime` TLS
+  tests), 22 skipped; fresh-output 16 passed; compile-fail 1 passed. No
+  reruns of individual tests were needed and none were load-sensitive.
+- `just check-tier-coverage schematic` (repo root): 0 stranded.
+- `cargo test --doc -p schematic-gen export::`: 11 passed (new
+  `ExampleSource` and `build_postman_environment` examples included).
+- `just lint-schema` / `just test-schema`: not run; generated Rust in
+  `schematic/schema/src` was not changed by this phase.
+- Dependents: only `schematic-gen` changed. Its reverse dependencies are all
+  inside `schematic/` (covered by `just test`). The eight external
+  dependents use `schematic-schema`, whose sources this phase left unchanged,
+  so no dependent build or test was needed.
+- Scope calculator (`git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages: [schematic-gen, test-toolkit, darkmatter, schematic-define]`,
+  `change_class: package` (the working tree still includes Phase 8's
+  changes); not used to skip anything, both gates ran.
+- Cross-OS check: not run. The change is in-memory JSON building plus file
+  names joined with `Path::join`; no path comparison, process, or
+  OS-specific code changed, and `jsonschema` already compiles on every CI
+  environment as a dev-dependency.
+
+### Review agenda (Phase 9)
+
+1. Shared-module variable separation (R20 adopted default): every member
+   gets its own `baseUrl{N}` and API-name-suffixed credentials, so `emqx`
+   requests now carry request-level auth with `username_EmqxBasic` /
+   `bearerToken_EmqxBearer`.
+2. Parameter variable naming `{location}_{name}` (collision rule).
+3. Optional cookies are named in the `Cookie` header description, not
+   enabled, to keep one Cookie header (R24 wording).
+4. GraphQL `variables: {}` for `Unit` operations follows R55 wording, while
+   the runtime omits `variables` (D-27).
+5. Example realism: "validate but mislead" cases such as Ollama's NDJSON
+   item, whose first `anyOf` branch is the error shape. Authored `examples`
+   on the definition types would fix them.
+6. OpenAI `CreateChatCompletionRequest2` lacks `required` (an import
+   fidelity gap), so its example is `{}`.
+
+Phase 9 status: checkpoint met. Every emitted example validates against its
+registered schema and output is deterministic. Every variable is declared,
+with or without environments. OAuth2, content types, and parameters
+survive. GraphQL is runnable in Postman and skipped by name in OpenAPI.
+Drift passes for collections and environments.

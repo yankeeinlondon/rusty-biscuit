@@ -227,6 +227,138 @@ docs_updated_during_phase_7:
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
     - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_8:
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/tests.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/justfile
+    - schematic/schema/src/anthropic.rs
+    - schematic/schema/src/artificial_analysis.rs
+    - schematic/schema/src/bitbucket/mod.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/elevenlabs/mod.rs
+    - schematic/schema/src/elevenlabs/requests.rs
+    - schematic/schema/src/emqx/mod.rs
+    - schematic/schema/src/emqx/requests.rs
+    - schematic/schema/src/eversolo/mod.rs
+    - schematic/schema/src/eversolo/requests.rs
+    - schematic/schema/src/gitea/mod.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/mod.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/mod.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/schema/src/huggingface/mod.rs
+    - schematic/schema/src/huggingface/requests.rs
+    - schematic/schema/src/lib.rs
+    - schematic/schema/src/lmstudio.rs
+    - schematic/schema/src/ollama/mod.rs
+    - schematic/schema/src/ollama/requests.rs
+    - schematic/schema/src/openai/mod.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/src/prelude.rs
+    - schematic/schema/src/samsung_smart_tv.rs
+    - schematic/schema/src/unfolded_circle_core_rest.rs
+    - schematic/gen/tests/l1/generated_docs.rs
+docs_updated_during_phase_8:
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/workflow.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_9:
+    - schematic/gen/Cargo.toml
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/export/auth.rs
+    - schematic/gen/src/export/body.rs
+    - schematic/gen/src/export/examples.rs
+    - schematic/gen/src/export/examples/tests.rs
+    - schematic/gen/src/export/mod.rs
+    - schematic/gen/src/export/postman/auth.rs
+    - schematic/gen/src/export/postman/collection.rs
+    - schematic/gen/src/export/postman/environment.rs
+    - schematic/gen/src/export/postman/examples.rs
+    - schematic/gen/src/export/postman/graphql.rs
+    - schematic/gen/src/export/postman/item.rs
+    - schematic/gen/src/export/postman/mod.rs
+    - schematic/gen/src/export/postman/request.rs
+    - schematic/gen/src/export/postman/responses.rs
+    - schematic/gen/src/export/postman/tests.rs
+    - schematic/gen/src/export/postman/types.rs
+    - schematic/gen/src/export/postman/variables.rs
+    - schematic/gen/src/export/vocabulary.rs
+    - schematic/gen/src/main.rs
+    - schematic/gen/src/pipeline.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/fixtures/postman/golden/api_key_query_auth.json
+    - schematic/gen/tests/fixtures/postman/golden/auth_variables_openai.json
+    - schematic/gen/tests/fixtures/postman/golden/file_upload_elevenlabs.json
+    - schematic/gen/tests/fixtures/postman/golden/grouped_module_ollama.json
+    - schematic/gen/tests/fixtures/postman/golden/mixed_auth_emqx.json
+    - schematic/gen/tests/fixtures/postman/golden/oauth2_grants.json
+    - schematic/gen/tests/fixtures/postman/golden/path_query_params_github.json
+    - schematic/gen/tests/l1/api_inventory.rs
+    - schematic/gen/tests/l1/artifact_drift.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/module_naming.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/gen/tests/l1/pagination_validation.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/postman_golden.rs
+    - schematic/gen/tests/l1/postman_runnable.rs
+    - schematic/gen/tests/l1/response_adapters.rs
+    - schematic/gen/tests/l1/vocabulary_exports.rs
+    - schematic/justfile
+    - schematic/postman/anthropic.postman_collection.json
+    - schematic/postman/anthropic.postman_environment.json
+    - schematic/postman/artificial_analysis.postman_collection.json
+    - schematic/postman/artificial_analysis.postman_environment.json
+    - schematic/postman/bitbucket.postman_collection.json
+    - schematic/postman/bitbucket.postman_environment.json
+    - schematic/postman/elevenlabs.postman_collection.json
+    - schematic/postman/elevenlabs.postman_environment.json
+    - schematic/postman/emqx.postman_collection.json
+    - schematic/postman/emqx.postman_environment.json
+    - schematic/postman/eversolo.postman_collection.json
+    - schematic/postman/eversolo.postman_environment.json
+    - schematic/postman/gitea.postman_collection.json
+    - schematic/postman/gitea.postman_environment.json
+    - schematic/postman/github.postman_collection.json
+    - schematic/postman/github.postman_environment.json
+    - schematic/postman/gitlab.postman_collection.json
+    - schematic/postman/gitlab.postman_environment.json
+    - schematic/postman/huggingface.postman_collection.json
+    - schematic/postman/huggingface.postman_environment.json
+    - schematic/postman/lmstudio.postman_collection.json
+    - schematic/postman/lmstudio.postman_environment.json
+    - schematic/postman/ollama.postman_collection.json
+    - schematic/postman/ollama.postman_environment.json
+    - schematic/postman/openai.postman_collection.json
+    - schematic/postman/openai.postman_environment.json
+    - schematic/postman/samsung_smart_tv.postman_collection.json
+    - schematic/postman/samsung_smart_tv.postman_environment.json
+    - schematic/postman/unfolded_circle_core_rest.postman_collection.json
+    - schematic/postman/unfolded_circle_core_rest.postman_environment.json
+docs_updated_during_phase_9:
+    - schematic/docs/dependencies.md
+    - schematic/docs/generation/partial-generation.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/generation/workflow.md
+    - schematic/docs/graphql.md
+    - schematic/docs/io/export-postman.md
+    - schematic/docs/typed-registration.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/responses.md
 ---
 
 # Schematic fidelity and polish implementation plan
@@ -698,7 +830,7 @@ all dependents pass unchanged, and common phase checks pass.
 
 ### Wave 16: Documentation generation
 
-- [ ] **Correct examples**
+- [x] **Correct examples**
   - R38–R41, R51: executable Rust fences become no_run; keep prose/shell/JSON
     languages appropriate. Use real typed-send constructors, complete ApiKey
     fields, remove stray ///; emission, and retain every shared-module API's docs.
@@ -707,7 +839,7 @@ all dependents pass unchanged, and common phase checks pass.
 
 ### Wave 17: Doctest integration
 
-- [ ] **Compile docs**
+- [x] **Compile docs**
   - Extend `just doctest` or reuse recipe-driven isolated doctest compilation to
     include the excluded generated crate. Compile default-all and a selected
     module with no defaults; examples must not import disabled modules.
@@ -722,7 +854,7 @@ line remains. Generated source changes come only from generator changes.
 
 ### Wave 18: Schema example engine
 
-- [ ] **Generate examples**
+- [x] **Generate examples**
   - R19: pass the authoritative original schema registry into Postman generation;
     implement P10-c selection, constraints, compositions, local refs, and depth-3
     recursion. Validate candidates against full original schemas before emitting.
@@ -732,7 +864,7 @@ line remains. Generated source changes come only from generator changes.
 
 ### Wave 19: Independent Postman mappings
 
-- [ ] **Map requests**
+- [x] **Map requests**
   - R22–R24/R55: preserve OAuth2 grants/URLs/scopes, Text/Binary mode/content
     types, header parameters, and one encoded Cookie header. Respect constants,
     effective credentials, collisions, and optional parameters' disabled state.
@@ -740,14 +872,14 @@ line remains. Generated source changes come only from generator changes.
     Add one OpenAPI skip diagnostic per GraphQL operation, no synthetic HTTP paths
     or GraphQL extension. Ownership: request/auth/body mapping and skip diagnostics.
 
-- [ ] **Build environments**
+- [x] **Build environments**
   - R20: build optional environment output, declare every collection placeholder
     regardless of the switch, and separate server/auth variables for shared API
     groups. Include path/query/header/cookie variables; credentials remain empty.
   - Ownership: variable/environment writer module and tests. Integrator owns
     export option/CLI wiring and shared type/test-root edits.
 
-- [ ] **Save responses**
+- [x] **Save responses**
   - R21: use the example engine for each success media type and declared error
     shape. Choose deterministic concrete statuses that respect narrower overrides.
     Empty bodies stay absent, binary examples are documented placeholders, and
@@ -756,7 +888,7 @@ line remains. Generated source changes come only from generator changes.
 
 ### Wave 20: Postman integration
 
-- [ ] **Validate collections**
+- [x] **Validate collections**
   - Validate every shipped JSON request and saved JSON response against original
     schemas with local definitions; finite streams validate their frames.
     Every failure is diagnosed and has a named authored example or accepted gap.
