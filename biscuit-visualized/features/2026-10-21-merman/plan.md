@@ -3,7 +3,7 @@ total_phases: 7
 created: 2026-10-21
 updated: 2026-10-22
 phase: 1
-start_phase: 6
+start_phase: 7
 agent: claude/sonnet
 yolo: true
 rulings_decided_on: 2026-10-22
@@ -256,6 +256,41 @@ skills_files_updated_during_phase_5:
     - .claude/skills/biscuit-visualized/artifacts-caching.md
     - .claude/skills/biscuit-visualized/diagram-components.md
     - .claude/skills/biscuit-terminal/discovery.md
+source_files_during_phase_6:
+    - biscuit-visualized/src/Cargo.toml
+    - biscuit-visualized/justfile
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/raster/png.rs
+    - biscuit-visualized/src/src/mermaid/contrast.rs
+    - biscuit-visualized/src/src/mermaid/design.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/golden_tests.rs
+    - biscuit-visualized/src/src/tests/contrast_corpus_tests.rs
+    - biscuit-visualized/src/src/tests/corpus_measure_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_family_tests.rs
+    - biscuit-visualized/src/src/tests/measure_tests.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_cache_key_tests.rs
+    - biscuit-visualized/src/src/tests/goldens/svg/*.snap (138 files)
+    - biscuit-visualized/src/src/tests/goldens/png/*.png (66 files)
+    - biscuit-visualized/bench/Cargo.toml
+    - biscuit-visualized/bench/Cargo.lock
+    - biscuit-visualized/bench/baseline.json
+    - biscuit-visualized/bench/src/main.rs
+    - biscuit-visualized/bench/src/baseline.rs
+    - biscuit-visualized/bench/src/corpus.rs
+    - biscuit-visualized/bench/src/stats.rs
+    - biscuit-visualized/bench/tests/wiring.rs
+docs_updated_during_phase_6:
+    - biscuit-visualized/docs/merman.md
+    - biscuit-visualized/features/2026-10-21-merman/gallery/themed-gallery-macos.html
+    - biscuit-visualized/features/2026-10-21-merman/gallery/themed-gallery-linux.html
+docs_created_during_phase_6:
+    - biscuit-visualized/bench/README.md
+skills_files_updated_during_phase_6:
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/artifacts-caching.md
 ---
 
 # Plan: Merman Rendering
@@ -1043,7 +1078,7 @@ promote the package to gating, and add the local speed guard.
   Merman's fonts; keep the size under the ~20 MB cap; Mermaid.js 12.2.0
   references only (D38). Golden inputs use only code points Inter maps, and no
   emoji (D40, D65).
-- [ ] **Benchmark (D12, D35, D44, D67, R-V6, AC-V2).** Release profile; reference
+- [x] **Benchmark (D12, D35, D44, D67, R-V6, AC-V2).** Release profile; reference
   host is the **Linux build host** (`os` skill); limits apply only there,
   timings elsewhere are informational. A standalone non-member crate at
   `biscuit-visualized/bench/` (empty `[workspace]`, D67), so CI schedules no
@@ -1068,17 +1103,17 @@ promote the package to gating, and add the local speed guard.
   goldens (flowchart, sequence, gitGraph × full ANSI, background only). Every
   test pins its palette (R-V2). A test compares golden inputs' code points
   with Inter's `cmap`.
-- [ ] **Golden PNGs (D42, R-V12, AC-V1).** `Dark` and `Default` only,
+- [x] **Golden PNGs (D42, R-V12, AC-V1).** `Dark` and `Default` only,
   `MERMAID_FONT=Inter`, tolerance AE share ≤ 0.1% and RMSE ≤ 0.005, L1 on
   **every** CI environment. Prove them on macOS and Linux locally, and on
   native Windows and WSL2 through the test rigs (`os` skill; `just ci-seed`).
-- [ ] **Cross-OS re-measure with Inter (R-C14, AC-S8).** Record AE share and
+- [x] **Cross-OS re-measure with Inter (R-C14, AC-S8).** Record AE share and
   RMSE per host pair (macOS, Linux, Windows) with `MERMAID_FONT=Inter` in the
   log.
 - [x] **Merman-only family smoke tests (D16, AC-C5).** Confirm the family list
   from Merman's registry at the pinned rev (the research list has 15 entries,
   counting railroad dialects); one smoke test each.
-- [ ] **Corpus contrast test (R-V3, D45, AC-T4).** Every text element in every
+- [x] **Corpus contrast test (R-V3, D45, AC-T4).** Every text element in every
   golden, derived-palette goldens included, meets 4.5:1 against the fill
   behind it.
 - [x] **Corpus checks.** No `foreignObject` in rasterized output (AC-C7);
@@ -1087,7 +1122,7 @@ promote the package to gating, and add the local speed guard.
 
 **Wave 15 — after Wave 14.**
 
-- [ ] **Canonical `just` recipe set (D42, AC-V4; pre-authorized: item 11).**
+- [x] **Canonical `just` recipe set (D42, AC-V4; pre-authorized: item 11).**
   First task of the gating wave. Bring `biscuit-visualized/justfile` to the
   canonical set: every recipe in the `rust-testing` skill's "Canonical Just
   Recipes" table (`sanity`, `test`, `slow-tests`, `test-l2`, `test-l3`,
@@ -1117,12 +1152,12 @@ promote the package to gating, and add the local speed guard.
 
 ### Validation checkpoint 6
 
-- [ ] `just test` and `just lint` pass; goldens pass on macOS, Linux, native
+- [x] `just test` and `just lint` pass; goldens pass on macOS, Linux, native
   Windows, and WSL2.
-- [ ] The benchmark recipe runs on the Linux build host; a doctored baseline
+- [x] The benchmark recipe runs on the Linux build host; a doctored baseline
   and a doctored limit each flag (AC-V2). The stored Merman baseline is
   committed.
-- [ ] AC-V1, AC-V3, AC-V4, AC-C5, AC-T4, AC-M1, AC-M2, AC-S8 verified.
+- [x] AC-V1, AC-V3, AC-V4, AC-C5, AC-T4, AC-M1, AC-M2, AC-S8 verified.
 
 ---
 

@@ -252,6 +252,41 @@ skills_files_updated_during_phase_5:
     - .claude/skills/biscuit-visualized/artifacts-caching.md
     - .claude/skills/biscuit-visualized/diagram-components.md
     - .claude/skills/biscuit-terminal/discovery.md
+source_files_during_phase_6:
+    - biscuit-visualized/src/Cargo.toml
+    - biscuit-visualized/justfile
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/raster/png.rs
+    - biscuit-visualized/src/src/mermaid/contrast.rs
+    - biscuit-visualized/src/src/mermaid/design.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/golden_tests.rs
+    - biscuit-visualized/src/src/tests/contrast_corpus_tests.rs
+    - biscuit-visualized/src/src/tests/corpus_measure_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_family_tests.rs
+    - biscuit-visualized/src/src/tests/measure_tests.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_cache_key_tests.rs
+    - biscuit-visualized/src/src/tests/goldens/svg/*.snap (138 files)
+    - biscuit-visualized/src/src/tests/goldens/png/*.png (66 files)
+    - biscuit-visualized/bench/Cargo.toml
+    - biscuit-visualized/bench/Cargo.lock
+    - biscuit-visualized/bench/baseline.json
+    - biscuit-visualized/bench/src/main.rs
+    - biscuit-visualized/bench/src/baseline.rs
+    - biscuit-visualized/bench/src/corpus.rs
+    - biscuit-visualized/bench/src/stats.rs
+    - biscuit-visualized/bench/tests/wiring.rs
+docs_updated_during_phase_6:
+    - biscuit-visualized/docs/merman.md
+    - biscuit-visualized/features/2026-10-21-merman/gallery/themed-gallery-macos.html
+    - biscuit-visualized/features/2026-10-21-merman/gallery/themed-gallery-linux.html
+docs_created_during_phase_6:
+    - biscuit-visualized/bench/README.md
+skills_files_updated_during_phase_6:
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/artifacts-caching.md
 decisions_for_review:
     - |-
       **Sign off on the new diagram look (AC-T5; moved to this review by D74).**
@@ -319,36 +354,103 @@ decisions_for_review:
       Recommendation: **A**. Each choice is what makes the dark palettes
       readable, and each is pinned by a test (log "## Phase 5", "Decided
       during implementation").
+    - |-
+      **The look changed in eleven diagram types after the gallery you have
+      not yet reviewed; review it in the regenerated gallery.** Phase 6's
+      automated contrast check (every text at 4.5:1 against what is drawn
+      behind it) found 160 unreadable labels in 12 diagram types. They were
+      fixed in the styling code, not by loosening the check: C4 boundaries are
+      no longer filled (the fill was drawn over the nodes and hid them in
+      PNGs), kanban columns are darker on dark themes, timeline sections use
+      stronger colors (their text is a fixed dark gray), event-modeling and
+      cynefin boxes take palette tints, gitGraph commit-label backgrounds are
+      darker, and sankey, treemap, gantt, venn, and tree-view colors were
+      adjusted. Both galleries were regenerated, and so were the goldens.
+      - **Option A: accept.** Pro: every label is readable, proven by test.
+      - **Option B: ask for different colors per type.** Any replacement must
+        still pass the contrast test; the goldens are regenerated.
+      Recommendation: **A**, after a look at C4, kanban, and timeline in
+      `gallery/themed-gallery-macos.html`.
+    - |-
+      **One known unreadable case is allow-listed: sequence-diagram message
+      text on an author's light `box` in dark palettes (contrast 1.07–1.50).**
+      The box color is the author's but the text color is ours, so by the
+      spec it should be fixed. The contrast pass cannot reach it: the text is
+      colored by a stylesheet, the box by an attribute, and the messages are
+      not inside the box's element. Fixing it needs the pass to reason about
+      regions (which drawn rectangle contains a text), a larger change.
+      Other allow-listed failures are all the authors' own colors (C4
+      `$fontColor`/`$textColor`, venn `style … color:red`), which we never
+      change.
+      - **Option A: keep the allow-list and schedule a follow-up** for
+        region-aware contrast. Pro: no risky change now. Con: dark-theme
+        sequence diagrams with a light `box` stay hard to read.
+      - **Option B: fix now** with geometry in the contrast pass. Con: more
+        work in this feature; goldens of affected diagrams change.
+      Recommendation: **A**. Removing the allow-list entry makes the test fail
+      until it is fixed.
+    - |-
+      **The benchmark flags two diagram types on the Linux reference host.**
+      Warm render medians there: sequence 56 ms and timeline 84 ms, over the
+      spec's 50 ms limit (all others 2–45 ms; every cold render under 100 ms,
+      far below 500 ms). `just bench` on build-linux therefore exits 1 today.
+      The limits were not changed and the baseline records these timings.
+      - **Option A: accept** and record it (the baseline then catches any
+        further 25% slowdown). Pro: no work. Con: two families stay over the
+        stated rule.
+      - **Option B: raise the warm limit** (for example to 100 ms). Con:
+        weakens the rule for every family.
+      - **Option C: profile and speed up** sequence and timeline (much of a
+        timeline render is rasterizing a 2390 px wide image at 2×). Con:
+        work in Merman or the rasterizer.
+      Recommendation: **A** now, **C** as a follow-up.
+      Smaller benchmark choices the spec did not settle, all in
+      `bench/README.md`: the reference host is recognized by hostname
+      matching the baseline's `reference_host` (or `--reference`); the cold
+      limit is judged on the median; a family with no baseline entry flags on
+      the reference host; an empty `families` object is valid. Each is a
+      few-line change if you prefer another.
+    - |-
+      **Goldens pin their font with a bundled-only font chain, not the
+      `MERMAID_FONT` environment variable.** The spec says goldens render with
+      `MERMAID_FONT=Inter`. The process-wide font chain reads that variable
+      once, so setting it inside one test is unreliable. Instead the tests
+      render through a new crate-private entry point that takes the chain,
+      using a chain of the bundled fonts with `MERMAID_FONT=Inter` and no
+      installed fonts. The result is the same as the spec's intent and
+      stronger: no installed font can reach a golden. The PNG goldens also
+      render at 1× (the default request is 2×) to stay small and fast. If you
+      prefer the literal reading, the goldens would need `MERMAID_FONT` set
+      for the whole test process (a nextest setup step), with the same
+      output. The fixture license files keep their Phase 3 names
+      (`families/LICENSES/merman-LICENSE-MIT`, `merman-LICENSE-APACHE`,
+      `mermaid/LICENSE`) rather than the plan's `LICENSE-MIT`,
+      `LICENSE-APACHE`, `THIRD_PARTY_LICENSES/mermaid`; renaming is a
+      file move plus one README line.
 message_to_agent: |-
-  Phase 5 is implemented. Ken's gallery sign-off (AC-T5) and the four
-  styling departures are in `decisions_for_review` for the first review
-  after implementation (spec D74): do NOT wait for them. Generate Phase 6's
-  goldens from the implemented look. Read the log's "## Phase 5" section first, especially
-  "Merman behavior found" and "Decided during implementation".
+  Phase 6 is implemented. Read the log's "## Phase 6" section first.
 
-  - Galleries: `gallery/themed-gallery-{macos,linux}.html`, generated by the
-    non-member crate `gallery/` (`CARGO_TARGET_DIR=/tmp/... cargo run
-    --release -- <out.html>`). Regenerate them if styling changes.
-  - Styling API: `mermaid::{Rgb, Palette, TerminalColors}`,
-    `MermaidDiagram::{with_palette, palette}`; `with_theme` resets to the
-    fixed palette. Phase 6's goldens should pin palettes explicitly: the
-    four `Palette::fixed`, and D47's two synthetic terminals are exactly
-    the gallery's `tokyo_night()` and background-only `#1a1b26`
-    (`src/tests/palette_tests.rs` has the same constructors).
-  - Merman traps: explicit site-config `themeVariables` beat compiled
-    styles AND the source's own `%%{init}%%` variables; a static fill beats
-    an ordinal palette; an unsupported rule erases a supported one. Guard
-    tests are in `src/tests/theme_tests.rs`.
-  - AC-T4 (Phase 6's contrast test over the golden corpus) can reuse
-    `mermaid::contrast` (crate-private): it already finds the fill behind
-    each `<text>` (inline fills, closed sibling groups, `<use>` placements)
-    and parses Merman's CSS colors.
-  - `MERMAID_BACKEND` is `+bv2`; bump it again for any output change.
-  - Still open from Phase 4: darkmatter's 45 key-order failures (separate
-    fix `2026-10-23-frontmatter-key-order`). Also pre-existing (fail on
-    clean HEAD): worktree-cli L2 Kitty tests
-    `level2_graph_height_cap_elides_lanes_in_a_short_kitty_window` and
-    `level2_graph_restores_lane_density_in_kitty` (lane height cap).
+  - The golden corpus is live: `src/src/tests/golden_tests.rs` (204 tests),
+    `contrast_corpus_tests.rs` (AC-T4 oracle), `corpus_measure_tests.rs`
+    (AC-M1/M2). ANY change to rendered output shows up as golden diffs:
+    regenerate with `INSTA_UPDATE=always BISCUIT_VISUALIZED_UPDATE_GOLDENS=1
+    cargo nextest run -p biscuit-visualized --all-features --lib -E
+    'test(/golden_tests::/)'`, rerun without the variables, delete any
+    `*.snap.new`, and bump `MERMAID_BACKEND` (now `+bv3`) for output changes.
+  - `biscuit-visualized` is now gating in CI (`gates = true`); its L1 runs on
+    all four environments. Goldens and PNGs passed on macOS, Linux, native
+    Windows (pixel-identical everywhere) and WSL2 (see the log).
+  - Phase 7 docs: `docs/merman.md` has new "Golden tests" and "Benchmark"
+    sections; the Merman-only family list (D16, R-D1) is still to write. The
+    benchmark's own reference is `bench/README.md`.
+  - Open for review (in `decisions_for_review`): the sequence `box` contrast
+    allow-list, sequence/timeline over the 50 ms warm limit on build-linux
+    (`just bench` there exits 1), and the eleven restyled diagram types
+    (galleries regenerated).
+  - Still pre-existing and out of scope: darkmatter key-order failures
+    (fix `2026-10-23-frontmatter-key-order`) and worktree-cli L2 Kitty tests
+    `level2_graph_height_cap_elides_lanes_in_a_short_kitty_window`,
+    `level2_graph_restores_lane_density_in_kitty`.
 ---
 
 # Implementation Log for 2026-10-21-merman (7 phases)
@@ -1702,3 +1804,294 @@ modified by other work and are not this phase's either.)
   `NotApplicable`) and take the palette only through the site variables;
   the second sequence corpus case's light `rect` band is the author's.
   Phase 6's automated contrast test (AC-T4) is the full check of R-T8.
+
+## Phase 6
+
+Orchestrated by one agent with three parallel subagents (benchmark crate;
+AC-M1/AC-M2 over the corpus; AC-T4 contrast oracle and its fixes). The
+golden suite, render seam, justfile, gating edit, docs, and cross-OS runs
+were done directly.
+
+**Commit note:** partway through this phase the early golden work
+(`render_in` seam, `golden_tests.rs`, first goldens, plus the then-pending
+plan/spec/log edits) was committed as `0630606c4` ("fix(biscuit-visualized):
+render Mermaid PNGs with measured fonts"), not by this agent. The phase's
+file lists in the frontmatter therefore include files in that commit as well
+as the uncommitted ones.
+
+### Golden corpus (R-V1, R-V2, R-V11, AC-V1, AC-V3, AC-C5, AC-C7)
+
+- **Fixtures:** the 33 family fixtures already in
+  `src/src/tests/fixtures/merman/families/` (Phase 3, one per family of
+  Merman's registry, licenses in `families/LICENSES/`) are the golden inputs.
+  No new fixture was copied; no fonts; the fixtures folder is about 50 KB.
+  Nothing references Mermaid.js 11.x renders (goldens snapshot our own
+  output, D13).
+- **Seam:** `MermaidDiagram::render` now delegates to the crate-private
+  `render_in(chain, request)`, and the PNG path rasterizes with that same
+  chain (`raster::png::rasterize_svg_for_request_with`); before, the
+  rasterizer always took `default_chain()`. Behavior-neutral for `render`
+  (same chain object), so no backend bump for it.
+- `src/src/tests/golden_tests.rs`: per family, `svg_{dark,default,forest,neutral}`
+  (`insta`, `src/src/tests/goldens/svg/<fixture>_<palette>.snap`) and
+  `png_{dark,default}` (`src/src/tests/goldens/png/<fixture>_<palette>.png`,
+  AE share ≤ 0.001, RMSE ≤ 0.005, size must match); six `derived_golden_*`
+  tests (flowchart, sequence, gitgraph × `terminal_ansi` Tokyo Night /
+  `terminal_background` `#1a1b26`). 33 × 6 + 6 = 204 golden tests, 138 SVG
+  snapshots, 66 PNGs, about 5 MB.
+- Every golden pins its palette and renders with
+  `FontChain::injected(&[], &[], Some("Inter"))`: `MERMAID_FONT=Inter` with
+  no installed fonts. The SVG's `bv-<16 hex>` diagram id comes from the cache
+  key (font set hash; Linux also bundles Noto Emoji) and is normalized to
+  `bv-ID`.
+- Guards: `every_smoke_family_has_goldens` (golden list = smoke list, which
+  `the_smoke_list_is_mermans_family_registry` ties to Merman's registry),
+  `the_six_derived_goldens_cover_three_families_and_two_palettes`,
+  `every_golden_input_code_point_is_mapped_by_inter` (every non-control code
+  point of every golden input, in both Inter faces: passes, no fixture edit
+  needed), `normalize_ids_replaces_only_sixteen_hex_digits`,
+  `png_difference_counts_differing_pixels_and_channel_error`.
+- AC-C7: each `png_*` golden asserts the SVG handed to the rasterizer
+  (`take_rasterized_svgs`) has no `foreignObject`; each SVG golden asserts
+  the same of its SVG.
+- PNG goldens use `scale: 1` (the default request is 2×) to keep them small
+  and fast; slowest golden test 1.4 s (timeline PNG, 2390 × 687).
+
+### Merman-only families (D16, AC-C5)
+
+Registry confirmed at the pinned rev by the existing guard
+`the_smoke_list_is_mermans_family_registry` (33 rendered families + `error`
+and `zenuml` excluded with reasons). Each has its smoke tests
+(`mermaid_family_tests`) and four fixed-palette goldens. The docs list of
+Merman-only families is Phase 7's R-D1 task.
+
+### Corpus contrast (R-V3, D45, AC-T4)
+
+`src/src/tests/contrast_corpus_tests.rs`: an oracle independent of the
+production pass. It reads each stored `.snap` (path joined to
+`CARGO_MANIFEST_DIR`, so a golden change schedules these tests), parses it
+with usvg on the golden chain (stylesheets, `<use>`, transforms resolved),
+takes each text's resolved fill times group opacity and its glyph-ink box,
+rasterizes the SVG with every `<text>` removed, and judges each text against
+the most frequent pixel in its box. One test per family (`<family>_text_is_readable`,
+fixed palettes plus the derived ones), `every_svg_golden_has_a_contrast_check`,
+and four unit tests of the oracle (a stylesheet-painted label placed through
+`<use>` and a translucent label must fail; a readable one must pass).
+
+It first found **160 failing texts in 12 families**. Fixed in production
+(`mermaid/design.rs`, `mermaid/contrast.rs`; `MERMAID_BACKEND` → `+bv3`):
+
+| Family | Cause | Fix |
+| --- | --- | --- |
+| c4 (all) | compiled `cluster` fill reached C4 boundaries, drawn after their contents: nodes were hidden in the PNGs | no `cluster` fill for c4 (Mermaid's boundary is unfilled) |
+| c4 dark | Merman's fixed `#444` boundary/relationship text; white on `#999` external elements | `c4.boundary_font_color`, `relationship_text_color` = palette text; `external_*_font_color` = best of text/black/white |
+| treeView | fixed `descriptionColor` `#6a9955` | green accent adjusted to 4.5:1 |
+| eventmodeling dark | light default lane/box fills | `em*` site variables from surfaces, tints, accents |
+| kanban dark | stylesheet-painted light `cScale` columns | `cScale0..11` = second surface, 10 points darker (Merman lightens by 10) |
+| timeline dark | fixed `#333` text on dark sections | section accents adjusted until `#333` reads (the mindmap approach) |
+| cynefin dark | default domain colors | `cynefin.*Bg` = tints |
+| gantt dark | `base`'s white alternate section at 0.2 opacity | `altSectionBkgColor` = background |
+| treemap default | `cScale` from the surface, stacked translucently | `cScale0..11` = tints |
+| sankey default | full accents under half-transparent links | node colors moved toward the background until text reads |
+| gitGraph dark, both terminals | half-transparent commit label background over branch lines | label background moved toward black/white until it reads over every branch color |
+| venn dark | derived near-background set color | `venn1..8` = accents |
+
+The contrast pass now blends translucent fills over what they cover, and a
+closed node group's fill reaches only its next siblings (it had spread to the
+rest of the diagram, recoloring C4 boundary and venn text). Goldens of c4,
+cynefin, eventmodeling, gantt, gitgraph (incl. both terminals), kanban,
+sankey, timeline, treemap, treeView, and venn were regenerated; every other
+golden stayed byte-identical. `docs/merman.md` ("Readable text", "How a
+palette reaches Merman") updated.
+
+**17 allow-listed failures** (each must still fail, so a fix removes it):
+the c4 person's author `$fontColor="red"` on author `$bgColor="grey"` (4
+palettes); c4 relationships' author `$textColor` on our background; venn
+"React" author `color:red` on author `fill:#ff6b6b` (4 palettes); and
+**sequence × dark/terminal_ansi/terminal_background: our message text on the
+author's `box LightGrey`** (1.07–1.50). The last is ours to fix but the pass
+cannot reach it (stylesheet text, presentation-attribute box, messages
+outside the box's group); see `decisions_for_review`.
+
+### Corpus measurement (AC-M1, AC-M2)
+
+`src/src/tests/corpus_measure_tests.rs`: per family,
+`drawn_widths_match_usvg` (AC-M1, with a per-family minimum label count) and
+`labels_fit_their_boxes` (AC-M2), over the family's Default golden SVG on
+the golden chain; guards `corpus_measure_families_are_the_golden_corpus`
+(macro list = `GOLDEN_SOURCES`, minimums sum ≥ 450) and
+`corpus_measure_allow_lists_name_golden_fixtures`. **483 labels compared;
+worst width difference 0.0000153 px** (ishikawa), no glyph or face mismatch.
+Overflows, none measurer-attributable:
+
+- swimlane edge label "Needs code change": Merman wraps it at 120 px and
+  sizes a two-line box but draws one line (a flowchart edge label with the
+  same text is not wrapped); also overflows with Merman's own measurer.
+  `MERMAN_CORPUS_OVERFLOWS`.
+- radar axis label "Intelligence": radar's fixed 700 × 700 canvas; the label
+  starts at x ≈ −17.5. `MERMAN_CORPUS_OVERFLOWS`.
+- radar legend "Naruto", "Sasuke", "Ninja": no box; the survey picks the
+  graticule circle. `NO_BOX_LABELS` (axis labels stay surveyed).
+
+Both Merman defects are candidates for upstream issues (not filed).
+
+### Benchmark (D12, D35, D44, D67, R-V6, AC-V2)
+
+`biscuit-visualized/bench/` (non-member crate, empty `[workspace]`, own
+`Cargo.lock` with the same Merman rev): warm (`render` to PNG, default
+request, `Default` palette, after one untimed render) and cold (the binary
+spawns itself, `__one-shot <family>`, spawn → exit), median and nearest-rank
+p95 per family, 20 iterations each; every iteration gets a fresh
+`BISCUIT_VISUALIZED_CACHE_DIR` checked empty before the timer, and a cache
+hit (or a render that wrote nothing there) is an error. Flags: warm median
+> 50 ms, cold median ≥ 500 ms, warm or cold median > 25% over the baseline,
+no baseline entry; exit 1 names family and rule. `just bench` runs it
+directly (`cd bench && cargo run --release --quiet -- "$@"`; `*args` without
+a default, because `*args=""` passes an empty argument under
+`positional-arguments`).
+
+- Loader matrix (`bench/src/baseline.rs`, 36 tests): control (committed
+  baseline), `median_ms`/`p95_ms` × absent, null, string, `[]`, `{}`,
+  negative, zero, bare `NaN` (parse error), `"NaN"`; `p95 < median`; family
+  missing → `NoBaseline` state; `"families": {}` valid (all no-baseline);
+  empty document; no `families`; family not an object; no `cold`; unknown
+  family / field; trailing garbage; duplicate family / field / top-level key
+  (custom visitor); missing file. Every invalid shape is an error naming the
+  JSON path; nothing compared or overwritten.
+- Wiring (`bench/tests/wiring.rs`, spawns the binary with
+  `--families flowchart --iterations 3 --reference`): control passes;
+  doctored baseline flags ("slower than the baseline"); doctored limit
+  `--warm-limit-ms 0.001` flags; no-baseline flags on the reference host;
+  off-host a doctored baseline only prints "would flag"; a duplicate-key
+  baseline exits 2 and the file is unchanged. 46/46 pass on macOS and on
+  build-linux (`cargo nextest run --locked`).
+- **Linux reference baseline** (build-linux, tree shipped by tar,
+  `--reference --write-baseline`, scratch dir removed): warm medians
+  2.4 ms (info) – 84.3 ms (timeline); cold medians 11.6–98.0 ms. **Over the
+  50 ms warm limit: sequence 56.4 ms, timeline 84.3 ms**, so `just bench`
+  on build-linux exits 1 today (eventmodeling 45.3 and kanban 42.1 are
+  close). A second run auto-enforced via the hostname and landed within
+  −1.3% to +7.2% of the baseline. macOS (informational, busy host): warm
+  6–71 ms, cold 265–709 ms.
+- `just ci-local --plan` shows no cell for the bench crate and no
+  `biscuit-visualized/*/check` cell. A change to `bench/src/*.rs` alone
+  selects only the repo-wide `test-toolkit` archive-path-guard lint
+  (`affected_scope.py`), the same as the gallery and spike crates.
+- The baseline was recorded while the contrast agent was changing designs
+  (both ran concurrently); the design changes are colors only.
+
+### CI: canonical recipes and gating (D42, R-V12, AC-V4)
+
+- Justfile: the canonical set already existed except `lint-fix` (added,
+  `just lint || just _fix_lint`) and `bench` (now real); `docs` now passes
+  `--all-features`. `just check-tier-coverage biscuit-visualized`: 0
+  stranded, no stubbed tier listed.
+- **Before the gating edit**, `just ci-local --plan` planned **no cell at
+  all** for `biscuit-visualized` (the `promotion-pending` exclusion keeps it
+  out of the plan), so "L1 cells planned on each environment" could only be
+  observed after the edit.
+- `src/Cargo.toml`: `gates = true`; `exclusion-class`, `owner`, `reason`,
+  `expiry` removed; comment updated. `source-inputs` unchanged: the fixtures
+  are read with `include_str!`, the PNG goldens and the stored SVG goldens
+  through literals joined to `CARGO_MANIFEST_DIR` (both CI-visible), and
+  `source-inputs` only accepts another package's source.
+- **After**, `just ci-local --plan`:
+
+  ```text
+  biscuit-visualized/ubuntu-latest/lint  execute  ci  pending  — lint gate for biscuit-visualized, hosted on ubuntu-latest
+  biscuit-visualized/ubuntu-latest/L1  execute  ci  pending  — biscuit-visualized declares the L1 tier; ubuntu-latest is a required environment
+  biscuit-visualized/windows-latest/L1  execute  ci  pending  — biscuit-visualized declares the L1 tier; windows-latest is a required environment
+  biscuit-visualized/macos-latest/L1  execute  ci  pending  — biscuit-visualized declares the L1 tier; macos-latest is a required environment
+  biscuit-visualized/wsl2-ubuntu/L1  execute  ci  pending  — biscuit-visualized declares the L1 tier; wsl2-ubuntu is a required environment
+  ```
+
+### Galleries
+
+Regenerated after the contrast fixes, so the sign-off item shows the shipped
+look: `gallery/themed-gallery-macos.html` locally and
+`gallery/themed-gallery-linux.html` on build-linux (tree shipped by tar,
+scratch removed).
+
+### Docs and skill
+
+- `docs/merman.md`: new "Golden tests" (corpus table, pinned palette/font,
+  tolerance, regeneration, guards, "CI") and "Benchmark" sections. The plan's
+  "Docs (shipped)" item was already checked, but `merman.md` had no such
+  content; it was written now.
+- `.claude/skills/biscuit-visualized/SKILL.md`: golden corpus, gating, bench
+  notes; `+bv3` (with `artifacts-caching.md`).
+
+### Cross-OS goldens and re-measure with Inter (R-C14, AC-S8, R-V12)
+
+`just cross-check biscuit-visualized --os all --all-features --lib
+--no-capture golden_tests contrast_corpus_tests corpus_measure_tests` on
+the final tree (native mode, because of `--all-features`; no receipt):
+
+| Host | Result | PNG goldens vs the macOS-generated ones |
+| --- | --- | --- |
+| macOS (local) | 315 passed | generated here |
+| Linux (build-linux) | 315 passed | 66/66 AE share 0, RMSE 0 |
+| native Windows (build-win-native) | 315 passed | 66/66 AE share 0, RMSE 0 |
+| WSL2 (build-win) | 315 passed | 66/66 AE share 0, RMSE 0 |
+
+Per host pair with `MERMAID_FONT=Inter` (the goldens' chain): macOS–Linux,
+macOS–Windows, Linux–Windows (both equal to macOS, so equal to each other),
+and macOS–WSL2 are all **pixel-identical: AE share 0.000000, RMSE 0.000000**
+on every one of the 66 PNGs. The Phase 1 host-font record (Linux AE share
+0.27%/0.74% from DejaVu substitution) is the prior one; with the bundled
+Inter, the D42 tolerance is not even approached. An earlier Linux run, before
+the contrast fixes, was identical too.
+
+A first `--os all` attempt with an `-E '…'` expression died locally on a
+shell-quoting error while its Windows leg kept running remotely and held the
+clone lock; the rerun waited for it, then ran. Use plain name filters with
+`cross-check`, not `-E`.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) |
+| --- | --- |
+| R-V1, AC-V1 (SVG, every family × 4 palettes) | `golden_tests::golden_<family>::svg_{dark,default,forest,neutral}` (132) |
+| R-V1, AC-V1, D42 (PNG, Dark/Default, tolerance) | `golden_tests::golden_<family>::png_{dark,default}` (66), `png_difference_counts_differing_pixels_and_channel_error` |
+| AC-V1 (Inter maps every code point) | `every_golden_input_code_point_is_mapped_by_inter` |
+| R-V11, AC-V3, D47 | `derived_golden_{flowchart,sequence,gitgraph}_{ansi,background}`, `the_six_derived_goldens_cover_three_families_and_two_palettes` |
+| R-V2 (pinned palette and font) | every golden: `with_palette(…)` + `golden_chain()`; `normalize_ids_replaces_only_sixteen_hex_digits` |
+| AC-C5, D16, D27 | `mermaid_family_tests` smoke tests + `the_smoke_list_is_mermans_family_registry`; `every_smoke_family_has_goldens` |
+| AC-C7 | every `png_*` golden (rasterized SVG) and `svg_*` golden; smoke tests |
+| AC-T4, R-V3, D45 | `contrast_corpus_tests::<family>_text_is_readable` (33), `every_svg_golden_has_a_contrast_check`, oracle unit tests (`strip_text_removes_every_text_element_and_nothing_else`, `snapshot_body_skips_the_insta_header`, `dominant_color_is_the_most_frequent_pixel_in_the_box`, `the_oracle_fails_a_low_contrast_label_and_passes_a_readable_one`) |
+| AC-M1 | `corpus_measure_tests::<family>::drawn_widths_match_usvg` (33) |
+| AC-M2 | `corpus_measure_tests::<family>::labels_fit_their_boxes` (33), `corpus_measure_families_are_the_golden_corpus`, `corpus_measure_allow_lists_name_golden_fixtures` |
+| AC-V2, R-V6 (local only, never CI) | `bench/src/baseline.rs` loader matrix (36), `bench/tests/wiring.rs` (control, doctored baseline, doctored limit, no-baseline, off-host, duplicate key) |
+| AC-V4, R-V12, D42 | `just ci-local --plan` record above; `just check-tier-coverage` 0 stranded |
+| AC-S8, R-C14 | cross-OS table above |
+
+Input robustness: the only new configuration loader is the benchmark's
+baseline JSON (matrix above, in-process; the binary spawned only for
+wiring). Its tests live in the non-member crate and so never run in CI, by
+D67's design.
+
+### Gates
+
+| Check | Result |
+| --- | --- |
+| `just lint` (biscuit-visualized) | clean |
+| `just test` (biscuit-visualized) | **921 passed, 3 skipped** (74 s; host load average 15–18 from other sessions; 145 tests reported SLOW > 5 s, all passing, slowest 6.9 s, all pre-existing render tests; slowest new test 1.4 s) |
+| `just check-tier-coverage biscuit-visualized` | 0 stranded |
+| bench crate (`cargo nextest run` in `bench/`) | 46 passed (macOS and build-linux) |
+| cross-OS (Linux, native Windows, WSL2) | 315/315 each |
+| darkmatter `-E 'test(/mermaid\|svg_sanitizer\|diagram/)'` | 106 passed |
+| worktree-cli `test(/git_graph\|graph/)` & L1 filter | 85 passed |
+
+The first `just test` invocation reported only 318 tests (a run that started
+while another session's cargo build was in flight); an immediate rerun ran
+the full 921, and that is the result above. `sniff-cli` and
+`biscuit-terminal-cli` assert no Mermaid styling (as in Phase 5).
+
+### Scope check
+
+`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs
+python3 scripts/ci/affected_scope.py` → `packages: []`, `change_class:
+documentation`, because this phase's code had already been committed
+(`0630606c4`, `96e554b61`, `8f081510e`, `bf8e0665c`) and only this log was
+uncommitted. The gates were run regardless (above); over the phase's own
+files the selected package is `biscuit-visualized`.
