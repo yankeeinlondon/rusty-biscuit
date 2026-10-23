@@ -1,7 +1,7 @@
 //! Allowlist-based SVG sanitizer for safe raw-HTML emission.
 //!
 //! The browser render-tree path promotes a `mermaid` fence to a static `<svg>`
-//! produced by `mermaid-rs-renderer` (via `biscuit-visualized`) and emits it
+//! produced by Merman (via `biscuit-visualized`) and emits it
 //! through [`define_as_raw_html`], which never escapes its input. That makes the
 //! SVG an injection surface: a future renderer path — or an unescaped graph
 //! label — could carry `<script>`, an `on*` event handler, an external
@@ -23,10 +23,12 @@ use quick_xml::writer::Writer;
 ///
 /// Compared case-insensitively against the lowercased local name, so any
 /// element whose lowercased name is absent — `script`, `foreignObject`,
-/// `image`, `iframe`, the `animate*`/`set`/`filter`/`fe*` families — is dropped
+/// `image`, `iframe`, the `animate*`/`set`/`fe*` families — is dropped
 /// along with its entire subtree. The set is presentation-only: no scripting,
-/// no external resource loading. It covers everything `mermaid-rs-renderer`
-/// emits plus the standard SVG shape vocabulary.
+/// no external resource loading. It covers everything Merman emits plus the
+/// standard SVG shape vocabulary. `<filter>` is absent on purpose: it is
+/// admitted only through [`sanitize_filter_element`], which keeps bounded
+/// drop shadows and nothing else.
 const ALLOWED_ELEMENTS: &[&str] = &[
     "svg",
     "g",
@@ -67,6 +69,10 @@ const ALLOWED_ELEMENTS: &[&str] = &[
 /// fetches. XML declarations, doctypes, processing instructions, and comments
 /// are dropped.
 ///
+/// Of the filter family only a `<filter>` holding `<feDropShadow>` primitives
+/// survives, under the limits of [`sanitize_filter_element`]; every other `fe*`
+/// primitive is dropped.
+///
 /// ## Returns
 ///
 /// The sanitized SVG, or `None` when the input is not well-formed XML — in
@@ -91,11 +97,14 @@ pub fn sanitize_svg(svg: &str) -> Option<String> {
     loop {
         match reader.read_event_into(&mut buf).ok()? {
             Event::Start(e) => {
-                if local_name_lower(e.name().as_ref()) == b"style" {
+                let local = local_name_lower(e.name().as_ref());
+                if local == b"style" {
                     // `<style>` is allowlisted for diagram fidelity, but its CSS
                     // is an external-reference surface (`@import`, `url(...)`).
                     // Validate the whole block and drop it wholesale when unsafe.
                     sanitize_style_element(&mut reader, &mut writer, &e)?;
+                } else if local == b"filter" {
+                    sanitize_filter_element(&mut reader, &mut writer, &e)?;
                 } else if is_allowed_element(e.name().as_ref()) {
                     writer.write_event(Event::Start(sanitize_start(&e))).ok()?;
                 } else {
@@ -110,7 +119,9 @@ pub fn sanitize_svg(svg: &str) -> Option<String> {
                 if is_allowed_element(e.name().as_ref()) {
                     writer.write_event(Event::Empty(sanitize_start(&e))).ok()?;
                 }
-                // A disallowed empty element has no subtree; just drop it.
+                // A disallowed empty element has no subtree; just drop it. This
+                // includes `<filter/>` (no primitive, see
+                // `sanitize_filter_element`) and any `fe*` outside a filter.
             }
             // Only allowed-element ends reach here (disallowed subtrees are
             // consumed above), so write them straight through.
@@ -260,6 +271,188 @@ fn sanitize_style_element(
     Some(())
 }
 
+/// Largest `|dx|`, `|dy|`, and `stdDeviation` a kept `<feDropShadow>` may carry.
+///
+/// Bounds the blur radius and offset so a crafted diagram cannot make the
+/// reader's browser render slowly.
+const DROP_SHADOW_CAP: f64 = 20.0;
+
+/// Re-emits a `<filter>` only as a bounded drop shadow; otherwise drops it with
+/// its whole subtree.
+///
+/// Kept: the `<filter>` and its `<feDropShadow>` children, each only when every
+/// attribute other than `id` is a number (a percentage counts, as in Merman's
+/// `width="130%"` filter region) or a color, `|dx|` and `|dy|` are at most
+/// [`DROP_SHADOW_CAP`], `stdDeviation` is one or two numbers each in
+/// `0..=DROP_SHADOW_CAP`, and `flood-opacity` is a number in `0..=1`. Every
+/// other child — `feImage`, `feTurbulence`, `feGaussianBlur`, any non-`fe`
+/// element, and anything nested inside a `<feDropShadow>` — is dropped.
+///
+/// A `<filter>` left with no `<feDropShadow>` is dropped too: an empty filter
+/// renders the element that references it as transparent, whereas a
+/// `filter="url(#…)"` naming a missing filter is ignored and the element paints
+/// unfiltered.
+///
+/// ## Returns
+///
+/// `None` on malformed input, so the caller fails closed.
+fn sanitize_filter_element(
+    reader: &mut Reader<&[u8]>,
+    writer: &mut Writer<Vec<u8>>,
+    start: &BytesStart,
+) -> Option<()> {
+    let filter_is_safe = filter_attributes_are_safe(start);
+    let mut shadows: Vec<BytesStart<'static>> = Vec::new();
+    let mut buf = Vec::new();
+    let mut skip_buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf).ok()? {
+            Event::Start(e) => {
+                if is_safe_drop_shadow(&e) {
+                    shadows.push(sanitize_start(&e));
+                }
+                reader.read_to_end_into(e.name(), &mut skip_buf).ok()?;
+                skip_buf.clear();
+            }
+            Event::Empty(e) => {
+                if is_safe_drop_shadow(&e) {
+                    shadows.push(sanitize_start(&e));
+                }
+            }
+            // Nested starts are consumed whole above, so this is the filter's own end.
+            Event::End(_) => break,
+            Event::Eof => return None,
+            _ => {}
+        }
+        buf.clear();
+    }
+    if filter_is_safe && !shadows.is_empty() {
+        writer.write_event(Event::Start(sanitize_start(start))).ok()?;
+        for shadow in shadows {
+            writer.write_event(Event::Empty(shadow)).ok()?;
+        }
+        writer.write_event(Event::End(start.to_end())).ok()?;
+    }
+    Some(())
+}
+
+/// Returns `true` when `element` is a `<feDropShadow>` within the limits of
+/// [`sanitize_filter_element`].
+fn is_safe_drop_shadow(element: &BytesStart) -> bool {
+    local_name_lower(element.name().as_ref()) == b"fedropshadow"
+        && filter_attributes_are_safe(element)
+}
+
+/// Returns `true` when every attribute of a `<filter>` or `<feDropShadow>` is
+/// within the limits of [`sanitize_filter_element`].
+fn filter_attributes_are_safe(element: &BytesStart) -> bool {
+    element.attributes().with_checks(false).all(|attr| {
+        let Ok(attr) = attr else {
+            return false;
+        };
+        let Ok(value) = attr.unescape_value() else {
+            return false;
+        };
+        // The full lowercased key: a prefixed `foo:dx` is not `dx`, so it must
+        // pass as a plain number or color like any other attribute.
+        match attr.key.as_ref().to_ascii_lowercase().as_slice() {
+            b"id" => attribute_is_safe(&attr),
+            b"dx" | b"dy" => parse_svg_number(&value).is_some_and(|n| n.abs() <= DROP_SHADOW_CAP),
+            b"stddeviation" => std_deviation_is_safe(&value),
+            b"flood-opacity" => parse_svg_number(&value).is_some_and(|n| (0.0..=1.0).contains(&n)),
+            _ => is_number_or_percentage(&value) || is_color(&value),
+        }
+    })
+}
+
+/// Returns `true` when `value` is one number, or two separated by whitespace or
+/// one comma, each in `0..=DROP_SHADOW_CAP`. A negative deviation is an SVG
+/// error, so it is rejected rather than capped by magnitude.
+fn std_deviation_is_safe(value: &str) -> bool {
+    let parts: Vec<&str> = match value.split_once(',') {
+        Some((first, second)) => vec![first.trim(), second.trim()],
+        None => value.split_ascii_whitespace().collect(),
+    };
+    (1..=2).contains(&parts.len())
+        && parts.iter().all(|part| {
+            parse_svg_number(part).is_some_and(|n| (0.0..=DROP_SHADOW_CAP).contains(&n))
+        })
+}
+
+/// Parses an SVG `<number>`: an optional sign, digits with an optional
+/// fraction, and an optional exponent. No surrounding whitespace.
+///
+/// The grammar is checked before `f64::from_str`, which would also accept
+/// `inf`, `NaN`, and `infinity`.
+fn parse_svg_number(value: &str) -> Option<f64> {
+    let bytes = value.as_bytes();
+    let mut idx = 0;
+    if matches!(bytes.first(), Some(b'+' | b'-')) {
+        idx += 1;
+    }
+    let int_start = idx;
+    while bytes.get(idx).is_some_and(u8::is_ascii_digit) {
+        idx += 1;
+    }
+    let mut digits = idx - int_start;
+    if bytes.get(idx) == Some(&b'.') {
+        idx += 1;
+        let frac_start = idx;
+        while bytes.get(idx).is_some_and(u8::is_ascii_digit) {
+            idx += 1;
+        }
+        digits += idx - frac_start;
+    }
+    if digits == 0 {
+        return None;
+    }
+    if matches!(bytes.get(idx), Some(b'e' | b'E')) {
+        idx += 1;
+        if matches!(bytes.get(idx), Some(b'+' | b'-')) {
+            idx += 1;
+        }
+        let exp_start = idx;
+        while bytes.get(idx).is_some_and(u8::is_ascii_digit) {
+            idx += 1;
+        }
+        if idx == exp_start {
+            return None;
+        }
+    }
+    if idx != bytes.len() {
+        return None;
+    }
+    value.parse::<f64>().ok().filter(|n| n.is_finite())
+}
+
+/// Returns `true` for an SVG number or a number followed by `%`.
+fn is_number_or_percentage(value: &str) -> bool {
+    parse_svg_number(value.strip_suffix('%').unwrap_or(value)).is_some()
+}
+
+/// Returns `true` for a hex color (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`) or
+/// an `rgb()`/`rgba()`/`hsl()`/`hsla()` whose three or four arguments are all
+/// numbers or percentages. Named colors are not admitted.
+fn is_color(value: &str) -> bool {
+    if let Some(hex) = value.strip_prefix('#') {
+        return matches!(hex.len(), 3 | 4 | 6 | 8) && hex.bytes().all(|b| b.is_ascii_hexdigit());
+    }
+    let lower = value.to_ascii_lowercase();
+    ["rgb(", "rgba(", "hsl(", "hsla("].iter().any(|function| {
+        lower
+            .strip_prefix(function)
+            .and_then(|rest| rest.strip_suffix(')'))
+            .is_some_and(|args| {
+                let parts: Vec<&str> = args
+                    .split(|c: char| c == ',' || c == '/' || c.is_ascii_whitespace())
+                    .filter(|part| !part.is_empty())
+                    .collect();
+                (3..=4).contains(&parts.len())
+                    && parts.iter().all(|part| is_number_or_percentage(part))
+            })
+    })
+}
+
 /// Returns `true` only when `value` (ignoring leading ASCII whitespace) begins
 /// with `#`, i.e. an in-document fragment reference. Everything else — absolute
 /// URLs, `javascript:`, `data:`, scheme-relative — is rejected.
@@ -396,6 +589,236 @@ mod tests {
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg"><rect filter="url(#f)" width="1"/></svg>"##;
         let out = sanitize_svg(svg).expect("well-formed");
         assert!(out.contains(r##"filter="url(#f)""##), "local fragment filter dropped: {out}");
+    }
+
+    /// Merman's drop-shadow defs exactly as its ER, state, class, mindmap,
+    /// requirement, block, and flowchart renderers emit them (light theme).
+    const MERMAN_SHADOW_DEFS: &str = r##"<defs><filter id="bv-2f30a68e5cebaffa-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"/></filter></defs><defs><filter id="bv-2f30a68e5cebaffa-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"/></filter></defs>"##;
+
+    /// Wraps one `<feDropShadow>` attribute list in a referenced filter.
+    fn shadow_svg(shadow_attrs: &str) -> String {
+        format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg"><defs><filter id="f" width="130%"><feDropShadow {shadow_attrs}/></filter></defs><rect filter="url(#f)" width="1"/></svg>"##
+        )
+    }
+
+    fn keeps_shadow(shadow_attrs: &str) -> bool {
+        let out = sanitize_svg(&shadow_svg(shadow_attrs)).expect("well-formed");
+        out.contains("<feDropShadow")
+    }
+
+    #[test]
+    fn keeps_merman_drop_shadow_verbatim() {
+        let svg = format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg">{MERMAN_SHADOW_DEFS}<rect filter="url(#bv-2f30a68e5cebaffa-drop-shadow)" width="1"/></svg>"##
+        );
+        let out = sanitize_svg(&svg).expect("well-formed");
+        assert!(out.contains(MERMAN_SHADOW_DEFS), "Merman shadow altered or dropped: {out}");
+        assert!(
+            out.contains(r##"filter="url(#bv-2f30a68e5cebaffa-drop-shadow)""##),
+            "local filter reference dropped: {out}"
+        );
+    }
+
+    #[test]
+    fn drop_shadow_offsets_are_capped_by_magnitude() {
+        for attr in ["dx", "dy"] {
+            assert!(keeps_shadow(&format!(r#"{attr}="20""#)), "{attr} at cap dropped");
+            assert!(keeps_shadow(&format!(r#"{attr}="-20""#)), "{attr} at negative cap dropped");
+            assert!(keeps_shadow(&format!(r#"{attr}="0""#)), "{attr} zero dropped");
+            assert!(!keeps_shadow(&format!(r#"{attr}="20.001""#)), "{attr} above cap kept");
+            assert!(!keeps_shadow(&format!(r#"{attr}="-21""#)), "{attr} below negative cap kept");
+            assert!(!keeps_shadow(&format!(r#"{attr}="2e2""#)), "{attr} exponent above cap kept");
+        }
+    }
+
+    #[test]
+    fn drop_shadow_std_deviation_is_capped() {
+        assert!(keeps_shadow(r#"stdDeviation="20""#), "stdDeviation at cap dropped");
+        assert!(keeps_shadow(r#"stdDeviation="0""#), "stdDeviation zero dropped");
+        assert!(keeps_shadow(r#"stdDeviation="20 20""#), "two values at cap dropped");
+        assert!(keeps_shadow(r#"stdDeviation="3,4""#), "comma pair dropped");
+        assert!(!keeps_shadow(r#"stdDeviation="21""#), "stdDeviation above cap kept");
+        assert!(!keeps_shadow(r#"stdDeviation="20 21""#), "second value above cap kept");
+        assert!(!keeps_shadow(r#"stdDeviation="-1""#), "negative stdDeviation kept");
+        assert!(!keeps_shadow(r#"stdDeviation="1 2 3""#), "three values kept");
+        assert!(!keeps_shadow(r#"stdDeviation="""#), "empty stdDeviation kept");
+    }
+
+    #[test]
+    fn drop_shadow_flood_opacity_is_limited_to_unit_range() {
+        assert!(keeps_shadow(r#"flood-opacity="0""#), "flood-opacity 0 dropped");
+        assert!(keeps_shadow(r#"flood-opacity="1""#), "flood-opacity 1 dropped");
+        assert!(!keeps_shadow(r#"flood-opacity="1.01""#), "flood-opacity above 1 kept");
+        assert!(!keeps_shadow(r#"flood-opacity="-0.01""#), "flood-opacity below 0 kept");
+        assert!(!keeps_shadow(r#"flood-opacity="50%""#), "percentage flood-opacity kept");
+    }
+
+    #[test]
+    fn drop_shadow_numbers_reject_empty_and_non_numeric_values() {
+        for value in ["", " 4", "4px", "inf", "NaN", "infinity", ".", "1e", "--1", "1.2.3"] {
+            assert!(!keeps_shadow(&format!(r#"dx="{value}""#)), "dx={value:?} kept");
+        }
+        assert!(keeps_shadow(r#"dx="+1.5e1""#), "signed exponent number dropped");
+        assert!(keeps_shadow(r#"dx=".5""#), "leading-dot number dropped");
+    }
+
+    #[test]
+    fn drop_shadow_colors_accept_hex_and_numeric_functions_only() {
+        let kept = [
+            "#000",
+            "#000F",
+            "#FFFFFF",
+            "#00000080",
+            "rgb(0, 0, 0)",
+            "rgba(185,185,185,0.5)",
+            "hsl(120 50% 50% / 0.4)",
+        ];
+        for color in kept {
+            assert!(keeps_shadow(&format!(r#"flood-color="{color}""#)), "color {color:?} dropped");
+        }
+        let rejected = [
+            "",
+            "#",
+            "#12345",
+            "#GGGGGG",
+            "red",
+            "url(#x)",
+            "rgb(0, 0)",
+            "rgb(a, b, c)",
+            "rgb(0 0 0",
+            "var(--c)",
+        ];
+        for color in rejected {
+            assert!(!keeps_shadow(&format!(r#"flood-color="{color}""#)), "color {color:?} kept");
+        }
+    }
+
+    #[test]
+    fn drop_shadow_with_keyword_attribute_is_dropped() {
+        assert!(!keeps_shadow(r#"in="SourceGraphic" dx="1""#), "keyword `in` kept");
+        assert!(!keeps_shadow(r#"result="shadow" dx="1""#), "keyword `result` kept");
+        assert!(!keeps_shadow(r#"dx="1" onload="alert(1)""#), "event handler kept");
+    }
+
+    #[test]
+    fn filter_with_non_numeric_attribute_is_dropped_with_its_children() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg"><filter id="f" filterUnits="userSpaceOnUse"><feDropShadow dx="1"/></filter><rect/></svg>"##;
+        let out = sanitize_svg(svg).expect("well-formed");
+        assert!(!out.contains("<filter"), "filter with keyword attribute kept: {out}");
+        assert!(!out.contains("feDropShadow"), "child of dropped filter kept: {out}");
+        assert!(out.contains("<rect"), "safe sibling dropped: {out}");
+    }
+
+    #[test]
+    fn filter_region_accepts_numbers_and_percentages_only() {
+        let keeps = |region: &str| {
+            let svg = format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg"><filter id="f" {region}><feDropShadow dx="1"/></filter></svg>"#
+            );
+            sanitize_svg(&svg).expect("well-formed").contains("<filter")
+        };
+        assert!(keeps(r#"x="-20%" y="-20%" width="140%" height="140%""#), "percent region dropped");
+        assert!(keeps(r#"x="0" width="10.5""#), "number region dropped");
+        assert!(!keeps(r#"width="""#), "empty region kept");
+        assert!(!keeps(r#"width="%""#), "bare percent kept");
+        assert!(!keeps(r#"width="130 %""#), "spaced percent kept");
+    }
+
+    #[test]
+    fn other_filter_primitives_are_dropped() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg"><filter id="f"><feImage href="https://attacker.example/x.png"/><feTurbulence baseFrequency="0.9" numOctaves="10"/><feGaussianBlur stdDeviation="1"/><feDropShadow dx="1"/></filter></svg>"##;
+        let out = sanitize_svg(svg).expect("well-formed");
+        assert!(!out.contains("feImage"), "feImage kept: {out}");
+        assert!(!out.contains("attacker.example"), "feImage target kept: {out}");
+        assert!(!out.contains("feTurbulence"), "feTurbulence kept: {out}");
+        assert!(!out.contains("feGaussianBlur"), "feGaussianBlur kept: {out}");
+        assert!(out.contains("<feDropShadow"), "sibling drop shadow dropped: {out}");
+    }
+
+    #[test]
+    fn filter_left_without_a_drop_shadow_is_dropped() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg"><filter id="a"><feImage href="#x"/></filter><filter id="b"><feDropShadow dx="99"/></filter><filter id="c"/><filter id="d"></filter><rect/></svg>"##;
+        let out = sanitize_svg(svg).expect("well-formed");
+        assert!(!out.contains("<filter"), "empty filter kept: {out}");
+        assert!(out.contains("<rect"), "safe sibling dropped: {out}");
+    }
+
+    #[test]
+    fn drop_shadow_outside_a_filter_and_its_children_are_dropped() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg"><feDropShadow dx="1"/><filter id="f"><feDropShadow dx="1"><animate attributeName="dx" to="9999"/></feDropShadow></filter></svg>"##;
+        let out = sanitize_svg(svg).expect("well-formed");
+        assert_eq!(out.matches("<feDropShadow").count(), 1, "stray drop shadow kept: {out}");
+        assert!(!out.contains("<animate"), "drop shadow child kept: {out}");
+    }
+
+    #[test]
+    fn drops_external_url_on_filter_attribute_of_shadowed_element() {
+        let svg = format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg">{MERMAN_SHADOW_DEFS}<g filter="url(https://attacker.example/f.svg#bv-2f30a68e5cebaffa-drop-shadow)"><rect/></g></svg>"##
+        );
+        let out = sanitize_svg(&svg).expect("well-formed");
+        assert!(!out.contains("attacker.example"), "external filter url kept: {out}");
+        assert!(out.contains("<feDropShadow"), "local shadow dropped: {out}");
+    }
+
+    #[test]
+    fn unterminated_filter_returns_none() {
+        assert!(sanitize_svg(r#"<svg><filter id="f"><feDropShadow dx="1"/></svg>"#).is_none());
+    }
+
+    /// Text content of every `<text>` element, in document order.
+    fn label_texts(svg: &str) -> Vec<String> {
+        let mut reader = Reader::from_str(svg);
+        let mut labels = Vec::new();
+        let mut depth = 0usize;
+        loop {
+            match reader.read_event().expect("well-formed") {
+                Event::Start(e) if e.name().as_ref() == b"text" => {
+                    depth += 1;
+                    labels.push(String::new());
+                }
+                Event::End(e) if e.name().as_ref() == b"text" => depth -= 1,
+                Event::Text(t) if depth > 0 => {
+                    let text = t.decode().expect("utf-8");
+                    labels.last_mut().expect("open label").push_str(&text);
+                }
+                Event::GeneralRef(r) if depth > 0 => {
+                    let name = r.decode().expect("utf-8");
+                    labels.last_mut().expect("open label").push_str(&format!("&{name};"));
+                }
+                Event::Eof => break,
+                _ => {}
+            }
+        }
+        labels
+    }
+
+    #[test]
+    fn merman_flowchart_survives_with_labels_and_shadow() {
+        let source = "flowchart LR\n  A[Start here] --> B{Is it?}\n  \
+                      B -->|Yes| C(Tom & Jerry)\n  B -->|No| D[(Store)]";
+        let svg = biscuit_visualized::components::mermaid::MermaidDiagram::new(source)
+            .render_to_svg()
+            .expect("Merman renders the flowchart");
+        let out = sanitize_svg(&svg).expect("Merman SVG is well-formed");
+
+        let before = label_texts(&svg);
+        let after = label_texts(&out);
+        assert_eq!(after, before, "label text changed by sanitization");
+        for label in ["Start here", "Is it?", "Yes", "No", "Tom &amp; Jerry", "Store"] {
+            assert!(
+                after.iter().any(|text| text.contains(label)),
+                "label {label:?} missing: {after:?}"
+            );
+        }
+        assert!(svg.contains("<feDropShadow"), "fixture no longer exercises a shadow: {svg}");
+        assert_eq!(
+            out.matches("<feDropShadow").count(),
+            svg.matches("<feDropShadow").count(),
+            "Merman drop shadow dropped: {out}"
+        );
+        assert!(out.contains("<style"), "Merman's scoped stylesheet dropped: {out}");
     }
 
     #[test]

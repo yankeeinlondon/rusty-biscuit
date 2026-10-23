@@ -98,6 +98,7 @@ mod meta_schema_phase4;
 mod meta_schema_phase5;
 mod meta_schema_phase6;
 mod meta_schema_reference_graph;
+mod mermaid_static_svg;
 mod meta_schema_repo_schemas;
 mod missing_ctx_capture;
 mod more_is_more_literals_and_indexes;

@@ -17,7 +17,7 @@
 
 use std::cell::{OnceCell, RefCell};
 
-use biscuit_visualized::components::mermaid::MermaidDiagram;
+use biscuit_visualized::components::mermaid::{MermaidDiagram, MermaidTarget};
 use biscuit_terminal::terminal::Terminal;
 use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::color::{
@@ -607,7 +607,13 @@ impl CodeRenderer for TerminalCodeRenderer {
         // `None` on failure is the contract: it surfaces the promotion failure
         // to the render tree so strictness can reject or diagnose it, rather
         // than silently degrading to a code block here.
-        let svg = MermaidDiagram::new(value).render_to_svg().ok()?;
+        // The HTML-static target leads each label font with the face it was
+        // measured with and lets labels overflow: the reader's fonts are
+        // unknowable, so a wider face must spill rather than clip.
+        let svg = MermaidDiagram::new(value)
+            .with_target(MermaidTarget::HtmlStatic)
+            .render_to_svg()
+            .ok()?;
         // The SVG is emitted unescaped as raw HTML, so it must pass an explicit
         // allowlist sanitizer first — the render tree must not depend on the
         // upstream renderer (or any future string override) staying safe. A
