@@ -64,8 +64,16 @@ actions → `Operation::complete`.
   `EarlierAttempt` (absent or `null` reads as unknown, so v4 reports still
   load).
 - **The recheck runs `git status`, which may rewrite the index**, so its admin
-  events are drained before `bind_index` and allowed; any admin event after
-  the binding refuses (before the move) or stops (after it).
+  events are drained before `bind_index` and allowed; an admin event after
+  the binding is a warning. After consent, `recheck` (tip, fingerprint) and
+  `confirm_unchanged` return warnings (strings and `ObservedActivity`) that
+  the attempt carries into its report; they refuse only for an interrupt or
+  a tree root that is no longer the checkout. `unregister_quarantine`
+  returns `Unregistered { activity }` and calls `remove_listed_record` with
+  `Changes::Allow` (a changed index or HEAD is reported); something at the
+  quarantine path still keeps the registration (`git worktree remove`
+  would delete it). Still refused after consent: the usage check, watch
+  startup (`ObservationError`), and the handoff's second-run comparison.
 - **`confirm_unchanged` skips `Original("")`** (the tree root itself); a
   replaced root is caught by `open_root`'s identity check inside `confirm`.
 - **The move's own events** are `Original("")` with `own_move` kinds and the
@@ -194,6 +202,12 @@ registration from the admin `gitdir` (`registration_state`), then:
   attempt's, each diagnostic run, and the record's saved `discovery`); a
   complete check adds no line, and the success path never calls them, so
   `remove.rs`'s "no `Discovery`" assertion guards the no-chatter rule.
+  Identical process-check notes merge into one line. A stop's "What to
+  do" step comes from `first_step` (recreated original, then a Git command
+  named by the first `Admin` activity's file name, `index`/`HEAD` and their
+  `.lock`, then the first observed path); interrupts, failed steps, and lost
+  watching get the retry alone. `InventoryRefusal::Changed` refuses as
+  "something is still writing into it", not "fix what is named above".
   Nothing reaches stdout, so no `cd:` or
   `remove-handoff:` follows a failure. The handoff's second run sets
   `Facts::reported` from the verified fresh state, then runs the same

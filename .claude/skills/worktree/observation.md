@@ -276,9 +276,20 @@ record, Arc<inventory>)` (the inventory is journal line 2), the move,
   for a directory, which Windows reports when its children go). With
   `DeletionOptions::cumulative_kinds` (default on macOS) any kinds that
   include `Removed` (or, at the original, `MovedFrom`) are the deletion's
-  history. A write-like kind otherwise is `Stop::Uncertain`. An approved entry
-  not yet reached is re-checked against the inventory. Anything else is
+  history. A write-like kind otherwise is an uncertain warning. An approved
+  entry not yet reached is re-checked against the inventory. Anything else is
   activity.
+- **After consent, nothing observed stops deletion** (author decision
+  2026-10-23: "if they agree to delete, we delete"). Activity, uncertain
+  events, and lost coverage go to `Deletion::warnings` (the report's
+  `activity`); the first `CoverageLost` clears `Engine::watching` and no
+  later drain runs, so a stalled observer costs one wait, not one per level.
+  A changed approved entry, a non-empty folder, and a changed folder on the
+  way down go through `deletion::sweep` (no link following, no device
+  crossing, unjournaled). `Stop` is only `Replaced` (the quarantine root is
+  not the moved directory), `Interrupted`, `Io`, and `Journal`.
+  `OperationReport::push_activity` records one `CoverageLost`, since a lost
+  observer reports the loss on every drain.
 - **Found the hard way (macOS):** FSEvents reported the original path's move
   with a `Created` flag from the fixture's creation moments earlier, so the
   native tests stopped on their own move until `own_move` applied the

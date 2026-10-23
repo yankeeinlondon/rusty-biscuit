@@ -394,7 +394,12 @@ the ones that cost time.
   written by `begin` in the staging directory, so an operation always has
   one. A batch may only plan inventory entries, with the same kind; the
   reader refuses anything else. The size limit counts batch lines only (the
-  inventory is as large as the checkout).
+  inventory is as large as the checkout) and is **derived from the
+  inventory** (`journal::limit_for`): every entry planned once, alone in a
+  batch, with the longest kind and result. The writer refuses an entry an
+  earlier batch of the same journal planned, so the bound holds by
+  construction. A fixed 64 MiB cap (until 2026-10-23) stopped every
+  removal past about 150k entries, which is most of them here.
 - **Journal:** an intent is refused (`LimitReached`, nothing written) unless the
   worst-case results line for the batch would still fit, so a confirmation is
   never lost to the size limit. An unterminated last line is a torn write and is
