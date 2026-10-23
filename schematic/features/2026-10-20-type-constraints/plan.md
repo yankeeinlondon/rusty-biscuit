@@ -110,6 +110,84 @@ skills_files_updated_during_phase_3:
     - .claude/skills/schematic-define/SKILL.md
     - .claude/skills/schematic-define/schematic/define.md
     - .claude/skills/schematic-define/schematic/pagination.md
+source_files_during_phase_4:
+    - schematic/define/Cargo.toml
+    - schematic/define/src/constraints/mod.rs
+    - schematic/define/src/constraints/schema.rs
+    - schematic/define/src/openapi/export/conversion.rs
+    - schematic/define/src/openapi/export/parameters.rs
+    - schematic/define/src/openapi/export/paths.rs
+    - schematic/define/src/openapi/export/request_body.rs
+    - schematic/define/src/openapi/import.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/openapi/import/mappings/mod.rs
+    - schematic/define/src/openapi/import/mappings/parameters.rs
+    - schematic/define/src/openapi/import/mappings/responses.rs
+    - schematic/define/src/openapi/import/mappings/schema.rs
+    - schematic/define/src/openapi/import/normalize.rs
+    - schematic/define/src/openapi/import/resolver.rs
+    - schematic/define/src/openapi/options.rs
+    - schematic/define/tests/constraint_preservation.rs
+    - schematic/define/tests/fixtures/constraint_preservation.yaml
+    - schematic/define/tests/import_normalization.rs
+    - schematic/define/tests/openapi_constraint_export.rs
+    - schematic/define/tests/openapi_constraint_import.rs
+    - schematic/define/tests/support/constraint_meaning.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/definitions/src/openai/types.rs
+    - schematic/definitions/src/openai_pagination.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/src/model_gen.rs
+    - schematic/gen/tests/l1/constraint_preservation.rs
+    - schematic/gen/tests/l1/definition_baseline.rs
+    - schematic/gen/tests/l1/definitions_out_constraints.rs
+    - schematic/gen/tests/l1/extension_round_trip.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/openapi/bitbucket.json
+    - schematic/openapi/gitea.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+    - schematic/openapi/openai.json
+    - schematic/postman/openai.postman_collection.json
+docs_updated_during_phase_4:
+    - schematic/docs/dependencies.md
+    - schematic/docs/io/export-openapi.md
+    - schematic/docs/io/import-openapi.md
+    - schematic/docs/pagination.md
+    - schematic/docs/value-constraints.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/schematic-define/schematic/openapi.md
+source_files_during_phase_5:
+    - schematic/define/src/constraints/registered.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/value_rules/mod.rs
+    - schematic/gen/src/codegen/value_rules/tests.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/into_parts.rs
+    - schematic/gen/src/codegen/request_structs/form.rs
+    - schematic/gen/src/codegen/request_structs/shared.rs
+    - schematic/gen/src/codegen/request_structs/query_params.rs
+    - schematic/gen/src/codegen/request_structs/named_params.rs
+    - schematic/gen/src/codegen/request_structs/path_params.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/tests/value_rules.rs
+docs_updated_during_phase_5:
+    - schematic/docs/generation/request-side.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/value-constraints.md
+    - schematic/docs/typed-registration.md
+    - schematic/docs/runtime/validation.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
 ---
 
 # Type constraints implementation plan
@@ -445,7 +523,7 @@ smell-grep run and logged; docs for definition builders updated
 
 ### Wave 9: Lossless capture (sequential; touches shared normalization)
 
-- [ ] **Replace clamping**
+- [x] **Replace clamping**
   - Replace constraint-value clamping in `normalize.rs` with lossless capture
     per S1 (exact decimal text sidecar); a source number that cannot be
     represented fails with its path. Never clamp, round, or narrow. Keep any
@@ -457,7 +535,7 @@ smell-grep run and logged; docs for definition builders updated
 
 ### Wave 10: Import and export (parallel; disjoint files)
 
-- [ ] **Importer**
+- [x] **Importer**
   - In `define/src/openapi/import/mappings/` retain constraints on parameters,
     inline bodies, form fields, array items, aliases, nested-only components,
     renamed fields, and a constrained reference used by several endpoints,
@@ -468,7 +546,7 @@ smell-grep run and logged; docs for definition builders updated
     (path, keyword, reason; no warnings for `title`/`description`).
   - Tests: direct import; definitions-out → assembly; response-only constraints
     preserved without generating checks.
-- [ ] **Exporter**
+- [x] **Exporter**
   - In `define/src/openapi/export/{conversion,parameters,request_body,components}.rs`
     emit constraints for parameters, bodies, forms, and components with the
     reversed exclusive-bound mapping, `const` as singleton `enum`, nullable
@@ -479,7 +557,7 @@ smell-grep run and logged; docs for definition builders updated
 
 ### Wave 11: Compact preservation fixture
 
-- [ ] **Fixture and acceptance**
+- [x] **Fixture and acceptance**
   - One compact fixture covering every supported keyword: inline roots, aliases,
     renamed properties, arrays and items, local recursive references, exclusive
     bounds, `const` lowering, a large integer bound, and a decimal `multipleOf`.
@@ -494,7 +572,7 @@ explained exclusive-bound/`const` spelling changes, which are listed in the log.
 
 ### Wave 12: Plan compilation (sequential; one owner of `gen` plan code)
 
-- [ ] **Compile plans**
+- [x] **Compile plans**
   - In `schematic-gen`, compile each endpoint's parameters, body, and forms into
     runtime `Plan` data (reusing named plans so recursion terminates), resolving
     local component references from the stored schemas. Compile every admitted
@@ -507,12 +585,12 @@ explained exclusive-bound/`const` spelling changes, which are listed in the log.
 
 ### Wave 13: Emission (parallel; disjoint generated-code modules)
 
-- [ ] **`validate()` method**
+- [x] **`validate()` method**
   - Emit `validate(&self) -> Result<(), Violations>` on each request with
     supported constraints in `request_structs/`, returning all violations in
     deterministic order (parameter declaration → body traversal), with
     location-prefixed names (`query.limit`) and serialized body paths.
-- [ ] **`into_parts` integration**
+- [x] **`into_parts` integration**
   - In `gen/src/codegen/request_structs/into_parts.rs` run the same checks
     before returning parts so endpoint calls, `client.send`, `.full()`, and
     `send_raw` are all covered. Parameters are checked on typed values before
@@ -522,13 +600,13 @@ explained exclusive-bound/`const` spelling changes, which are listed in the log.
     with attached rules are rejected at definition validation (Phase 3), never
     silently skipped.
   - Serialization failure remains the existing preparation error.
-- [ ] **Docs and diagnostics**
+- [x] **Docs and diagnostics**
   - Generated field rustdoc distinguishes enforced rules from preserved
     annotations and unenforced patterns/formats. Update module docs.
 
 ### Wave 14: Generation tests
 
-- [ ] **Generation tests**
+- [x] **Generation tests**
   - Reuse the existing generation guard: fresh generated code compiles and uses
     a mock transport. Cover build, ordinary await, `.full()`, direct `send`, and
     `send_raw` for violating (error shape + zero transport sends) and valid

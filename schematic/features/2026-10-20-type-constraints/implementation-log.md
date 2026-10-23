@@ -18,28 +18,23 @@ packages:
     - schematic-definitions
 human_review: false
 message_to_agent: |-
-  Phase 3 built schematic_define::constraints; read "## Phase 3" in this log.
-  Facts Phase 4 relies on:
-  - ParamDef.constraints, FormField.constraints, and Endpoint.request_constraints
-    are Option<Box<Constraints>> (boxed: inline overflowed the debug stack of the
-    imported OpenAI builders). Builders take a plain Constraints.
-  - Serialized keys are snake_case (min_length, allowed_values, constant,
-    pattern_unenforced, ...); numeric limits are JSON strings of decimal text.
-    Export must map them to OpenAPI keywords, without narrowing.
-  - An imported pattern outside the enforced subset must be stored with
-    Constraints::unenforced_pattern (pattern_unenforced: true); .pattern() on one
-    is a definition error. admit_pattern(source) classifies, and
-    PatternAdmission::Enforced { translated } is what Phase 5 compiles.
-  - gen/src/definition_gen.rs param_def_tokens emits `constraints: None`; Phase 4
-    must emit the real rules (as a builder call or Some(Box::new(..))). The
-    committed definitions/src/openai/mod.rs was patched to that form; the
-    import_overlay test pins two older re-import differences (info.version, the
-    realtime session part), so after `just import-openai` keep those pins in
-    mind rather than assuming every diff is yours.
-  - FieldDef has no constraint field yet; Wave 10 owns that shape.
-  - pagination::adopted_page_size(api, ep) gives the adopted page-size param's
-    effective bounds for export; constraints::unenforceable_rules(api, body) is
-    for Phase 5.
+  Phase 5 made generated requests enforce their value rules; read
+  "## Phase 5" in this log. Facts Phase 6 relies on:
+  - The generator's compiler is gen/src/codegen/value_rules/. Pager-adopted
+    parameters are not request fields (requests come from the pager view),
+    so no generated validate() or into_parts checks them. The pager engine
+    must keep its own page-size check, now through schematic_runtime's
+    validate helpers (check_number with a Plan of the strategy's bounds).
+  - Keep the engine's problem text, or update the tests that match it:
+    "the page size is above the declared maximum, {max}". Retry resizing
+    clears problems starting "the page size ".
+  - ABI stays 8. Phase 2 made the feature's one increment; do not bump it
+    again unless generated code starts needing a new runtime item.
+  - Only schema/src/openai/requests.rs changed on regeneration. After any
+    runtime or generator change, rerun `just generate` and keep
+    artifact_drift green. `just test-schema` now has 153 tests.
+  - The host was heavily loaded (load average about 71) during this
+    phase's gates; generation-heavy L1 tests were marked SLOW but passed.
 source_files_during_phase_2:
     - Cargo.lock
     - schematic/gen/src/lib.rs
@@ -133,6 +128,84 @@ skills_files_updated_during_phase_3:
     - .claude/skills/schematic-define/SKILL.md
     - .claude/skills/schematic-define/schematic/define.md
     - .claude/skills/schematic-define/schematic/pagination.md
+source_files_during_phase_4:
+    - schematic/define/Cargo.toml
+    - schematic/define/src/constraints/mod.rs
+    - schematic/define/src/constraints/schema.rs
+    - schematic/define/src/openapi/export/conversion.rs
+    - schematic/define/src/openapi/export/parameters.rs
+    - schematic/define/src/openapi/export/paths.rs
+    - schematic/define/src/openapi/export/request_body.rs
+    - schematic/define/src/openapi/import.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/openapi/import/mappings/mod.rs
+    - schematic/define/src/openapi/import/mappings/parameters.rs
+    - schematic/define/src/openapi/import/mappings/responses.rs
+    - schematic/define/src/openapi/import/mappings/schema.rs
+    - schematic/define/src/openapi/import/normalize.rs
+    - schematic/define/src/openapi/import/resolver.rs
+    - schematic/define/src/openapi/options.rs
+    - schematic/define/tests/constraint_preservation.rs
+    - schematic/define/tests/fixtures/constraint_preservation.yaml
+    - schematic/define/tests/import_normalization.rs
+    - schematic/define/tests/openapi_constraint_export.rs
+    - schematic/define/tests/openapi_constraint_import.rs
+    - schematic/define/tests/support/constraint_meaning.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/definitions/src/openai/types.rs
+    - schematic/definitions/src/openai_pagination.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/src/model_gen.rs
+    - schematic/gen/tests/l1/constraint_preservation.rs
+    - schematic/gen/tests/l1/definition_baseline.rs
+    - schematic/gen/tests/l1/definitions_out_constraints.rs
+    - schematic/gen/tests/l1/extension_round_trip.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/openapi/bitbucket.json
+    - schematic/openapi/gitea.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+    - schematic/openapi/openai.json
+    - schematic/postman/openai.postman_collection.json
+docs_updated_during_phase_4:
+    - schematic/docs/dependencies.md
+    - schematic/docs/io/export-openapi.md
+    - schematic/docs/io/import-openapi.md
+    - schematic/docs/pagination.md
+    - schematic/docs/value-constraints.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/schematic-define/schematic/openapi.md
+source_files_during_phase_5:
+    - schematic/define/src/constraints/registered.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/value_rules/mod.rs
+    - schematic/gen/src/codegen/value_rules/tests.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/into_parts.rs
+    - schematic/gen/src/codegen/request_structs/form.rs
+    - schematic/gen/src/codegen/request_structs/shared.rs
+    - schematic/gen/src/codegen/request_structs/query_params.rs
+    - schematic/gen/src/codegen/request_structs/named_params.rs
+    - schematic/gen/src/codegen/request_structs/path_params.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/tests/value_rules.rs
+docs_updated_during_phase_5:
+    - schematic/docs/generation/request-side.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/value-constraints.md
+    - schematic/docs/typed-registration.md
+    - schematic/docs/runtime/validation.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
 ---
 
 # Implementation Log for 2026-10-20-type-constraints (8 phases)
@@ -999,3 +1072,621 @@ Input Robustness notes:
   workspace. Windows, Linux, and WSL2 were not exercised for this phase.
 - Spec frontmatter: this phase's prompt asked for no spec properties, so the
   spec is unchanged.
+
+## Phase 4
+
+Phase 4 carries value rules through OpenAPI import, `import
+--definitions-out`, and OpenAPI export, without narrowing. I wrote the shared
+core (Wave 9: lossless capture, the exact-number convention, stored-schema
+restoration, export resolution) and the Wave 11 fixture and acceptance tests
+myself. The three Wave 10 tasks ran as parallel subagents with disjoint write
+ownership:
+- importer: `define/src/openapi/import/mappings/{parameters,responses,mod}.rs`,
+  `define/tests/openapi_constraint_import.rs`;
+- exporter: `define/src/openapi/export/{parameters,paths,request_body}.rs`
+  (plus one helper in `conversion.rs`), `define/tests/openapi_constraint_export.rs`;
+- emitter: `gen/src/{definition_gen,model_gen,import_pipeline}.rs`,
+  `gen/tests/l1/definitions_out_constraints.rs`, and the `just import-openai`
+  regeneration.
+
+The subagents were launched without the foreground flag and ran in the
+background. I did not end the turn: I worked on unowned files (docs, fixture,
+acceptance tests) and waited for all three completion notices before
+integrating.
+
+### What landed
+
+- **Exact numbers in schemas** (`define/src/constraints/schema.rs`, new):
+  - `json_number(text)` returns the JSON number that means exactly `text`:
+    an `i64`/`u64`, or an `f64` whose shortest text has the same decimal
+    value.
+  - A numeric keyword no JSON number holds keeps the nearest `f64` as a
+    stand-in, plus `"x-schematic-exact": {"<keyword>": "<text>"}` beside it.
+  - `exact_number(schema, keyword)` reads the extension first. A float is
+    rendered in plain notation when that is short, so `-9223372036854776000`
+    stays digits.
+  - `Constraints::to_schema()` / `Constraints::from_schema()` convert
+    between rules and JSON Schema keywords. `from_schema` reads both
+    exclusive-bound spellings.
+  - `normalize_exclusive_flags`, `mark_inexact_numbers` (both crate-private,
+    `openapi` feature).
+- **Lossless capture** (`define/src/openapi/import/normalize.rs`, rewritten):
+  - `clamp_numeric_bounds` is gone; it was public, so its re-export was
+    removed too.
+  - `SourceKeywords::capture(text, json)` walks the raw document once, with
+    `serde_yaml_ng`'s `deserialize_str` (which hands over a plain scalar's
+    source text) or `serde_json`'s `RawValue`. It records each numeric
+    keyword's exact text and each `const` by RFC 6901 pointer. It skips name
+    maps (`properties`, `schemas`, `paths`, ...) and data keywords
+    (`example`, `default`, `enum`, `x-*`).
+  - The capture refuses three kinds of value with `OpenApiError::Validation`
+    at the keyword's pointer: unrepresentable numbers (`.inf`/`.nan`, an
+    exponent beyond ±10000), and explicit `null` value keywords.
+  - `stand_in_bounds` keeps the old line rewrite of out-of-`i64` integers,
+    now only as a parse stand-in. The capture wins wherever a value is read,
+    so the clamp warning is gone.
+  - `RefResolver::source_schema(schema, pointer)` gives any `openapiv3`
+    schema back as JSON, with exact numbers and `const` restored and Boolean
+    exclusive flags normalized. Stored component schemas and every importer
+    mapping read rules through it.
+  - An integer schema `openapiv3` demoted to `Any` (a bound beyond `i64`)
+    keeps its `integer`/`number` type (`mappings/schema.rs` `any_primitive`).
+- **Export resolution:**
+  - `conversion.rs` carries each numeric keyword's exact text through the
+    3.0 conversion, so it moves with the keyword even when `split_types`
+    distributes keywords. It re-marks every bound `openapiv3` would narrow.
+  - `openapi::serialize` substitutes the exact text and removes the
+    extension. It renders through `serde_yaml_ng::Value`, which keeps member
+    order, and only when the extension is present. Documents without it
+    serialize byte-identically.
+  - New `convert_schema_at(value, pointer)` converts inline schemas.
+- **Importer** (subagent):
+  - Rules are imported onto every input kind: `ParamDef::constraints`
+    (query, header, cookie, path, items, `$ref` parameters),
+    `request_constraints` (text body, inline JSON root), and
+    `FormField::constraints` (inline text/JSON parts).
+  - Patterns are admitted with `admit_pattern`. Unsupported and invalid
+    patterns are kept unenforced, each with its own warning.
+  - Rules `endpoint_problems` refuses are dropped with a WARN naming the
+    input and keyword; the import never fails for them.
+  - `minProperties`/`maxProperties` on a parameter or field get a "not
+    preserved" WARN.
+  - A constrained path parameter counts as typed.
+- **Exporter** (subagent):
+  - Parameter, path-parameter, body-root, and form-field rules are merged
+    into the type's schema and converted through `convert_schema_at`.
+  - An adopted page-size parameter exports its strategy's
+    `minimum`/`maximum`.
+  - A body rule that overlaps the body type's own keyword exports as
+    `allOf: [type, rules]`.
+  - Constraint-free definitions export byte-identically.
+- **Emitter** (subagent, plus my path-parameter fix):
+  - `definition_gen` emits `Constraints` builder chains (numbers as text)
+    for parameters, form fields, `request_constraints`, and alias-typed
+    bodies.
+  - `model_gen` emits one `#[schemars(extend(..))]` per constrained model
+    field, read from the stored component schema. It merges plain-alias
+    rules and admits `null` in an optional field's `enum`/`const`.
+  - It restates the `items` schema for primitive items, and keeps the
+    `x-schematic-exact` text.
+  - I found that `definition_gen` never emitted typed path parameters, so
+    a constrained one lost its rules on the definitions-out route. It now
+    emits an endpoint's typed path parameters when one carries rules (see
+    Design decisions).
+- **OpenAI overlay**: `definitions/src/openai_pagination.rs` gains
+  `align_page_size_bounds` (see Design decisions).
+- **Regenerated through recipes** (`just import-openai`,
+  `just generate-openapi`, `just generate-postman`):
+  - `definitions/src/openai/{mod,types}.rs`;
+  - `openapi/{bitbucket,gitea,github,gitlab,openai}.json`;
+  - `postman/openai.postman_collection.json`.
+
+  `schema/src/**` (the generated Rust clients) and `asyncapi/` are
+  unchanged. The two `import_overlay` pins (`_ctx` on `endpoint_183`, the
+  realtime `session` text part, no `.version("2.3.0")`) were restored after
+  each re-import, exactly as that test expects.
+
+### Design decisions (adaptations and adopted defaults)
+
+- **Adopted default: no new YAML dependency** (source: S1 / Phase 1 "a
+  source-preserving YAML parser chosen in Phase 4 Wave 9, prefer
+  `yaml-rust2` or `saphyr`").
+  - A probe showed that `serde_yaml_ng` 0.10, already locked, passes a
+    plain scalar's source text to `deserialize_str`, including
+    `0.10000000000000000001`, `1e400`, and i128-range integers.
+  - A key-aware visitor therefore captures exact text without a second
+    parser. JSON uses `serde_json`'s `raw_value` feature, now declared in
+    `define/Cargo.toml`. It was already unified in the workspace, so
+    `Cargo.lock` is unchanged.
+  - Review agenda item 3 from Phase 1 is therefore moot.
+- **Adopted default: `x-schematic-exact` as the "explicit schema metadata"
+  for stored schemas** (source: spec "explicit schema metadata where
+  attributes cannot express them"; S2 "exact bounds beyond the i64/u64
+  range … need explicit schema metadata").
+  - One convention serves stored component schemas, export (resolved by
+    `serialize`), and `--definitions-out`, where schemars `extend` can
+    write it. So no registration API was needed.
+  - It appears only for values no JSON number holds exactly.
+- **Adopted default: the line-based integer stand-in stays as the parse
+  enabler** (source: S1 Decision (b)).
+  - A bound beyond `i64` in a YAML flow mapping (`{maximum: 1844…}`) is
+    not rewritten. `openapiv3` then fails with a located parse error. It
+    is never a silent clamp. Tested; recorded as a limitation in the docs.
+- **Adopted default: rules a definition cannot carry are dropped from that
+  input with a WARN, and the import continues** (source: the importer's
+  existing "diagnostic + skip" convention; spec "Preserve unsupported rules
+  when the source representation permits it, with … diagnostic").
+  - The import cannot hold a contradictory rule without the generator
+    later refusing the whole API. `--strict` turns these warnings into a
+    failure.
+- **Adopted default: explicit `null` on a value keyword fails the import**
+  at its pointer (source: plan Input robustness, "`"maxLength": null` is
+  malformed, not absent").
+  - `openapiv3` would read it as absent, so the capture refuses it first.
+  - This covers `minLength`, `maxLength`, `minItems`, `maxItems`,
+    `uniqueItems`, `pattern`, `format`, `enum`, and the five numeric
+    keywords.
+- **Adaptation: the exporter writes adopted page-size bounds from the
+  strategy** (`pagination::adopted_page_size`).
+  - This adds `minimum: 1` (and the strategy's `maximum`) to GitHub,
+    Gitea, GitLab, Bitbucket, and 57 OpenAI parameters in `openapi/*.json`.
+    This is the explained golden drift Checkpoint 4 allows.
+  - Adopted default (exporter subagent): an adopted size with no `max`
+    still exports `minimum: 1` (source: `PageSize::new` sets `min: 1`).
+- **Adaptation: the OpenAI overlay now aligns adopted `limit` bounds with
+  its strategies** (`openai_pagination::align_page_size_bounds`).
+  - Once the import carried OpenAI's source bounds (`minimum: 0, maximum:
+    100/1000`), Phase 3's page-size rule refused 16 endpoints whose strategy
+    minimum is 1. Rust client generation failed.
+  - The overlay already documented its choice: "where the provider
+    documents a minimum of 0, the minimum stays at 1". It now applies that
+    choice explicitly to the adopted parameter, replacing the document's
+    bounds with the strategy's. Other rules such as `format` are kept.
+  - This is an authored file change, made under the spec's "conflicting
+    bounds fail definition validation rather than one silently winning".
+    The overlay makes the decision visibly. **Review agenda.**
+- **Adaptation: typed path parameters in `--definitions-out`.**
+  - Before this phase, `definition_gen` never emitted `params.path`. A
+    constrained path parameter, which the import now declares as typed, lost
+    its rules.
+  - Emitting every typed path parameter would also emit OpenAI's 222
+    described path parameters, a pre-existing loss. That would change the
+    generated OpenAI client: request structs would lose `Default` and
+    `From<&str>`. That is a downstream-visible change outside this feature.
+  - So `path_param` calls are emitted only for an endpoint where some path
+    parameter carries rules. The description-only loss is on the review
+    agenda.
+- **Adopted defaults (emitter subagent):**
+  - every model-field rule goes through `extend`, never native
+    `length`/`range` (source: S2 silent drops; no native form for
+    `exclusiveMinimum`/`multipleOf`/`enum`/`const`/`uniqueItems`);
+  - `format` is not rebuilt on model fields (source:
+    `constraints/registered.rs` "annotations … are never rules"; schemars
+    writes the type's own format, and a source format could change the
+    generated client's type mapping);
+  - a field's own rule wins over an alias' rule on the same keyword;
+  - `null` is appended to `enum`/`const` on every `Option` field.
+- **Adopted defaults (importer subagent):**
+  - a component parameter's warnings repeat once per referencing
+    operation;
+  - a part already reported as "imported as text" gets no rules;
+  - problem paths match an input plus any trailing `[]`.
+- **Adopted defaults (exporter subagent):**
+  - an `Enum` parameter's own values stay authoritative, and the rules'
+    `enum`/`const` are not written again;
+  - error pointers count within the endpoint's own parameter list.
+- **Spelling changes allowed by the spec** ("compares meaning, not byte
+  spelling"):
+  - Boolean exclusive flags become numeric bounds in stored schemas and
+    constraints;
+  - `const` exports as a singleton `enum`;
+  - a string `enum` parameter re-imports as `QueryParamType::Enum`, not as
+    constraints;
+  - an imported `f64`-exact bound's text may be re-spelled in plain
+    notation.
+
+### Requirement-to-test mapping
+
+| Requirement (plan Waves 9–11, Input robustness) | Test(s) |
+| --- | --- |
+| Lossless capture by pointer (YAML plain-scalar text, JSON raw text); names and data skipped | `define` `openapi::import::normalize::tests::{yaml_capture_records_exact_text_by_pointer_and_skips_names_and_data, json_capture_reads_raw_number_text}` |
+| Unrepresentable bound fails with its path (`.inf`, exponent > 10000), in-process and through the CLI | `normalize::tests::unrepresentable_bounds_fail_with_their_pointer`; `openapi_constraint_import::{loader_infinite_bound_fails_with_its_path, loader_huge_exponent_fails_with_its_path}`; `gen l1 constraint_preservation::the_cli_import_reports_an_unrepresentable_or_null_bound_at_its_pointer_and_writes_nothing` |
+| Explicit `null` is not absent (YAML and JSON), in-process and through the CLI | `normalize::tests::null_value_keywords_fail_instead_of_reading_as_absent`; `openapi_constraint_import::loader_null_value_keyword_fails_with_its_path`; the CLI test above |
+| Stand-in, never a clamp; OpenAI's `seed` bounds parse; flow-style out-of-`i64` bound is a located parse error | `normalize::tests::stand_ins_replace_only_out_of_range_integer_bounds`; `openapi_constraint_import::{openai_style_seed_bounds_parse_from_yaml, loader_flow_style_bound_beyond_i64_is_a_parse_error}` |
+| Exact numbers in stored schemas (`x-schematic-exact`), `const` restored, Boolean exclusives normalized | `constraints::schema::tests::*` (3); `normalize::tests::restored_schemas_carry_exact_numbers_and_constants`; `openapi_constraint_import::component_rules_are_kept_in_stored_schemas` |
+| Loader matrix: control, absent, Boolean exclusives, duplicate keyword (YAML and JSON → parse error, not last-wins), wrong type (parse error) | `openapi_constraint_import::loader_*` (10 cells) |
+| Importer: every parameter location, items, `$ref` parameter, typed path parameter | `openapi_constraint_import::{parameter_keywords_import_as_constraints, unconstrained_parameters_carry_no_constraints, parameter_schema_reference_carries_no_constraints, exact_parameter_bounds_survive_yaml_and_json}` |
+| Importer: body roots (text, inline JSON) vs `$ref` body; form fields, dropped numeric rule on a text field | `openapi_constraint_import::{body_root_rules_import_for_inline_bodies_only, form_field_rules_import_and_unrepresentable_ones_are_dropped}` |
+| Patterns: admitted / unsupported / invalid diagnostics; unsupported-rule and contradiction warnings; strict mode | `openapi_constraint_import::{admitted_pattern_draws_no_diagnostic, unsupported_pattern_is_kept_unenforced_with_a_warning, invalid_pattern_is_kept_unenforced_and_reported_as_invalid, contradictory_source_bounds_are_dropped_with_a_warning, object_count_keywords_on_a_parameter_are_reported_not_preserved, strict_mode_fails_on_constraint_warnings}` |
+| Exporter: every location in 3.0 form; bodies and forms; exact numerics in JSON and YAML text; components above `i64`; nullable keeps rules; adopted page size; constraint-free byte identity; reimport by meaning | `openapi_constraint_export::*` (7) |
+| `--definitions-out` emitter: builder calls for every keyword (compile-checked expression), parameter/form/body/alias emission, field `extend` attributes, no attribute without rules, typed path parameters only when constrained | `gen definition_gen::tests::{definition_gen_constraints_emit_compiling_builder_calls_for_every_keyword, definition_gen_emits_parameter_form_and_body_rules, definition_gen_emits_typed_path_parameters_only_when_one_carries_rules}`; `gen model_gen::tests::{definitions_out_fields_rebuild_every_source_rule_through_extend, definitions_out_models_without_rules_emit_no_schemars_attribute, a_nullable_source_enum_keeps_its_single_null, plain_alias_body_rules_become_constraints_but_nominal_bodies_do_not}`; `gen l1 definitions_out_constraints::*` (2, real `run_import`) |
+| Wave 11 acceptance, direct route: compact fixture (every keyword; inline roots, alias, renamed property, arrays and items, local recursion, Boolean exclusives, `const`, beyond-`u64` and decimal bounds), import → export → re-import in JSON and YAML, twice, by meaning; 3.0 spelling | `define constraint_preservation::{the_fixture_imports_every_rule_exactly, export_and_reimport_keep_every_rule_by_meaning_in_both_formats, exported_spelling_is_openapi_3_0}` |
+| Wave 11 acceptance, emitted route: `import --definitions-out` → compiled module → `module_group()` registration keeps every rule, by meaning | `gen l1 constraint_preservation::slow_definitions_out_rebuilds_every_rule_through_registration` (fresh crate, run by `test-fresh-output`) |
+| Committed OpenAI definition equals a fresh re-import (pins honored) | `gen l1 import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition` |
+| Historical snapshots still match, with value rules (new metadata) set aside for OpenAI only | `gen l1 definition_baseline::openai` (new `VALUE_RULE_APIS` normalization) |
+| Committed artifacts current | `gen l1 artifact_drift::*` |
+
+The meaning comparison (`define/tests/support/constraint_meaning.rs`) is
+one file that both acceptance tests use: the define test through `#[path]`,
+the fresh crate as pasted source. It canonicalizes numbers by exact decimal
+value, treats `const c` as `enum [c]`, inlines primitive-alias rules where
+they are referenced, reads through nullable wrappers, and ignores `format` on
+component nodes, because schemars writes the type's own format there.
+
+Tiers and placement:
+- `define` tests are auto-discovered top-level files
+  (`openapi_constraint_import`, `openapi_constraint_export`,
+  `constraint_preservation`).
+- `gen` tests are declared in `tests/l1/main.rs` (`constraint_preservation`,
+  `definitions_out_constraints`).
+- Only the fresh-crate test carries `slow_`, the existing convention that
+  `just test-fresh-output` (part of `just test`) runs.
+
+### Review agenda (Phase 4 additions)
+
+1. `openai_pagination::align_page_size_bounds` edits a hand-written overlay
+   so the adopted `limit` parameters agree with their strategies (see Design
+   decisions). The alternative is to relax Phase 3's rule. I did not take it:
+   the spec asks for a visible decision.
+2. Pre-existing: `--definitions-out` never emitted typed path parameters, so
+   OpenAI's committed definition lacks 222 described path parameters that the
+   direct import has. Only constrained ones are emitted now. Emitting all of
+   them changes the generated OpenAI client (request structs lose `Default`
+   and `From<&str>`) and needs its own decision.
+3. Model-field `format` is not rebuilt on the definitions-out route; endpoint
+   inputs keep it. Rebuilding it could change the client's type mapping
+   (`int32` vs `int64`, `date-time`).
+4. Not rebuilt on model fields, as the emitter reported: item rules of
+   `Vec<Named>`, rules beside a `$ref` to a struct/enum/union model, rules on
+   `Bytes`/`Json`/map fields and `additionalProperties`, and rules inside
+   compositions. These are kept in the direct import's stored schema.
+5. `openapiv3` silently drops 2020-12 keywords that OpenAPI 3.0 does not
+   define (`contains`, `prefixItems`, `propertyNames`, `dependencies`,
+   `patternProperties` on typed schemas). They draw no "not preserved"
+   warning. Capturing them is new scope (3.1 import is a non-goal).
+6. A bound beyond `i64` in a YAML flow mapping fails to parse (located,
+   never clamped), because the stand-in rewrite works line by line.
+7. The registered OpenAI schemas now carry 1,244 `extend` rules, mostly
+   single-value `enum`s on `object`/`type` discriminator strings. As a
+   result, `openapi/openai.json` grows by about 5,000 lines and the Postman
+   examples now use the declared values (`"object": "list"`). Phase 5 will
+   enforce the request-side ones.
+
+### Gates and verification (all on macOS, this host)
+
+- `just lint` (from `schematic/`): exit 0 on the final tree.
+  - Earlier runs failed: dead code and unused imports in
+    `constraints/{mod,schema}.rs` with the `openapi` feature off. Fixed with
+    `#[cfg(feature = "openapi")]` gates.
+- `just test` (from `schematic/`): exit 0 on the final tree.
+  - Main L1: 3109 passed, 23 skipped.
+  - `test-fresh-output`: 17 passed, including the new
+    `constraint_preservation::slow_definitions_out_rebuilds_every_rule_through_registration`.
+  - `test-compile-fail`: 1 passed.
+  - The first full run failed `definition_baseline::openai`: historical
+    snapshots lack the new rules. I added the `VALUE_RULE_APIS`
+    normalization. A probe showed my first version stripped schemars' own
+    `{"nullable": true, "enum": [null]}` branch; I fixed that.
+  - The second run failed `extension_round_trip::artifact::{bitbucket,gitea,github,gitlab,openai}`:
+    re-imported adopted page-size parameters now carry their exported
+    strategy bounds. I added the named `page-size-bounds` tolerance, listed
+    only for those five artifacts.
+  - The third run passed completely.
+- `just doctest`: exit 0. All crates passed, including the new
+  `constraints::schema` doctests.
+- Regeneration, all through recipes: `just import-openai` (the two
+  `import_overlay` pins restored), `just generate-openapi`, and
+  `just generate-postman`. `schema/src/**` is unchanged, so
+  `just test-schema` checks only that the dependents still work.
+- Dependents:
+  - `just test-schema`: 152 passed.
+  - `cargo check -p model-citizen` (depends on `schematic-definitions`):
+    builds.
+  - `schematic-oauth` ran inside `just test`.
+- Narrowed test-input readers from the scope calculator:
+  - the `darkmatter` skill readers (`ambient_ctx_capture`,
+    `current_root_migration_guard`, `current_root_documentation_contract`,
+    `schema_phase_validation`, `schema_roots`, `shipped_schema_corpus`):
+    62 passed;
+  - `test-toolkit` `archive_path_guard` and
+    `the_ci_documentation_states_the_implemented_behavior`: 2 passed. The
+    archive-path failure recorded in Phases 2 and 3 no longer reproduces.
+- Smell grep over the new loader code (`normalize.rs`, `constraints/schema.rs`,
+  `mappings/*`):
+  - no `#[serde(default)]` was added;
+  - `unwrap_or_default` appears twice:
+    - `stand_in` parses a stand-in `f64` whose text is already validated;
+    - `std::fs::read_dir(..).unwrap_or_default()` is in the CLI test only.
+  - `.ok()` appears in `json_number`, where `None` means "no exact JSON
+    number", which is its meaning.
+  - `unwrap_or_else(|_| {})` in `source_schema` serializes an `openapiv3`
+    value, which cannot fail.
+  - No `filter_map(.. as_str())` on a load-bearing parse.
+  - Explicit `null` and wrong types are refused or rejected, not read as
+    absent (tested).
+- Cross-OS: not run. The changes are serde and text processing, with no OS
+  crates or `cfg`. The new tests use `manifest_dir!()`, `bin_exe!`,
+  tempdirs, and `include_str!`. `str::lines` already strips the `\r` of a
+  CRLF checkout before the stand-in rewrite.
+- Scope calculator, run after all edits from the repository root:
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: ["schematic-define", "schematic-definitions", "schematic-gen",
+  "test-toolkit", "darkmatter"]`, `change_class: package`. The gates were
+  required, and they ran (above).
+- Spec frontmatter: this phase's prompt asked for no spec properties, so the
+  spec is unchanged.
+
+## Phase 5
+
+Phase 5 makes generated requests enforce their value rules. I did all the
+work myself, with no subagents. Wave 12 (plan compilation) has one owner by
+design. Wave 13's three emission tasks all edit the same few
+`request_structs` files. Wave 14's tests needed the generator's emitted
+shape at hand. So splitting the work would have cost more coordination
+than it saved.
+
+### What landed
+
+- **Plan compiler** (`gen/src/codegen/value_rules/`, new):
+  - `ApiValueRules` compiles each request's rules into an IR that mirrors
+    `schematic_runtime::validate::Plan`. The rules come from two sources:
+    - parameter, form-field, and body-root `Constraints`;
+    - the stored component schemas a JSON body or JSON form field reaches,
+      followed through `$ref`, `#`, properties, `items`,
+      `additionalProperties`, and the `Option` `anyOf`.
+  - Components are indexed before their schema is compiled, so recursion
+    ends at the component's index. A fixpoint pass prunes everything that
+    checks nothing.
+  - Emission is one private `{api_snake}_value_rules` module per API:
+    - `COMPONENT_{n}_{NAME}` statics, each emitted once however many
+      requests reach it;
+    - `{REQUEST}_{LOCATION}_{FIELD}` / `{REQUEST}_BODY` /
+      `{REQUEST}_FORM_{FIELD}` statics;
+    - one `PATTERN_{n}` per distinct translated pattern.
+  - Numbers are the exact text (`exact_number`, which honors
+    `x-schematic-exact`). Patterns pass through `admit_pattern` at
+    generation; only the translated source is emitted.
+  - `api_findings(api)` lists every rule the client does not enforce, with
+    its severity (see Design decisions).
+  - `rule_doc_lines` writes the rustdoc labels for parameters and form
+    fields.
+- **Emission** (`request_structs/{mod,into_parts,form,shared,query_params,named_params,path_params}.rs`):
+  - `generate_request_struct_with_rules` threads one `ApiValueRules` per
+    API through `output/assemble/api.rs`. The standalone
+    `generate_request_struct*` entry points append their own plans module,
+    so their output still compiles on its own.
+  - A request with rules gets `pub fn validate(&self) -> Result<(),
+    schematic_runtime::validate::Violations>`. Its `into_parts` runs the
+    same checks first and returns
+    `violations.into_result().map_err(InvalidArgument::from)?` before the
+    path, query, or headers are built.
+  - Parameters are checked as typed values: `check_str`, `check_number`, or
+    `check_value` for booleans and JSON. An array parameter is checked by
+    count (`check_array_len`), then each item under
+    `PathSegment::Index(index)`, then `uniqueItems`/`enum`/`const` through
+    a JSON array.
+  - A checked JSON body is serialized once with `to_value`, checked, and
+    sent with `to_string(&body)`. An unchecked body keeps
+    `to_string(&self.body)`, byte for byte.
+  - A checked multipart JSON field is serialized once (fallibly, with
+    "the form field `x` cannot be serialized as JSON"), checked, and
+    assembled inline by `form::generate_checked_form_parts`, which sends
+    that same value. It never takes `into_form_parts`' silent drop.
+  - `QueryParamInfo` and `PathField` now carry `constraints`.
+- **Diagnostics**: `validation::check_value_rules` (Rust output only) turns
+  `api_findings` of the API's pager view into `type-constraint` diagnostics.
+- **Define helpers** (`define/src/constraints/registered.rs`):
+  - `UnenforceableRule` gains `composition: Option<CompositionSite>`
+    (component, pointer, keyword). It is `None` for an unresolved
+    reference.
+  - New public helpers `referenced_component`, `admits_only_null`, and
+    `is_width_bound` let the generator walk schemas exactly as
+    `unenforceable_rules` does.
+- **Regenerated through `just generate`** (authorized by Rule 12, and needed
+  because `artifact_drift::generated_rust_artifacts_are_up_to_date` compares
+  committed clients with fresh output):
+  - only `schema/src/openai/requests.rs` changed (+3,801/−38): 62 OpenAI
+    requests gain `validate()` and checked `into_parts`, and the
+    `open_ai_value_rules` module is added;
+  - no other committed client has request-side rules yet;
+  - OpenAPI, Postman, and AsyncAPI output did not change in this phase.
+- **ABI**: unchanged (8). Phase 2 already raised it for the feature (Rule 7
+  is one increment), and the generated code uses only `validate` items that
+  ABI 8 provides.
+
+### Design decisions (adaptations and adopted defaults)
+
+- **Adopted default: Schemars' type-derived rules are neither enforced nor
+  reported** (source: spec "Supported schema traversal" and S2's "implicit
+  primitive bounds are not authored constraints"; this settles Phase 3
+  review agenda item 4).
+  - Integer-width bounds (`is_width_bound`) are skipped.
+  - A string `enum`/`const` is skipped when it is a unit enum's value set
+    at a component root, or a variant or tag of a component whose root is
+    the Rust enum's `oneOf`/`anyOf`.
+  - Serializing the Rust value always meets these rules. Enforcing the root
+    enum sets would also have pushed every request that references a unit
+    enum onto the `Value` path, changing its wire key order for no benefit.
+  - A probe of the shipped definitions found 105 rules beneath
+    compositions (Anthropic 54, OpenAI 49, ElevenLabs 2). Most were these
+    type-derived values.
+- **Adopted default: a rule inside a member of a union component is a
+  warning, not an error** (source: the spec says such a rule must not
+  produce a client that claims to enforce it; the warning keeps that
+  promise).
+  - Every other rule beneath `oneOf`/`anyOf`/`allOf`/`not`, and every rule
+    beside an unresolved `$ref`, stays a generation **error**, as the spec
+    requires.
+  - A union component is an `anyOf`/`oneOf` that is a component's whole
+    schema, which is how a Rust enum of structs appears.
+  - Why: OpenAI's `CreateResponse` reaches 42 such rules through the
+    `BetaTool`, `BetaToolChoiceParam`, and
+    `BetaTextResponseFormatConfiguration` unions. Each is a `type` enum or a
+    bound on an imported struct field. The serialized body does not say
+    which member it is, and evaluating unions is a spec non-goal. As errors
+    they would make the shipped OpenAI client impossible to generate.
+  - So the rules are labeled in rustdoc and listed as warnings, pinned in
+    `output_validation::UNCHECKED_VALUE_RULES`. Changing this means
+    flipping one severity. **Review agenda.**
+- **Adopted default: `format` diagnostics skip the numeric-width formats**
+  `int32`, `int64`, `float`, and `double` (source: Rule 2 asks for
+  "annotation only" labels; these formats only restate the Rust type).
+  - Parameter rustdoc still labels them "an annotation only".
+- **Adopted default: component patterns outside the subset are reported
+  once per API** (endpoint `None`), not once per request that reaches the
+  component (source: the existing per-API diagnostic convention). Each
+  request's rustdoc still lists them.
+- **Adopted default: violation paths use the Rust field name after the
+  location**, for example `header.x_tag` for `X-Tag` (source: spec "Use
+  Rust parameter names when available"). Body paths use serialized names
+  (`body.displayName`). Form-field paths use the wire name.
+- **Adaptation: `validate` is not added to the reserved setter names.**
+  - Phase 1 S3 expected a parameter named `validate` to collide.
+  - Request-struct setters are `with_*`, and a field named `validate` does
+    not clash with the method in Rust.
+  - Call types get no `validate()`. The spec puts it on the request, and a
+    call's `.build()?` is its early check.
+- **Check order within a request**: path, query, header, cookie, then the
+  text body and text form fields, then JSON values (the body, or multipart
+  JSON fields in declaration order). Body serialization failures are
+  returned before violations.
+- **A `$ref` beside an `Option` `anyOf` at one level** (Schemars never writes
+  this): the `$ref` is followed and the `anyOf` member is not. This is
+  commented at the site.
+- **Not handled, logged as residual:**
+  - Rules inside tuple `items` arrays (`prefixItems` in the 3.0 form) are
+    neither enforced nor reported. `unenforceable_rules` does not report
+    them either. No shipped definition has one.
+  - The plan's "unknown keywords become diagnostics" has no source in this
+    phase. The importer already reports unpreserved keywords (Phase 4), and
+    stored component schemas only hold supported keywords and annotations.
+
+### Requirement-to-test mapping
+
+| Requirement (plan Waves 12–14) | Test(s) |
+| --- | --- |
+| Rule-free requests unchanged: no `validate`, no plans module, direct `to_string(&self.body)`; width bounds and unit-enum value sets skipped, no findings | `gen codegen::value_rules::tests::a_request_without_rules_keeps_its_direct_serialization_and_gets_no_validate`; `artifact_drift::generated_rust_artifacts_are_up_to_date` (every other committed client byte-identical) |
+| Parameters checked on typed values in declaration order (path, query, array count then items, header, cookie), before the path is built; `\d` → `[0-9]`; exact numeric text | `gen codegen::value_rules::tests::parameter_rules_are_checked_as_typed_values_in_declaration_order` |
+| Named plans reused, so recursion terminates; component emitted once for two requests; exact beyond-`u64` bound from `x-schematic-exact`; the checked value is the one sent | `gen codegen::value_rules::tests::a_shared_recursive_component_is_emitted_once_and_refers_to_its_own_plan` |
+| Unenforced rules: format and unenforced pattern → warning; union member → warning; composition inside a property → error; tagged-enum tags not reported; rustdoc labels | `gen codegen::value_rules::tests::unenforced_rules_are_findings_with_their_severity` |
+| Component pattern outside the subset reported once per API; admitted sibling still enforced | `gen codegen::value_rules::tests::a_component_pattern_outside_the_subset_is_reported_once_for_the_api` |
+| Unsupported composition → generation error through the public pipeline (Rust only; OpenAPI and Postman still written; no Rust output written), with a control | `gen l1 output_validation::a_request_rule_beneath_a_composition_blocks_only_the_rust_client` |
+| Shipped definitions: no error; exactly the 42 union-member warnings | `gen l1 output_validation::live_definitions_have_no_embedded_queries_or_validation_gaps` (new `UNCHECKED_VALUE_RULES`) |
+| Violating request: `InvalidArgument` shape and zero sends through `validate()`, `.build()`, awaited endpoint call, `.full()`, awaited `client.send`, `client.send(..).full()`, `send_raw`; array count, uniqueness, and item paths; header pattern | fresh crate `a_violating_request_is_refused_on_every_send_path_and_nothing_is_sent` (run by `gen l1 fresh_output_compile::slow_fixture_apis_compile_and_send_offline`) |
+| Valid request sends unchanged data (query bytes, header, JSON body equal to `to_value(body)`); length counts code points | fresh crate `valid_values_pass_their_checks_and_are_sent_unchanged` |
+| Custom `Serialize` (renamed, skipped, flattened), map, items, decimal `multipleOf`, recursive `Option<Box<Self>>`; deterministic key/index order | fresh crate `a_body_is_checked_as_it_serializes_including_renamed_flattened_and_recursive_fields` |
+| Direct field mutation after an early `validate()` is caught at send (parameter and body) | fresh crate `a_field_changed_after_validate_is_caught_by_the_send` |
+| Text body and multipart text/JSON fields checked before encoding; the checked JSON part is sent | fresh crate `text_bodies_and_form_fields_are_checked_before_they_are_encoded` |
+| Secret values and map keys never in `Display`/`Debug` of `Violations`, `InvalidArgument`, or `TransportError`; `[redacted]` key path | fresh crate `reports_of_secret_values_and_map_keys_never_contain_them` |
+| Shipped artifact through the normal path: the committed OpenAI client refuses `CreateSpeech` outside `maxLength`/`maximum` with zero sends; 4096 four-byte characters pass | `schematic-schema value_rules::an_openai_speech_request_outside_its_declared_rules_is_refused_before_sending` |
+| Fixture coverage bookkeeping | `fresh_output_compile::{fixture_coverage_names_every_fixture_api, request_side_test_list_names_every_child_test}` |
+| `referenced_component` | its doctest |
+| GitHub page-size refusal unchanged | `schematic-schema pagination::github_page_size_outside_the_authored_bounds_is_refused_before_sending` (inside `just test-schema`) |
+
+Fidelity and tier:
+- The send-path evidence is F3: a generated crate compiled fresh, with real
+  HTTP to a local wiremock server.
+- The shipped-artifact test runs the committed client.
+- Unit tests pin the emitted shape.
+- Every new test is L1:
+  - the gen unit tests are in the lib target (`value_rules/tests.rs`,
+    declared with `mod tests;`);
+  - `output_validation` and `fresh_output_compile` are already declared in
+    `tests/l1/main.rs`;
+  - `schema/tests/value_rules.rs` is auto-discovered.
+- The fresh-crate test keeps its existing `slow_` name, which
+  `just test-fresh-output` runs. No new name carries a tier marker.
+
+Input Robustness Matrix: not applicable. Phase 5 adds no file-format or
+configuration loader. Its inputs are definitions that the Phase 3/4 loaders
+and checks have already validated. Smell grep over the new code
+(`value_rules/mod.rs`, the `registered.rs` additions):
+- No `#[serde(default)]`.
+- `unwrap_or_default` appears twice:
+  - `typed_paths.unwrap_or_default()` (no typed paths means none to check);
+  - `prune(..).unwrap_or_default()` for a component that `expr` only
+    references when it is live, so the default is unreachable.
+- The `filter_map` prunes dead properties.
+- The `.ok()` calls are in the pre-existing `percent_decode`.
+
+### Review agenda (Phase 5 additions)
+
+1. Union-member rules are warnings, not errors (see Design decisions).
+   OpenAI `CreateResponse` has 42 that are labeled but not checked.
+2. Type-derived Schemars rules (integer widths, unit-enum and tag values)
+   are skipped silently. A hand-written `extend("enum" = [..])` on a string
+   field at a component root would be treated the same way, but Schemars
+   never puts a field at a component root.
+3. Constrained JSON bodies are sent with sorted keys and `f32` widened
+   (Rule 1, documented in `docs/generation/request-side.md`). This now
+   applies to the 62 OpenAI requests with rules.
+4. Generated OpenAI code grew by about 3,800 lines, of which the plans
+   module is about 2,200. No compile-time cost was measured.
+
+### Gates and verification (all on macOS, this host)
+
+- `just lint` (from `schematic/`): exit 0, no warnings.
+- `just test` (from `schematic/`): exit 0 on the final tree.
+  - Main L1: 3116 passed, 23 skipped.
+  - `test-fresh-output`: 17 passed, including the extended
+    `fresh_output_compile::slow_fixture_apis_compile_and_send_offline` with
+    its six new child tests.
+  - `test-compile-fail`: 1 passed.
+  - 19 tests were marked SLOW, all of which passed. The host's load
+    average was about 71 during the run, from other work on this machine;
+    no subagent was running.
+  - The SLOW list is the pre-existing TLS `builder::` and extension-matrix
+    tests plus generation-heavy tests (`artifact_drift`, `e2e_generation`,
+    `generated_docs`).
+  - Rerun alone, under the same load: `e2e_generation::multiple_apis_generate_together`
+    took 3.3 s, `shared_module_defines_no_pagination_trait` 3.4 s, and
+    `artifact_drift::generated_rust_artifacts_are_up_to_date` 5.9 s.
+  - A timing probe (since removed) on the real OpenAI definition, in a
+    debug build: `api_findings` took 16 ms and the whole module assembly
+    285 ms. The new compiler is therefore not the cost. These tests are
+    recorded as load-sensitive. `artifact_drift`'s Rust test is close to
+    the 5 s budget under load; a measurement on an idle host belongs to
+    Phase 7's regeneration review.
+  - Earlier, before the gate: the first targeted run of the gen L1 failed
+    `output_validation::live_definitions_have_no_embedded_queries_or_validation_gaps`,
+    because the 42 union-member warnings are a new accepted gap. It now
+    lists them in `UNCHECKED_VALUE_RULES`.
+- `just doctest`: exit 0. This includes `schematic-define` (205, with the
+  new `referenced_component` doctest) and the generated crate (577).
+- Generated crate:
+  - `just lint-schema` (clippy `-D warnings`): exit 0;
+  - `cargo nextest run --manifest-path schema/Cargo.toml`: 153 passed (152
+    plus the new `value_rules`). The pager anchor
+    `github_page_size_outside_the_authored_bounds_is_refused_before_sending`
+    is among them.
+- `just check-tier-coverage schematic`: nothing stranded.
+- Dependents:
+  - `cargo check -p eversolo-integration -p arcam-amp-integration -p
+    unfolded-integration-helper -p homelab -p sony-receiver-integration -p
+    sniff -p biscuit-speaks -p model-citizen`: builds.
+  - No package outside `schematic/` uses the regenerated OpenAI module.
+  - `schematic-oauth` ran inside `just test`.
+- Narrowed test-input readers, from the scope calculator:
+  - the `darkmatter` skill readers (the same six groups as earlier phases):
+    62 passed;
+  - `test-toolkit` `archive_path_guard` and
+    `the_ci_documentation_states_the_implemented_behavior`: 2 passed.
+- Scope calculator, run after all edits from the repository root (the whole
+  working tree, which still includes the uncommitted Phase 4 work):
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: ["schematic-define", "schematic-definitions",
+  "schematic-gen", "test-toolkit", "darkmatter"]`, `change_class: package`.
+  The gates were required, and they ran (above).
+  - The calculator does not list `schematic-schema`, which is a separate
+    workspace. I ran its lint and tests anyway, because its committed
+    source changed.
+- Checkpoint 5's `just generate-dry-run`: `just generate` was run instead,
+  because the drift test requires the committed client to match. Its diff
+  is exactly `schema/src/openai/requests.rs`, explained under What landed.
+- Cross-OS: not run. The new generator code is token and string
+  construction. The generated code uses only `serde_json` and
+  `schematic_runtime::validate`, with no paths, `cfg`, or OS crates. The
+  new fresh-crate and `schema` tests use wiremock on 127.0.0.1, like their
+  neighbors. Windows, Linux, and WSL2 were not exercised for this phase.
+- Spec frontmatter: this phase's prompt asked for no spec properties, so
+  the spec is unchanged.
