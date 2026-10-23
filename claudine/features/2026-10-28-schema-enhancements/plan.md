@@ -344,6 +344,398 @@ skills_files_updated_during_phase_4:
     - .claude/skills/claudine/cli-reference.md
     - .claude/skills/darkmatter/compose.md
     - .claude/skills/darkmatter/library-surfaces.md
+source_files_during_phase_5:
+    - darkmatter/cli/tests/l1/compose_schema_enhancements.rs
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/mod.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/call_check_agreement.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/signature.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/test_hooks.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/prepared.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/compose_call_precheck.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/design_time_call_check.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+docs_updated_during_phase_5:
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/darkmatter-compose-pipeline.md
+docs_created_during_phase_5:
+    - darkmatter/docs/inline/call-check.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/expressions.md
+source_files_during_phase_6:
+    - darkmatter/lib/src/markdown/coercion/mod.rs
+    - darkmatter/lib/src/markdown/coercion/shape.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/tests/l1/function_call_binding.rs
+    - darkmatter/schemas/partials/functions.yaml
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/tests/l1/type_scope_ownership_guard.rs
+docs_updated_during_phase_6:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/numbers.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/README.md
+    - darkmatter/docs/dependencies.md
+    - docs/dependencies.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/dmls/docs/editors/README.md
+    - darkmatter/dmls/docs/editors/smoke-checklist.md
+    - darkmatter/dmls/README.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/architecture.md
+    - darkmatter/docs/lsp/features.md
+    - claudine/docs/topics/state-management/expression-engine.md
+    - claudine/docs/topics/state-management/drift.md
+    - claudine/README.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/criteria-map.md
+    - claudine/features/2026-10-28-schema-enhancements/behavior-ledger.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+source_code:
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/mod.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/envelope.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/raw_schema.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/frontmatter.rs
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.json
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.md-get.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.schema.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.json
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/slash-commands.shipped.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/timing.shipped.yaml
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/src/main.rs
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/src/Cargo.toml
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/src/Cargo.lock
+    - claudine/gen/src/schema_compat.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/opencode_config.rs
+    - claudine/lib/src/provider/tests.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/compose_state_set.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_grammar_types.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/named_references.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - darkmatter/dmls/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/lifecycle/actions.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/expression/ast.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/replacement.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/parser.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - darkmatter/lib/src/markdown/hash/mod.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/numeric.rs
+    - darkmatter/lib/src/markdown/numeric/ingress.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/phase.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/signature.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/categories.documented.yaml
+    - darkmatter/lib/tests/l1/expression_type_scope.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase6.rs
+    - darkmatter/lib/tests/l1/numeric_admission.rs
+    - darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/snapshots/l1__schema_grammar_descriptors__snapshot_empty_tuple_and_category_annotation.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schema_grammar_descriptors__snapshot_fixed_tuple.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schema_grammar_descriptors__snapshot_union_operator.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schema_grammar_descriptors__snapshot_variadic_tuple_with_optional_position.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_string_with_pattern_and_array_constraints.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_with_description.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_any.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolean.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolish.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_date.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_datetime.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_email.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_enum_members.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_array_min_items.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_bare.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_match.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number_integer_with_min.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_numberlike.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_object.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_min_max.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_not_empty.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_pattern.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_time.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_bare.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_scheme.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_with_description.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_default_and_required_atoms.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_enum_with_default_and_required.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_full_document_schema.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_array.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_as_union_arm.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_bare.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_constrained_array.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_empty.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_mixed_with_string_fallback.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_multi_line.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_nested.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_required_value.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_basic.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_matching_default.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_required.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_root_union_inline_only.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__suggest_constraint_phase3__conversion_snapshot_covers_valid_and_invalid_metadata.snap
+    - sniff/cli/src/commands/filesystem_query.rs
+    - sniff/cli/src/output/mod.rs
+    - sniff/cli/tests/l1/snapshots.rs
+    - darkmatter/lib/src/markdown/cleanup/rules.rs
+    - darkmatter/lib/src/markdown/coercion/engine.rs
+    - darkmatter/lib/src/markdown/coercion/error.rs
+    - darkmatter/lib/src/markdown/coercion/mod.rs
+    - darkmatter/lib/src/markdown/coercion/shape.rs
+    - darkmatter/lib/src/markdown/coercion/union.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/signature.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/json_shape.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/style/parse.rs
+    - darkmatter/schemas/partials/style.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.conversion.schema.yaml
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/clean_rules.rs
+    - darkmatter/lib/tests/l1/coercion_core.rs
+    - darkmatter/lib/tests/l1/coercion_engine_parity.rs
+    - darkmatter/lib/tests/l1/coercion_translator_conformance.rs
+    - darkmatter/lib/tests/l1/frontmatter_coercion_engine.rs
+    - darkmatter/lib/tests/l1/function_call_binding.rs
+    - darkmatter/lib/tests/l1/raw_schema_conversion.rs
+    - darkmatter/lib/tests/l1/schemas_conjunctive_lowering.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_values.rs
+    - darkmatter/lib/tests/l1/schemas_union_clean.rs
+    - darkmatter/lib/tests/l1/schemas_union_coerce.rs
+    - darkmatter/lib/tests/l1/schemas_union_report.rs
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/cli/tests/l1/schema_union_pipeline.rs
+    - darkmatter/dmls/tests/l1/style_markdown_parity.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/cli/src/commands/context/expressions.rs
+    - claudine/cli/src/commands/context/format.rs
+    - claudine/cli/src/commands/context/mod.rs
+    - claudine/cli/src/commands/context/tests.rs
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+    - claudine/docs/schemas/partials/functions.yaml
+    - claudine/docs/schemas/partials/mutations.yaml
+    - claudine/schemas/action.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/cli/tests/l1/compose_expression_failures.rs
+    - darkmatter/cli/tests/l1/compose_schema_enhancements.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/docs/schemas/expression-functions.yaml
+    - darkmatter/lib/src/lib.rs
+    - darkmatter/lib/src/lifecycle/actions/tests.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/capabilities.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/ast.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/agentic_cli.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/args.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/cicd.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/collections.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/composition.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/dates.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/git.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/markdown_docs.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/network.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/pull_requests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/repository.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/shell.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/skills.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/strings.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/terminal.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/test_hooks.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+    - darkmatter/lib/src/markdown/compose/tests/provider_network.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/context_function_contracts.rs
+    - darkmatter/lib/tests/l1/context_functions.rs
+    - darkmatter/lib/tests/l1/current_root_documentation_contract.rs
+    - darkmatter/lib/tests/l1/find_files_and_try_frontmatter.rs
+    - darkmatter/lib/tests/l1/function_binding_conversions.rs
+    - darkmatter/lib/tests/l1/function_binding_registry.rs
+    - darkmatter/lib/tests/l1/function_catalog_parity.rs
+    - darkmatter/lib/tests/l1/function_dispatch.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/nested_composition.rs
+    - darkmatter/lib/tests/l1/predict_conflicts.rs
+    - darkmatter/lib/tests/l1/pure_function_contracts.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/schemas/partials/function-examples/as_line_separated.yaml
+    - darkmatter/schemas/partials/function-examples/as_ordered_list.yaml
+    - darkmatter/schemas/partials/function-examples/as_tsv.yaml
+    - darkmatter/schemas/partials/function-examples/as_unordered_list.yaml
+    - darkmatter/schemas/partials/functions.yaml
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+    - darkmatter/schemas/partials/mutations.yaml
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/mod.rs
+    - darkmatter/dmls/tests/l1/call_check_agreement.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/prepared.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/compose_call_precheck.rs
+    - darkmatter/lib/tests/l1/design_time_call_check.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+    - darkmatter/dmls/tests/l1/type_scope_ownership_guard.rs
+documentation:
+    - claudine/features/2026-10-28-schema-enhancements/inventory/criteria-map.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/prerequisites.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/function-registry.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/ownership.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/reader-matrix.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/rulings.md
+    - claudine/features/2026-10-28-schema-enhancements/behavior-ledger.md
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/findings.md
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/runs/default.md
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/runs/arbitrary-precision.md
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/runs/preserve-order.md
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/PROVENANCE.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/dependencies.md
+    - docs/dependencies.md
+    - darkmatter/docs/topics/numbers.md
+    - darkmatter/docs/inline/schema-validation.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/state-management/context-variables.md
+    - claudine/docs/topics/state-management/drift.md
+    - claudine/docs/topics/state-management/expression-engine.md
+    - darkmatter/docs/lsp/features.md
+    - prompts/_add/add-expressions.md
+    - claudine/features/2026-10-28-schema-enhancements/plan.md
+    - claudine/features/2026-10-28-schema-enhancements/implementation-log.md
+    - claudine/features/2026-10-28-schema-enhancements/phase4-design.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/darkmatter-compose-pipeline.md
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/README.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/dmls/docs/editors/README.md
+    - darkmatter/dmls/docs/editors/smoke-checklist.md
+    - darkmatter/dmls/README.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/architecture.md
+    - claudine/README.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Plan: Schema Enhancements
@@ -944,7 +1336,7 @@ handler coercion remains. Catalog/context rendering snapshots pass.
 
 ### Wave 7 — Library checking authority
 
-- [ ] **Variable projection** — sequential, depends on Wave 6.
+- [x] **Variable projection** — sequential, depends on Wave 6.
   - Expose one passive top-level type projection from `EffectiveSchema` using
     shared effective presence. Preserve constraints; optional properties add
     null; raw schemas/mixed root unions and undeclared names yield unknown.
@@ -954,7 +1346,7 @@ handler coercion remains. Catalog/context rendering snapshots pass.
   - Test projection without access to filesystem, remote, or runtime values,
     including inherited/hoisted required markers and null-admitting unions.
 
-- [ ] **Compatibility API** — follows projection; same library owner.
+- [x] **Compatibility API** — follows projection; same library owner.
   - Implement five-category argument and whole-call queries from the shared
     rules, including arity, overloads, source exclusions and fallback recovery.
     Typed refinements defer to runtime; literal constraints use passive checks.
@@ -971,7 +1363,7 @@ Freeze the diagnostic result/span API before consumer integration.
 
 ### Wave 8 — Parallel consumer integration
 
-- [ ] **Composition precheck** — **parallel**, own preparation/compose wiring
+- [x] **Composition precheck** — **parallel**, own preparation/compose wiring
   and composition public-path tests; depends on Wave 7.
   - Run passive checking after schema resolution and before first frontmatter
     interpolation. Reject category 5 for every function before any sibling
@@ -983,7 +1375,7 @@ Freeze the diagnostic result/span API before consumer integration.
   - Test ternary/boolean/dead-block branches, frontmatter effects, nested
     transclusion, frontmatter-only entry points, and conservative rows f–i.
 
-- [ ] **Editor diagnostics** — **parallel**, own DMLS config/overlay/provider
+- [x] **Editor diagnostics** — **parallel**, own DMLS config/overlay/provider
   code and protocol tests.
   - Add reloadable `expressions.strict`, honoring file/editor precedence and
     matrix error/fallback cases. Repair the observed fallback comment drift.
@@ -1003,7 +1395,7 @@ frontmatter-only and non-executable syntax cases stay within their surface.
 
 ### Wave 9 — Documentation and coverage audit
 
-- [ ] **Current documentation** — **parallel**, own Darkmatter schema/expression
+- [x] **Current documentation** — **parallel**, own Darkmatter schema/expression
   and numeric/coercion topic docs and associated skill pages.
   - Update the actual schema-definition topic and related type/constraint/
     validation/authoring pages for grammar, categories, both example forms,
@@ -1016,7 +1408,7 @@ frontmatter-only and non-executable syntax cases stay within their surface.
   - Document `preserve_order` in root and Darkmatter dependency docs, including
     intentional ordering and custom-format interoperability.
 
-- [ ] **Consumer documentation** — **parallel**, own DMLS diagnostics/config
+- [x] **Consumer documentation** — **parallel**, own DMLS diagnostics/config
   docs, Claudine context docs/README and claudine skill references.
   - Document category severities, `expressions.strict`, reload/precedence,
     errors versus uncertain warnings, recovery, and the shared catalog owner.
@@ -1025,7 +1417,7 @@ frontmatter-only and non-executable syntax cases stay within their surface.
   - Keep examples approachable to developers unfamiliar with the repository;
     remove descriptions claiming old coercion, numeric or null behavior.
 
-- [ ] **Coverage audit** — **parallel**, own evidence mapping and ledger only.
+- [x] **Coverage audit** — **parallel**, own evidence mapping and ledger only.
   - Resolve every acceptance ID 1–59 plus 33a/33b to a passing test/public
     result. Audit every canonical's fixture set, null analogy, aliases,
     fallibility, returns, constraints, and baseline disposition.
@@ -1042,7 +1434,7 @@ implicit matrix fields. Remaining human ledger review is explicitly recorded.
 
 ### Wave 10 — Final scoped verification
 
-- [ ] **Scoped verification** — sequential integrator.
+- [x] **Scoped verification** — sequential integrator.
   - Run `just test` and `just lint` in `darkmatter/` and `claudine/`, covering
     library, CLI, DMLS and their consumers via canonical nextest recipes. Run
     additional affected packages from the ordering audit with root
@@ -1063,7 +1455,7 @@ implicit matrix fields. Remaining human ledger review is explicitly recorded.
     or closure commands. An existing lint recipe's check-only formatting gate
     may identify edits to fix manually. Re-run only gates affected by a fix.
 
-- [ ] **Review package** — follows passing gates.
+- [x] **Review package** — follows passing gates.
   - Finish `implementation-log.md` with decisions/departures, actual commands,
     outcomes, fixture/matrix provenance, baseline ledger, changed ordering
     consumers, and outstanding platform evidence or human review.

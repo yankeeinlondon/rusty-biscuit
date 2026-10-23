@@ -8,6 +8,16 @@
 > `[]`. Shipped documents, examples, and tests that rely on a changed result
 > are updated in the same change.
 
+> **Human review pending for the closing changes (criterion 13).** The
+> Phase 6 coverage audit (2026-10-23) added rows 114–116 (`trim`, `keys`,
+> `values`, registered in Phase 4) and the
+> [Final reconciliation](#final-reconciliation-phase-6-coverage-audit)
+> section, which records each function's implemented signature,
+> fallibility, observed null outcome, and fixture evidence. Those additions
+> describe decided, implemented behavior, but the author has not reviewed
+> them. Criterion 13 stays open until the author records that review here.
+> No function is undecided.
+
 This ledger records, for every registered Darkmatter expression function, what
 happens when the one-pass migration moves argument binding into the coercion
 engine: the target signature, what the function does with `null`, whether
@@ -19,7 +29,8 @@ It starts from `current-state-coercion.md`, the coercion-baseline spike
 `signature-decisions.md`), and the spec. The function list is the registry
 enumeration in [`inventory/function-registry.md`](inventory/function-registry.md):
 **113 canonical functions**, one row each. Aliases are checked separately in
-[Aliases](#aliases).
+[Aliases](#aliases). Phase 4 registered three more (`trim`, `keys`,
+`values`), so the registry now has 116; they are rows 114–116.
 
 ## How to read a row
 
@@ -168,11 +179,15 @@ enumeration in [`inventory/function-registry.md`](inventory/function-registry.md
 | 111 | `as_markdown` | `as_markdown(content: string \| null): string \| null` (draft without null arm) | proposed: `null`; text transform — decided 2026-10-22 (today an argument error) | intentionally changed | Null: argument error → `null` (text-transform family). | reserved | reserved | reserved | reviewed 2026-10-22 |
 | 112 | `and` | `and(...values: unknown \| null): boolean` (draft `any`; lazy in registration) | `null` admitted as a falsy value; domain truthiness | preserved | — (lazy short-circuiting kept, criterion 53) | reserved | impossible: every value binds and every arity, including zero, is eligible (`functions/mod.rs:6031`) | impossible: preservation-only `unknown \| null` variadic | reviewed 2026-10-22 |
 | 113 | `or` | `or(...values: unknown \| null): boolean` (draft `any`; lazy in registration) | `null` admitted as a falsy value; domain truthiness | preserved | — (lazy short-circuiting kept, criterion 53) | reserved | impossible: every value binds and every arity, including zero, is eligible (`functions/mod.rs:6031`) | impossible: preservation-only `unknown \| null` variadic | reviewed 2026-10-22 |
+| 114 | `trim` | `trim(text: string \| null): string \| null` | `null`; text transform (criterion 43) | new (no baseline; ruling 3 below) | — | `trim("  a  ")` → `"a"` | `trim({})` type error | `trim(4)` → `"4"` | added 2026-10-23; human review pending |
+| 115 | `keys` | `keys(obj: object \| null): string[]` | `[]`; author decision 2026-10-22 (see [Planned functions](#planned-functions-not-yet-registered)) | new (criterion 45) | — | `keys({b: 1, a: 2})` → `["b", "a"]` | `keys([1])` type error | impossible: `object \| null` never parses text or wraps a value; evidence shows input kept | added 2026-10-23; human review pending |
+| 116 | `values` | `values(obj: object \| null): any[]` | `[]`; same decision as `keys` | new (criterion 45) | — | `values({b: 1, a: 2})` → `[1, 2]` | `values("x")` type error | impossible: as `keys` | added 2026-10-23; human review pending |
 
 ## Planned functions (not yet registered)
 
 These join the ledger as full rows when they are registered (spec "Map
-Functions", criterion 45).
+Functions", criterion 45). Both were registered in Phase 4 and are now rows
+115 and 116; this table keeps the 2026-10-22 decision as recorded.
 
 | Function | Target signature | Null outcome; family or analogy | Status |
 |---|---|---|---|
@@ -315,3 +330,163 @@ alias, and has its own row above.
 | `markdownbodyempty` | `markdown_body_empty` | reserved |
 | `markdowntitle` | `markdown_title` | reserved |
 | `validateschema` | `validate_schema` | reserved |
+
+## Final reconciliation (Phase 6 coverage audit)
+
+Audited 2026-10-23 against the shipped catalog
+(`darkmatter/schemas/partials/functions.yaml`), the registry, and the
+dispatch fixtures. **Status: human review pending** (see the note at the top).
+
+What was checked, and the result:
+
+- **Function set.** The catalog has 116 canonical functions (124 overloads),
+  the registry enumerates the same 116
+  (`function_dispatch::the_embedded_catalog_and_the_registry_have_the_same_functions`,
+  unit `functions::registration_tests::catalog_and_runtime_bindings_have_bidirectional_canonical_parity`),
+  and this ledger now has a row for each. No function is undecided: every
+  "TBD Phase 4" signature and every "proposed" null outcome above was
+  decided by the author on 2026-10-22 and is implemented as the table below
+  records.
+- **Fixtures (criterion 10, ruling R1).** Every function has one
+  macro-generated row, `function_binding_registry::rows::<name>`, holding
+  an accepted, a rejected, and a converted-input fixture through normal
+  dispatch with the handler-entry counter (0 on every rejection); cells the
+  ledger marks impossible carry their reason and the unchanged-delivery
+  evidence. The guard `function_binding_registry::every_registered_function_has_a_row`
+  fails on a registered function without a row or a row without a function.
+- **Null outcome (criterion 43).** Each function's null outcome was observed
+  through the real `md compose` path (one document per call, first argument
+  `null`, the rest valid). Every observation matches the ledger's null
+  column. The dispatch tests pin the criterion's examples
+  (`pure_function_contracts::the_ledger_null_rule_holds_for_pure_functions`,
+  `context_function_contracts::file_exists_inspects_its_argument_without_converting_it`)
+  and the null fixtures inside the registry rows; the other observations are
+  recorded here, not pinned by a test.
+- **Aliases.** The 75 aliases in [Aliases](#aliases) are exactly the
+  registered ones (`function_catalog_parity::the_registered_aliases_are_the_inventoried_ones`),
+  and each resolves to its canonical's result
+  (`function_catalog_parity::aliases_resolve_as_before`).
+- **Returns and fallibility.** Taken from the catalog; a handler that
+  returns outside its declared type is an implementation-contract error
+  (`function_dispatch::a_wrong_return_is_an_implementation_contract_error_and_is_not_converted`).
+- **Baseline disposition.** Unchanged from the rows above; rows 114–116 are
+  new functions with no baseline.
+
+| # | Function | Catalog signature (final) | Fallible | Null outcome observed through `md compose` | Reconciliation | Fixture evidence |
+|---:|---|---|---|---|---|---|
+| 1 | `is_null` | `(x: unknown \| null) -> boolean` | no | `is_null(null)` → `true` | matches ledger | `function_binding_registry::rows::is_null` |
+| 2 | `is_empty` | `(x: unknown \| null) -> boolean` | no | `is_empty(null)` → `true` | matches ledger | `function_binding_registry::rows::is_empty` |
+| 3 | `is_string` | `(x: unknown \| null) -> boolean` | no | `is_string(null)` → `false` | matches ledger | `function_binding_registry::rows::is_string` |
+| 4 | `is_number` | `(x: unknown \| null) -> boolean` | no | `is_number(null)` → `false` | matches ledger | `function_binding_registry::rows::is_number` |
+| 5 | `is_array` | `(x: unknown \| null) -> boolean` | no | `is_array(null)` → `false` | matches ledger | `function_binding_registry::rows::is_array` |
+| 6 | `is_object` | `(x: unknown \| null) -> boolean` | no | `is_object(null)` → `false` | matches ledger | `function_binding_registry::rows::is_object` |
+| 7 | `is_positive` | `(val: number \| null) -> boolean` | no | `is_positive(null)` → `false` | matches ledger | `function_binding_registry::rows::is_positive` |
+| 8 | `is_negative` | `(val: number \| null) -> boolean` | no | `is_negative(null)` → `false` | matches ledger | `function_binding_registry::rows::is_negative` |
+| 9 | `is_integer` | `(val: unknown \| null) -> boolean` | no | `is_integer(null)` → `false` | matches ledger | `function_binding_registry::rows::is_integer` |
+| 10 | `min` | `(a: number, b: number) -> number` | no | `min(null, 5)` → binding error | matches ledger | `function_binding_registry::rows::min` |
+| 11 | `max` | `(a: number, b: number) -> number` | no | `max(null, 5)` → binding error | matches ledger | `function_binding_registry::rows::max` |
+| 12 | `abs` | `(x: number) -> number` | no | `abs(null)` → binding error | matches ledger | `function_binding_registry::rows::abs` |
+| 13 | `round` | `(x: numberlike, fallback?: number) -> number` | no | `round(null)` → binding error; `round(null, 2.7)` → `3` | matches ledger | `function_binding_registry::rows::round` |
+| 14 | `first` | `(x: any[] \| null) -> any` | no | `first(null)` → `null` | matches ledger | `function_binding_registry::rows::first` |
+| 15 | `last` | `(x: any[] \| null) -> any` | no | `last(null)` → `null` | matches ledger | `function_binding_registry::rows::last` |
+| 16 | `has_key` | `(obj: object \| null, key: string \| null) -> boolean` | no | `has_key(null, "a")` → `false` | matches ledger | `function_binding_registry::rows::has_key` |
+| 17 | `contains` | `(haystack: string \| any[] \| object \| null, needle: unknown \| null) -> boolean` | no | `contains(null, "a")` → `false`; `contains("abc", null)` → `true` | matches ledger | `function_binding_registry::rows::contains` |
+| 18 | `length` | `(val: string \| any[] \| object) -> number` | no | `length(null)` → binding error | null decided: type error (ledger: proposed) | `function_binding_registry::rows::length` |
+| 19 | `number` | `(x: numberlike, fallback?: number) -> number` | no | `number(null)` → binding error; `number(null, 7)` → `7` | matches ledger | `function_binding_registry::rows::number` |
+| 20 | `as_line_separated` | `(list: any[] \| null) -> string \| null` | no | `as_line_separated(null)` → `null` | returns `string \| null` (ledger wrote `string`; null → null as ledgered) | `function_binding_registry::rows::as_line_separated` |
+| 21 | `as_csv` | `(list: any[] \| null) -> string \| null` | no | `as_csv(null)` → `null` | returns `string \| null` (ledger wrote `string`; null → null as ledgered) | `function_binding_registry::rows::as_csv` |
+| 22 | `as_tsv` | `(list: any[] \| null) -> string \| null` | no | `as_tsv(null)` → `null` | returns `string \| null` (ledger wrote `string`; null → null as ledgered) | `function_binding_registry::rows::as_tsv` |
+| 23 | `as_space_separated` | `(list: any[] \| null) -> string \| null` | no | `as_space_separated(null)` → `null` | returns `string \| null` (ledger wrote `string`; null → null as ledgered) | `function_binding_registry::rows::as_space_separated` |
+| 24 | `as_unordered_list` | `(list: any[] \| null) -> string \| null` | no | `as_unordered_list(null)` → `null` | returns `string \| null` (ledger wrote `string`; null → null as ledgered) | `function_binding_registry::rows::as_unordered_list` |
+| 25 | `as_ordered_list` | `(list: any[] \| null) -> string \| null` | no | `as_ordered_list(null)` → `null` | returns `string \| null` (ledger wrote `string`; null → null as ledgered) | `function_binding_registry::rows::as_ordered_list` |
+| 26 | `as_json` | `(list: any[] \| null) -> string \| null` | no | `as_json(null)` → `null` | returns `string \| null` (ledger wrote `string`; null → null as ledgered) | `function_binding_registry::rows::as_json` |
+| 27 | `as_json5` | `(list: any[] \| null) -> string \| null` | no | `as_json5(null)` → `null` | returns `string \| null` (ledger wrote `string`; null → null as ledgered) | `function_binding_registry::rows::as_json5` |
+| 28 | `starts_with` | `(x: string \| null, find: string \| null) -> boolean` | no | `starts_with(null, "a")` → `false` | matches ledger | `function_binding_registry::rows::starts_with` |
+| 29 | `ends_with` | `(x: string \| null, find: string \| null) -> boolean` | no | `ends_with(null, "a")` → `false` | matches ledger | `function_binding_registry::rows::ends_with` |
+| 30 | `lower` | `(x: string \| null) -> string \| null` | no | `lower(null)` → `null` | matches ledger | `function_binding_registry::rows::lower` |
+| 31 | `upper` | `(x: string \| null) -> string \| null` | no | `upper(null)` → `null` | matches ledger | `function_binding_registry::rows::upper` |
+| 32 | `capitalize` | `(x: string \| null) -> string \| null` | no | `capitalize(null)` → `null` | matches ledger | `function_binding_registry::rows::capitalize` |
+| 33 | `kebab_case` | `(x: string \| null) -> string \| null` | no | `kebab_case(null)` → `null` | matches ledger | `function_binding_registry::rows::kebab_case` |
+| 34 | `snake_case` | `(x: string \| null) -> string \| null` | no | `snake_case(null)` → `null` | matches ledger | `function_binding_registry::rows::snake_case` |
+| 35 | `camel_case` | `(x: string \| null) -> string \| null` | no | `camel_case(null)` → `null` | matches ledger | `function_binding_registry::rows::camel_case` |
+| 36 | `pascal_case` | `(x: string \| null) -> string \| null` | no | `pascal_case(null)` → `null` | matches ledger | `function_binding_registry::rows::pascal_case` |
+| 37 | `title_case` | `(x: string \| null) -> string \| null` | no | `title_case(null)` → `null` | matches ledger | `function_binding_registry::rows::title_case` |
+| 38 | `without_date` | `(string: string \| null) -> string \| null` | no | `without_date(null)` → `null` | matches ledger | `function_binding_registry::rows::without_date` |
+| 39 | `ensure_leading` | `(var: string \| number \| null, prefix: string \| number \| null) -> string \| number \| null` | no | `ensure_leading(null, "a")` → `null` | matches ledger | `function_binding_registry::rows::ensure_leading` |
+| 40 | `ensure_trailing` | `(var: string \| number \| null, postfix: string \| number \| null) -> string \| number \| null` | no | `ensure_trailing(null, "a")` → `null` | matches ledger | `function_binding_registry::rows::ensure_trailing` |
+| 41 | `replace` | `(x: string \| null, find: string \| null, replacement: string \| null) -> string \| null` | no | `replace(null, "a", "b")` → `null` | matches ledger | `function_binding_registry::rows::replace` |
+| 42 | `replace_first` | `(x: string \| null, find: string \| null, replacement: string \| null) -> string \| null` | no | `replace_first(null, "a", "b")` → `null` | matches ledger | `function_binding_registry::rows::replace_first` |
+| 43 | `replace_last` | `(x: string \| null, find: string \| null, replacement: string \| null) -> string \| null` | no | `replace_last(null, "a", "b")` → `null` | matches ledger | `function_binding_registry::rows::replace_last` |
+| 44 | `terminal` | `(content: string \| null) -> string \| null` | no | `terminal(null)` → `null` | matches ledger | `function_binding_registry::rows::terminal` |
+| 45 | `date` | `(iso: date \| datetime \| null, fmt: enum('MMMM Do', short, 'MMMM Do [YYYY]', short-optional, 'MMMM Do YYYY', 'D MMMM [YYYY]', 'D MMMM YYYY', 'ddd, MMMM Do, YYYY', long) \| null) -> string \| null` | no | `date(null, "short")` → `null` | refined: `iso: date \| datetime \| null`, `fmt` is the format enum `\| null` (ledger: TBD Phase 4) | `function_binding_registry::rows::date` |
+| 46 | `is_date` | `(x: unknown \| null) -> boolean` | no | `is_date(null)` → `false` | matches ledger | `function_binding_registry::rows::is_date` |
+| 47 | `is_date_utc` | `(x: unknown \| null) -> boolean` | no | `is_date_utc(null)` → `false` | matches ledger | `function_binding_registry::rows::is_date_utc` |
+| 48 | `is_date_time` | `(x: unknown \| null) -> boolean` | no | `is_date_time(null)` → `false` | matches ledger | `function_binding_registry::rows::is_date_time` |
+| 49 | `is_date_time_utc` | `(x: unknown \| null) -> boolean` | no | `is_date_time_utc(null)` → `false` | matches ledger | `function_binding_registry::rows::is_date_time_utc` |
+| 50 | `is_today` | `(x: unknown \| null) -> boolean` | no | `is_today(null)` → `false` | matches ledger | `function_binding_registry::rows::is_today` |
+| 51 | `is_today_utc` | `(x: unknown \| null) -> boolean` | no | `is_today_utc(null)` → `false` | matches ledger | `function_binding_registry::rows::is_today_utc` |
+| 52 | `is_yesterday` | `(x: unknown \| null) -> boolean` | no | `is_yesterday(null)` → `false` | matches ledger | `function_binding_registry::rows::is_yesterday` |
+| 53 | `is_yesterday_utc` | `(x: unknown \| null) -> boolean` | no | `is_yesterday_utc(null)` → `false` | matches ledger | `function_binding_registry::rows::is_yesterday_utc` |
+| 54 | `is_tomorrow` | `(x: unknown \| null) -> boolean` | no | `is_tomorrow(null)` → `false` | matches ledger | `function_binding_registry::rows::is_tomorrow` |
+| 55 | `is_tomorrow_utc` | `(x: unknown \| null) -> boolean` | no | `is_tomorrow_utc(null)` → `false` | matches ledger | `function_binding_registry::rows::is_tomorrow_utc` |
+| 56 | `is_this_month` | `(x: unknown \| null) -> boolean` | no | `is_this_month(null)` → `false` | matches ledger | `function_binding_registry::rows::is_this_month` |
+| 57 | `is_this_month_utc` | `(x: unknown \| null) -> boolean` | no | `is_this_month_utc(null)` → `false` | matches ledger | `function_binding_registry::rows::is_this_month_utc` |
+| 58 | `is_this_year` | `(x: unknown \| null) -> boolean` | no | `is_this_year(null)` → `false` | matches ledger | `function_binding_registry::rows::is_this_year` |
+| 59 | `is_this_year_utc` | `(x: unknown \| null) -> boolean` | no | `is_this_year_utc(null)` → `false` | matches ledger | `function_binding_registry::rows::is_this_year_utc` |
+| 60 | `date_delta` | `(date1: date \| datetime, date2: date \| datetime, diff: string(pattern(<duration>))) -> boolean` | yes | `date_delta(null, "2024-01-01", "1d")` → binding error | refined: `date \| datetime` dates, duration `string(pattern(...))`; fallible (ledger: TBD Phase 4) | `function_binding_registry::rows::date_delta` |
+| 61 | `older_than` | `(date1: date \| datetime, date2: date \| datetime, diff: string(pattern(<duration>))) -> boolean` | yes | `older_than(null, "2024-01-01", "1d")` → binding error | refined: `date \| datetime` dates, duration `string(pattern(...))`; fallible (ledger: TBD Phase 4) | `function_binding_registry::rows::older_than` |
+| 62 | `newer_than` | `(date1: date \| datetime, date2: date \| datetime, diff: string(pattern(<duration>))) -> boolean` | yes | `newer_than(null, "2024-01-01", "1d")` → binding error | refined: `date \| datetime` dates, duration `string(pattern(...))`; fallible (ledger: TBD Phase 4) | `function_binding_registry::rows::newer_than` |
+| 63 | `predict_conflicts` | `(branch: string \| null) -> string[] \| null` | yes | `predict_conflicts(null)` → `null` | matches ledger | `function_binding_registry::rows::predict_conflicts` |
+| 64 | `branch_exists_on_remote` | `(void) -> boolean`<br>`(branch: string) -> boolean`<br>`(branch: string, remote: string) -> boolean` | yes | `branch_exists_on_remote(null)` → binding error | matches ledger | `function_binding_registry::rows::branch_exists_on_remote` |
+| 65 | `remote_vendor` | `(remote?: string) -> enum('', github, gitlab, gitea, forgejo, bitbucket, azure_devops, aws_code_commit, source_hut)` | yes | `remote_vendor(null)` → binding error | matches ledger | `function_binding_registry::rows::remote_vendor` |
+| 66 | `recent_commits` | `(count: number(integer; min(1))) -> recent-commits` | yes | `recent_commits(null)` → binding error | returns the named type `recent-commits` (`string[]`); no `max(...)` bound | `function_binding_registry::rows::recent_commits` |
+| 67 | `package_area` | `(where: file) -> string` | yes | `package_area(null)` → binding error | matches ledger | `function_binding_registry::rows::package_area` |
+| 68 | `package` | `(where: file) -> string` | yes | `package(null)` → binding error | matches ledger | `function_binding_registry::rows::package` |
+| 69 | `ipv4` | `(filter?: string) -> string[]` | yes | `ipv4(null)` → binding error | matches ledger | `function_binding_registry::rows::ipv4` |
+| 70 | `ipv6` | `(filter?: string) -> string[]` | yes | `ipv6(null)` → binding error | matches ledger | `function_binding_registry::rows::ipv6` |
+| 71 | `ping` | `(address: ip-address, timeout?: number) -> boolean \| null` | yes | `ping(null)` → binding error | matches ledger | `function_binding_registry::rows::ping` |
+| 72 | `ping_under` | `(address: ip-address, timeout: number, attempts?: number(integer; min(1); max(100))) -> boolean \| enum(unstable) \| null` | yes | `ping_under(null, 1)` → binding error | matches ledger | `function_binding_registry::rows::ping_under` |
+| 73 | `pr` | `(id: number(integer; min(1)) \| string(min(1))) -> string` | yes | `pr(null)` → binding error | `string(min(1))` (ledger spelled `min-length(1)`) | `function_binding_registry::rows::pr` |
+| 74 | `pr_list` | `(query: object) -> string[]`<br>`(count: number(integer; min(1); max(100))) -> string[]` | yes | `pr_list(null)` → binding error | matches ledger | `function_binding_registry::rows::pr_list` |
+| 75 | `cicd` | `(id: number(integer; min(1)) \| string(min(1))) -> string` | yes | `cicd(null)` → binding error | `string(min(1))` (ledger spelled `min-length(1)`) | `function_binding_registry::rows::cicd` |
+| 76 | `cicd_list` | `(query: object) -> string[]`<br>`(count: number(integer; min(1); max(100))) -> string[]` | yes | `cicd_list(null)` → binding error | matches ledger | `function_binding_registry::rows::cicd_list` |
+| 77 | `absolute` | `(file: file \| null) -> file \| null` | yes | `absolute(null)` → `null` | matches ledger | `function_binding_registry::rows::absolute` |
+| 78 | `relative` | `(file: file \| null) -> file \| null` | yes | `relative(null)` → `null` | matches ledger | `function_binding_registry::rows::relative` |
+| 79 | `file_exists` | `(value: unknown \| null) -> boolean` | yes | `file_exists(null)` → `false` | matches ledger | `function_binding_registry::rows::file_exists` |
+| 80 | `find_files` | `(pattern: string \| null) -> file[]` | yes | `find_files(null)` → `[]` | decided `pattern: string \| null` → `file[]` (ledger: TBD/proposed) | `function_binding_registry::rows::find_files` |
+| 81 | `has_command` | `(cmd: string \| null) -> boolean` | no | `has_command(null)` → `false` | decided `string \| null` (criterion 44; ledger: TBD Phase 4) | `function_binding_registry::rows::has_command` |
+| 82 | `has_binary` | `(name_or_path: string \| null) -> boolean` | no | `has_binary(null)` → `false` | decided `string \| null` (criterion 44; ledger: TBD Phase 4) | `function_binding_registry::rows::has_binary` |
+| 83 | `is_indexed_file` | `(file: file \| null) -> boolean` | yes | `is_indexed_file(null)` → `false` | matches ledger | `function_binding_registry::rows::is_indexed_file` |
+| 84 | `file_index` | `(file: file \| null) -> number \| null` | yes | `file_index(null)` → `null` | matches ledger | `function_binding_registry::rows::file_index` |
+| 85 | `increment_file_index` | `(file: file \| null) -> file \| null` | yes | `increment_file_index(null)` → `null` | matches ledger | `function_binding_registry::rows::increment_file_index` |
+| 86 | `decrement_file_index` | `(file: file \| null) -> file \| null` | yes | `decrement_file_index(null)` → `null` | matches ledger | `function_binding_registry::rows::decrement_file_index` |
+| 87 | `find_first_index` | `(file: file \| null) -> file \| null` | yes | `find_first_index(null)` → `null` | matches ledger | `function_binding_registry::rows::find_first_index` |
+| 88 | `find_last_index` | `(file: file \| null) -> file \| null` | yes | `find_last_index(null)` → `null` | matches ledger | `function_binding_registry::rows::find_last_index` |
+| 89 | `basename` | `(file: file \| null) -> string \| null` | yes | `basename(null)` → `null` | matches ledger | `function_binding_registry::rows::basename` |
+| 90 | `basename_without_index` | `(file: file \| null) -> string \| null` | yes | `basename_without_index(null)` → `null` | matches ledger | `function_binding_registry::rows::basename_without_index` |
+| 91 | `dirname` | `(file: file \| null) -> string \| null` | yes | `dirname(null)` → `null` | matches ledger | `function_binding_registry::rows::dirname` |
+| 92 | `ext` | `(file: file \| null) -> string \| null` | yes | `ext(null)` → `null` | matches ledger | `function_binding_registry::rows::ext` |
+| 93 | `parent_dir` | `(file: file \| null) -> string \| null` | yes | `parent_dir(null)` → `null` | matches ledger | `function_binding_registry::rows::parent_dir` |
+| 94 | `file_trailing` | `(file: file \| null) -> string \| null` | yes | `file_trailing(null)` → `null` | matches ledger | `function_binding_registry::rows::file_trailing` |
+| 95 | `dir_leading` | `(file: file \| null) -> string \| null` | yes | `dir_leading(null)` → `null` | matches ledger | `function_binding_registry::rows::dir_leading` |
+| 96 | `join` | `(left: string \| null, right: string \| null) -> string \| null` | yes | `join(null, "a")` → `null` | matches ledger | `function_binding_registry::rows::join` |
+| 97 | `link` | `(file: file \| null) -> string \| null`<br>`(target: file \| null, desc: string \| null) -> string \| null` | yes | `link(null)` → `null`; `link(null, "d")` → `null` | matches ledger | `function_binding_registry::rows::link` |
+| 98 | `code_link` | `(file: file \| null) -> string \| null`<br>`(target: file \| null, desc: string \| null) -> string \| null` | yes | `code_link(null)` → `null`; `code_link(null, "d")` → `null` | decided: mirrors `link` (ledger: TBD Phase 4) | `function_binding_registry::rows::code_link` |
+| 99 | `has_alias` | `(name: string \| null) -> boolean` | no | `has_alias(null)` → `false` | decided `string \| null` (criterion 44; ledger: TBD Phase 4) | `function_binding_registry::rows::has_alias` |
+| 100 | `has_builtin_function` | `(name: string \| null) -> boolean` | no | `has_builtin_function(null)` → `false` | decided `string \| null` (criterion 44; ledger: TBD Phase 4) | `function_binding_registry::rows::has_builtin_function` |
+| 101 | `has_user_function` | `(name: string \| null) -> boolean` | no | `has_user_function(null)` → `false` | decided `string \| null` (criterion 44; ledger: TBD Phase 4) | `function_binding_registry::rows::has_user_function` |
+| 102 | `can_execute` | `(name: string \| null) -> boolean` | no | `can_execute(null)` → `false` | decided `string \| null` (criterion 44; ledger: TBD Phase 4) | `function_binding_registry::rows::can_execute` |
+| 103 | `has_agentic_cli` | `(agent: agentic-cli \| null) -> boolean` | yes | `has_agentic_cli(null)` → `false` | `agent: agentic-cli \| null`; fallible | `function_binding_registry::rows::has_agentic_cli` |
+| 104 | `has_skill` | `(name: string \| null) -> boolean` | yes | `has_skill(null)` → `false` | matches ledger | `function_binding_registry::rows::has_skill` |
+| 105 | `has_local_skill` | `(name: string \| null) -> boolean` | yes | `has_local_skill(null)` → `false` | matches ledger | `function_binding_registry::rows::has_local_skill` |
+| 106 | `frontmatter` | `(file: file \| null) -> object \| null`<br>`(file: file \| null, prop: string) -> any` | yes | `frontmatter(null)` → `null`; `frontmatter(null, "a")` → `null` | matches ledger | `function_binding_registry::rows::frontmatter` |
+| 107 | `try_frontmatter` | `(file: file \| null) -> object \| null` | no | `try_frontmatter(null)` → `null` | decided `file: file \| null` → `object \| null` (ledger: TBD/proposed) | `function_binding_registry::rows::try_frontmatter` |
+| 108 | `markdown_body_empty` | `(file: file \| null) -> boolean` | yes | `markdown_body_empty(null)` → `false` | null decided: `false` (ledger: proposed) | `function_binding_registry::rows::markdown_body_empty` |
+| 109 | `markdown_title` | `(file: file \| null) -> string \| null` | yes | `markdown_title(null)` → `null` | matches ledger | `function_binding_registry::rows::markdown_title` |
+| 110 | `validate_schema` | `(file: file \| null) -> boolean \| null`<br>`(file: file \| null, obj: object) -> boolean \| null` | yes | `validate_schema(null)` → `null` | null decided: `null` (ledger: proposed) | `function_binding_registry::rows::validate_schema` |
+| 111 | `as_markdown` | `(content: string \| null) -> string \| null` | yes | `as_markdown(null)` → `null` | null decided: `null` (ledger: proposed) | `function_binding_registry::rows::as_markdown` |
+| 112 | `and` | `(...values: unknown \| null) -> boolean` | no | `and(null)` → `false` | matches ledger | `function_binding_registry::rows::and` |
+| 113 | `or` | `(...values: unknown \| null) -> boolean` | no | `or(null)` → `false` | matches ledger | `function_binding_registry::rows::or` |
+| 114 | `trim` | `(text: string \| null) -> string \| null` | no | `trim(null)` → `null` | new row (registered in Phase 4; ledger ruling 3) | `function_binding_registry::rows::trim` |
+| 115 | `keys` | `(obj: object \| null) -> string[]` | no | `keys(null)` → `[]` | new row (was "planned"; criterion 45) | `function_binding_registry::rows::keys` |
+| 116 | `values` | `(obj: object \| null) -> any[]` | no | `values(null)` → `[]` | new row (was "planned"; criterion 45) | `function_binding_registry::rows::values` |

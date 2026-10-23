@@ -240,15 +240,6 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/cleanup.md
     - .claude/skills/darkmatter/schema.md
-message_to_agent: |-
-    Phase 4 (Waves 5-6) is done; read implementation-log.md "## Phase 4" first. What Phase 5 builds on:
-
-    - Catalog: darkmatter/schemas/partials/functions.yaml (116 functions; named helper types agentic-cli, ip-address, recent-commits). Library API in compose/expression/catalog/mod.rs: expression_function_catalog() (categories + descriptors in documentation order), expression_function_descriptors(), function_descriptors(name) (alias- and case-aware; every overload of one function as one slice), ExpressionFunctionDescriptor.function_type (the grammar FunctionType) and parameters/returns/fallible/examples. FunctionCatalog has a crate-private type_resolver() for the helper types.
-    - Registry and dispatch: compose/expression/functions/mod.rs. Every function is a call_binding::FunctionRegistration compiled once from the catalog (length's boolean exclusion and number/round recovery registered there). call_function(name, args, ctx) binds before any handler; lazy and/or bind operand by operand (functions::lazy_function). The design-time compatibility API (Wave 7) should read these same registrations rather than recompiling signatures.
-    - Errors: ExpressionError::Call(Box<CallBindingError>); only ImplementationContract is authoring-fatal. Arity/ArgType/ArityBound are gone.
-    - Test hooks: function_test_hooks (feature effects-instrumentation): register test functions and count handler entries. Criterion 37/49/53 compose-precheck tests can assert "counter at 0" with them.
-    - Known load-sensitive test (not on feat/pipeline yet): dmls::l1 searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back; passes alone.
-    - Hazards: zsh CDPATH (cd with absolute paths); `git rm`/`git apply --3way` stage files. Parallel subagents in throwaway worktrees seeded from a tarball of the uncommitted tree worked well again; give each disjoint files.
 source_files_during_phase_4:
     - claudine/cli/src/commands/context/expressions.rs
     - claudine/cli/src/commands/context/format.rs
@@ -353,6 +344,404 @@ skills_files_updated_during_phase_4:
     - .claude/skills/claudine/cli-reference.md
     - .claude/skills/darkmatter/compose.md
     - .claude/skills/darkmatter/library-surfaces.md
+source_files_during_phase_5:
+    - darkmatter/cli/tests/l1/compose_schema_enhancements.rs
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/mod.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/call_check_agreement.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/signature.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/test_hooks.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/prepared.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/compose_call_precheck.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/design_time_call_check.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+docs_updated_during_phase_5:
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/darkmatter-compose-pipeline.md
+docs_created_during_phase_5:
+    - darkmatter/docs/inline/call-check.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/expressions.md
+source_files_during_phase_6:
+    - darkmatter/lib/src/markdown/coercion/mod.rs
+    - darkmatter/lib/src/markdown/coercion/shape.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/tests/l1/function_call_binding.rs
+    - darkmatter/schemas/partials/functions.yaml
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/tests/l1/type_scope_ownership_guard.rs
+docs_updated_during_phase_6:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/numbers.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/README.md
+    - darkmatter/docs/dependencies.md
+    - docs/dependencies.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/dmls/docs/editors/README.md
+    - darkmatter/dmls/docs/editors/smoke-checklist.md
+    - darkmatter/dmls/README.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/architecture.md
+    - darkmatter/docs/lsp/features.md
+    - claudine/docs/topics/state-management/expression-engine.md
+    - claudine/docs/topics/state-management/drift.md
+    - claudine/README.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/criteria-map.md
+    - claudine/features/2026-10-28-schema-enhancements/behavior-ledger.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+source_code:
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/mod.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/envelope.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/raw_schema.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/frontmatter.rs
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.json
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.md-get.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.schema.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.json
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/slash-commands.shipped.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/timing.shipped.yaml
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/src/main.rs
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/src/Cargo.toml
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/src/Cargo.lock
+    - claudine/gen/src/schema_compat.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/opencode_config.rs
+    - claudine/lib/src/provider/tests.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/compose_state_set.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_grammar_types.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/named_references.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - darkmatter/dmls/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/lifecycle/actions.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/expression/ast.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/replacement.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/parser.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - darkmatter/lib/src/markdown/hash/mod.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/numeric.rs
+    - darkmatter/lib/src/markdown/numeric/ingress.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/phase.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/signature.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/categories.documented.yaml
+    - darkmatter/lib/tests/l1/expression_type_scope.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase6.rs
+    - darkmatter/lib/tests/l1/numeric_admission.rs
+    - darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/snapshots/l1__schema_grammar_descriptors__snapshot_empty_tuple_and_category_annotation.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schema_grammar_descriptors__snapshot_fixed_tuple.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schema_grammar_descriptors__snapshot_union_operator.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schema_grammar_descriptors__snapshot_variadic_tuple_with_optional_position.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_string_with_pattern_and_array_constraints.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_with_description.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_any.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolean.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolish.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_date.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_datetime.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_email.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_enum_members.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_array_min_items.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_bare.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_match.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number_integer_with_min.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_numberlike.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_object.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_min_max.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_not_empty.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_pattern.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_time.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_bare.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_scheme.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_with_description.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_default_and_required_atoms.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_enum_with_default_and_required.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_full_document_schema.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_array.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_as_union_arm.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_bare.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_constrained_array.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_empty.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_mixed_with_string_fallback.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_multi_line.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_nested.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_required_value.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_basic.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_matching_default.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_required.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_root_union_inline_only.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__suggest_constraint_phase3__conversion_snapshot_covers_valid_and_invalid_metadata.snap
+    - sniff/cli/src/commands/filesystem_query.rs
+    - sniff/cli/src/output/mod.rs
+    - sniff/cli/tests/l1/snapshots.rs
+    - darkmatter/lib/src/markdown/cleanup/rules.rs
+    - darkmatter/lib/src/markdown/coercion/engine.rs
+    - darkmatter/lib/src/markdown/coercion/error.rs
+    - darkmatter/lib/src/markdown/coercion/mod.rs
+    - darkmatter/lib/src/markdown/coercion/shape.rs
+    - darkmatter/lib/src/markdown/coercion/union.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/signature.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/json_shape.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/style/parse.rs
+    - darkmatter/schemas/partials/style.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.conversion.schema.yaml
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/clean_rules.rs
+    - darkmatter/lib/tests/l1/coercion_core.rs
+    - darkmatter/lib/tests/l1/coercion_engine_parity.rs
+    - darkmatter/lib/tests/l1/coercion_translator_conformance.rs
+    - darkmatter/lib/tests/l1/frontmatter_coercion_engine.rs
+    - darkmatter/lib/tests/l1/function_call_binding.rs
+    - darkmatter/lib/tests/l1/raw_schema_conversion.rs
+    - darkmatter/lib/tests/l1/schemas_conjunctive_lowering.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_values.rs
+    - darkmatter/lib/tests/l1/schemas_union_clean.rs
+    - darkmatter/lib/tests/l1/schemas_union_coerce.rs
+    - darkmatter/lib/tests/l1/schemas_union_report.rs
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/cli/tests/l1/schema_union_pipeline.rs
+    - darkmatter/dmls/tests/l1/style_markdown_parity.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/cli/src/commands/context/expressions.rs
+    - claudine/cli/src/commands/context/format.rs
+    - claudine/cli/src/commands/context/mod.rs
+    - claudine/cli/src/commands/context/tests.rs
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+    - claudine/docs/schemas/partials/functions.yaml
+    - claudine/docs/schemas/partials/mutations.yaml
+    - claudine/schemas/action.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/cli/tests/l1/compose_expression_failures.rs
+    - darkmatter/cli/tests/l1/compose_schema_enhancements.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/docs/schemas/expression-functions.yaml
+    - darkmatter/lib/src/lib.rs
+    - darkmatter/lib/src/lifecycle/actions/tests.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/capabilities.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/ast.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/agentic_cli.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/args.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/cicd.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/collections.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/composition.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/dates.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/git.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/markdown_docs.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/network.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/pull_requests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/repository.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/shell.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/skills.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/strings.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/terminal.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/test_hooks.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+    - darkmatter/lib/src/markdown/compose/tests/provider_network.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/context_function_contracts.rs
+    - darkmatter/lib/tests/l1/context_functions.rs
+    - darkmatter/lib/tests/l1/current_root_documentation_contract.rs
+    - darkmatter/lib/tests/l1/find_files_and_try_frontmatter.rs
+    - darkmatter/lib/tests/l1/function_binding_conversions.rs
+    - darkmatter/lib/tests/l1/function_binding_registry.rs
+    - darkmatter/lib/tests/l1/function_catalog_parity.rs
+    - darkmatter/lib/tests/l1/function_dispatch.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/nested_composition.rs
+    - darkmatter/lib/tests/l1/predict_conflicts.rs
+    - darkmatter/lib/tests/l1/pure_function_contracts.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/schemas/partials/function-examples/as_line_separated.yaml
+    - darkmatter/schemas/partials/function-examples/as_ordered_list.yaml
+    - darkmatter/schemas/partials/function-examples/as_tsv.yaml
+    - darkmatter/schemas/partials/function-examples/as_unordered_list.yaml
+    - darkmatter/schemas/partials/functions.yaml
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+    - darkmatter/schemas/partials/mutations.yaml
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/mod.rs
+    - darkmatter/dmls/tests/l1/call_check_agreement.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/prepared.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/compose_call_precheck.rs
+    - darkmatter/lib/tests/l1/design_time_call_check.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+    - darkmatter/dmls/tests/l1/type_scope_ownership_guard.rs
+documentation:
+    - claudine/features/2026-10-28-schema-enhancements/inventory/criteria-map.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/prerequisites.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/function-registry.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/ownership.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/reader-matrix.md
+    - claudine/features/2026-10-28-schema-enhancements/inventory/rulings.md
+    - claudine/features/2026-10-28-schema-enhancements/behavior-ledger.md
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/findings.md
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/runs/default.md
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/runs/arbitrary-precision.md
+    - claudine/features/2026-10-28-schema-enhancements/spikes/numeric-ingress/runs/preserve-order.md
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/PROVENANCE.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/dependencies.md
+    - docs/dependencies.md
+    - darkmatter/docs/topics/numbers.md
+    - darkmatter/docs/inline/schema-validation.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/state-management/context-variables.md
+    - claudine/docs/topics/state-management/drift.md
+    - claudine/docs/topics/state-management/expression-engine.md
+    - darkmatter/docs/lsp/features.md
+    - prompts/_add/add-expressions.md
+    - claudine/features/2026-10-28-schema-enhancements/plan.md
+    - claudine/features/2026-10-28-schema-enhancements/implementation-log.md
+    - claudine/features/2026-10-28-schema-enhancements/phase4-design.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/darkmatter-compose-pipeline.md
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/README.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/dmls/docs/editors/README.md
+    - darkmatter/dmls/docs/editors/smoke-checklist.md
+    - darkmatter/dmls/README.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/architecture.md
+    - claudine/README.md
+completed_phase: 6
+implemented: true
+pipeline_refreshed:
+    - 2026-10-29-recursive-schema-types
+    - 2026-10-30-claudine-recursive-schemas
+    - 2026-10-31-type-aware-evaluation
+    - 2026-11-01-map-and-filter
+decisions_for_author: []
 ---
 
 # Implementation Log for 2026-10-28-schema-enhancements (6 phases)
@@ -1513,3 +1902,491 @@ in temp dirs and spawn `md`/`claudine` only through the existing fixtures. No
 Skills: `darkmatter` (`library-surfaces.md`, `compose.md`) and `claudine`
 (`cli-commands.md`, `cli-reference.md` — the `--expressions` report's order
 and example column) were updated.
+
+
+## Phase 5
+
+Phase 5 adds passive checking and editor agreement (Waves 7–8). Started
+2026-10-22 from the Phase 4 tree.
+
+### Wave 7: library checking authority (integrator)
+
+New module `darkmatter/lib/src/markdown/compose/expression/call_check.rs`,
+re-exported from `expression`:
+
+- `ArgumentCategory` (`Compatible` 1, `NullableMatch` 2, `Uncertain` 3,
+  `Unknown` 4, `Incompatible` 5; `number()`), `ArgumentType`
+  (`Literal(Value)` / `Typed(scope::Shape)` / `Unknown`, built by
+  `ArgumentType::of(arg, &TypeScope)`).
+- `classify_argument(&ArgumentType, &CompiledParameter)`: the pairwise query.
+- `check_call(name, &[ArgumentType], call_span, argument_spans) -> Option<CallCheck>`:
+  whole-call classification (arity, overloads, source exclusions, numeric
+  recovery). `CallCheck::{category, is_rejected, findings, rejection_message}`;
+  `CallFinding { span, category, argument, message }` (argument span, or the
+  call span for `CallProblem::{Arity, Ambiguous, NoOverload}`).
+- `check_expression_calls(&SpannedExpr, &TypeScope) -> Vec<CallCheck>`: every
+  call in every branch, each argument typed at its own site through
+  `branch_scope` (so `is_number(foo) ? min(foo, 5) : 0` narrows).
+- `check_prepared_calls(&PreparedValue, &TypeScope) -> Vec<PreparedCallCheck>`:
+  the same over a prepared frontmatter value, spans mapped onto the leaf.
+- Projection: `DeclaredTypes::top_level_types() -> BTreeMap<String, Shape>`.
+- `ExpressionError::CallCheck(Box<CallCheck>)`: authoring-fatal; its message
+  is the binder's own type error for an all-literal call.
+- Supporting: `CompiledParameter::{declared, binds}`,
+  `CompiledSignature::recovery`, `functions::inspect_registration` (test
+  functions first, as dispatch resolves them).
+
+Tests: `darkmatter` `l1` `design_time_call_check::*` (23).
+
+### Design Decisions
+
+1. **Call checks read the declaration-only layer.**
+   - Decision: the call check's `TypeScope` is built over
+     `DeclaredTypes::new(schema)` with no static frontmatter.
+   - Alternatives: reuse the static-frontmatter layer the presence checks use
+     (a set `maybe: 3` would remove `null`, making row b category 1).
+   - Why: the spec's projection table derives types from the schema alone,
+     and criterion 40 sets every variable in frontmatter yet expects row b to
+     be category 2. A frontmatter value is a runtime value: setters, caller
+     inputs, and interpolation can replace it.
+   - Downsides: a document that sets an optional property still gets the
+     strict-mode category 2 warning.
+2. **An all-literal call is classified by the runtime binder itself.**
+   - Decision: when every argument is a literal, `check_call` runs
+     `FunctionRegistration::bind_call` (passive; no handler) and maps its
+     result; recovery and ambiguity come out exactly as at runtime, and the
+     rejection message is the binder's type error.
+   - Alternatives: classify literals one by one (recovery and ambiguity
+     would need re-implementing).
+   - Why: "Literals are checked by value through the same rules the runtime
+     uses"; it also makes composition's message read like the runtime error.
+   - Downsides: none found; mixed calls use the per-argument path with
+     `CompiledParameter::binds` for their literals.
+3. **Typed arguments: `is_subtype` first, then the engine's conversion
+   families.** An exact fit is `is_subtype` against the parameter's declared
+   grammar type; otherwise source and target are compared as coercion shapes
+   by family (number/boolean → text always; text → number/boolean/content
+   may; native → json/yaml always). Constraints and assertions never decide a
+   type-level verdict; a literal alternative (narrowed) binds by value; a
+   list → list whose elements do not fit is category 3 (an empty list binds).
+   Alternative: compare grammar types only (cannot see resolved named types
+   or conversions). Downside: the family table restates which conversions
+   exist; it reads the same `Shape`s the engine walks.
+4. **Overloads.** With several overloads that take the argument count, the
+   verdict is the overload whose worst argument is least concerning; if every
+   overload is impossible, the finding ranges the one argument they all
+   reject, else the call (`NoOverload`). Typed arguments never produce an
+   ambiguity finding (only literals can prove one).
+5. **Recovery for typed arguments.** A subject that may fail is recovered
+   when the fallback is certain to bind (category 1); otherwise it takes the
+   fallback's category (it is recovered exactly when the fallback binds); an
+   impossible fallback rejects the call on the fallback.
+6. **Category order for "worst".** 5 > 3 > 4 > 2 > 1: a possible error
+   outranks an unknown type, which outranks a possible null.
+7. **The shared walk is at the expression level.** The library walks every
+   call of a parsed expression with branch-aware narrowing; composition and
+   DMLS each find their own expressions (composition from the document it
+   composes, DMLS from its overlay with editor positions) and pass each one,
+   under its enclosing block's guards, to the same walk. Alternative: a
+   library document scanner returning document offsets (DMLS's frontmatter
+   positions come from its own YAML AST, so it could not adopt one without a
+   second position model). Downside: each consumer owns which expressions it
+   finds; Wave 8's shared-corpus test pins that they agree.
+8. **No batch API and no `may_bind`.** The spec allows a batch form only
+   with measured need; `CallCheck::is_rejected` answers the boolean question.
+
+After Wave 8 the integrator fixed one Wave 7 defect the DMLS task found: an
+unknown argument (a call result, an untyped variable) passed to an
+`unknown | null` parameter was category 4; the spec makes any source to
+`unknown | null` category 1, so strict mode warned on every `and(…, f())`.
+`classify_argument` now returns category 1 there (a plain `unknown`
+parameter keeps category 4); `design_time_call_check::categories::null_is_accepted_only_by_an_explicit_null_arm`
+pins it.
+
+### Wave 8: consumer integration
+
+Two foreground subagents ran in parallel with disjoint files: *Composition
+precheck* in a throwaway worktree seeded from the uncommitted tree (its files
+were copied back and the worktree removed; `tests/l1/main.rs` merged by
+hand), *Editor diagnostics* in the main tree under `darkmatter/dmls/` only.
+The integrator then added the shared-corpus agreement test.
+
+**Composition precheck** (`darkmatter/lib/src/markdown/compose/call_precheck.rs`,
+hooked in `pipeline/mod.rs::run_compose_pipeline_node` after schema
+preparation and caller projection, before the pre-approval clone and
+frontmatter interpolation pass 1). It checks, on the composed surface only:
+frontmatter string leaves exactly as pass 1 would evaluate them (skipping
+`exclude_keys` and data leaves; `--set` values are authored and checked);
+`::block when=` conditions and each block body under its guards (when page
+blocks run); `::file`/`::code` `when=` conditions (when transclusion runs);
+body `{{ … }}` through the body composer's own scan (fences and `{{{ … }}}`
+excluded unless `interpolate_code_blocks`). Each transcluded child is checked
+by its own pipeline node against its own schema. `MarkdownError::rejected_call()`
+finds the `CallCheck` in a rejection's cause chain.
+
+**Editor diagnostics** (`darkmatter/dmls/src/diagnostics/call_check.rs`,
+wired in `providers/dsl.rs` for body interpolations and every directive
+`when=`, and in `diagnostics/frontmatter.rs` for expression-typed values,
+lifecycle stacks/guards, and plain frontmatter `{{ … }}` values). Severity:
+5 → error, 3 → warning, strict adds 2 and 4 as warnings, 1 never. Codes
+`dm.expression.incompatible_call` (error) and `dm.expression.uncertain_call`
+(warning). Setting `ExpressionsConfig { strict }` (`[expressions] strict` in
+`.dmls.toml`, `dmls.expressions.strict` from the editor) through the same
+serde validation and layering as `schema.strict`. The `ConfigState` comment
+drift (it claimed an invalid merge keeps the previous effective config; the
+code falls back to the file layer) was fixed in the comment and pinned by
+`config::tests::expressions_strict::an_invalid_merge_falls_back_to_the_file_layer_not_the_previous_config`;
+the existing test `test_semantic_tokens_malformed_value_keeps_previous` was
+renamed `…_falls_back_to_file_layer` to say what it asserts.
+
+Existing tests changed: `compose_expression_failure_contract::preflight_discovery_does_not_fail_on_a_region_composition_removes`
+used `min(1)` inside a false block as a runtime failure discovery must
+tolerate; that call is now rejected at composition by criterion 49, so the
+test uses `min(missing, 5)` (not provably wrong, still fails at runtime).
+`type_scope_ownership_guard.rs` gained a reasoned allowlist entry for the
+precheck's one unguarded `TypeScope`.
+
+### Design Decisions (Wave 8)
+
+9. **Composition reuses the runtime's error variants.**
+   - Decision: a precheck rejection is the variant the runtime raises at the
+     same place (`MarkdownError::Interpolation` for frontmatter and body,
+     `PageBlock(Condition(Eval))` for a block condition,
+     `TransclusionError::ConditionEval` for a transclusion condition), each
+     with `ExpressionError::CallCheck` as its cause.
+   - Alternatives: a new `MarkdownError` variant.
+   - Why: location, excerpt, and supplier attribution keep working unchanged.
+   - Downsides: callers distinguish a precheck rejection through
+     `MarkdownError::rejected_call()`.
+10. **A rejected transcluded child fails its parent.**
+    - Decision: `transclusion_failure_is_fatal` includes `rejected_call()`.
+    - Alternatives: keep the tolerant "Could not transclude" placeholder.
+    - Why: criterion 37 says a category 5 call is rejected at composition;
+      it is an authoring defect no runtime value repairs, like an unavailable
+      binding, which is already fatal. A placeholder would let `md compose`
+      exit 0 on a document the editor marks as an error.
+    - Downsides: a parent that previously tolerated a broken child now fails.
+11. **Block-body narrowing applies only when page blocks run.** Otherwise a
+    false block's body is evaluated unguarded, so it is checked unguarded.
+12. **Not checked before evaluation:** `replace`-map insertions and `{{ }}`
+    inside `::shell` lines when body interpolation is off. They exist only
+    after a later stage or are not evaluated on that surface; a bad call there
+    still fails at runtime. Unparsable expressions are skipped; the stage that
+    evaluates them reports the parse error.
+13. **DMLS checks plain frontmatter `{{ … }}` values and every directive
+    `when=`.** Composition checks both, and the editor must report an error
+    exactly when composition rejects. The shared corpus pins agreement.
+14. **Two DMLS codes, split by proven and possible.** One error code
+    (category 5, arity, ambiguity) and one warning code (3, plus 2 and 4 in
+    strict mode); editors suppress by code. The category number is in the
+    message. Alternative: one code per category (five codes for two
+    severities).
+15. **"`workspace/configuration`" is DMLS's existing settings channel**
+    (`workspace/didChangeConfiguration` settings under `dmls`, as
+    `schema.strict` uses). DMLS does not pull configuration; adding a pull
+    only for this flag would give it a second transport.
+16. **The DMLS no-handler test runs in-source on the test thread**: test
+    function registration is thread-local, so the LSP fixture's server
+    thread would not see a test `effect()`.
+
+### Requirement-to-test mapping (Phase 5)
+
+"lib" is `darkmatter` `l1`, "dmls" is `dmls` `l1`. Counter is
+`function_test_hooks::handler_entries`.
+
+| Requirement | Tests |
+|---|---|
+| Criterion 36 (category per pair) | lib `design_time_call_check::categories::{the_worked_example_rows, criterion_36_pairs, unions_quantify_over_their_options, containers_reason_about_their_elements}` |
+| Criterion 37 (category 5 rejected at composition, every function) | lib `compose_call_precheck::rejection::{a_proven_bad_call_rejects_before_any_expression_runs, the_message_reads_like_the_type_error_and_names_the_key, a_bad_body_call_rejects_before_frontmatter_runs, every_registered_function_rejects_a_proven_bad_call}`; darkmatter-cli `compose_schema_enhancements::a_proven_bad_call_in_a_dead_branch_rejects_before_any_evaluation` (real `md compose`: exit 1, located type error, the whitelisted `$(touch …)` sentinel never created) |
+| Criterion 38 | lib `compose_call_precheck::conversions::a_category_1_conversion_composes_and_fails_by_value_at_runtime`; `design_time_call_check::categories::three_letter_acronym_takes_a_typed_number` |
+| Criterion 40 (DMLS, both settings, file and editor, reload) | dmls `expression_call_diagnostics::settings::{rows_a_to_e_by_default, rows_a_to_e_from_the_config_file_and_its_reload, rows_a_to_e_from_editor_settings_flipped_at_runtime}` |
+| Criterion 41 (ranging, agreement) | dmls `expression_call_diagnostics::ranges::*`, `call_check_agreement::composition_and_the_editor_reject_the_same_documents` |
+| Criterion 42 (`file_exists`) | lib `design_time_call_check::categories::null_is_accepted_only_by_an_explicit_null_arm`; dmls `verdicts::file_exists_takes_a_number_silently`, `config::tests::expressions_strict::strict_is_the_only_expressions_setting` |
+| Criterion 44 (`length(true)` category 5) | lib `design_time_call_check::categories::source_exclusions_are_part_of_classification` |
+| Criterion 48 (projection) | lib `design_time_call_check::projection::*` (projection takes only a schema reference: it has no file, value, or expression input to read) |
+| Criterion 49 (dead branches) | lib `design_time_call_check::walk::branches_that_do_not_run_are_checked`, `compose_call_precheck::branches::*`; dmls `verdicts::branches_that_do_not_run_are_checked` |
+| Criterion 50 (presence, `fm.` spellings) | lib `design_time_call_check::projection::presence_follows_the_shared_rule`, `walk::fm_spellings_reject_like_the_bare_name`, `compose_call_precheck::rejection::frontmatter_namespace_access_rejects_like_the_bare_name` |
+| Criterion 51 (recovery) | lib `design_time_call_check::whole_calls::numeric_recovery`, `compose_call_precheck::conversions::numeric_recovery_composes_and_an_unrecoverable_call_is_rejected`; dmls `verdicts::numeric_recovery` |
+| Criterion 52 (content formats) | lib `design_time_call_check::categories::content_formats` |
+| Criterion 53 (laziness) | lib `design_time_call_check::walk::checking_never_enters_a_handler`, `compose_call_precheck::branches::lazy_operands_stay_lazy_and_are_still_checked`; dmls in-source `diagnostics::call_check::tests::diagnostics_never_enter_a_handler` |
+| Criterion 54 (surface, ordering) | lib `compose_call_precheck::surface::{non_executable_syntax_is_not_checked, frontmatter_only_composition_leaves_an_invalid_body_untouched, frontmatter_only_composition_still_checks_frontmatter}`; sibling effect counters in every `rejected_before_evaluation` test; dmls `verdicts::fenced_code_and_literals_are_not_checked` |
+| Rows f–i stay unrejected; g/h exact | lib `design_time_call_check::categories::{the_worked_example_rows, guards_narrow_the_argument}`, `compose_call_precheck::branches::conservative_rows_are_not_rejected`; dmls `verdicts::guards_narrow_rows_g_and_h` |
+| Nested transclusion | lib `compose_call_precheck::transclusion::*` |
+| `expressions.strict` input matrix | dmls `config::tests::expressions_strict::*`: absent and empty section → false; file true/false; editor overrides file both ways, whole-settings `null` clears the overlay; explicit null, wrong type (`"yes"`, `1`, `expressions = 5`) → error diagnostic and file-layer fallback; TOML duplicate key and duplicate table reject the file; malformed file recovers on reload |
+| Shared-corpus agreement (checkpoint) | dmls `call_check_agreement::composition_and_the_editor_reject_the_same_documents` (24 documents) |
+
+**Matrix review.** Field `expressions.strict` goes through the same serde
+validator as `schema.strict`/`style.strict` (no `#[serde(default)]` on the
+field read as a value; the section's default is `false` only when absent).
+Every field shape above is covered at the config API, and wiring is covered
+by the LSP-session tests. One quirk is recorded, not changed: an editor value
+`"expressions": [true]` deserializes as a struct, as every existing section
+does (serde's sequence-as-struct form).
+
+### Gates
+
+The scope calculator, run from the repository root after the last edit:
+`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`.
+It gave `packages: [darkmatter, darkmatter-cli, dmls, test-toolkit]` and
+`change_class: package`, so every gate was required. The gates ran serially,
+with no subagent running.
+
+| Gate | Result |
+|---|---|
+| `darkmatter`: `just lint` | clean |
+| `darkmatter`: `just test` | library and CLI: every test passed; it stopped at 11,521 passed and 1 failed. The failure was the known load-sensitive `dmls::l1 searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back` (one watch registration too many, 3 instead of 2). It passes alone and in its module. |
+| `dmls` full rerun (the tests fail-fast skipped) | 1,237 passed, 6 skipped. The same test failed again under full-crate load and passes alone; no code this phase changed touches watch registration. |
+| `zed-dmls-cli` | 27 passed |
+| `claudine`: `just lint` | clean (only the existing linker `__eh_frame` notice) |
+| `claudine`: `just test` | 10,692 passed, 9 skipped, 0 failed |
+| `just check-tier-coverage claudine` / `darkmatter` | 0 stranded / 0 stranded |
+| `test-toolkit` (selected by the calculator) | 476 passed |
+| Dependents: `messenger` | 738 passed |
+| Dependents: research, messenger-cli, sniff-cli, playa-cli, biscuit-icon-cli, biscuit-speaks-cli, claudine-gen | `cargo check --tests` clean; `research` uses only `darkmatter::render` |
+
+One subagent run used `--no-fail-fast` once (a scoped sweep of 1,353 tests),
+against the brief; it caused no load problem.
+
+**Cross-OS.** No path, process, console, or `#[cfg]` code changed. The new
+tests compose in temp dirs and spawn `md` only through the existing CLI
+fixture, so no `just cross-check` was run; CI covers the other environments.
+
+**Docs and skills.** The tasks wrote a new page,
+`darkmatter/docs/inline/call-check.md`, and added a stage to
+`darkmatter-compose-pipeline.md`. `dmls/docs/diagnostics.md` gained the two
+codes, the severity table, and the setting. Skills updated: `darkmatter`
+(`SKILL.md` pipeline order, `expressions.md` call check) and `claudine`
+(`SKILL.md`). Phase 6 owns the complete documentation pass.
+
+## Phase 6
+
+Phase 6 documents, audits, and verifies (Waves 9–10). Started 2026-10-22
+from the uncommitted Phase 5 tree (Phase 5 is not yet committed, so the
+working tree holds both phases; the Phase 6 file lists in the frontmatter
+come from a before/after `git status` comparison plus each task's report).
+
+### Wave 9: documentation and coverage audit
+
+Three foreground subagents ran in parallel with disjoint files.
+
+**Current documentation** (Darkmatter docs and the `darkmatter` skill).
+`definition.md` "Type Coercion" is now the single rule list: two interfaces
+of a type, three actions, conversion rules with the rejected conversions,
+nested values (container rules), choosing a union option (renamed from
+"Unions", whose anchor clashed with the grammar section), binding before
+computing, type errors with real output, raw JSON Schema conversion, and
+changes for existing documents. The `numberlike`/`boolish` rows say the
+value is kept as written; the content-format coercion bullet and two stale
+"Limitations" entries (no `(A | B)[]`, "no coercions beyond the matrix")
+are gone; display-only and file-form examples and `fallible` are
+documented. `authoring-schemas.md` got content for its empty "Union Types"
+heading and allows `categories:` in the envelope. `inline/call-check.md` has
+the five categories for authors, a Mermaid flow, runnable examples, and
+"What the check cannot see" (each limit checked against the code).
+`numbers.md` is the one numeric page; both dependency docs describe
+`preserve_order` (insertion order is not source order everywhere; sort when
+order must be stable; `md schema detect --format json` and `json` text keep
+the written order; other validators ignore Darkmatter's formats). Every
+claim was checked with a debug `md` on temp files.
+
+**Consumer documentation** (DMLS and Claudine docs, the `claudine` skill,
+`darkmatter/dmls.md`). `dmls/docs/diagnostics.md` has "Call diagnostics"
+under Severity (example, category → severity table, proven versus possible,
+types from `$schema` only, every branch, Darkmatter decides) and a "Fixing a
+call diagnostic" table; Configuration has `expressions.strict` (file and
+editor forms, precedence, `null` and invalid values, reload).
+`docs/lsp/configuration.md` lists `[expressions]`. Several DMLS docs said
+DMLS reads `workspace/configuration`; they now name `didChangeConfiguration`.
+Four DMLS docs carried `features:` frontmatter naming specs and two editor
+docs linked into `features/`; both removed (docs never name a spec). The
+`claudine context --expressions` report already met criterion 39 and the
+example forms, so the renderer is unchanged; `cargo run -p darkmatter
+--example expression_doc_generator` matched the doc table.
+
+**Coverage audit** (`inventory/criteria-map.md`, `behavior-ledger.md`). All
+61 IDs resolve to existing, passing tests: 53 pass, 7 pass with a review
+clause the audit performed (7, 11, 33b, 41, 42, 48, 58), and criterion 13
+waits on the author. The audit added
+`…catalog::tests::{executable_examples_number_at_least_72_and_display_only_ones_are_skipped_by_design, example_results_compare_structurally}`
+(criteria 8 and 9 had no count or structural-comparison test: 100
+executable, 43 display-only). The ledger had 113 rows for 116 registered
+functions; rows 114–116 (`trim`, `keys`, `values`) were added with their
+null outcomes, checked through `md compose`.
+
+### Integrator follow-ups (after the audit)
+
+The audit and the doc tasks reported gaps; each was fixed rather than filed:
+
+- `example(number() => error)` added to the catalog (criterion 12's arity
+  case had no catalog example); the generated table in
+  `darkmatter-expressions.md` regenerated (only that row changed).
+- Catalog loader: an entry written as `null`, `~`, or empty now fails with
+  "`types.<name>` is null, not a function signature" (ruling R5). Tests
+  `a_missing_null_or_wrong_kind_does_not_load` (absent, `null`, `~`, `""`,
+  wrong string, number, duplicate key, second document, trailing invalid
+  content) and `an_entry_written_as_null_does_not_load`.
+- DMLS `expressions.strict` matrix: `empty_values_are_wrong_types_not_absent`,
+  `a_list_section_is_read_positionally_as_every_section_is`,
+  `a_syntactically_broken_file_is_rejected_whole`, `an_unknown_key_is_ignored`
+  (R6).
+- Type-error messages printed an expression literal `0` as `received number
+  0.0` (`pr_list(0)`); they now present numbers as interpolation does.
+  `function_call_binding::a_received_number_reads_as_interpolation_presents_it`.
+- `inline/call-check.md` quoted the message as `argument 1 (a)`; the real
+  text is ``argument 1 (`a`)``.
+- Gate defect from Phase 5: `dmls::l1 type_scope_ownership_guard` failed on
+  two unreviewed `TypeScope::unguarded` sites Phase 5 added
+  (`providers/dsl.rs::expression_diagnostics`,
+  `diagnostics/frontmatter.rs::FrontmatterCalls::new`). Both are correct
+  (the body site narrows by `BodyGuards::scope_at`; frontmatter has no
+  guard), so they got reasoned allowlist entries, a decision-site rule for
+  the body site, and baseline snippets in the guard's self-test.
+
+### Design Decisions
+
+17. **The catalog loader rejects a null entry.**
+    - Decision: `load_catalog` fails on a `types:` entry written as null,
+      `~`, or empty; general schema files keep reading it as the `null` type.
+    - Alternatives: keep the later registry-build error
+      (`BindingWithoutCatalog`, "runtime binding has no catalog function").
+    - Why: ruling R5 places this E in the loader; the later error names the
+      wrong cause and stage. A null named type has no use in the catalog.
+    - Downsides: none found.
+18. **A missing canonical stays a registry-build error.**
+    - Decision: the loader does not check registered names.
+    - Alternatives: pass the registered canonicals into `load_catalog`.
+    - Why: the loader is generic over fixtures and knows no registry; the
+      shipped catalog is pinned both ways by
+      `catalog_and_runtime_bindings_have_bidirectional_canonical_parity`.
+    - Downsides: R5's "a missing canonical is E" is met at registry build,
+      not at catalog load.
+19. **Messages present a float number as interpolation does.**
+    - Decision: `coercion::compact` (shared by every coercion and binding
+      message) writes a float `Value::Number` through `format_number`;
+      integer-stored numbers keep serde's exact text.
+    - Alternatives: leave serde's `0.0`; convert every literal to an integer
+      `Number` at parse time (wider change to evaluation values).
+    - Why: the spec's numeric model presents `4.0` as `4`; the message is
+      what authors read.
+    - Downsides: a number nested in a list or object in a message keeps
+      serde's spelling.
+20. **The sequence-as-struct reading of a list section is pinned, not
+    changed.** `"expressions": [true]` sets strict, as every DMLS section
+    reads a list positionally (Phase 5 recorded the quirk). Changing it
+    belongs to all sections at once.
+
+### Departures the docs follow (code wins)
+
+- A root union whose arms are all SimplifiedSchema still projects a
+  property when every arm that declares it agrees; only a raw JSON Schema
+  arm or disagreeing arms make variables unknown (the spec says a mixed
+  root union projects everything as unknown, which holds for the mixed
+  case).
+- A native YAML number that cannot be represented exactly fails when the
+  document loads, whatever the property's type (Phase 2 decision 4).
+- `[true]` against `(string | number)[]` composes as `["true"]` (Phase 3
+  decision 1); the spec's "rejects `[true]`" holds for the compiled JSON
+  Schema validator, which the doc states.
+- The editor setting arrives through `workspace/didChangeConfiguration`,
+  not a `workspace/configuration` pull (decision 15). An invalid editor
+  value drops all editor settings except `formatting`, not only
+  `expressions.strict`.
+
+### Requirement-to-test mapping (Phase 6)
+
+The final map for criteria 1–59, 33a and 33b is
+`inventory/criteria-map.md`. Phase 6 additions:
+
+| Requirement | Tests |
+|---|---|
+| Criterion 8 (≥ 72 executable, structural comparison) | `darkmatter` lib `…expression::catalog::tests::{executable_examples_number_at_least_72_and_display_only_ones_are_skipped_by_design, example_results_compare_structurally}` |
+| Criterion 9 (display-only skipped by design) | same first test |
+| Criterion 12 (arity example) | catalog `number() => error`, run by `…catalog::tests::every_executable_example_evaluates_to_its_declared_result` |
+| R5 catalog envelope cells | `…catalog::tests::{a_missing_null_or_wrong_kind_does_not_load, an_entry_written_as_null_does_not_load}` |
+| `expressions.strict` remaining cells, R6 | `dmls` lib `config::tests::expressions_strict::{empty_values_are_wrong_types_not_absent, a_list_section_is_read_positionally_as_every_section_is, a_syntactically_broken_file_is_rejected_whole, an_unknown_key_is_ignored}` |
+| Message presentation (criterion 16's received value) | `darkmatter` l1 `function_call_binding::a_received_number_reads_as_interpolation_presents_it` |
+| Type-scope ownership of the call-check sites | `dmls` l1 `type_scope_ownership_guard::*` |
+
+### Review package
+
+- The old catalog `darkmatter/docs/schemas/expression-functions.yaml` is
+  deleted and nothing reads it (criterion 7); the catalog compiles once
+  (`LazyLock` in `expression_function_catalog`); production conversion has
+  one owner (`coercion_engine_parity::old_frontmatter_rule_code_is_gone`).
+- **Human ledger review is pending** (criterion 13): the author's
+  2026-10-22 review covered rows 1–113; rows 114–116 (`trim`, `keys`,
+  `values`) and the closing per-function table in `behavior-ledger.md`
+  need the author's review before merge.
+- Unrelated pre-existing changes in the tree were left untouched.
+
+### Observed, not part of this feature
+
+- `topics/schemas/schema-types.md`, `schema-constraints.md`,
+  `schema-validation.md`, and `topics/expression-engine.md` are empty stub
+  pages that predate this feature; links to them now point into
+  `definition.md`.
+- `md` keeps ANSI color in error output under `NO_COLOR=1`.
+- The `pr_list`/`cicd_list` descriptions link to
+  `darkmatter-expressions.md#provider-query-vocabulary`; in the terminal
+  report that relative link resolves against the current directory.
+- `.claude/skills/darkmatter/SKILL.md` is 217 lines (over the 200-line
+  target before this phase, at 213).
+
+### Gates
+
+The scope calculator, run from the repository root after the last edit
+(`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`),
+gave `packages: [darkmatter, darkmatter-cli, dmls, test-toolkit]` and
+`change_class: package`, so every gate was required. Gates ran serially with
+no subagent running.
+
+| Gate | Result |
+|---|---|
+| `darkmatter`: `just lint` | clean (before and after the follow-up test edits) |
+| `darkmatter`: `just test`, run 1 | stopped at 11,536 of 11,644: the known load-sensitive `dmls::l1 searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back`; passes alone |
+| `darkmatter`: `just test`, run 2 | stopped at 11,565: `dmls::l1 type_scope_ownership_guard::dmls_reads_types_only_through_the_library_scope` (the Phase 5 defect above; fixed) |
+| `darkmatter`: `just test`, run 3 | 11,644 passed, 10 skipped |
+| `claudine`: `just lint` | clean (only the existing linker `__eh_frame` notice) |
+| `claudine`: `just test` | 10,692 passed, 9 skipped |
+| `just check-tier-coverage claudine` / `darkmatter` | 0 stranded / 0 stranded |
+| Dependents (root `just test {pkg}`) | `test-toolkit` 476, `sniff-cli` 975, `messenger` 738, `messenger-cli` 133, `research` 606: all passed |
+| Dependents (`cargo check --tests`) | `research-cli`, `biscuit-icon-cli`, `playa-cli`, `biscuit-speaks-cli`, `claudine-gen`: clean |
+
+The dependent list is the audit's `preserve_order` consumer list
+(`inventory/criteria-map.md` "Downstream gates"). No other package's tests
+pin the changed message text (repository-wide search).
+
+**Cross-OS.** Phase 6 changed message text, a YAML loader check, and tests;
+no path, process, console, or `#[cfg]` code. No `just cross-check` was run.
+Evidence is macOS only; Linux and macOS are proven by the pull request's CI,
+native Windows and WSL2 by the nightly. No other environment is claimed.
+
+## Pipeline Refresh
+
+- `2026-10-29-recursive-schema-types`: changed. Spec names the real
+  translators and limits (`json_shape.rs` `CYCLE_EXPANSIONS`/`MAX_REFERENCE_DEPTH`/`REFERENCE_BUDGET`,
+  `call_binding/translate.rs` `TooDeep`, engine `max_depth`), adds
+  `is_subtype`, `DeclaredTypes::top_level_types` and `call_check` as
+  consumers that must terminate on recursion, extends the callable ban to
+  `$defs`; three decisions recorded; plan Waves 1, 4, 5 own those files.
+- `2026-10-30-claudine-recursive-schemas`: changed. Names the catalog API,
+  the shared engine, `bind_call`, and `BindOptions.defer`; new
+  reconciliation section (overload choice by `bind_call`, inline helper
+  types, no generated schema for callback parameters); plan rule 9 and
+  Waves 2–4 updated. Noted, not caused here: its plan maps only criteria
+  1–9 of 11.
+- `2026-10-31-type-aware-evaluation`: changed (spec, plan,
+  `declarations-design.md`). Corrects `file_exists` to `unknown | null`
+  (inspects, `file_exists(42)` is `false`), `is_file_type` to
+  `unknown | null`, names the projection function, corrects the root-union
+  projection, uses the real code `dm.expression.incompatible_call`; plan
+  Waves 8 and 11 updated. Noted, not caused here: its plan's Phase 3 builds
+  a narrowing engine its spec says `TypeScope` already provides.
+- `2026-11-01-map-and-filter`: changed (Phase 1 done; only Phases 2–5
+  edited). Names the loader, `RegistrationError::FunctionValued`, the
+  example parser; decisions for callback-body call checking, non-array
+  iterables, and verb-inventory exclusion.
+- `2026-10-22-spec-dependency-gate`: checked, unchanged (names this spec
+  only in a sample output that is still accurate).
+
+No downstream decision meets the bar for the author (`decisions_for_author: []`).

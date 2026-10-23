@@ -42,6 +42,8 @@ related:
     - 2026-10-23-shell-template-approval
     - 2026-09-17-remove-strict-mode
     - 2026-05-28-schema-coercion
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Schema Enhancements
