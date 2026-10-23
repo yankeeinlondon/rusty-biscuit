@@ -20,6 +20,8 @@
 //! | `dm.expression.unknown_function` | `ERROR` | The function catalog is closed, so compose fails on the call. |
 //! | `dm.expression.unavailable_global` | `ERROR` | The event's view declares the global unavailable, so the read fails when the stack runs. |
 //! | `dm.expression.nested_span_in_literal` | `ERROR` | Its surfaces never re-interpolate the literal. |
+//! | `dm.expression.incompatible_call` | `ERROR` | Argument category 5 (or a wrong argument count or ambiguous overload): composition rejects the document. |
+//! | `dm.expression.uncertain_call` | `WARNING` | Argument category 3; with `expressions.strict`, also 2 (may be `null`) and 4 (type unknown). |
 //!
 //! Design: `claudine/fixes/2026-09-13-better-static-analysis/spec.md` (D7).
 
@@ -155,6 +157,14 @@ pub mod code {
     /// A `{{ … }}` span inside a quoted string literal on a single-pass
     /// lifecycle surface, where it is never interpolated.
     pub const EXPRESSION_NESTED_SPAN_IN_LITERAL: &str = "dm.expression.nested_span_in_literal";
+    /// A function call Darkmatter's design-time check proves wrong (argument
+    /// category 5, a wrong argument count, or an ambiguous overload), so
+    /// composition rejects the document. Ranges the argument, or the whole
+    /// call for a call-level problem.
+    pub const EXPRESSION_INCOMPATIBLE_CALL: &str = "dm.expression.incompatible_call";
+    /// A call argument that might not bind: category 3, and with
+    /// `expressions.strict` also categories 2 and 4.
+    pub const EXPRESSION_UNCERTAIN_CALL: &str = "dm.expression.uncertain_call";
     /// A fenced-code info string whose language token no grammar recognizes.
     pub const FENCE_UNKNOWN_LANGUAGE: &str = "dm.fence.unknown_language";
     /// A `::shell` / `::shell-block` / `$()` command the shell policy disallows.

@@ -235,7 +235,7 @@ impl EvaluationLookup for DeferrableLookup<'_> {
 /// Checks (in priority order):
 /// 1. `ComposeOptions::interpolate_code_blocks`
 /// 2. Frontmatter `interpolate_code_blocks` key
-fn resolve_interpolate_code_blocks(markdown: &Markdown, options: &crate::markdown::compose::ComposeRequest) -> bool {
+pub(crate) fn resolve_interpolate_code_blocks(markdown: &Markdown, options: &crate::markdown::compose::ComposeRequest) -> bool {
     if options.interpolate_code_blocks {
         return true;
     }

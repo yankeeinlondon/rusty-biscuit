@@ -678,6 +678,18 @@ pub(crate) fn accepts_call_arity(canonical: &str, arity: usize) -> bool {
         .is_some_and(|entry| entry.registration.overloads().iter().any(|signature| signature.accepts_count(arity)))
 }
 
+/// Runs `inspect` on the registration a call to `name` binds against (a
+/// thread's test function first, as dispatch resolves it), for passive
+/// design-time checks. `None` for an unknown name.
+pub(crate) fn inspect_registration<R>(name: &str, inspect: impl FnOnce(&FunctionRegistration) -> R) -> Option<R> {
+    let name = name.to_ascii_lowercase();
+    #[cfg(any(test, feature = "effects-instrumentation"))]
+    if let Some(function) = test_hooks::lookup(&name) {
+        return Some(inspect(function.registration()));
+    }
+    find_binding(&name).map(|entry| inspect(&entry.registration))
+}
+
 /// Whether the evaluator dispatches `name`: lowercased, then by canonical
 /// name or alias.
 pub(crate) fn is_dispatchable(name: &str) -> bool {

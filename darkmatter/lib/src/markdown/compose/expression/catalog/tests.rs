@@ -92,6 +92,33 @@ fn semantically_duplicate_overloads_fail_catalog_load() {
     assert!(error.to_string().contains("the same binding contract"), "{error}");
 }
 
+/// Ruling R5: the catalog loader, unlike a general schema file, requires
+/// `kind: schema` and never reads a null entry as the `null` type.
+#[test]
+fn a_missing_null_or_wrong_kind_does_not_load() {
+    for kind in ["", "kind: null\n", "kind: ~\n", "kind: \"\"\n", "kind: trigger\n", "kind: 5\n"] {
+        let source = FIXTURE.replacen("kind: schema\n", kind, 1);
+        let error = load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).unwrap_err();
+        assert!(error.to_string().contains("kind: schema"), "{kind:?}: {error}");
+    }
+    let duplicate = FIXTURE.replacen("kind: schema\n", "kind: schema\nkind: schema\n", 1);
+    let trailing = format!("{FIXTURE}---\nkind: schema\n");
+    let garbage = format!("{FIXTURE}  ] not yaml\n");
+    for source in [duplicate, trailing, garbage] {
+        assert!(load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn an_entry_written_as_null_does_not_load() {
+    for value in [" null", " ~", ""] {
+        let source = FIXTURE.replacen("    ip-like: string\n", &format!("    ip-like: string\n    round_down:{value}\n"), 1);
+        let error = load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).unwrap_err();
+        assert!(matches!(error, CatalogError::Invalid { .. }), "{value:?}: {error:?}");
+        assert!(error.to_string().contains("`types.round_down` is null, not a function signature"), "{value:?}: {error}");
+    }
+}
+
 #[test]
 fn a_non_function_entry_is_a_named_type_not_a_function() {
     let catalog = fixture();
@@ -281,28 +308,100 @@ fn every_executable_example_evaluates_to_its_declared_result() {
         data: HashMap::from([("items".to_string(), json!([1, 2, 3])), ("obj".to_string(), json!({"a": 1}))]),
     };
     let mut failures = Vec::new();
-    for descriptor in expression_function_descriptors() {
-        for example in descriptor.examples {
-            let FunctionExample::Call {
-                call,
-                expected,
-                display_only: None,
-                ..
-            } = example
-            else {
-                continue;
-            };
-            let outcome = parse(call).map_err(|error| error.message).and_then(|expression| {
-                evaluate(&expression, &lookup).map_err(|error| error.to_string())
-            });
-            match (expected, outcome) {
-                (ExampleOutcome::Value(want), Ok(got)) if numeric_eq(want, &got) => {}
-                (ExampleOutcome::Error, Err(_)) => {}
-                (want, got) => failures.push(format!("{call}: expected {want:?}, got {got:?}")),
-            }
+    for (call, expected) in partition_call_examples().executable {
+        let outcome = parse(call).map_err(|error| error.message).and_then(|expression| {
+            evaluate(&expression, &lookup).map_err(|error| error.to_string())
+        });
+        if !example_holds(expected, &outcome) {
+            failures.push(format!("{call}: expected {expected:?}, got {outcome:?}"));
         }
     }
     assert!(failures.is_empty(), "examples that disagree with their result:\n{}", failures.join("\n"));
+}
+
+/// The embedded catalog's inline call examples, split into the ones the
+/// runner evaluates and the display-only ones it skips by design.
+struct CallExamples {
+    executable: Vec<(&'static str, &'static ExampleOutcome)>,
+    display_only: Vec<(&'static str, &'static str)>,
+}
+
+fn partition_call_examples() -> CallExamples {
+    let mut examples = CallExamples {
+        executable: Vec::new(),
+        display_only: Vec::new(),
+    };
+    for descriptor in expression_function_descriptors() {
+        for example in descriptor.examples {
+            if let FunctionExample::Call {
+                call,
+                expected,
+                display_only,
+                ..
+            } = example
+            {
+                match display_only {
+                    None => examples.executable.push((*call, expected)),
+                    Some(reason) => examples.display_only.push((*call, *reason)),
+                }
+            }
+        }
+    }
+    examples
+}
+
+/// Whether an evaluation outcome satisfies an example's declared result:
+/// a value compares structurally, and `=> error` holds only when the call
+/// fails.
+fn example_holds(expected: &ExampleOutcome, outcome: &Result<Value, String>) -> bool {
+    match (expected, outcome) {
+        (ExampleOutcome::Value(want), Ok(got)) => numeric_eq(want, got),
+        (ExampleOutcome::Error, Err(_)) => true,
+        _ => false,
+    }
+}
+
+/// Criteria 8 and 9: at least 72 examples run, and every display-only one is
+/// reported as skipped by design with its reason.
+#[test]
+fn executable_examples_number_at_least_72_and_display_only_ones_are_skipped_by_design() {
+    let examples = partition_call_examples();
+    assert!(
+        examples.executable.len() >= 72,
+        "only {} executable examples",
+        examples.executable.len()
+    );
+    assert!(!examples.display_only.is_empty(), "the catalog carries display-only examples");
+    for (call, reason) in &examples.display_only {
+        assert!(!reason.trim().is_empty(), "{call}: a display-only example names its reason");
+        assert!(
+            !examples.executable.iter().any(|(executable, _)| executable == call),
+            "{call}: a display-only example is never executed"
+        );
+    }
+    eprintln!(
+        "{} executable examples; {} display-only examples skipped by design",
+        examples.executable.len(),
+        examples.display_only.len()
+    );
+}
+
+/// Criterion 8: results compare structurally, never by spelling.
+#[test]
+fn example_results_compare_structurally() {
+    let three = ExampleOutcome::Value(json!(3));
+    assert!(example_holds(&three, &Ok(json!(3))));
+    assert!(example_holds(&three, &Ok(json!(3.0))), "numbers compare by value");
+    assert!(!example_holds(&three, &Ok(json!("3"))), "`=> 3` fails against the text \"3\"");
+
+    let object = ExampleOutcome::Value(json!({"a": 1, "b": 2}));
+    assert!(example_holds(&object, &Ok(json!({"b": 2, "a": 1}))), "key order is irrelevant");
+    assert!(!example_holds(&object, &Ok(json!({"a": 1}))));
+    assert!(!example_holds(&object, &Ok(json!({"a": 1, "b": 2, "c": 3}))));
+
+    assert!(example_holds(&ExampleOutcome::Error, &Err("type error".to_string())));
+    assert!(!example_holds(&ExampleOutcome::Error, &Ok(Value::Null)), "`=> error` requires a failure");
+    assert!(!example_holds(&three, &Err("type error".to_string())));
 }
 
 /// Structural equality that compares numbers by value (`3` and `3.0`).

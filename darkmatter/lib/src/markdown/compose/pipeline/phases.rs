@@ -555,7 +555,9 @@ impl Markdown {
 ///
 /// A child that cannot read its runtime context would leave the partially
 /// composed document the missing-capture contract forbids, and a child that
-/// reads a host global declared unavailable broke the host's scope rule. A child command
+/// reads a host global declared unavailable broke the host's scope rule. A
+/// child the design-time call check rejected makes a call no runtime value can
+/// bind, which is the document's rejection, not a resolution failure. A child command
 /// missing from the approval set is a broken pre-flight invariant, not a
 /// failure an author can tolerate.
 fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
@@ -570,6 +572,7 @@ fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
             )
     ) || error.missing_runtime_context().is_some()
         || error.unavailable_binding().is_some()
+        || error.rejected_call().is_some()
         || error.pre_approval_violation().is_some()
         || error.shell_input_violation().is_some()
         || error.shell_span_failure()

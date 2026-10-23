@@ -11,17 +11,38 @@ mod engine;
 
 use engine::{DecisionSite, Owned, Policy, Unguarded, snippets, violations};
 
-const UNGUARDED: &[Unguarded] = &[Unguarded {
-    path: "providers/dsl.rs",
-    item: "with_site_scope",
-    count: 1,
-    reason: "the one editor site scope: a body offset narrows it by its enclosing `BodyGuards`, a frontmatter site has no guard",
-}];
+const UNGUARDED: &[Unguarded] = &[
+    Unguarded {
+        path: "providers/dsl.rs",
+        item: "with_site_scope",
+        count: 1,
+        reason: "the one editor site scope: a body offset narrows it by its enclosing `BodyGuards`, a frontmatter site has no guard",
+    },
+    Unguarded {
+        path: "providers/dsl.rs",
+        item: "expression_diagnostics",
+        count: 1,
+        reason: "the body call check's base scope: each call narrows it by its enclosing `BodyGuards` before checking",
+    },
+    Unguarded {
+        path: "diagnostics/frontmatter.rs",
+        item: "FrontmatterCalls::new",
+        count: 1,
+        reason: "the frontmatter call check: no guard applies, since a lifecycle or task `when` is not applied to the actions it selects (composition checks them unguarded too)",
+    },
+];
 
 const DECISION_SITES: &[DecisionSite] = &[
     DecisionSite {
         path: "providers/dsl.rs",
         item: "with_site_scope",
+        requires: &["BodyGuards::scan", "scope_at("],
+        forbids: &[],
+        null_read: None,
+    },
+    DecisionSite {
+        path: "providers/dsl.rs",
+        item: "expression_diagnostics",
         requires: &["BodyGuards::scan", "scope_at("],
         forbids: &[],
         null_read: None,
@@ -84,9 +105,14 @@ fn a_dmls_guard_algebra_or_unreviewed_scope_is_rejected() {
         (
             "providers/dsl.rs",
             "fn with_site_scope() { let u = TypeScope::unguarded(&d); BodyGuards::scan(t).scope_at(u, 0) }
+             fn expression_diagnostics() { let u = TypeScope::unguarded(&d); BodyGuards::scan(t).scope_at(u, 0) }
              fn transclusion_diagnostics() { analyze_directive_targets(t); a.is_narrowed(); }",
         ),
         ("overlay/expressions.rs", "pub fn local_type() { branch_scope(e, s, site) }"),
+        (
+            "diagnostics/frontmatter.rs",
+            "impl FrontmatterCalls { fn new() -> Self { Self { site: TypeScope::unguarded(d) } } }",
+        ),
     ];
     assert_eq!(violations("snippet", &snippets(&baseline), &policy()), Vec::<String>::new());
 

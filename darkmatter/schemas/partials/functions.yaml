@@ -544,6 +544,7 @@ types:
             example(number("9007199254740993", 7) => 7);
             example(number("pear") => error);
             example(number("4", "x") => error);
+            example(number() => error);
         ) -> Converts a number or numeric text to a number. When `x` cannot convert (malformed text, null, a boolean, a list, an object, or a number that cannot be held exactly), a supplied `fallback` is returned instead; without one the call is a type error. The fallback must itself be a number.
 
     # Filesystem

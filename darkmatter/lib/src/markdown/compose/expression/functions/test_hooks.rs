@@ -102,6 +102,12 @@ pub(super) fn record_entry(name: &str) {
     ENTRIES.with(|entries| *entries.borrow_mut().entry(name.to_ascii_lowercase()).or_default() += 1);
 }
 
+impl TestFunction {
+    pub(super) fn registration(&self) -> &FunctionRegistration {
+        &self.registration
+    }
+}
+
 /// The test function registered under the lowercased `name` on this thread.
 pub(super) fn lookup(name: &str) -> Option<Rc<TestFunction>> {
     FUNCTIONS.with(|functions| functions.borrow().get(name).cloned())

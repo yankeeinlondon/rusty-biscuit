@@ -447,6 +447,27 @@ impl MarkdownError {
         None
     }
 
+    /// The call the design-time check rejected
+    /// ([`ExpressionError::CallCheck`]) somewhere in this error's cause chain,
+    /// if any.
+    ///
+    /// The document makes a call no runtime value can bind, so no tolerance a
+    /// stage offers for ordinary failures (a transclusion replaced by a
+    /// notice) may absorb it.
+    pub fn rejected_call(&self) -> Option<&crate::markdown::compose::expression::CallCheck> {
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            let expression = error
+                .downcast_ref::<ExpressionError>()
+                .or_else(|| error.downcast_ref::<Box<ExpressionError>>().map(AsRef::as_ref));
+            if let Some(ExpressionError::CallCheck(check)) = expression {
+                return Some(check);
+            }
+            current = error.source();
+        }
+        None
+    }
+
     /// The [`NotPreApproved`](crate::markdown::compose::ShellExpansionError::NotPreApproved)
     /// failure somewhere in this error's cause chain, if any.
     ///

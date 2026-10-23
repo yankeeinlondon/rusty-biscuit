@@ -319,6 +319,19 @@ fn overload_failure_lists_every_signature_and_reason() {
     }
 }
 
+#[test]
+fn a_received_number_reads_as_interpolation_presents_it() {
+    let pr_list = &pr_lists()[0];
+    // An expression literal `0` arrives as the float `0.0`.
+    for (value, shown) in [(json!(0.0), "received number 0;"), (json!(2.5), "received number 2.5;"), (json!(0), "received number 0;")] {
+        let message = pr_list.rejected(std::slice::from_ref(&value)).to_string();
+        assert!(message.contains(shown), "{shown:?} missing from:\n{message}");
+        assert!(!message.contains("0.0"), "float spelling in:\n{message}");
+    }
+    let message = pr_list.rejected(&[json!(u64::MAX)]).to_string();
+    assert!(message.contains("received number 18446744073709551615;"), "{message}");
+}
+
 // ── criterion 24 ────────────────────────────────────────────────────────────
 
 #[test]

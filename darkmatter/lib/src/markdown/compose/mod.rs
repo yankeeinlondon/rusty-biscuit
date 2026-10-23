@@ -3,6 +3,10 @@
 //! This module provides the `compose()` family of methods on `Markdown`
 //! for running operations in four phases:
 //!
+//! Before any operation, a passive **call check** rejects the document when an
+//! authored call on the composed surface is proven wrong (category 5) against
+//! its schema's declared types, in any branch; nothing has been evaluated yet.
+//!
 //! **Inline Pre** (serial):
 //! 0. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values.
 //!    When shell expansion is enabled, templated keys that reference
@@ -97,6 +101,7 @@
 
 pub(crate) mod body_origin;
 pub(crate) mod cache;
+mod call_precheck;
 pub mod conditions;
 pub mod context;
 mod frontmatter_interpolation;

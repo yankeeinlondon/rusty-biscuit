@@ -68,6 +68,7 @@ pub(crate) mod absence;
 pub mod ast;
 pub mod binding;
 pub mod call_binding;
+pub mod call_check;
 pub mod catalog;
 pub mod ctx;
 pub(crate) mod equality;
@@ -94,6 +95,10 @@ pub use binding::{
 pub use call_binding::{
     BoundArgs, BoundCall, CallBindingError, CallErrorKind, CompiledSignature, EvaluationMode, FunctionRegistration,
     LazyCall, RegistrationError,
+};
+pub use call_check::{
+    ArgumentCategory, ArgumentCheck, ArgumentType, CallCheck, CallFinding, CallProblem, PreparedCallCheck, check_call,
+    check_expression_calls, check_prepared_calls, classify_argument,
 };
 pub use catalog::{
     CatalogCategory, ExpressionFunctionDescriptor, FunctionCatalog, FunctionExample, FunctionParameterDescriptor,

@@ -272,6 +272,38 @@ impl<'s> DeclaredTypes<'s> {
         }
     }
 
+    /// The design-time type of every top-level property the projection
+    /// declares, keyed by name: the variable-type projection the design-time
+    /// call check reads (through [`TypeScope`](super::TypeScope), so guards
+    /// refine it).
+    ///
+    /// A property declared `A(required)` is `A`, constraints kept; an optional
+    /// one adds `null` by the shared presence rule. A name absent from the
+    /// map is `unknown`: undeclared, or the owner has no single typed
+    /// projection (a raw JSON Schema, a mixed root union, root-union arms that
+    /// disagree). Passive: no file, no value, no expression.
+    pub fn top_level_types(&self) -> std::collections::BTreeMap<String, super::Shape> {
+        let mut types = std::collections::BTreeMap::new();
+        let names: Vec<&String> = match self.schema {
+            None => Vec::new(),
+            Some(SimplifiedSchema::Single(shape)) => shape.properties.keys().collect(),
+            Some(SimplifiedSchema::Union(arms)) => arms
+                .iter()
+                .filter_map(|arm| match arm {
+                    SchemaArm::Inline(shape) => Some(shape.properties.keys()),
+                    _ => None,
+                })
+                .flatten()
+                .collect(),
+        };
+        for name in names {
+            if let Declaration::Found(def) = self.declaration(name) {
+                types.insert(name.clone(), super::Shape::from_definition(def));
+            }
+        }
+        types
+    }
+
     /// The declared type of `subject`.
     pub fn declared(&self, subject: &Subject) -> DeclaredType {
         match &subject.binding {

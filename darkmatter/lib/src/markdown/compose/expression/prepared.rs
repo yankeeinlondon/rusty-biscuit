@@ -90,7 +90,7 @@ impl PreparedExpression {
     }
 
     /// Maps a span of [`text`](Self::text) onto the string leaf.
-    fn leaf_span(&self, span: &SourceSpan) -> SourceSpan {
+    pub(crate) fn leaf_span(&self, span: &SourceSpan) -> SourceSpan {
         self.offset + span.start..self.offset + span.end
     }
 }

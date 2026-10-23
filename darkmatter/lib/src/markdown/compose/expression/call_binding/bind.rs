@@ -332,6 +332,15 @@ fn bind_signature<'v>(signature: &CompiledSignature, args: &'v [Value]) -> Resul
     ))
 }
 
+impl CompiledParameter {
+    /// Whether `value` binds to this parameter exactly as a call argument
+    /// would: source exclusions, the `null` rule, then the coercion engine.
+    /// Passive; the value is never changed.
+    pub fn binds(&self, value: &Value) -> bool {
+        bind_argument(self, self.index(), value).is_ok()
+    }
+}
+
 /// Binds one argument: registered source exclusions first, then the
 /// parameter-level `null` rule, then the coercion engine.
 fn bind_argument<'v>(parameter: &CompiledParameter, index: usize, value: &'v Value) -> Result<Bound<'v>, Box<ArgumentError>> {

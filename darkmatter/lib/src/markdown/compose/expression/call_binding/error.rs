@@ -6,7 +6,7 @@ use std::fmt;
 
 use serde_json::Value;
 
-use crate::markdown::coercion::{ConversionError, ValueFailure, ValueKind, render_path};
+use crate::markdown::coercion::{ConversionError, ValueFailure, ValueKind, compact, render_path};
 
 /// The four kinds of call-binding error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,7 +97,7 @@ impl ArgumentError {
 fn describe_received(value: &Value) -> String {
     match value {
         Value::Null => "null".to_string(),
-        other => format!("{} {}", ValueKind::of(other), serde_json::to_string(other).unwrap_or_default()),
+        other => format!("{} {}", ValueKind::of(other), compact(other)),
     }
 }
 

@@ -565,7 +565,14 @@ fn separator(first: &mut bool, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     Ok(())
 }
 
-/// Compact JSON text for a value in a description or message.
-pub(super) fn compact(value: &Value) -> String {
+/// Compact JSON text for a value in a description or message. A float
+/// number reads as interpolation presents it (`0.0` is `0`), since an
+/// expression literal `0` is stored as a float.
+pub(crate) fn compact(value: &Value) -> String {
+    if let Value::Number(number) = value
+        && let Some(float) = number.as_f64().filter(|_| number.is_f64())
+    {
+        return crate::markdown::numeric::format_number(float);
+    }
     serde_json::to_string(value).unwrap_or_else(|_| value.to_string())
 }

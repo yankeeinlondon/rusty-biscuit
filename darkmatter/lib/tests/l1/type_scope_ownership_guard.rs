@@ -57,6 +57,12 @@ const UNGUARDED: &[Unguarded] = &[
         count: 1,
         reason: "each lifecycle event's walk starts from the declarations alone; `walk_scoped` adds its guards",
     },
+    Unguarded {
+        path: "markdown/compose/call_precheck.rs",
+        item: "check_document",
+        count: 1,
+        reason: "the composition call check's declaration-only base, which body `BodyGuards::scope_at` narrows",
+    },
 ];
 
 /// The functions the type-narrowing inventory named as static decisions:
@@ -180,6 +186,10 @@ fn baseline() -> Vec<(&'static str, String)> {
         ("markdown/compose/expression/absence.rs", "impl AbsenceScope<'_> { pub(crate) fn facts(&self) { TypeScope::unguarded(&UNTYPED) } }
              fn walk_static() { scope.facts().assume(&c, Polarity::True); }"
             .to_string()),
+        (
+            "markdown/compose/call_precheck.rs",
+            "pub(crate) fn check_document() { let site = TypeScope::unguarded(&declared); }".to_string(),
+        ),
     ];
     for entry in UNGUARDED {
         if files.iter().any(|(path, _)| *path == entry.path) {

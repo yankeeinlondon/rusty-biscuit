@@ -539,15 +539,16 @@ fn preflight_discovery_tolerates_what_composition_rejects() {
 }
 
 /// Discovery composes without page blocks, so it evaluates a region a false
-/// `::block` removes. A failure there must not reject a document whose real
-/// composition never reaches it.
+/// `::block` removes. A runtime failure there must not reject a document whose
+/// real composition never reaches it. (A call proven wrong at design time,
+/// such as `min(1)`, rejects the document in any region.)
 #[test]
 fn preflight_discovery_does_not_fail_on_a_region_composition_removes() {
     let dir = TempDir::new().unwrap();
     let path = write(
         dir.path(),
         "doc.md",
-        "---\nrev: \"$(git rev-parse HEAD)\"\n---\nkept\n\n::block when=\"false\"\n{{ min(1) }}\n::end-block\n",
+        "---\nrev: \"$(git rev-parse HEAD)\"\n---\nkept\n\n::block when=\"false\"\n{{ min(missing, 5) }}\n::end-block\n",
     );
     let markdown = Markdown::try_from(path.as_path()).unwrap();
     let shell = ShellExpansionOptions { policy_root: Some(dir.path().to_path_buf()), ..Default::default() };

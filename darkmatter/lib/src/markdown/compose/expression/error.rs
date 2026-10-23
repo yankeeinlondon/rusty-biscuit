@@ -372,6 +372,12 @@ pub enum ExpressionError {
     #[error("{0}")]
     Call(Box<super::call_binding::CallBindingError>),
 
+    /// A call the design-time check proves wrong (category 5), found before
+    /// any expression of the document was evaluated. Always fatal: the
+    /// document is rejected whichever branch the call is in.
+    #[error("{}", .0.rejection_message())]
+    CallCheck(Box<super::call_check::CallCheck>),
+
     /// A binding failure: a read of a global the host declared unavailable in
     /// this scope, or an invalid host registration. Never resolved by falling
     /// through to a same-named document property.
@@ -479,6 +485,9 @@ impl ExpressionError {
     ///   not bind (type, arity, ambiguous overload) is not fatal here, like the
     ///   arity and arg-type errors it replaces.
     ///
+    /// - [`CallCheck`] — a call the design-time check proves wrong rejects the
+    ///   document before evaluation, so no lenient surface may keep it.
+    ///
     /// Every other variant (arity, arg-type, parse, arithmetic, generic
     /// [`Other`], …) is demoted to a `ComposeWarning` in lenient body
     /// interpolation. [`RemoteNotEnabled`] is
@@ -497,6 +506,7 @@ impl ExpressionError {
     /// [`MalformedLiteralToken`]: ExpressionError::MalformedLiteralToken
     /// [`Binding`]: ExpressionError::Binding
     /// [`Call`]: ExpressionError::Call
+    /// [`CallCheck`]: ExpressionError::CallCheck
     /// [`Other`]: ExpressionError::Other
     /// [`Malformed`]: FileRefFailure::Malformed
     /// [`NotFound`]: FileRefFailure::NotFound
@@ -511,6 +521,7 @@ impl ExpressionError {
             ExpressionError::ReservedRootPathUnknown { .. } => true,
             ExpressionError::MalformedLiteralToken(_) => true,
             ExpressionError::Binding(_) => true,
+            ExpressionError::CallCheck(_) => true,
             // A broken return contract is a Darkmatter defect; a call that
             // does not bind keeps the old arity/arg-type severity.
             ExpressionError::Call(error) => {

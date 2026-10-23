@@ -22,7 +22,7 @@ use darkmatter::markdown::compose::target_chain::TargetSelection;
 use darkmatter::markdown::compose::directive_targets::{
     TargetNullability, analyze_directive_targets,
 };
-use darkmatter::markdown::compose::expression::{DeclaredTypes, ExpressionFinder, TypeScope};
+use darkmatter::markdown::compose::expression::{DeclaredTypes, ExpressionFinder, SpannedExpr, TypeScope};
 use darkmatter::markdown::compose::page_blocks::BodyGuards;
 use darkmatter::markdown::compose::{
     FRONTMATTER_SHELL_SUFFIXES, FrontmatterShellValue, describe_suffix,
@@ -40,6 +40,7 @@ use lsp_types::{
 use super::DocumentContext;
 use super::frontmatter;
 use super::location::line_range;
+use crate::diagnostics::call_check;
 use crate::diagnostics::codes::{code, source};
 use crate::context::{ReferenceTarget, resolution_failure_data};
 use crate::overlay::shell::PolicyVerdict;
@@ -917,6 +918,10 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
 /// only *inferred* to be an expression (foreign template syntax is common in
 /// prose), and an undeclared property is valid and may be supplied at runtime.
 /// A call to an unknown function is an `ERROR`: compose fails on it.
+///
+/// Every call in a body interpolation or a directive's `when` condition also
+/// gets the design-time call check ([`call_check`]), typed at its site under
+/// the enclosing `::block when` guards.
 fn expression_diagnostics(
     ctx: &DocumentContext,
     catalogs: Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
@@ -926,6 +931,44 @@ fn expression_diagnostics(
     let known_roots = KnownRoots::with_catalogs(ctx, catalogs);
     // The body is outside every lifecycle stack.
     let view = known_roots.as_ref().map(|known_roots| known_roots.view(None));
+    let declared = call_check::declared_types(ctx);
+    let unguarded = TypeScope::unguarded(&declared);
+    let guards = BodyGuards::scan(ctx.text);
+    let strict = ctx.config.expressions.strict;
+    let calls = |expr: &SpannedExpr, at: usize, project: &dyn Fn(SourceSpan) -> SourceSpan| {
+        let site = guards.scope_at(unguarded.clone(), at);
+        call_check::call_diagnostics(expr, &site, strict)
+            .into_iter()
+            .filter_map(|found| {
+                let range = ctx.source_map.byte_range_to_lsp(project(found.span))?;
+                Some(diagnostic(range, found.severity, found.code, source::COMPOSE, found.message))
+            })
+            .collect::<Vec<_>>()
+    };
+    for directive in directives::directives(ctx.text) {
+        for option in &directive.options {
+            let Some(value) = option.value.as_ref().filter(|_| option.key.value == "when") else {
+                continue;
+            };
+            // A malformed condition is composition's error to report.
+            let Ok(expr) = expressions::parse_condition(&value.value) else {
+                continue;
+            };
+            // The value span includes its quotes. Escapes make the authored
+            // bytes differ from the parsed text; range such a condition as a
+            // whole.
+            let authored = ctx.text.get(value.span.clone()).unwrap_or_default();
+            let base = match authored.len().checked_sub(value.value.len()) {
+                Some(0) if authored == value.value => Some(value.span.start),
+                Some(2) if authored.get(1..authored.len() - 1) == Some(value.value.as_str()) => Some(value.span.start + 1),
+                _ => None,
+            };
+            out.extend(calls(&expr, directive.span.start, &|span: SourceSpan| match base {
+                Some(base) => base + span.start..base + span.end,
+                None => value.span.clone(),
+            }));
+        }
+    }
     for interpolation in expressions::interpolations(ctx.text, body_base) {
         match expressions::parse(&interpolation.text) {
             Err(error) => {
@@ -945,6 +988,7 @@ fn expression_diagnostics(
             }
             Ok(expr) => {
                 let base = interpolation.inner.start;
+                out.extend(calls(&expr, base, &|span: SourceSpan| base + span.start..base + span.end));
                 for (name, span) in expressions::unknown_function_calls(&expr, &interpolation.text) {
                     if let Some(range) =
                         ctx.source_map.byte_range_to_lsp(base + span.start..base + span.end)

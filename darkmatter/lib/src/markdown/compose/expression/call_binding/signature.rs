@@ -20,6 +20,7 @@ pub struct CompiledParameter {
     rest: bool,
     admits_null: bool,
     type_text: String,
+    declared: PropertyDef,
     /// Original source kinds the registration rejects before conversion.
     pub(super) excluded: Vec<ValueKind>,
 }
@@ -49,6 +50,12 @@ impl CompiledParameter {
     /// The declared type as written, without descriptions.
     pub fn type_text(&self) -> &str {
         &self.type_text
+    }
+
+    /// The declared grammar type, before translation; design-time checks
+    /// compare it with [`is_subtype`](crate::markdown::schemas::is_subtype).
+    pub fn declared(&self) -> &PropertyDef {
+        &self.declared
     }
 
     pub fn excluded_sources(&self) -> &[ValueKind] {
@@ -98,6 +105,7 @@ impl CompiledSignature {
                 optional: parameter.optional,
                 rest: parameter.rest,
                 type_text: type_text(&parameter.def),
+                declared: parameter.def.clone(),
                 excluded: Vec::new(),
             });
         }
@@ -139,6 +147,12 @@ impl CompiledSignature {
 
     pub fn returns(&self) -> &Shape {
         &self.returns
+    }
+
+    /// The `(subject, fallback)` parameter indexes of the registration's
+    /// numeric recovery, when it has one.
+    pub fn recovery(&self) -> Option<(usize, usize)> {
+        self.recovery
     }
 
     pub fn is_fallible(&self) -> bool {

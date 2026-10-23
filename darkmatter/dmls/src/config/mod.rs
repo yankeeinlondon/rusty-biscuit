@@ -161,6 +161,20 @@ pub struct StyleConfig {
     pub strict: bool,
 }
 
+/// Expression call diagnostics.
+///
+/// The only setting for call diagnostics: no function has a setting of its
+/// own.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExpressionsConfig {
+    /// Strict mode: a call argument that may be `null` where the parameter
+    /// rejects it (category 2) or whose type is unknown (category 4) warns
+    /// too. Proven errors and possible conversion failures are shown either
+    /// way.
+    pub strict: bool,
+}
+
 /// Shell-policy discovery.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -253,6 +267,8 @@ pub struct DmlsConfig {
     pub schema: SchemaConfig,
     /// `style:` frontmatter behavior.
     pub style: StyleConfig,
+    /// Expression call diagnostics.
+    pub expressions: ExpressionsConfig,
     /// Shell-policy discovery.
     pub shell: ShellConfig,
     /// Inlay-hint toggles.
@@ -454,8 +470,12 @@ impl fmt::Display for ConfigDiagnostic {
 /// The file layer reloads from disk; the overlay layer holds the most recent
 /// `didChangeConfiguration` settings. For every section but `formatting`, the
 /// effective config is file → overlay deep-merged as JSON, then deserialized;
-/// a merge that no longer deserializes keeps the file's sections (with an
-/// error diagnostic), so bad editor settings cannot wedge the server.
+/// a merge that no longer deserializes falls back to the file layer (the
+/// file's settings over defaults), not to the previous effective config, and
+/// records an error diagnostic, so bad editor settings cannot wedge the
+/// server. An explicit `null` for a section or a typed leaf (for example
+/// `expressions` or `expressions.strict`) is such an invalid merge; only a
+/// whole-settings `null` clears the overlay.
 /// `formatting` is normalized per source and merged leaf by leaf (see the
 /// module docs).
 #[derive(Debug)]
@@ -892,6 +912,7 @@ mod tests {
         );
         assert!(!config.schema.strict);
         assert!(!config.style.strict);
+        assert!(!config.expressions.strict);
         assert!(config.hints.inlay);
         assert!(config.semantic_tokens.enable);
         assert_eq!(config.diagnostics.debounce_ms, 200);
@@ -1076,9 +1097,10 @@ mod tests {
     }
 
     #[test]
-    fn test_semantic_tokens_malformed_value_keeps_previous() {
-        // A non-boolean `enable` fails to deserialize the overlay, so the last
-        // good (default-enabled) config survives rather than wedging the server.
+    fn test_semantic_tokens_malformed_value_falls_back_to_file_layer() {
+        // A non-boolean `enable` fails to deserialize the merge, so the file
+        // layer (here the defaults, enabled) applies rather than wedging the
+        // server.
         let mut state = ConfigState::load(Vec::new(), None);
         state.apply_client_settings(json!({
             "dmls": { "semantic_tokens": { "enable": "yes-please" } }
@@ -1131,5 +1153,221 @@ mod tests {
         let state = ConfigState::load(vec![temp.path().to_path_buf()], Some(explicit.clone()));
         assert!(!state.effective().hints.inlay);
         assert_eq!(state.file_path(), Some(explicit.as_path()));
+    }
+
+    /// `expressions.strict`: the same file/editor layering and serde
+    /// validation as every other strict flag.
+    mod expressions_strict {
+        use super::*;
+
+        /// A state over a workspace whose `.dmls.toml` holds `toml`, or none
+        /// for `None`. The directory lives as long as the state is used.
+        fn load(toml: Option<&str>) -> (tempfile::TempDir, ConfigState) {
+            let temp = tempfile::tempdir().unwrap();
+            if let Some(toml) = toml {
+                std::fs::write(temp.path().join(CONFIG_FILE_NAME), toml).unwrap();
+            }
+            let state = ConfigState::load(vec![temp.path().to_path_buf()], None);
+            (temp, state)
+        }
+
+        fn strict(state: &ConfigState) -> bool {
+            state.effective().expressions.strict
+        }
+
+        /// `(severity, source is the editor, key)` of every finding.
+        fn findings(state: &ConfigState) -> Vec<(ConfigSeverity, bool, Option<String>)> {
+            state
+                .diagnostics()
+                .iter()
+                .map(|diagnostic| {
+                    (diagnostic.severity, diagnostic.source == ConfigSource::EditorSettings, diagnostic.key.clone())
+                })
+                .collect()
+        }
+
+        #[test]
+        fn absent_and_empty_sections_default_to_false() {
+            for toml in [None, Some(""), Some("[expressions]\n"), Some("[wiki]\nenable = false\n")] {
+                let (_temp, state) = load(toml);
+                assert!(!strict(&state), "{toml:?}");
+                assert!(state.diagnostics().is_empty(), "{toml:?}: {:?}", state.diagnostics());
+            }
+            let (_temp, mut state) = load(None);
+            for settings in [json!({ "dmls": { "expressions": {} } }), json!({ "dmls": {} }), json!({})] {
+                state.apply_client_settings(settings.clone());
+                assert!(!strict(&state), "{settings}");
+                assert!(state.diagnostics().is_empty(), "{settings}: {:?}", state.diagnostics());
+            }
+        }
+
+        #[test]
+        fn the_file_sets_either_value() {
+            for (toml, expected) in [("[expressions]\nstrict = true\n", true), ("[expressions]\nstrict = false\n", false)] {
+                let (_temp, state) = load(Some(toml));
+                assert_eq!(strict(&state), expected, "{toml}");
+                assert!(state.diagnostics().is_empty());
+            }
+        }
+
+        #[test]
+        fn the_editor_overrides_the_file_in_both_directions() {
+            let (_temp, mut state) = load(Some("[expressions]\nstrict = false\n"));
+            state.apply_client_settings(json!({ "dmls": { "expressions": { "strict": true } } }));
+            assert!(strict(&state));
+            // The bare section form, as for `schema.strict`.
+            state.apply_client_settings(json!({ "expressions": { "strict": true } }));
+            assert!(strict(&state));
+            // An empty editor table sets nothing, so the file's value stands.
+            state.apply_client_settings(json!({ "dmls": { "expressions": {} } }));
+            assert!(!strict(&state));
+
+            let (_temp, mut state) = load(Some("[expressions]\nstrict = true\n"));
+            state.apply_client_settings(json!({ "dmls": { "expressions": { "strict": false } } }));
+            assert!(!strict(&state));
+            // A whole-settings `null` clears the overlay.
+            state.apply_client_settings(Value::Null);
+            assert!(strict(&state));
+            assert!(state.diagnostics().is_empty());
+        }
+
+        #[test]
+        fn invalid_editor_values_are_errors_that_fall_back_to_the_file() {
+            for settings in [
+                json!({ "dmls": { "expressions": null } }),
+                json!({ "dmls": { "expressions": { "strict": null } } }),
+                json!({ "dmls": { "expressions": { "strict": "yes" } } }),
+                json!({ "dmls": { "expressions": { "strict": 1 } } }),
+                json!({ "dmls": { "expressions": 5 } }),
+            ] {
+                let (_temp, mut state) = load(Some("[expressions]\nstrict = true\n[diagnostics]\ndebounce_ms = 150\n"));
+                state.apply_client_settings(settings.clone());
+                assert!(strict(&state), "{settings}: the file's value applies");
+                assert_eq!(state.effective().diagnostics.debounce_ms, 150, "{settings}");
+                assert_eq!(findings(&state), vec![(ConfigSeverity::Error, true, None)], "{settings}");
+            }
+        }
+
+        #[test]
+        fn invalid_file_values_reject_the_file() {
+            for toml in [
+                "[expressions]\nstrict = \"yes\"\n",
+                "[expressions]\nstrict = 1\n",
+                "expressions = 5\n",
+                // TOML forbids duplicate keys and tables; the loader rejects both.
+                "[expressions]\nstrict = true\nstrict = false\n",
+                "[expressions]\nstrict = true\n[expressions]\nstrict = false\n",
+            ] {
+                let (_temp, state) = load(Some(&format!("{toml}[diagnostics]\ndebounce_ms = 150\n")));
+                assert!(!strict(&state), "{toml}");
+                // None of the file's settings applied.
+                assert_eq!(state.effective().diagnostics.debounce_ms, 200, "{toml}");
+                assert_eq!(state.file_path(), None, "{toml}");
+                assert_eq!(findings(&state), vec![(ConfigSeverity::Error, false, None)], "{toml}");
+            }
+        }
+
+        /// The fallback after an invalid merge is the file layer, not the
+        /// previous effective config: a strict mode the editor turned on is
+        /// off again while its settings are invalid, and the diagnostic says
+        /// so.
+        #[test]
+        fn an_invalid_merge_falls_back_to_the_file_layer_not_the_previous_config() {
+            let (_temp, mut state) = load(Some("[expressions]\nstrict = false\n"));
+            state.apply_client_settings(json!({ "dmls": { "expressions": { "strict": true } } }));
+            assert!(strict(&state));
+
+            state.apply_client_settings(json!({ "dmls": { "expressions": { "strict": "yes" } } }));
+            assert!(!strict(&state), "the file layer applies, not the previous `true`");
+            let [diagnostic] = state.diagnostics() else {
+                panic!("one finding: {:?}", state.diagnostics());
+            };
+            assert_eq!(diagnostic.severity, ConfigSeverity::Error);
+            assert_eq!(diagnostic.source, ConfigSource::EditorSettings);
+            assert!(
+                diagnostic.message.contains("the file and default settings remain"),
+                "{diagnostic}"
+            );
+
+            // Recovered settings apply again and the finding is gone.
+            state.apply_client_settings(json!({ "dmls": { "expressions": { "strict": true } } }));
+            assert!(strict(&state));
+            assert!(state.diagnostics().is_empty());
+        }
+
+        #[test]
+        fn a_malformed_file_recovers_on_reload() {
+            let (temp, mut state) = load(Some("[expressions]\nstrict = \"yes\"\n"));
+            assert!(!strict(&state));
+            assert_eq!(state.diagnostics().len(), 1);
+
+            std::fs::write(temp.path().join(CONFIG_FILE_NAME), "[expressions]\nstrict = true\n").unwrap();
+            state.reload();
+            assert!(strict(&state));
+            assert!(state.diagnostics().is_empty());
+        }
+
+        #[test]
+        fn empty_values_are_wrong_types_not_absent() {
+            for toml in ["[expressions]\nstrict = \"\"\n", "[expressions]\nstrict = []\n", "expressions = \"\"\n"] {
+                let (_temp, state) = load(Some(&format!("{toml}[diagnostics]\ndebounce_ms = 150\n")));
+                assert_eq!(state.effective().diagnostics.debounce_ms, 200, "{toml}");
+                assert_eq!(findings(&state), vec![(ConfigSeverity::Error, false, None)], "{toml}");
+            }
+            for settings in [
+                json!({ "dmls": { "expressions": { "strict": "" } } }),
+                json!({ "dmls": { "expressions": { "strict": [] } } }),
+                json!({ "dmls": { "expressions": "" } }),
+            ] {
+                let (_temp, mut state) = load(Some("[expressions]\nstrict = true\n"));
+                state.apply_client_settings(settings.clone());
+                assert!(strict(&state), "{settings}: the file's value applies");
+                assert_eq!(findings(&state), vec![(ConfigSeverity::Error, true, None)], "{settings}");
+            }
+        }
+
+        /// serde reads a sequence as a struct's fields in order, for every
+        /// section alike, so a one-element list sets `strict`; this pins that
+        /// shared behavior rather than endorsing it.
+        #[test]
+        fn a_list_section_is_read_positionally_as_every_section_is() {
+            let (_temp, mut state) = load(None);
+            state.apply_client_settings(json!({ "dmls": { "expressions": [true] } }));
+            assert!(strict(&state));
+            assert!(state.diagnostics().is_empty());
+            state.apply_client_settings(json!({ "dmls": { "expressions": ["yes"] } }));
+            assert!(!strict(&state));
+            assert_eq!(findings(&state), vec![(ConfigSeverity::Error, true, None)]);
+        }
+
+        #[test]
+        fn a_syntactically_broken_file_is_rejected_whole() {
+            for toml in ["[expressions\nstrict = true\n", "[expressions]\nstrict = true garbage\n"] {
+                let (_temp, state) = load(Some(toml));
+                assert!(!strict(&state), "{toml}");
+                assert_eq!(state.file_path(), None, "{toml}");
+                assert_eq!(findings(&state), vec![(ConfigSeverity::Error, false, None)], "{toml}");
+            }
+        }
+
+        /// Ruling R6: an unknown key in `[expressions]` is ignored, as in
+        /// every section except `[formatting]`; a misspelling leaves strict off.
+        #[test]
+        fn an_unknown_key_is_ignored() {
+            let (_temp, state) = load(Some("[expressions]\nstrcit = true\n"));
+            assert!(!strict(&state));
+            assert!(state.diagnostics().is_empty(), "{:?}", state.diagnostics());
+            let (_temp, mut state) = load(None);
+            state.apply_client_settings(json!({ "dmls": { "expressions": { "strcit": true } } }));
+            assert!(!strict(&state));
+            assert!(state.diagnostics().is_empty(), "{:?}", state.diagnostics());
+        }
+
+        /// Criterion 42: the section has one setting, and no function has
+        /// one of its own.
+        #[test]
+        fn strict_is_the_only_expressions_setting() {
+            assert_eq!(serde_json::to_value(ExpressionsConfig::default()).unwrap(), json!({ "strict": false }));
+        }
     }
 }

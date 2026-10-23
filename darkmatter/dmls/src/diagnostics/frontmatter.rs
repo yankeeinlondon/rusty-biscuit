@@ -85,6 +85,7 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
                 style_diagnostics(ctx, ast, &mut out);
                 expression_diagnostics(ctx, ast, &report, &expression_values, &mut out);
                 stack_expression_diagnostics(ctx, ast, &expression_values, &mut out);
+                interpolation_call_diagnostics(ctx, ast, &mut out);
             }
         }
         SchemaOutcome::Ready(None) => {}
@@ -649,7 +650,9 @@ fn problem_range(
 /// `dm.expression.undeclared_property` (`WARNING`) for each unhandled
 /// identifier, in any operand position, that is an undeclared document property,
 /// `dm.expression.unknown_function` (`ERROR`) for each call to a function
-/// outside Darkmatter's catalog,
+/// outside Darkmatter's catalog, the design-time call check's
+/// `dm.expression.incompatible_call` / `dm.expression.uncertain_call`
+/// ([`FrontmatterCalls`]),
 /// and `dm.expression.nested_span_in_literal` for a lifecycle predicate. All
 /// carry source `darkmatter.frontmatter`; ranges go through the scalar
 /// projection, exact (YAML quotes excluded) for untagged single-line plain or
@@ -674,6 +677,8 @@ fn expression_diagnostics(
     let mut settled = std::collections::HashSet::new();
     let mut unreported_errors = std::collections::HashMap::new();
     let stale = ctx.overlay.is_some_and(|overlay| overlay.stale);
+    let declared = crate::diagnostics::call_check::declared_types(ctx);
+    let calls = FrontmatterCalls::new(ctx, &declared);
 
     for value in expression_values {
         let expression = value.expression();
@@ -736,6 +741,10 @@ fn expression_diagnostics(
             }
             Ok(parsed) => {
                 settled.insert(expression_span);
+                for found in calls.check(&parsed) {
+                    let doc_span = value.project(found.span.clone()).unwrap_or_else(|| value.expression_span());
+                    calls.push(ctx, doc_span, found, out);
+                }
                 let event = crate::overlay::event_views::stack_event(&path);
                 for (name, span) in crate::overlay::expressions::unknown_function_calls(&parsed, expression) {
                     let doc_span = value.project(span).unwrap_or_else(|| value.expression_span());
@@ -814,8 +823,9 @@ fn expression_diagnostics(
 /// [`expression_diagnostics`]'), each classified against its event's view
 /// ([`KnownRoots::view`](crate::providers::dsl::KnownRoots::view)): an unknown
 /// function and a read of a global the event makes unavailable are errors, an
-/// undeclared document property a warning. A span or guard that does not
-/// parse is left to the runtime; a stale tree reports nothing.
+/// undeclared document property a warning, and each call gets the call check
+/// ([`FrontmatterCalls`]). A span or guard that does not parse is left to the
+/// runtime; a stale tree reports nothing.
 fn stack_expression_diagnostics(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
@@ -830,11 +840,17 @@ fn stack_expression_diagnostics(
     };
     let typed: std::collections::HashSet<usize> = expression_values.iter().map(|value| value.index).collect();
     let stacks = crate::overlay::event_views::stack_expressions(ctx.text, ast, |index| typed.contains(&index));
+    let declared = crate::diagnostics::call_check::declared_types(ctx);
+    let calls = FrontmatterCalls::new(ctx, &declared);
     let mut views = std::collections::HashMap::new();
     for expression in stacks {
         let Ok(parsed) = expression.parse() else {
             continue;
         };
+        for found in calls.check(&parsed) {
+            let doc_span = expression.range(found.span.clone());
+            calls.push(ctx, doc_span, found, out);
+        }
         let view = views.entry(expression.event).or_insert_with(|| known_roots.view(Some(expression.event)));
         let mut push = |span: std::ops::Range<usize>, severity, code_value: &str, message: String| {
             if let Some(range) = ctx.source_map.byte_range_to_lsp(expression.range(span)) {
@@ -871,6 +887,69 @@ fn stack_expression_diagnostics(
             if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
                 out.push(crate::providers::dsl::undeclared_property_diagnostic(range, source::FRONTMATTER, &finding));
             }
+        }
+    }
+}
+
+/// The design-time call check over the `{{ … }}` spans of frontmatter values
+/// outside lifecycle stacks (those are [`stack_expression_diagnostics`]'),
+/// which frontmatter interpolation evaluates. `$schema` declarations are not
+/// interpolated; a span that does not parse, and a stale tree, report
+/// nothing.
+fn interpolation_call_diagnostics(ctx: &DocumentContext, ast: &FrontmatterAst, out: &mut Vec<Diagnostic>) {
+    if ctx.overlay.is_some_and(|overlay| overlay.stale) {
+        return;
+    }
+    let declared = crate::diagnostics::call_check::declared_types(ctx);
+    let calls = FrontmatterCalls::new(ctx, &declared);
+    for interpolation in crate::overlay::expressions::frontmatter_interpolations(ctx.text, ast) {
+        let path = ast.path_at(interpolation.index);
+        if matches!(path.first(), Some(crate::overlay::FmPathSegment::Key("$schema")))
+            || crate::overlay::event_views::stack_event(&path).is_some()
+        {
+            continue;
+        }
+        let Ok(parsed) = crate::overlay::expressions::parse(&interpolation.text) else {
+            continue;
+        };
+        for found in calls.check(&parsed) {
+            let doc_span = interpolation.project(found.span.clone()).unwrap_or_else(|| interpolation.outer_span());
+            calls.push(ctx, doc_span, found, out);
+        }
+    }
+}
+
+/// The frontmatter's call-check site: unguarded (a lifecycle or task `when`
+/// is not applied to the actions it selects) over the declaration-only types.
+struct FrontmatterCalls<'d> {
+    site: darkmatter::markdown::compose::expression::TypeScope<'d>,
+    strict: bool,
+}
+
+impl<'d> FrontmatterCalls<'d> {
+    fn new(ctx: &DocumentContext, declared: &'d darkmatter::markdown::compose::expression::DeclaredTypes<'d>) -> Self {
+        Self {
+            site: darkmatter::markdown::compose::expression::TypeScope::unguarded(declared),
+            strict: ctx.config.expressions.strict,
+        }
+    }
+
+    fn check(
+        &self,
+        expr: &darkmatter::markdown::compose::expression::SpannedExpr,
+    ) -> Vec<crate::diagnostics::call_check::CallDiagnostic> {
+        crate::diagnostics::call_check::call_diagnostics(expr, &self.site, self.strict)
+    }
+
+    fn push(
+        &self,
+        ctx: &DocumentContext,
+        doc_span: std::ops::Range<usize>,
+        found: crate::diagnostics::call_check::CallDiagnostic,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
+            out.push(diagnostic(range, found.severity, source::FRONTMATTER, found.code, found.message));
         }
     }
 }

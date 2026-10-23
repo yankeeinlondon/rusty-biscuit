@@ -133,8 +133,10 @@ impl Markdown {
     /// Internal recursive pipeline runner shared by root and child documents.
     ///
     /// Frontmatter is resolved in a fixed order before the body stages run:
-    /// **Interp pass 1 → Schema Validation → Shell Expansion → Interp pass 2**.
-    /// Pass 1 resolves `{{ }}` against seed values; schema validation and
+    /// **Call check → Interp pass 1 → Schema Validation → Shell Expansion →
+    /// Interp pass 2**. The call check is passive: it rejects the document
+    /// when an authored call on the composed surface is proven wrong against
+    /// the schema's declared types, before anything is evaluated. Pass 1 resolves `{{ }}` against seed values; schema validation and
     /// coercion run next; authored `$(...)` frontmatter values then expand;
     /// pass 2 resolves only the keys that were deferred because they
     /// referenced shell-pending values. Every authored value is scanned once
@@ -217,6 +219,25 @@ impl Markdown {
             )?;
             caller_projection.install(self);
             caller_projection.install_provenance(&mut options);
+
+            // A call the design-time check proves wrong rejects the document
+            // before any of its expressions (and so any sibling effect) runs.
+            let effective = prepared_schemas.effective_for(self);
+            super::call_precheck::check_document(
+                self,
+                &provenance,
+                &options,
+                effective.as_ref().and_then(|effective| effective.simplified.as_ref()),
+            )
+            .map_err(|failure| match failure {
+                super::call_precheck::PrecheckFailure::Frontmatter(failure) => attribute_frontmatter_failure(
+                    failure,
+                    &options,
+                    self.loaded_source_context_for_errors(),
+                    &self.full_source_context_for_errors(),
+                ),
+                super::call_precheck::PrecheckFailure::Body(error) => error,
+            })?;
 
             let shell_expansion_enabled =
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion);

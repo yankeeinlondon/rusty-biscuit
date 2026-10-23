@@ -15,6 +15,8 @@ mod content_policy_baseline;
 mod context_construction_guard;
 mod core_schema_types;
 mod entry_point_parity;
+mod call_check_agreement;
+mod expression_call_diagnostics;
 mod expression_scopes;
 mod formatting_transaction;
 mod full_index_removal_guard;

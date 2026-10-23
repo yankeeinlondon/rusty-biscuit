@@ -248,7 +248,7 @@ pub(crate) enum CatalogError {
 
 /// Loads a catalog document. Strict: the tagged envelope with `categories:`,
 /// each function entry a `function` or a union of `function`s, one category
-/// per function, and every file-form example present in `example_files` and
+/// per function, no entry written as null, and every file-form example present in `example_files` and
 /// valid under the example envelope.
 ///
 /// Descriptors are leaked to `'static`; the embedded catalog loads once, and
@@ -274,6 +274,11 @@ pub(crate) fn load_catalog(
         return Err(invalid("`types:` must be a mapping of named types".into()));
     };
     let raw_entries = raw_type_entries(source);
+    if let Some(name) = null_type_entry(source) {
+        // A general schema file reads `types.x: null` as the `null` type; in
+        // the catalog that can only be a function signature left empty.
+        return Err(invalid(format!("`types.{name}` is null, not a function signature")));
+    }
 
     let mut named_types = IndexMap::new();
     let mut functions: Vec<CatalogFunction<'_>> = Vec::new();
@@ -446,6 +451,16 @@ fn category_of(atom: &PropertyAtom) -> Option<&str> {
 /// single string), so an inline example's result can be shown as written.
 /// Missing or unexpected shapes yield no text; the result then falls back to
 /// its JSON spelling.
+/// The first `types:` entry written as `null`, `~`, or an empty value.
+fn null_type_entry(source: &str) -> Option<String> {
+    let document = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source).ok()?;
+    let types = document.get("types")?.as_mapping()?;
+    types
+        .iter()
+        .find(|(_, value)| value.is_null())
+        .and_then(|(key, _)| key.as_str().map(str::to_string))
+}
+
 fn raw_type_entries(source: &str) -> IndexMap<String, Vec<Option<String>>> {
     let Ok(document) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source) else {
         return IndexMap::new();
