@@ -52,11 +52,15 @@ convert](#how-component-schemas-convert) for what each component becomes.
 See [typed registration](../typed-registration.md) and
 [the compiling example](../authoring-examples.md).
 
-Query/header/cookie parameters export in their declared locations. Query strings
+Query/header/cookie parameters export in their declared locations, with their
+`style`. `explode: false` is always written; `explode: true` is written only
+where it is not OpenAPI's default (`true` for `form`, `false` otherwise), that
+is on a non-`form` parameter such as a `deepObject` query parameter. Query strings
 do not belong in path templates; endpoint identity is method plus normalized
-path. The API's authentication strategy (`auth`) determines the document's
-security scheme and requirement; an endpoint's own authentication adds
-operation-level `security` (see [Endpoint security](#endpoint-security)).
+path. The API's effective auth policy determines the document's security
+schemes and root `security` (see [Document security](#document-security));
+an endpoint's own authentication adds operation-level `security` (see
+[Endpoint security](#endpoint-security)).
 Runtime-only origin/redaction policies do not become OpenAPI transport rules.
 The supported extension fields, including rate-limit and retry metadata, are
 described in [OpenAPI extensions](openapi-extensions.md).
@@ -137,8 +141,39 @@ sees an approximation of the definition:
 - GraphQL operations are absent.
 
 [Importing](import-openapi.md#several-success-shapes-and-declared-errors)
-the document back restores what the `responses` map holds and nothing from
-`x-schematic`.
+the document back restores the `responses` map, and from `x-schematic` the
+shapes, end conditions, variants, notes, and declared error levels, once they
+agree with that map (see
+[Standard fields win](openapi-extensions.md#standard-fields-win)).
+
+## Request bodies
+
+A JSON, text, or binary body exports as one `requestBody.content` entry and
+nothing else. A form body exports as an object schema under
+`multipart/form-data` or `application/x-www-form-urlencoded`: one property
+per field, `required` for required fields, a file as `{type: string, format:
+binary}`, and several files as an array of those with `minItems`/`maxItems`
+from the field's counts. A multipart body also writes an `encoding` entry for
+each part whose content type is not the default:
+
+```yaml
+multipart/form-data:
+  schema:
+    type: object
+    required: [samples]
+    properties:
+      samples: { type: array, items: { type: string, format: binary }, minItems: 1, maxItems: 5 }
+      metadata: { $ref: "#/components/schemas/VoiceMetadata" }
+  encoding:
+    samples: { contentType: "audio/mpeg, audio/wav" }   # the accept list
+    metadata: { contentType: application/json }         # a JSON part
+```
+
+A text part and a file that accepts any type get no `encoding` entry. A
+URL-encoded body writes none. The form's field details are also written to
+the operation's
+[`x-schematic.request`](openapi-extensions.md#request-types); no other body
+kind writes that member.
 
 ## Path parameters, deprecation, and composition
 
@@ -146,7 +181,11 @@ A path parameter declared with `path_param` exports with its type, its
 description, `required: true`, and `deprecated: true` when it is deprecated.
 An endpoint that declares none keeps one untyped `string` parameter per
 placeholder. A placeholder repeated in the template, or written `{+name}`,
-is declared once:
+is declared once. An OpenAPI path key cannot hold the reserved-expansion
+marker, so `{+name}` is written as `{name}` and the endpoint's full template
+goes to the operation's
+[`x-schematic.path_template`](openapi-extensions.md#parameter-details-and-path-templates);
+a parameter's secret marker and Rust name go to its `params`:
 
 ```yaml
 /items/{item_id}:
@@ -186,6 +225,30 @@ see [typed registration](../typed-registration.md)) exports as that
 composition of references, for example
 `Pet: {oneOf: [{$ref: '#/components/schemas/Cat'}, {$ref: '#/components/schemas/Dog'}]}`.
 
+## Document security
+
+The root `security` lists one requirement per method the API's effective auth
+policy accepts (its explicit methods, then its environment fallback), so any
+one of them satisfies an inheriting operation. An API with a single auth
+strategy has one requirement; one without authentication has none. Each
+method's scheme is registered in `components.securitySchemes`:
+
+| Method | Scheme |
+| --- | --- |
+| bearer token | `bearerAuth`: `{type: http, scheme: bearer}` |
+| bearer token in another header | `bearerAuth`: `{type: apiKey, in: header, name: <header>}` |
+| API key in a header, query, or cookie | `apiKeyAuth`: `{type: apiKey, in: <location>, name: <name>}` |
+| HTTP Basic | `basicAuth`: `{type: http, scheme: basic}` |
+| OAuth2 | `oauth2Auth`: an authorization-code or client-credentials flow |
+
+Two facts have no standard spelling: a bearer token sent in a header other
+than `Authorization`, and an API key's value prefix (Gitea sends
+`Authorization: token <key>`). Each is written as an
+[auth detail](openapi-extensions.md#auth-details) keyed by the scheme's name,
+`{"bearer": true}` or `{"value_prefix": "token "}`. The extension holds
+nothing else about authentication and never a credential; environment
+variable names go to `env_auth` and `env_mapping`.
+
 ## Endpoint security
 
 An endpoint that declares its own authentication gets an operation-level
@@ -202,7 +265,9 @@ after the API's own. A scheme identical to one already registered reuses its
 name; a different scheme takes its base name (`bearerAuth`, `apiKeyAuth`,
 `basicAuth`, `oauth2Auth`) when free, else `bearerAuth2`, `bearerAuth3`, and
 so on. A name is never reassigned to a different scheme, and endpoints are
-visited in definition order, so the names are deterministic.
+visited in definition order, so the names are deterministic. A replacement's
+auth details and its `env_mapping` are written to that operation's own
+`x-schematic`, never merged with the document's.
 
 OpenAPI 3.0 has no OAuth2 device-code flow. A device-code grant gets no
 scheme and no requirement, and the generator reports an `oauth2-grant`

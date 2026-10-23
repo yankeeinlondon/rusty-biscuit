@@ -802,7 +802,8 @@ fn merge_path_parameters(existing: &mut openapiv3::PathItem, incoming: &mut open
         let key = parameter_key(&param);
         match existing.parameters.iter().find(|present| key.is_some() && parameter_key(present) == key) {
             None => existing.parameters.push(param),
-            Some(present) if present == &param => existing.parameters.push(param),
+            // Already declared identically: one declaration serves both.
+            Some(present) if present == &param => {}
             Some(_) => {
                 for method in METHODS {
                     if let Some(op) = method_slot_mut(incoming, method).as_mut()

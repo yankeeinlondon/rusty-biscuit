@@ -39,12 +39,13 @@ pub struct ImportOptions {
     pub overlay: Option<String>,
     /// Path prefixes whose endpoints are excluded from the import.
     pub exclude_paths: Vec<String>,
-    /// Response header carrying the provider's request id; an OpenAPI
-    /// document does not declare one, so it is supplied here.
+    /// Response header carrying the provider's request id. Standard OpenAPI
+    /// cannot declare one; when set it overrides the document's
+    /// `x-schematic.request_id_header`.
     pub request_id_header: Option<String>,
     /// Print generated code without writing files.
     pub dry_run: bool,
-    /// Fail on any warning-level diagnostic.
+    /// Fail on any WARN or ERROR diagnostic; INFO never fails.
     pub strict: bool,
     /// Print all diagnostics to stderr.
     pub verbose: bool,
@@ -116,7 +117,11 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
     }
 
     let mut api = import_result.api;
-    api.request_id_header.clone_from(&options.request_id_header);
+    // The flag overrides the document's `x-schematic.request_id_header`;
+    // without it the imported value stands.
+    if let Some(header) = &options.request_id_header {
+        api.request_id_header = Some(header.clone());
+    }
     let models = import_result.models;
     let mut diagnostics = import_result.diagnostics;
 

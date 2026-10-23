@@ -284,6 +284,14 @@ pub(super) fn check_text(content: &str, json: bool) -> Result<(), OpenApiError> 
     } else {
         biscuit_file::serde_yaml_ng::from_str(content).map_err(|error| OpenApiError::Parse { message: error.to_string(), location: None })?
     };
+    // `openapiv3` reads a null `security` as absent and YAML `version: ~` as
+    // the string "~"; both are malformed, not omissions.
+    if value.0.get("security").is_some_and(|security| !security.is_array()) {
+        return Err(invalid("#/security", "Expected an array of security requirements; null is not omission"));
+    }
+    if value.0.get("info").and_then(|info| info.get("version")).is_some_and(Value::is_null) {
+        return Err(invalid("#/info/version", "Expected a version string; null is not a version"));
+    }
     if let Some(paths) = value.0.get("paths") {
         let paths = paths.as_object().ok_or_else(|| invalid("paths", "Expected paths object"))?;
         for (path, item) in paths {
@@ -299,6 +307,9 @@ pub(super) fn check_text(content: &str, json: bool) -> Result<(), OpenApiError> 
                         return Err(invalid(path, format!("{api} endpoint {id} GET cannot declare a request body")));
                     }
                     check_parameters(operation.get("parameters"), path)?;
+                    if operation.get("security").is_some_and(|security| !security.is_array()) {
+                        return Err(invalid(path, format!("{method} `security` must be an array of security requirements; null is not omission")));
+                    }
                     let id = operation.get("operationId").and_then(Value::as_str).unwrap_or(method);
                     let api = value.0["info"]["title"].as_str().unwrap_or("API");
                     check_responses(operation.get("responses"), &format!("API {api} endpoint {id} {} {path} responses", method.to_uppercase()))?;

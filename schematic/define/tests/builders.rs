@@ -308,15 +308,16 @@ fn public_default_set_equals_documented_allow_list() {
         include_str!("../src/openapi/export/security.rs"),
         include_str!("../src/openapi/export/validate.rs"),
         include_str!("../src/openapi/extensions.rs"),
-        include_str!("../src/openapi/import/auth.rs"),
         include_str!("../src/openapi/import/builder.rs"),
         include_str!("../src/openapi/import/diagnostics.rs"),
+        include_str!("../src/openapi/import/extension.rs"),
         include_str!("../src/openapi/import/mappings/mod.rs"),
         include_str!("../src/openapi/import/mappings/parameters.rs"),
         include_str!("../src/openapi/import/mappings/responses.rs"),
         include_str!("../src/openapi/import/mappings/schema.rs"),
         include_str!("../src/openapi/import/naming.rs"),
         include_str!("../src/openapi/import/normalize.rs"),
+        include_str!("../src/openapi/import/reconcile.rs"),
         include_str!("../src/openapi/import/resolver.rs"),
         include_str!("../src/openapi/import.rs"),
         include_str!("../src/openapi/mod.rs"),
@@ -369,7 +370,7 @@ fn public_default_set_equals_documented_allow_list() {
     let allowed = ["AuthPolicy", "AuthStrategy", "ConnectionLifecycle", "CrossOrigin", "EndpointParams",
         "EndpointRole", "EnvMapping", "ExportFormat", "ExportOptions", "FrameFormat", "Headers", "OAuth2ClientAuthMethod",
         "OpenApiImportOptions", "PkceRequirement", "RequestIdType", "SchematicDocExtension",
-        "SchematicSchemaExtension", "SensitiveString", "WebSocketEndpoint", "WebSocketEndpointHints",
+        "SensitiveString", "WebSocketEndpoint", "WebSocketEndpointHints",
         "WebSocketRuntimeHints"].into_iter().collect::<BTreeSet<_>>();
     assert_eq!(observed, allowed);
     let documentation = include_str!("../../docs/definition-builders.md");

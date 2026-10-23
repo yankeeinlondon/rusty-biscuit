@@ -10,6 +10,7 @@ use colored::Colorize;
 use indexmap::IndexMap;
 use schematic_define::RestApi;
 use schematic_define::openapi::{ExportFormat, ExportOptions};
+use schematic_definitions::registry::{ApiRegistration, registrations};
 
 use crate::diagnostics::{Output, ValidationDiagnostic, has_errors};
 use crate::errors::GeneratorError;
@@ -21,61 +22,40 @@ use crate::output::{
 };
 use crate::validation::{validate_openapi, validate_postman, validate_rust_client};
 
-/// List of available API names for error messages.
-const AVAILABLE_APIS: &str = "anthropic, artificial-analysis-data, artificial-analysis-critpt, bitbucket, openai, elevenlabs, eversolo, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, samsung-smart-tv, unfolded-circle-core-rest, all";
+/// The selection names `--api` accepts, then `all`, comma-separated.
+pub fn available_apis() -> String {
+    available_apis_in(registrations())
+}
 
-/// Returns the available API names string.
-pub fn available_apis() -> &'static str {
-    AVAILABLE_APIS
+/// [`available_apis`] over `registrations`: every REST key in registration
+/// order, then `all`.
+pub fn available_apis_in(registrations: &[ApiRegistration]) -> String {
+    let keys: Vec<&str> = registrations.iter().filter_map(|entry| entry.rest()).map(|rest| rest.key).collect();
+    format!("{}, all", keys.join(", "))
 }
 
 /// Resolves an API name to its definition.
 pub fn resolve_api(name: &str) -> Result<RestApi, GeneratorError> {
-    use schematic_definitions::anthropic::define_anthropic_api;
-    use schematic_definitions::artificial_analysis::{
-        define_artificial_analysis_critpt_api, define_artificial_analysis_data_api,
-    };
-    use schematic_definitions::bitbucket::define_bitbucket_api;
-    use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
-    use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
-    use schematic_definitions::eversolo::define_eversolo_api;
-    use schematic_definitions::gitea::define_gitea_api;
-    use schematic_definitions::github::define_github_api;
-    use schematic_definitions::gitlab::define_gitlab_api;
-    use schematic_definitions::huggingface::define_huggingface_hub_api;
-    use schematic_definitions::lmstudio::define_lmstudio_api;
-    use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
-    use schematic_definitions::openai::define_openai_api;
-    use schematic_definitions::samsung_smart_tv::define_samsung_smart_tv_api;
-    use schematic_definitions::unfolded_circle::define_unfolded_circle_core_rest_api;
+    resolve_api_in(registrations(), name)
+}
 
-    match name {
-        "anthropic" => Ok(define_anthropic_api()),
-        "artificial-analysis-data" => Ok(define_artificial_analysis_data_api()),
-        "artificial-analysis-critpt" => Ok(define_artificial_analysis_critpt_api()),
-        "bitbucket" => Ok(define_bitbucket_api()),
-        "openai" => Ok(define_openai_api()),
-        "elevenlabs" => Ok(define_elevenlabs_rest_api()),
-        "gitea" => Ok(define_gitea_api()),
-        "github" => Ok(define_github_api()),
-        "gitlab" => Ok(define_gitlab_api()),
-        "huggingface" => Ok(define_huggingface_hub_api()),
-        "lmstudio" => Ok(define_lmstudio_api()),
-        "ollama-native" => Ok(define_ollama_native_api()),
-        "ollama-openai" => Ok(define_ollama_openai_api()),
-        "emqx-basic" => Ok(define_emqx_basic_api()),
-        "emqx-bearer" => Ok(define_emqx_bearer_api()),
-        "eversolo" => Ok(define_eversolo_api()),
-        "samsung-smart-tv" => Ok(define_samsung_smart_tv_api()),
-        "unfolded-circle-core-rest" => Ok(define_unfolded_circle_core_rest_api()),
-        "all" => Err(GeneratorError::ConfigError(
-            "Use resolve_all_apis() for 'all'".to_string(),
-        )),
-        other => Err(GeneratorError::ConfigError(format!(
-            "Unknown API: '{}'. Available APIs: {}",
-            other, AVAILABLE_APIS
-        ))),
+/// [`resolve_api`] over `registrations`: selects a REST API by its key.
+pub fn resolve_api_in(registrations: &[ApiRegistration], name: &str) -> Result<RestApi, GeneratorError> {
+    if name == "all" {
+        return Err(GeneratorError::ConfigError("Use resolve_all_apis() for 'all'".to_string()));
     }
+    let entry = schematic_definitions::registry::find_rest(registrations, name).ok_or_else(|| {
+        GeneratorError::ConfigError(format!(
+            "Unknown API: '{}'. Available APIs: {}",
+            name,
+            available_apis_in(registrations)
+        ))
+    })?;
+    let group: Vec<ApiRegistration> = registrations.iter().filter(|other| other.module == entry.module).copied().collect();
+    Ok(schematic_definitions::registry::rest_apis(&group)
+        .into_iter()
+        .find(|api| api.name == entry.name)
+        .expect("a registered API builds"))
 }
 
 /// Returns all available API definitions for batch generation.
@@ -354,7 +334,7 @@ fn print_diagnostics(diagnostics: &[ValidationDiagnostic]) {
 /// when `verbose` is set.
 fn rust_diagnostics(batch: &[&RestApi], verbose: u8) -> Vec<ValidationDiagnostic> {
     let mut diagnostics = validate_rust_client(batch);
-    let ws = crate::output::ws_modules::validate_ws_definition_modules();
+    let ws = crate::output::ws_modules::validate_ws_definition_modules(registrations());
     if verbose > 0 {
         for note in &ws.notes {
             eprintln!("{} {note}", "[INFO]".dimmed());
@@ -407,6 +387,7 @@ fn publish_rust(
         let manifest_dir = output_dir.parent().unwrap_or(Path::new("schematic/schema"));
         let prepared = prepare_rust_output(&RustOutputRequest {
             registry,
+            registrations: registrations(),
             selection,
             output_dir,
             manifest_dir: Some(manifest_dir),

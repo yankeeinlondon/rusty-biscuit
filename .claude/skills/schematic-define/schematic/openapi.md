@@ -30,14 +30,14 @@ schematic-gen import --input api.yaml --output src --dry-run
 |--------|-------------|
 | `--input` | Path to OpenAPI spec file (JSON or YAML) |
 | `--api-name` | Override API name (default: derived from spec title) |
-| `--module-path` | Override module path for generated code |
+| `--module-path` | Override module path for generated code (wins over `x-schematic.module_path` only when given) |
 | `--output` | Output directory for generated code |
 | `--dry-run` | Preview generated code without writing files |
-| `--strict` | Fail on any warning-level diagnostic |
+| `--strict` | Fail on any WARN or ERROR diagnostic (INFO never fails) |
 | `--definitions-out` | Write a definitions-crate module (`mod.rs` with `define_{api}_api()` and the fallible `module_group()`, plus `types.rs`) instead of a standalone client |
 | `--overlay <RUST_PATH>` | With `--definitions-out`: a hand-written `fn(RestApi) -> RestApi` the factory applies, so additions survive a re-import (OpenAI: `crate::openai_pagination::apply`) |
 | `--exclude-path <PREFIX>` | Drop endpoints by path prefix (repeatable) |
-| `--request-id-header <HEADER>` | Set `RestApi::request_id_header` (OpenAPI declares none; `just import-openai` passes `x-request-id`) |
+| `--request-id-header <HEADER>` | Set `RestApi::request_id_header`; overrides `x-schematic.request_id_header` only when given (`just import-openai` passes `x-request-id`) |
 
 ### Library API
 
@@ -84,9 +84,10 @@ undefined schema fails the import with `OpenApiError::Definition`. See
 Every 2xx response becomes a success shape (`text/event-stream` an SSE
 stream, `application/x-ndjson`/`application/jsonl` an NDJSON stream of the
 schema's component) and every exact `400`-`599`, `4XX`, or `5XX` response an
-endpoint error entry (never hoisted to the API). Stream end conditions cannot
-be read from OpenAPI, so imported streams end at connection close unless the
-document carries `x-schematic`. Bodies and responses with no named schema
+endpoint error entry (never hoisted to the API, unless `x-schematic.errors`
+restores the API defaults). Stream end conditions cannot be read from
+standard OpenAPI, so imported streams end at connection close unless the
+operation's `x-schematic.success` restores them. Bodies and responses with no named schema
 become `serde_json::Value` (`TypeRef::Primitive(Json)`); render that type path
 with `syn` parsing, never `format_ident!`.
 
@@ -145,11 +146,13 @@ pub enum DiagnosticSeverity {
 pub struct OpenApiDiagnostic {
     pub severity: DiagnosticSeverity,
     pub message: String,
-    pub location: Option<String>,  // JSON path
+    pub location: String,  // RFC 6901 pointer, e.g. `#/x-schematic/auth`
 }
 ```
 
-Use `--strict` to fail on warnings.
+Strict mode fails on any WARN or ERROR, never on INFO (pinned by
+`build_strict_mode_*` in `import/builder.rs` and
+`strict_import_passes_an_info_only_document`).
 
 ## Export to OpenAPI
 
@@ -198,43 +201,95 @@ rules and examples in `schematic/docs/io/export-openapi.md#how-component-schemas
 - Gates: `schematic-definitions` tests `schema_fidelity` (zero lost/typed-loss
   positions over 18 registries) and `schema_values` (jsonschema accepts/rejects).
 
+### Standard import mappings
+
+- Path-item `parameters` merge into each operation (identity: name + `in`,
+  header names case-insensitive; operation wins in place). Local
+  `#/components/parameters` refs resolve first; unresolved or remote refs are
+  ERROR at their pointer, never fetched.
+- Typed path params import only when some path param is non-string,
+  described, or deprecated (then every placeholder, template order). A plain
+  undescribed string path param imports as an undeclared placeholder.
+- Operation/parameter `deprecated`, `info.version` (into `RestApi::version`)
+  are read. No `servers` → WARN, base URL `https://api.example.com`.
+- ERROR: empty `info.version`/`servers[0].url`/`externalDocs.url`, a
+  non-required path param, empty `requestBody.content`, `apiKey` with empty
+  `name`. `security: null` fails the import.
+- Multipart: `encoding.<part>.contentType` → file `accept` (comma-split) or a
+  JSON part; `minItems`/`maxItems` → file counts. A primitive part (or a
+  component/composition of primitives) is text silently; an object-valued part
+  without JSON encoding is WARN and stays text; unresolved part refs ERROR;
+  encoding `headers`/`style`/`explode`/`allowReserved` WARN.
+- Auth: root `security` is authoritative (none/one/several → anonymous /
+  `AuthStrategy` / `AuthPolicy`); absent root `security` falls back to the
+  first component scheme. Operation `security`: absent inherits, `[]` public,
+  equal to root (no op details) inherits, otherwise `EndpointAuth::Policy`.
+
 ### Schematic Extensions
 
-OpenAPI specs include `x-schematic` extensions for round-trip fidelity:
+Export writes `x-schematic` at the document root and on each operation, and
+the importer **reads it back** (`import/extension.rs` decodes,
+`import/reconcile.rs` applies). Writer shapes: `SchematicDocExtension`,
+`SchematicOpExtension`, `AuthDetail`, `ParamDetail` (serialize-only;
+`EXTENSION_VERSION = 1`).
 
 ```yaml
-# Document level
-x-schematic:
-  module_path: "my_api"
-  request_suffix: "Request"
-  env_mapping:
-    bearer_token: ["API_KEY"]
-  headers:
-    - ["X-Custom", "value"]
-
-# Operation level
-x-schematic:
-  request:
-    Json: { Named: CreateUserBody }
-  response:
-    Json: { Named: User }        # first success shape; Text/Binary/Empty are scalars
-  success: [...]                 # every shape, only when `response` cannot carry them
-  errors: [...]                  # the endpoint's own error entries
-  headers:
-    - ["X-Request-ID", "12345"]
+x-schematic:                     # document
+  version: 1                     # only here; absent = 1; anything else disables all extensions (one WARN)
+  module_path: gitea
+  env_auth: ["GITEA_TOKEN"]      # env var names, never credentials
+  auth: { apiKeyAuth: { value_prefix: "token " } }   # or { bearer: true }; nothing else allowed
+  secret_names: ["x-session"]
+  # also: request_suffix, env_mapping, headers, rate_limit, retry_guidance,
+  #       errors, cross_origin, request_id_header
+paths:
+  /models/{repo_id}:
+    get:
+      x-schematic:               # operation
+        response: { Json: { Named: Model } }   # legacy, always written
+        path_template: /models/{+repo_id}      # only when the path has {+name}
+        params: { query: { api-key: { secret: true }, type: { rust_name: kind } } }
+        # also: request (form bodies only), success, errors, no_declared_errors,
+        #       headers, rate_limit, retry_guidance, cross_origin,
+        #       auth + env_mapping (only with an operation `security` override)
 ```
 
-Emitted: document-level and operation-level `x-schematic`; the schema-level
-`SchematicSchemaExtension` is defined but not emitted. The document level
-carries `module_path`, `request_suffix`, `env_mapping`, `headers`,
-`rate_limit`, `retry_guidance`, `errors` (API defaults), `request_id_header`,
-and `cross_origin` (only when not `SameOrigin`). The operation level carries
-`request`, `response`, `headers`, `success` (several shapes, a stream, or any
-selection fact, variant, or note), `errors`, `no_declared_errors`, and the
-endpoint's own `rate_limit`/`retry_guidance`/`cross_origin`. Deprecation and
-endpoint auth overrides use standard `deprecated`/`security`. JSON shapes hold
-the stored `TypeRef` (component names plus wrappers), never a Rust path.
-GraphQL operations are not exported (`graphql-operation` warning). See
+Reader rules:
+
+- Each member decodes on its own. Unknown member → INFO. Malformed, failing
+  `validate_api`'s checks, or explicit `null` → WARN at an RFC 6901 pointer
+  (`#/x-schematic/<member>…`, `#/paths/<escaped>/<method>/x-schematic/<member>…`),
+  member dropped, siblings kept. Allowed nulls: `env_mapping`'s
+  `bearer_token`/`basic_user`/`basic_pass`/`api_key`, form field
+  `description`, `Files.min`/`max` (the writer emits them).
+- Standard wins: `success`/`response`/`errors` are re-exported with
+  `map_responses` and compared with the standard `responses` (descriptions
+  ignored); mismatch → WARN, standard-derived value kept. Conflicting document
+  `errors` are withdrawn as a whole with one WARN. A form `request` only fills
+  `accept`, file counts, and a JSON part's reference. Legacy JSON/text/binary
+  `request` is compared only.
+- Auth details apply only to an `apiKey` header scheme the relevant
+  `security` applies; else WARN. Fixed headers exported as single-value-enum
+  header parameters are recognized and not re-imported as parameters.
+- Does not round-trip: pagination (`default_pagination`, endpoint
+  `pagination`, `pager_managed`), GraphQL, component Rust paths (rebuilt as
+  `{module_path}::{Name}`), the explicit/env-fallback split of a hand-written
+  `AuthPolicy`, OAuth2 details beyond standard flows, grouped documents beyond
+  the first API's metadata and `info.title`, a declared undescribed
+  plain-string path param.
+
+Export side: root `security` has one requirement per method of
+`effective_auth_policy()`; multipart writes `encoding` and file
+`minItems`/`maxItems`; `explode: true` is written only for non-`form` styles;
+JSON shapes hold the stored `TypeRef`, never a Rust path. GraphQL operations
+are not exported (`graphql-operation` warning).
+
+Tests that pin behavior: `define/tests/openapi_extension_matrix.rs` (every
+member × absent/null/wrong/empty, JSON and YAML),
+`openapi_standard_matrix.rs`, `openapi_import_parameters.rs`,
+`openapi_multipart_import.rs`, `response_openapi.rs`, and
+`gen/tests/l1/extension_round_trip.rs` (every committed `schematic/openapi/`
+artifact imports strictly and re-exports with only listed differences). Docs:
 `schematic/docs/io/openapi-extensions.md`.
 
 Fixed headers (`.header(name, value)`, API or endpoint) also export as

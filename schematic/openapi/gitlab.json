@@ -162,6 +162,13 @@
           }
         },
         "x-schematic": {
+          "params": {
+            "query": {
+              "ref": {
+                "rust_name": "git_ref"
+              }
+            }
+          },
           "response": {
             "Json": {
               "Named": "FileContent"
@@ -3120,6 +3127,10 @@
     "url": "https://docs.gitlab.com/api/rest/"
   },
   "x-schematic": {
+    "env_auth": [
+      "GITLAB_TOKEN",
+      "GITLAB_PRIVATE_TOKEN"
+    ],
     "env_mapping": {
       "api_key": {
         "header": "PRIVATE-TOKEN",
@@ -3140,7 +3151,8 @@
         "schematic-gitlab-client"
       ]
     ],
-    "module_path": "gitlab"
+    "module_path": "gitlab",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "GitLab"

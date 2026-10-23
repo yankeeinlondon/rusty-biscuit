@@ -40,11 +40,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "LoginRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ApiResponseMessage"
@@ -968,6 +963,10 @@
     "url": "https://unfoldedcircle.github.io/core-api/rest/"
   },
   "x-schematic": {
+    "env_auth": [
+      "UCR_CORE_API_KEY",
+      "UNFOLDED_CIRCLE_API_KEY"
+    ],
     "env_mapping": {
       "api_key": null,
       "basic_pass": {
@@ -988,7 +987,8 @@
       }
     },
     "module_path": "unfolded_circle_core_rest",
-    "request_suffix": "CoreRestRequest"
+    "request_suffix": "CoreRestRequest",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "UnfoldedCircleCoreRest"

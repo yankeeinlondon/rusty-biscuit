@@ -1,7 +1,9 @@
 //! OpenAPI export functionality.
 //!
 //! This module provides the core export logic for transforming `RestApi` definitions
-//! into OpenAPI 3.0.3 documents with vendor extensions for round-trip fidelity.
+//! into OpenAPI 3.0.3 documents. `x-schematic` vendor extensions carry the
+//! metadata standard OpenAPI cannot express; the importer reads them back for
+//! the subset `schematic/docs/io/openapi-extensions.md` lists.
 //!
 //! ## Examples
 //!
@@ -37,18 +39,25 @@ use crate::types::RestApi;
 use components::map_components;
 use info::{map_info, map_servers};
 use paths::map_paths;
-use security::map_security_requirements;
 use validate::validate_ref_closure;
 
 pub use headers::{HeaderGap, HeaderGapReason};
 pub use paths::extract_path_params;
 pub use security::map_security;
 
+// The importer re-exports a value to compare it with the standard field it
+// sits beside (R12).
+pub(crate) use paths::strip_reserved_markers;
+pub(crate) use request_body::map_request_body;
+pub(crate) use responses::map_responses;
+
 /// Exports a `RestApi` definition to an OpenAPI 3.0.3 document.
 ///
 /// This function transforms the Schematic API definition into a fully compliant
-/// OpenAPI document, including vendor extensions (`x-schematic`) to preserve
-/// Schematic-specific metadata for round-trip fidelity.
+/// OpenAPI document. The root `security` lists one requirement per method of
+/// the API's effective auth policy. Vendor extensions (`x-schematic`) carry
+/// the Schematic metadata standard OpenAPI cannot express; the importer reads
+/// back the subset `schematic/docs/io/openapi-extensions.md` lists.
 ///
 /// ## Parameters
 ///
@@ -92,11 +101,11 @@ fn export_with_header_gaps(
     api.validate_schema_closure()?;
     let info = map_info(api, options);
     let servers = map_servers(api);
-    let mut components = map_components(api, options)?;
+    let (mut components, root) = map_components(api, options)?;
     // Endpoint auth registers override-only schemes after the API's own.
     let mut header_gaps = Vec::new();
-    let paths = map_paths(api, options, &mut components.security_schemes, &mut header_gaps)?;
-    let security = map_security_requirements(api);
+    let paths = map_paths(api, options, &root.requirements, &mut components.security_schemes, &mut header_gaps)?;
+    let security = root.requirements;
 
     let mut extensions = IndexMap::new();
     if !options.skip_extensions {
@@ -104,12 +113,16 @@ fn export_with_header_gaps(
             module_path: api.module_path.clone(),
             request_suffix: api.request_suffix.clone(),
             env_mapping: api.env_mapping.clone(),
+            env_auth: api.env_auth.clone(),
             headers: api.headers.clone(),
+            auth: root.details,
             rate_limit: api.rate_limit.clone(),
             retry_guidance: api.retry_guidance.clone(),
             errors: api.errors.clone(),
             cross_origin: api.cross_origin.clone(),
             request_id_header: api.request_id_header.clone(),
+            secret_names: api.secret_names.clone(),
+            ..Default::default()
         };
         extensions.insert("x-schematic".to_string(), doc_ext.into());
     }
@@ -461,8 +474,13 @@ mod tests {
         assert!(doc.paths.paths.contains_key("/models/{repo_id}"));
         assert!(!doc.paths.paths.contains_key("/models/{+repo_id}"));
 
-        // No `{+` may leak anywhere in the serialized document.
-        let json = serde_json::to_string(&doc).unwrap();
+        // No `{+` may leak into a standard member; only the extension's
+        // `path_template` keeps the runtime template.
+        let mut value = serde_json::to_value(&doc).unwrap();
+        let operation = value["paths"]["/models/{repo_id}"]["get"].as_object_mut().unwrap();
+        let extension = operation.remove("x-schematic").unwrap();
+        assert_eq!(extension["path_template"], "/models/{+repo_id}");
+        let json = value.to_string();
         assert!(!json.contains("{+"), "reserved marker leaked: {json}");
 
         if let openapiv3::ReferenceOr::Item(path_item) = &doc.paths.paths["/models/{repo_id}"] {

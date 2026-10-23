@@ -19,7 +19,7 @@ that describe `schematic-define` behavior. Code generation lives in
 | [`schematic/responses.md`](./schematic/responses.md) | Success shapes, streams, multi-shape enums, declared errors, GraphQL operations, `Relay` |
 | [`schematic/pagination.md`](./schematic/pagination.md) | REST strategies, collections, adoption, generated pager surface |
 | [`schematic/gen.md`](./schematic/gen.md) | Generator CLI, output layout, generated code, name-collision renames, fresh-output guard |
-| [`schematic/openapi.md`](./schematic/openapi.md) | OpenAPI import/export, `x-schematic`, imported builder assemblies |
+| [`schematic/openapi.md`](./schematic/openapi.md) | OpenAPI import/export, `x-schematic` writer and reader (what round-trips, strict rule), imported builder assemblies |
 | [`schematic/definitions.md`](./schematic/definitions.md) | Shipped APIs and facts that drift |
 | [`schematic/headers.md`](./schematic/headers.md) | `Headers` (standalone builder; no generated client uses it), `SensitiveString`, `EnvList`, `EnvMapping` |
 | [`schematic/websocket.md`](./schematic/websocket.md) | `WebSocketApi` roles, client-relative directions, selectors/fallback, `responds_with` typed requests, handshake params and credential, hints, JSON form |

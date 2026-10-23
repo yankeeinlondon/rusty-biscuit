@@ -1,10 +1,10 @@
 use indexmap::IndexMap;
-use openapiv3::{MediaType, ReferenceOr, RequestBody};
+use openapiv3::{Encoding, MediaType, ReferenceOr, RequestBody};
 
 use crate::request::{ApiRequest, FormField, FormFieldKind};
 
 /// Maps request body to OpenAPI RequestBody.
-pub(super) fn map_request_body(request: &ApiRequest) -> Result<RequestBody, crate::openapi::OpenApiError> {
+pub(crate) fn map_request_body(request: &ApiRequest) -> Result<RequestBody, crate::openapi::OpenApiError> {
     let content = match request {
         ApiRequest::Json(schema) => {
             let mut content = IndexMap::new();
@@ -23,6 +23,7 @@ pub(super) fn map_request_body(request: &ApiRequest) -> Result<RequestBody, crat
                 "multipart/form-data".to_string(),
                 MediaType {
                     schema: Some(ReferenceOr::Item(map_form_fields_to_schema(fields)?)),
+                    encoding: multipart_encoding(fields),
                     ..Default::default()
                 },
             );
@@ -114,11 +115,7 @@ pub(super) fn map_form_fields_to_schema(fields: &[FormField]) -> Result<openapiv
                     },
                 )),
             },
-            FormFieldKind::Files {
-                accept: _,
-                min: _,
-                max: _,
-            } => openapiv3::Schema {
+            FormFieldKind::Files { accept: _, min, max } => openapiv3::Schema {
                 schema_data: openapiv3::SchemaData {
                     description: field.description.clone(),
                     ..Default::default()
@@ -136,8 +133,8 @@ pub(super) fn map_form_fields_to_schema(fields: &[FormField]) -> Result<openapiv
                                 },
                             )),
                         }))),
-                        min_items: None,
-                        max_items: None,
+                        min_items: min.map(|min| min as usize),
+                        max_items: max.map(|max| max as usize),
                         unique_items: false,
                     },
                 )),
@@ -171,6 +168,25 @@ pub(super) fn map_form_fields_to_schema(fields: &[FormField]) -> Result<openapiv
             ..Default::default()
         })),
     })
+}
+
+/// The multipart `encoding` entries, in field order: each file part's
+/// `accept` list as its `contentType`, and `application/json` for JSON parts.
+/// Text parts and files accepting any type use the default and get no entry.
+fn multipart_encoding(fields: &[FormField]) -> IndexMap<String, Encoding> {
+    fields
+        .iter()
+        .filter_map(|field| {
+            let content_type = match &field.kind {
+                FormFieldKind::File { accept } | FormFieldKind::Files { accept, .. } if !accept.is_empty() => {
+                    accept.join(", ")
+                }
+                FormFieldKind::Json(_) => "application/json".to_string(),
+                _ => return None,
+            };
+            Some((field.name.clone(), Encoding { content_type: Some(content_type), ..Default::default() }))
+        })
+        .collect()
 }
 
 #[cfg(test)]

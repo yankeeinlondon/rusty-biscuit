@@ -1,8 +1,9 @@
 use indexmap::IndexMap;
 use openapiv3::{ReferenceOr, SecurityRequirement, SecurityScheme};
 
+use super::super::extensions::AuthDetail;
 use crate::auth::{AuthMethod, AuthPolicy, AuthStrategy, EndpointAuth, EnvAuthStrategy};
-use crate::types::{Endpoint, RestApi};
+use crate::types::Endpoint;
 
 /// Maps authentication strategy to OpenAPI security schemes.
 ///
@@ -122,14 +123,42 @@ fn method_scheme(method: &AuthMethod) -> Option<(String, SecurityScheme)> {
     }
 }
 
-/// Maps security requirements for the API.
-///
-/// Names the scheme [`map_security`] registers, so a strategy with no
-/// scheme has no requirement rather than a dangling one.
-pub(super) fn map_security_requirements(api: &RestApi) -> Vec<SecurityRequirement> {
-    map_security(&api.auth)
-        .map(|(name, _)| vec![IndexMap::from([(name, Vec::new())])])
-        .unwrap_or_default()
+/// The requirements of `policy`, one per accepted method so any one of them
+/// satisfies the operation, and the [`AuthDetail`] of each scheme they name
+/// that needs one (R54). Each scheme is registered in `schemes` through
+/// [`register_scheme`]; a method with no OpenAPI scheme (an OAuth2
+/// device-code grant) adds no requirement.
+pub(super) fn policy_security(
+    policy: &AuthPolicy,
+    schemes: &mut IndexMap<String, ReferenceOr<SecurityScheme>>,
+) -> (Vec<SecurityRequirement>, IndexMap<String, AuthDetail>) {
+    let mut requirements: Vec<SecurityRequirement> = Vec::new();
+    let mut details = IndexMap::new();
+    for method in accepted_methods(policy) {
+        let Some((base, scheme)) = method_scheme(&method) else { continue };
+        let name = register_scheme(schemes, &base, scheme);
+        if let Some(detail) = method_detail(&method) {
+            details.insert(name.clone(), detail);
+        }
+        let requirement = IndexMap::from([(name, Vec::new())]);
+        if !requirements.contains(&requirement) {
+            requirements.push(requirement);
+        }
+    }
+    (requirements, details)
+}
+
+/// What `method` needs beside its standard scheme: a bearer token sent in a
+/// named header exports as an `apiKey` scheme, and an API key's value prefix
+/// has no standard spelling.
+fn method_detail(method: &AuthMethod) -> Option<AuthDetail> {
+    match method {
+        AuthMethod::BearerToken { header: Some(_) } => Some(AuthDetail { bearer: true, value_prefix: None }),
+        AuthMethod::ApiKey { value_prefix: Some(prefix), .. } => {
+            Some(AuthDetail { bearer: false, value_prefix: Some(prefix.clone()) })
+        }
+        _ => None,
+    }
 }
 
 /// Every method a policy accepts, in order: its explicit methods, then its
@@ -160,31 +189,22 @@ fn fallback_method(fallback: &EnvAuthStrategy) -> AuthMethod {
     }
 }
 
-/// The operation-level `security` of `endpoint`.
+/// The operation-level `security` of `endpoint` and the auth details of the
+/// schemes it names.
 ///
 /// `None` inherits the document's requirements; a public endpoint is
-/// `Some([])`; a replacement policy lists each accepted method as its own
-/// requirement object, so any one of them satisfies the operation. A
-/// replacement none of whose methods has an OpenAPI scheme (an OAuth2
-/// device-code grant) is `None`; the generator reports that loss.
-///
-/// Each scheme is registered in `schemes` through [`register_scheme`].
+/// `Some([])`; a replacement policy is [`policy_security`]'s. A replacement
+/// none of whose methods has an OpenAPI scheme (an OAuth2 device-code grant)
+/// is `None`; the generator reports that loss.
 pub(super) fn endpoint_security(
     endpoint: &Endpoint,
     schemes: &mut IndexMap<String, ReferenceOr<SecurityScheme>>,
-) -> Option<Vec<SecurityRequirement>> {
+) -> Option<(Vec<SecurityRequirement>, IndexMap<String, AuthDetail>)> {
     match endpoint.auth.as_ref()? {
-        EndpointAuth::Public => Some(Vec::new()),
+        EndpointAuth::Public => Some((Vec::new(), IndexMap::new())),
         EndpointAuth::Policy { policy, .. } => {
-            let mut requirements: Vec<SecurityRequirement> = Vec::new();
-            for (base, scheme) in accepted_methods(policy).iter().filter_map(method_scheme) {
-                let name = register_scheme(schemes, &base, scheme);
-                let requirement = IndexMap::from([(name, Vec::new())]);
-                if !requirements.contains(&requirement) {
-                    requirements.push(requirement);
-                }
-            }
-            (!requirements.is_empty()).then_some(requirements)
+            let (requirements, details) = policy_security(policy, schemes);
+            (!requirements.is_empty()).then_some((requirements, details))
         }
     }
 }
@@ -325,13 +345,14 @@ mod tests {
         let mut schemes = IndexMap::new();
 
         assert_eq!(endpoint_security(&endpoint(base()), &mut schemes), None);
-        assert_eq!(endpoint_security(&endpoint(base().public()), &mut schemes), Some(vec![]));
+        assert_eq!(endpoint_security(&endpoint(base().public()), &mut schemes), Some((vec![], IndexMap::new())));
 
         let two = AuthPolicy {
             explicit: vec![AuthMethod::Basic, query_key()],
             env_fallback: Some(EnvAuthStrategy::Basic),
         };
-        let requirements = endpoint_security(&endpoint(base().auth(two)), &mut schemes).unwrap();
+        let (requirements, details) = endpoint_security(&endpoint(base().auth(two)), &mut schemes).unwrap();
+        assert!(details.is_empty());
         let expected: Vec<SecurityRequirement> = vec![
             IndexMap::from([("basicAuth".to_string(), vec![])]),
             IndexMap::from([("apiKeyAuth".to_string(), vec![])]),
@@ -353,6 +374,26 @@ mod tests {
         let mut api = crate::RestApi::builder(&DefinitionContext::types_in("::m"), "Device", "https://example.com")
             .describes("Device").no_auth().build().unwrap();
         api.auth = device;
-        assert!(map_security_requirements(&api).is_empty());
+        assert!(policy_security(&api.effective_auth_policy(), &mut IndexMap::new()).0.is_empty());
+    }
+
+    #[test]
+    fn bearer_header_overrides_and_value_prefixes_get_details_on_distinct_schemes() {
+        let policy = AuthPolicy {
+            explicit: vec![
+                AuthMethod::ApiKey { header: "Authorization".into(), value_prefix: Some("token ".into()) },
+                AuthMethod::BearerToken { header: Some("Authorization".into()) },
+                AuthMethod::BearerToken { header: None },
+            ],
+            env_fallback: None,
+        };
+        let mut schemes = IndexMap::new();
+        let (requirements, details) = policy_security(&policy, &mut schemes);
+        assert_eq!(requirements.len(), 3);
+        assert_eq!(schemes.keys().collect::<Vec<_>>(), ["apiKeyAuth", "bearerAuth", "bearerAuth2"]);
+        assert_eq!(details, IndexMap::from([
+            ("apiKeyAuth".to_string(), AuthDetail { bearer: false, value_prefix: Some("token ".into()) }),
+            ("bearerAuth".to_string(), AuthDetail { bearer: true, value_prefix: None }),
+        ]));
     }
 }

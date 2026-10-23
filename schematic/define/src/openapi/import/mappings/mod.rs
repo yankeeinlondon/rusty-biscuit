@@ -5,11 +5,11 @@ mod responses;
 mod schema;
 
 pub use classify::{ResponseClassification, classify_responses};
-pub use schema::{SchemaMapResult, map_all_schemas};
+pub use schema::map_all_schemas;
 
 use std::collections::HashSet;
 
-use openapiv3::{Operation, SecurityScheme, Server};
+use openapiv3::{Operation, Parameter, ReferenceOr, SecurityScheme, Server};
 
 use super::diagnostics::OpenApiDiagnostic;
 use super::naming::{deconflict_name, operation_id_fallback, sanitize_rust_ident};
@@ -39,12 +39,16 @@ pub fn map_server(servers: &[Server], policy: &BaseUrlPolicy) -> String {
     }
 }
 
-pub fn map_operation(
+/// Maps one operation; `path_item_parameters` are the enclosing path item's
+/// `parameters`, which the operation's own list overrides by name and location.
+#[allow(clippy::too_many_arguments)]
+pub fn map_operation<'a>(
     api: &str,
-    op: &Operation,
+    op: &'a Operation,
+    path_item_parameters: &'a [ReferenceOr<Parameter>],
     path: &str,
     method: RestMethod,
-    resolver: &RefResolver,
+    resolver: &RefResolver<'a>,
     used_names: &mut HashSet<String>,
     options: &OpenApiImportOptions,
 ) -> Result<(Endpoint, Vec<OpenApiDiagnostic>), String> {
@@ -56,8 +60,8 @@ pub fn map_operation(
             let fallback = operation_id_fallback(&method.to_string(), path);
             diagnostics.push(OpenApiDiagnostic::info(
                 format!(
-                    "#/paths{}/{}",
-                    path.replace('/', "~1"),
+                    "#/paths/{}/{}",
+                    path.replace('~', "~0").replace('/', "~1"),
                     method.to_string().to_lowercase()
                 ),
                 format!("Missing operationId, using fallback: {}", fallback),
@@ -77,15 +81,22 @@ pub fn map_operation(
         .unwrap_or_else(|| format!("{} {}", method, path));
 
     let request =
-        responses::map_request_body(&op.request_body, resolver, &mut diagnostics, options);
+        responses::map_request_body(&op.request_body, &format!("#/paths/{}/{}", path.replace('~', "~0").replace('/', "~1"), method.to_string().to_lowercase()), resolver, &mut diagnostics, options);
 
     let classification = classify_responses(api, &id, &op.responses, resolver).map_err(|error| error.to_string())?;
     diagnostics.extend(classification.diagnostics);
 
-    let params = parameters::map_parameters(&op.parameters, resolver, &mut diagnostics);
+    let params = parameters::map_parameters(
+        path,
+        method,
+        path_item_parameters,
+        &op.parameters,
+        resolver,
+        &mut diagnostics,
+    );
 
     Ok((
-        Endpoint { rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: classification.errors, no_declared_errors: false,
+        Endpoint { rate_limit: None, retry_guidance: None, deprecated: op.deprecated, auth: None, errors: classification.errors, no_declared_errors: false,
             id,
             method,
             path: path.to_string(),
@@ -96,6 +107,7 @@ pub fn map_operation(
             params: if params.query.is_empty()
                 && params.header.is_empty()
                 && params.cookie.is_empty()
+                && params.path.is_empty()
             {
                 None
             } else {

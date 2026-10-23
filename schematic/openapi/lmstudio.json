@@ -45,11 +45,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ChatBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ChatResult"
@@ -138,11 +133,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "LoadModelBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "LoadModelResponse"
@@ -179,11 +169,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "UnloadModelBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "UnloadModelResponse"
@@ -220,11 +205,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "DownloadModelBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "DownloadModelResponse"
@@ -261,11 +241,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "DownloadStatusBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "DownloadStatusResponse"
@@ -1516,12 +1491,16 @@
     "url": "https://lmstudio.ai/docs/developer/rest"
   },
   "x-schematic": {
+    "env_auth": [
+      "LM_API_TOKEN"
+    ],
     "env_mapping": {
       "api_key": null,
       "basic_pass": null,
       "basic_user": null,
       "bearer_token": null
-    }
+    },
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "LmStudio"

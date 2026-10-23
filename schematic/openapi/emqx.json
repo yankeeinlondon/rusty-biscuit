@@ -72,15 +72,6 @@
             "type": "string"
           },
           "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "node",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
         }
       ]
     },
@@ -162,15 +153,6 @@
         }
       },
       "parameters": [
-        {
-          "in": "path",
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
         {
           "in": "path",
           "name": "id",
@@ -355,15 +337,6 @@
             "type": "string"
           },
           "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "clientid",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
         }
       ]
     },
@@ -388,24 +361,10 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "SubscribeBody"
-            }
-          },
           "response": "Empty"
         }
       },
       "parameters": [
-        {
-          "in": "path",
-          "name": "clientid",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
         {
           "in": "path",
           "name": "clientid",
@@ -438,24 +397,10 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "SubscribeBody"
-            }
-          },
           "response": "Empty"
         }
       },
       "parameters": [
-        {
-          "in": "path",
-          "name": "clientid",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
         {
           "in": "path",
           "name": "clientid",
@@ -514,11 +459,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "PublishBody"
-            }
-          },
           "response": "Empty"
         }
       }
@@ -544,11 +484,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "PublishBatchBody"
-            }
-          },
           "response": "Empty"
         }
       }
@@ -652,15 +587,6 @@
             "type": "string"
           },
           "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "topic",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
         }
       ]
     },
@@ -716,11 +642,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateRuleBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "RuleInfo"
@@ -781,11 +702,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateRuleBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "RuleInfo"
@@ -807,15 +723,6 @@
         }
       },
       "parameters": [
-        {
-          "in": "path",
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
         {
           "in": "path",
           "name": "id",
@@ -855,11 +762,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "TestRuleBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "TestRuleResponse"
@@ -868,15 +770,6 @@
         }
       },
       "parameters": [
-        {
-          "in": "path",
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
         {
           "in": "path",
           "name": "id",
@@ -948,15 +841,6 @@
             "type": "string"
           },
           "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
         }
       ]
     },
@@ -1017,11 +901,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateAuthUserBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "AuthUser"
@@ -1030,15 +909,6 @@
         }
       },
       "parameters": [
-        {
-          "in": "path",
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
         {
           "in": "path",
           "name": "id",
@@ -1065,24 +935,6 @@
         }
       },
       "parameters": [
-        {
-          "in": "path",
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "user_id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
         {
           "in": "path",
           "name": "id",
@@ -1181,11 +1033,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateBanBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "BanInfo"
@@ -1209,24 +1056,6 @@
         }
       },
       "parameters": [
-        {
-          "in": "path",
-          "name": "ban_type",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "who",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
         {
           "in": "path",
           "name": "ban_type",
@@ -1275,11 +1104,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "LoginBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "LoginResponse"
@@ -2628,7 +2452,8 @@
       "bearer_token": null
     },
     "module_path": "emqx",
-    "request_suffix": "BasicRequest"
+    "request_suffix": "BasicRequest",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "EmqxBasic",

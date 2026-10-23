@@ -158,8 +158,9 @@ pub struct RestApi {
     pub request_suffix: Option<String>,
     /// Semantic version of this API definition (e.g., `"1.0.0"`).
     ///
-    /// Used as the `info.version` field in exported OpenAPI documents.
-    /// If `None`, the exporter falls back to `ExportOptions::version`, then `"1.0.0"`.
+    /// Used as the `info.version` field in exported OpenAPI documents, after
+    /// `ExportOptions::version` when that is set; with neither, the exporter
+    /// writes `"1.0.0"`. OpenAPI import reads it back from `info.version`.
     pub version: Option<String>,
     /// Environment variable mapping for authentication credentials.
     ///
@@ -184,7 +185,8 @@ pub struct RestApi {
     /// ```
     pub env_mapping: Option<EnvMapping>,
     /// Governs redirects and followed next-page links that leave the base
-    /// origin. Defaults to same-origin; endpoints cannot override it.
+    /// origin. Defaults to same-origin; an endpoint's
+    /// [`Endpoint::cross_origin`] replaces it for that endpoint.
     pub cross_origin: CrossOrigin,
     /// Response header carrying the provider's request id, matched
     /// case-insensitively. `None` when the provider is not known to send one.

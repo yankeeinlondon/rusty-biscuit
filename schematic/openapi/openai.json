@@ -41,11 +41,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateSpeechRequest2"
-            }
-          },
           "response": "Binary"
         }
       }
@@ -520,11 +515,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "UpdateVoiceConsentRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "VoiceConsentResource"
@@ -724,11 +714,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateBatchRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "Batch"
@@ -912,11 +897,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateChatCompletionRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "CreateChatCompletionResponse"
@@ -975,11 +955,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Primitive": "Json"
-            }
-          },
           "response": {
             "Json": {
               "Named": "CreateChatCompletionResponse"
@@ -1121,11 +1096,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateCompletionRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "CreateCompletionResponse"
@@ -1228,11 +1198,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateContainerBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ContainerResource"
@@ -1376,11 +1341,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateContainerFileBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ContainerFileResource"
@@ -1599,11 +1559,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Primitive": "Json"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ConversationItemList"
@@ -1733,11 +1688,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateEmbeddingRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "CreateEmbeddingResponse"
@@ -1844,11 +1794,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateEvalRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "Eval"
@@ -1907,11 +1852,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Primitive": "Json"
-            }
-          },
           "response": {
             "Json": {
               "Named": "Eval"
@@ -2054,11 +1994,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateEvalRunRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "EvalRun"
@@ -2590,11 +2525,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "RunGraderRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "RunGraderResponse"
@@ -2631,11 +2561,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ValidateGraderRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ValidateGraderResponse"
@@ -2738,11 +2663,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateFineTuningCheckpointPermissionRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ListFineTuningCheckpointPermissionResponse"
@@ -2837,6 +2757,7 @@
             "name": "metadata",
             "description": "Optional metadata filter. To filter, use the syntax `metadata[k]=v`. Alternatively, set `metadata=null` to indicate no metadata.\n",
             "schema": {},
+            "explode": true,
             "style": "deepObject"
           }
         ],
@@ -2887,11 +2808,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateFineTuningJobRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "FineTuningJob"
@@ -3190,11 +3106,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "EditImageBodyJsonParam"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ImagesResponse"
@@ -3231,11 +3142,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateImageRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ImagesResponse"
@@ -3471,11 +3377,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateModerationRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "CreateModerationResponse"
@@ -3564,11 +3465,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Primitive": "Json"
-            }
-          },
           "response": {
             "Json": {
               "Named": "AdminApiKeyCreateResponse"
@@ -3850,11 +3746,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "UploadCertificateRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "Certificate"
@@ -3891,11 +3782,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ToggleCertificatesRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "OrganizationCertificateActivationResponse"
@@ -3932,11 +3818,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ToggleCertificatesRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "OrganizationCertificateDeactivationResponse"
@@ -4014,11 +3895,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ModifyCertificateRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "Certificate"
@@ -4232,11 +4108,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "UpdateOrganizationDataRetentionBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "OrganizationDataRetention"
@@ -4330,11 +4201,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateGroupBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "GroupResponse"
@@ -4395,11 +4261,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "UpdateGroupBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "GroupResourceWithSuccess"
@@ -4528,11 +4389,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "PublicAssignOrganizationGroupRoleBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "GroupRoleAssignment"
@@ -4707,11 +4563,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateGroupUserBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "GroupUserAssignment"
@@ -4873,11 +4724,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "InviteRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "Invite"
@@ -5028,11 +4874,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ProjectCreateRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "Project"
@@ -5093,11 +4934,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ProjectUpdateRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "Project"
@@ -5393,11 +5229,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ToggleCertificatesRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "OrganizationProjectCertificateActivationResponse"
@@ -5445,11 +5276,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ToggleCertificatesRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "OrganizationProjectCertificateDeactivationResponse"
@@ -5521,11 +5347,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "UpdateProjectDataRetentionBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ProjectDataRetention"
@@ -5630,11 +5451,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "InviteProjectGroupBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ProjectGroup"
@@ -5791,11 +5607,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ProjectHostedToolPermissionsUpdateRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ProjectHostedToolPermissions"
@@ -5867,11 +5678,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ProjectModelPermissionsUpdateRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ProjectModelPermissions"
@@ -6009,11 +5815,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ProjectRateLimitUpdateRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ProjectRateLimit"
@@ -6114,11 +5915,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ProjectServiceAccountCreateRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ProjectServiceAccountCreateResponse"
@@ -6190,11 +5986,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "UpdateProjectServiceAccountBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ProjectServiceAccount"
@@ -6341,11 +6132,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateSpendAlertBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ProjectSpendAlert"
@@ -6417,11 +6203,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateSpendAlertBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ProjectSpendAlert"
@@ -6546,11 +6327,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ProjectUserCreateRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ProjectUser"
@@ -6622,11 +6398,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ProjectUserUpdateRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ProjectUser"
@@ -6764,11 +6535,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "PublicCreateOrganizationRoleBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "Role"
@@ -6829,11 +6595,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "PublicUpdateOrganizationRoleBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "Role"
@@ -6971,11 +6732,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateSpendAlertBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "OrganizationSpendAlert"
@@ -7036,11 +6792,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateSpendAlertBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "OrganizationSpendAlert"
@@ -8633,11 +8384,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "UserRoleUpdateRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "User"
@@ -8766,11 +8512,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "PublicAssignOrganizationGroupRoleBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "UserRoleAssignment"
@@ -8945,11 +8686,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "PublicAssignOrganizationGroupRoleBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "GroupRoleAssignment"
@@ -9142,11 +8878,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "PublicCreateOrganizationRoleBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "Role"
@@ -9218,11 +8949,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "PublicUpdateOrganizationRoleBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "Role"
@@ -9360,11 +9086,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "PublicAssignOrganizationGroupRoleBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "UserRoleAssignment"
@@ -9563,11 +9284,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "RealtimeSessionCreateRequestGA"
-            }
-          },
           "response": "Empty"
         }
       },
@@ -9630,11 +9346,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "RealtimeCallReferRequest"
-            }
-          },
           "response": "Empty"
         }
       },
@@ -9671,11 +9382,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "RealtimeCallRejectRequest"
-            }
-          },
           "response": "Empty"
         }
       },
@@ -9719,11 +9425,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "RealtimeCreateClientSecretRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "RealtimeCreateClientSecretResponse"
@@ -9760,11 +9461,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "RealtimeSessionCreateRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "RealtimeSessionCreateResponse"
@@ -9801,11 +9497,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "RealtimeTranscriptionSessionCreateRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "RealtimeTranscriptionSessionCreateResponse"
@@ -9842,11 +9533,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "RealtimeTranslationClientSecretCreateRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "RealtimeTranslationClientSecretCreateResponse"
@@ -9909,11 +9595,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "BetaCreateResponse"
-            }
-          },
           "response": {
             "Json": {
               "Named": "BetaResponse"
@@ -10284,11 +9965,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateUploadRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "Upload"
@@ -10362,11 +10038,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CompleteUploadRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "Upload"
@@ -10553,11 +10224,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateVectorStoreRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "VectorStoreObject"
@@ -10618,11 +10284,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "UpdateVectorStoreRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "VectorStoreObject"
@@ -10694,11 +10355,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateVectorStoreFileBatchRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "VectorStoreFileBatchObject"
@@ -11022,11 +10678,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateVectorStoreFileRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "VectorStoreFileObject"
@@ -11098,11 +10749,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "UpdateVectorStoreFileAttributesRequest2"
-            }
-          },
           "response": {
             "Json": {
               "Named": "VectorStoreFileObject"
@@ -11229,11 +10875,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "VectorStoreSearchRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "VectorStoreSearchResultsPage"
@@ -11281,11 +10922,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateConversationBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ConversationResource"
@@ -11346,11 +10982,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "UpdateConversationBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ConversationResource"
@@ -11446,11 +11077,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "UpdateOrganizationSpendLimitBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "OrganizationSpendLimitResource"
@@ -11535,11 +11161,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "UpdateProjectSpendLimitBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ProjectSpendLimitResource"
@@ -11611,11 +11232,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateProjectServiceAccountApiKeyBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ServiceAccountApiKeyBody"
@@ -11785,11 +11401,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateVideoJsonBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "VideoResource"
@@ -11936,11 +11547,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateVideoEditJsonBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "VideoResource"
@@ -11977,11 +11583,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateVideoExtendJsonBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "VideoResource"
@@ -12123,11 +11724,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateVideoRemixBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "VideoResource"
@@ -12201,11 +11797,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "BetaTokenCountsBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "BetaTokenCountsResource"
@@ -12268,11 +11859,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "BetaCompactResponseMethodPublicBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "BetaCompactResource"
@@ -12360,11 +11946,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateSkillBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "SkillResource"
@@ -12425,11 +12006,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "SetDefaultSkillVersionBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "SkillResource"
@@ -12587,11 +12163,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateSkillVersionBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "SkillVersionResource"
@@ -12790,11 +12361,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateChatSessionBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ChatSessionResource"
@@ -51941,7 +51507,8 @@
   ],
   "x-schematic": {
     "module_path": "openai",
-    "request_id_header": "x-request-id"
+    "request_id_header": "x-request-id",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "OpenAI"

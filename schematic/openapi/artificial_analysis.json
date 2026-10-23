@@ -232,11 +232,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CritPtEvaluateBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "CritPtEvaluateResponse"
@@ -749,6 +744,9 @@
     "url": "https://artificialanalysis.ai/api-reference"
   },
   "x-schematic": {
+    "env_auth": [
+      "ARTIFICIAL_ANALYSIS_API_KEY"
+    ],
     "env_mapping": {
       "api_key": {
         "header": "x-api-key",
@@ -762,7 +760,8 @@
       "basic_user": null,
       "bearer_token": null
     },
-    "module_path": "artificial_analysis"
+    "module_path": "artificial_analysis",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "ArtificialAnalysisData",

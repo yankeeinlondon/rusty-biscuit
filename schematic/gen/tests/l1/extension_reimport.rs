@@ -2,13 +2,11 @@
 //! OpenAPI export whose optional collections are absent or explicitly empty
 //! re-imports through the public pipeline with its meaning intact.
 //!
-//! The importer does not read `x-schematic` yet, so each test also decodes the
-//! exported extension values with the public extension types: that is the
-//! read a `skip_serializing_if` field without `serde(default)` would break.
+//! The importer reads `x-schematic` back, so each test asserts the imported
+//! definition keeps every member the export omitted or wrote empty: the read
+//! a `skip_serializing_if` field without `serde(default)` would break.
 
-use schematic_define::openapi::{
-    ExportOptions, OpenApiImport, OpenApiSource, SchematicDocExtension, SchematicOpExtension,
-};
+use schematic_define::openapi::{DiagnosticSeverity, ExportOptions, OpenApiImport, OpenApiSource};
 use schematic_define::{
     ApiRequest, DefinitionContext, Endpoint, EnvMapping, ErrorSet, ResponseShape, RestApi,
     SuccessShape,
@@ -55,65 +53,20 @@ fn export(api: &RestApi) -> (tempfile::TempDir, std::path::PathBuf, Value) {
     (dir, path, document)
 }
 
-/// Every operation object of `document`, keyed by `operationId`.
-fn operations(document: &Value) -> Vec<(String, &Value)> {
-    let mut found = Vec::new();
-    for item in document["paths"].as_object().expect("paths").values() {
-        for operation in item.as_object().unwrap().values().filter(|value| value.get("operationId").is_some()) {
-            found.push((operation["operationId"].as_str().unwrap().to_string(), operation));
-        }
-    }
-    found
-}
-
-/// The document extension `api` exports, as the exporter builds it.
-fn expected_doc_extension(api: &RestApi) -> SchematicDocExtension {
-    SchematicDocExtension {
-        module_path: api.module_path.clone(),
-        request_suffix: api.request_suffix.clone(),
-        env_mapping: api.env_mapping.clone(),
-        headers: api.headers.clone(),
-        rate_limit: api.rate_limit.clone(),
-        retry_guidance: api.retry_guidance.clone(),
-        errors: api.errors.clone(),
-        cross_origin: api.cross_origin.clone(),
-        request_id_header: api.request_id_header.clone(),
-    }
-}
-
-/// Decodes every `x-schematic` value of `document` with the public types and
-/// asserts each equals what `api` declared.
-fn assert_extensions_decode_to(api: &RestApi, document: &Value) {
-    let doc_extension: SchematicDocExtension =
-        serde_json::from_value(document["x-schematic"].clone()).expect("document x-schematic decodes");
-    assert_eq!(doc_extension, expected_doc_extension(api));
-
-    let operations = operations(document);
-    assert_eq!(operations.len(), api.endpoints.len());
-    for endpoint in &api.endpoints {
-        let (_, operation) = operations
-            .iter()
-            .find(|(id, _)| id.eq_ignore_ascii_case(&endpoint.id) || id.replace('_', "").eq_ignore_ascii_case(&endpoint.id))
-            .unwrap_or_else(|| panic!("no operation for {}", endpoint.id));
-        let extension: SchematicOpExtension =
-            serde_json::from_value(operation["x-schematic"].clone()).expect("operation x-schematic decodes");
-        assert_eq!(extension.request, endpoint.request, "{}", endpoint.id);
-        assert_eq!(extension.headers, endpoint.headers, "{}", endpoint.id);
-        assert_eq!(extension.errors, endpoint.errors, "{}", endpoint.id);
-        assert_eq!(extension.no_declared_errors, endpoint.no_declared_errors, "{}", endpoint.id);
-        assert_eq!(extension.rate_limit, endpoint.rate_limit, "{}", endpoint.id);
-        assert_eq!(extension.cross_origin, endpoint.cross_origin, "{}", endpoint.id);
-        assert_eq!(extension.response, endpoint.response[0].shape, "{}", endpoint.id);
-    }
-}
-
 /// Imports `path` through the public importer and the generator pipeline and
-/// asserts the endpoints keep their method, path, body presence, and response
-/// kind, and that no endpoint or API gained headers.
-fn assert_reimport_preserves(api: &RestApi, path: &std::path::Path) {
+/// asserts the endpoints keep their method, path, request, response kind,
+/// errors, and inherited metadata, and that no endpoint or API gained
+/// headers. Returns the import diagnostics.
+fn assert_reimport_preserves(api: &RestApi, path: &std::path::Path) -> Vec<schematic_define::openapi::OpenApiDiagnostic> {
     let imported = OpenApiImport::new(OpenApiSource::path(path)).build().expect("re-import succeeds");
     assert_eq!(imported.api.endpoints.len(), api.endpoints.len());
     assert!(imported.api.headers.is_empty());
+    assert_eq!(imported.api.env_mapping, api.env_mapping);
+    assert_eq!(imported.api.errors, api.errors);
+    assert_eq!(imported.api.rate_limit, api.rate_limit);
+    assert_eq!(imported.api.cross_origin, api.cross_origin);
+    assert_eq!(imported.api.request_id_header, api.request_id_header);
+    assert_eq!(imported.api.module_path, api.module_path);
     for endpoint in &api.endpoints {
         let twin = imported
             .api
@@ -124,12 +77,15 @@ fn assert_reimport_preserves(api: &RestApi, path: &std::path::Path) {
         assert!(twin.headers.is_empty(), "{}", endpoint.id);
         let kind = |shape: &ResponseShape| std::mem::discriminant(shape);
         assert_eq!(kind(&twin.response[0].shape), kind(&endpoint.response[0].shape), "{}", endpoint.id);
-        // A multipart body imports as `None` today, a separate import gap, so
-        // body presence is compared for JSON bodies and bodiless endpoints.
+        assert_eq!(twin.errors, endpoint.errors, "{}", endpoint.id);
+        assert_eq!(twin.no_declared_errors, endpoint.no_declared_errors, "{}", endpoint.id);
+        assert_eq!(twin.rate_limit, endpoint.rate_limit, "{}", endpoint.id);
+        assert_eq!(twin.cross_origin, endpoint.cross_origin, "{}", endpoint.id);
+        // A form with no fields has no standard schema to import from.
         match &endpoint.request {
+            Some(ApiRequest::FormData { fields }) if fields.is_empty() => assert!(twin.request.is_none(), "{}", endpoint.id),
             Some(ApiRequest::Json(_)) => assert!(matches!(twin.request, Some(ApiRequest::Json(_))), "{}", endpoint.id),
-            None => assert!(twin.request.is_none(), "{}", endpoint.id),
-            Some(_) => {}
+            request => assert_eq!(&twin.request, request, "{}", endpoint.id),
         }
     }
 
@@ -149,6 +105,14 @@ fn assert_reimport_preserves(api: &RestApi, path: &std::path::Path) {
     })
     .expect("pipeline re-import succeeds");
     assert_eq!(result.endpoint_count, api.endpoints.len());
+    imported.diagnostics
+}
+
+/// The only WARN a sparse export re-imports with: its form has no fields.
+fn assert_only_the_empty_form_warns(diagnostics: &[schematic_define::openapi::OpenApiDiagnostic]) {
+    let warnings: Vec<_> = diagnostics.iter().filter(|diagnostic| diagnostic.severity >= DiagnosticSeverity::Warn).collect();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].message.contains("no properties"), "{warnings:?}");
 }
 
 #[test]
@@ -160,8 +124,7 @@ fn absent_optional_collections_reimport() {
     for absent in ["env_mapping", "headers", "errors", "rate_limit", "retry_guidance", "request_id_header", "cross_origin"] {
         assert!(!doc_extension.contains_key(absent), "{absent} should be skipped, got {doc_extension:?}");
     }
-    assert_extensions_decode_to(&api, &document);
-    assert_reimport_preserves(&api, &path);
+    assert_only_the_empty_form_warns(&assert_reimport_preserves(&api, &path));
 }
 
 #[test]
@@ -170,12 +133,13 @@ fn explicitly_empty_env_mapping_reimports() {
     let (_dir, path, document) = export(&api);
 
     assert!(document["x-schematic"]["env_mapping"].is_object(), "an empty mapping is still written");
-    assert_extensions_decode_to(&api, &document);
-    assert_reimport_preserves(&api, &path);
+    assert_only_the_empty_form_warns(&assert_reimport_preserves(&api, &path));
 }
 
 /// The writer omits empty `Vec`s, so a document spelling them `[]` is
-/// hand-written; it must decode to the same meaning as the omitted form.
+/// hand-written. `headers` and `errors` mean the same as the omitted form;
+/// `success: []` is never valid (an endpoint has at least one success shape),
+/// so it is a WARN at its location and the standard responses stand.
 #[test]
 fn explicitly_empty_extension_arrays_decode_like_absent_ones() {
     let api = sparse_api(None);
@@ -195,6 +159,17 @@ fn explicitly_empty_extension_arrays_decode_like_absent_ones() {
     let path = dir.path().join("explicit_empty.json");
     std::fs::write(&path, serde_json::to_string_pretty(&document).unwrap()).unwrap();
 
-    assert_extensions_decode_to(&api, &document);
-    assert_reimport_preserves(&api, &path);
+    let diagnostics = assert_reimport_preserves(&api, &path);
+    let mut rejected: Vec<&str> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Warn && diagnostic.location.ends_with("/x-schematic/success"))
+        .map(|diagnostic| diagnostic.location.as_str())
+        .collect();
+    rejected.sort_unstable();
+    assert_eq!(rejected, [
+        "#/paths/~1items/get/x-schematic/success",
+        "#/paths/~1items/post/x-schematic/success",
+        "#/paths/~1items~1{id}/delete/x-schematic/success",
+        "#/paths/~1uploads/post/x-schematic/success",
+    ]);
 }

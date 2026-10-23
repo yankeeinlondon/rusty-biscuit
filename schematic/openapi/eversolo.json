@@ -1220,7 +1220,8 @@
       "basic_user": null,
       "bearer_token": null
     },
-    "module_path": "eversolo"
+    "module_path": "eversolo",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "Eversolo"

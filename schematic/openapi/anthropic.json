@@ -60,11 +60,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateMessageBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "MessageResponse"
@@ -141,11 +136,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CountTokensBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "CountTokensResponse"
@@ -1838,6 +1828,9 @@
     "url": "https://docs.anthropic.com/en/api/messages"
   },
   "x-schematic": {
+    "env_auth": [
+      "ANTHROPIC_API_KEY"
+    ],
     "env_mapping": {
       "api_key": {
         "header": "X-Api-Key",
@@ -1856,7 +1849,8 @@
         "anthropic-version",
         "2023-06-01"
       ]
-    ]
+    ],
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "Anthropic"

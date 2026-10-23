@@ -60,19 +60,21 @@ assert_eq!(pet.rust_path.as_deref(), Some("items::Pet")); // `Pet` without modul
 
 | OpenAPI input | Definition or generated model |
 | --- | --- |
-| info, servers, externalDocs | API name, description, base URL, docs URL; import options may override metadata |
+| info, servers, externalDocs | API name, description, version (`info.version`), base URL, docs URL; import options may override metadata. No `servers` is a warning and the base URL defaults to `https://api.example.com` |
 | operationId or operation fallback | PascalCase endpoint id, de-conflicted as needed |
-| path parameter | Path template placeholder |
-| query, header, cookie | Parameter in the declared transport location, with its `required`, `style`, and `explode`; an absent `explode` takes OpenAPI's default, `true` for `form` style (query and cookie) and `false` otherwise |
+| operation `deprecated` | A deprecated endpoint |
+| path parameter | Path template placeholder; typed path parameters when any is typed (see [Parameters](#parameters)) |
+| query, header, cookie | Parameter in the declared transport location, with its `required`, `style`, `explode`, and `deprecated`; an absent `explode` takes OpenAPI's default, `true` for `form` style (query and cookie) and `false` otherwise. Path-item parameters merge into each operation |
 | JSON body | Typed model or free-form JSON |
-| multipart / URL-encoded body | Form fields, with file constraints where supported |
+| multipart / URL-encoded body | Form fields, with file `accept` lists, file counts, and JSON parts from `encoding` and `minItems`/`maxItems` (see [Form bodies](#form-bodies)) |
 | text / binary body | Raw body with content type |
 | responses | Every 2xx response becomes a success shape and every 400-599 response an endpoint error entry (see [Several success shapes and declared errors](#several-success-shapes-and-declared-errors)) |
 | component / inline schemas | Named models or synthesized model names |
 | oneOf / anyOf | Enum with one variant per member, selected by the `discriminator` when every member has a tag value, else untagged (first member that fits); unnamed members may remain free-form JSON (see [Unions and discriminators](#unions-and-discriminators)) |
 | allOf | Merged schema/model according to import support |
 | nullable | Optional Rust representation |
-| bearer, basic, header/query/cookie API key | Existing auth strategy and environment mapping |
+| bearer, basic, header/query/cookie API key | Auth strategy or policy from the root `security`, and endpoint overrides from operation `security` (see [Authentication](#authentication)) |
+| `x-schematic` | Everything else Schematic exported, checked against the standard fields (see [Schematic extensions](#schematic-extensions)) |
 
 The importer does not implement OpenAPI 3.1. Full provider HTTP fidelity is
 not established by a successful import; compile the generated crate and test
@@ -230,26 +232,172 @@ lost, rather than being guessed:
 - an error body under `*/*` (not imported: an error entry needs a concrete
   media type).
 
-Import reads only the standard `responses` map; it never reads
-`x-schematic` back. A document that Schematic exported therefore imports with
-these facts lost or approximated:
+The standard `responses` map alone cannot carry every fact of a success
+shape or error table. A document Schematic exported carries the rest in the
+operation's `x-schematic` `success` and `errors` members, and the importer
+restores them when re-exporting them reproduces the operation's standard
+responses (see
+[Standard fields win](openapi-extensions.md#standard-fields-win)). Without
+those members (a third-party document, one exported with
+`skip_extensions()`, or one whose members disagree with its responses) these
+facts are lost or approximated:
 
-| Exported fact | After import |
+| Exported fact | After import from `responses` alone |
 | --- | --- |
 | an SSE or NDJSON end condition (`[DONE]`, an event, a field) and `keep_end` | the stream ends at connection close, and nothing is kept |
 | a byte stream | a binary shape |
-| a shape's `variant` name | not read back; a separated `oneOf` member is named after its component (`Array` / `Object` when unnamed), any other shape by its kind |
+| a shape's `variant` name | a separated `oneOf` member is named after its component (`Array` / `Object` when unnamed), any other shape by its kind |
 | a shape's `note` | none; it survives only in the exported description |
 | an API's default errors | one exact or class entry per exported status on each endpoint, never on the API |
 | a class expanded because an exact entry supersedes part of it | one exact entry per status |
 
-Keys, media types, and schemas survive, so exporting the imported definition
-again gives the same `content` for every response.
+Keys, media types, and schemas survive either way, so exporting the imported
+definition again gives the same `content` for every response.
 
 An operation with no representable success is an import error for that
 operation: it is left out with an `error` diagnostic naming the API and
 operation (the import fails under `--strict`), and the other operations
 still import.
+
+### Parameters
+
+An operation's parameters are its own list merged over its path item's
+`parameters`. A parameter's identity is its name and location (`in`), with
+header names compared case-insensitively; an operation parameter replaces the
+inherited one of the same identity in place, and one with the same name in a
+different location is a second parameter:
+
+```yaml
+/items/{id}:
+  parameters:
+    - { in: path, name: id, required: true, schema: { type: integer } }
+    - { in: header, name: X-Trace, schema: { type: string } }
+  get:
+    parameters:
+      - { in: header, name: x-trace, required: true, schema: { type: string } }
+# GET /items/{id}: path `id` (integer) and one required header `x-trace`
+```
+
+A local `#/components/parameters/<name>` reference is resolved before the
+merge. A reference that does not resolve, and any remote reference (a URL or
+another file, never fetched), is an ERROR at its pointer, such as
+`#/paths/~1items~1{id}/get/parameters/0`, and the parameter is skipped.
+
+**Typed path parameters.** When any path parameter has a non-string schema, a
+description, or `deprecated`, every placeholder of the path is declared as a
+typed path parameter, in template order, and a placeholder with no declaration
+becomes a plain string. When all are plain undescribed strings, none is
+declared: such a parameter exports exactly like an undeclared placeholder, so
+the endpoint keeps plain placeholders. Around that rule:
+
+- an array or object path schema imports as `String` with a warning, since a
+  path segment cannot carry one;
+- a path parameter whose name is not a placeholder of the path is skipped with
+  a warning;
+- a path parameter without `required: true` is an ERROR, as OpenAPI requires
+  it.
+
+`deprecated: true` on an operation or parameter marks the endpoint or
+parameter deprecated.
+
+### Form bodies
+
+A `multipart/form-data` or `application/x-www-form-urlencoded` body becomes
+form fields from its object schema: `properties` give the fields, `required`
+and `description` their flags, a `format: binary` string a file part, and an
+array of those a repeated file part. The multipart `encoding` and the array
+bounds add the rest:
+
+```yaml
+multipart/form-data:
+  schema:
+    type: object
+    required: [samples]
+    properties:
+      samples: { type: array, items: { type: string, format: binary }, minItems: 1, maxItems: 5 }
+      metadata: { $ref: "#/components/schemas/VoiceMetadata" }
+      label: { type: string }
+  encoding:
+    samples: { contentType: "audio/mpeg, audio/wav" }
+    metadata: { contentType: application/json }
+# samples: Files { accept: [audio/mpeg, audio/wav], min: 1, max: 5 }
+# metadata: Json(VoiceMetadata); label: Text
+```
+
+- **`encoding.<part>.contentType`** on a file part is its `accept` list, split
+  at commas. A JSON content type on any other part makes it a JSON part of the
+  part's schema. An empty `contentType` is an ERROR, and the file accepts any
+  type.
+- **`minItems`/`maxItems`** on a repeated file part are its file counts.
+- **Without an encoding**, a part follows OpenAPI's default: a primitive, a
+  component naming one, or a composition of primitives is a text part,
+  silently. An object-valued part without a JSON encoding is a warning and
+  stays a text part, rather than silently becoming something else.
+- A part whose `$ref` (or array `items` `$ref`) does not resolve is an ERROR,
+  and the part is skipped.
+- Each of these is a warning and is ignored: an `encoding` entry naming no
+  property; an encoding's `headers`, `style`, `explode`, or `allowReserved`;
+  an array part whose items are not files (imported as one text part); and a
+  binary property on a URL-encoded body (imported as text).
+
+A request body whose `content` is empty is an ERROR, and the body is omitted.
+
+### Authentication
+
+The API's authentication comes from the root `security`. With no
+requirement the API is anonymous, with one it is that scheme's method, and
+with several it is an auth policy accepting any of them. A document without a
+root `security` takes the first supported scheme in
+`components.securitySchemes`. An operation's own `security` is an endpoint
+override: absent inherits, `[]` is public, and any other list (unless it equals
+the root's) replaces the API's authentication for that endpoint. The full
+table is in
+[OpenAPI extensions](openapi-extensions.md#authentication), together with the
+two auth details the extension adds.
+
+An `apiKey` scheme with an empty `name` is an ERROR and is not mapped, and a
+`security: null`, at the root or on an operation, fails the import: it is not
+the same as omitting `security`.
+
+## Schematic extensions
+
+A document Schematic exported carries `x-schematic` objects at its root and on
+each operation, and the importer reads them back: module path, request
+suffix, environment mapping, fixed headers, auth details, secret names,
+rate-limit and retry metadata, cross-origin policy, request-id header,
+success shapes, declared error tables, form field details, reserved-expansion
+paths, and parameter details. Each member is decoded on its own; one that is
+malformed is a WARN at its pointer and dropped, and one that disagrees with
+the standard fields is a WARN and the standard value is used. An unsupported
+`x-schematic.version` turns off every extension in the document with one
+WARN. The rules, the members, and what does not round-trip are in
+[OpenAPI extensions](openapi-extensions.md#reading-extensions-back).
+
+`schematic-gen import --module-path` and `--request-id-header` override the
+extension's `module_path` and `request_id_header` when given.
+
+## Diagnostics and strict mode
+
+Import returns its diagnostics in `result.diagnostics`, each with a severity,
+a location in the source document (an RFC 6901 pointer for every extension,
+parameter, form, and security diagnostic), and a message:
+
+```text
+[WARN] #/servers: the document declares no server; the base URL defaults to `https://api.example.com`
+```
+
+| Severity | Meaning | Fails `--strict` |
+| --- | --- | --- |
+| INFO | Nothing was lost (an unknown extension member, an alternative content type, a grouped document) | no |
+| WARN | Something was approximated or ignored | yes |
+| ERROR | Something could not be imported and was skipped | yes |
+
+Strict import (`--strict`, `OpenApiImport::strict()`) fails with
+`OpenApiError::Validation` located at the first WARN or ERROR and quoting
+their count; a document with only INFO diagnostics imports strictly.
+
+Besides those described above, these standard inputs are ERRORs: an empty
+`info.version`, `servers[0].url`, or `externalDocs.url`.
 
 ## Importing into `schematic-definitions`
 

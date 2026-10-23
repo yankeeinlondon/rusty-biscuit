@@ -59,9 +59,14 @@ fn parameter_data(param: &ParamDef) -> ParameterData {
         ))),
         example: None,
         examples: IndexMap::new(),
-        // Only emitted when it differs from the style's default, which for
-        // `form` is `explode: true`.
-        explode: (!param.explode).then_some(false),
+        // OpenAPI defaults `explode` to true for `form` and false for every
+        // other style; `false` is always written, `true` only where it is
+        // not the default (a `deepObject` parameter).
+        explode: match (param.explode, param.style) {
+            (false, _) => Some(false),
+            (true, ParamStyle::Form) => None,
+            (true, _) => Some(true),
+        },
         extensions: IndexMap::new(),
     }
 }

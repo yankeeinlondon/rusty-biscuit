@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use super::super::source::OpenApiSource;
-use super::auth::map_auth_strategy;
 use super::diagnostics::OpenApiDiagnostic;
 use super::mappings;
+use super::{extension, reconcile};
 use super::resolver::RefResolver;
 use crate::cross_origin::CrossOrigin;
 use crate::models::ModelCatalog;
@@ -137,10 +137,10 @@ impl OpenApiImport {
         self
     }
 
-    /// Enables strict mode: any diagnostic becomes an error.
+    /// Enables strict mode: any WARN or ERROR diagnostic fails the import.
     ///
-    /// In strict mode, warnings and info diagnostics also cause
-    /// the import to fail.
+    /// INFO diagnostics never fail it; they are returned in
+    /// [`OpenApiImportResult::diagnostics`] as in permissive mode.
     #[must_use]
     pub fn strict(mut self) -> Self {
         self.options.strict = true;
@@ -166,7 +166,9 @@ impl OpenApiImport {
     /// - An endpoint body or response names a schema the document does not
     ///   define ([`OpenApiError::Definition`] holding
     ///   [`crate::DefinitionError::UnresolvedReference`])
-    /// - Strict mode is enabled and any diagnostics were generated
+    /// - Strict mode is enabled and any WARN or ERROR diagnostic was
+    ///   generated ([`OpenApiError::Validation`] located at the first one,
+    ///   with the count and that diagnostic's message)
     pub fn build(self) -> Result<OpenApiImportResult, super::super::error::OpenApiError> {
         let mut diagnostics = Vec::new();
 
@@ -179,15 +181,18 @@ impl OpenApiImport {
 
         let mut api = self.map_to_rest_api(&doc, &resolver, &mut diagnostics)?;
 
-        let request_suffix = "Request";
+        let request_suffix = api.request_suffix.as_deref().unwrap_or("Request");
         let reserved_names: std::collections::HashSet<String> = api
             .endpoints
             .iter()
             .map(|ep| format!("{}{}", ep.id, request_suffix))
             .collect();
 
+        // Models live in the effective module: the CLI's, else the document's.
+        let mut catalog_options = self.options.clone();
+        catalog_options.module_path.clone_from(&api.module_path);
         let schema_result =
-            self.map_to_model_catalog(&doc, &resolver, &mut diagnostics, &reserved_names);
+            mappings::map_all_schemas(&doc, &resolver, &mut diagnostics, &catalog_options, &reserved_names);
 
         if !schema_result.name_mapping.is_empty() {
             for endpoint in &mut api.endpoints {
@@ -197,11 +202,22 @@ impl OpenApiImport {
         api.schemas = schema_result.components;
         api.validate_references()?;
 
-        if self.options.strict && !diagnostics.is_empty() {
-            return Err(super::super::error::OpenApiError::Validation {
-                path: "".to_string(),
-                message: format!("Strict mode: {} diagnostics encountered", diagnostics.len()),
-            });
+        if self.options.strict {
+            let mut failing = diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.severity != super::diagnostics::DiagnosticSeverity::Info);
+            if let Some(first) = failing.next() {
+                return Err(super::super::error::OpenApiError::Validation {
+                    path: first.location.clone(),
+                    message: format!(
+                        "Strict mode: {} WARN/ERROR diagnostics encountered; first: {} at {}: {}",
+                        1 + failing.count(),
+                        first.severity,
+                        first.location,
+                        first.message
+                    ),
+                });
+            }
         }
 
         Ok(OpenApiImportResult {
@@ -352,10 +368,34 @@ impl OpenApiImport {
         let name = self.options.api_name.clone().unwrap_or(default_name);
 
         let base_url = map_server(&doc.servers, &self.options.base_url_policy);
+        if doc.servers.is_empty() && self.options.base_url_policy == BaseUrlPolicy::FromServers {
+            diagnostics.push(OpenApiDiagnostic::warn(
+                "#/servers".to_string(),
+                format!("the document declares no server; the base URL defaults to `{base_url}`"),
+            ));
+        }
 
-        let auth = map_auth_strategy(doc, diagnostics);
+        // `openapiv3` reads these required strings without checking them.
+        let required_text = [
+            ("#/info/version", Some(doc.info.version.as_str())),
+            ("#/servers/0/url", doc.servers.first().map(|server| server.url.as_str())),
+            ("#/externalDocs/url", doc.external_docs.as_ref().map(|docs| docs.url.as_str())),
+        ];
+        for (location, _) in required_text.iter().filter(|(_, text)| *text == Some("")) {
+            diagnostics.push(OpenApiDiagnostic::error(location.to_string(), "must not be empty".to_string()));
+        }
+        let nonempty = |text: &str| (!text.is_empty()).then(|| text.to_string());
+
+        let doc_ext = extension::decode_document(&doc.extensions, diagnostics);
+        let no_details = Vec::new();
+        let (auth, auth_policy) = reconcile::map_root_auth(
+            doc,
+            doc_ext.as_ref().map_or(&no_details, |ext| &ext.auth),
+            diagnostics,
+        );
 
         let mut endpoints = Vec::new();
+        let mut outcomes = Vec::new();
         let mut used_names: HashSet<String> = HashSet::new();
 
         for (path, path_item_ref) in &doc.paths.paths {
@@ -363,7 +403,7 @@ impl OpenApiImport {
                 openapiv3::ReferenceOr::Item(item) => item,
                 openapiv3::ReferenceOr::Reference { reference } => {
                     diagnostics.push(OpenApiDiagnostic::warn(
-                        format!("#/paths{}", path),
+                        format!("#/paths/{}", extension::escape(path)),
                         format!("Path reference '{}' not supported, skipping", reference),
                     ));
                     continue;
@@ -374,6 +414,7 @@ impl OpenApiImport {
                 match map_operation(
                     &name,
                     operation,
+                    &path_item.parameters,
                     path,
                     method,
                     resolver,
@@ -387,12 +428,24 @@ impl OpenApiImport {
                                     param.rust_name = names.get(&param.name).and_then(serde_json::Value::as_str).map(str::to_string);
                                 }
                         }
-                        endpoints.push(endpoint);
+                        let location = format!("#/paths/{}/{}", extension::escape(path), method.to_string().to_lowercase());
+                        let op_ext = extension::decode_operation(&operation.extensions, &location, doc_ext.is_some(), diagnostics);
+                        let outcome = reconcile::apply_operation(&mut endpoint, operation, path, op_ext, doc_ext.as_ref(), doc, diagnostics);
+                        // What the standard classification could not say about
+                        // shapes the extension has now restored exactly.
+                        op_diags.retain(|diagnostic| {
+                            let superseded = (outcome.success_from_extension && diagnostic.location.starts_with("responses/2"))
+                                || (outcome.errors_from_extension
+                                    && (diagnostic.location.starts_with("responses/4") || diagnostic.location.starts_with("responses/5")));
+                            !(superseded && diagnostic.severity == super::diagnostics::DiagnosticSeverity::Warn)
+                        });
                         diagnostics.append(&mut op_diags);
+                        endpoints.push(endpoint);
+                        outcomes.push(outcome);
                     }
                     Err(e) => {
                         diagnostics.push(OpenApiDiagnostic::error(
-                            format!("#/paths{}/{}", path, method.to_string().to_lowercase()),
+                            format!("#/paths/{}/{}", extension::escape(path), method.to_string().to_lowercase()),
                             format!("Failed to map operation: {}", e),
                         ));
                     }
@@ -400,26 +453,32 @@ impl OpenApiImport {
             }
         }
 
-        Ok(RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None,
+        let mut api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None,
             name,
             description,
             base_url,
-            docs_url: doc.external_docs.as_ref().map(|ext| ext.url.clone()),
+            docs_url: doc.external_docs.as_ref().and_then(|docs| nonempty(&docs.url)),
             auth,
-            auth_policy: None,
+            auth_policy,
             env_auth: vec![],
             headers: vec![],
             endpoints,
             module_path: self.options.module_path.clone(),
             request_suffix: None,
-            version: None,
+            version: nonempty(&doc.info.version),
             env_mapping: None,
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
             schemas: vec![],
-            })
+            };
+        if let Some(mut doc_ext) = doc_ext {
+            reconcile::settle_document_errors(&mut api.endpoints, outcomes, &mut doc_ext, diagnostics);
+            reconcile::apply_document(&mut api, doc_ext, &self.options, diagnostics);
+        }
+        reconcile::settle_endpoint_fallbacks(&mut api);
+        Ok(api)
     }
 
     /// Extracts operations from a PathItem.
@@ -452,17 +511,6 @@ impl OpenApiImport {
         }
         ops
     }
-
-    /// Maps component schemas to a ModelCatalog.
-    fn map_to_model_catalog(
-        &self,
-        doc: &openapiv3::OpenAPI,
-        resolver: &RefResolver,
-        diagnostics: &mut Vec<OpenApiDiagnostic>,
-        reserved_names: &std::collections::HashSet<String>,
-    ) -> mappings::SchemaMapResult {
-        mappings::map_all_schemas(doc, resolver, diagnostics, &self.options, reserved_names)
-    }
 }
 
 /// Options for OpenAPI import.
@@ -476,7 +524,7 @@ pub struct OpenApiImportOptions {
     pub base_url_policy: BaseUrlPolicy,
     /// Content type preference.
     pub content_preference: ContentPreference,
-    /// Strict mode: fail on any diagnostic.
+    /// Strict mode: fail on any WARN or ERROR diagnostic; INFO never fails.
     pub strict: bool,
 }
 
@@ -814,24 +862,95 @@ components:
         }
     }
 
-    #[test]
-    fn build_strict_mode_fails_on_diagnostics() {
-        let yaml = r#"
+    use super::super::diagnostics::DiagnosticSeverity;
+
+    fn severities(diagnostics: &[OpenApiDiagnostic]) -> Vec<DiagnosticSeverity> {
+        diagnostics.iter().map(|diagnostic| diagnostic.severity).collect()
+    }
+
+    /// No operationId: one INFO (fallback name).
+    const INFO_ONLY_SPEC: &str = r#"
 openapi: "3.0.0"
 info:
   title: Test
   version: "1.0.0"
+servers:
+  - url: https://api.test
 paths:
   /test:
     get:
       responses:
-        '200':
-          description: OK
+        '204':
+          description: No content
 "#;
-        let source = OpenApiSource::yaml(yaml);
-        let result = OpenApiImport::new(source).strict().build();
 
-        assert!(result.is_err() || result.unwrap().diagnostics.is_empty());
+    /// A path-level `$ref` is skipped with a WARN.
+    const WARN_ONLY_SPEC: &str = r#"
+openapi: "3.0.0"
+info:
+  title: Test
+  version: "1.0.0"
+servers:
+  - url: https://api.test
+paths:
+  /test:
+    $ref: '#/components/pathItems/Shared'
+"#;
+
+    /// An unresolvable local parameter `$ref`: one ERROR.
+    const ERROR_ONLY_SPEC: &str = r#"
+openapi: "3.0.0"
+info:
+  title: Test
+  version: "1.0.0"
+servers:
+  - url: https://api.test
+paths:
+  /test:
+    get:
+      operationId: getTest
+      parameters:
+        - $ref: '#/components/parameters/Missing'
+      responses:
+        '204':
+          description: No content
+"#;
+
+    #[test]
+    fn build_strict_mode_passes_info_only_diagnostics() {
+        let permissive = OpenApiImport::new(OpenApiSource::yaml(INFO_ONLY_SPEC)).build().unwrap();
+        assert_eq!(severities(&permissive.diagnostics), [DiagnosticSeverity::Info]);
+
+        let strict = OpenApiImport::new(OpenApiSource::yaml(INFO_ONLY_SPEC)).strict().build().unwrap();
+
+        assert_eq!(strict.diagnostics, permissive.diagnostics);
+        assert_eq!(strict.api.endpoints.len(), 1);
+    }
+
+    #[test]
+    fn build_strict_mode_fails_on_warn_diagnostic() {
+        let permissive = OpenApiImport::new(OpenApiSource::yaml(WARN_ONLY_SPEC)).build().unwrap();
+        assert_eq!(severities(&permissive.diagnostics), [DiagnosticSeverity::Warn]);
+
+        let error = OpenApiImport::new(OpenApiSource::yaml(WARN_ONLY_SPEC)).strict().build().unwrap_err();
+
+        let message = error.to_string();
+        assert!(message.contains("1 WARN/ERROR"), "{message}");
+        assert!(message.contains(&permissive.diagnostics[0].location), "{message}");
+        assert!(message.contains(&permissive.diagnostics[0].message), "{message}");
+    }
+
+    #[test]
+    fn build_strict_mode_fails_on_error_diagnostic() {
+        let permissive = OpenApiImport::new(OpenApiSource::yaml(ERROR_ONLY_SPEC)).build().unwrap();
+        assert_eq!(severities(&permissive.diagnostics), [DiagnosticSeverity::Error]);
+
+        let error = OpenApiImport::new(OpenApiSource::yaml(ERROR_ONLY_SPEC)).strict().build().unwrap_err();
+
+        let message = error.to_string();
+        assert!(message.contains("1 WARN/ERROR"), "{message}");
+        assert!(message.contains("#/paths/~1test/get/parameters/0"), "{message}");
+        assert!(message.contains("#/components/parameters/Missing"), "{message}");
     }
 
     #[test]

@@ -241,7 +241,7 @@ The public defaults below remain meaningful; the audit test checks the shipped s
 | `FrameFormat`, `RequestIdType` | JSON text frames / u64 request ids are complete established defaults. |
 | `EndpointRole` | `Client` is the documented meaning of an absent role: an endpoint generates a client unless it declares `host` or `both`. |
 | `WebSocketRuntimeHints`, `WebSocketEndpointHints` | No optional hints is valid. |
-| `SchematicDocExtension`, `SchematicSchemaExtension` | All optional extension metadata may be absent. |
+| `SchematicDocExtension` | Every member but the version is optional; the default writes only `version: 1`. |
 | `ExportOptions`, `ExportFormat`, `OpenApiImportOptions` | Complete tooling options with established defaults. |
 
 All shipped REST providers and the importer use typed builders. `Endpoint` and `RestApi` are `#[non_exhaustive]`, preventing external struct literals. A generated request type loses `Default` when it has a typed path parameter or a required query parameter that no pager adopts, so that value can only arrive through `new()`; every other request type, including one whose only inputs are untyped path placeholders, keeps it. The unused endpoint `oauth_scopes` field is removed; explicit API `auth_policy` remains authoritative.

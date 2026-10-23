@@ -1,15 +1,17 @@
 use indexmap::IndexMap;
-use openapiv3::{Operation, Parameter, PathItem, Paths, ReferenceOr, SecurityScheme};
+use openapiv3::{Operation, Parameter, PathItem, Paths, ReferenceOr, SecurityRequirement, SecurityScheme};
 
 use super::super::OpenApiError;
-use super::super::extensions::SchematicOpExtension;
+use super::super::extensions::{AuthDetail, ParamDetail, SchematicOpExtension};
 use super::super::options::ExportOptions;
 use super::headers::{HeaderGap, apply_fixed_headers, credential_headers};
 use super::parameters::{map_parameters, param_schema};
 use super::request_body::map_request_body;
 use super::responses::map_responses;
-use super::security::{endpoint_security, map_security_requirements};
-use crate::params::ParamDef;
+use super::security::endpoint_security;
+use crate::auth::EndpointAuth;
+use crate::params::{EndpointParams, ParamDef};
+use crate::request::ApiRequest;
 use crate::response::ResponseShape;
 use crate::types::{Endpoint, RestMethod};
 
@@ -27,18 +29,22 @@ use crate::types::{Endpoint, RestMethod};
 pub(super) fn map_paths(
     api: &crate::types::RestApi,
     options: &ExportOptions,
+    document_security: &[SecurityRequirement],
     security_schemes: &mut IndexMap<String, ReferenceOr<SecurityScheme>>,
     header_gaps: &mut Vec<HeaderGap>,
 ) -> Result<Paths, OpenApiError> {
     let mut paths: IndexMap<String, PathItem> = IndexMap::new();
     let mut declarations: IndexMap<String, Vec<(RestMethod, Vec<Parameter>)>> = IndexMap::new();
-    let document_security = map_security_requirements(api);
 
     for endpoint in &api.endpoints {
-        let mut operation = map_operation(api, endpoint, options)?;
-        operation.security = endpoint_security(endpoint, security_schemes);
+        let (security, auth_details) = match endpoint_security(endpoint, security_schemes) {
+            Some((requirements, details)) => (Some(requirements), details),
+            None => (None, IndexMap::new()),
+        };
+        let mut operation = map_operation(api, endpoint, options, auth_details)?;
+        operation.security = security;
         let credentials = credential_headers(
-            operation.security.as_deref().unwrap_or(&document_security),
+            operation.security.as_deref().unwrap_or(document_security),
             security_schemes,
         );
         header_gaps.extend(apply_fixed_headers(api, endpoint, &mut operation, &credentials));
@@ -187,11 +193,14 @@ fn share_path_parameters(item: &mut PathItem, operations: &[(RestMethod, Vec<Par
 
 /// Maps a single endpoint to an OpenAPI operation.
 ///
-/// Path parameters and `security` are added by [`map_paths`].
+/// Path parameters and `security` are added by [`map_paths`];
+/// `auth_details` are those of the schemes the operation's own `security`
+/// names.
 pub(super) fn map_operation(
     api: &crate::types::RestApi,
     endpoint: &Endpoint,
     options: &ExportOptions,
+    auth_details: IndexMap<String, AuthDetail>,
 ) -> Result<Operation, OpenApiError> {
     let request_body = endpoint
         .request
@@ -204,7 +213,11 @@ pub(super) fn map_operation(
     let mut extensions = IndexMap::new();
     if !options.skip_extensions {
         let op_ext = SchematicOpExtension {
-            request: endpoint.request.clone(),
+            // `requestBody` alone carries a JSON, text, or binary body, and
+            // a form with no fields has no detail to add.
+            request: endpoint.request.clone().filter(|request| {
+                matches!(request, ApiRequest::FormData { fields } | ApiRequest::UrlEncoded { fields } if !fields.is_empty())
+            }),
             response: shapes.first().map(|first| first.shape.clone()).unwrap_or(ResponseShape::Empty),
             headers: endpoint.headers.clone(),
             rate_limit: endpoint.rate_limit.clone(),
@@ -217,6 +230,13 @@ pub(super) fn map_operation(
             errors: endpoint.errors.clone(),
             no_declared_errors: endpoint.no_declared_errors,
             cross_origin: endpoint.cross_origin.clone(),
+            auth: auth_details,
+            env_mapping: match &endpoint.auth {
+                Some(EndpointAuth::Policy { env_mapping, .. }) => env_mapping.clone(),
+                _ => None,
+            },
+            path_template: endpoint.path.contains("{+").then(|| endpoint.path.clone()),
+            params: param_details(endpoint.params.as_ref()),
         };
         extensions.insert("x-schematic".to_string(), op_ext.into());
     }
@@ -234,11 +254,28 @@ pub(super) fn map_operation(
     })
 }
 
+/// The secret markers and Rust names of `params`, by location and wire name.
+fn param_details(params: Option<&EndpointParams>) -> IndexMap<String, IndexMap<String, ParamDetail>> {
+    let mut details = IndexMap::new();
+    let Some(params) = params else { return details };
+    for (location, defs) in [("query", &params.query), ("header", &params.header), ("cookie", &params.cookie), ("path", &params.path)] {
+        let entries: IndexMap<String, ParamDetail> = defs
+            .iter()
+            .filter(|param| param.secret || param.rust_name.is_some())
+            .map(|param| (param.name.clone(), ParamDetail { secret: param.secret, rust_name: param.rust_name.clone() }))
+            .collect();
+        if !entries.is_empty() {
+            details.insert(location.to_string(), entries);
+        }
+    }
+    details
+}
+
 /// Rewrites RFC 6570 reserved-expansion markers (`{+name}`) to plain `{name}`.
 ///
 /// The `+` is a runtime encoding hint; exported OpenAPI paths and parameter
 /// names must never carry it.
-fn strip_reserved_markers(path: &str) -> String {
+pub(crate) fn strip_reserved_markers(path: &str) -> String {
     let mut result = String::with_capacity(path.len());
     let mut chars = path.chars().peekable();
     while let Some(c) = chars.next() {

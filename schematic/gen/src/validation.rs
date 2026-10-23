@@ -52,6 +52,8 @@ use serde_json::Value;
 
 use crate::codegen::endpoint_methods::{call_type_name, resolve_names};
 use crate::codegen::request_structs::param_enums::variant_collisions;
+use schematic_definitions::registry::{ApiRegistration, registrations};
+
 use crate::codegen::request_structs::path_params::{PathValue, typed_path_fields};
 use crate::codegen::request_structs::shared::{extract_query_params, query_shape};
 use crate::codegen::pagination::pager_view;
@@ -120,13 +122,23 @@ pub fn endpoint_uniqueness_key(endpoint: &Endpoint) -> EndpointUniquenessKey {
 /// file names, type syntax, declared path parameters, generated-name
 /// collisions across each module group, endpoint-method and setter renames (warnings), and the request
 /// inputs the client sends verbatim: header and cookie parameter names, raw
-/// body content types, and API-key parameter names.
+/// body content types, and API-key parameter names. A module path may not
+/// take a shipped WebSocket module's name.
 pub fn validate_rust_client(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
+    validate_rust_client_in(apis, registrations())
+}
+
+/// [`validate_rust_client`] for a crate that packages the WebSocket modules
+/// of `registrations`.
+pub fn validate_rust_client_in(
+    apis: &[&RestApi],
+    registrations: &[ApiRegistration],
+) -> Vec<ValidationDiagnostic> {
     let mut diagnostics = Vec::new();
     for api in apis {
         check_routes(api, Output::Rust, &mut diagnostics);
         check_schema_references(api, Output::Rust, &mut diagnostics);
-        check_rust_api(api, &mut diagnostics);
+        check_rust_api(api, registrations, &mut diagnostics);
     }
 
     let mut groups: BTreeMap<String, Vec<&RestApi>> = BTreeMap::new();
@@ -328,7 +340,7 @@ fn check_safe_file_stem(stem: &str) -> Result<(), &'static str> {
 }
 
 /// Checks the Rust-only rules for one API and its endpoints.
-fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
+fn check_rust_api(api: &RestApi, registrations: &[ApiRegistration], diagnostics: &mut Vec<ValidationDiagnostic>) {
     let error = |endpoint: Option<&str>, feature: Feature, message: String| {
         ValidationDiagnostic::new(
             Severity::Error,
@@ -368,7 +380,7 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
         ));
     }
 
-    check_module_path(api, diagnostics);
+    check_module_path(api, registrations, diagnostics);
     check_api_key_param(api, diagnostics);
     check_endpoint_method_names(api, diagnostics);
 
@@ -622,7 +634,7 @@ fn check_type_ident(name: &str) -> Result<(), &'static str> {
 /// directory `<path>/`, and (through its definitions mapping) a
 /// `schematic_definitions::<a>::<b>` import path, so it must be one plain
 /// identifier that names no other generated file.
-fn check_module_path(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
+fn check_module_path(api: &RestApi, registrations: &[ApiRegistration], diagnostics: &mut Vec<ValidationDiagnostic>) {
     let module_path = get_module_path(api);
     let push = |diagnostics: &mut Vec<ValidationDiagnostic>, feature, message: String| {
         diagnostics.push(ValidationDiagnostic::new(
@@ -659,9 +671,8 @@ fn check_module_path(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>)
         );
     }
 
-    let ws_modules = crate::output::ws_modules::ws_definition_modules();
     if RESERVED_MODULE_NAMES.contains(&module_path.as_str())
-        || ws_modules.iter().any(|ws| ws.module == module_path)
+        || crate::output::ws_modules::ws_registrations(registrations).any(|(entry, _)| entry.module == module_path)
     {
         push(
             diagnostics,

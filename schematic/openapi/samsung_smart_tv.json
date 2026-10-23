@@ -317,7 +317,8 @@
       "basic_user": null,
       "bearer_token": null
     },
-    "module_path": "samsung_smart_tv"
+    "module_path": "samsung_smart_tv",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "SamsungSmartTv"

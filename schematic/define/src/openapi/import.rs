@@ -39,13 +39,14 @@
 //! assert_eq!(result.api.name, "PetStore");
 //! ```
 
-mod auth;
 mod builder;
 mod diagnostics;
+mod extension;
 mod mappings;
 pub mod naming;
 mod normalize;
 mod query_paths;
+mod reconcile;
 mod resolver;
 
 pub use builder::{

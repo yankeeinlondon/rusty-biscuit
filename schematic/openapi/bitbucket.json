@@ -2889,7 +2889,8 @@
       },
       "bearer_token": null
     },
-    "module_path": "bitbucket"
+    "module_path": "bitbucket",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "Bitbucket"

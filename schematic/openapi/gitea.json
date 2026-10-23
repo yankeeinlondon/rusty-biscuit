@@ -142,6 +142,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/repos/{owner}/{repo}/raw/{+filepath}",
           "response": "Text"
         }
       },
@@ -1970,13 +1971,22 @@
     "url": "https://docs.gitea.com/api/1.25/"
   },
   "x-schematic": {
+    "auth": {
+      "apiKeyAuth": {
+        "value_prefix": "token "
+      }
+    },
+    "env_auth": [
+      "GITEA_TOKEN"
+    ],
     "headers": [
       [
         "Accept",
         "application/json"
       ]
     ],
-    "module_path": "gitea"
+    "module_path": "gitea",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "Gitea"

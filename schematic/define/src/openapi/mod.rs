@@ -2,7 +2,8 @@
 //!
 //! This module provides types and utilities for working with OpenAPI 3.x specifications.
 //! It supports both importing OpenAPI documents and exporting schematic's REST API
-//! definitions to OpenAPI format with vendor extensions for round-trip fidelity.
+//! definitions to OpenAPI format, with `x-schematic` vendor extensions carrying
+//! the Schematic metadata standard OpenAPI cannot express.
 //!
 //! ## Core Types
 //!
@@ -24,7 +25,11 @@
 //!
 //! - [`SchematicDocExtension`] - Document-level `x-schematic` extension
 //! - [`SchematicOpExtension`] - Operation-level `x-schematic` extension
-//! - [`SchematicSchemaExtension`] - Schema-level `x-schematic` extension
+//! - [`AuthDetail`], [`ParamDetail`] - Auth and parameter details neither
+//!   standard field can carry
+//!
+//! The importer reads both extensions back for the supported subset; see
+//! `schematic/docs/io/openapi-extensions.md`.
 //!
 //! ## Examples
 //!
@@ -87,7 +92,7 @@ mod source;
 pub use error::OpenApiError;
 pub use export::{HeaderGap, HeaderGapReason, export, extract_path_params, header_gaps, map_security};
 pub use extensions::{
-    AuthExtension, SchematicDocExtension, SchematicOpExtension, SchematicSchemaExtension,
+    AuthDetail, EXTENSION_VERSION, ParamDetail, SchematicDocExtension, SchematicOpExtension,
 };
 pub use import::{
     BaseUrlPolicy, ContentPreference, DiagnosticSeverity, OpenApiDiagnostic, OpenApiImport,

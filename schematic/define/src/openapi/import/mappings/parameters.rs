@@ -1,103 +1,197 @@
-use openapiv3::{ReferenceOr, Schema, SchemaKind, Type};
+use openapiv3::{Parameter, ReferenceOr, Schema, SchemaKind, Type};
 
 use super::super::diagnostics::OpenApiDiagnostic;
 use super::super::resolver::RefResolver;
-use crate::params::{ParamDef, ParamStyle, QueryParamType};
+use crate::params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
+use crate::types::RestMethod;
 
-pub fn map_parameters(
-    parameters: &[ReferenceOr<openapiv3::Parameter>],
-    resolver: &RefResolver,
+/// Maps one operation's effective parameters: the path item's `inherited`
+/// list overlaid by the operation's `declared` list.
+///
+/// Local `$ref`s are resolved before merging so each parameter's identity
+/// (name and location; header names compared ASCII-case-insensitively) is
+/// known. An operation parameter replaces the inherited one with the same
+/// identity in place; the rest are appended. An unresolvable or remote
+/// `$ref` is reported as an ERROR at its RFC 6901 pointer and skipped.
+///
+/// `path` stays empty unless some path parameter is typed (non-string,
+/// described, or deprecated); then every placeholder of `path` is declared,
+/// in template order, so the endpoint passes typed-path validation.
+pub fn map_parameters<'a>(
+    path: &str,
+    method: RestMethod,
+    inherited: &'a [ReferenceOr<Parameter>],
+    declared: &'a [ReferenceOr<Parameter>],
+    resolver: &RefResolver<'a>,
     diagnostics: &mut Vec<OpenApiDiagnostic>,
-) -> crate::params::EndpointParams {
-    let mut params = crate::params::EndpointParams::default();
+) -> EndpointParams {
+    let escaped_path = path.replace('~', "~0").replace('/', "~1");
+    let path_item_pointer = format!("#/paths/{escaped_path}/parameters");
+    let operation_pointer = format!(
+        "#/paths/{escaped_path}/{}/parameters",
+        method.to_string().to_lowercase()
+    );
 
-    for param_ref in parameters {
-        let param = match resolver.resolve_parameter(param_ref) {
-            Ok(p) => p,
-            Err(e) => {
-                diagnostics.push(OpenApiDiagnostic::error(
-                    "parameter".to_string(),
-                    format!("Failed to resolve parameter: {}", e),
-                ));
+    let mut merged: Vec<(&Parameter, String)> = Vec::new();
+    for (param_refs, pointer) in [(inherited, &path_item_pointer), (declared, &operation_pointer)] {
+        for (index, param_ref) in param_refs.iter().enumerate() {
+            let location = format!("{pointer}/{index}");
+            let Some(param) = resolve_parameter(param_ref, &location, resolver, diagnostics) else {
                 continue;
-            }
-        };
-
-        if let Some(param_def) = map_parameter(param, diagnostics) {
-            match param {
-                openapiv3::Parameter::Query { .. } => params.query.push(param_def),
-                openapiv3::Parameter::Header { .. } => params.header.push(param_def),
-                openapiv3::Parameter::Cookie { .. } => params.cookie.push(param_def),
-                openapiv3::Parameter::Path { .. } => {}
+            };
+            match merged.iter().position(|(existing, _)| same_identity(existing, param)) {
+                Some(position) => merged[position] = (param, location),
+                None => merged.push((param, location)),
             }
         }
     }
 
+    let mut params = EndpointParams::default();
+    let mut path_params: Vec<(ParamDef, String)> = Vec::new();
+    for (param, location) in merged {
+        // `openapiv3` accepts an optional path parameter; OpenAPI does not.
+        if matches!(param, Parameter::Path { .. }) && !param.parameter_data_ref().required {
+            diagnostics.push(OpenApiDiagnostic::error(
+                format!("{location}/required"),
+                "a path parameter must declare `required: true`".to_string(),
+            ));
+        }
+        let param_def = map_parameter(param, diagnostics);
+        match param {
+            Parameter::Query { .. } => params.query.push(param_def),
+            Parameter::Header { .. } => params.header.push(param_def),
+            Parameter::Cookie { .. } => params.cookie.push(param_def),
+            Parameter::Path { .. } => path_params.push((param_def, location)),
+        }
+    }
+    params.path = typed_path_params(path, path_params, diagnostics);
     params
 }
 
-pub fn map_parameter(
-    param: &openapiv3::Parameter,
+/// Resolves a parameter `$ref` within this document; a remote reference is
+/// never fetched.
+fn resolve_parameter<'a>(
+    param_ref: &'a ReferenceOr<Parameter>,
+    location: &str,
+    resolver: &RefResolver<'a>,
     diagnostics: &mut Vec<OpenApiDiagnostic>,
-) -> Option<ParamDef> {
-    let (name, required, description, schema, style, explode) = match param {
-        openapiv3::Parameter::Query {
-            parameter_data,
-            allow_reserved: _,
-            style,
-            allow_empty_value: _,
-        } => (
-            &parameter_data.name,
-            parameter_data.required,
-            &parameter_data.description,
-            get_param_schema(parameter_data),
-            map_query_style(style),
-            parameter_data.explode,
-        ),
-        openapiv3::Parameter::Header {
-            parameter_data,
-            style,
-        } => (
-            &parameter_data.name,
-            parameter_data.required,
-            &parameter_data.description,
-            get_param_schema(parameter_data),
-            map_header_style(style),
-            parameter_data.explode,
-        ),
-        openapiv3::Parameter::Cookie {
-            parameter_data,
-            style,
-        } => (
-            &parameter_data.name,
-            parameter_data.required,
-            &parameter_data.description,
-            get_param_schema(parameter_data),
-            map_cookie_style(style),
-            parameter_data.explode,
-        ),
-        openapiv3::Parameter::Path { .. } => {
-            return None;
+) -> Option<&'a Parameter> {
+    match param_ref {
+        ReferenceOr::Item(param) => Some(param),
+        ReferenceOr::Reference { reference } if !reference.starts_with('#') => {
+            diagnostics.push(OpenApiDiagnostic::error(
+                location.to_string(),
+                format!("Remote parameter reference '{reference}' is not supported (never fetched); parameter skipped"),
+            ));
+            None
         }
+        ReferenceOr::Reference { reference } => match resolver.resolve_parameter(param_ref) {
+            Ok(param) => Some(param),
+            Err(error) => {
+                diagnostics.push(OpenApiDiagnostic::error(
+                    location.to_string(),
+                    format!("Unresolved parameter reference '{reference}' ({error}); parameter skipped"),
+                ));
+                None
+            }
+        },
+    }
+}
+
+fn same_identity(left: &Parameter, right: &Parameter) -> bool {
+    let (left_name, right_name) = (&left.parameter_data_ref().name, &right.parameter_data_ref().name);
+    match (left, right) {
+        (Parameter::Header { .. }, Parameter::Header { .. }) => left_name.eq_ignore_ascii_case(right_name),
+        _ => std::mem::discriminant(left) == std::mem::discriminant(right) && left_name == right_name,
+    }
+}
+
+/// The endpoint's typed path parameters, or none when every declared one is
+/// a plain undescribed, undeprecated string (indistinguishable on export
+/// from an undeclared placeholder).
+fn typed_path_params(
+    path: &str,
+    mut declared: Vec<(ParamDef, String)>,
+    diagnostics: &mut Vec<OpenApiDiagnostic>,
+) -> Vec<ParamDef> {
+    // Typed-path validation accepts only scalar and enum path types.
+    for (param, location) in &mut declared {
+        if matches!(param.param_type, QueryParamType::Array(_) | QueryParamType::Json) {
+            diagnostics.push(OpenApiDiagnostic::warn(
+                location.clone(),
+                format!(
+                    "Path parameter '{}' has an array or structured schema, which a path segment cannot carry; imported as string",
+                    param.name
+                ),
+            ));
+            param.param_type = QueryParamType::String;
+        }
+    }
+    let typed = declared.iter().any(|(param, _)| {
+        param.param_type != QueryParamType::String || param.description.is_some() || param.deprecated
+    });
+    if !typed {
+        return Vec::new();
+    }
+
+    let mut placeholders: Vec<&str> = Vec::new();
+    for name in crate::pagination::path_params(path) {
+        if !placeholders.contains(&name) {
+            placeholders.push(name);
+        }
+    }
+    for (param, location) in &declared {
+        if !placeholders.contains(&param.name.as_str()) {
+            diagnostics.push(OpenApiDiagnostic::warn(
+                location.clone(),
+                format!("Path parameter '{}' has no placeholder in '{path}'; skipped", param.name),
+            ));
+        }
+    }
+    placeholders
+        .into_iter()
+        .map(|name| {
+            declared
+                .iter()
+                .find(|(param, _)| param.name == name)
+                .map(|(param, _)| param.clone())
+                .unwrap_or_else(|| ParamDef::path(name, QueryParamType::String))
+        })
+        .collect()
+}
+
+/// Maps one resolved parameter. Path parameters are always required,
+/// `simple` style, and not exploded.
+pub fn map_parameter(param: &Parameter, diagnostics: &mut Vec<OpenApiDiagnostic>) -> ParamDef {
+    let parameter_data = param.parameter_data_ref();
+    let style = match param {
+        Parameter::Query { style, .. } => map_query_style(style),
+        Parameter::Header { style, .. } => map_header_style(style),
+        Parameter::Cookie { style, .. } => map_cookie_style(style),
+        Parameter::Path { .. } => ParamStyle::Simple,
     };
-
-    // OpenAPI 3.0.3: "When style is form, the default value is true. For
-    // all other styles, the default value is false."
-    let explode = explode.unwrap_or(style == ParamStyle::Form);
-
-    let param_type = match schema {
-        Some(s) => map_schema_to_param_type(s, diagnostics),
+    let param_type = match get_param_schema(parameter_data) {
+        Some(schema) => map_schema_to_param_type(schema, diagnostics),
         None => QueryParamType::String,
     };
-
-    Some(ParamDef { deprecated: false, rust_name: None, secret: false, pager_managed: false,
-        name: name.clone(),
-        required,
-        description: description.clone(),
-        param_type,
-        explode,
+    let param_def = ParamDef {
+        required: parameter_data.required,
+        description: parameter_data.description.clone(),
+        deprecated: parameter_data.deprecated == Some(true),
+        // OpenAPI 3.0.3: "When style is form, the default value is true. For
+        // all other styles, the default value is false."
+        explode: parameter_data.explode.unwrap_or(style == ParamStyle::Form),
         style,
-    })
+        ..ParamDef::new(parameter_data.name.clone(), param_type)
+    };
+    match param {
+        Parameter::Path { .. } => ParamDef {
+            description: param_def.description,
+            deprecated: param_def.deprecated,
+            ..ParamDef::path(param_def.name, param_def.param_type)
+        },
+        _ => param_def,
+    }
 }
 
 fn get_param_schema(data: &openapiv3::ParameterData) -> Option<&ReferenceOr<Schema>> {

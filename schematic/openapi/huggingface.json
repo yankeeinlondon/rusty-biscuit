@@ -61,6 +61,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/models/{+repo_id}",
           "response": {
             "Json": {
               "Named": "ModelInfo"
@@ -101,6 +102,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/models/{+repo_id}/tree/{revision}",
           "response": {
             "Json": {
               "Array": {
@@ -149,6 +151,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/models/{+repo_id}/blob/{revision}/{+path}",
           "response": {
             "Json": {
               "Named": "FileMetadata"
@@ -207,6 +210,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/models/{+repo_id}/commits/{revision}",
           "response": {
             "Json": {
               "Array": {
@@ -255,6 +259,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/models/{+repo_id}/resolve/{revision}/README.md",
           "response": "Text"
         }
       },
@@ -297,6 +302,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/models/{+repo_id}/discussions",
           "response": {
             "Json": {
               "Named": "DiscussionList"
@@ -334,6 +340,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/models/{+repo_id}/resolve/{revision}/model_card.md",
           "response": "Text"
         }
       },
@@ -407,6 +414,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/datasets/{+repo_id}",
           "response": {
             "Json": {
               "Named": "DatasetInfo"
@@ -447,6 +455,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/datasets/{+repo_id}/tree/{revision}",
           "response": {
             "Json": {
               "Array": {
@@ -495,6 +504,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/datasets/{+repo_id}/blob/{revision}/{+path}",
           "response": {
             "Json": {
               "Named": "FileMetadata"
@@ -553,6 +563,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/datasets/{+repo_id}/commits/{revision}",
           "response": {
             "Json": {
               "Array": {
@@ -601,6 +612,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/datasets/{+repo_id}/resolve/{revision}/README.md",
           "response": "Text"
         }
       },
@@ -674,6 +686,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/spaces/{+repo_id}",
           "response": {
             "Json": {
               "Named": "SpaceInfo"
@@ -714,6 +727,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/spaces/{+repo_id}/tree/{revision}",
           "response": {
             "Json": {
               "Array": {
@@ -762,6 +776,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/spaces/{+repo_id}/blob/{revision}/{+path}",
           "response": {
             "Json": {
               "Named": "FileMetadata"
@@ -827,11 +842,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateRepoBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "RepoUrl"
@@ -868,11 +878,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "DeleteRepoBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "StatusResponse"
@@ -909,11 +914,7 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "UpdateRepoSettingsBody"
-            }
-          },
+          "path_template": "/repos/{repo_type}/{+repo_id}/settings",
           "response": {
             "Json": {
               "Named": "StatusResponse"
@@ -970,11 +971,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "MoveRepoBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "StatusResponse"
@@ -2805,6 +2801,11 @@
     "url": "https://huggingface.co/docs/hub/api"
   },
   "x-schematic": {
+    "env_auth": [
+      "HF_TOKEN",
+      "HUGGING_FACE_API_KEY",
+      "HF_API_KEY"
+    ],
     "env_mapping": {
       "api_key": null,
       "basic_pass": null,
@@ -2817,7 +2818,8 @@
         ]
       }
     },
-    "module_path": "huggingface"
+    "module_path": "huggingface",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "HuggingFaceHub"

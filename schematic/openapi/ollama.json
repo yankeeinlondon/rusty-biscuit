@@ -45,11 +45,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "GenerateBody"
-            }
-          },
           "response": {
             "Stream": {
               "end": {
@@ -131,11 +126,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ChatBody"
-            }
-          },
           "response": {
             "Stream": {
               "end": {
@@ -212,11 +202,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "EmbeddingsBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "EmbeddingsResponse"
@@ -279,11 +264,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "ShowModelBody"
-            }
-          },
           "response": {
             "Json": {
               "Named": "ShowModelResponse"
@@ -325,11 +305,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "PullModelBody"
-            }
-          },
           "response": {
             "Stream": {
               "end": {
@@ -411,11 +386,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "PushModelBody"
-            }
-          },
           "response": {
             "Stream": {
               "end": {
@@ -485,11 +455,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CopyModelBody"
-            }
-          },
           "response": "Empty"
         }
       }
@@ -515,11 +480,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "DeleteModelBody"
-            }
-          },
           "response": "Empty"
         }
       }
@@ -557,11 +517,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "CreateModelBody"
-            }
-          },
           "response": {
             "Stream": {
               "end": {
@@ -669,11 +624,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "OpenAIChatCompletionRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "OpenAIChatCompletionResponse"
@@ -740,11 +690,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "OpenAICompletionRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "OpenAICompletionResponse"
@@ -806,11 +751,6 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "Named": "OpenAIEmbeddingRequest"
-            }
-          },
           "response": {
             "Json": {
               "Named": "OpenAIEmbeddingResponse"
@@ -2575,7 +2515,8 @@
       "bearer_token": null
     },
     "module_path": "ollama",
-    "request_suffix": "NativeRequest"
+    "request_suffix": "NativeRequest",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "OllamaNative",

@@ -1,13 +1,22 @@
 use indexmap::IndexMap;
-use openapiv3::ReferenceOr;
+use openapiv3::{ReferenceOr, SecurityRequirement};
 
 use super::super::OpenApiError;
 use super::super::options::ExportOptions;
 use super::conversion::convert_component_schema;
-use super::security::map_security;
+use super::super::extensions::AuthDetail;
+use super::security::policy_security;
 use crate::types::RestApi;
 
-/// Maps API components (schemas and security schemes).
+/// The document's `security` and the auth details of the schemes it names.
+pub(super) struct RootSecurity {
+    pub requirements: Vec<SecurityRequirement>,
+    pub details: IndexMap<String, AuthDetail>,
+}
+
+/// Maps API components (schemas and security schemes) and the root
+/// security: one requirement per method of the API's effective auth policy,
+/// registered before any endpoint override's scheme.
 ///
 /// ## Errors
 ///
@@ -15,12 +24,9 @@ use crate::types::RestApi;
 pub(super) fn map_components(
     api: &RestApi,
     _options: &ExportOptions,
-) -> Result<openapiv3::Components, OpenApiError> {
+) -> Result<(openapiv3::Components, RootSecurity), OpenApiError> {
     let mut security_schemes = IndexMap::new();
-
-    if let Some((name, scheme)) = map_security(&api.auth) {
-        security_schemes.insert(name, ReferenceOr::Item(scheme));
-    }
+    let (requirements, details) = policy_security(&api.effective_auth_policy(), &mut security_schemes);
 
     let schemas = api
         .schemas
@@ -28,9 +34,10 @@ pub(super) fn map_components(
         .map(|component| Ok((component.name.clone(), ReferenceOr::Item(convert_component_schema(&component.name, &component.schema)?))))
         .collect::<Result<_, OpenApiError>>()?;
 
-    Ok(openapiv3::Components {
+    let components = openapiv3::Components {
         security_schemes,
         schemas,
         ..Default::default()
-    })
+    };
+    Ok((components, RootSecurity { requirements, details }))
 }

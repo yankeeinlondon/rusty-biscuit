@@ -140,7 +140,11 @@ fn repeated_and_reserved_placeholders_declare_each_name_once() {
     let params = &doc["paths"]["/repos/{owner}/{path}/by/{owner}"]["parameters"];
     let names: Vec<&str> = params.as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["owner", "path"]);
-    assert!(!doc.to_string().contains("{+"));
+    // Only the extension's `path_template` keeps the runtime template.
+    let mut standard = doc.clone();
+    let extension = standard["paths"]["/repos/{owner}/{path}/by/{owner}"]["get"].as_object_mut().unwrap().remove("x-schematic").unwrap();
+    assert_eq!(extension["path_template"], "/repos/{owner}/{+path}/by/{owner}");
+    assert!(!standard.to_string().contains("{+"));
 
     let collection = postman(&fixture);
     let url = &request(&collection, "GetFile")["url"];
@@ -287,9 +291,13 @@ fn environment_variable_names_never_become_exported_values() {
     let bearer = AuthPolicy::from_auth_strategy(&AuthStrategy::BearerToken { header: None });
     let fixture = api("Secrets", vec![get("Admin", "/admin").auth_with_env_mapping(bearer, own).build().unwrap()]);
 
-    let doc = openapi(&fixture);
-    assert!(!doc.to_string().contains("ENDPOINT_ONLY_TOKEN"));
+    // The OpenAPI document names the variable only as `x-schematic` metadata
+    // of the override, never as a value of a standard member.
+    let mut doc = openapi(&fixture);
     assert_eq!(doc["paths"]["/admin"]["get"]["security"], json!([requirement("bearerAuth")]));
+    let extension = doc["paths"]["/admin"]["get"]["x-schematic"].as_object_mut().unwrap();
+    assert_eq!(extension.remove("env_mapping").unwrap()["bearer_token"], json!({"names": ["ENDPOINT_ONLY_TOKEN"]}));
+    assert!(!doc.to_string().contains("ENDPOINT_ONLY_TOKEN"));
 
     let collection = postman(&fixture);
     assert!(!collection.to_string().contains("ENDPOINT_ONLY_TOKEN"));

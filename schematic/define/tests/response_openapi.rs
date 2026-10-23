@@ -543,7 +543,9 @@ fn public_import_of_the_exported_json_and_yaml_keeps_shapes_content_types_and_en
         vec![typed(ResponseShape::Text, "text/markdown")],
     ];
     let api = fixture(shapes.clone(), |index| (index == 0).then(|| ErrorSet::new().on(StatusMatch::exact(404), ErrorShape::empty())));
-    let document = export(&api, &ExportOptions::new()).unwrap();
+    // The standard members alone: `x-schematic` restores the declared levels
+    // (see `extension_import_restores_declared_error_levels_and_stream_ends`).
+    let document = export(&api, &ExportOptions::new().skip_extensions()).unwrap();
     let first = serde_json::to_value(&document).unwrap();
     // The exporter names `oneOf` members by `$ref`, so import keeps their types.
     assert_eq!(first["paths"]["/r1"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["oneOf"],
@@ -570,7 +572,7 @@ fn public_import_of_the_exported_json_and_yaml_keeps_shapes_content_types_and_en
         let second_errors = &imported.api.endpoints.iter().find(|endpoint| endpoint.path == "/r1").unwrap().errors;
         assert_eq!(second_errors, api.effective_errors(&api.endpoints[1]).entries());
 
-        let second = serde_json::to_value(export(&imported.api, &ExportOptions::new()).unwrap()).unwrap();
+        let second = serde_json::to_value(export(&imported.api, &ExportOptions::new().skip_extensions()).unwrap()).unwrap();
         for index in 0..shapes.len() {
             assert_eq!(without_error_descriptions(&operation(&second, index)["responses"]), without_error_descriptions(&operation(&first, index)["responses"]), "/r{index}");
         }
@@ -591,14 +593,14 @@ fn without_error_descriptions(responses: &Value) -> Value {
 }
 
 #[test]
-fn import_reads_only_the_responses_map_so_stream_ends_and_byte_streams_come_back_plain() {
-    // Reading `x-schematic` back is out of scope (R26); content type alone
-    // never proves a terminator (R28).
+fn the_responses_map_alone_brings_stream_ends_and_byte_streams_back_plain() {
+    // Content type alone never proves a terminator (R28); only `x-schematic`
+    // carries one.
     let shapes = vec![
         vec![sse(StreamEnd::EventNamed("message_stop".into()))],
         vec![SuccessShape::new(stream(StreamFraming::Bytes, StreamEnd::ConnectionClose))],
     ];
-    let document = export(&fixture(shapes, |_| None), &ExportOptions::new()).unwrap();
+    let document = export(&fixture(shapes, |_| None), &ExportOptions::new().skip_extensions()).unwrap();
     let first = serde_json::to_value(&document).unwrap();
     let imported = import_text(&document, ExportFormat::Json);
     let response = |path: &str| &imported.api.endpoints.iter().find(|endpoint| endpoint.path == path).unwrap().response;
@@ -609,6 +611,49 @@ fn import_reads_only_the_responses_map_so_stream_ends_and_byte_streams_come_back
     for index in 0..2 {
         assert_eq!(operation(&second, index)["responses"]["200"]["content"], operation(&first, index)["responses"]["200"]["content"]);
     }
+}
+
+#[test]
+fn extension_import_restores_declared_error_levels_and_stream_ends() {
+    let shapes = vec![
+        vec![sse(StreamEnd::EventNamed("message_stop".into()))],
+        vec![SuccessShape::new(stream(StreamFraming::Bytes, StreamEnd::ConnectionClose))],
+        vec![json_shape("Message"), sse(StreamEnd::ConnectionClose), fallback_binary()],
+    ];
+    let api = fixture(shapes.clone(), |index| match index {
+        0 => Some(ErrorSet::new().on(StatusMatch::exact(404), ErrorShape::empty())),
+        1 => Some(ErrorSet::none()),
+        _ => None,
+    });
+    let document = export(&api, &ExportOptions::new()).unwrap();
+    for format in [ExportFormat::Json, ExportFormat::Yaml] {
+        let imported = import_text(&document, format);
+        let warnings: Vec<_> = imported.diagnostics.iter().filter(|d| d.severity >= DiagnosticSeverity::Warn).collect();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(imported.api.errors, api.errors);
+        for (index, original) in api.endpoints.iter().enumerate() {
+            let endpoint = &imported.api.endpoints[index];
+            assert_eq!(endpoint.response, shapes[index], "/r{index}");
+            assert_eq!((&endpoint.errors, endpoint.no_declared_errors), (&original.errors, original.no_declared_errors), "/r{index}");
+        }
+        assert_eq!(serde_json::to_value(export(&imported.api, &ExportOptions::new()).unwrap()).unwrap()["paths"], serde_json::to_value(&document).unwrap()["paths"]);
+    }
+}
+
+/// `document` with every `x-schematic` member removed.
+fn without_extensions(mut document: Value) -> Value {
+    fn strip(value: &mut Value) {
+        match value {
+            Value::Object(members) => {
+                members.remove("x-schematic");
+                members.values_mut().for_each(strip);
+            }
+            Value::Array(items) => items.iter_mut().for_each(strip),
+            _ => {}
+        }
+    }
+    strip(&mut document);
+    document
 }
 
 // ---------------------------------------------------------------------------
@@ -626,7 +671,8 @@ fn union_cell(referenced_union: bool, referenced_response: bool) -> Value {
     let tagged = |name: &str, value: &str| shape(ResponseShape::Json(named(name)), |s| s.json_tag = Some(JsonTag::Field { name: "type".into(), value: json!(value) }));
     let listing = shape(ResponseShape::Json(TypeRef::Array(Box::new(named("File")))), |s| s.json_tag = Some(JsonTag::Array));
     let file = shape(ResponseShape::Json(named("File")), |s| s.json_tag = Some(JsonTag::Object));
-    let mut document = exported(&fixture(vec![vec![tagged("Directory", "dir"), tagged("File", "file")], vec![listing, file]], |_| None));
+    // The standard spelling alone: `x-schematic` would restore the shapes.
+    let mut document = without_extensions(exported(&fixture(vec![vec![tagged("Directory", "dir"), tagged("File", "file")], vec![listing, file]], |_| None)));
     for index in 0..2 {
         let path = format!("/paths/~1r{index}");
         if referenced_union {

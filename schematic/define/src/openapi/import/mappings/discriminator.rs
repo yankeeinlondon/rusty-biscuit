@@ -180,7 +180,7 @@ mod tests {
     /// `Pet` alias with every warning.
     fn import_pet(schemas: &str) -> (TypeAlias, Vec<OpenApiDiagnostic>) {
         let indented: String = schemas.lines().map(|line| format!("    {line}\n")).collect();
-        let yaml = format!("openapi: \"3.0.0\"\ninfo:\n  title: Test\n  version: \"1.0.0\"\npaths: {{}}\ncomponents:\n  schemas:\n{indented}");
+        let yaml = format!("openapi: \"3.0.0\"\ninfo:\n  title: Test\n  version: \"1.0.0\"\nservers:\n  - url: https://api.test\npaths: {{}}\ncomponents:\n  schemas:\n{indented}");
         let result = OpenApiImport::new(OpenApiSource::yaml(&yaml)).build().expect("the document imports");
         let pet = result
             .models

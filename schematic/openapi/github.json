@@ -231,6 +231,7 @@
               "application/vnd.github.raw+json"
             ]
           ],
+          "path_template": "/repos/{owner}/{repo}/contents/{+path}",
           "response": "Text"
         }
       },
@@ -3024,6 +3025,10 @@
     "url": "https://docs.github.com/en/rest"
   },
   "x-schematic": {
+    "env_auth": [
+      "GITHUB_TOKEN",
+      "GH_TOKEN"
+    ],
     "env_mapping": {
       "api_key": null,
       "basic_pass": null,
@@ -3057,7 +3062,8 @@
       "reset_unit": "epoch_seconds",
       "retry_after_header": "retry-after"
     },
-    "request_id_header": "x-github-request-id"
+    "request_id_header": "x-github-request-id",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "GitHub"

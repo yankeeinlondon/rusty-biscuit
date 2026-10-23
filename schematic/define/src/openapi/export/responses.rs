@@ -88,7 +88,7 @@ struct MediaMembers<'a> {
 ///
 /// [`crate::openapi::OpenApiError::Validation`] when a JSON reference's wire
 /// schema is not OpenAPI-compatible.
-pub(super) fn map_responses(shapes: &[SuccessShape], errors: &ErrorTable) -> Result<Responses, crate::openapi::OpenApiError> {
+pub(crate) fn map_responses(shapes: &[SuccessShape], errors: &ErrorTable) -> Result<Responses, crate::openapi::OpenApiError> {
     let mut by_status: IndexMap<u16, Vec<&SuccessShape>> = IndexMap::new();
     for shape in shapes {
         for status in success_statuses(shape) {

@@ -437,14 +437,9 @@ pub(crate) fn validate_api(api: &RestApi) -> Result<(), DefinitionError> {
     if api.name.trim().is_empty() || api.description.trim().is_empty() || !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
         return Err(fail("name and description must be nonempty and base URL must be HTTP(S)"));
     }
-    if let Some(mapping) = &api.env_mapping {
-        let expected = RestApi::legacy_env_mapping_for(&api.auth, &api.env_auth);
-        if (expected.bearer_token.is_some() && mapping.bearer_token.is_some() && mapping.bearer_token != expected.bearer_token)
-            || (expected.basic_user.is_some() && mapping.basic_user.is_some() && mapping.basic_user != expected.basic_user)
-            || (expected.basic_pass.is_some() && mapping.basic_pass.is_some() && mapping.basic_pass != expected.basic_pass)
-            || (expected.api_key.is_some() && mapping.api_key.is_some() && mapping.api_key != expected.api_key) {
-            return Err(fail("explicit environment mapping conflicts with authentication declaration"));
-        }
+    if let Some(mapping) = &api.env_mapping
+        && env_mapping_conflicts(&api.auth, &api.env_auth, mapping) {
+        return Err(fail("explicit environment mapping conflicts with authentication declaration"));
     }
     validate_origin(&api.cross_origin).map_err(|message| fail(&message))?;
     // Fields are public and deserializable, so values built through the
@@ -569,7 +564,7 @@ fn validate_typed_paths(ep: &Endpoint) -> Result<(), String> {
 /// Why a replacement policy's environment fallback has no usable source, if
 /// it has none. The source is the endpoint mapping if declared, else the
 /// API's effective mapping.
-fn credential_source_problem(api: &RestApi, ep: &Endpoint) -> Option<String> {
+pub(crate) fn credential_source_problem(api: &RestApi, ep: &Endpoint) -> Option<String> {
     let Some(EndpointAuth::Policy { policy, env_mapping }) = &ep.auth else { return None };
     let fallback = policy.env_fallback.as_ref()?;
     let (source, mapping) = match env_mapping {
@@ -601,16 +596,26 @@ fn credential_source_problem(api: &RestApi, ep: &Endpoint) -> Option<String> {
     problem.map(|problem| format!("endpoint auth policy falls back to {method} environment credentials, but {source} has {problem}"))
 }
 
+/// Whether an explicit `mapping` names different variables for a credential
+/// than `auth` and `env_auth` already declare.
+pub(crate) fn env_mapping_conflicts(auth: &AuthStrategy, env_auth: &[String], mapping: &EnvMapping) -> bool {
+    let expected = RestApi::legacy_env_mapping_for(auth, env_auth);
+    (expected.bearer_token.is_some() && mapping.bearer_token.is_some() && mapping.bearer_token != expected.bearer_token)
+        || (expected.basic_user.is_some() && mapping.basic_user.is_some() && mapping.basic_user != expected.basic_user)
+        || (expected.basic_pass.is_some() && mapping.basic_pass.is_some() && mapping.basic_pass != expected.basic_pass)
+        || (expected.api_key.is_some() && mapping.api_key.is_some() && mapping.api_key != expected.api_key)
+}
+
 pub(crate) fn valid_header_name(name: &str) -> bool {
     !name.is_empty() && name.bytes().all(|c| c.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&c))
 }
-fn valid_rust_name(name: &str) -> bool {
+pub(crate) fn valid_rust_name(name: &str) -> bool {
     let mut chars = name.chars();
     chars.next().is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
         && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
         && name != "_" && !["as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where", "while", "async", "await", "dyn", "abstract", "become", "box", "do", "final", "macro", "override", "priv", "typeof", "unsized", "virtual", "yield", "try", "gen"].contains(&name)
 }
-fn validate_origin(policy: &CrossOrigin) -> Result<(), String> {
+pub(crate) fn validate_origin(policy: &CrossOrigin) -> Result<(), String> {
     if let CrossOrigin::AllowOrigins(origins) = policy {
         for text in origins {
             let url = url::Url::parse(text).map_err(|_| format!("invalid exact origin `{text}`"))?;

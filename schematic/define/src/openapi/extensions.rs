@@ -1,29 +1,36 @@
-//! Vendor extensions for OpenAPI documents.
+//! The `x-schematic` vendor extensions an exported OpenAPI document carries.
 //!
-//! This module provides structs for `x-schematic` vendor extensions that preserve
-//! Schematic-specific metadata in exported OpenAPI documents. These extensions
-//! enable round-trip fidelity when importing and re-exporting API definitions.
+//! The structs here describe what the exporter writes: Schematic metadata
+//! that standard OpenAPI cannot express, at the document root
+//! ([`SchematicDocExtension`]) and on each operation
+//! ([`SchematicOpExtension`]). Standard fields stay authoritative; the
+//! extension never repeats the auth method, credential location or name,
+//! scopes, deprecation, or a JSON/text/binary request body.
 //!
-//! ## Extension Types
-//!
-//! - [`SchematicDocExtension`] - Document-level extension (API metadata)
-//! - [`SchematicOpExtension`] - Operation-level extension (endpoint metadata)
-//! - [`SchematicSchemaExtension`] - Schema-level extension (type metadata)
+//! The importer reads the same members back, each decoded and validated on
+//! its own (see `import/extension.rs`), so one malformed member never
+//! discards the rest. Only the subset documented in
+//! `schematic/docs/io/openapi-extensions.md` round-trips; pagination, GraphQL,
+//! OAuth2 details beyond the standard flows, and schema Rust paths do not.
 
-use serde::{Deserialize, Serialize};
+use indexmap::IndexMap;
+use serde::Serialize;
 
-use crate::auth::AuthStrategy;
 use crate::cross_origin::CrossOrigin;
+use crate::error_table::ErrorEntry;
 use crate::headers::EnvMapping;
 use crate::metadata::{RateLimit, RetryGuidance};
 use crate::request::ApiRequest;
-use crate::error_table::ErrorEntry;
 use crate::response::{ResponseShape, SuccessShape};
+
+/// The `x-schematic.version` this crate writes and the only major it reads.
+pub const EXTENSION_VERSION: u32 = 1;
 
 /// Document-level vendor extension for Schematic metadata.
 ///
-/// This extension is serialized to `x-schematic` at the OpenAPI document root level.
-/// It preserves API-wide configuration that doesn't have native OpenAPI equivalents.
+/// Serialized to `x-schematic` at the OpenAPI document root. Every optional
+/// member is omitted when unset; `env_mapping`'s four legacy members are the
+/// only nulls it writes.
 ///
 /// ## Examples
 ///
@@ -32,21 +39,17 @@ use crate::response::{ResponseShape, SuccessShape};
 ///
 /// let ext = SchematicDocExtension {
 ///     module_path: Some("openai".to_string()),
-///     request_suffix: None,
-///     env_mapping: None,
-///     headers: vec![],
-///     rate_limit: None,
-///     retry_guidance: None,
-///     errors: vec![],
-///     cross_origin: Default::default(),
-///     request_id_header: None,
+///     ..Default::default()
 /// };
 ///
 /// let json: serde_json::Value = ext.into();
-/// assert!(json.get("module_path").is_some());
+/// assert_eq!(json, serde_json::json!({"version": 1, "module_path": "openai"}));
 /// ```
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SchematicDocExtension {
+    /// The extension's major version, always [`EXTENSION_VERSION`].
+    pub version: u32,
+
     /// Custom module path for generated code.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub module_path: Option<String>,
@@ -59,29 +62,63 @@ pub struct SchematicDocExtension {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub env_mapping: Option<EnvMapping>,
 
-    /// Default headers for all endpoints.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Environment variable names for token and key credentials (names, not
+    /// credentials).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub env_auth: Vec<String>,
+
+    /// Default headers for all endpoints, as `[name, value]` pairs.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub headers: Vec<(String, String)>,
 
+    /// Auth details `securitySchemes` cannot express, keyed by the component
+    /// name of a scheme the root `security` applies.
+    #[serde(skip_serializing_if = "IndexMap::is_empty")]
+    pub auth: IndexMap<String, AuthDetail>,
+
     /// The API's rate-limit headers; descriptive only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<RateLimit>,
 
     /// The API's retry guidance; descriptive only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_guidance: Option<RetryGuidance>,
 
     /// The API's default error entries, as declared (R26).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<ErrorEntry>,
 
     /// The API's cross-origin policy; absent means the same-origin default.
-    #[serde(default, skip_serializing_if = "is_same_origin")]
+    #[serde(skip_serializing_if = "is_same_origin")]
     pub cross_origin: CrossOrigin,
 
     /// The response header carrying the provider's request id.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id_header: Option<String>,
+
+    /// Extra header and query names whose values are never shown.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub secret_names: Vec<String>,
+}
+
+impl Default for SchematicDocExtension {
+    fn default() -> Self {
+        Self {
+            version: EXTENSION_VERSION,
+            module_path: None,
+            request_suffix: None,
+            env_mapping: None,
+            env_auth: vec![],
+            headers: vec![],
+            auth: IndexMap::new(),
+            rate_limit: None,
+            retry_guidance: None,
+            errors: vec![],
+            cross_origin: CrossOrigin::SameOrigin,
+            request_id_header: None,
+            secret_names: vec![],
+        }
+    }
 }
 
 fn is_same_origin(policy: &CrossOrigin) -> bool {
@@ -94,35 +131,59 @@ impl From<SchematicDocExtension> for serde_json::Value {
     }
 }
 
+/// One auth detail OpenAPI cannot express (R54): a bearer token sent in a
+/// header other than `Authorization`, or an API-key value prefix.
+///
+/// The scheme it names is an `apiKey` scheme in a header; the header name
+/// stays in the scheme's standard `name`. Never holds a credential.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AuthDetail {
+    /// The `apiKey` header scheme carries a bearer token.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub bearer: bool,
+
+    /// Prepended to the API key before it is sent (Gitea: `"token "`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_prefix: Option<String>,
+}
+
+/// Parameter metadata OpenAPI cannot express, keyed under
+/// `params.<location>.<wire name>`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ParamDetail {
+    /// The value is a secret and is never shown.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub secret: bool,
+
+    /// The generated Rust field name, when it differs from the wire name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rust_name: Option<String>,
+}
+
 /// Operation-level vendor extension for Schematic metadata.
 ///
-/// This extension is serialized to `x-schematic` at the OpenAPI operation level.
-/// It preserves endpoint-specific configuration that extends OpenAPI capabilities.
+/// Serialized to `x-schematic` on each OpenAPI operation. Members the
+/// standard operation already states are omitted; `response` is always
+/// written for compatibility with earlier artifacts.
 ///
 /// ## Examples
 ///
 /// ```
 /// use schematic_define::openapi::SchematicOpExtension;
-/// use schematic_define::{ApiRequest, ResponseShape, TypeRef};
+/// use schematic_define::{ResponseShape, TypeRef};
 ///
 /// let ext = SchematicOpExtension {
-///     request: Some(ApiRequest::json_type("CreateUserBody")),
-///     response: ResponseShape::Json(TypeRef::Named("User".into())),
 ///     headers: vec![("X-Custom".to_string(), "value".to_string())],
-///     rate_limit: None,
-///     retry_guidance: None,
-///     success: vec![],
-///     errors: vec![],
-///     no_declared_errors: false,
-///     cross_origin: None,
+///     ..SchematicOpExtension::new(ResponseShape::Json(TypeRef::Named("User".into())))
 /// };
 ///
 /// let json: serde_json::Value = ext.into();
-/// assert!(json.get("request").is_some());
+/// assert_eq!(json["headers"], serde_json::json!([["X-Custom", "value"]]));
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SchematicOpExtension {
-    /// Request body specification (preserves FormData field details, etc.).
+    /// A form body's field details (multipart or URL-encoded); JSON, text,
+    /// and binary bodies are carried by `requestBody` alone.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<ApiRequest>,
 
@@ -130,93 +191,82 @@ pub struct SchematicOpExtension {
     /// (`{"Json": …}`, `"Text"`, `"Binary"`, `"Empty"`, or a stream).
     pub response: ResponseShape,
 
-    /// Endpoint-specific headers.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Endpoint-specific headers, as `[name, value]` pairs.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub headers: Vec<(String, String)>,
 
     /// The endpoint's own rate-limit headers, which replace the API's whole;
     /// absent when the endpoint inherits.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<RateLimit>,
 
     /// The endpoint's own retry guidance, which replaces the API's whole;
     /// absent when the endpoint inherits.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_guidance: Option<RetryGuidance>,
 
     /// Every success shape, written only when `response` cannot carry them:
     /// several shapes, a stream, or any selection fact, variant name, or note
     /// (R26).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub success: Vec<SuccessShape>,
 
     /// The endpoint's own error entries, which overlay the API's `errors`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<ErrorEntry>,
 
     /// The endpoint opts out of the API's default errors.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub no_declared_errors: bool,
 
     /// The endpoint's own cross-origin policy, which replaces the API's;
     /// absent when the endpoint inherits.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cross_origin: Option<CrossOrigin>,
+
+    /// Auth details of the schemes this operation's own `security` names.
+    /// Document-level details never apply to an operation override.
+    #[serde(skip_serializing_if = "IndexMap::is_empty")]
+    pub auth: IndexMap<String, AuthDetail>,
+
+    /// The environment mapping of an endpoint auth policy override.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env_mapping: Option<EnvMapping>,
+
+    /// The endpoint's path when it holds reserved-expansion markers
+    /// (`{+name}`), which the OpenAPI path key cannot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path_template: Option<String>,
+
+    /// Parameter details keyed by location (`query`, `header`, `cookie`,
+    /// `path`) and then wire name.
+    #[serde(skip_serializing_if = "IndexMap::is_empty")]
+    pub params: IndexMap<String, IndexMap<String, ParamDetail>>,
+}
+
+impl SchematicOpExtension {
+    /// An extension holding only `response`.
+    pub fn new(response: ResponseShape) -> Self {
+        Self {
+            request: None,
+            response,
+            headers: vec![],
+            rate_limit: None,
+            retry_guidance: None,
+            success: vec![],
+            errors: vec![],
+            no_declared_errors: false,
+            cross_origin: None,
+            auth: IndexMap::new(),
+            env_mapping: None,
+            path_template: None,
+            params: IndexMap::new(),
+        }
+    }
 }
 
 impl From<SchematicOpExtension> for serde_json::Value {
     fn from(ext: SchematicOpExtension) -> Self {
-        serde_json::to_value(ext).expect("x-schematic extension is always serializable")
-    }
-}
-
-/// Schema-level vendor extension for Schematic metadata.
-///
-/// This extension is serialized to `x-schematic` at the OpenAPI schema level.
-/// It preserves type information that enables code generation.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::openapi::SchematicSchemaExtension;
-///
-/// let ext = SchematicSchemaExtension {
-///     rust_type: Some("crate::models::User".to_string()),
-/// };
-///
-/// let json: serde_json::Value = ext.into();
-/// assert!(json.get("rust_type").is_some());
-/// ```
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SchematicSchemaExtension {
-    /// Full Rust type path for this schema.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rust_type: Option<String>,
-}
-
-impl From<SchematicSchemaExtension> for serde_json::Value {
-    fn from(ext: SchematicSchemaExtension) -> Self {
-        serde_json::to_value(ext).expect("x-schematic extension is always serializable")
-    }
-}
-
-/// Authentication extension for preserving AuthStrategy details.
-///
-/// This is embedded within [`SchematicDocExtension`] to preserve authentication
-/// configuration beyond what OpenAPI security schemes support.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AuthExtension {
-    /// The original AuthStrategy.
-    pub strategy: AuthStrategy,
-
-    /// Environment variable names for token and key credentials (legacy
-    /// format); Basic carries its own lists inside `strategy`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub env_auth: Vec<String>,
-}
-
-impl From<AuthExtension> for serde_json::Value {
-    fn from(ext: AuthExtension) -> Self {
         serde_json::to_value(ext).expect("x-schematic extension is always serializable")
     }
 }
@@ -226,347 +276,7 @@ mod tests {
     use super::*;
     use crate::headers::{EnvList, EnvMapping};
     use crate::request::FormField;
-
-    // =============================================
-    // SchematicDocExtension tests
-    // =============================================
-
-    #[test]
-    fn doc_extension_default() {
-        let ext = SchematicDocExtension::default();
-        assert!(ext.module_path.is_none());
-        assert!(ext.request_suffix.is_none());
-        assert!(ext.env_mapping.is_none());
-        assert!(ext.headers.is_empty());
-    }
-
-    #[test]
-    fn doc_extension_with_module_path() {
-        let ext = SchematicDocExtension {
-            module_path: Some("openai".to_string()),
-            ..Default::default()
-        };
-        assert_eq!(ext.module_path, Some("openai".to_string()));
-    }
-
-    #[test]
-    fn doc_extension_with_headers() {
-        let ext = SchematicDocExtension {
-            headers: vec![("X-Custom".to_string(), "value".to_string())],
-            ..Default::default()
-        };
-        assert_eq!(ext.headers.len(), 1);
-    }
-
-    #[test]
-    fn doc_extension_with_env_mapping() {
-        let mapping = EnvMapping {
-            bearer_token: Some(EnvList::single("API_KEY")),
-            ..Default::default()
-        };
-        let ext = SchematicDocExtension {
-            env_mapping: Some(mapping.clone()),
-            ..Default::default()
-        };
-        assert!(ext.env_mapping.is_some());
-    }
-
-    #[test]
-    fn doc_extension_into_json() {
-        let ext = SchematicDocExtension {
-            module_path: Some("test".to_string()),
-            request_suffix: Some("Params".to_string()),
-            env_mapping: None,
-            headers: vec![],
-            ..Default::default()
-        };
-
-        let json: serde_json::Value = ext.into();
-        assert!(json.is_object());
-        assert_eq!(
-            json.get("module_path").and_then(|v| v.as_str()),
-            Some("test")
-        );
-        assert_eq!(
-            json.get("request_suffix").and_then(|v| v.as_str()),
-            Some("Params")
-        );
-    }
-
-    #[test]
-    fn doc_extension_serde_roundtrip() {
-        let ext = SchematicDocExtension {
-            module_path: Some("mymodule".to_string()),
-            request_suffix: Some("Body".to_string()),
-            env_mapping: Some(EnvMapping {
-                bearer_token: Some(EnvList::single("TOKEN")),
-                ..Default::default()
-            }),
-            headers: vec![("Accept".to_string(), "application/json".to_string())],
-            ..Default::default()
-        };
-
-        let json = serde_json::to_string(&ext).unwrap();
-        let parsed: SchematicDocExtension = serde_json::from_str(&json).unwrap();
-        assert_eq!(ext, parsed);
-    }
-
-    #[test]
-    fn doc_extension_skips_empty_fields_in_json() {
-        let ext = SchematicDocExtension::default();
-        let json = serde_json::to_string(&ext).unwrap();
-
-        // Empty fields should be skipped
-        assert!(!json.contains("module_path"));
-        assert!(!json.contains("headers"));
-    }
-
-    // =============================================
-    // SchematicOpExtension tests
-    // =============================================
-
-    #[test]
-    fn op_extension_with_json_request() {
-        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
-            request: Some(ApiRequest::json_type("CreateBody")),
-            response: ResponseShape::Json(crate::TypeRef::Named("Response".into())),
-            headers: vec![],
-            };
-        assert!(ext.request.is_some());
-    }
-
-    #[test]
-    fn op_extension_with_form_data_request() {
-        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
-            request: Some(ApiRequest::form_data(vec![
-                FormField::file("document"),
-                FormField::text("name").optional(),
-            ])),
-            response: ResponseShape::Json(crate::TypeRef::Named("UploadResponse".into())),
-            headers: vec![],
-            };
-
-        if let Some(ApiRequest::FormData { fields }) = &ext.request {
-            assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].name, "document");
-            assert!(!fields[1].required);
-        } else {
-            panic!("Expected FormData request");
-        }
-    }
-
-    #[test]
-    fn op_extension_with_binary_response() {
-        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
-            request: None,
-            response: ResponseShape::Binary,
-            headers: vec![],
-            };
-        assert_eq!(ext.response, ResponseShape::Binary);
-    }
-
-    #[test]
-    fn op_extension_with_endpoint_headers() {
-        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
-            request: None,
-            response: ResponseShape::Empty,
-            headers: vec![("X-Custom-Header".to_string(), "custom-value".to_string())],
-            };
-        assert_eq!(ext.headers.len(), 1);
-    }
-
-    #[test]
-    fn op_extension_into_json() {
-        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
-            request: Some(ApiRequest::json_type("TestBody")),
-            response: ResponseShape::Text,
-            headers: vec![],
-            };
-
-        let json: serde_json::Value = ext.into();
-        assert!(json.is_object());
-        assert!(json.get("request").is_some());
-        assert!(json.get("response").is_some());
-    }
-
-    #[test]
-    fn op_extension_serde_roundtrip() {
-        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
-            request: Some(ApiRequest::form_data(vec![FormField::file("file")])),
-            response: ResponseShape::Json(crate::TypeRef::Named("Result".into())),
-            headers: vec![("X-Header".to_string(), "value".to_string())],
-            };
-
-        let json = serde_json::to_string(&ext).unwrap();
-        let parsed: SchematicOpExtension = serde_json::from_str(&json).unwrap();
-        assert_eq!(ext, parsed);
-    }
-
-    // =============================================
-    // SchematicSchemaExtension tests
-    // =============================================
-
-    #[test]
-    fn schema_extension_default() {
-        let ext = SchematicSchemaExtension::default();
-        assert!(ext.rust_type.is_none());
-    }
-
-    #[test]
-    fn schema_extension_with_rust_type() {
-        let ext = SchematicSchemaExtension {
-            rust_type: Some("crate::models::User".to_string()),
-        };
-        assert_eq!(ext.rust_type, Some("crate::models::User".to_string()));
-    }
-
-    #[test]
-    fn schema_extension_into_json() {
-        let ext = SchematicSchemaExtension {
-            rust_type: Some("MyType".to_string()),
-        };
-
-        let json: serde_json::Value = ext.into();
-        assert_eq!(
-            json.get("rust_type").and_then(|v| v.as_str()),
-            Some("MyType")
-        );
-    }
-
-    #[test]
-    fn schema_extension_serde_roundtrip() {
-        let ext = SchematicSchemaExtension {
-            rust_type: Some("crate::types::Response".to_string()),
-        };
-
-        let json = serde_json::to_string(&ext).unwrap();
-        let parsed: SchematicSchemaExtension = serde_json::from_str(&json).unwrap();
-        assert_eq!(ext, parsed);
-    }
-
-    #[test]
-    fn schema_extension_skips_none_rust_type() {
-        let ext = SchematicSchemaExtension::default();
-        let json = serde_json::to_string(&ext).unwrap();
-        assert!(!json.contains("rust_type"));
-    }
-
-    // =============================================
-    // AuthExtension tests
-    // =============================================
-
-    #[test]
-    fn auth_extension_bearer_token() {
-        let ext = AuthExtension {
-            strategy: AuthStrategy::BearerToken { header: None },
-            env_auth: vec!["OPENAI_API_KEY".to_string()],
-        };
-
-        assert!(matches!(ext.strategy, AuthStrategy::BearerToken { .. }));
-        assert_eq!(ext.env_auth.len(), 1);
-    }
-
-    #[test]
-    fn auth_extension_basic_auth() {
-        let ext = AuthExtension {
-            strategy: AuthStrategy::Basic {
-                username_env: EnvList::single("API_USERNAME"),
-                password_env: EnvList::single("API_PASSWORD"),
-            },
-            env_auth: vec![],
-        };
-
-        let json = serde_json::to_string(&ext).unwrap();
-        assert!(json.contains(r#""username_env":{"names":["API_USERNAME"]}"#));
-        assert_eq!(serde_json::from_str::<AuthExtension>(&json).unwrap(), ext);
-    }
-
-    #[test]
-    fn auth_extension_api_key() {
-        let ext = AuthExtension {
-            strategy: AuthStrategy::ApiKey {
-                header: "X-API-Key".to_string(),
-                value_prefix: None,
-            },
-            env_auth: vec!["MY_API_KEY".to_string()],
-        };
-
-        if let AuthStrategy::ApiKey { header, .. } = &ext.strategy {
-            assert_eq!(header, "X-API-Key");
-        } else {
-            panic!("Expected ApiKey strategy");
-        }
-    }
-
-    #[test]
-    fn auth_extension_into_json() {
-        let ext = AuthExtension {
-            strategy: AuthStrategy::BearerToken { header: None },
-            env_auth: vec!["TOKEN".to_string()],
-        };
-
-        let json: serde_json::Value = ext.into();
-        assert!(json.is_object());
-        assert!(json.get("strategy").is_some());
-        assert!(json.get("env_auth").is_some());
-    }
-
-    #[test]
-    fn auth_extension_serde_roundtrip() {
-        let ext = AuthExtension {
-            strategy: AuthStrategy::ApiKey {
-                header: "Authorization".to_string(),
-                value_prefix: None,
-            },
-            env_auth: vec!["KEY1".to_string(), "KEY2".to_string()],
-        };
-
-        let json = serde_json::to_string(&ext).unwrap();
-        let parsed: AuthExtension = serde_json::from_str(&json).unwrap();
-        assert_eq!(ext, parsed);
-    }
-
-    // =============================================
-    // Empty-collection round-trip (re-import own export)
-    // =============================================
-
-    #[test]
-    fn doc_extension_default_roundtrips_without_headers_field() {
-        let ext = SchematicDocExtension::default();
-        let json = serde_json::to_string(&ext).unwrap();
-        assert!(!json.contains("headers"));
-        let parsed: SchematicDocExtension = serde_json::from_str(&json).unwrap();
-        assert_eq!(ext, parsed);
-    }
-
-    #[test]
-    fn op_extension_empty_headers_roundtrips() {
-        let ext = SchematicOpExtension { rate_limit: None, retry_guidance: None, success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
-            request: Some(ApiRequest::json_type("Body")),
-            response: ResponseShape::Json(crate::TypeRef::Named("Response".into())),
-            headers: vec![],
-            };
-        let json = serde_json::to_string(&ext).unwrap();
-        assert!(!json.contains("headers"));
-        let parsed: SchematicOpExtension = serde_json::from_str(&json).unwrap();
-        assert_eq!(ext, parsed);
-    }
-
-    #[test]
-    fn auth_extension_empty_env_auth_roundtrips() {
-        let ext = AuthExtension {
-            strategy: AuthStrategy::BearerToken { header: None },
-            env_auth: vec![],
-        };
-        let json = serde_json::to_string(&ext).unwrap();
-        assert!(!json.contains("env_auth"));
-        let parsed: AuthExtension = serde_json::from_str(&json).unwrap();
-        assert_eq!(ext, parsed);
-    }
-
-    // =============================================
-    // Rate-limit and retry metadata
-    // =============================================
+    use serde_json::json;
 
     fn metadata() -> (RateLimit, RetryGuidance) {
         use crate::metadata::{Backoff, ResetUnit, StatusSelector};
@@ -585,24 +295,70 @@ mod tests {
     }
 
     #[test]
-    fn absent_metadata_adds_no_extension_members() {
-        let doc = serde_json::to_value(SchematicDocExtension::default()).unwrap();
-        assert!(doc.get("rate_limit").is_none() && doc.get("retry_guidance").is_none());
-        let op = serde_json::to_value(SchematicOpExtension {
-            rate_limit: None, retry_guidance: None, request: None, response: ResponseShape::Empty, headers: vec![],
-            success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
-        }).unwrap();
-        assert_eq!(op, serde_json::json!({"response": "Empty"}));
+    fn defaults_write_only_the_version_and_response() {
+        assert_eq!(serde_json::Value::from(SchematicDocExtension::default()), json!({"version": 1}));
+        assert_eq!(serde_json::Value::from(SchematicOpExtension::new(ResponseShape::Empty)), json!({"response": "Empty"}));
     }
 
     #[test]
-    fn metadata_keeps_every_field_through_both_extensions() {
+    fn env_mapping_writes_its_four_legacy_members_as_null() {
+        let doc = SchematicDocExtension {
+            env_mapping: Some(EnvMapping { bearer_token: Some(EnvList::single("TOKEN")), ..Default::default() }),
+            ..Default::default()
+        };
+        assert_eq!(serde_json::Value::from(doc)["env_mapping"], json!({
+            "bearer_token": {"names": ["TOKEN"]}, "basic_user": null, "basic_pass": null, "api_key": null,
+        }));
+    }
+
+    #[test]
+    fn auth_details_and_param_details_omit_unset_members() {
+        let doc = SchematicDocExtension {
+            env_auth: vec!["GITEA_TOKEN".into()],
+            auth: IndexMap::from([
+                ("apiKeyAuth".to_string(), AuthDetail { bearer: false, value_prefix: Some("token ".into()) }),
+                ("bearerAuth".to_string(), AuthDetail { bearer: true, value_prefix: None }),
+            ]),
+            secret_names: vec!["x-session".into()],
+            ..Default::default()
+        };
+        let json = serde_json::Value::from(doc);
+        assert_eq!(json["auth"], json!({"apiKeyAuth": {"value_prefix": "token "}, "bearerAuth": {"bearer": true}}));
+        assert_eq!(json["env_auth"], json!(["GITEA_TOKEN"]));
+        assert_eq!(json["secret_names"], json!(["x-session"]));
+
+        let op = SchematicOpExtension {
+            path_template: Some("/repos/{+path}".into()),
+            params: IndexMap::from([("query".to_string(), IndexMap::from([
+                ("api-key".to_string(), ParamDetail { secret: true, rust_name: None }),
+                ("type".to_string(), ParamDetail { secret: false, rust_name: Some("kind".into()) }),
+            ]))]),
+            ..SchematicOpExtension::new(ResponseShape::Empty)
+        };
+        let json = serde_json::Value::from(op);
+        assert_eq!(json["params"], json!({"query": {"api-key": {"secret": true}, "type": {"rust_name": "kind"}}}));
+        assert_eq!(json["path_template"], "/repos/{+path}");
+    }
+
+    #[test]
+    fn form_requests_keep_their_writer_nulls() {
+        let op = SchematicOpExtension {
+            request: Some(ApiRequest::form_data(vec![FormField::files("samples")])),
+            ..SchematicOpExtension::new(ResponseShape::Empty)
+        };
+        assert_eq!(serde_json::Value::from(op)["request"], json!({"FormData": {"fields": [{
+            "name": "samples", "kind": {"Files": {"accept": [], "min": null, "max": null}}, "required": true, "description": null,
+        }]}}));
+    }
+
+    #[test]
+    fn metadata_keeps_every_field_in_both_extensions() {
         let (rate_limit, retry) = metadata();
-        let expected_rate = serde_json::json!({
+        let expected_rate = json!({
             "limit_header": "x-limit", "remaining_header": "x-remaining", "reset_header": "x-reset",
             "retry_after_header": "retry-after", "reset_unit": "http_date",
         });
-        let expected_retry = serde_json::json!({
+        let expected_retry = json!({
             "retry_on": [{"code": 429}, {"range": {"start": 500, "end": 503}}],
             "honor_retry_after": true, "max_attempts": 4, "backoff": {"fixed": {"delay_ms": 750}},
         });
@@ -610,53 +366,22 @@ mod tests {
         let doc = SchematicDocExtension {
             rate_limit: Some(rate_limit.clone()), retry_guidance: Some(retry.clone()), ..Default::default()
         };
-        let doc_json: serde_json::Value = doc.clone().into();
+        let doc_json: serde_json::Value = doc.into();
         assert_eq!(doc_json["rate_limit"], expected_rate);
         assert_eq!(doc_json["retry_guidance"], expected_retry);
-        assert_eq!(serde_json::from_value::<SchematicDocExtension>(doc_json).unwrap(), doc);
 
         let op = SchematicOpExtension {
-            rate_limit: Some(rate_limit), retry_guidance: Some(retry), request: None,
-            response: ResponseShape::Empty, headers: vec![], success: vec![], errors: vec![], no_declared_errors: false, cross_origin: None,
+            rate_limit: Some(rate_limit), retry_guidance: Some(retry),
+            ..SchematicOpExtension::new(ResponseShape::Empty)
         };
-        let op_json: serde_json::Value = op.clone().into();
+        let op_json: serde_json::Value = op.into();
         assert_eq!(op_json["rate_limit"], expected_rate);
         assert_eq!(op_json["retry_guidance"], expected_retry);
-        assert_eq!(serde_json::from_value::<SchematicOpExtension>(op_json).unwrap(), op);
-    }
-
-    #[test]
-    fn response_vocabulary_round_trips_through_both_extensions() {
-        use crate::error_table::StatusMatch;
-        use crate::response::{JsonTag, ResponseShape, StreamEnd, StreamFraming};
-        let mut tagged = SuccessShape::new(ResponseShape::Json(crate::TypeRef::Named("File".into())));
-        tagged.json_tag = Some(JsonTag::Field { name: "type".into(), value: serde_json::json!("file") });
-        tagged.variant = Some("File".into());
-        tagged.statuses = vec![200];
-        let mut fallback = SuccessShape::new(ResponseShape::Binary);
-        fallback.fallback = true;
-        fallback.note = Some("anything else".into());
-        let stream = SuccessShape::new(ResponseShape::Stream {
-            framing: StreamFraming::Ndjson(crate::TypeRef::Named("Chunk".into())),
-            end: StreamEnd::FieldEquals { field: "done".into(), value: serde_json::json!(true) },
-            keep: true,
-        });
-        let errors = vec![ErrorEntry { content_type: Some("text/html".into()), ..ErrorEntry::new(StatusMatch::exact(404), ResponseShape::Text) }];
-        let op = SchematicOpExtension {
-            rate_limit: None, retry_guidance: None, request: None, response: ResponseShape::Empty, headers: vec![],
-            success: vec![tagged, fallback, stream], errors: errors.clone(), no_declared_errors: false, cross_origin: None,
-        };
-        let doc = SchematicDocExtension { errors, ..Default::default() };
-
-        let op_json: serde_json::Value = op.clone().into();
-        assert_eq!(op_json["success"][2]["shape"]["Stream"], serde_json::json!({"framing": {"Ndjson": {"Named": "Chunk"}}, "end": {"FieldEquals": {"field": "done", "value": true}}, "keep": true}));
-        assert_eq!(serde_json::from_value::<SchematicOpExtension>(op_json).unwrap(), op);
-        assert_eq!(serde_json::from_value::<SchematicDocExtension>(doc.clone().into()).unwrap(), doc);
     }
 
     #[test]
     fn cross_origin_and_request_id_are_written_only_when_declared() {
-        let default_doc = serde_json::to_value(SchematicDocExtension::default()).unwrap();
+        let default_doc = serde_json::Value::from(SchematicDocExtension::default());
         assert!(default_doc.get("cross_origin").is_none() && default_doc.get("request_id_header").is_none());
 
         let doc = SchematicDocExtension {
@@ -664,17 +389,11 @@ mod tests {
             request_id_header: Some("x-request-id".into()),
             ..Default::default()
         };
-        let doc_json: serde_json::Value = doc.clone().into();
-        assert_eq!(doc_json["cross_origin"], serde_json::json!({"AllowOrigins": ["https://uploads.example.com"]}));
+        let doc_json: serde_json::Value = doc.into();
+        assert_eq!(doc_json["cross_origin"], json!({"AllowOrigins": ["https://uploads.example.com"]}));
         assert_eq!(doc_json["request_id_header"], "x-request-id");
-        assert_eq!(serde_json::from_value::<SchematicDocExtension>(doc_json).unwrap(), doc);
 
-        let op = SchematicOpExtension {
-            rate_limit: None, retry_guidance: None, request: None, response: ResponseShape::Empty, headers: vec![],
-            success: vec![], errors: vec![], no_declared_errors: false, cross_origin: Some(CrossOrigin::Deny),
-        };
-        let op_json: serde_json::Value = op.clone().into();
-        assert_eq!(op_json["cross_origin"], "Deny");
-        assert_eq!(serde_json::from_value::<SchematicOpExtension>(op_json).unwrap(), op);
+        let op = SchematicOpExtension { cross_origin: Some(CrossOrigin::Deny), ..SchematicOpExtension::new(ResponseShape::Empty) };
+        assert_eq!(serde_json::Value::from(op)["cross_origin"], "Deny");
     }
 }
