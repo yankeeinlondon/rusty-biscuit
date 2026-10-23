@@ -90,6 +90,8 @@ references:
     biscuit-visualized/docs/research/mermaid/zed-merman.md: >-
         Research on Zed's styling layer over Merman. GPL-3.0-or-later; ideas only,
         never code (D6).
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Merman Rendering

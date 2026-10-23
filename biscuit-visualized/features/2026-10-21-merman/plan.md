@@ -3,7 +3,7 @@ total_phases: 7
 created: 2026-10-21
 updated: 2026-10-22
 phase: 1
-start_phase: 7
+start_phase: 8
 agent: claude/sonnet
 yolo: true
 rulings_decided_on: 2026-10-22
@@ -291,6 +291,234 @@ docs_created_during_phase_6:
 skills_files_updated_during_phase_6:
     - .claude/skills/biscuit-visualized/SKILL.md
     - .claude/skills/biscuit-visualized/artifacts-caching.md
+source_files_during_phase_7:
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/mermaid/config.rs
+    - biscuit-visualized/src/src/mermaid/postprocess.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/components/mermaid.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - biscuit-visualized/src/src/tests/gitgraph_layout_tests.rs
+    - biscuit-visualized/src/src/tests/gitgraph_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_cache_key_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_family_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_tests.rs
+    - biscuit-visualized/src/tests/l1/render_tree_diagram_hook.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/mod.rs
+    - biscuit-terminal/lib/src/discovery/startup_exchange.rs
+    - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+docs_updated_during_phase_7:
+    - biscuit-visualized/docs/merman.md
+    - biscuit-visualized/docs/mermaid-gitgraph.md
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - biscuit-visualized/docs/components/git_graph.md
+    - biscuit-visualized/docs/components/graph_expression.md
+    - biscuit-visualized/docs/dependencies.md
+    - biscuit-visualized/README.md
+    - biscuit-visualized/bench/README.md
+    - docs/dependencies.md
+    - biscuit-terminal/docs/discovery/terminal-queries.md
+    - biscuit-terminal/docs/discovery/color.md
+    - biscuit-terminal/cli/README.md
+    - darkmatter/docs/rendering/mermaid.md
+    - worktree/docs/git-graph.md
+    - worktree/docs/performance-testing.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+    - .claude/skills/biscuit-visualized/artifacts-caching.md
+    - .claude/skills/biscuit-visualized/rasterization.md
+    - .claude/skills/biscuit-terminal/diagrams.md
+    - .claude/skills/biscuit-terminal/discovery.md
+source_code:
+    - biscuit-visualized/features/2026-10-21-merman/spikes/s3-gitgraph-geometry/Cargo.toml
+    - biscuit-visualized/features/2026-10-21-merman/spikes/s3-gitgraph-geometry/Cargo.lock
+    - biscuit-visualized/features/2026-10-21-merman/spikes/s3-gitgraph-geometry/src/main.rs
+    - biscuit-visualized/src/Cargo.toml
+    - Cargo.lock
+    - biscuit-terminal/lib/Cargo.toml
+    - biscuit-visualized/src/src/artifact.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/lib.rs
+    - biscuit-visualized/src/src/fonts/mod.rs
+    - biscuit-visualized/src/src/fonts/bundled.rs
+    - biscuit-visualized/src/src/fonts/chain.rs
+    - biscuit-visualized/src/src/fonts/query.rs
+    - biscuit-visualized/src/src/fonts/metadata.rs
+    - biscuit-visualized/src/src/fonts/matching.rs
+    - biscuit-visualized/src/src/fonts/shaper.rs
+    - biscuit-visualized/src/src/fonts/measure.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/newline.rs
+    - biscuit-visualized/src/src/raster/mod.rs
+    - biscuit-visualized/src/src/raster/png.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/bundled_font_tests.rs
+    - biscuit-visualized/src/src/tests/font_chain_tests.rs
+    - biscuit-visualized/src/src/tests/measure_tests.rs
+    - biscuit-visualized/src/src/tests/newline_tests.rs
+    - biscuit-visualized/src/src/tests/raster_tests.rs
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_class.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_er.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_flowchart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_mindmap.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_sequence.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_state.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/mixed/mixed_class.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/mixed/mixed_flowchart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/mixed/mixed_mindmap.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/mixed/mixed_sequence.mmd
+    - biscuit-visualized/src/assets/fonts/inter/Inter-Regular.ttf
+    - biscuit-visualized/src/assets/fonts/inter/Inter-Bold.ttf
+    - biscuit-visualized/src/assets/fonts/noto-emoji/NotoEmoji-Variable.ttf
+    - biscuit-terminal/lib/examples/discovery_probe.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/mod.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/parse.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/query.rs
+    - biscuit-terminal/lib/src/discovery/startup_exchange.rs
+    - biscuit-terminal/lib/tests/common/pty.rs
+    - biscuit-terminal/lib/tests/l1/level1_graphics_probe.rs
+    - biscuit-terminal/lib/tests/l1/level1_osc4_palette.rs
+    - biscuit-terminal/lib/tests/l1/main.rs
+    - biscuit-visualized/src/src/components/git_graph.rs
+    - biscuit-visualized/src/src/components/git_graph/tests.rs
+    - biscuit-visualized/src/src/components/mermaid.rs
+    - biscuit-visualized/src/src/mermaid/gitgraph.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - biscuit-visualized/src/src/tests/gitgraph_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_tests.rs
+    - biscuit-visualized/src/src/mermaid/gitgraph_layout.rs
+    - biscuit-visualized/src/src/mermaid/postprocess.rs
+    - biscuit-visualized/src/src/tests/cache_identity_tests.rs
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/LICENSES/mermaid/LICENSE
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/LICENSES/merman-LICENSE-APACHE
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/LICENSES/merman-LICENSE-MIT
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/agentflow.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/architecture.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/block.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/c4.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/class.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/cynefin.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/er.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/eventmodeling.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/flowchart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/gantt.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/gitgraph.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/info.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/ishikawa.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/journey.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/kanban.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/mindmap.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/packet.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/pie.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/quadrantchart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/radar.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/railroad.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/requirement.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/sankey.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/sequence.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/state.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/swimlane.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/timeline.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/treeView.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/treemap.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/usecase.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/venn.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/wardley.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/xychart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/empty_branch_merge.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/labeled_merge.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/layout.json
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/layout.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/long_labels.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/observation_1.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/tag_collision_adjacent.mmd
+    - biscuit-visualized/src/src/tests/gitgraph_layout_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_cache_key_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_family_tests.rs
+    - biscuit-visualized/src/src/tests/postprocess_tests.rs
+    - biscuit-visualized/src/src/tests/html_static_tests.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - darkmatter/lib/src/markdown/render_tree/svg_sanitizer.rs
+    - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+    - darkmatter/lib/tests/l1/mermaid_static_svg.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - sniff/cli/tests/l1/snapshots.rs
+    - biscuit-terminal/lib/tests/level2/level2_windows_console_query.rs
+    - biscuit-visualized/src/src/mermaid/config.rs
+    - biscuit-visualized/src/src/mermaid/color.rs
+    - biscuit-visualized/src/src/mermaid/palette.rs
+    - biscuit-visualized/src/src/mermaid/design.rs
+    - biscuit-visualized/src/src/mermaid/accents.rs
+    - biscuit-visualized/src/src/mermaid/contrast.rs
+    - biscuit-visualized/src/src/tests/palette_tests.rs
+    - biscuit-visualized/src/src/tests/theme_tests.rs
+    - biscuit-visualized/features/2026-10-21-merman/gallery/Cargo.toml
+    - biscuit-visualized/features/2026-10-21-merman/gallery/Cargo.lock
+    - biscuit-visualized/features/2026-10-21-merman/gallery/src/main.rs
+    - biscuit-visualized/justfile
+    - biscuit-visualized/src/src/tests/golden_tests.rs
+    - biscuit-visualized/src/src/tests/contrast_corpus_tests.rs
+    - biscuit-visualized/src/src/tests/corpus_measure_tests.rs
+    - biscuit-visualized/bench/Cargo.toml
+    - biscuit-visualized/bench/Cargo.lock
+    - biscuit-visualized/bench/baseline.json
+    - biscuit-visualized/bench/src/main.rs
+    - biscuit-visualized/bench/src/baseline.rs
+    - biscuit-visualized/bench/src/corpus.rs
+    - biscuit-visualized/bench/src/stats.rs
+    - biscuit-visualized/bench/tests/wiring.rs
+    - biscuit-visualized/src/tests/l1/render_tree_diagram_hook.rs
+documentation:
+    - biscuit-visualized/features/2026-10-21-merman/spikes/s3-gitgraph-geometry/FINDINGS.md
+    - biscuit-visualized/features/2026-10-21-merman/spikes/s1-comparison/windows-leg.md
+    - biscuit-visualized/docs/merman.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/pr-01-gitgraph-commit-spacing.md
+    - biscuit-visualized/src/assets/fonts/inter/README.md
+    - biscuit-visualized/src/assets/fonts/inter/OFL.txt
+    - biscuit-visualized/src/assets/fonts/noto-emoji/README.md
+    - biscuit-visualized/src/assets/fonts/noto-emoji/OFL.txt
+    - biscuit-visualized/src/src/tests/fixtures/merman/README.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/01-default-measurement-clips-labels.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/02-wrapped-labels-lose-line-breaks.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/03-neo-dark-dividers-invisible.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/04-normalize-backslash-n-like-br.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/05-backslash-n-pie-gitgraph-block.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/06-er-attribute-comment-br-clips.md
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/README.md
+    - biscuit-visualized/features/2026-10-21-merman/gallery/themed-gallery-macos.html
+    - biscuit-visualized/features/2026-10-21-merman/gallery/themed-gallery-linux.html
+    - biscuit-visualized/bench/README.md
+    - docs/dependencies.md
+    - biscuit-visualized/docs/dependencies.md
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - biscuit-visualized/docs/components/graph_expression.md
+    - biscuit-terminal/docs/dependencies.md
+    - biscuit-terminal/docs/discovery/color.md
+    - biscuit-terminal/docs/discovery/terminal-queries.md
+    - biscuit-visualized/README.md
+    - biscuit-visualized/docs/components/git_graph.md
+    - biscuit-visualized/docs/mermaid-gitgraph.md
+    - biscuit-visualized/features/2026-10-21-merman/spec.md
+    - worktree/docs/git-graph.md
+    - darkmatter/docs/rendering/mermaid.md
+    - biscuit-terminal/cli/README.md
+    - biscuit-visualized/features/2026-10-21-merman/plan.md
+    - biscuit-visualized/features/2026-10-21-merman/implementation-log.md
+    - .claude/skills/os/build-hosts.md
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/artifacts-caching.md
+    - .claude/skills/biscuit-visualized/rasterization.md
+    - .claude/skills/biscuit-terminal/discovery.md
+    - .claude/skills/biscuit-visualized/diagram-components.md
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+    - .claude/skills/worktree/git-graph.md
+    - .claude/skills/biscuit-terminal/diagrams.md
+    - worktree/docs/performance-testing.md
+completed_phase: 7
+implemented: true
 ---
 
 # Plan: Merman Rendering
@@ -1215,7 +1443,7 @@ phases have already written their behavior into these pages (marked
   `artifacts-caching.md`, `diagram-components.md`) and the `biscuit-terminal`
   skill (`.claude/skills/biscuit-terminal/`, at least `diagrams.md` and
   `discovery.md` for OSC 4) where they describe Mermaid rendering.
-- [ ] **README (R-C12).** `biscuit-visualized/README.md` stays an overview
+- [x] **README (R-C12).** `biscuit-visualized/README.md` stays an overview
   linking into `docs/` (merman.md, components), with no reference content.
 - [x] **Upstream drafts check (AC-U1, AC-C2a).** The six issue files and the
   pull request draft exist in `upstream-issues/`; record in the log any issue
@@ -1223,7 +1451,7 @@ phases have already written their behavior into these pages (marked
 
 **Wave 17 — after Wave 16.**
 
-- [ ] **R-D4: audience validation checkpoint (AC-D4, AC-D7).** For every
+- [x] **R-D4: audience validation checkpoint (AC-D4, AC-D7).** For every
   document touched by this work (the Phase 7 files above,
   `biscuit-terminal/docs/discovery/terminal-queries.md` and `color.md`,
   `darkmatter/docs/rendering/mermaid.md`, `worktree/docs/git-graph.md`),
@@ -1237,25 +1465,25 @@ phases have already written their behavior into these pages (marked
     - no reference to a spec or plan (search for `features/`, `fixes/`, and
       `YYYY-MM-DD-name` patterns);
     - every link resolves (link check).
-- [ ] **R-D6: planned markers (AC-D6).** Search every touched document for
+- [x] **R-D6: planned markers (AC-D6).** Search every touched document for
   **planned**; remove each marker whose behavior has shipped (check each hit
   against the code); any marker left names behavior that has not shipped and
   is listed in the log.
-- [ ] **Final verification sweep.** `just test`, `just test-l2`, `just lint` in
+- [x] **Final verification sweep.** `just test`, `just test-l2`, `just lint` in
   `biscuit-visualized`, `biscuit-terminal`, `darkmatter`, `sniff`, `worktree`;
   `cargo tree -i mermaid-rs-renderer` empty; `cargo tree -d` one usvg; Merman
   rev exact on the fork; run `just ci-local --plan` and review the scheduled
   cells before anyone pushes.
-- [ ] **Clean-room check (R-T10, D69, AC-T9).** A reviewer confirms that no
+- [x] **Clean-room check (R-T10, D69, AC-T9).** A reviewer confirms that no
   file in the change carries a Zed copyright or a GPL header, and that a
   repository search over the changed code for Zed-specific identifiers (at
   least `zed-accent`, `mermaid_render`, `inject_css`, `accent_colors`) finds
   none; record the check and the search in the log.
-- [ ] **Comment-drift pass.** Re-read `///`/`//!` and inline comments in every
+- [x] **Comment-drift pass.** Re-read `///`/`//!` and inline comments in every
   touched file; code wins over comments; record any drift fixed.
-- [ ] **Matrix smell grep.** `#[serde(default)]`, `unwrap_or_default()`,
+- [x] **Matrix smell grep.** `#[serde(default)]`, `unwrap_or_default()`,
   `filter_map(.. as_str())`, `.ok()` on load-bearing parses in the new loaders.
-- [ ] **Close-out entry.** In the log, record: AC checklist status, AC-S4
+- [x] **Close-out entry.** In the log, record: AC checklist status, AC-S4
   (D30), departures from the spec, follow-ups (`2026-10-21-mermaid-embedded-font`,
   `2026-10-22-merman-text-fallback`, D57's return to stock Merman,
   prerequisite status). Leave the spec in place and do not run `just
@@ -1263,14 +1491,14 @@ phases have already written their behavior into these pages (marked
 
 ### Validation checkpoint 7 (final)
 
-- [ ] Every acceptance criterion in the spec is verified with evidence in the
+- [x] Every acceptance criterion in the spec is verified with evidence in the
   log, or listed with its gate: AC-T5 (Ken's sign-off in the first review,
   D74), or release (Windows detection prerequisite, D7). Open items are
   listed in `decisions_for_review` and never block the next item.
-- [ ] Every R-D requirement has its task ticked and its AC verified
+- [x] Every R-D requirement has its task ticked and its AC verified
   (R-D1/AC-D1, R-D2/AC-D2, R-D3/AC-D3, R-D4/AC-D4 and AC-D7, R-D5/AC-D5,
   R-D6/AC-D6).
-- [ ] Set `implemented: true` on the plan, log, and spec even with items in
+- [x] Set `implemented: true` on the plan, log, and spec even with items in
   `decisions_for_review` (D74), and state: **implementation complete, ready
   for review.**
 

@@ -427,30 +427,293 @@ decisions_for_review:
       `mermaid/LICENSE`) rather than the plan's `LICENSE-MIT`,
       `LICENSE-APACHE`, `THIRD_PARTY_LICENSES/mermaid`; renaming is a
       file move plus one README line.
-message_to_agent: |-
-  Phase 6 is implemented. Read the log's "## Phase 6" section first.
-
-  - The golden corpus is live: `src/src/tests/golden_tests.rs` (204 tests),
-    `contrast_corpus_tests.rs` (AC-T4 oracle), `corpus_measure_tests.rs`
-    (AC-M1/M2). ANY change to rendered output shows up as golden diffs:
-    regenerate with `INSTA_UPDATE=always BISCUIT_VISUALIZED_UPDATE_GOLDENS=1
-    cargo nextest run -p biscuit-visualized --all-features --lib -E
-    'test(/golden_tests::/)'`, rerun without the variables, delete any
-    `*.snap.new`, and bump `MERMAID_BACKEND` (now `+bv3`) for output changes.
-  - `biscuit-visualized` is now gating in CI (`gates = true`); its L1 runs on
-    all four environments. Goldens and PNGs passed on macOS, Linux, native
-    Windows (pixel-identical everywhere) and WSL2 (see the log).
-  - Phase 7 docs: `docs/merman.md` has new "Golden tests" and "Benchmark"
-    sections; the Merman-only family list (D16, R-D1) is still to write. The
-    benchmark's own reference is `bench/README.md`.
-  - Open for review (in `decisions_for_review`): the sequence `box` contrast
-    allow-list, sequence/timeline over the 50 ms warm limit on build-linux
-    (`just bench` there exits 1), and the eleven restyled diagram types
-    (galleries regenerated).
-  - Still pre-existing and out of scope: darkmatter key-order failures
-    (fix `2026-10-23-frontmatter-key-order`) and worktree-cli L2 Kitty tests
-    `level2_graph_height_cap_elides_lanes_in_a_short_kitty_window`,
-    `level2_graph_restores_lane_density_in_kitty`.
+    - |-
+      **gitGraph tag sizes now follow Merman's own reading (a fix made in
+      the final phase).** The final checks found that the tag spacing code
+      read an author's `tagLabelFontSize` as a plain pixel number, while
+      Merman accepts `px`, `em`, `%`, `inherit`, and `unset` and draws a
+      bare number at 10 px. With `"150%"`, tags were spaced for 10 px but
+      drawn at 24 px, so they overlapped. The code now reads the value
+      exactly as Merman draws it, 12 new tests compare our measured tag
+      boxes with the boxes Merman actually draws, and the cache version was
+      bumped (`+bv4`) so no old image is reused.
+      - **Option A: keep the fix.** Pro: tags never overlap, whatever unit
+        the author uses. Con: none known.
+      - **Option B: revert it** and document that only `px` sizes are
+        supported. Con: overlapping tags for the other units.
+      Recommendation: **A**. Reverting means undoing two small functions in
+      `mermaid/render.rs` and deleting the tests.
+    - |-
+      **`docs/mermaid-gitgraph.md` was kept, not merged into
+      `docs/merman.md`.** The spec allowed either. That page is the only
+      full description of the gitGraph tag-spacing rules, which apply to
+      every caller, not just the git graph component. `merman.md` keeps a
+      short summary that links to it.
+      - **Option A: keep it.** Pro: `merman.md` (already long) stays
+        readable. Con: one more page.
+      - **Option B: fold it into `merman.md`.** Con: a longer page; links
+        from about six other pages and skills must be repointed.
+      Recommendation: **A**.
+    - |-
+      **The final check of the other packages was scoped, not a full run of
+      every suite.** The plan's final sweep lists `just test` and
+      `just test-l2` in five packages. This phase changed only comments and
+      docs in `biscuit-terminal`, `darkmatter`, and `worktree`, plus a
+      gitGraph tag-size path none of them uses. So it ran the full suite in
+      `biscuit-visualized` (933 passed) and the affected tests in the others
+      (worktree graph 87/87 L1; darkmatter Mermaid 125/125; biscuit-terminal
+      color and OSC 448/448; biscuit-terminal-cli 4/4). Still open from
+      before: darkmatter's 45 key-order failures (their own fix) and one
+      worktree Kitty L2 test.
+      - **Option A: accept,** and let CI run the full cells (about 60–100
+        minutes for a pull request).
+      - **Option B: run every suite locally before merging.** Con: several
+        hours of local runs that prove nothing new.
+      Recommendation: **A**.
+    - |-
+      **Found, not fixed: the graph (non-Mermaid) image cache ignores
+      fonts.** Graph PNGs are drawn through the same font chain as Mermaid
+      diagrams, but their cache key has no font identity. After
+      `MERMAID_FONT` changes, or a font is installed, a graph drawn earlier
+      is served in its old face until its cache entry is removed (the
+      component doc says so). Mermaid's key does include fonts.
+      - **Option A: a small follow-up** that adds the font chain's cache
+        identity to the graph key (and bumps the graph backend id).
+      - **Option B: accept it.** Graphs rarely change fonts.
+      Recommendation: **A**, as its own fix. Also noted for follow-up:
+      stale comments in `darkmatter/lib/src/mermaid/mod.rs` (`mmdc`, icon
+      packs) and `markdown/output/terminal.rs` ("mermaid.ink"); 58
+      pre-existing broken workspace links in the root
+      `docs/dependencies.md`; and `biscuit-terminal`'s lib tests not
+      compiling with `--all-features`.
+source_files_during_phase_7:
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/mermaid/config.rs
+    - biscuit-visualized/src/src/mermaid/postprocess.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/components/mermaid.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - biscuit-visualized/src/src/tests/gitgraph_layout_tests.rs
+    - biscuit-visualized/src/src/tests/gitgraph_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_cache_key_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_family_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_tests.rs
+    - biscuit-visualized/src/tests/l1/render_tree_diagram_hook.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/mod.rs
+    - biscuit-terminal/lib/src/discovery/startup_exchange.rs
+    - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+docs_updated_during_phase_7:
+    - biscuit-visualized/docs/merman.md
+    - biscuit-visualized/docs/mermaid-gitgraph.md
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - biscuit-visualized/docs/components/git_graph.md
+    - biscuit-visualized/docs/components/graph_expression.md
+    - biscuit-visualized/docs/dependencies.md
+    - biscuit-visualized/README.md
+    - biscuit-visualized/bench/README.md
+    - docs/dependencies.md
+    - biscuit-terminal/docs/discovery/terminal-queries.md
+    - biscuit-terminal/docs/discovery/color.md
+    - biscuit-terminal/cli/README.md
+    - darkmatter/docs/rendering/mermaid.md
+    - worktree/docs/git-graph.md
+    - worktree/docs/performance-testing.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+    - .claude/skills/biscuit-visualized/artifacts-caching.md
+    - .claude/skills/biscuit-visualized/rasterization.md
+    - .claude/skills/biscuit-terminal/diagrams.md
+    - .claude/skills/biscuit-terminal/discovery.md
+source_code:
+    - biscuit-visualized/features/2026-10-21-merman/spikes/s3-gitgraph-geometry/Cargo.toml
+    - biscuit-visualized/features/2026-10-21-merman/spikes/s3-gitgraph-geometry/Cargo.lock
+    - biscuit-visualized/features/2026-10-21-merman/spikes/s3-gitgraph-geometry/src/main.rs
+    - biscuit-visualized/src/Cargo.toml
+    - Cargo.lock
+    - biscuit-terminal/lib/Cargo.toml
+    - biscuit-visualized/src/src/artifact.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/lib.rs
+    - biscuit-visualized/src/src/fonts/mod.rs
+    - biscuit-visualized/src/src/fonts/bundled.rs
+    - biscuit-visualized/src/src/fonts/chain.rs
+    - biscuit-visualized/src/src/fonts/query.rs
+    - biscuit-visualized/src/src/fonts/metadata.rs
+    - biscuit-visualized/src/src/fonts/matching.rs
+    - biscuit-visualized/src/src/fonts/shaper.rs
+    - biscuit-visualized/src/src/fonts/measure.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/newline.rs
+    - biscuit-visualized/src/src/raster/mod.rs
+    - biscuit-visualized/src/src/raster/png.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/bundled_font_tests.rs
+    - biscuit-visualized/src/src/tests/font_chain_tests.rs
+    - biscuit-visualized/src/src/tests/measure_tests.rs
+    - biscuit-visualized/src/src/tests/newline_tests.rs
+    - biscuit-visualized/src/src/tests/raster_tests.rs
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_class.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_er.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_flowchart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_mindmap.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_sequence.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/wrap/wrap_state.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/mixed/mixed_class.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/mixed/mixed_flowchart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/mixed/mixed_mindmap.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/mixed/mixed_sequence.mmd
+    - biscuit-visualized/src/assets/fonts/inter/Inter-Regular.ttf
+    - biscuit-visualized/src/assets/fonts/inter/Inter-Bold.ttf
+    - biscuit-visualized/src/assets/fonts/noto-emoji/NotoEmoji-Variable.ttf
+    - biscuit-terminal/lib/examples/discovery_probe.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/mod.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/parse.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/query.rs
+    - biscuit-terminal/lib/src/discovery/startup_exchange.rs
+    - biscuit-terminal/lib/tests/common/pty.rs
+    - biscuit-terminal/lib/tests/l1/level1_graphics_probe.rs
+    - biscuit-terminal/lib/tests/l1/level1_osc4_palette.rs
+    - biscuit-terminal/lib/tests/l1/main.rs
+    - biscuit-visualized/src/src/components/git_graph.rs
+    - biscuit-visualized/src/src/components/git_graph/tests.rs
+    - biscuit-visualized/src/src/components/mermaid.rs
+    - biscuit-visualized/src/src/mermaid/gitgraph.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - biscuit-visualized/src/src/tests/gitgraph_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_tests.rs
+    - biscuit-visualized/src/src/mermaid/gitgraph_layout.rs
+    - biscuit-visualized/src/src/mermaid/postprocess.rs
+    - biscuit-visualized/src/src/tests/cache_identity_tests.rs
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/LICENSES/mermaid/LICENSE
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/LICENSES/merman-LICENSE-APACHE
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/LICENSES/merman-LICENSE-MIT
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/agentflow.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/architecture.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/block.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/c4.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/class.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/cynefin.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/er.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/eventmodeling.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/flowchart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/gantt.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/gitgraph.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/info.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/ishikawa.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/journey.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/kanban.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/mindmap.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/packet.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/pie.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/quadrantchart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/radar.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/railroad.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/requirement.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/sankey.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/sequence.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/state.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/swimlane.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/timeline.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/treeView.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/treemap.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/usecase.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/venn.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/wardley.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/families/xychart.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/empty_branch_merge.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/labeled_merge.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/layout.json
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/layout.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/long_labels.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/observation_1.mmd
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/tag_collision_adjacent.mmd
+    - biscuit-visualized/src/src/tests/gitgraph_layout_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_cache_key_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_family_tests.rs
+    - biscuit-visualized/src/src/tests/postprocess_tests.rs
+    - biscuit-visualized/src/src/tests/html_static_tests.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - darkmatter/lib/src/markdown/render_tree/svg_sanitizer.rs
+    - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+    - darkmatter/lib/tests/l1/mermaid_static_svg.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - sniff/cli/tests/l1/snapshots.rs
+    - biscuit-terminal/lib/tests/level2/level2_windows_console_query.rs
+    - biscuit-visualized/src/src/mermaid/config.rs
+    - biscuit-visualized/src/src/mermaid/color.rs
+    - biscuit-visualized/src/src/mermaid/palette.rs
+    - biscuit-visualized/src/src/mermaid/design.rs
+    - biscuit-visualized/src/src/mermaid/accents.rs
+    - biscuit-visualized/src/src/mermaid/contrast.rs
+    - biscuit-visualized/src/src/tests/palette_tests.rs
+    - biscuit-visualized/src/src/tests/theme_tests.rs
+    - biscuit-visualized/features/2026-10-21-merman/gallery/Cargo.toml
+    - biscuit-visualized/features/2026-10-21-merman/gallery/Cargo.lock
+    - biscuit-visualized/features/2026-10-21-merman/gallery/src/main.rs
+    - biscuit-visualized/justfile
+    - biscuit-visualized/src/src/tests/golden_tests.rs
+    - biscuit-visualized/src/src/tests/contrast_corpus_tests.rs
+    - biscuit-visualized/src/src/tests/corpus_measure_tests.rs
+    - biscuit-visualized/bench/Cargo.toml
+    - biscuit-visualized/bench/Cargo.lock
+    - biscuit-visualized/bench/baseline.json
+    - biscuit-visualized/bench/src/main.rs
+    - biscuit-visualized/bench/src/baseline.rs
+    - biscuit-visualized/bench/src/corpus.rs
+    - biscuit-visualized/bench/src/stats.rs
+    - biscuit-visualized/bench/tests/wiring.rs
+    - biscuit-visualized/src/tests/l1/render_tree_diagram_hook.rs
+documentation:
+    - biscuit-visualized/features/2026-10-21-merman/spikes/s3-gitgraph-geometry/FINDINGS.md
+    - biscuit-visualized/features/2026-10-21-merman/spikes/s1-comparison/windows-leg.md
+    - biscuit-visualized/docs/merman.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/pr-01-gitgraph-commit-spacing.md
+    - biscuit-visualized/src/assets/fonts/inter/README.md
+    - biscuit-visualized/src/assets/fonts/inter/OFL.txt
+    - biscuit-visualized/src/assets/fonts/noto-emoji/README.md
+    - biscuit-visualized/src/assets/fonts/noto-emoji/OFL.txt
+    - biscuit-visualized/src/src/tests/fixtures/merman/README.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/01-default-measurement-clips-labels.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/02-wrapped-labels-lose-line-breaks.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/03-neo-dark-dividers-invisible.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/04-normalize-backslash-n-like-br.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/05-backslash-n-pie-gitgraph-block.md
+    - biscuit-visualized/features/2026-10-21-merman/upstream-issues/06-er-attribute-comment-br-clips.md
+    - biscuit-visualized/src/src/tests/fixtures/merman/gitgraph/README.md
+    - biscuit-visualized/features/2026-10-21-merman/gallery/themed-gallery-macos.html
+    - biscuit-visualized/features/2026-10-21-merman/gallery/themed-gallery-linux.html
+    - biscuit-visualized/bench/README.md
+    - docs/dependencies.md
+    - biscuit-visualized/docs/dependencies.md
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - biscuit-visualized/docs/components/graph_expression.md
+    - biscuit-terminal/docs/dependencies.md
+    - biscuit-terminal/docs/discovery/color.md
+    - biscuit-terminal/docs/discovery/terminal-queries.md
+    - biscuit-visualized/README.md
+    - biscuit-visualized/docs/components/git_graph.md
+    - biscuit-visualized/docs/mermaid-gitgraph.md
+    - biscuit-visualized/features/2026-10-21-merman/spec.md
+    - worktree/docs/git-graph.md
+    - darkmatter/docs/rendering/mermaid.md
+    - biscuit-terminal/cli/README.md
+    - biscuit-visualized/features/2026-10-21-merman/plan.md
+    - biscuit-visualized/features/2026-10-21-merman/implementation-log.md
+    - .claude/skills/os/build-hosts.md
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/artifacts-caching.md
+    - .claude/skills/biscuit-visualized/rasterization.md
+    - .claude/skills/biscuit-terminal/discovery.md
+    - .claude/skills/biscuit-visualized/diagram-components.md
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+    - .claude/skills/worktree/git-graph.md
+    - .claude/skills/biscuit-terminal/diagrams.md
+    - worktree/docs/performance-testing.md
+completed_phase: 7
+implemented: true
 ---
 
 # Implementation Log for 2026-10-21-merman (7 phases)
@@ -2171,3 +2434,338 @@ link needed repointing.
   `package ID specification mermaid-rs-renderer did not match any packages`.
 - `cargo tree -d --workspace --all-features` lists no `usvg`/`resvg`
   duplicate; `Cargo.lock` has one `usvg` (0.47.0) and one `resvg` (0.47.0).
+
+### R-D2: component docs (AC-D2)
+
+Done by a subagent and checked against the code. `mermaid_diagram.md`,
+`git_graph.md`, and `graph_expression.md` now cover the font chain,
+`MERMAID_FONT`, the bundled Inter and Linux-only Noto Emoji, palettes (fixed
+and terminal), OSC 4 with the native Windows case, the time budget, and the
+Merman-only families (linked to `merman.md#diagram-types`). Symbols link to
+their sources; there are new Mermaid flows for render-and-fallback and
+palette choice. Drift found (code wins), each fixed in the doc:
+
+- the family list lacked the Merman-only families;
+- `with_title` was described as drawn, but it is only alt text and cache key;
+- `with_scale` was described as higher resolution, but it is ignored when a
+  target width is set (always, for the component);
+- `QuadrantTheme::Default` was "standard Mermaid colors"; it takes the
+  palette;
+- `Background::Theme` is the palette's background, not the theme's;
+- `with_palette`, `inverted`, `render_to_svg`, and `fallback_code_block` were
+  missing from the API table;
+- `git_graph.md`: `with_theme` was undocumented (terminal palette, lane
+  `i` → accent `i mod 6`);
+- `graph_expression.md`: a margin example that did not compile
+  (`Margin::Chars`), the orientation and input-syntax lists, a scale claim,
+  `with_font_family` on parsed graphs, and font sizing (layout-rs sizes by
+  character count).
+
+No **planned** markers were present.
+
+### R-D5: dependencies and skills (AC-D5)
+
+Done by a subagent.
+
+- Both `docs/dependencies.md` files record Merman (fork URL, branch, exact
+  rev, features, defaults off, license, why a fork, the return path, and the
+  `serde_json` `preserve_order` side effect); `fontique` 0.12.0,
+  `ttf-parser` 0.25.1, `rustybuzz` 0.20.1, `unicode-bidi`, `unicode-script`;
+  resvg/usvg 0.47 (fontdb 0.23); Inter (OFL 1.1, every OS) and Noto Emoji
+  (OFL 1.1, Linux only).
+- `mermaid-rs-renderer` is no longer listed. One dated, clearly historical
+  note in the root file's change list remains.
+- Drift fixed: Merman's crate list in `biscuit-visualized/docs/dependencies.md`
+  (it pulls `merman-core`, `merman-render`, `merman-theme-contract`, and
+  `merman-unicode-linebreak`); a stale fontconfig link-time note; the skill
+  lists of site-config families, diagram types, render-flow steps, and the
+  fallback order; spec IDs removed from the skills.
+- `biscuit-terminal` skill: a new "Diagram colors (the OSC 4 palette)"
+  section in `diagrams.md`; the native-Windows summary in `discovery.md`
+  includes OSC 4.
+- Code comments fixed: `biscuit-terminal/lib/src/discovery/osc_queries/mod.rs`
+  and `startup_exchange.rs` still said native Windows sends no OSC 4 query
+  (comments only).
+- `worktree/docs/performance-testing.md` pointed at
+  `mermaid_rs_renderer::compute_layout`; it now points at Merman and
+  `natural_size()`.
+- mmdr search over docs and skills: the only remaining hits are
+  `docs/research/` and `biscuit-visualized/docs/data-visualization/visualizing-graph-expressions.md`,
+  a dated research survey (`prompt:` frontmatter, `last_updated: 2026-03-18`),
+  left as historical research.
+
+### README (R-C12)
+
+`biscuit-visualized/README.md` was cut back to an overview: what the
+package is, installation and features, examples, and a Documentation section
+linking `merman.md`, the component pages, `mermaid-gitgraph.md`,
+`dot-graph.md`, and `dependencies.md`. The error, time-budget, background,
+input-format, and orientation detail was removed; all of it already lives in
+those pages.
+
+### R-D4: audience validation (AC-D4, AC-D7)
+
+All of the following pass the six checks: new reader, examples per behavior
+section, symbols linked and explained, Mermaid flows, no spec or plan
+reference, links resolve. `merman.md` was done directly; the component pages
+and dependencies by their subagents; the rest by an audit subagent.
+
+| Document | Result |
+| --- | --- |
+| `biscuit-visualized/docs/merman.md` | pass after this phase's additions (overview, example, decisions, rejected, future; symbols linked); palette claim fixed (Darkmatter's static SVG uses the terminal component, so the terminal palette, not a fixed one) |
+| `biscuit-visualized/docs/mermaid-gitgraph.md` | fixed: em, lane, and directive explained; examples added to "Cost and cache identity" and "Checking a layout"; symbols linked; merge errors stated exactly; tag-size rule added (see below) |
+| `docs/components/{mermaid_diagram,git_graph,graph_expression}.md` | fixed (R-D2 above) |
+| `biscuit-visualized/docs/dependencies.md`, root `docs/dependencies.md` | fixed (R-D5 above) |
+| `biscuit-visualized/README.md` | fixed (R-C12 above) |
+| `biscuit-visualized/bench/README.md` | fixed: p95, reference host, and goldens explained; run-flow diagram, a results example, and a `baseline.json` example added; sources linked |
+| `biscuit-terminal/docs/discovery/terminal-queries.md` | fixed drift: three places said native Windows sends no OSC 4; the gate is stdout *or stderr*; symbols linked |
+| `biscuit-terminal/docs/discovery/color.md` | fixed: OSC 4 and `RgbValue` explained; empty "Using the `bt` CLI" section filled from the code |
+| `biscuit-terminal/cli/README.md` (Mermaid parts) | fixed drift: the PNG is rendered at the column width, not 2×; terminal palette; `--inverse`; the error and fallback behavior |
+| `darkmatter/docs/rendering/mermaid.md` | fixed major drift: terminal section rewritten for the render-tree hook; `mermaid_theme_for_syntect` scope; static SVG palette and background; dead "Icon Packs" section removed; CLI table corrected; sanitizer limits spelled out with examples |
+| `worktree/docs/git-graph.md` (Mermaid parts) | fixed: `to_git_graph` maps onto `biscuit-visualized`'s component types; `gitgraph_geometry` linked and explained |
+
+- **Link check:** `python3 -I /tmp/merman-linkcheck.py <19 touched docs>`
+  (a checker written for this audit: relative targets plus GitHub-style
+  heading anchors) is clean for every touched document except the root
+  `docs/dependencies.md`. That file has 58 broken workspace-package links
+  (`./pkg` where `../pkg` is meant), the same 58 as at `b0d59f187` before this
+  phase; none is in the Merman, fonts, or resvg entries. They are recorded
+  here as pre-existing, not fixed.
+- **AC-D7 search** (`features/`, `fixes/`, `YYYY-MM-DD-name`) over the touched
+  docs: one hit, root `docs/dependencies.md:123`
+  (`2026-09-26-lockfile-corroboration`, an unrelated `sniff` entry from
+  2026-09-26), pre-existing. `worktree/docs/performance-testing.md` (one line
+  changed this phase) carries several pre-existing spec references unrelated
+  to this work; left as they are.
+
+### R-D6: planned markers (AC-D6)
+
+`grep -i planned` over all 19 touched docs finds one hit: root
+`docs/dependencies.md:173`, "computes every planned build", ordinary
+English about CI, not a marker. No **planned** marker remains, for shipped or
+unshipped behavior.
+
+### Matrix smell grep, and the defect it found
+
+By the comment-drift subagent over `gitgraph_layout.rs`, `bench/`, the OSC 4
+parser, and `fonts/metadata.rs`: no `#[serde(default)]`. Each
+`filter_map`/`unwrap_or`/`.ok()` hit was judged; all are safe except one:
+
+**Defect fixed:** `mermaid/render.rs` `tag_metrics` read
+`themeVariables.tagLabelFontSize` as a plain px number (a JSON number or a
+`"Npx"` string). Merman (`merman-render` `gitgraph/theme/typography.rs`,
+`GitGraphRoleFontSize::resolve`, at the pinned rev) reads only a string:
+`px`, `em`, `%` (of the base size), `inherit`/`unset` (the base), `0`; a JSON
+number or anything else draws at 10 px. The base `fontSize` is clamped to at
+least 1. So `'150%'` was measured at 10 px but drawn at 24 px: the written
+`commitSpacing` was too small, the drawn tags overlapped, and
+`gitgraph_geometry()` reported bounds that did not match the drawing. A JSON
+`14` was measured at 14 px but drawn at 10.
+
+- **Fix:** `tag_metrics` now uses `base_font_size` and `tag_font_size`,
+  mirroring Merman's reading. One observed difference from Merman's resolver
+  source: `"14px !important"` is *drawn* at 10 px (the value is discarded
+  before the resolver), so it is treated as not a size, which matches the
+  drawing.
+- **Tests:** `gitgraph_tests::tag_font_size_*`, 12 L1 tests through the
+  public `MermaidDiagram` (`gitgraph_geometry()` plus `render` to SVG). Each
+  compares every measured tag box with the polygon Merman drew
+  (`gitgraph_layout_tests::drawn_tags`, now `pub(super)`) and asserts the
+  drawn neighbors are at least the gap apart. Cases: absent (control),
+  `14px`, `150%`, `1.5em`, `120%` with `fontSize: 20`, `inherit`, `unset`,
+  `14px !important`, JSON `14`, `"14"`, `"large"`, `"0"`.
+- **Before the fix:** `150%`, `1.5em`, base-relative `120%`, `inherit`, JSON
+  `14`, and `"14"` failed (`unset` and `"0"` were added with the fix); absent,
+  `14px`, `!important`, and `"large"` passed. All 12 pass after it.
+- Each runs about 1.3 s alone, about 5 s when twelve start at once on this Mac
+  (each process builds the macOS font chain), the same profile as the
+  existing `gitgraph_tests`.
+- `MERMAID_BACKEND` → `merman@6e6b1e6554e8+bv4` (spacing output changes for
+  such inputs). `cache_tests`, `mermaid_cache_key_tests` (including "the next
+  version" now `+bv5`), `merman.md`, `mermaid-gitgraph.md`, and the skill
+  were updated. Goldens are unchanged (the diagram id is normalized, and no
+  golden sets a tag size).
+- `mermaid-gitgraph.md` ("Tag widths") and the skill's tag-spacing bullet
+  describe the rule.
+
+Other smell hits (all judged safe, no change): `gitgraph_layout.rs:474`
+(`filter_map`, parents already checked); `:487` (`unwrap_or` for a one-commit
+graph, documented); the `as_str()` membership checks; `bench/main.rs:432`
+(hostname failure treated as not the reference host, minor: banner wording);
+`osc_queries/parse.rs` (a bad reply leaves its slot unknown, by design);
+`startup_exchange.rs`; `fonts/metadata.rs:42, 67` (an unparsable face is
+excluded like one with no OS/2 table).
+
+### Clean-room check (R-T10, D69, AC-T9)
+
+By the comment-drift subagent over 420 paths: the non-test source list of
+every phase, plus `git diff --name-only main...HEAD` and the working-tree
+files under the five areas, excluding features, fixes, and spikes. The search
+was `xargs git grep --untracked -n -I -E '<pattern>' --` over that list.
+
+| Pattern | Hits | Verdict |
+| --- | --- | --- |
+| `Zed Industries`, `Copyright .*Zed` | 0 | clean |
+| `GNU General Public License`, `SPDX-License-Identifier: GPL` | 0 | clean |
+| `GPL-3` / `AGPL` | 3 | this repository's own `AGPL-3.0-only` declarations (`biscuit-terminal/lib/Cargo.toml`, `worktree/lib/Cargo.toml`, `biscuit-terminal/cli/README.md`), not a third-party header |
+| `zed-accent`, `inject_css`, `accent_colors` | 0 | clean |
+| `mermaid_render` | 7 | test names (`test_mermaid_renderer_new`, `mermaid_render_separates_…`) |
+| `zed_` | 17 | all are "-ized" words (`rasterized_svgs`, `normalized_os`, …); a word-boundary `zed_` and standalone `Zed` find 0 |
+
+No file carries a Zed copyright or a GPL header, and no Zed-specific
+identifier is present.
+
+### Comment-drift pass
+
+Comment-only changes; a non-comment diff check came back empty.
+
+- `components/mermaid.rs` and `src/tests/l1/render_tree_diagram_hook.rs`:
+  "host lacks Mermaid rendering dependencies" → the render failed (Merman is
+  pure Rust).
+- `mermaid/postprocess.rs`: the guard-test path now includes `src/`.
+- `tests/mermaid_family_tests.rs` and `tests/mermaid_tests.rs`: "interim
+  theme" → fixed-palette theme.
+- `darkmatter/.../code_renderer.rs`: "Host lacks the Mermaid toolchain" → a
+  failed render.
+- `biscuit-terminal` `osc_queries/mod.rs` and `startup_exchange.rs`: the OSC 4
+  Windows claims (by the R-D5 subagent).
+- Directly: `cache/file_cache.rs` (`FileCache::new` said
+  `$BISCUIT_VISUALIZED_CACHE_DIR/v1/`; the code uses
+  `<dir>/biscuit-visualized/v1/`; the skill's two copies of the claim were
+  fixed too); `mermaid/config.rs` (`QuadrantTheme::Default` "Default Mermaid
+  colors" → the quadrants take the palette).
+- Checked and accurate: the backend id, the 2 s budget, the commit-spacing
+  constants, fontdb 0.23 / usvg 0.47 / Mermaid.js 12.2.0, docs paths; no
+  `mmdr`, TODO, or spec path in comments.
+
+Found but outside this feature's files (recorded as follow-ups, not edited):
+`darkmatter/lib/src/mermaid/mod.rs` `render_for_terminal` docs (mention
+`mmdc`, icon packs, and a 10 KB limit) and
+`darkmatter/lib/src/markdown/output/terminal.rs` (`MermaidMode::Image` "via
+mermaid.ink"); `worktree/lib/src/timing.rs:150`'s perf label "graph image
+render (biscuit-terminal)".
+
+### Final verification sweep
+
+**Commit note:** at 14:39 an outside process committed this phase's
+in-progress work (for example `1d3b0dc371` "fix(biscuit-visualized): measure
+gitGraph tags as Merman renders them", `7db08f9b68`, `cbb293922a`
+"planning(biscuit-visualized): record Phase 7 close for merman"). This agent
+made no commit. The file lists in the frontmatter cover the committed and
+uncommitted Phase 7 files alike.
+
+- `biscuit-visualized`: `just test` → 933 run, 933 passed, 3 skipped (golden,
+  contrast, and measurement corpora included). A first run failed only
+  `mermaid_cache_key_tests::the_key_follows_the_post_process_version` (it
+  pinned the "next" backend as `+bv4`; now `+bv5`). `just lint` clean;
+  `just test-l2` "not applicable"; `just check-tier-coverage
+  biscuit-visualized` → stranded (0). After the two final comment edits:
+  `cargo clippy -p biscuit-visualized --all-features --all-targets -- -D
+  warnings` clean.
+- Dependents, serially and scoped to what changed (the tag-size fix,
+  comment-only edits, docs read by tests):
+    - `worktree-cli` graph tests (`test(/git_graph|graph/)`, L1): 87/87 pass.
+      L2 graph: 4/5; `level2_graph_restores_lane_density_in_kitty` fails, one
+      of the two pre-existing Kitty failures named by Phase 6. Neither
+      `worktree` nor the `GitGraph` component sets `fontSize` or
+      `tagLabelFontSize`, so the fix cannot reach it.
+    - `darkmatter` (`test(/mermaid|svg_sanitizer|code_renderer/)`): 125/125;
+      `just lint` clean.
+    - `biscuit-terminal` (`--features image`,
+      `test(/osc|palette|startup_exchange|ansi|color/)`, L1): 448/448;
+      `just lint` clean.
+    - `biscuit-terminal-cli` (`test(/mermaid|git_graph|atomic_tokens|flowchart/)`,
+      L1): 4/4, including `public_docs_do_not_advertise_removed_atomic_tokens`,
+      which reads `cli/README.md`.
+    - `sniff`: nothing changed in it this phase; not rerun.
+- `cargo nextest … -p biscuit-terminal --all-features` does not compile the
+  lib tests (28 errors such as `text_terminal_with_width`, `ScopedLcAll`).
+  Since `b0d59f187` the `biscuit-terminal` source diff is comments only, so
+  this is a pre-existing feature-combination problem; the area's own feature
+  set (`image`) compiles and passes. Not fixed here.
+- The full `just test` / `just test-l2` in `biscuit-terminal`, `darkmatter`,
+  `sniff`, and `worktree` were not rerun in this phase. Earlier phases ran
+  them (Phase 4 and Phase 6 logs), and this phase changed only comments and
+  docs there, plus a tag-size path none of them exercises.
+- `cargo tree -i mermaid-rs-renderer` is empty; one usvg (0.47.0); the Merman
+  rev is exact on the fork (see "Dependency graph" above).
+- `just ci-local --plan` (branch vs `origin/main`, 1167 changed paths): 53
+  executing cells (29 ubuntu, 10 macOS, 7 Windows, 7 WSL2). A pull request
+  runs the 39 Linux and macOS cells, the ">30" band: expect 60–100 min.
+- **Cross-OS:** not rerun. This phase's code change is a pure string and
+  number parse with no OS surface, and the new tests compare measured against
+  drawn on whichever host runs them. Phase 6 proved goldens on all four
+  environments, and no golden changed.
+- **Gate-skip calculator:** not used to skip; both gates were run. (The
+  working tree also holds other sessions' uncommitted files, so it no longer
+  equals this phase's changes.)
+
+### Requirement-to-test mapping (this phase)
+
+| Behavior | Test (L1, `biscuit-visualized` lib) |
+| --- | --- |
+| Tag size read as Merman reads it (each shape) | `tests::gitgraph_tests::tag_font_size_*` (12) |
+| Tags never overlap for a relative tag size | same, the drawn-gap assertion |
+| Cache identity after the spacing change | `cache_tests::…` (pins `+bv4`), `mermaid_cache_key_tests::the_key_follows_the_post_process_version` (`+bv5` differs) |
+| No output change elsewhere | `golden_tests::*` (204), unchanged |
+| Docs read by tests | `biscuit-terminal-cli` `public_docs_do_not_advertise_removed_atomic_tokens`; `test-toolkit`'s CI-docs test (run by the R-D5 subagent) |
+
+### Close-out
+
+**AC-S4 (D30):** Ken chose Merman on 2026-10-21. The reason: it won the
+spike scorecard (S1/S2) on fidelity, family coverage (11 more families), and
+exact measurement, with faster cold renders. This is recorded in the spec's
+D30 and in `spikes/s1-comparison/FINDINGS.md`.
+
+**Acceptance criteria:**
+
+| AC | Status | Evidence |
+| --- | --- | --- |
+| AC-S1–S3, AC-S5, AC-S7 | met (spikes) | `spikes/s1-comparison/FINDINGS.md`, galleries, scorecard |
+| AC-S4 | met | D30; above |
+| AC-S6, AC-C4 | met | Phase 1 spike S3; Phase 4 log (worktree tests, D43) |
+| AC-S8 | met | Phase 6 log (pixel-identical PNGs on macOS, Linux, native Windows, WSL2) |
+| AC-R1 | not applicable | D30 |
+| AC-C1, C2, C6, C6a, C7, C9–C13, C15 | met | Phase 3 log, validation table |
+| AC-C2a | met | Phase 2 log (fork test, push); `ls-remote` above; PR draft present |
+| AC-C3 | **open, with its gate:** every package passes except `darkmatter` `just test` (45 frontmatter key-order failures from Merman's serde_json `preserve_order`), left to the separate fix `2026-10-23-frontmatter-key-order` (plan checkpoint 4, ruled 2026-10-23) | Phase 4 log; this phase's scoped dependent runs |
+| AC-C5 | met | Phase 6 (smoke and goldens per family); this phase (docs list in `merman.md`) |
+| AC-C8, C8a, C8b | met | Phase 4 log (Darkmatter tests) |
+| AC-M1, M2 | met | Phase 6 (`corpus_measure_tests`, 483 labels) |
+| AC-M3–M11 | met | Phase 2 log, validation table |
+| AC-T1–T4, T6–T8 | met | Phase 5 log; T4 Phase 6 (`contrast_corpus_tests`, with the allow-list in `decisions_for_review`) |
+| AC-T5 | **open, with its gate:** Ken's sign-off in the first review (D74) | gallery; `decisions_for_review` |
+| AC-T9 | met | clean-room check above |
+| AC-P1–P6 | met | Phase 2 and Phase 5 logs. P6 (native Windows OSC 4) is carried; Windows detection is a **release** prerequisite (D7) |
+| AC-V1–V4 | met | Phase 6 log (V2: `just bench` exits 1 on build-linux, in `decisions_for_review`) |
+| AC-U1 | met | drafts present; none filed by an agent |
+| AC-D1–D7 | met | this phase (R-D1–R-D6 above) |
+
+**Departures from the spec in this phase:**
+
+- `docs/mermaid-gitgraph.md` was kept (R-D3 allows either outcome).
+- `tag_metrics` now follows Merman's tag-size reading (a defect fix within
+  D36/AC-C12), with the `+bv4` bump.
+- The final sweep was scoped for the dependents, not full suites in all five
+  packages (see above).
+
+**Follow-ups** (none started):
+
+- `2026-10-21-mermaid-embedded-font` (font embedding in HTML).
+- `2026-10-22-merman-text-fallback` (Merman text-art fallback).
+- `2026-10-23-frontmatter-key-order` (darkmatter key order under
+  `preserve_order`; closes AC-C3 and plan checkpoint 4).
+- D57's return to stock Merman once upstream lands `commitSpacing`.
+- Region-aware contrast for the sequence `box` case.
+- Sequence and timeline speed on build-linux.
+- The graph cache key has no font identity (below).
+- Stale Darkmatter Mermaid comments (`mermaid/mod.rs`, `output/terminal.rs`).
+- The root `docs/dependencies.md` broken workspace links.
+- The `biscuit-terminal --all-features` test compile.
+
+**Prerequisites:** the Windows color-detection prerequisite (D7) gates the
+release, not this merge.
+
+The spec is left in place; `just complete` was not run.
+
+**Implementation complete, ready for review.**
