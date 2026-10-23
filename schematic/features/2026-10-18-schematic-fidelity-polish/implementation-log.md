@@ -17,12 +17,6 @@ packages:
     - schematic-definitions
     - schematic-define
 human_review: false
-message_to_agent: |-
-    Phase 3 (required constant headers) is complete; read "## Phase 3" in implementation-log.md.
-    - Export now emits each ordinary fixed header (RestApi::headers / Endpoint::headers, endpoint over API, case-insensitive) as an operation-level header parameter: required, style simple, schema {type: string, enum: [value], default: value}. Code: schematic/define/src/openapi/export/headers.rs, called from map_paths after operation security is set.
-    - Credential headers (from the operation's effective security schemes), Accept/Content-Type/Authorization, and incompatible explicit-param collisions are left out and returned by the public schematic_define::openapi::header_gaps(api); schematic-gen reports them as Feature::FixedHeader ("fixed-header") OpenAPI warnings. 17 shipped gaps (GitHub Accept x16, Gitea raw Accept x1) are pinned in gen/tests/l1/output_validation.rs FIXED_HEADER_GAPS; a definitions change that alters them must update that list.
-    - Phase 4 importer: Anthropic/GitHub/GitLab artifacts now carry header parameters with a single-value enum that mirror x-schematic.headers entries. Per contracts.md (RestApi::headers row), the importer must recognize such a parameter (same name case-insensitively, enum == value) as the fixed header and NOT create a ParamDef; until then re-import gains header ParamDefs. A compatible explicit header ParamDef merged with a fixed header exports as required + default with its own schema (no single-value enum) — keep it a ParamDef on import.
-    - Same gate notes as before: use `just _test schematic-define --all-features` and `cargo clippy -p schematic-define --all-features --all-targets -- -D warnings`.
 source_files_during_phase_2:
     - schematic/define/src/openapi/export/conversion.rs
     - schematic/define/src/openapi/export/components.rs
@@ -84,6 +78,110 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/schematic-define/schematic/openapi.md
+source_files_during_phase_4:
+    - schematic/define/src/builders.rs
+    - schematic/define/src/types.rs
+    - schematic/define/src/openapi/mod.rs
+    - schematic/define/src/openapi/extensions.rs
+    - schematic/define/src/openapi/export/components.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/export/parameters.rs
+    - schematic/define/src/openapi/export/paths.rs
+    - schematic/define/src/openapi/export/request_body.rs
+    - schematic/define/src/openapi/export/responses.rs
+    - schematic/define/src/openapi/export/security.rs
+    - schematic/define/src/openapi/import.rs
+    - schematic/define/src/openapi/import/auth.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/openapi/import/extension.rs
+    - schematic/define/src/openapi/import/reconcile.rs
+    - schematic/define/src/openapi/import/query_paths.rs
+    - schematic/define/src/openapi/import/mappings/mod.rs
+    - schematic/define/src/openapi/import/mappings/parameters.rs
+    - schematic/define/src/openapi/import/mappings/responses.rs
+    - schematic/define/src/openapi/import/mappings/discriminator.rs
+    - schematic/define/tests/builders.rs
+    - schematic/define/tests/response_openapi.rs
+    - schematic/define/tests/openapi_import_parameters.rs
+    - schematic/define/tests/openapi_multipart_import.rs
+    - schematic/define/tests/openapi_extension_matrix.rs
+    - schematic/define/tests/openapi_standard_matrix.rs
+    - schematic/define/tests/matrix_support/mod.rs
+    - schematic/gen/src/export/openapi.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/extension_reimport.rs
+    - schematic/gen/tests/l1/extension_round_trip.rs
+    - schematic/gen/tests/l1/import_overlay.rs
+    - schematic/gen/tests/l1/vocabulary_exports.rs
+    - schematic/openapi/anthropic.json
+    - schematic/openapi/artificial_analysis.json
+    - schematic/openapi/bitbucket.json
+    - schematic/openapi/elevenlabs.json
+    - schematic/openapi/emqx.json
+    - schematic/openapi/eversolo.json
+    - schematic/openapi/gitea.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+    - schematic/openapi/huggingface.json
+    - schematic/openapi/lmstudio.json
+    - schematic/openapi/ollama.json
+    - schematic/openapi/openai.json
+    - schematic/openapi/samsung_smart_tv.json
+    - schematic/openapi/unfolded_circle_core_rest.json
+docs_updated_during_phase_4:
+    - schematic/docs/io/openapi-extensions.md
+    - schematic/docs/io/import-openapi.md
+    - schematic/docs/io/export-openapi.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/definition-builders.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/openapi.md
+    - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_5:
+    - schematic/definitions/src/registry/inventory.rs
+    - schematic/definitions/src/registry/lookup.rs
+    - schematic/definitions/src/registry/mod.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/tests/api_inventory.rs
+    - schematic/definitions/tests/ws_conformance.rs
+    - schematic/definitions/tests/ws_definition_json.rs
+    - schematic/gen/src/pipeline.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/output/inventory.rs
+    - schematic/gen/src/output/ws_modules.rs
+    - schematic/gen/src/output/assemble/helpers.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/mod.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/tests/l1/api_inventory.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/openapi_strict_completeness.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/gen/tests/l1/ws_validation.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+docs_updated_during_phase_5:
+    - schematic/docs/generation/workflow.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/definitions/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/schematic-define/schematic/definitions.md
+    - .claude/skills/schematic-define/schematic/gen.md
+message_to_agent: |-
+  Phase 5 (single API registration inventory) is complete; read "## Phase 5" in implementation-log.md.
+
+  - Every shipped API is one entry in schematic/definitions/src/registry/inventory.rs (`registrations()`): ApiRegistration { name, module, definitions_path, protocol: Rest{key, group, member} | WebSocket{define, constructor, summary} }. all_apis(), apis_by_module(), registry_key_for, --api help/resolution, WS module packaging, lib.rs/prelude.rs WS entries, reserved module names, and definitions_module_path all derive from it.
+  - `module` on each entry is the generated module / export stem. A test (definitions/tests/api_inventory.rs) asserts it equals api.module_path or the lowercased name. Phase 6 (resolver unification) should treat the registration's `module` as the authority, or update that invariant test when the resolver changes.
+  - Phase 7 (module feature flags): enumerate modules from registrations() (REST modules + WebSocket modules); do not add a new list.
+  - Fixture seams: resolve_api_in, available_apis_in, RustOutputRequest::registrations, validate_rust_client_in, generate_ws_definition_modules(regs), validate_ws_definition_modules(regs). generate_batch still takes REST APIs and packages the shipped WebSocket entries.
+  - The strict gate's skip list is STRICT_GATE_SKIPS in gen/tests/l1/openapi_strict_completeness.rs (empty).
+  - Gate notes unchanged: `just test` and `just lint` from schematic/; clippy redundant_closure is enforced in tests.
 ---
 
 # Implementation Log for 2026-10-18-schematic-fidelity-polish (13 phases)
@@ -989,3 +1087,484 @@ Phase 3 status: checkpoint met. Ordinary fixed headers are standard header
 parameters; no duplicate/reserved/credential header parameter in any
 committed artifact; Rust output unchanged; export, drift, and the common
 phase checks pass.
+
+## Phase 4
+
+Scope: Waves 8–10 (R10–R18, R54). Started 2026-10-23.
+
+Execution plan: Wave 8 runs as two parallel subagents with disjoint file
+ownership (parameters + strict: `import/builder.rs` strict gate,
+`import/mappings/{mod,parameters}.rs`; multipart: `import/mappings/responses.rs`,
+`export/request_body.rs`). Wave 9 (extension reader/writer, auth reconciliation)
+is done directly by the orchestrator. Wave 10 matrix tests follow.
+
+### Wave 8: Standard import mappings (R16, R17, R18)
+
+Two parallel subagents, disjoint files; both reported green scoped runs.
+
+- **R16 strict** (`import/builder.rs`): strict fails only when a WARN or ERROR
+  exists; INFO-only passes and is returned. The `OpenApiError::Validation` is
+  located at the first WARN/ERROR and quotes the count. Docs corrected on
+  `OpenApiImport::strict`, `OpenApiImportOptions::strict`, `build()`, and gen
+  `ImportOptions::strict`. The tautological test was replaced by
+  `build_strict_mode_passes_info_only_diagnostics`,
+  `build_strict_mode_fails_on_warn_diagnostic`,
+  `build_strict_mode_fails_on_error_diagnostic`.
+- **R17 path-item parameters** (`import/mappings/{mod,parameters}.rs`): local
+  `#/components/parameters/X` refs resolve before the merge; identity is
+  `(name, in)`, header names case-insensitive; an operation parameter replaces
+  the inherited one in place. Unresolved local ref and remote ref → ERROR at
+  `#/paths/<escaped>/[<method>/]parameters/<i>`, parameter skipped, never
+  fetched. `map_operation` gained `path_item_parameters`.
+- **D17 typed path parameters**: all path parameters import into
+  `EndpointParams.path` when any has a non-string schema, a description, or
+  `deprecated`; otherwise none. Adopted defaults (subagent, source: D17 +
+  `validate_typed_paths`): an array/JSON path type imports as `String` with
+  WARN (validation forbids them); undeclared placeholders get a plain string
+  parameter when typed import applies; declared parameters with no
+  placeholder are dropped with WARN.
+- Standard `deprecated` is now read for operations and parameters.
+- **R18 multipart** (`import/mappings/responses.rs`, `export/request_body.rs`):
+  export writes `encoding.<part>.contentType` (accept joined by `", "`, or
+  `application/json` for a JSON part) and Files `minItems`/`maxItems`; import
+  reads them back. Unresolved part/items refs → ERROR, part skipped; encoding
+  for an unknown part, `headers`/`style`/`explode`/`allowReserved`, an array of
+  non-file items, and a binary part on a URL-encoded body → WARN; empty
+  `contentType` → ERROR.
+- **Orchestrator correction to R18 (found by the OpenAI re-import guard):** the
+  subagent's first rule made any component `$ref` part a JSON part, which
+  turned OpenAI's `response_format` (a `$ref` to a string enum) and `model`
+  (an `anyOf` of strings) into JSON parts. The rule now follows OpenAPI's
+  default part encoding: a JSON `encoding.contentType` makes a JSON part; a
+  primitive, a component naming one, or a composition of primitives is a text
+  part silently; an object-valued part without a JSON encoding is WARN and
+  stays text (adopted default, source: contracts.md matrix 2 "an
+  object-valued part is WARN", R18 "never silently become text"). Tests:
+  `primitive_parts_without_an_encoding_import_as_text_silently`,
+  `object_parts_without_json_encoding_warn_and_stay_text`,
+  `json_encoded_component_and_inline_parts_import_as_json`.
+- Fixed the malformed missing-operationId INFO location (`#/paths~1…` →
+  `#/paths/~1…`, `~` escaped) and the path-reference WARN location.
+
+### Wave 9: Extension reader and writer (R10–R15, R54) — orchestrator
+
+Writer (`openapi/extensions.rs`, `export/{mod,paths,security,components}.rs`):
+
+- `SchematicDocExtension` / `SchematicOpExtension` are now serialize-only
+  writer shapes (R-S1: the reader never derives `Deserialize` on them). New
+  doc members `version: 1` (always), `env_auth`, `auth`, `secret_names`; new
+  operation members `auth`, `env_mapping`, `path_template`, `params`. New
+  public `AuthDetail`, `ParamDetail`, `EXTENSION_VERSION`.
+- Operation `request` is written only for nonempty form bodies (JSON, text,
+  binary bodies are standard-only; contracts.md).
+- Root `security` is derived from `effective_auth_policy()` with one
+  requirement per accepted method (D6) through the new
+  `security::policy_security`, which also returns the R54 details of the
+  schemes it registers. `map_security_requirements` is gone. A bearer header
+  override registers a distinct scheme (description differs) from an API key
+  on the same header, so details never collide.
+- `SchematicSchemaExtension` and `AuthExtension` deleted with their
+  re-exports, tests, the `Default` allowlist entry in `tests/builders.rs`,
+  and the `docs/definition-builders.md` row (R15).
+
+Reader (new `import/extension.rs` decode + `import/reconcile.rs` apply;
+`import/auth.rs` deleted, its legacy first-scheme fallback moved into
+`reconcile::map_root_auth`):
+
+- Version gate: absent → 1; anything but integer 1, or a non-object
+  `x-schematic`, → one WARN and every Schematic extension in the document
+  (operations included) ignored (D).
+- Each member decodes independently from the raw `Value`; unknown members
+  INFO; malformed → WARN at `#/x-schematic/<member>…` or
+  `#/paths/<escaped>/<method>/x-schematic/<member>…`, member dropped, siblings
+  kept. Explicit `null` is WARN except at the writer-null positions
+  (`env_mapping.{bearer_token,basic_user,basic_pass,api_key}`, form field
+  `description`, `Files.min/max`), implemented as one null-position walk.
+- Validation reuses `validate_api`'s pieces (`RateLimit::validate`,
+  `RetryGuidance::validate`, `validate_error_entries`,
+  `validate_success_shapes`, `validate_origin`, `valid_header_name`,
+  `valid_rust_name`, new `builders::env_mapping_conflicts` factored out of
+  `validate_api`).
+- Standard wins (R12): `success`/`response` and the error decomposition are
+  re-exported with `map_responses` and compared with the operation's
+  standard responses (descriptions ignored, 2xx and error statuses compared
+  apart); a match applies the extension, a mismatch keeps the standard-derived
+  value with WARN. A legacy JSON/text/binary `request` is compared by
+  re-exported `content`; a form `request` fills only `accept`, file counts, and
+  a JSON part's reference, WARN on any disagreement.
+- Auth: root `security` requirements are authoritative (none → anonymous, one
+  → `AuthStrategy`, several → `AuthPolicy`); absent root `security` keeps the
+  legacy first-scheme fallback. `auth.<scheme>.{bearer,value_prefix}` applies
+  only to an `apiKey` header scheme the relevant `security` applies; else WARN
+  and standard wins. Operation `security`: absent inherits, `[]` → `Public`,
+  identical to root with no details → inherits, otherwise
+  `EndpointAuth::Policy`; operation `auth`/`env_mapping` without an override →
+  WARN. Adopted default (source: D6 "explicit/env_fallback split not
+  round-tripped"): an imported policy falls back to its first
+  environment-capable method, dropped after assembly when the effective
+  mapping cannot supply it (`credential_source_problem`).
+- Basic auth's lists are restored from `env_mapping.basic_user/basic_pass`
+  (the builder writes both), so Bitbucket/EMQX keep their variables.
+- Fixed-header recognition (Phase 3 handoff): a required header parameter
+  whose only value is `Enum([v])` equal to an effective fixed header (endpoint
+  over API, case-insensitive) is dropped as that header's standard form.
+- `path_template` applies when stripping its markers gives the path key.
+  `params.<loc>.<name>` sets `secret`/`rust_name`; it imports plain-string
+  path parameters when a path entry needs one; it wins over the internal
+  `x-schematic-query-rust-names` with WARN on disagreement (R-S12).
+- Importer also: reads `info.version` into `RestApi::version`; absent
+  `servers` → WARN at `#/servers` (contracts.md matrix 2; ten define fixtures
+  gained a `servers` entry); the reserved request-name suffix uses the
+  imported `request_suffix`; gen `run_import` overrides
+  `request_id_header` only when `--request-id-header` is given (D24).
+- `x-schematic-grouped-from` is reported as INFO.
+
+Artifacts regenerated with `just generate-openapi`: all 15 OpenAPI files
+change (`version: 1`; JSON `request` copies removed; Gitea gains `env_auth`
+and `auth.apiKeyAuth.value_prefix`; Hugging Face gains 16 `path_template`;
+ElevenLabs/Unfolded Circle multipart gain `encoding`). `schema/` Rust
+unchanged (no diff).
+
+Existing tests updated because they pinned the old lossy behavior:
+`response_openapi.rs` (standard-only cases now export with
+`skip_extensions()`/`without_extensions`, plus new
+`extension_import_restores_declared_error_levels_and_stream_ends`),
+`export::tests::export_strips_reserved_marker_from_path_and_params`,
+gen `vocabulary_exports::{repeated_and_reserved_placeholders_declare_each_name_once,
+environment_variable_names_never_become_exported_values}` (operation
+`env_mapping` is now extension metadata, D5), gen `extension_reimport.rs`
+(rewritten against the reader; `success: []` is now WARN at its pointer).
+
+**OpenAI re-import (review item).** `import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition`
+now differs from `definitions/src/openai/mod.rs` in exactly two places:
+`.version("2.3.0")` (info.version is read) and the realtime `session` part,
+which the vendored spec declares `encoding.contentType: application/json`, now
+a JSON part of `RealtimeSessionCreateRequestGA`. Re-importing is an
+endpoint-level definitions change and changes generated Rust, which the
+plan's execution-authority rule leaves unmade; the test pins exactly those two
+differences (any other drift still fails, and running `just import-openai`
+fails it until the pins are removed). Author decision at review: adopt with
+`just import-openai`, or keep.
+
+### Wave 9 follow-up: R10 round trip over every artifact (subagent + orchestrator)
+
+New `gen/tests/l1/extension_round_trip.rs` (24 L1 tests with
+`extension_reimport`): one `#[test]` per committed artifact via
+`macro_rules!` with an `include_str!` literal each, plus a guard that the list
+equals `schematic/openapi/*.json` and `apis_by_module()`. Each artifact must
+import with **zero WARN/ERROR and pass `.strict()`**, re-export equal to the
+committed document, and re-import equal to the current definition
+(`canonical(serde_json::to_value(..))`, D9) except these named, value-checked
+categories (each asserted as the exact set per artifact):
+
+- Document: `grouped-title`, `grouped-server-description`,
+  `grouped-from-sibling` (grouped writer, D8), `generic-component-names`
+  (Bitbucket `X<Y>` → `X_Y_`).
+- Definition: `version-default` (definitions leave `version` unset; import
+  reads `info.version`), `grouped-name`, `grouped-operation-ids`,
+  `grouped-auth-union` (EMQX) (D8), `schema-rust-path` (rebuilt exactly as
+  `{module_path}::{Name}`), `schema-json-normalized` (JSON Schema vs OpenAPI
+  3.0 form; components compared equal on the document side), `pagination`
+  (D7).
+- Not observed, so not listed: `pager_managed`, description vs summary, D17
+  plain path parameters, the D6 policy split (no shipped API exercises them).
+
+Purpose-built fixture (every v1 member load-bearing at both levels) round-trips
+through JSON and YAML with exact definition and document equality.
+R54: Gitea-style `value_prefix` and a `BearerToken{header}` override survive;
+a detail on an `http bearer` scheme is WARN at `#/x-schematic/auth/apiKeyAuth`
+and the standard scheme wins; every artifact's and the fixture's `auth`
+entries hold only `bearer`/`value_prefix`, and no `x-schematic` holds
+`strategy`, `scopes`, `oauth_scopes`, or a credential-like value.
+
+Bugs found by this test and fixed:
+- reader: extension shapes kept unsanitized component names
+  (`PaginatedResponse<SourceEntry>`), so Bitbucket failed reference
+  validation (subagent fix, `reconcile.rs::sanitize_shape`);
+- gen grouped writer (`gen/src/export/openapi.rs::merge_path_parameters`)
+  appended an identical path-item parameter again (14 duplicates in
+  `emqx.json`, which OpenAPI forbids);
+- `export/parameters.rs` omitted `explode: true` on non-`form` styles
+  (OpenAI `deepObject` `metadata` came back `false`);
+- imported component `rust_path` ignored the document's `module_path`
+  (now the effective module: CLI option, else extension);
+- classification WARNs ("no named schema …") survived after the extension
+  restored the exact shapes, failing strict import of 9 artifacts; they are
+  now dropped for the 2xx (resp. error) responses the extension restored.
+
+### Wave 10: Reader acceptance (input matrices)
+
+New `define/tests/openapi_extension_matrix.rs` (table 1 + version controls +
+document shapes + strict), `define/tests/openapi_standard_matrix.rs`
+(table 2), shared `define/tests/matrix_support/mod.rs` (control `RestApi`
+exported once, one mutation per cell, 24 per-column probes so every cell also
+proves its unrelated siblings still apply). Each cell runs from JSON text and
+YAML text, permissive and strict; about 338 table-1 and 70 table-2 cells per
+format; slowest test 2.2 s. Control rows import every column with no
+WARN/ERROR. Duplicate keys (inside `x-schematic` and a standard member),
+trailing content, and a second YAML document fail before `Value` conversion
+(`check_text`).
+
+Outcomes adopted where contracts.md's cell differs (each tagged `adopted(..)`
+in the test; adopted defaults, source: R12 "standard wins" / plan matrix
+codes):
+
+- adopted default: an operation whose declared error table (its own
+  `errors`/`no_declared_errors` plus the document defaults) does not reproduce
+  its standard responses is WARN at that operation's `x-schematic/errors`
+  even when the member is absent or `[]` (covers removing the document
+  `x-schematic` while operation extensions remain).
+- adopted default: document `errors` that disagree only at statuses the
+  document entries export are withdrawn whole with one WARN at
+  `#/x-schematic/errors`; every operation keeps its standard-derived table.
+- adopted default: a rejected `success` does not fall back to the legacy
+  `response`; a legacy `response` that disagrees is silently superseded
+  (it only ever summarized the first shape).
+- adopted default: an unresolved extension reference that disagrees with a
+  standard reference (request JSON part, SSE item) is W (standard wins); it is
+  ERROR only when the extension would fill an untyped standard part.
+- adopted default: an empty `auth.<scheme>` entry is no detail (O).
+- adopted default: a semantic structural error found after parsing
+  (unresolved/remote `$ref`, empty `encoding.contentType`, empty
+  `info.version`/`servers[0].url`/`externalDocs.url`, non-required path
+  parameter, empty `requestBody.content`, empty `apiKey` `name`) is an ERROR
+  diagnostic (strict fails, permissive skips the item) rather than a failed
+  build; shape errors (null, wrong type, empty parameter `name`,
+  `security: null`, `info.version: null`) fail the build.
+- ruling precedence: parameter `schema: {}` stays `QueryParamType::Json`; the
+  earlier import-normalization contract (`tests/import_normalization.rs`)
+  pins it and supersedes contracts.md's `String`.
+- known gap: a second YAML document fails without a location
+  (`serde_yaml_ng`'s message carries none).
+
+Smell grep (subagent, `extension.rs`, `reconcile.rs`, `mappings/parameters.rs`,
+`mappings/responses.rs`): no `#[serde(default)]`. Load-bearing hits and their
+coverage: `extension.rs` `unwrap_or_default()` after a reported rejection
+(covered; rejection tracked by `errors_rejected`/`success_rejected`);
+`reconcile.rs` `ext.errors.unwrap_or_default()` (absent = `[]`, covered);
+`reconcile.rs` `.ok()` on re-export (failure ⇒ mismatch WARN, the safe
+direction). Not covered, logged: `responses.rs` `u32::try_from(minItems).ok()`
+drops a bound above `u32::MAX` silently; `parameters.rs`
+`filter_map(|v| v.clone())` drops `null` members of a string `enum` silently
+(pre-existing).
+
+GraphQL: the extension carries no GraphQL member and the exporter still skips
+GraphQL operations; the named-diagnostic verification belongs to Phase 9,
+which installs those diagnostics (plan Wave 10 wording).
+
+R15 grep (`SchematicSchemaExtension|AuthExtension|oauth_scopes` over
+`schematic/` and `.claude/skills`, excluding features/fixes/research/reviews):
+only `schematic/oauth/oauth-schematic-design.md` (explicitly a historical,
+unmaintained proposal), the `docs/definition-builders.md` sentence saying
+`oauth_scopes` was removed, and the round-trip test's forbidden-key list.
+
+### Documentation and skills
+
+Documenter subagent: `docs/io/openapi-extensions.md` rewritten (writer and
+reader, members at both levels, version rule, decoding and standard-wins
+rules, auth details, round-trip subset and exclusions, Mermaid read path;
+schema-level section removed); `docs/io/import-openapi.md` (parameters, form
+bodies, authentication, extensions, diagnostics and strict mode);
+`docs/io/export-openapi.md` (request bodies, document security, `explode`);
+`docs/generation/generated-clients.md` (strict wording, round-trip link);
+`docs/definition-builders.md` (Default row); skill
+`.claude/skills/schematic-define/{SKILL.md, schematic/openapi.md,
+schematic/gen.md}`. Rustdoc drift fixed (D16): `RestApi::cross_origin`
+(endpoints do override it), `RestApi::version` precedence; round-trip claims
+in `extensions.rs`, `openapi/mod.rs`, `export/mod.rs` now name the supported
+subset.
+
+### Requirement → test mapping (Phase 4)
+
+| Requirement | Tests (all L1, in-process at the public API) |
+| --- | --- |
+| R16 strict | `builder.rs` `build_strict_mode_{passes_info_only_diagnostics,fails_on_warn_diagnostic,fails_on_error_diagnostic}`; matrix strict checks per cell |
+| R17 path-item params, refs | `openapi_import_parameters.rs` (11 tests); table 2 parameter columns |
+| D17 typed path params | `typed_path_parameters_{import_in_placeholder_order,round_trip_through_export}`, `plain_string_path_parameters_stay_untyped` |
+| R18 multipart | `openapi_multipart_import.rs` (15 tests, AddVoiceSample shape JSON+YAML round trip); real ElevenLabs/UC artifacts via `extension_round_trip::artifact::*` |
+| R10 round trip | `extension_round_trip.rs` (15 artifacts + fixture JSON/YAML); `response_openapi::extension_import_restores_declared_error_levels_and_stream_ends` |
+| R11 version | `openapi_extension_matrix.rs` version controls (absent, 1, 2, 1.0, "1", null, true, [1], non-object, `{}`) |
+| R12 standard wins | matrix R12 cells; `an_auth_detail_on_an_http_bearer_scheme_warns_and_the_standard_scheme_wins` |
+| R13 unknown/malformed | matrix unknown-key INFO and malformed-beside-valid-sibling cells, permissive and strict |
+| R14 row 14 | `extension_reimport.rs` (rewritten against the reader): "not reproducible, guarded" stands |
+| R15 dead structs | compile (symbols absent) + grep above; `extensions.rs` writer-shape tests |
+| R54 auth details | `extension_round_trip::{an_api_key_value_prefix_and_a_bearer_header_override_survive_the_round_trip, no_fixture_extension_carries_an_auth_field_beyond_the_two_details}`, per-artifact R54 scan; `security.rs` `bearer_header_overrides_and_value_prefixes_get_details_on_distinct_schemes` |
+| Phase 3 handoff (fixed headers) | every artifact round-trips with no header `ParamDef` gained (`extension_round_trip`) |
+
+### Gates (Phase 4)
+
+- `just test` (schematic): 2849 passed (4 slow), 20 skipped; fresh-output
+  14 passed; compile-fail 1 passed. No failures, none load-sensitive.
+- `just lint` (schematic): clean. `cargo clippy -p schematic-define
+  --all-features --all-targets -- -D warnings`: clean. `cargo clippy -p
+  schematic-gen --tests -- -D warnings`: clean.
+- `just check-tier-coverage schematic`: 0 stranded.
+- `just generate-openapi` regenerated all 15 OpenAPI artifacts; `schema/`
+  (generated Rust) shows no diff. `lint-schema` not rerun (generated Rust
+  unchanged).
+- Scope calculator not used to skip gates; both gates ran.
+- Dependents: no package outside `schematic/` depends on `schematic-define`
+  or `schematic-gen`; dependents consume `schematic-schema`, whose generated
+  source is byte-identical. No dependent runs needed.
+- Cross-OS check: not run — no path, process, terminal, or `#[cfg]` code;
+  test reads use `include_str!` or `manifest_dir!()` joins.
+
+### Review agenda (Phase 4)
+
+1. OpenAI re-import pins two pending differences (`.version("2.3.0")`, realtime
+   `session` part as JSON per the vendored spec's `encoding`). Adopt with
+   `just import-openai` (changes the generated Realtime client) or keep.
+2. Adopted matrix outcomes above (error-table attribution, legacy `response`,
+   ERROR-diagnostic vs build-error split for semantic structure errors).
+3. Multipart object-valued parts without a JSON encoding stay text with WARN
+   (rather than becoming JSON parts), to keep OpenAI's committed definition
+   and generated client unchanged.
+4. New public surface: `AuthDetail`, `ParamDetail`, `EXTENSION_VERSION`;
+   `SchematicDocExtension`/`SchematicOpExtension` are serialize-only;
+   `SchematicSchemaExtension`/`AuthExtension` deleted.
+5. Absent `servers` is now a WARN, so strict import of a server-less document
+   fails (contract matrix 2).
+6. Known gaps logged: nullable string-enum members dropped in parameter enums;
+   a `minItems` above `u32::MAX` dropped; `remap_reference_names` does not
+   rename a form JSON part whose component yields its name to a request
+   struct; a second YAML document's error has no location.
+
+Phase 4 status: checkpoint met. R10–R18/R54 pass, mappings and the subset are
+logged, both public matrices pass in JSON and YAML, generated Rust is
+unchanged, and the artifact and common phase checks pass.
+
+## Phase 5
+
+Consolidate API registration (R33–R35). Implemented directly by the
+orchestrator without subagents: the change threads one type through
+`schematic-definitions` and `schematic-gen`, and its write set is not
+divisible.
+
+### R33 re-derivation
+
+Phase 1's inventory (Wave 2 above) still held at the start of this phase:
+4 runtime REST lists (`registry::MODULES`, `registry_key_for`,
+`pipeline::AVAILABLE_APIS`, `pipeline::resolve_api`'s match), 2 runtime
+WebSocket lists (`ws_modules::WS_DEFINITION_MODULES`,
+`ws_modules::shipped_ws_module`), one supporting map
+(`output/assemble/helpers.rs::definitions_module_path`), and test tables.
+Endpoint literals were not re-measured (no endpoint literal changed).
+
+### Wave 11: the inventory (R34)
+
+- New `schematic/definitions/src/registry/inventory.rs` (replaces
+  `registry/lookup.rs`): `ApiRegistration { name, module, definitions_path,
+  protocol }`, `Protocol::{Rest(RestRegistration { key, group, member }),
+  WebSocket(WebSocketRegistration { define, constructor, summary })}`, and the
+  one `REGISTRATIONS` table (18 REST + 5 WebSocket, catalog order). Derived:
+  `registrations()`, `find_rest`, `rest_apis` (builds each module group once,
+  panics on an unregistered group member, a wrong member index, or a name
+  mismatch), `group_by_module`, `websocket_apis`, `registry_key_for`.
+- `all_apis()` and `apis_by_module()` (`definitions/src/lib.rs`) now derive
+  from the inventory; `apis_by_module` groups by the registered module, and a
+  test asserts that equals the API's own `module_path`/lowercased name, so the
+  grouping is unchanged.
+- `schematic-gen`: `available_apis()`/`available_apis_in`,
+  `resolve_api()`/`resolve_api_in` (`pipeline.rs`) derive from REST entries;
+  `ws_modules.rs` derives module files, re-exports, and `define_api` from
+  WebSocket entries (`ws_registrations`, `ws_helper_name`);
+  `assemble_lib_rs`, `assemble_prelude`, `read_rust_inventory`/
+  `prelude_exports`, and the reserved-module-name check take the
+  registrations; `RustOutputRequest` gains `registrations`;
+  `validate_rust_client_in` added (`validate_rust_client` = shipped);
+  `definitions_module_path` derives from REST entries.
+- Removed hand-written lists (exact locations): `registry/lookup.rs`
+  `MODULES` (15 entries) and `registry_key_for`'s 18-arm match;
+  `gen/src/pipeline.rs` `AVAILABLE_APIS` and the 18-arm `resolve_api` match
+  with its 15 `use` lines; `gen/src/output/ws_modules.rs`
+  `WsDefinitionModule`/`WS_DEFINITION_MODULES` (5) and `shipped_ws_module`
+  (5 arms), plus `shipped_ws_apis`; `gen/src/output/assemble/helpers.rs`
+  `definitions_module_path` match arm; `assemble_prelude_with_options`
+  (folded into `assemble_prelude(apis, registrations)`; `&[]` = no helpers).
+- Test tables replaced by derivation: `definitions/src/registry/mod.rs`
+  18-row key table (keys now live in the registrations; the inventory test
+  checks `registry_key_for(name) == key`), and the four unguarded 5-row
+  WebSocket tables — `gen/tests/l1/ws_codegen.rs::lower_all_apis`,
+  `gen/src/ws_codegen/plan.rs::lower_all_known_ws_apis`,
+  `definitions/tests/ws_conformance.rs::shipped`,
+  `definitions/tests/ws_definition_json.rs::every_shipped_definition_round_trips_twice_without_loss`.
+- Kept, with reasons: per-API expectation tables that hold data per API and
+  are already guarded set-equal with the inventory-derived lists
+  (`definitions/tests/api_policy.rs`, `gen/tests/l1/definition_baseline.rs`,
+  `definitions/tests/pagination_coverage/`); `definitions/src/lib.rs`
+  `pub mod`/`pub use define_*` (Rust module declarations the compiler needs;
+  not a runtime list); the `gen/tests/l1` legacy-filename lists (Phase 6's
+  resolver work).
+- Grep (R34, recorded): `grep -rn --include='*.rs'` for `"ollama-native"`,
+  `"OllamaNative"`, `"elevenlabs_ws"`, `"unfolded_circle_core_rest"`,
+  `define_samsung_smart_tv_remote_ws_api`, `"samsung-smart-tv"` over
+  `definitions/src`, `gen/src`, `gen/examples`: the only list holding them is
+  `registry/inventory.rs`; other hits are each API's own definition, doc
+  examples, and single-API unit tests.
+- adopted default: no `aliases` field. Phase 1 found "exact kebab keys, no
+  aliases" and none exist to preserve; an alias is a later field addition
+  (source: spec R34 "preserve existing selection aliases").
+- adopted default: catalog order (Phase 1 ruling) is the `--api` help order,
+  so `eversolo` moves from after `elevenlabs` to after `emqx-bearer` in the
+  help/error text. No artifact changes.
+- adopted default: `generate_batch` keeps taking REST APIs (15 fixture call
+  sites rely on it) and packages the shipped WebSocket entries; a fixture
+  WebSocket entry is driven through `prepare_rust_output` (source: spec P10-e
+  "tests supply a local fixture inventory to consumers").
+- adopted default: the generated `define_api` doc is `Builds the {summary}.`
+  from the registration's summary; the five shipped WebSocket modules are
+  byte-identical (drift tests pass).
+
+### Wave 12: propagation and the strict gate (R34, R35)
+
+Requirement → test:
+
+| Requirement | Test |
+| --- | --- |
+| R34 fixture reaches registry lists (REST shared module + WS) | `definitions/tests/api_inventory.rs::a_fixture_registration_reaches_every_derived_list` |
+| R34 a group member cannot be skipped silently | `api_inventory::{an_unregistered_group_member_is_refused, a_registration_naming_the_wrong_member_is_refused, a_registration_past_the_group_is_refused}` |
+| R34 registry lists derive from the inventory, in order | `api_inventory::the_registry_lists_derive_from_the_shipped_inventory_in_its_order` |
+| R34 entries agree with the APIs they build (module, key, names, WS modules) | `api_inventory::every_shipped_registration_agrees_with_the_api_it_builds` |
+| R34 selection names, help, inputs | `gen/tests/l1/api_inventory.rs::selection_names_and_inputs_come_from_the_inventory` |
+| R34 REST exports (Rust, OpenAPI, Postman) | `gen l1 api_inventory::a_fixture_rest_registration_reaches_every_rest_output` |
+| R34 WS packaging (module file, lib.rs, prelude.rs, partial-run inventory, reserved names, WS validation) | `gen l1 api_inventory::a_fixture_websocket_registration_reaches_every_websocket_consumer` |
+| R35 covered set = `apis_by_module()`; one reasoned skip registry | `gen l1 openapi_strict_completeness::the_strict_gate_covers_every_registered_api` |
+| R35 a fixture registration joins the gate | `openapi_strict_completeness::a_fixture_registration_joins_the_strict_gate` |
+| unchanged registrations → unchanged artifacts and Rust | `artifact_drift::{generated_rust_artifacts_are_up_to_date, generated_openapi_artifacts_are_up_to_date, generated_postman_artifacts_are_up_to_date}` |
+
+The strict gate's `STRICT_GATE_SKIPS: &[(&str, &str)]` is empty (all 18
+pass); `real_apis_still_pass_strict_completeness` iterates
+`strict_gate_apis(registrations())`. Fidelity: F2 in-process through each
+crate's public API; the REST-output test publishes real files to a temp dir.
+Input robustness matrix: not applicable (no file format or configuration
+reader added or changed). Docs: new "Register an API" section with the
+Mermaid flow in `docs/generation/workflow.md`; stale 13-name list in
+`docs/generation/generated-clients.md` replaced; `definitions/README.md`
+pointer; skill `definitions.md` checklist and `gen.md` example updated.
+
+### Gates (Phase 5)
+
+- `just test` (schematic): 2859 passed (4 slow: the pre-existing
+  `schematic-runtime` TLS builder tests), 20 skipped; fresh-output 14 passed;
+  compile-fail 1 passed. No failures.
+- `just lint` (schematic): first run flagged one `redundant_closure` in the new
+  `definitions/tests/api_inventory.rs`; fixed, rerun clean.
+- `just check-tier-coverage schematic`: 0 stranded.
+- Artifacts: `artifact_drift::generated_{rust,openapi,postman}_artifacts_are_up_to_date`
+  pass, so the generated Rust, OpenAPI, and Postman output is byte-identical;
+  no regeneration and no `lint-schema` needed.
+- Dependents: `schematic-schema` consumers (homelab, the four integrations,
+  sniff, biscuit-speaks) see byte-identical generated source; no runs needed.
+  `model-citizen` depends on `schematic-definitions` but uses only
+  `lmstudio`/`ollama` types: `cargo check -p model-citizen` clean and its
+  `scanner::` tests 61 passed.
+- Scope calculator not used to skip gates; both gates ran.
+- Cross-OS check: not run. No path, process, terminal, or `#[cfg]` code
+  changed; new tests write only under `tempfile` dirs and read no repository
+  file.
+
+Phase 5 status: checkpoint met. One fixture entry reaches every consumer
+(registry lists, selection/help/input, REST outputs, WebSocket packaging, the
+strict gate); the gate's covered set is checked against `apis_by_module()`
+with one reasoned skip list (empty); unchanged registrations yield unchanged
+artifacts and Rust output; the common phase checks pass.

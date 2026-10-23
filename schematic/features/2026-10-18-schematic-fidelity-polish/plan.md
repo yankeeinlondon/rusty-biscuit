@@ -78,6 +78,101 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/schematic-define/schematic/openapi.md
+source_files_during_phase_4:
+    - schematic/define/src/builders.rs
+    - schematic/define/src/types.rs
+    - schematic/define/src/openapi/mod.rs
+    - schematic/define/src/openapi/extensions.rs
+    - schematic/define/src/openapi/export/components.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/export/parameters.rs
+    - schematic/define/src/openapi/export/paths.rs
+    - schematic/define/src/openapi/export/request_body.rs
+    - schematic/define/src/openapi/export/responses.rs
+    - schematic/define/src/openapi/export/security.rs
+    - schematic/define/src/openapi/import.rs
+    - schematic/define/src/openapi/import/auth.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/openapi/import/extension.rs
+    - schematic/define/src/openapi/import/reconcile.rs
+    - schematic/define/src/openapi/import/query_paths.rs
+    - schematic/define/src/openapi/import/mappings/mod.rs
+    - schematic/define/src/openapi/import/mappings/parameters.rs
+    - schematic/define/src/openapi/import/mappings/responses.rs
+    - schematic/define/src/openapi/import/mappings/discriminator.rs
+    - schematic/define/tests/builders.rs
+    - schematic/define/tests/response_openapi.rs
+    - schematic/define/tests/openapi_import_parameters.rs
+    - schematic/define/tests/openapi_multipart_import.rs
+    - schematic/define/tests/openapi_extension_matrix.rs
+    - schematic/define/tests/openapi_standard_matrix.rs
+    - schematic/define/tests/matrix_support/mod.rs
+    - schematic/gen/src/export/openapi.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/extension_reimport.rs
+    - schematic/gen/tests/l1/extension_round_trip.rs
+    - schematic/gen/tests/l1/import_overlay.rs
+    - schematic/gen/tests/l1/vocabulary_exports.rs
+    - schematic/openapi/anthropic.json
+    - schematic/openapi/artificial_analysis.json
+    - schematic/openapi/bitbucket.json
+    - schematic/openapi/elevenlabs.json
+    - schematic/openapi/emqx.json
+    - schematic/openapi/eversolo.json
+    - schematic/openapi/gitea.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+    - schematic/openapi/huggingface.json
+    - schematic/openapi/lmstudio.json
+    - schematic/openapi/ollama.json
+    - schematic/openapi/openai.json
+    - schematic/openapi/samsung_smart_tv.json
+    - schematic/openapi/unfolded_circle_core_rest.json
+docs_updated_during_phase_4:
+    - schematic/docs/io/openapi-extensions.md
+    - schematic/docs/io/import-openapi.md
+    - schematic/docs/io/export-openapi.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/definition-builders.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/openapi.md
+    - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_5:
+    - schematic/definitions/src/registry/inventory.rs
+    - schematic/definitions/src/registry/lookup.rs
+    - schematic/definitions/src/registry/mod.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/tests/api_inventory.rs
+    - schematic/definitions/tests/ws_conformance.rs
+    - schematic/definitions/tests/ws_definition_json.rs
+    - schematic/gen/src/pipeline.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/output/inventory.rs
+    - schematic/gen/src/output/ws_modules.rs
+    - schematic/gen/src/output/assemble/helpers.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/mod.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/tests/l1/api_inventory.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/openapi_strict_completeness.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/gen/tests/l1/ws_validation.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+docs_updated_during_phase_5:
+    - schematic/docs/generation/workflow.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/definitions/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/schematic-define/schematic/definitions.md
+    - .claude/skills/schematic-define/schematic/gen.md
 ---
 
 # Schematic fidelity and polish implementation plan
@@ -428,13 +523,13 @@ and export/drift plus common phase checks pass.
 
 ### Wave 8: Standard import mappings
 
-- [ ] **Merge parameters**
+- [x] **Merge parameters**
   - R16, R17: strict rejects WARN/ERROR only; replace the tautological test with
     INFO-only/WARN-only/ERROR cases and correct ImportOptions docs. Resolve local
     parameter refs before merging path-item/operation parameters by name/location,
     case-insensitive for headers. Ownership: builder, parameter mapping tests.
 
-- [ ] **Import multipart**
+- [x] **Import multipart**
   - R18: preserve part names, required/file/text, accepted content types from
     encoding, and representable file arrays. Diagnose unsupported object/encoding
     forms. Round-trip the ElevenLabs AddVoiceSample shape. Ownership: request-body
@@ -442,7 +537,7 @@ and export/drift plus common phase checks pass.
 
 ### Wave 9: Extension reconciliation
 
-- [ ] **Roundtrip metadata**
+- [x] **Roundtrip metadata**
   - R10–R15, R54: implement document version gating and independent field decoding;
     preserve standard precedence and location-bearing unknown/malformed/conflict
     diagnostics. Include actual refreshed response/framing/keep and runtime metadata.
@@ -455,7 +550,7 @@ and export/drift plus common phase checks pass.
 
 ### Wave 10: Reader acceptance
 
-- [ ] **Exercise inputs**
+- [x] **Exercise inputs**
   - Execute the frozen JSON and YAML OpenAPI matrices through public import;
     malformed fields must not discard valid siblings. Cover missing version,
     unsupported/malformed versions, unknown keys, conflicts, and strict behavior.
@@ -471,7 +566,7 @@ pass, Rust output remains unchanged, and artifact/common phase checks pass.
 
 ### Wave 11: Inventory implementation
 
-- [ ] **Unify registrations**
+- [x] **Unify registrations**
   - R33, R34: implement the plain authoritative inventory in definitions; derive
     registry lookup, apis_by_module, generator selection/help/input, REST exports,
     WebSocket packaging/export enumeration, and test consumers. Preserve aliases
@@ -481,7 +576,7 @@ pass, Rust output remains unchanged, and artifact/common phase checks pass.
 
 ### Wave 12: Consumer coverage
 
-- [ ] **Prove propagation**
+- [x] **Prove propagation**
   - R34, R35: inject one local fixture registration and observe it in every
     consumer; include WebSocket and shared-module cases. Derive the strict gate's
     covered set from the inventory; named skips require one reasoned registry.
