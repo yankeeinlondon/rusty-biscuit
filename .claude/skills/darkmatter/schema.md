@@ -169,7 +169,8 @@ authored in `darkmatter/schemas/partials/fm.yaml`. That partial declares
 `content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy.yaml"`
 (optional, no default) and imports `style@./style.yaml` and
 `context@./context-variables.yaml`. `schemas/embedded.rs::SHIPPED` holds the
-compiled-in bundle (catalog, five partials, `content_policy::EDITOR_SCHEMA`)
+compiled-in bundle (catalog, its partials including the expression-function
+catalog `functions.yaml`, `content_policy::EDITOR_SCHEMA`)
 keyed by repo-relative virtual paths. Embedded imports resolve
 lexically with `/` (no `~ & ^ $ % @`, URLs, globs, or climbing above the
 root), never touch the disk or network, add no dependency edge (DMLS never

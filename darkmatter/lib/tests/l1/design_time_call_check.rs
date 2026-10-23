@@ -392,3 +392,162 @@ mod walk {
         assert_eq!(found[0].check.argument_spans[0], 9..13);
     }
 }
+
+/// `numberlike` and `boolish` deliver either the native scalar or the text as
+/// sent, so a classification must keep both representations: a cross-family
+/// pair is uncertain (some retained text converts), not proven wrong, and a
+/// pair whose retained text may fail (`json`) is not certain.
+mod preserved_text {
+    use super::*;
+
+    use darkmatter::markdown::coercion::bind;
+    use darkmatter::markdown::compose::expression::call_binding::{NoNamedTypes, shape_from_property_def};
+    use darkmatter::markdown::compose::expression::{EvaluationLookup, evaluate, parse};
+    use darkmatter::markdown::schemas::simplified::grammar::parse_type_definition;
+    use serde_json::Value;
+
+    /// One test per `(source, parameter)` cell; the expected categories are
+    /// the review's table, written out rather than derived, except the two
+    /// retained-text → `yaml` cells (see
+    /// `retained_text_is_not_always_json_or_yaml`).
+    macro_rules! matrix {
+        ($($name:ident: $source:literal -> $target:literal = $expected:ident;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert_eq!(pair(concat!($source, "(required)"), $target), $expected);
+                }
+            )*
+        };
+    }
+
+    matrix! {
+        number_to_number: "number" -> "number" = Compatible;
+        number_to_boolean: "number" -> "boolean" = Incompatible;
+        number_to_numberlike: "number" -> "numberlike" = Compatible;
+        number_to_boolish: "number" -> "boolish" = Incompatible;
+        number_to_string: "number" -> "string" = Compatible;
+        number_to_json: "number" -> "json" = Compatible;
+        number_to_yaml: "number" -> "yaml" = Compatible;
+
+        boolean_to_number: "boolean" -> "number" = Incompatible;
+        boolean_to_boolean: "boolean" -> "boolean" = Compatible;
+        boolean_to_numberlike: "boolean" -> "numberlike" = Incompatible;
+        boolean_to_boolish: "boolean" -> "boolish" = Compatible;
+        boolean_to_string: "boolean" -> "string" = Compatible;
+        boolean_to_json: "boolean" -> "json" = Compatible;
+        boolean_to_yaml: "boolean" -> "yaml" = Compatible;
+
+        string_to_number: "string" -> "number" = Uncertain;
+        string_to_boolean: "string" -> "boolean" = Uncertain;
+        string_to_numberlike: "string" -> "numberlike" = Uncertain;
+        string_to_boolish: "string" -> "boolish" = Uncertain;
+        string_to_string: "string" -> "string" = Compatible;
+        string_to_json: "string" -> "json" = Uncertain;
+        string_to_yaml: "string" -> "yaml" = Uncertain;
+
+        numberlike_to_number: "numberlike" -> "number" = Compatible;
+        numberlike_to_boolean: "numberlike" -> "boolean" = Uncertain;
+        numberlike_to_numberlike: "numberlike" -> "numberlike" = Compatible;
+        numberlike_to_boolish: "numberlike" -> "boolish" = Uncertain;
+        numberlike_to_string: "numberlike" -> "string" = Compatible;
+        numberlike_to_json: "numberlike" -> "json" = Uncertain;
+        numberlike_to_yaml: "numberlike" -> "yaml" = Uncertain;
+
+        boolish_to_number: "boolish" -> "number" = Uncertain;
+        boolish_to_boolean: "boolish" -> "boolean" = Compatible;
+        boolish_to_numberlike: "boolish" -> "numberlike" = Uncertain;
+        boolish_to_boolish: "boolish" -> "boolish" = Compatible;
+        boolish_to_string: "boolish" -> "string" = Compatible;
+        boolish_to_json: "boolish" -> "json" = Uncertain;
+        boolish_to_yaml: "boolish" -> "yaml" = Uncertain;
+    }
+
+    // Sibling shapes of the same representation loss: a type that refuses
+    // native scalars, literal parameters, containers, unions, and an
+    // optional source.
+    matrix! {
+        numberlike_to_alphanumeric: "numberlike" -> "alphanumeric" = Uncertain;
+        boolish_to_alphanumeric: "boolish" -> "alphanumeric" = Uncertain;
+        number_to_alphanumeric: "number" -> "alphanumeric" = Incompatible;
+        numberlike_to_literal_true: "numberlike" -> "literal(true)" = Uncertain;
+        boolish_to_literal_one: "boolish" -> "literal(1)" = Uncertain;
+        number_to_literal_true: "number" -> "literal(true)" = Incompatible;
+        boolish_to_object: "boolish" -> "object" = Incompatible;
+        numberlike_to_number_list: "numberlike" -> "number[]" = Incompatible;
+        numberlike_list_to_number_list: "numberlike[]" -> "number[]" = Compatible;
+        numberlike_list_to_boolean_list: "numberlike[]" -> "boolean[]" = Uncertain;
+        boolish_to_number_or_string: "boolish" -> "number | string" = Compatible;
+    }
+
+    #[test]
+    fn an_optional_or_union_source_keeps_its_retained_text() {
+        assert_eq!(pair("boolish", "number"), Uncertain);
+        assert_eq!(pair("[boolish(required), object(required)]", "number"), Uncertain);
+        assert_eq!(pair("[boolean(required), object(required)]", "number"), Incompatible);
+    }
+
+    /// Why retained text is uncertain for both content formats: `+4` and
+    /// `yes` are not JSON, and a tab-led spelling that `numberlike` and
+    /// `boolish` admit (their parsers trim it) is not YAML.
+    #[test]
+    fn retained_text_is_not_always_json_or_yaml() {
+        let shape = |text: &str| {
+            shape_from_property_def(&parse_type_definition("p", text).expect("parses"), &NoNamedTypes).expect("translates")
+        };
+        let (yaml, json_shape, numberlike, boolish) = (shape("yaml"), shape("json"), shape("numberlike"), shape("boolish"));
+        for text in ["+4", "\t4"] {
+            assert!(bind(&numberlike, &json!(text)).is_ok(), "{text:?} is numberlike");
+        }
+        for text in ["yes", "\tyes"] {
+            assert!(bind(&boolish, &json!(text)).is_ok(), "{text:?} is boolish");
+        }
+        assert!(bind(&json_shape, &json!("+4")).is_err());
+        assert!(bind(&json_shape, &json!("yes")).is_err());
+        assert!(bind(&yaml, &json!("+4")).is_ok());
+        assert!(bind(&yaml, &json!("\t4")).is_err(), "a tab-led numberlike is not YAML");
+        assert!(bind(&yaml, &json!("\tyes")).is_err(), "a tab-led boolish is not YAML");
+    }
+
+    /// `length` excludes a native Boolean, not the text a `boolish` keeps.
+    #[test]
+    fn length_of_a_boolish_is_uncertain() {
+        assert_eq!(call_category("src: boolish(required)", "length(src)"), Uncertain);
+        assert_eq!(call_category("src: boolean(required)", "length(src)"), Incompatible);
+    }
+
+    #[test]
+    fn every_numeric_builtin_is_uncertain_for_a_boolish() {
+        for expression in ["min(src, 5)", "max(src, 5)", "abs(src)"] {
+            assert_eq!(call_category("src: boolish(required)", expression), Uncertain, "{expression}");
+            assert_eq!(call_category("src: numberlike(required)", expression), Compatible, "{expression}");
+        }
+    }
+
+    #[test]
+    fn a_valid_fallback_still_recovers_a_boolish() {
+        assert_eq!(call_category("src: boolish(required)", "number(src, 7)"), Compatible);
+    }
+
+    struct Lookup(Value);
+
+    impl EvaluationLookup for Lookup {
+        fn get(&self, path: &str) -> Option<Value> {
+            self.0.get(path).cloned()
+        }
+    }
+
+    /// The runtime binds what the classification calls possible.
+    #[test]
+    fn retained_text_binds_at_runtime() {
+        let lookup = Lookup(json!({"src": "1", "word": "yes"}));
+        let eval = |source: &str| evaluate(&parse(source).expect("parses"), &lookup).expect(source);
+        hooks::reset_handler_entries();
+        assert_eq!(eval("min('1', 5)"), json!(1));
+        assert_eq!(eval("length('yes')"), json!(3));
+        assert_eq!(eval("min(src, 5)"), json!(1));
+        assert_eq!(eval("length(word)"), json!(3));
+        assert_eq!(hooks::handler_entries("min"), 2);
+        assert_eq!(hooks::handler_entries("length"), 2);
+    }
+}

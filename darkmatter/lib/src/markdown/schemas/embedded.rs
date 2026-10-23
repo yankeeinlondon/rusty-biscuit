@@ -154,8 +154,10 @@ pub(crate) struct EmbeddedDocument<'a> {
 pub(crate) const CONTENT_POLICY_PATH: &str = "content-policy/schemas/content-policy.yaml";
 
 /// The shipped documents: Darkmatter's global catalog, its partials
-/// (including the neutral lifecycle action definitions and the `md` profile's
-/// stacks), and the Content Policy editor schema the `fm` partial imports.
+/// (including the neutral lifecycle action definitions, the `md` profile's
+/// stacks, and the expression-function catalog, whose `recent-commits` helper
+/// type the context partial imports), and the Content Policy editor schema the
+/// `fm` partial imports.
 /// The runtime baseline is the catalog's resolved `fm` definition.
 pub(crate) const SHIPPED: &[EmbeddedDocument<'static>] = &[
     EmbeddedDocument {
@@ -189,6 +191,10 @@ pub(crate) const SHIPPED: &[EmbeddedDocument<'static>] = &[
     EmbeddedDocument {
         path: "darkmatter/schemas/partials/md-lifecycle.yaml",
         text: include_str!("../../../../schemas/partials/md-lifecycle.yaml"),
+    },
+    EmbeddedDocument {
+        path: "darkmatter/schemas/partials/functions.yaml",
+        text: include_str!("../../../../schemas/partials/functions.yaml"),
     },
     EmbeddedDocument {
         path: CONTENT_POLICY_PATH,
@@ -431,6 +437,7 @@ mod tests {
                 "darkmatter/schemas/partials/timing.yaml",
                 "darkmatter/schemas/partials/lifecycle.yaml",
                 "darkmatter/schemas/partials/md-lifecycle.yaml",
+                "darkmatter/schemas/partials/functions.yaml",
                 CONTENT_POLICY_PATH,
             ]
         );

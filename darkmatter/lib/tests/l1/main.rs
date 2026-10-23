@@ -137,6 +137,7 @@ mod predict_conflicts;
 mod prelude_exports;
 mod prose_wrap_parity;
 mod raw_schema_conversion;
+mod recent_commits_shared_type;
 mod reference_integration;
 mod request_context_builder;
 mod required_context;

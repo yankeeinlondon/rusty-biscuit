@@ -733,6 +733,18 @@ file-form ones from `schemas/partials/function-examples/`. Do not edit the
 generated table directly; run `just darkmatter regen-expr-doc` from the
 repository root to refresh it after changing the catalog.
 
+The catalog's other `types:` entries are named helper types that signatures
+use: `agentic-cli`, `ip-address`, and `recent-commits`. A schema imports one as
+`Name@darkmatter:functions` (see
+[Reserved Darkmatter References](schemas/definition.md#reserved-darkmatter-references-namedarkmatterstem)).
+`ctx.recent_commits` is declared that way, so it and the return of
+`recent_commits(count)` are the one `recent-commits` type, a `string[]`:
+
+```yaml
+# darkmatter/schemas/partials/context-variables.yaml
+recent_commits: "recent-commits(generated; required)@darkmatter:functions -> …"
+```
+
 <!-- BEGIN GENERATED FUNCTION TABLE -->
 
 | Category | Function | Description | Example |

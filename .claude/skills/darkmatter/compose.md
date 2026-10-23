@@ -219,9 +219,10 @@ preflight discovery) may tolerate.
 no group: each reached call walks history from the file-resolution
 `repository_root` and renders through the capture's `render_recent_commits`.
 It is the lazy half of the first variable/function pair (R29): `ctx.recent_commits`
-is the eager snapshot in the same rendering. The function returns the catalog's
-`recent-commits` named type, and each side's description names the other; there
-is no shared descriptor entry.
+is the eager snapshot in the same rendering. Both use the catalog's one
+`recent-commits` named type (the function returns it; `context-variables.yaml`
+imports it as `recent-commits(generated; required)@darkmatter:functions`), and
+each side's description names the other; there is no shared descriptor entry.
 
 `has_agentic_cli(agent)` demands `Agent`; the capture retains a lazily scanned
 `InstalledAiClients` `PATH` index that every clone of the request shares, and a

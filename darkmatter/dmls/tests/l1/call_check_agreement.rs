@@ -57,8 +57,26 @@ const CORPUS: &[(&str, &str, &str, bool)] = &[
     ("file_exists_number", "", "{{ file_exists(42) }}", false),
 ];
 
-fn document(extra: &str, body: &str) -> String {
-    format!("---\n{FRONTMATTER}{extra}---\n\n{body}\n")
+/// Retained text: a `boolish` may hold `"1"` and a `numberlike` always
+/// admits as a number, so neither is a proven error; a `boolean` still is.
+const RETAINED_FRONTMATTER: &str = "$schema:
+  word: boolish(required)
+  amount: numberlike(required)
+  switch: boolean(required)
+word: \"1\"
+amount: \"4\"
+switch: true
+";
+
+const RETAINED_CORPUS: &[(&str, &str, &str, bool)] = &[
+    ("boolish_min", "", "{{ min(word, 5) }}", false),
+    ("boolish_length", "", "{{ length(word) }}", false),
+    ("numberlike_min", "", "{{ min(amount, 5) }}", false),
+    ("boolean_length", "", "{{ length(switch) }}", true),
+];
+
+fn document(frontmatter: &str, extra: &str, body: &str) -> String {
+    format!("---\n{frontmatter}{extra}---\n\n{body}\n")
 }
 
 fn composition_rejects(workspace: &LspWorkspace, path: &std::path::Path) -> bool {
@@ -81,6 +99,17 @@ fn editor_rejects(diagnostics: &[Value]) -> bool {
 
 #[test]
 fn composition_and_the_editor_reject_the_same_documents() {
+    agree(FRONTMATTER, CORPUS);
+}
+
+#[test]
+fn composition_and_the_editor_agree_on_retained_text() {
+    agree(RETAINED_FRONTMATTER, RETAINED_CORPUS);
+}
+
+/// Composes and opens every document of `corpus` under `frontmatter`, and
+/// fails on any document either side judges differently from its row.
+fn agree(frontmatter: &str, corpus: &[(&str, &str, &str, bool)]) {
     let workspace = LspWorkspace::new();
     let root_uri = url::Url::from_directory_path(workspace.path()).unwrap();
     let mut fixture = LspFixture::start(&workspace);
@@ -91,8 +120,8 @@ fn composition_and_the_editor_reject_the_same_documents() {
     }));
 
     let mut disagreements = Vec::new();
-    for (name, extra, body, rejected) in CORPUS {
-        let text = document(extra, body);
+    for (name, extra, body, rejected) in corpus {
+        let text = document(frontmatter, extra, body);
         let path = workspace.path().join(format!("{name}.md"));
         std::fs::write(&path, &text).unwrap();
         let composed = composition_rejects(&workspace, &path);

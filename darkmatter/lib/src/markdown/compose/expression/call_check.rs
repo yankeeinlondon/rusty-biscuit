@@ -39,7 +39,7 @@ use super::call_binding::{
 use super::functions;
 use super::prepared::PreparedValue;
 use super::scope::{Shape as ScopeShape, TypeScope};
-use crate::markdown::coercion::{Additional, ContentFormat, Shape, ValueKind, bind};
+use crate::markdown::coercion::{Additional, ContentFormat, NumberShape, Shape, ValueKind, bind};
 use crate::markdown::schemas::simplified::serialize_property_atom;
 use crate::markdown::schemas::{Constraint, PropertyAtom, PropertyDef, is_subtype};
 use crate::markdown::span::SourceSpan;
@@ -300,12 +300,16 @@ fn subtype_of_parameter(arm: &PropertyAtom, declared: &PropertyDef) -> bool {
     }
 }
 
-/// The runtime value kinds a source shape can produce.
+/// The runtime value kinds a source shape can produce. `numberlike` and
+/// `boolish` keep their value as sent, so they produce text as well as the
+/// native scalar.
 fn source_kinds(shape: &Shape) -> Vec<ValueKind> {
     match shape {
         Shape::Any => Vec::new(),
         Shape::Null => vec![ValueKind::Null],
+        Shape::Number(number) if number.as_sent => vec![ValueKind::Number, ValueKind::Text],
         Shape::Number(_) => vec![ValueKind::Number],
+        Shape::Boolean { as_sent: true } => vec![ValueKind::Boolean, ValueKind::Text],
         Shape::Boolean { .. } => vec![ValueKind::Boolean],
         Shape::Text(_) | Shape::Content(_) => vec![ValueKind::Text],
         Shape::Literal(value) => vec![ValueKind::of(value)],
@@ -333,6 +337,12 @@ enum Family {
     Content(ContentFormat),
     List,
     Object,
+    /// Retained `numberlike` text: admitted numeric text, kept as sent.
+    /// Only ever a source family.
+    NumberText,
+    /// Retained `boolish` text: a boolean word, kept as sent. Only ever a
+    /// source family.
+    BooleanText,
 }
 
 fn literal_family(value: &Value) -> Option<Family> {
@@ -353,6 +363,19 @@ fn fit(source: &Shape, target: &Shape) -> Fit {
     match (source, target) {
         (Shape::Assert(inner, _), _) => fit(inner, target),
         (Shape::Union(options), _) => Fit::all(options.iter().map(|option| fit(option, target))),
+        // `numberlike` and `boolish` deliver either the native scalar or the
+        // text as sent; every value fits only if both representations do.
+        (Shape::Number(number), _) if number.as_sent => {
+            let native = Shape::Number(NumberShape {
+                as_sent: false,
+                bounds: number.bounds.clone(),
+            });
+            Fit::all([fit(&native, target), retained_text_fit(Family::NumberText, target)])
+        }
+        (Shape::Boolean { as_sent: true }, _) => Fit::all([
+            fit(&Shape::Boolean { as_sent: false }, target),
+            retained_text_fit(Family::BooleanText, target),
+        ]),
         (Shape::Any, _) => Fit::Unknown,
         (_, Shape::Any) => Fit::Fits,
         (_, Shape::Assert(inner, _)) => fit(source, inner),
@@ -395,6 +418,22 @@ fn fit(source: &Shape, target: &Shape) -> Fit {
     }
 }
 
+/// Whether retained `numberlike` or `boolish` text (`text` is
+/// [`Family::NumberText`] or [`Family::BooleanText`]) binds to `target`.
+fn retained_text_fit(text: Family, target: &Shape) -> Fit {
+    match target {
+        Shape::Any => Fit::Fits,
+        Shape::Null => Fit::Wrong,
+        Shape::Assert(inner, _) => retained_text_fit(text, inner),
+        Shape::Union(options) => options.iter().map(|option| retained_text_fit(text, option)).fold(Fit::Wrong, Fit::best),
+        Shape::Literal(value) => match literal_family(value) {
+            Some(to) if family_fit(text, to, true) != Fit::Wrong => Fit::Maybe,
+            _ => Fit::Wrong,
+        },
+        _ => family(target).map_or(Fit::Unknown, |to| family_fit(text, to, scalar_text(target))),
+    }
+}
+
 fn family(shape: &Shape) -> Option<Family> {
     match shape {
         Shape::Number(_) => Some(Family::Number),
@@ -421,9 +460,17 @@ fn scalar_text(target: &Shape) -> bool {
 /// text always succeed (unless the text type refuses scalars); text →
 /// number, boolean, or content may; a native value → `json`/`yaml` always
 /// does.
+///
+/// Retained `numberlike`/`boolish` text is text, so it fits any text type,
+/// and is narrower than arbitrary text: numeric text always converts to a
+/// number and a boolean word to a boolean, while only `1` and `0` are both.
+/// It is not always content: `+4` and `yes` are not JSON, and a tab-led
+/// `\t4`, which admission trims, is not YAML.
 fn family_fit(from: Family, to: Family, scalar_text: bool) -> Fit {
-    use Family::{Boolean, Content, List, Number, Object, Text};
+    use Family::{Boolean, BooleanText, Content, List, Number, NumberText, Object, Text};
     match (from, to) {
+        (NumberText, Number) | (BooleanText, Boolean) | (NumberText | BooleanText, Text) => Fit::Fits,
+        (NumberText, Boolean) | (BooleanText, Number) | (NumberText | BooleanText, Content(_)) => Fit::Maybe,
         (Number, Number) | (Boolean, Boolean) | (Text, Text) | (List, List) | (Object, Object) => Fit::Fits,
         (Content(_), Text) => Fit::Fits,
         (Content(left), Content(right)) if left == right => Fit::Fits,

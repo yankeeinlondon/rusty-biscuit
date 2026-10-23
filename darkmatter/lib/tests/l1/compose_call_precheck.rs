@@ -290,6 +290,25 @@ mod conversions {
             rejected_before_evaluation(&document("", &format!("{{{{ {call} }}}}")));
         }
     }
+
+    /// A `boolish` keeps `"1"` as sent, so `min` may bind it: uncertain, not
+    /// rejected. A numeric declaration and a literal call are the controls.
+    #[test]
+    fn a_boolish_holding_numeric_text_composes() {
+        let document = |declared: &str, value: &str, call: &str| {
+            format!("---\n$schema:\n  src: {declared}(required)\nsrc: {value}\n---\n{{{{ {call} }}}}\n")
+        };
+        assert_eq!(composed(&document("boolish", "\"1\"", "min(src, 5)")), "1");
+        assert_eq!(composed(&document("boolish", "\"yes\"", "length(src)")), "3");
+        assert_eq!(composed(&document("number", "1", "min(src, 5)")), "1");
+        assert_eq!(composed(&document("numberlike", "\"1\"", "min(src, 5)")), "1");
+        assert_eq!(composed(&document("boolish", "\"1\"", "min(\"1\", 5)")), "1");
+        // A native Boolean is still a runtime type error, not a design-time one.
+        let error = compose(&document("boolish", "true", "min(src, 5)")).unwrap_err();
+        assert!(call_check(&error).is_none(), "rejected at design time: {error}");
+        // A plain `boolean` is still proven wrong.
+        rejected(&document("boolean", "true", "min(src, 5)"));
+    }
 }
 
 mod surface {

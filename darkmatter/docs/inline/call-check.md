@@ -94,6 +94,30 @@ A few rules decide the category:
   `number("4", "x")` is category 5 because the fallback itself cannot bind.
 - **Wrong argument counts** (`min(1)`) and calls no overload can take are
   category 5.
+- **`numberlike` and `boolish` may hold text.** Both keep a value exactly as
+  sent, so a declared `boolish` is either a native boolean or a boolean word
+  such as `"yes"` or `"1"`, and a `numberlike` is a number or numeric text
+  such as `"+4"`. The check counts both forms:
+
+  | Declared `src` | Call | Category | Why |
+  |---|---|---|---|
+  | `boolish(required)` | `min(src, 5)` | 3 | `"1"` converts to a number; `true` does not |
+  | `boolish(required)` | `length(src)` | 3 | `length` refuses a boolean, not the text `"yes"` |
+  | `numberlike(required)` | `min(src, 5)` | 1 | every numberlike value converts to a number |
+  | `numberlike(required)` | a `boolean` parameter | 3 | `"1"` is a boolean word; `4` and `"+4"` are not |
+  | `numberlike` or `boolish` | a `json` or `yaml` parameter | 3 | `"+4"` and `"yes"` are not JSON; a tab-led `"\t4"` is not YAML |
+  | `boolean(required)` | `min(src, 5)` | 5 | a native boolean never binds a number |
+
+  This document composes to `1`:
+
+  ```markdown
+  ---
+  $schema:
+    src: boolish(required)
+  src: "1"
+  ---
+  {{ min(src, 5) }}
+  ```
 
 A call in category 3 can still fail at runtime. Save this as `count.md` and
 run `md compose count.md`:
@@ -129,6 +153,7 @@ Only a call that is **proven** wrong (category 5) rejects the document:
 | `min(1)`, `number()` | rejected: wrong argument count |
 | `number("4", "x")`, `number("pear")` | rejected: the literal cannot bind |
 | `min(size, 5)`, `number("pear", 7)`, `number(flag, 7)` | not rejected (`number`'s `7` is a valid fallback) |
+| `min(word, 5)`, `length(word)` with `word: boolish(required)` | not rejected; `word` may hold text such as `"1"` |
 | `min(untyped, 5)` (no schema entry) | not rejected; its value is checked when it runs |
 | `min(maybe \|\| 0, 5)`, `min(length(count), 5)` | not rejected; the argument's type is not known before it runs |
 

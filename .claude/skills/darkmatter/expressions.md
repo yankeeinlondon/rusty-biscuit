@@ -40,6 +40,11 @@ and DMLS both read it.
   a set value is runtime data.
 - An all-literal call is classified by the real `bind_call`, which runs no
   handler.
+- An `as_sent` source (`numberlike`, `boolish`) is two representations, the
+  native scalar and retained text (`Family::NumberText`/`BooleanText`,
+  `source_kinds` adds `Text`); never collapse it to one primitive family, or
+  `min(boolish, 5)` becomes a false category 5 and `numberlike → json` a
+  false category 1.
 - New authored-expression surfaces must be added to both consumers.
   `dmls/tests/l1/call_check_agreement.rs` pins their agreement on one corpus.
 - Projection limits are intended, not gaps to patch locally: paths below a

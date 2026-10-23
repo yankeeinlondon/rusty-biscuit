@@ -368,3 +368,52 @@ mod verdicts {
         );
     }
 }
+
+/// `numberlike` and `boolish` keep text as sent: a `boolish` passed to a
+/// numeric or `length` parameter may bind (`"1"`, `"yes"`), so the editor
+/// warns (category 3) and never errs.
+mod preserved_text {
+    use super::*;
+
+    const DECLARED: &str = "---
+$schema:
+  flag: boolish(required)
+  amount: numberlike(required)
+flag: \"1\"
+amount: \"4\"
+---
+
+";
+
+    /// `(line, start, end, severity, code)` of every call diagnostic of
+    /// `body` under [`DECLARED`], lines relative to the body.
+    fn body_calls(body: &str) -> Vec<Finding> {
+        let workspace = LspWorkspace::new();
+        let text = format!("{DECLARED}{body}");
+        let mut session = Session::open(&workspace, &text);
+        let offset = DECLARED.matches('\n').count() as u64;
+        let found = session.calls().into_iter().map(|(line, start, end, severity, code)| (line - offset, start, end, severity, code)).collect();
+        session.shutdown();
+        found
+    }
+
+    #[test]
+    fn a_boolish_to_a_numeric_or_length_parameter_warns() {
+        let body = "{{ min(flag, 5) }}\n{{ max(flag, 5) }}\n{{ abs(flag) }}\n{{ length(flag) }}\n";
+        let expected: Vec<Finding> = body
+            .lines()
+            .enumerate()
+            .map(|(line, text)| {
+                let start = text.find("flag").unwrap() as u64;
+                (line as u64, start, start + 4, WARNING, UNCERTAIN.to_string())
+            })
+            .collect();
+        assert_eq!(body_calls(body), expected);
+    }
+
+    #[test]
+    fn numberlike_recovered_and_literal_controls_are_silent() {
+        let body = "{{ min(amount, 5) }}\n{{ number(flag, 7) }}\n{{ min(\"1\", 5) }}\n";
+        assert_eq!(body_calls(body), vec![]);
+    }
+}

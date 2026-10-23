@@ -52,8 +52,10 @@ behavior.
   `ip-address` (IPv4, IPv6, or a scoped `fe80::1%en0` literal; no DNS),
   `agentic-cli` (an `enum(...)` that a test pins to
   `expression/functions/agentic_cli_generated.rs`), and `recent-commits` (the
-  return of `recent_commits(count)`; `ctx.recent_commits` still declares its
-  own `string[]`, and the two descriptions name each other). Typed signatures
+  return of `recent_commits(count)` and, through
+  `recent-commits@darkmatter:functions`, the type of `ctx.recent_commits`; the
+  two descriptions name each other). `functions.yaml` is in `SHIPPED` for that
+  import, so on-disk copies of the partials need no copy of it. Typed signatures
   show the helper's name, not its expansion.
 - `agentic_cli_generated.rs` is written by `claudine-gen generate` from
   `claudine/docs/providers.yaml`. Never hand-edit it; `claudine-gen check` and
