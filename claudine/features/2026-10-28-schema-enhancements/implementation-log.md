@@ -43,6 +43,8 @@ packages:
     - claudine
     - claudine-gen
     - sniff-cli
+    - claudine-cli
+    - test-toolkit
 human_review: false
 source_files_during_phase_2:
     - claudine/gen/src/schema_compat.rs
@@ -175,14 +177,182 @@ skills_files_updated_during_phase_2:
     - .claude/skills/darkmatter/expressions.md
     - .claude/skills/darkmatter/frontmatter.md
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/cleanup/rules.rs
+    - darkmatter/lib/src/markdown/coercion/engine.rs
+    - darkmatter/lib/src/markdown/coercion/error.rs
+    - darkmatter/lib/src/markdown/coercion/mod.rs
+    - darkmatter/lib/src/markdown/coercion/shape.rs
+    - darkmatter/lib/src/markdown/coercion/union.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/signature.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/json_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/style/parse.rs
+    - darkmatter/schemas/partials/style.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.conversion.schema.yaml
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/clean_rules.rs
+    - darkmatter/lib/tests/l1/coercion_core.rs
+    - darkmatter/lib/tests/l1/coercion_engine_parity.rs
+    - darkmatter/lib/tests/l1/coercion_translator_conformance.rs
+    - darkmatter/lib/tests/l1/frontmatter_coercion_engine.rs
+    - darkmatter/lib/tests/l1/function_call_binding.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/raw_schema_conversion.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/frontmatter.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/raw_schema.rs
+    - darkmatter/lib/tests/l1/schemas_conjunctive_lowering.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_values.rs
+    - darkmatter/lib/tests/l1/schemas_union_clean.rs
+    - darkmatter/lib/tests/l1/schemas_union_coerce.rs
+    - darkmatter/lib/tests/l1/schemas_union_report.rs
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolish.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number_integer_with_min.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_numberlike.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_matching_default.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__suggest_constraint_phase3__conversion_snapshot_covers_valid_and_invalid_metadata.snap
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/cli/tests/l1/schema_union_pipeline.rs
+    - darkmatter/dmls/tests/l1/style_markdown_parity.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/PROVENANCE.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/cleanup.md
+    - .claude/skills/darkmatter/schema.md
 message_to_agent: |-
-  Phase 2 (Wave 2) is implemented; read implementation-log.md "## Phase 2" first. What Phase 3 builds on:
-  - Numbers: darkmatter::markdown::numeric is the only way a number enters Darkmatter. Use admit_number_text for text -> number (the one lenient parser), admit_json_number/admit_f64 for values without a spelling, json_number to store and format_number to render. Frontmatter YAML, raw JSON/YAML schemas, schema-file YAML (standalone.rs and resolve.rs both go through numeric::load_admitted_yaml), SimplifiedSchema metadata, and expression literals are admitted AT LOAD, so the conversion core never sees an inexact native number; it still must admit converted text.
-  - Grammar AST (schemas/simplified/types.rs): TypeExpr::Tuple(TupleType{elements: TupleElement.., spread}), TypeExpr::Function(Box<FunctionType>) with FunctionParameters/FunctionParameter/CallExample/ExampleOutcome, Constraint::Category. `(A | B)[]` is the existing TypeExpr::Union with is_array; `id: A | B` parses to PropertyDef::Union exactly like the YAML list. Tuples lower to prefixItems/minItems/items; functions are rejected in to_json_schema (the one choke point). Duplicate-overload contracts: simplified/signature.rs.
-  - Still on the old engine: schemas/coerce.rs has no tuple (prefixItems) handling, and today's frontmatter coercion turns `true` into "true", so criterion 47's document-level rejection of [true] and every conversion criterion wait for your core. coerce_to_number leaves inexact text unconverted and validate.rs appends the admission reason; replace both with the core.
-  - serde_json preserve_order is on for every package linking darkmatter. Alphabetical outputs sort explicitly (md schema validate JSON, md hash non-strict frontmatter hash, Claudine OpenCode/Kilo config, sniff-cli JSON). Do not mechanically refresh snapshots.
-  - Hazards in this shared worktree: zsh CDPATH sends a relative `cd claudine` to /Volumes/coding/personal/rusty-biscuit (a different checkout), so always cd with absolute paths and check `pwd -P`; an outside process may commit or briefly roll back files mid-phase (it did in Phase 2). `git apply --3way` stages files; unstage with `git reset -q -- <files>`.
-  - Known load-sensitive test: dmls::l1 searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back fails only under full-suite load; main fixes it in 43798e829, not yet on feat/pipeline.
+    Phase 4 (Waves 5-6) is done; read implementation-log.md "## Phase 4" first. What Phase 5 builds on:
+
+    - Catalog: darkmatter/schemas/partials/functions.yaml (116 functions; named helper types agentic-cli, ip-address, recent-commits). Library API in compose/expression/catalog/mod.rs: expression_function_catalog() (categories + descriptors in documentation order), expression_function_descriptors(), function_descriptors(name) (alias- and case-aware; every overload of one function as one slice), ExpressionFunctionDescriptor.function_type (the grammar FunctionType) and parameters/returns/fallible/examples. FunctionCatalog has a crate-private type_resolver() for the helper types.
+    - Registry and dispatch: compose/expression/functions/mod.rs. Every function is a call_binding::FunctionRegistration compiled once from the catalog (length's boolean exclusion and number/round recovery registered there). call_function(name, args, ctx) binds before any handler; lazy and/or bind operand by operand (functions::lazy_function). The design-time compatibility API (Wave 7) should read these same registrations rather than recompiling signatures.
+    - Errors: ExpressionError::Call(Box<CallBindingError>); only ImplementationContract is authoring-fatal. Arity/ArgType/ArityBound are gone.
+    - Test hooks: function_test_hooks (feature effects-instrumentation): register test functions and count handler entries. Criterion 37/49/53 compose-precheck tests can assert "counter at 0" with them.
+    - Known load-sensitive test (not on feat/pipeline yet): dmls::l1 searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back; passes alone.
+    - Hazards: zsh CDPATH (cd with absolute paths); `git rm`/`git apply --3way` stage files. Parallel subagents in throwaway worktrees seeded from a tarball of the uncommitted tree worked well again; give each disjoint files.
+source_files_during_phase_4:
+    - claudine/cli/src/commands/context/expressions.rs
+    - claudine/cli/src/commands/context/format.rs
+    - claudine/cli/src/commands/context/mod.rs
+    - claudine/cli/src/commands/context/tests.rs
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+    - claudine/docs/schemas/partials/functions.yaml
+    - claudine/docs/schemas/partials/mutations.yaml
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/cli/tests/l1/compose_expression_failures.rs
+    - darkmatter/cli/tests/l1/compose_schema_enhancements.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/docs/schemas/expression-functions.yaml
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/lib.rs
+    - darkmatter/lib/src/lifecycle/actions/tests.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/capabilities.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/ast.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/agentic_cli.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/args.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/cicd.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/collections.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/composition.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/dates.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/git.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/markdown_docs.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/network.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/pull_requests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/repository.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/shell.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/skills.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/strings.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/terminal.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/test_hooks.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+    - darkmatter/lib/src/markdown/compose/tests/provider_network.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/tests/l1/coercion_engine_parity.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/context_function_contracts.rs
+    - darkmatter/lib/tests/l1/context_functions.rs
+    - darkmatter/lib/tests/l1/current_root_documentation_contract.rs
+    - darkmatter/lib/tests/l1/find_files_and_try_frontmatter.rs
+    - darkmatter/lib/tests/l1/function_binding_conversions.rs
+    - darkmatter/lib/tests/l1/function_binding_registry.rs
+    - darkmatter/lib/tests/l1/function_catalog_parity.rs
+    - darkmatter/lib/tests/l1/function_dispatch.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/nested_composition.rs
+    - darkmatter/lib/tests/l1/predict_conflicts.rs
+    - darkmatter/lib/tests/l1/pure_function_contracts.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/schemas/partials/function-examples/as_line_separated.yaml
+    - darkmatter/schemas/partials/function-examples/as_ordered_list.yaml
+    - darkmatter/schemas/partials/function-examples/as_tsv.yaml
+    - darkmatter/schemas/partials/function-examples/as_unordered_list.yaml
+    - darkmatter/schemas/partials/functions.yaml
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+    - darkmatter/schemas/partials/mutations.yaml
+docs_updated_during_phase_4:
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/state-management/context-variables.md
+    - claudine/docs/topics/state-management/drift.md
+    - claudine/docs/topics/state-management/expression-engine.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - prompts/_add/add-expressions.md
+    - claudine/features/2026-10-28-schema-enhancements/plan.md
+    - claudine/features/2026-10-28-schema-enhancements/implementation-log.md
+docs_created_during_phase_4:
+    - claudine/features/2026-10-28-schema-enhancements/phase4-design.md
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/library-surfaces.md
 ---
 
 # Implementation Log for 2026-10-28-schema-enhancements (6 phases)
@@ -695,3 +865,651 @@ The `claudine` skill needed no change: Claudine's only visible effects are the
 authored-order `with:` iteration (documented in Darkmatter) and the sorted
 OpenCode/Kilo inline config (unchanged output). The `darkmatter` skill
 (`expressions.md`, `frontmatter.md`, `schema.md`) was updated.
+
+## Phase 3
+
+Phase 3 builds the shared conversion engine: the rule core (Wave 3), then the
+schema adapter and the call binder (Wave 4). Production function dispatch is
+not switched in this phase (Phase 4 does that).
+
+### Wave 3: conversion core
+
+Started 2026-10-22 from a clean tree at `72cb04ab7`. The core is delegated to
+one foreground subagent with the design below; the integrator owns
+`markdown/mod.rs` registration.
+
+The core landed as `darkmatter::markdown::coercion`
+(`darkmatter/lib/src/markdown/coercion/{mod,shape,engine,union,error}.rs`):
+
+- `Shape` is the neutral, rule-free target. Its kinds are `Any`, `Null`,
+  `Number` (with `as_sent` for `numberlike`), `Boolean` (with `as_sent` for
+  `boolish`), `Text` (lengths, pattern, members, and `scalar_text: false` for
+  `alphanumeric`), `Literal`, `Content` (Json/Yaml), `Array`, `Tuple`,
+  `Object`, `Union`, and `Assert`.
+- `Object` covers properties, pattern slots with a `PatternScope`
+  (`AllKeys` for JSON Schema, `UndeclaredKeys` for SimplifiedSchema), and
+  `Additional`.
+- `Assert` wraps a shape with a passive predicate. Translators use it for
+  refinement formats and for assertions the core does not model.
+- Entry points: `bind`, `bind_with` (`BindOptions { defer, max_depth }`),
+  `check_exact` (keep-only, for return contracts), `accepts_exactly`, and
+  `content_error` (the one strict JSON/YAML content check).
+- `bind` returns `Bound::Kept(&original)` or `Bound::Converted(copy)`.
+- `ConversionError` holds one `ValueFailure` per failing path. Each failure
+  carries the path, the expected type with its constraints, the received
+  value (`None` when missing), the converted value if any, and a typed
+  `FailureReason`.
+- The default depth bound is `MAX_DEPTH = 64`.
+- Tests: `darkmatter` `l1` `coercion_core::*` (46 tests, 0.47 s total).
+
+### Design Decisions
+
+1. **Criterion 47's `[true]` rejection is the compiled schema's.**
+   - Decision: the rule core converts `[true]` against `(string | number)[]`
+     to `["true"]`, because boolean → text is always safe and only the
+     `string` option is reachable. Criterion 47's "reject `[true]`" is read
+     as the compiled JSON Schema's verdict, which `check_exact` agrees with.
+   - Alternatives: make boolean → text unsafe inside unions (contradicts the
+     conversion table and `s(val: string | string[])` given `2026`); add a
+     list-specific exception (two engines).
+   - Why: criterion 47's "How to validate" compares lowered JSON Schema. The
+     spec's conversion rules and criterion 20 force the document-level
+     result.
+   - Downsides: a document with `tags: [true]` under that type now composes
+     as `["true"]` instead of failing.
+2. **Union ties are compared field by field at the deepest differing paths.**
+   - Decision: each reading records which conversion produced each converted
+     path. A reading wins only if, at every path where it differs from
+     another reading, it holds number-over-boolean or JSON-over-YAML. Any
+     other difference, including converted against kept, is an ambiguous
+     union naming every reading.
+   - Alternatives: rank whole options (order-sensitive); treat a kept field
+     as beating a converted one (a third tie-breaker the spec forbids).
+   - Why: spec "Unions: Choosing an Option" names exactly two tie-breakers
+     and requires field-wise application.
+   - Downsides: `{a: string, b: number} | {a: number, b: number}` given
+     `{a: "4", b: "5"}` is ambiguous rather than keeping `a`.
+3. **Overlapping declarations get their own reason** (`ConflictingDeclarations`).
+   - Why: a JSON Schema key under a property and a matching pattern must
+     satisfy both, so this is not a union choice.
+   - Downsides: one more reason variant for consumers to render.
+4. **Content text is checked for syntax, duplicates, and finiteness only.**
+   - Decision: numbers inside JSON/YAML text are not checked for exactness.
+     Text given to `json`/`yaml` is kept as written.
+   - Alternatives: admit every number inside the content.
+   - Why: the spec treats content text as already-encoded data that is kept
+     unchanged. Author decision (numeric cell 4) already covers only `1e400`.
+   - Downsides: `"9007199254740993"` inside a JSON string-typed config keeps
+     its digits as text, which a later reader may round.
+5. **`check_exact` reports a needed conversion as `ConversionNotAllowed`.**
+   - Why: a return-contract failure must not say "no conversion from that
+     type" when a conversion exists but is not permitted there.
+6. **The depth bound is 64 value levels** (`BindOptions.max_depth`). The
+   grammar limit of 32 bounds type nesting, not value nesting. Exceeding the
+   bound is a `ResourceLimit` failure, never acceptance.
+
+### Wave 4: schema adapter and call binder
+
+The two tasks ran in parallel as foreground subagents, each in its own
+detached worktree (`p3-adapter`, `p3-binder`) seeded with a tarball of the
+Wave 3 base. They owned disjoint files. The integrator copied each task's
+files back into this worktree and merged the shared `tests/l1/main.rs`
+registrations and the `compose/expression/mod.rs` exports by hand, then
+removed both worktrees.
+
+**Schema adapter**
+
+- New `schemas/json_shape.rs` with `shape_from_json_schema`: compiled or raw
+  JSON Schema → `Shape`.
+- `schemas/coerce.rs` is rewritten over the core. The old rule code is gone
+  (`CoercionTarget`, `coercion_target`, `is_numberlike`, `coerce_to_number`,
+  and the root-union and property-union pickers). The entry points keep
+  their names.
+- Other changes:
+  - Custom formats `darkmatter-numberlike` and `darkmatter-boolish`; the
+    lowering is now `{"type": ["number", "string"], "format": ...}`.
+  - `darkmatter-json` and `darkmatter-yaml` use `coercion::content_error`.
+  - `validate.rs` reports the core's reasons.
+  - `rewrite.rs` root unions are order-independent.
+  - `resolve.rs` reports duplicate-key, trailing-content, and overflow errors
+    in raw `.json` schemas as located `SchemaDocument` errors. This fixes the
+    Phase 1 `AmbiguousReferenced` defect.
+- New tests: `frontmatter_coercion_engine` (criteria 28–34, 33a, 33b, 47
+  element-wise, 59), `raw_schema_conversion` (33a raw, 55, `$id`/`$anchor`),
+  CLI `compose_schema::{compose_frontmatter_writes_engine_conversions,
+  compose_reports_the_engine_reason_for_a_failed_conversion}`, and matrix
+  cells `raw_schema::{raw_json,raw_yaml}_schema_conversion_controls` and
+  `frontmatter::frontmatter_conversion_matrix`.
+
+**Call binder**
+
+- New module `compose/expression/call_binding/{mod,translate,signature,registration,bind,error}.rs`.
+- Grammar → `Shape` translator: `shape_from_property_def`,
+  `property_shape_from_def`, `shape_from_simplified_schema`, with a
+  `TypeResolver` for named types.
+- Signatures and registrations: `CompiledSignature`, and
+  `FunctionRegistration` with evaluation mode, source exclusions, and
+  numeric recovery.
+- Binding: `bind_call` with order-independent overloads, read-only
+  `BoundArgs`, incremental `LazyCall`, and `check_return`. Errors are typed
+  as type, arity, ambiguous overload, or implementation contract.
+- Dispatch is not switched; that is Phase 4.
+- Tests: `function_call_binding` (52 tests, criteria 12 binding level, 14–27,
+  57 return contract, laziness, registration rules).
+
+**Integrator work after the merge**
+
+- **Translator conformance** (Wave 4 checkpoint): new
+  `tests/l1/coercion_translator_conformance.rs`. It runs 40 grammar
+  constructs, one `#[test]` each, binding 38 probe values as a document
+  property through `call_binding::shape_from_simplified_schema` and through
+  `to_json_schema` + `shape_from_json_schema`. The keep/convert/error
+  outcomes must be identical. All 40 pass.
+- **`number(integer)`'s 2^64 ceiling** (the adapter flagged the two
+  translators disagreeing at or above 2^64): `convert.rs` now emits
+  `x-darkmatter-integer: true` beside `"type": "integer"`. That custom
+  keyword (`format.rs`, registered in `validate.rs`) enforces magnitude
+  below 2^64 in the validator, and `json_shape.rs` maps it to
+  `IntegerRule::WholeBelow2Pow64`. The `md schema about` description of
+  `integer` is updated.
+- **Cleanup rule reader**: the adapter had split
+  `base_style_markdown_schema_agrees_with_the_rule_validator` and the DMLS
+  `style_markdown_parity` test, because schema validation now converts
+  `style.markdown` values (`"80"` → `80`, `5` → `"5"`) while
+  `cleanup::rules` read the authored value. Instead,
+  `cleanup/rules.rs::read_leaf` now binds each value through the engine
+  against the rule's declaration in the shipped `style.yaml` partial
+  (`RULE_SHAPES`). Every rule reader (`md clean`, the `style:` parser, DMLS
+  `formatting.markdown`) therefore agrees with validation. Both tests are
+  back to one agreed expectation per row. `schemas::embedded` became
+  `pub(crate)` for this. The `style.yaml` comment claiming literal unions
+  block coercion was stale and is rewritten.
+- **Commit unit is the top-level property**: see Design Decision 9 below.
+  `schemas/coerce.rs::property_wise` plus `partial_copy` now commit each
+  property that converts cleanly. The adapter's three tests that pinned
+  "one failure commits nothing" were updated (`raw_schema_conversion::failure_leaves_input_unchanged`,
+  `schemas_core_type_values::alphanumeric_never_coerces_numbers_or_booleans`,
+  and the unit test renamed `a_failing_property_keeps_its_siblings_conversions`).
+  New test: `frontmatter_coercion_engine::a_missing_required_sibling_does_not_block_conversion`.
+  This fixed claudine `composition::prepare::service::tests::a_deferred_read_still_coerces_declared_types`,
+  which failed after the merge.
+- **Lifecycle parity**: claudine `claudine_schemas::break_and_prep_shapes_agree_between_schema_and_parser`
+  now parses the frontmatter the validated document holds (`Judged.held`,
+  through `EffectiveSchema::coerce_frontmatter_with_pending`), as Claudine's
+  preparation does. Two rows changed on purpose: `break: {code: '2'}` (now
+  `2`) and `break: 5` (the reason `"5"`) are valid. A row with
+  `code: 'two'` keeps the rejection case.
+- **New tests**: `coercion_engine_parity` (criterion 35). It has 17 value/type
+  tables, one `#[test]` each, comparing library composition of a temp-dir
+  document with `FunctionRegistration::bind_call`, plus a control test showing
+  both sides observe keep, convert, and reject, plus
+  `old_frontmatter_rule_code_is_gone` (an `include_str!` scan of
+  `schemas/coerce.rs`). Also `frontmatter_coercion_engine::integer_ceiling_applies_to_frontmatter`.
+  Function-call parity through production dispatch arrives with Phase 4's
+  dispatch switch.
+
+### Performance (spec "Performance": one before/after sample)
+
+After the merge, claudine `just test` took 643 s with 6 timeouts (Phase 1
+took 332 s). Serial A/B on this host, with a HEAD worktree at `72cb04ab7`
+(`p3-baseline`) against this tree, `-j 1`:
+
+| Test | HEAD | after merge | final |
+|---|---|---|---|
+| `claudine_schemas::cancelled_dictionaries_reject_forbidden_actions` | 0.95 s | 10.9 s | 1.20 s |
+| `claudine_schemas::task_cancelled_rejects_forbidden_actions_in_the_deepest_conditionals` | 1.42 s | 14.9 s | 1.74 s |
+| `wrap_sequence_composition::sequence_composition_dry_run_for_every_provider` (CLI) | 9.7 s | 15.6 s | 8.6 s |
+
+`sample` profiles named four causes, each fixed:
+
+1. `schema_content_hash` serialized the whole schema to bytes and hashed it
+   on every shape, relaxed-shape, and validator lookup, three or four times
+   per validation, and Claudine's unrolled trigger schemas are very large.
+   A `ConversionPlan` (shape, relaxed shape, and structural validator, each
+   lazy) is now kept on `EffectiveSchema`. It is keyed by the digest
+   `ValidatorCache::shared_schema_hash` already records for the same `Arc`,
+   so a validation hashes nothing extra.
+2. Before deciding to keep a value, the plan compiled a separate structural
+   validator for the whole schema. Now `EffectiveSchema::accepts_as_is`
+   checks the instance with the validators the schema already compiled, and
+   a value the complete schema accepts is kept without any plan work.
+3. `Shape::describe` rendered whole union and object types for every failure.
+   It now stops at `DESCRIPTION_LIMIT` (240 bytes) and appends `…`.
+4. `relax_presence` rebuilt the relaxed shape on every partial-copy pass. It
+   is now built once per plan.
+
+The remaining cost (about 1.2–1.26x on invalid documents) is the core
+binding a large instance to find what converts. Valid documents (the CLI
+test) are faster than HEAD, because the keep decision now reuses the
+compiled validators.
+
+### Design Decisions (Wave 4)
+
+These continue the Wave 3 numbering.
+
+7. **Raw-schema authority through assertions** (adapter).
+   - Decision: keywords the translator does not model, `oneOf`'s
+     exactly-one rule, `$ref` with constraining siblings, and Darkmatter's
+     validating `x-` keywords become a lazily compiled `jsonschema` assertion
+     on their subschema. A subschema holding a reference compiles inside a
+     wrapper that embeds the whole document under its resolved `$id`. Cyclic
+     references go validation-only below 4 levels, with at most 32 references
+     per path and 4,096 per translation.
+   - Alternatives: model every keyword (a second validator); ignore
+     unmodeled keywords during conversion (they would become unconstrained
+     success).
+   - Why: spec "Raw JSON Schema Conversion Boundaries": the complete schema
+     decides admissibility, and candidates are filtered by full validation.
+   - Downsides: an assertion that cannot compile passes locally, and the
+     final full validation decides.
+8. **Text with only numeric keywords is kept as written** (adapter). A
+   typeless subschema such as `{minimum: 0}` never converts text, because
+   converting `0.25` to `"0.25"` would let it escape `minimum`.
+9. **Each top-level property is its own commit unit** (integrator; replaces
+   the adapter's whole-document rule).
+   - Decision: when the whole converted document is not accepted, each
+     top-level property whose conversion succeeds, and on which the complete
+     schema then reports no problem, is written back. A failing property
+     stays as written. A missing required property never blocks a sibling,
+     because presence is the validator's verdict. A root union keeps the
+     whole-document rule, since choosing its arm needs the whole document.
+     Inside one property, conversion is still all-or-nothing.
+   - Alternatives: commit nothing on any failure (the adapter's rule).
+   - Why: spec "Three Actions per Value" names each frontmatter property as
+     a value. Claudine's deferred reads (`SchemaStage::DeferToStabilizedReread`)
+     must see converted types while a required field's verdict is
+     postponed, and the old engine committed per property.
+   - Downsides: a validate-only report and the write-back can each hold a
+     partly converted document. This was already true before this feature.
+10. **`number(integer)` emits `x-darkmatter-integer: true`** (integrator).
+    - Decision: a custom validator keyword enforces the spec's "below 2^64"
+      ceiling, and `json_shape.rs` maps it to `IntegerRule::WholeBelow2Pow64`.
+      Raw `integer` keeps no ceiling.
+    - Alternatives: `exclusiveMaximum: 2^64` (an awkward float literal in
+      every snapshot, and indistinguishable from an authored bound); a
+      translator-only marker (the validator and the engine would disagree).
+    - Why: the compiled schema, the frontmatter path, and the call binder
+      must reach the same verdict (conformance test, spec "Numbers").
+    - Downsides: three snapshots and one inline lowering expectation gained
+      the keyword. External validators ignore it, which is looser but
+      acceptable.
+11. **`style.markdown` frontmatter values bind through the engine; settings
+    files do not** (integrator).
+    - Decision: `cleanup::rules::bind_document_rules` and `validate_rule`
+      bind a document's rule values against the shipped `style.yaml`
+      declarations (`RULE_SHAPES`) before reading them. `md clean`'s document
+      reader and the `style:` parser use it. DMLS `.dmls.toml` and editor
+      `formatting.markdown` keep reading values as written.
+    - Alternatives: bind in the shared `read_leaf` (tried first). That made
+      the settings readers accept `"80"` and broke their established
+      robustness matrices (`workspace_formatting_settings::{toml,json}_formatting_matrix`).
+    - Why: the spec governs frontmatter and function calls. A frontmatter
+      consumer must read the value the validated document holds, so
+      validation and cleanup agree. Settings files are outside the spec.
+    - Downsides: the same quoted `"80"` is valid in frontmatter and rejected
+      in `.dmls.toml`. The module docs say so.
+    - The `clean_rules` matrix's wrong-type values were changed to values
+      that stay wrong after conversion (`"maybe"`, `"80.5"`, `"3"`,
+      `{ lang: sh }`). New tests: `clean_rules::quoted_rule_values_bind_like_schema_validation`
+      and `style::parse::tests::markdown_rule_values_bind_like_schema_validation`.
+12. **Call-binder registration rules** (binder).
+    - Lazy registrations have exactly one signature and no recovery
+      (`InvalidLazy`).
+    - Recovery requires a required subject, an optional `number` fallback,
+      and a `number` return.
+    - A recovered call never counts as exact.
+    - Null is admitted only through `Shape::admits_null_explicitly`, checked
+      after source exclusions.
+    - Return checks use `check_exact`, with no parameter null rule.
+    - Refinement formats reuse the structural JSON Schema format validators,
+      so the two translators judge formats with the same code. `file` is
+      always syntax-only.
+13. **Translator conformance is a document-level comparison** (integrator).
+    Each construct is the single property `v`, bound through
+    `shape_from_simplified_schema` and through `to_json_schema` +
+    `shape_from_json_schema`. That includes the optional-property null
+    wrapper both translators apply.
+14. **`numberlike`/`boolish` lowering** (adapter): `{"type": [number|boolean,
+    "string"], "format": "darkmatter-numberlike|boolish"}`. Both formats
+    are backed by the canonical parser. `md schema detect` never infers these
+    types, so its JSON output and snapshot are unchanged, and no detect
+    snapshot existed to update for criterion 33b.
+
+### Requirement-to-test mapping (Phase 3)
+
+All tests are `darkmatter` `l1` unless noted.
+
+| Requirement | Tests |
+|---|---|
+| Core rule tables: conversions, rejections, exactness, constraints, preservation types, content, containers, unions in every option order, immutability, depth bound | `coercion_core::*` (46) |
+| Criteria 14–27 at binding level (no dispatch switch yet) | `function_call_binding::*` (52; mapping in the Wave 4 summary above) |
+| Criterion 12 recovery and criterion 57 return contract (binding level) | `function_call_binding::{recovery_*, a_supplied_fallback_is_always_validated, wrong_return_reports_implementation_contract_error}` |
+| Criterion 53 laziness (binding level) | `function_call_binding::{lazy_binding_never_binds_unevaluated_operands, lazy_binding_reports_each_operand_as_it_binds}` |
+| Criteria 28–34, 47 (element-wise), 59 | `frontmatter_coercion_engine::*`, plus `integer_ceiling_applies_to_frontmatter` and `a_missing_required_sibling_does_not_block_conversion` |
+| Criterion 33a raw, 55 | `raw_schema_conversion::*` |
+| Criterion 35 (one engine) | `coercion_engine_parity::*` (17 tables, a control, and the source scan) |
+| Wave 4 checkpoint: both translators agree | `coercion_translator_conformance::*` (40) |
+| End to end through `md compose` | CLI `compose_schema::{compose_frontmatter_writes_engine_conversions, compose_reports_the_engine_reason_for_a_failed_conversion}` |
+| Reader matrix cells (raw schema, frontmatter conversion, located `.json` document errors) | `schema_enhancements_matrix::raw_schema::{raw_json,raw_yaml}_schema_conversion_controls`, `schema_enhancements_matrix::frontmatter::frontmatter_conversion_matrix` |
+| `style.markdown` agreement | `base_schema_end_to_end::base_style_markdown_schema_agrees_with_the_rule_validator`, DMLS `style_markdown_parity::*`, `clean_rules::{yaml_matrix_walks_every_rule_and_shape, quoted_rule_values_bind_like_schema_validation}`, unit `style::parse::tests::markdown_rule_values_bind_like_schema_validation` |
+| Lifecycle schema/parser agreement after conversion | claudine `claudine_schemas::break_and_prep_shapes_agree_between_schema_and_parser` |
+| Deferred reads still convert | claudine unit `composition::prepare::service::tests::a_deferred_read_still_coerces_declared_types` (failed after the merge; passes) |
+| `md schema about` text | CLI `schema_about::schema_about_verbose_prints_advanced_sections_as_readable_lists` |
+
+Existing expectations changed on purpose (each a spec-intended behavior):
+
+- `numberlike`/`boolish` are no longer normalized: `schemas_union_coerce` (5),
+  CLI `compose_schema` (2), CLI `schema_union_pipeline` (1), and unit
+  `inline_object_array_nested_coercion`.
+- `"yes"` now converts to a boolean (two copies of
+  `non_boolean_word_still_reports_type_problem`).
+- Number → text through overlapping union arms: `schemas_union_clean`,
+  `schemas_union_report`.
+- Quoted `style.markdown` values are valid in frontmatter.
+- Lifecycle rows `code: '2'` and `break: 5` are now valid.
+- Matrix: the `$id` row uses `[5]`, and the `1e400` cell expects
+  `SchemaDocument`.
+- Snapshots: three convert snapshots (the new `numberlike`/`boolish`
+  formats), and `snapshot_atom_number_integer_with_min` plus
+  `suggest_constraint_phase3` (`x-darkmatter-integer`).
+
+### Gates
+
+Scope calculator, run from the repository root after every edit:
+`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+gave `packages: [claudine, darkmatter, darkmatter-cli, dmls, test-toolkit]`
+and `change_class: package`, so every gate was required. All gates ran
+serially with no subagent running.
+
+| Gate | Result |
+|---|---|
+| `claudine`: `just test` (final run) | 10,691 passed, 9 skipped, 0 failed (366 s) |
+| `claudine`: `just lint` | clean (a pre-existing linker `__eh_frame` size note) |
+| `darkmatter`: `just test` (final run) | 11,472 passed, 10 skipped, 1 failed: the known load-sensitive `dmls::l1 searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back`, which passed alone each of the three times it was rerun |
+| `darkmatter`: `just lint` | clean |
+| `just check-tier-coverage claudine` / `darkmatter` | 0 stranded / 0 stranded |
+| `test-toolkit` (selected by the calculator) | 478 passed |
+| Dependents: claudine-gen and claudine-contract, then messenger | 298 passed, then 226 passed |
+| Dependents: research, sniff-cli, messenger-cli, playa-cli, biscuit-icon-cli, biscuit-speaks-cli | `cargo check --tests` clean. None of them uses the changed schema or conversion APIs; a grep found no use of the removed `CoercionTarget`/`coercion_target` outside a throwaway spike |
+
+Slow tests that predate this phase (over 5 s on HEAD as well):
+`wrap_sequence_composition::sequence_composition_dry_run_for_every_provider`
+(9.7 s on HEAD, 8.6 s now) and several `claudine_schemas::*_cancelled_*`
+tests. They were not changed.
+
+Cross-OS: no path, process, console, or `#[cfg]` code changed. The work is
+pure value conversion, one embedded-document lookup by a constant path, and
+docs, so no `just cross-check` was run; CI covers the other environments.
+
+The `claudine` skill needed no change. Claudine's only visible effect is that
+frontmatter lifecycle values convert like any other frontmatter (for example
+`break: {code: '2'}`), and the skill does not describe those value types. The
+`darkmatter` skill (`schema.md`, `cleanup.md`) was updated.
+
+## Phase 4
+
+Phase 4 migrates every function and catalog consumer (Waves 5–6). Started
+2026-10-22 from the Phase 3 tree. The integrator froze the shared shapes in
+`phase4-design.md` before any parallel task started.
+
+### Integrator preparation
+
+- **Move-only:** the context-handler bodies (`absolute_fn` … `validate_schema_fn`
+  and their helpers) moved from `functions/mod.rs` into `functions/fs.rs`,
+  re-exported with `pub use fs::*`. No behavior change; `cargo check --tests`
+  is clean.
+- **Interim catalog:** `darkmatter/schemas/partials/functions.yaml` was first
+  generated mechanically from the old catalog (old signatures, old examples)
+  so the loader and dispatch could be built and tested while the final
+  catalog was written in parallel.
+- **Frozen shapes:** `phase4-design.md` (catalog file, descriptor API, handler
+  signature, dispatch order, the `Call` error, test hooks).
+
+### Execution
+
+Three rounds of foreground subagents. Parallel tasks ran in throwaway
+worktrees seeded from a tarball of the uncommitted tree and owned disjoint
+files; the integrator copied each task's files back, merged the one shared
+file (`tests/l1/main.rs`) by hand, and removed the worktrees.
+
+1. **Round 1 (parallel).** *Catalog* wrote the final
+   `darkmatter/schemas/partials/functions.yaml` (116 functions, 124
+   overloads, 22 categories, 147 examples: 100 executable, 43 display-only,
+   4 file-form; all 121 old examples carried, 26 added), moved `mutations.yaml`
+   beside it, created `function-examples/*.yaml`, and deleted both drafts under
+   `claudine/docs/schemas/partials/`. *Infrastructure* replaced the catalog
+   loader and descriptors, built the registry and the one eager dispatch entry
+   (`call_function`), the lazy path for `and`/`or`, `ExpressionError::Call`,
+   and the test hooks, with transitional legacy handler variants so the old
+   bodies kept compiling. The old catalog file and its parser were deleted.
+2. **Integrator.** Moved the context unit tests into `functions/fs_tests.rs`
+   (move-only) so the two handler tasks did not share a test module.
+3. **Round 2 (parallel).** *Pure handlers* (bodies moved into their family
+   files), *Context handlers* (`fs.rs` and the family files), and *Consumers*
+   (DMLS, `md schema about`, `claudine context --expressions`, docs, the
+   shipped-schema corpus). After the merge the integrator deleted the legacy
+   handler variants, `args.rs`, `any_null`, `require_string`,
+   `ExpressionError::{Arity, ArgType}`, `ArityBound`, and the evaluator's
+   string-sniffing arity enrichment.
+4. **Round 3.** Registry-wide criterion tests (below).
+
+Integrator fixes after the merge (each an approved behavior change, not a
+weakened test):
+
+- `lifecycle::actions::tests::expression_function_signature_bracket_optional`:
+  `number`'s second parameter is `fallback` (spec item 1).
+- `compose_expression_failure_contract` (5) and CLI
+  `compose_expression_failures` (4): `min(1)` now reports the binder's
+  `min: no signature takes 1 argument` instead of handler text.
+- `unknown_identifier_warning`: the row `length(x)` (missing `x` → `0`)
+  became a type error by ledger row 18; replaced by `upper(x)` (null passes
+  through, row 31) and `is_empty(trim(x))` (the spec's own example, now that
+  `trim` exists).
+- `lookup_parity` inventory: the catalog's fixture lookup moved to
+  `catalog/tests.rs`; `FsLookup`/`MapLookup` no longer exist.
+- `current_root_documentation_contract`: two skill phrases claimed one shared
+  descriptor for `ctx.recent_commits`/`recent_commits()`; they now say the two
+  share one rendering (see decision 7). The `recent_commits` catalog
+  description carries the binding-time sentence the doc contract pins, and
+  the generated table was regenerated.
+- Docs: `darkmatter-expressions.md` "Function Contracts" rewritten (it still
+  said every function propagates null), the `validate_schema(path, obj)` row
+  (no longer "accepted for forward compatibility"), `docs/lsp/features.md`
+  (`fallback`), and Claudine `lifecycle.md`'s pre-warm example (`date()` with no
+  arguments is now an arity error).
+
+### Design Decisions
+
+1. **Handlers take the bound call.**
+   - Decision: `PureFn = fn(&BoundCall) -> Result<Value, String>`,
+     `ContextFn = fn(&BoundCall, &ResolutionContext) -> Result<Value, ExpressionError>`.
+     Handlers read only `BoundArgs` accessors and `overload()`.
+   - Alternatives: keep `&[Value]` and bind before the call (handlers could
+     still re-check types); pass `BoundArgs` only (overloaded handlers would
+     guess the overload from argument shapes).
+   - Why: spec criterion 11; the selected overload is part of the binding.
+   - Downsides: every handler and its unit tests changed.
+2. **`ExpressionError::Call` and its severity.**
+   - Decision: one variant carries the binder's `CallBindingError`. Only an
+     implementation-contract error is authoring-fatal; type, arity, and
+     ambiguous-overload errors keep the old arity/arg-type severity (demoted to
+     a warning only in lenient body interpolation). `Arity`/`ArgType` are gone.
+   - Alternatives: make every binding error fatal (changes the ratified
+     fatality matrix for ordinary mistakes); keep `ArgType` beside `Call` (two
+     ways to report one failure).
+   - Why: the spec makes bad input a type error at binding; the old severity
+     of type errors was a ratified contract.
+   - Downsides: some inputs that were fatal `ContractViolation`/`FileReference`
+     errors are now type errors and are demoted in lenient body interpolation:
+     an unknown `has_agentic_cli` name, a malformed `ping` address, an
+     out-of-range `recent_commits`/`pr_list` count, and `absolute("")`
+     (`fatality_characterization` changed that one cell deliberately). Document
+     bodies stay strict whatever `fail_fast` says, so composition still fails.
+3. **Test hooks ride the `effects-instrumentation` feature.** Test-registered
+   functions and handler-entry counters (`function_test_hooks`) compile under
+   `cfg(test)` or that feature, which `just test` and CI already enable for the
+   library and DMLS. Alternative: a new feature (one more CI feature set to
+   keep consistent). Downside: the feature name is broader than effects.
+4. **The display key keeps its old form** (`round(x, [fallback])`, `and(...)`).
+   Every key-based consumer (`lifecycle::signatures::parse_signature`,
+   suggestions, DMLS keys) keeps working; types live in `typed_signature()`
+   and the new fields. Alternative: grammar spelling (`fallback?`), which would
+   have changed every consumer's parser for no reader benefit.
+5. **File-form examples are embedded.** `example(./function-examples/<name>.yaml)`
+   files live in `darkmatter/schemas/partials/function-examples/`, are embedded
+   with `include_str!`, and are validated with `validate_example_bytes` when the
+   catalog loads, so the embedded catalog never reads disk.
+6. **Named helper types live in the catalog.** `agentic-cli` (an enum pinned to
+   the generated `AGENTIC_CLI_NAMES` by a test), `ip-address` (a pattern), and
+   `recent-commits`. Non-function `types:` entries are helper types, never
+   functions. Alternative: Rust-registered refinements (a second, invisible
+   type vocabulary).
+7. **`ctx.recent_commits` does not import `recent-commits`.**
+   - Decision: the function returns the catalog's `recent-commits` type and the
+     two descriptions name each other; `context-variables.yaml` keeps
+     `string[]`.
+   - Alternatives: add `functions.yaml` to the embedded shipped set and import
+     it (tried twice).
+   - Why: the import works, but every on-disk copy of the shipped partials
+     (the `global_catalog` fixture matrix, content-policy baselines, two DMLS
+     sessions, and a user's own disk copy) would then need `functions.yaml`
+     beside them; about 20 existing tests failed for that reason alone.
+   - Downsides: the shared type is enforced by review, not by one definition.
+8. **Strict catalog loader.** A function without `category(...)`, or an
+   overload set whose overloads name different categories, fails to load, so
+   each function's overloads stay adjacent and `function_descriptors(name)`
+   returns one slice. `Example.result` is the authored literal text.
+9. **Catalog signatures where the ledger left room** (catalog task):
+   - list formatters return `string | null` (the ledger's null rule returns
+     `null`, which a plain `string` return would reject);
+   - `date` and the date-arithmetic functions take `date | datetime`, `fmt` is
+     an enum of the nine accepted spellings, and the duration is a pattern, so
+     bad input is a type error (`date` lost `fallible`); the handlers accept
+     every datetime spelling the binder admits;
+   - `pr`/`cicd` take `number(integer; min(1)) | string(min(1))`: under the
+     union rule `pr(0)` binds as the text `"0"` and the handler rejects it at
+     runtime (recorded for review; the rule itself is correct);
+   - `ping`'s `timeout` stays plain `number` (range checked in the handler);
+   - `fallible` removed from functions that fail only by argument rejection
+     (`min`, `max`, `abs`, `first`, `last`, `has_key`, `contains`, `length`,
+     `number`, string predicates and transforms, `terminal`, `date`, list
+     formatters) and added where a captured context can be missing (`ipv4`,
+     `ipv6`, `has_agentic_cli`) or a bound value still fails (`has_skill`,
+     `has_local_skill`); `try_frontmatter(file: file | null): object | null` is
+     not fallible because every load error is inside its result.
+10. **Unbound-argument defects surface as errors, not panics.** Pure handlers
+    use a `bound()` helper and context handlers a `required_text` helper: if a
+    handler and its signature ever disagree, the call fails with a domain or
+    contract error instead of `expect`. Cost: a branch no caller can reach.
+11. **`validate_schema(file, obj)` reuses `deep_merge_override`** (the `::file
+    set=` merge the spec names) and validates the merged page in memory; only
+    the boolean is returned, so lost source positions are invisible.
+12. **Consumers.** DMLS completes and hovers aliases case-insensitively and
+    shows every overload on hover; `claudine context --expressions` and
+    `md schema about` group by `categories:` order and sort canonicals
+    alphabetically; file-form example results render in JSON spelling on one
+    line; the Claudine snapshot pins order and identity only, so a reworded
+    description does not churn it. Typed signatures name helper types
+    (`agent: agentic-cli`) instead of expanding them.
+13. **Lifecycle verb lists include the new functions.** `keys`, `trim`, and
+    `values` were added to the verb lists in `claudine/schemas/{action,lifecycle}.yaml`
+    and `darkmatter/schemas/partials/{lifecycle,md-lifecycle}.yaml`, which the
+    lifecycle parity tests derive from the function catalog.
+14. **Fixed while migrating:** a huge duration count (`99999999999999999d`)
+    panicked in `chrono::Duration::days` and is now a domain error; `ensure_*`
+    decides whether its joined result is a number with the canonical numeric
+    check, so a value that cannot be held exactly stays text.
+
+### Requirement-to-test mapping (Phase 4)
+
+All tests are `darkmatter` `l1` (`darkmatter/lib/tests/l1/`) unless noted.
+"Counter" is `function_test_hooks::handler_entries`.
+
+| Requirement | Tests |
+|---|---|
+| Criterion 7: catalog complete, only catalog, consumers read the API | `function_dispatch::the_embedded_catalog_and_the_registry_have_the_same_functions`, unit `functions::registration_tests::*` (parity both ways, every rule applies), `function_binding_registry::every_registered_function_has_a_row`; old file deleted (`git status`), CLI `context_command::*`, DMLS `lsp_session`/`overlay::expressions` tests read `function_descriptors` |
+| Criterion 8: executable examples pass structurally (100 ≥ 72) | unit `catalog::tests::every_executable_example_evaluates_to_its_declared_result` and the structural-comparison unit tests beside it |
+| Criterion 9: display-only and file-form examples shown, never run | unit `catalog::tests::{every_display_only_example_carries_a_non_empty_reason, examples_keep_their_authored_text_and_files_are_embedded}`; claudine-cli `commands::context::tests` example formatting; generated table in `darkmatter-expressions.md` (`narrative_doc_function_table_matches_catalog`) |
+| Criterion 10: every function binds (accepted / rejected / converted or impossible) | `function_binding_registry::rows::<name>` (116, one per function, macro-generated) + guard `every_registered_function_has_a_row` |
+| Criterion 11: no handler coerces | `function_binding_registry::no_handler_local_coercion_helpers_remain` (scans all 23 files of `functions/` and fails on an unscanned new file); the integrator reviewed every handler family in the merge (no handler inspects an argument's type to convert it, except `number`/`round`/`contains`/list rendering, whose purpose is conversion) |
+| Criterion 12: `number`/`round` | `pure_function_contracts::*` (all listed cases, counters), catalog executable examples |
+| Criteria 14, 15, 18, 19, 43 (pure), 44 (pure), 45 | `pure_function_contracts::*` |
+| Criteria 16, 17, 19, 20, 21, 22, 24, 25, 26, 27 through dispatch | `function_binding_conversions::*` (test-registered functions named as in the spec, both union orders, counters 0 on every rejection) |
+| Criterion 23 | `pull_requests`/`cicd` unit tests (both overload orders, counters), unit `compose::tests::provider_network` (fake provider request count) |
+| Criteria 42, 43 (`file_exists(null)`), 44 (`validate_schema` M9, `has_command(true)`) | `context_function_contracts::*` |
+| Criterion 35 dispatch side | `coercion_engine_parity::*` (each table now also runs through dispatch) |
+| Criterion 53 laziness through dispatch | `function_dispatch::a_skipped_lazy_operand_is_never_entered` |
+| Criterion 57 | `function_catalog_parity::{the_registered_aliases_are_the_inventoried_ones, aliases_resolve_as_before, canonical_names_resolve_case_insensitively, documentation_lists_canonicals_once}`, unit `catalog::tests::semantically_duplicate_overloads_fail_catalog_load`, `function_dispatch::a_wrong_return_is_an_implementation_contract_error_and_is_not_converted` |
+| Criterion 39 | claudine-cli `context_command::context_expressions_function_order_snapshot` |
+| Catalog loader rules | unit `catalog::tests::*` (missing `categories:`, named helper type, order, aliases, `typed_signature`, `agentic_cli_named_type_is_the_generated_table`) |
+| End to end through `md compose` | darkmatter-cli `compose_schema_enhancements::{converted_calls_compose_to_their_results, an_unbindable_call_fails_compose_with_the_type_error}` |
+| Shipped corpus | `shipped_schema_corpus::*` (`functions.yaml`/`mutations.yaml` classified as function catalogs that refuse to apply as document schemas; helper types import and lower; example files are not schemas) |
+
+Impossible converted-input cells (ruling R1) are asserted as "arrives
+unchanged" in their rows: the `unknown | null` predicates (`is_number("4")` is
+`false`; `file_exists(2026)` is `false` beside a file named `2026`), the
+`any[]` list functions, `keys`/`values`, and `and`/`or` (lazy, no handler,
+any arity). For `has_agentic_cli` and the date family a converted number then
+fails the refined type, so the row asserts the rejection with counter 0.
+Conversion itself is covered by the test-registered functions.
+
+Not automated here: criterion 13's human ledger review (recorded at the top of
+`behavior-ledger.md`); a ledger-completeness test was not added because a
+test must not read a feature directory that moves when the spec closes.
+
+Shipped-document scan (round 3): no call relies on a removed result
+(`round(x, default)`, one-argument `number`/`round` on text, `min`/`max` on
+null, `has_key` on non-objects). `length(...)` calls in Claudine docs read
+values that are always lists; they would become type errors only if the
+value were `null`.
+
+Lifecycle long-form keys follow catalog parameter names, so the renames in
+this phase change authored long-form spellings: `number`/`round` `default` →
+`fallback` (spec), `length` `x` → `val` (spec), `file_exists` `file` →
+`value` (spec), `terminal` `string` → `content`. The Claudine fixture
+`no_error_flag_is_accepted_on_every_action_category` now writes
+`length: {val: …}`.
+
+### Performance (spec "Performance": one before/after sample)
+
+Release `md compose` on one host (best of three), against the installed
+pre-feature `md` (built 2026-10-18): a document with 8,000 pure function
+calls took 0.401 s before and 0.422 s after; a control document with 8,000
+frontmatter reads took 0.377 s and 0.395 s. Function calls therefore cost
+about 24 ms before and 27 ms after per 8,000 calls; the rest of the
+difference is unrelated startup work present in the control. Binding
+compiles each signature once (the registry is built once per process) and
+`check_return` uses the already-compiled return shape, so no per-call schema
+hashing or compilation was added.
+
+### Gates
+
+Scope calculator, run from the repository root after every edit:
+`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+gave `packages: [claudine, claudine-cli, darkmatter, darkmatter-cli, dmls, test-toolkit]`
+and `change_class: package`, so every gate was required. Gates ran serially
+with no subagent running.
+
+| Gate | Result |
+|---|---|
+| `darkmatter`: `just test` (final run, `--no-fail-fast`) | 11,571 passed, 10 skipped, 0 failed |
+| `darkmatter`: `just lint` | clean |
+| `claudine`: `just test` (`--no-fail-fast`) | 10,691 passed, 9 skipped, 1 failed: `action_shape_control::no_error_flag_is_accepted_on_every_action_category` (`length`'s parameter is now `val`); fixed and rerun alone: passes |
+| `claudine`: `just lint` | clean |
+| `just check-tier-coverage claudine` / `darkmatter` | 0 stranded / 0 stranded |
+| `test-toolkit` (selected by the calculator) | 478 passed |
+| Dependents: `messenger` | 226 passed |
+| Dependents: research, messenger-cli, sniff-cli, playa-cli, biscuit-icon-cli, biscuit-speaks-cli | `cargo check --tests` clean; none uses the expression-function API |
+
+The known load-sensitive DMLS test
+`searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back`
+failed in one intermediate full darkmatter run and passed in the final one.
+
+Cross-OS: no path, process, console, or `#[cfg]` code changed. The file
+handlers keep their existing `FileReference` resolution; the new tests anchor
+in temp dirs and spawn `md`/`claudine` only through the existing fixtures. No
+`just cross-check` was run; CI covers the other environments.
+
+Skills: `darkmatter` (`library-surfaces.md`, `compose.md`) and `claudine`
+(`cli-commands.md`, `cli-reference.md` — the `--expressions` report's order
+and example column) were updated.

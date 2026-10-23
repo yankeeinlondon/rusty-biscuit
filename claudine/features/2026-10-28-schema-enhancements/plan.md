@@ -44,6 +44,8 @@ packages:
     - claudine
     - claudine-gen
     - sniff-cli
+    - claudine-cli
+    - test-toolkit
 source_files_during_phase_2:
     - claudine/gen/src/schema_compat.rs
     - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
@@ -175,6 +177,173 @@ skills_files_updated_during_phase_2:
     - .claude/skills/darkmatter/expressions.md
     - .claude/skills/darkmatter/frontmatter.md
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/cleanup/rules.rs
+    - darkmatter/lib/src/markdown/coercion/engine.rs
+    - darkmatter/lib/src/markdown/coercion/error.rs
+    - darkmatter/lib/src/markdown/coercion/mod.rs
+    - darkmatter/lib/src/markdown/coercion/shape.rs
+    - darkmatter/lib/src/markdown/coercion/union.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/signature.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/json_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/style/parse.rs
+    - darkmatter/schemas/partials/style.yaml
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.conversion.schema.yaml
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/clean_rules.rs
+    - darkmatter/lib/tests/l1/coercion_core.rs
+    - darkmatter/lib/tests/l1/coercion_engine_parity.rs
+    - darkmatter/lib/tests/l1/coercion_translator_conformance.rs
+    - darkmatter/lib/tests/l1/frontmatter_coercion_engine.rs
+    - darkmatter/lib/tests/l1/function_call_binding.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/raw_schema_conversion.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/frontmatter.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/raw_schema.rs
+    - darkmatter/lib/tests/l1/schemas_conjunctive_lowering.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_values.rs
+    - darkmatter/lib/tests/l1/schemas_union_clean.rs
+    - darkmatter/lib/tests/l1/schemas_union_coerce.rs
+    - darkmatter/lib/tests/l1/schemas_union_report.rs
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolish.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number_integer_with_min.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_numberlike.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_matching_default.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__suggest_constraint_phase3__conversion_snapshot_covers_valid_and_invalid_metadata.snap
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/cli/tests/l1/schema_union_pipeline.rs
+    - darkmatter/dmls/tests/l1/style_markdown_parity.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/lib/tests/fixtures/schema_enhancements_matrix/PROVENANCE.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/cleanup.md
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4:
+    - claudine/cli/src/commands/context/expressions.rs
+    - claudine/cli/src/commands/context/format.rs
+    - claudine/cli/src/commands/context/mod.rs
+    - claudine/cli/src/commands/context/tests.rs
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+    - claudine/docs/schemas/partials/functions.yaml
+    - claudine/docs/schemas/partials/mutations.yaml
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/cli/tests/l1/compose_expression_failures.rs
+    - darkmatter/cli/tests/l1/compose_schema_enhancements.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/docs/schemas/expression-functions.yaml
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/lib.rs
+    - darkmatter/lib/src/lifecycle/actions/tests.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/capabilities.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/ast.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/agentic_cli.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/args.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/cicd.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/collections.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/composition.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/dates.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/git.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/markdown_docs.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/network.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/pull_requests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/repository.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/shell.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/skills.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/strings.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/terminal.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/test_hooks.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+    - darkmatter/lib/src/markdown/compose/tests/provider_network.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/tests/l1/coercion_engine_parity.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/context_function_contracts.rs
+    - darkmatter/lib/tests/l1/context_functions.rs
+    - darkmatter/lib/tests/l1/current_root_documentation_contract.rs
+    - darkmatter/lib/tests/l1/find_files_and_try_frontmatter.rs
+    - darkmatter/lib/tests/l1/function_binding_conversions.rs
+    - darkmatter/lib/tests/l1/function_binding_registry.rs
+    - darkmatter/lib/tests/l1/function_catalog_parity.rs
+    - darkmatter/lib/tests/l1/function_dispatch.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/nested_composition.rs
+    - darkmatter/lib/tests/l1/predict_conflicts.rs
+    - darkmatter/lib/tests/l1/pure_function_contracts.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/schemas/partials/function-examples/as_line_separated.yaml
+    - darkmatter/schemas/partials/function-examples/as_ordered_list.yaml
+    - darkmatter/schemas/partials/function-examples/as_tsv.yaml
+    - darkmatter/schemas/partials/function-examples/as_unordered_list.yaml
+    - darkmatter/schemas/partials/functions.yaml
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+    - darkmatter/schemas/partials/mutations.yaml
+docs_updated_during_phase_4:
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/state-management/context-variables.md
+    - claudine/docs/topics/state-management/drift.md
+    - claudine/docs/topics/state-management/expression-engine.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - prompts/_add/add-expressions.md
+    - claudine/features/2026-10-28-schema-enhancements/plan.md
+    - claudine/features/2026-10-28-schema-enhancements/implementation-log.md
+docs_created_during_phase_4:
+    - claudine/features/2026-10-28-schema-enhancements/phase4-design.md
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/library-surfaces.md
 ---
 
 # Implementation Plan: Schema Enhancements
@@ -653,7 +822,7 @@ are classified. Freeze descriptor and numeric APIs for engine/adapter work.
 
 ### Wave 3 — Rule core
 
-- [ ] **Conversion core** — sequential; own a neutral shape module under
+- [x] **Conversion core** — sequential; own a neutral shape module under
   `markdown/coercion/` (or the equivalent agreed module) and core tests.
   - Implement keep/convert/error with one-step conversions, no null conversion,
     constraint checking after conversion, and passive refinements. Preserve
@@ -672,7 +841,7 @@ preservation formats. Translators receive a stable rule-free shape API.
 
 ### Wave 4 — Translators and binding
 
-- [ ] **Schema adapter** — **parallel**, own raw-schema translator,
+- [x] **Schema adapter** — **parallel**, own raw-schema translator,
   `schemas/{coerce,reference,rewrite,example,format}.rs` and
   `compose/schema_validation.rs`; depends on Wave 3.
   - Translate modeled compiled/raw JSON Schema syntax only. Keep resolved
@@ -685,7 +854,7 @@ preservation formats. Translators receive a stable rule-free shape API.
     snapshots intentionally. Cover raw `oneOf` overlap, `$ref` siblings,
     overlapping patterns/properties, additional keys, `multipleOf`, and cycles.
 
-- [ ] **Call binder** — **parallel**, own grammar-to-shape translator and new
+- [x] **Call binder** — **parallel**, own grammar-to-shape translator and new
   bound-argument/call-binding APIs; no production dispatch switch yet.
   - Compile callable signatures once and cache descriptors. Bind arity, all
     supplied arguments, omission, optional/rest positions, constraints, and
@@ -706,7 +875,7 @@ complete diagnostics, and order-independent overloads.
 
 ### Wave 5 — Prepare the complete migration
 
-- [ ] **Catalog replacement** — **parallel**, own catalog YAML,
+- [x] **Catalog replacement** — **parallel**, own catalog YAML,
   `expression/catalog/` and catalog/example tests; depends on Wave 4.
   - Move functions and mutations into `darkmatter/schemas/partials/`; normalize
     envelopes and syntax, remove retired metadata, fix descriptions/categories,
@@ -718,7 +887,7 @@ complete diagnostics, and order-independent overloads.
     file examples, and display-only reasons. The executable runner uses the
     normal evaluator and hermetic fixtures; display-only cases never run.
 
-- [ ] **Pure handlers** — **parallel**, own pure math/string/predicate/
+- [x] **Pure handlers** — **parallel**, own pure math/string/predicate/
   collection/date handler bodies and their family fixture rows.
   - Replace arity/type/conversion helpers with bound arguments. Apply ledger
     null contracts, `length`'s boolean exclusion, `contains` rendered-value
@@ -727,7 +896,7 @@ complete diagnostics, and order-independent overloads.
     rounding halfway away from zero without narrowing casts. Keep true
     conversion-function domain operations distinct from input coercion.
 
-- [ ] **Context handlers** — **parallel**, own filesystem/repository/network/
+- [x] **Context handlers** — **parallel**, own filesystem/repository/network/
   provider/composition handler bodies and corresponding fixture rows.
   - Migrate all context handlers to bound arguments, including refined count
     limits, content types, and null predicate behavior. `file_exists(42)` is
@@ -742,7 +911,7 @@ there is no completed mixed-runtime release. Shared dispatch wiring is next.
 
 ### Wave 6 — Atomic dispatch and consumer switch
 
-- [ ] **Registry integration** — sequential integrator.
+- [x] **Registry integration** — sequential integrator.
   - Join all implementations to the new descriptors and switch pure, context,
     and lazy dispatch together. Preserve `and`/`or` lazy evaluation, unknown
     function suggestions, aliases, source provenance, and bounded execution.
@@ -756,7 +925,7 @@ there is no completed mixed-runtime release. Shared dispatch wiring is next.
     produce implementation-contract errors. Complete ledger coverage against
     recorded baseline and update affected shipped documents in the same change.
 
-- [ ] **Consumer migration** — follows registry integration in this wave.
+- [x] **Consumer migration** — follows registry integration in this wave.
   - Update DMLS completion/hover and Claudine's
     `cli/src/commands/context/{expressions,format}.rs` to consume Darkmatter's
     full catalog API. Audit other library exports/generated references for old
