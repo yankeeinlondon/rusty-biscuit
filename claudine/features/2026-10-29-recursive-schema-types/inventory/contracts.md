@@ -53,6 +53,9 @@ pub enum DefNamespace {
     RootUnionArm(usize),
     /// A schema file, by the canonical path the resolver loaded it from.
     File(PathBuf),
+    /// Inline arm `index` of a schema file whose declaration is a root
+    /// union (added in Wave 2, see below).
+    FileRootUnionArm(PathBuf, usize),
     /// An embedded document (virtual path), including an embedded inline
     /// schema authored inside one (`importer`).
     Embedded(String),
@@ -65,6 +68,12 @@ pub enum DefNamespace {
 }
 ```
 
+- **Wave 2 change:** `FileRootUnionArm(path, index)` was added. The inline
+  arms of a root-union schema *file* each resolve `@this` against their own
+  properties; they shared `File(path)` before, so two arms of one file that
+  each declare `item` would have collided on one `DefKey` once both arms
+  allocate into the union's single table. `Raw(RawScope)` is not in the code
+  yet: Wave 3 adds it with raw merge ingress, the only producer.
 - `NamespaceKey` becomes `DefNamespace` (or converts into it 1:1); the four
   existing variants keep their meaning, and `Root` is replaced by
   `InlineRoot` / `RootUnionArm(i)`. An embedded inline schema is
@@ -115,6 +124,17 @@ pub struct DefinitionTable {
   group, including a file reached only through the cycle-closing edge, is
   added to `ResolvedSchema.imports`, so the existing dependency-hash
   invalidation covers it.
+- **As built (Wave 2):** `DefinitionTable` exposes `is_empty`, `len`,
+  `get(&DefKey)`, `key_for_json(&str)`, `iter()` (allocation order), and
+  `outer(&DefKey) -> Option<DefinitionOuter>` (`Object`, `Array`, `Tuple`,
+  `Union`, `Other`, looking through alias bodies); `insert` is crate-private
+  (the resolver allocates). `definition_pointer(json_key)` builds the escaped
+  `#/$defs/…` reference. `ResolvedSchema.definitions` is a public field;
+  `EffectiveSchema` keeps the table private behind `definitions()`, like its
+  other fields. `expand_named_types` now returns `NamedTypeExpansion {
+  schema, imports, definitions }`. Lowering is
+  `to_json_schema_with_definitions(schema, &table)`; `to_json_schema` is the
+  empty-table case.
 - Typed consumers receive the table explicitly: functions that walk a
   `SimplifiedSchema`/`SchemaShape` and can meet a `Ref` take
   `&DefinitionTable` (or a `TypeContext<'_> { definitions: &DefinitionTable }`
@@ -126,7 +146,13 @@ pub struct DefinitionTable {
 
 - Keys are allocated in **stable traversal order**: depth-first over the root
   schema's properties in declaration order, then pattern keys, then each
-  definition body as it is first reached. The first definition named `item`
+  definition body as it is first reached. As built, a definition is
+  allocated when its first use is reached; bodies are expanded from a FIFO
+  worklist after the root, so a definition first reached inside a body comes
+  after everything the root reached. An inline root property that is itself
+  a named type (`$schema: { group: …, member: … }`) is not a use, so in that
+  example `member` (reached inside `group`'s property body) is allocated
+  before `group`. The first definition named `item`
   gets `item`; a later, different `DefKey` with the same name gets `item-2`,
   `item-3`, … No path, hash, or process-random value appears in a key.
 - Keys are opaque: no consumer derives a name or namespace from one; they use
@@ -192,8 +218,25 @@ pub struct CycleReference {
     /// The named type it refers to, with that type's namespace source.
     pub target: String,
     pub target_source: SchemaSourceId,
+    /// Byte range of the reference name (Wave 2 addition), filled from the
+    /// file's source map when `site.source` is a schema file; `None` for the
+    /// inline `$schema`, which the consumer projects as it does for
+    /// `UnknownNamedType`.
+    pub span: Option<Range<usize>>,
 }
 ```
+
+- **As built (Wave 2):** only `NonDescendingCycle` exists so far;
+  `UnresolvedReference` and `UnsupportedMergeReference` belong to Wave 3's
+  scope lookup and merge ingress. Edges are reported in discovery order.
+- **As built (Wave 3):** `UnresolvedReference { schema, reference, location }`
+  and `UnsupportedMergeReference { schema, location, reason }`. The field is
+  `schema: String` (a label such as `the baseline`, `the payload \`…\``, or
+  `the root-union arm \`./x.json\``), not `path: PathBuf`: an in-memory
+  baseline has no path, and a field named `source` is reserved by
+  `thiserror`. `location` is the JSON Pointer of the schema holding the
+  reference (`/` for the root). Inside a trigger payload both are reported
+  through `TriggerPayloadNotMergeable.reason`.
 
 - `NonDescendingCycle` reports every reference in each rejected cycle, with
   spans resolved like `UnknownNamedType`'s (two files ⇒ spans in both). DMLS
@@ -224,9 +267,30 @@ pub struct CycleReference {
   the array; item constraints become siblings of the item `$ref`.
 - Two uses of one definition with different constraints produce two
   different sibling sets and one shared body.
+- **As built (Wave 2):** the marker set moved from a single-atom body is
+  `required`, `generated`, `eager`, `default`, `suggest`, `example`,
+  `category`, plus the description. For a union body only `required`,
+  `generated`, and `default` are hoisted off its alternatives (what a
+  property-level union hoists); an alternative's `eager`, description, and
+  examples stay on it. A definition that admits null (a union with a `null`
+  or `unknown` arm) drops `required` at every use, so `is_required` stays
+  table-free. Use-site value constraints allowed beside a `$ref`: key bounds
+  beside an object, item bounds/`unique` beside an array (a use-site
+  `min`/`max` on a list definition counts items), none beside a union or
+  tuple. A use-site bound is merged against the definition's own top-level
+  bounds only to report a contradiction (`ConstraintConflict`, definition
+  origin first); the body keeps its bounds.
+- The marker summary a use site needs is read off a first expansion pass;
+  see `resolve/recursive.rs`. An acyclic schema takes one pass, unchanged.
 
 ## 8. Raw references at merge boundaries
 
+- **State after Wave 2:** an inline document root and each inline root-union
+  arm already allocate into one table and the union root carries `$defs`. A
+  root-union arm that references a schema *file* with definitions is refused
+  with `SchemaError::Convert` until this section's re-keying lands; the
+  document's own `$defs` survives `merge_baseline` because document root keys
+  are kept.
 - `validate_simple_object_schema` adds `$defs` to its root allow-list and
   nothing else: root `$ref`, `anyOf`/`oneOf`/`allOf`, and other applicators
   remain rejected.
@@ -244,6 +308,31 @@ pub struct CycleReference {
   property.
 - Raw **document** schemas (not at a merge boundary) keep Draft 2020-12
   semantics unchanged and are never rewritten.
+- **As built (Wave 3):** `schemas/scope.rs` holds the rules.
+  `check_joined_references` runs for every baseline, trigger payload, and
+  root-union file arm: a `#/$defs/…` reference must resolve in its own table
+  (`UnresolvedReference`) even when the schema has no `$defs` (it could
+  otherwise bind to another layer's definition); with a root `$defs`, `$id`,
+  `$anchor`, `$dynamicAnchor`, `$dynamicRef`, external targets, and other local
+  pointers (`#`, `#/properties/…`, `""`) are `UnsupportedMergeReference`, and
+  `validate_simple_object_schema` meta-validates the schema against Draft
+  2020-12 (`SchemaError::Baseline`). `fold_definitions` shares a colliding key
+  only when both bodies are byte-equal and everything they reference is
+  shared; otherwise the joining side's key becomes `key-2`, … . Rewriting
+  visits schema keywords only. `DefNamespace::Raw` was **not** added: raw
+  definitions have no typed projection, so they exist only as JSON keys.
+  A SimplifiedSchema single-shape file arm of a root union joins through
+  `DefinitionTable::absorb` (typed table and JSON keys stay equal, which phase
+  lowering of the arms relies on); raw arms and file arms that are themselves
+  unions fold after every arm. `merge_baseline` refuses to move a baseline's
+  `$defs` into a document root union whose arm has its own `$id`.
+- **Typed tables (Wave 3):** `ResolvedPayload`/`TriggerLayer` carry
+  `definitions`; `EffectiveSchema::definitions()` stays the document's table
+  (its keys are the effective JSON's keys, since the document receives every
+  merge), and `EffectiveSchema::definition(&DefKey)` searches it and the
+  trigger tables. `ShippedBaseline` keeps no table: the built-in baseline does
+  not recurse, and `to_json_schema` would refuse one that did. DMLS extension
+  shapes are Wave 6's.
 
 ### Duplicate members (Phase 1 ruling)
 
@@ -291,6 +380,22 @@ impl SchemaScope<'_> {
   document under `$defs.document` with its own `$id`, so it is root-scoped
   today and needs only a test. `format_assertion` compiles a `{format}`
   fragment with no references and is exempt.
+- **As built (Wave 3):** `SchemaScope::{new, named, resolve, chain}`
+  (`resolve` is one local hop, `Ok(None)` for no `$ref` or a non-local one;
+  `chain` follows hops and errors on a missing target or a ref-only loop) and
+  `with_root_definitions(sub, root)`. `wrap_arm_as_root_schema(arm, root)` now
+  takes the root. Adapted sites: `CompiledValidators`/`wrapped_root_arms`,
+  `coerce::accepts`, `rewrite_root_union` and `rewrite_property_union` (the
+  rewrite walkers carry `root`), `narrow_discriminated_union_problems`,
+  `select_file_mode` and `root_schema_arm_applies` (the caller file-mode
+  classifier carries `root`), `schema_declares_property` (follows a chain),
+  and `example` targets (`resolve_document_examples` passes the root `$defs`;
+  inline union arms resolve examples before hoisting). Not adapted, with
+  reason: completion's `alternative_accepts` lowers a typed atom (Wave 5
+  follows `Ref` there), lint candidates never see a `Ref` (a suggestion on a
+  recursive reference is rejected), `check_alphanumeric_values` and
+  `format_assertion` compile reference-free fragments, and
+  `json_shape::Index::build` is already root-scoped.
 - Exhaustive matches gain a deliberate `Ref` arm. The 22 wildcard matches and
   49 partial destructures in consumers.md §1 are each reviewed in the wave that
   owns their file; a wildcard that would silently treat `Ref` as "something
@@ -304,6 +409,13 @@ impl SchemaScope<'_> {
 - Effective presence and timing are derived at each use site from the use-site
   atom (section 7), so a definition shared by an eager and a deferred property
   projects once and the two uses differ only in their siblings.
+- **As built (Wave 3):** `phase::project_definitions(&table, phase)` maps every
+  body through `project_def` under the same keys (`DefinitionTable::map_bodies`);
+  it runs per `validate_for_phase` call rather than being memoized, since it
+  is linear in the table and the lowering beside it costs more. The projected
+  `EffectiveSchema` carries the projected table. `merge_with_effective`
+  replaces the document's own `$defs` bodies with the projection's and keeps
+  the baseline/trigger-only ones.
 
 ## 11. Type-level consumers
 

@@ -19,6 +19,76 @@ docs_created_during_phase_1:
 skills_files_updated_during_phase_1: []
 packages:
     - darkmatter
+    - darkmatter-cli
+    - dmls
+    - claudine
+    - claudine-gen
+source_files_during_phase_2:
+    - claudine/gen/src/schema_compat.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/phase.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/resolve/graph.rs
+    - darkmatter/lib/src/markdown/schemas/resolve/recursive.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/definitions.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/tests/embedded_sources.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/recursive_schema_types.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - claudine/features/2026-10-29-recursive-schema-types/inventory/contracts.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/phase.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/scope.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/definitions.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/recursive_schema_merge.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/schemas/definition.md
+    - claudine/features/2026-10-29-recursive-schema-types/inventory/contracts.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/schema.md
 ---
 
 # Recursive Schema Types Implementation Plan
@@ -117,13 +187,13 @@ Before matrix sign-off, inspect touched reads for `#[serde(default)]`, absence/n
 
 ### Wave 2 — Reference Graph (Sequential)
 
-- [ ] **Discover Definition Graph**
+- [x] **Discover Definition Graph**
   - Own `schemas/resolve.rs`, `simplified/types.rs`, source/provenance helpers, errors, and shared schema structures. Discover reachable definitions/dependencies once and compute recursive groups, including direct, mutual, cross-file, alias-into-cycle, and repeated-import cases.
   - Classify child-value edges using the completed core-type representation. Reject cycles in the graph after descending edges are removed; report only the offending non-descending cycle, with spans from every file. Preserve non-type cycle and chain-limit errors.
-- [ ] **Store Typed References**
+- [x] **Store Typed References**
   - Add `Ref(DefKey)` and finite shared tables to `ResolvedSchema`, `EffectiveSchema`, and bundle-facing APIs. Preserve defining namespaces, origins, imports reached only on closing edges, and deterministic traversal order.
   - Preserve authored serialization and unresolved-import rejection. Update exhaustive matches to keep packages compiling while later tasks add consumer semantics. Resolve outer shape before rejecting an array postfix on an already-array target, without recursive expansion.
-- [ ] **Lower Recursive Definitions**
+- [x] **Lower Recursive Definitions**
   - Own `simplified/convert.rs` and lowering context. Emit one body per reachable cyclic definition and local references for all uses; acyclic bodies still inline identically. Keep reusable shapes separate from property presence/nullability and effective use-site constraints.
   - Test stable keys, JSON Pointer escaping, namespace isolation, descriptions/defaults/suggestions, nullable unions, inherited required/generated/eager, conflicting constraints, array bounds, and two differently constrained uses of one shared definition.
   - Implement declaration-matrix coverage through public preparation and validation. Add graph boundary tests for all four allowed descent categories, alias/self-union/callable rejection, mixed descending/non-descending SCCs, and two-file diagnostic spans.
@@ -134,14 +204,14 @@ Checkpoint: a recursive schema compiles and validates a finite depth-8 instance;
 
 ### Wave 3 — Shared Runtime Context (Sequential)
 
-- [ ] **Introduce Reference Lookup**
+- [x] **Introduce Reference Lookup**
   - Add one scope-aware JSON lookup context for the original root, definitions, siblings, and schema location. Missing targets fail structurally; traversal exhaustion fails rather than accepting an unconstrained value.
   - Inventory and adapt context construction for every independently compiled synthetic schema in validation, union selection, coercion, discriminants, and rewriting. Publish stable lookup APIs before parallel walker work; consumers retain ownership of union decisions.
-- [ ] **Isolate Merge Definitions**
+- [x] **Isolate Merge Definitions**
   - Own `resolve.rs` merge checks, `schemas/mod.rs` effective assembly, and `triggers/assemble.rs`. Admit supported property references/definitions while retaining simple object roots, document-over-baseline behavior, and trigger precedence.
   - Re-key colliding generated and admitted raw definition names with every affected reference updated in its original scope. Cover independent lowered roots, same-named types in different files, root-union arms, mixed raw/simplified arms, per-arm baseline merge, and embedded namespaces.
   - Implement raw-ingress matrix checks and scope tests: missing targets, local escaped pointers, `$ref` siblings, `$id`, external targets, and unsupported roots. Existing acyclic acceptance and raw document semantics stay unchanged.
-- [ ] **Project Validation Phases**
+- [x] **Project Validation Phases**
   - Own `schemas/phase.rs`. Project each cyclic definition finitely per phase with effective presence/timing derived at each use; avoid eager/deferred contamination of shared definitions.
   - Test Launch/Completion below recursion, inherited and use-site markers, nullable unions, and a definition shared between differently timed properties. Ensure phase re-lowering carries definitions and every phase validator retains root scope.
 
