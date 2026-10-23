@@ -34,12 +34,14 @@ use ratatui::{
 use super::event::EventOutcome;
 use super::frame::{FrameChrome, FrameChromeConfig, HeightSpec};
 
+mod cursor_fallback;
 mod inline_viewport;
 mod loop_driver;
 mod terminal_lifecycle;
 
 pub use loop_driver::{drive_event_loop, drive_event_loop_with_chrome, drive_event_loop_with_hint};
 
+use cursor_fallback::CursorFallbackBackend;
 use inline_viewport::{finalize_inline_viewport, run_inline_dynamic_with_chrome};
 use terminal_lifecycle::{
     TerminalGuard, drain_pending_events, prepare_terminal, restore_terminal,
@@ -236,7 +238,7 @@ where
         }
         Some(spec @ HeightSpec::Cells(_)) => {
             let resolved = resolve_height_spec(spec)?;
-            let backend = CrosstermBackend::new(io::stdout());
+            let backend = CursorFallbackBackend::new(CrosstermBackend::new(io::stdout()));
             let options = TerminalOptions {
                 viewport: Viewport::Inline(resolved),
             };

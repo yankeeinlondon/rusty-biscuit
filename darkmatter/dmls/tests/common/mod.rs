@@ -340,6 +340,24 @@ impl<'workspace> LspFixture<'workspace> {
         fixture
     }
 
+    /// Like [`LspFixture::start_with_startup_probe_gate`], but the file-list
+    /// walk also waits for [`LspFixture::release_file_list`], so a test
+    /// decides whether discovery's repositories are found before or after
+    /// the initial phase lists its probes.
+    pub fn start_with_file_list_and_startup_probe_gates(workspace: &'workspace LspWorkspace) -> Self {
+        let (file_list_tx, file_list_rx) = crossbeam_channel::bounded(1);
+        let (probe_tx, probe_rx) = crossbeam_channel::unbounded();
+        let hooks = dmls::StartupHooks {
+            file_list_gate: Some(file_list_rx),
+            startup_probe_gate: Some(probe_rx),
+            ..dmls::StartupHooks::default()
+        };
+        let mut fixture = Self::spawn_with_all_hooks(workspace, Duration::ZERO, Self::fixture_snapshot(workspace), hooks);
+        fixture.file_list_gate = Some(file_list_tx);
+        fixture.startup_probe_gate = Some(probe_tx);
+        fixture
+    }
+
     /// Lets one held startup probe through.
     pub fn release_startup_probe(&self) {
         if let Some(gate) = &self.startup_probe_gate {

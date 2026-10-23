@@ -8,9 +8,11 @@
 //! or JSON syntax inside the same `.yaml` files), and asserts the public
 //! result: trigger discovery or payload resolution fails visibly, or a pair of
 //! probe documents gets the stated verdicts or trigger selections. One test
-//! walks one column in one syntax; `matrix_tests_cover_the_table` keeps the
-//! generated tests equal to the table. `claudine_schemas_embedded.rs` walks
-//! the same table with the edited bundle supplied as an embedded bundle.
+//! walks half of one column's shapes in one syntax, and one test per syntax
+//! asserts every column's control on the unedited bundle;
+//! `matrix_tests_cover_the_table` keeps the generated tests equal to the
+//! table. `claudine_schemas_embedded.rs` walks the same table with the edited
+//! bundle supplied as an embedded bundle.
 
 use biscuit_file::Yaml;
 use claudine::composition::schema::bundle::{CLAUDINE_SCHEMA_BUNDLE_NAME, CLAUDINE_TRIGGER_FILES};
@@ -80,6 +82,30 @@ enum Outcome {
 }
 
 use Outcome::{Error, Selects, Verdicts};
+
+/// The half of [`SHAPES`] one generated test walks.
+///
+/// A cell that loads re-resolves every trigger whose payload reads the edited
+/// file, about a second in a debug build when that file is a library, so a
+/// column is walked in two tests to keep each well inside the L1 budget. The
+/// split falls between `Null` and `Empty`, the two shapes that load for a
+/// mapping export.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Half {
+    /// `Absent` through `WrongTypeOneElement`.
+    First,
+    /// `WrongTypeEveryElement` through `Trailing`.
+    Second,
+}
+
+impl Half {
+    fn range(self) -> std::ops::Range<usize> {
+        match self {
+            Half::First => 0..4,
+            Half::Second => 4..SHAPES.len(),
+        }
+    }
+}
 
 /// The control verdicts: the positive probe is valid, the violating one not.
 const CONTROL: Outcome = Verdicts(true, false);
@@ -479,39 +505,40 @@ fn as_json(text: &str) -> Value {
     Yaml::from_str(text).expect("shipped YAML").as_json().expect("JSON-compatible")
 }
 
-/// The bundle's discovery from `origin`, or `None` when it fails visibly.
-fn discover_from(bundle: &[BundleFile], edited: &str, origin: Origin) -> (SchemaRepo, Option<Discovered>) {
+/// The bundle's discovery from `origin` in `repo`, or `None` when it fails
+/// visibly. A disk bundle is first written over `repo`'s `schemas/`; an
+/// embedded one leaves `repo` without schema files.
+fn discover_from(repo: &SchemaRepo, bundle: &[BundleFile], edited: &str, origin: Origin) -> Option<Discovered> {
     match origin {
         Origin::Disk => {
-            let repo = SchemaRepo::new(bundle);
-            let discovered = repo.discover().ok();
-            (repo, discovered)
+            repo.write_bundle(bundle);
+            repo.discover().ok()
         }
-        Origin::Embedded => {
-            let repo = SchemaRepo::new(&[]);
-            let discovered = match repo.discover_embedded(embedded_bundle(bundle)) {
-                Ok(discovered) => Some(discovered),
-                Err(SchemaError::EmbeddedTriggerLoad { bundle, name, .. }) => {
-                    assert_eq!(bundle, CLAUDINE_SCHEMA_BUNDLE_NAME);
-                    assert!(
-                        CLAUDINE_TRIGGER_FILES.contains(&name.as_str()) || name == edited,
-                        "the failure names a trigger or the edited {edited}: {name}"
-                    );
-                    None
-                }
-                Err(other) => panic!("an embedded bundle fails as EmbeddedTriggerLoad, not: {other}"),
-            };
-            (repo, discovered)
-        }
+        Origin::Embedded => match repo.discover_embedded(embedded_bundle(bundle)) {
+            Ok(discovered) => Some(discovered),
+            Err(SchemaError::EmbeddedTriggerLoad { bundle, name, .. }) => {
+                assert_eq!(bundle, CLAUDINE_SCHEMA_BUNDLE_NAME);
+                assert!(
+                    CLAUDINE_TRIGGER_FILES.contains(&name.as_str()) || name == edited,
+                    "the failure names a trigger or the edited {edited}: {name}"
+                );
+                None
+            }
+            Err(other) => panic!("an embedded bundle fails as EmbeddedTriggerLoad, not: {other}"),
+        },
     }
 }
 
 /// The outcome of one bundle, through public discovery and validation.
-fn observe(bundle: &[BundleFile], column: &Column, origin: Origin) -> Outcome {
-    let (repo, discovered) = discover_from(bundle, column.file, origin);
-    let Some(discovered) = discovered else {
-        return Error;
-    };
+fn observe(repo: &SchemaRepo, bundle: &[BundleFile], column: &Column, origin: Origin) -> Outcome {
+    match discover_from(repo, bundle, column.file, origin) {
+        Some(discovered) => judge_probes(repo, &discovered, bundle, column),
+        None => Error,
+    }
+}
+
+/// The outcome of `column`'s probes against a bundle that loaded.
+fn judge_probes(repo: &SchemaRepo, discovered: &Discovered, bundle: &[BundleFile], column: &Column) -> Outcome {
     let claudine = text_of(bundle, "claudine.yaml");
     let inline = text_of(bundle, "inline-compose.yaml");
     let mut results = [false; 2];
@@ -538,25 +565,56 @@ pub(crate) fn column_names() -> Vec<&'static str> {
     COLUMNS.iter().map(|column| column.name).collect()
 }
 
-/// Walks one column in one syntax: the unedited control, then every shape.
-fn walk(column_name: &str, syntax: Syntax, shipped: &[BundleFile]) {
-    walk_from(column_name, syntax, shipped, Origin::Disk);
+/// Asserts every column's control in one syntax: the unedited bundle loads,
+/// and each column's probe pair gets the control verdicts (or, for a
+/// selection column, a selection pair). A cell's outcome is meaningful only
+/// against this control; one load of the unedited bundle serves every column.
+fn controls(syntax: Syntax, shipped: &[BundleFile]) {
+    controls_from(syntax, shipped, Origin::Disk);
+}
+
+/// [`controls`] with the bundle read from `origin`.
+pub(crate) fn controls_from(syntax: Syntax, shipped: &[BundleFile], origin: Origin) {
+    let repo = SchemaRepo::new(&[]);
+    let control = bundle_in(shipped, syntax);
+    let discovered =
+        discover_from(&repo, &control, "", origin).unwrap_or_else(|| panic!("the {syntax:?} control loads ({origin:?})"));
+    let mut failures = Vec::new();
+    for column in COLUMNS {
+        // A trigger may reject the shipped probe values only through the
+        // payload, so the control of a selection column is a selection pair.
+        let expected = if column.selection { Selects(true, false) } else { CONTROL };
+        let observed = judge_probes(&repo, &discovered, &control, column);
+        if observed != expected {
+            failures.push(format!("{}: expected {expected:?}, observed {observed:?}", column.name));
+        }
+    }
+    assert!(failures.is_empty(), "controls ({syntax:?}, {origin:?}):\n{}", failures.join("\n"));
+}
+
+/// Walks one column in one syntax over one half of the shapes, each cell
+/// from the unedited bundle. The column's control is asserted by
+/// [`controls`].
+fn walk(column_name: &str, syntax: Syntax, half: Half, shipped: &[BundleFile]) {
+    walk_from(column_name, syntax, half, shipped, Origin::Disk);
 }
 
 /// [`walk`] with the bundle read from `origin`. Both origins share the
 /// table: no cell's outcome depends on where the bundle is read from.
-pub(crate) fn walk_from(column_name: &str, syntax: Syntax, shipped: &[BundleFile], origin: Origin) {
+///
+/// Every cell is observed in one repository, rewritten per cell, so a
+/// trigger the cell leaves untouched (along with everything its payload
+/// reads) is resolved once per test rather than once per cell; see
+/// [`SchemaRepo::write_bundle`].
+pub(crate) fn walk_from(column_name: &str, syntax: Syntax, half: Half, shipped: &[BundleFile], origin: Origin) {
     let column = COLUMNS.iter().find(|column| column.name == column_name).expect("a table column");
+    let repo = SchemaRepo::new(&[]);
     let control = bundle_in(shipped, syntax);
-    // A trigger may reject the shipped probe values only through the
-    // payload, so the control of a selection column is a selection pair.
-    let expected_control = if column.selection { Selects(true, false) } else { CONTROL };
-    assert_eq!(observe(&control, column, origin), expected_control, "{column_name} ({syntax:?}, {origin:?}): control");
 
     let source = as_json(text_of(shipped, column.file));
     let mut failures = Vec::new();
-    for (shape, expected) in SHAPES.iter().zip(column.outcomes) {
-        let expected = unclaimed_trigger(column, *shape).unwrap_or(expected);
+    for (shape, expected) in SHAPES[half.range()].iter().zip(&column.outcomes[half.range()]) {
+        let expected = unclaimed_trigger(column, *shape).unwrap_or(*expected);
         let mut document = source.clone();
         let duplicate = edit(&mut document, column.pointer, *shape);
         let edited = serialize(&document, syntax, duplicate.as_ref(), *shape == Shape::Trailing);
@@ -564,12 +622,12 @@ pub(crate) fn walk_from(column_name: &str, syntax: Syntax, shipped: &[BundleFile
             .iter()
             .map(|(name, text)| (*name, if *name == column.file { edited.clone() } else { text.clone() }))
             .collect();
-        let observed = observe(&bundle, column, origin);
+        let observed = observe(&repo, &bundle, column, origin);
         if observed != expected {
             failures.push(format!("{shape:?}: expected {expected:?}, observed {observed:?}"));
         }
     }
-    assert!(failures.is_empty(), "{column_name} ({syntax:?}, {origin:?}):\n{}", failures.join("\n"));
+    assert!(failures.is_empty(), "{column_name} ({syntax:?}, {half:?}, {origin:?}):\n{}", failures.join("\n"));
 }
 
 /// The outcome of a trigger file that a duplicate key or trailing garbage
@@ -587,13 +645,23 @@ fn unclaimed_trigger(column: &Column, shape: Shape) -> Option<Outcome> {
 macro_rules! matrix_tests {
     ($($test:ident => ($column:literal, $syntax:ident);)*) => {
         $(
-            #[test]
-            fn $test() {
-                walk($column, Syntax::$syntax, &shipped_bundle!());
+            mod $test {
+                use super::*;
+
+                #[test]
+                fn shapes_1_to_4() {
+                    walk($column, Syntax::$syntax, Half::First, &shipped_bundle!());
+                }
+
+                #[test]
+                fn shapes_5_to_8() {
+                    walk($column, Syntax::$syntax, Half::Second, &shipped_bundle!());
+                }
             }
         )*
 
-        /// Every generated test, as `(column, syntax)`.
+        /// Every generated column test, as `(column, syntax)`; each covers
+        /// both halves.
         const GENERATED: &[(&str, Syntax)] = &[$(($column, Syntax::$syntax)),*];
     };
 }
@@ -638,7 +706,18 @@ matrix_tests! {
 }
 
 #[test]
+fn yaml_controls() {
+    controls(Syntax::Yaml, &shipped_bundle!());
+}
+
+#[test]
+fn json_controls() {
+    controls(Syntax::Json, &shipped_bundle!());
+}
+
+#[test]
 fn matrix_tests_cover_the_table() {
+    assert_halves_cover_the_shapes();
     for syntax in [Syntax::Yaml, Syntax::Json] {
         let generated: Vec<&str> =
             GENERATED.iter().filter(|(_, generated)| *generated == syntax).map(|(column, _)| *column).collect();
@@ -661,6 +740,12 @@ fn json_syntax_bundle_is_the_shipped_bundle() {
     }
 }
 
+/// The two halves walk every shape exactly once, in table order.
+pub(crate) fn assert_halves_cover_the_shapes() {
+    let (first, second) = (Half::First.range(), Half::Second.range());
+    assert_eq!((first.start, first.end, second.end), (0, second.start, SHAPES.len()), "the halves partition the shapes");
+}
+
 /// The trigger envelope's extra cell (implementation-log ruling R3): a
 /// non-string top-level key is an unknown key, not silently ignored. Only
 /// block YAML can spell one; every JSON key is a string, which the envelope
@@ -673,7 +758,8 @@ fn a_non_string_top_level_trigger_key_is_an_error() {
 /// The R3 cell from `origin`: the control, then three non-string keys.
 pub(crate) fn assert_non_string_trigger_key_errors(shipped: &[BundleFile], origin: Origin) {
     let column = COLUMNS.iter().find(|column| column.name == "trigger_kind").expect("a table column");
-    assert_eq!(observe(shipped, column, origin), CONTROL, "control");
+    let repo = SchemaRepo::new(&[]);
+    assert_eq!(observe(&repo, shipped, column, origin), CONTROL, "control");
     for key in ["42", "true", "[a, b]"] {
         let bundle: Vec<BundleFile> = shipped
             .iter()
@@ -682,6 +768,6 @@ pub(crate) fn assert_non_string_trigger_key_errors(shipped: &[BundleFile], origi
                 (*name, text)
             })
             .collect();
-        assert_eq!(observe(&bundle, column, origin), Error, "`{key}: extra` in claudine.yaml");
+        assert_eq!(observe(&repo, &bundle, column, origin), Error, "`{key}: extra` in claudine.yaml");
     }
 }

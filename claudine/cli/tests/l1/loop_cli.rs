@@ -536,9 +536,11 @@ while :; do /bin/sleep 1; done
     let assert = fixture
         .command()
         .env("OPENCODE_MODEL", "test-model")
-        .env("CLAUDINE_STEP_TIMEOUT", "2s")
-        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
-        .env("CLAUDINE_KILL_GRACE", "1s")
+        // The subject is how the kill is classified, not when it lands, so
+        // the budgets are as short as the stub's startup allows.
+        .env("CLAUDINE_STEP_TIMEOUT", "1s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "0.2s")
+        .env("CLAUDINE_KILL_GRACE", "0.5s")
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .timeout(std::time::Duration::from_secs(60))
         .assert()
@@ -725,19 +727,16 @@ exit 0
 }
 
 /// `--on-rate-limit pause` waits out a usable reset clock and then runs
-/// the next iteration. A reset_at ~3s in the future should produce a
-/// noticeable but bounded delay (no unbounded blocking) before iteration 2
-/// runs.
-///
-/// Marked `serial` because the ~8s pause makes the test sensitive to
-/// shared-test-runner contention; isolating it stabilizes the timing
-/// assertions.
+/// the next iteration: the second provider call reads its own clock at or
+/// after the reset the first call advertised, which a policy that did not
+/// wait would reach before it.
 #[cfg(unix)]
 #[test]
-#[serial_test::serial]
 fn compose_loop_rate_limit_pause_waits_then_continues() {
     let fixture = CliProcessFixture::named("loop-cli");
     let count_path = fixture.cwd().join("call-count.txt");
+    let reset_path = fixture.cwd().join("reset-epoch.txt");
+    let second_call_path = fixture.cwd().join("second-call-epoch.txt");
 
     let md_file = fixture.cwd().join("loop.md");
     fs::write(
@@ -753,11 +752,12 @@ Iteration {{counter}}
     )
     .unwrap();
 
-    // First call: emit a 429 with a reset clock ~3s in the future. Second
-    // call: just succeed. The engine should pause between iterations and
-    // both calls should land. `CLAUDINE_PAUSE_RESET_MARGIN` (set below)
-    // trims the production 5s safety margin to 1s so the test exercises the
-    // real pause-then-continue path without the full wall-clock wait.
+    // First call: emit a 429 with a reset clock 2s ahead (on a whole-second
+    // clock, so 1–2s away) and record it. Second call: record when it ran,
+    // then succeed. The engine should pause between iterations and both
+    // calls should land. `CLAUDINE_PAUSE_RESET_MARGIN` (set below) trims the
+    // production 5s safety margin to 0.1s so the test exercises the real
+    // pause-then-continue path without the full wall-clock wait.
     write_executable(
         &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
@@ -777,22 +777,27 @@ printf '%s\n' '{"type":"init","session_id":"loop-pause","model":"test-model"}'
 printf '%s\n' '{"type":"finish","sessionID":"loop-pause"}'
 
 if [ "$count" = "1" ]; then
-  # Reset ~3s in the future: comfortably ahead of the tail of iteration 1
-  # (stream parse + teardown, well under 1s) so the engine still sees a
-  # future reset, but short enough to keep the test fast.
-  reset_at=$(/bin/date -u -v+3S '+%Y-%m-%d %H:%M:%S' 2>/dev/null || /bin/date -u -d '+3 seconds' '+%Y-%m-%d %H:%M:%S')
+  # At least 1s ahead: comfortably past the tail of iteration 1 (stream
+  # parse + teardown, well under 1s) so the engine still sees a future
+  # reset, but short enough to keep the test fast.
+  reset_epoch=$(( $(/bin/date -u +%s) + 2 ))
+  printf '%s' "$reset_epoch" > "$CLAUDINE_RESET_FILE"
+  reset_at=$(/bin/date -u -r "$reset_epoch" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || /bin/date -u -d "@$reset_epoch" '+%Y-%m-%d %H:%M:%S')
   printf '%s\n' "ERROR 2026-04-15T19:26:02 +3054ms service=llm providerID=zai-coding-plan modelID=glm-5.1 error={\"error\":{\"name\":\"AI_RetryError\",\"reason\":\"maxRetriesExceeded\",\"errors\":[{\"name\":\"AI_APICallError\",\"statusCode\":429,\"responseBody\":\"{\\\"error\\\":{\\\"code\\\":\\\"1308\\\",\\\"message\\\":\\\"Usage limit reached. Your limit will reset at $reset_at\\\"}}\"}]}}" >&2
+else
+  /bin/date -u +%s > "$CLAUDINE_SECOND_CALL_FILE"
 fi
 exit 0
 "#,
     );
 
-    let start = std::time::Instant::now();
     fixture
         .command()
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .env("CLAUDINE_PAUSE_RESET_MARGIN", "1s")
+        .env("CLAUDINE_RESET_FILE", &reset_path)
+        .env("CLAUDINE_SECOND_CALL_FILE", &second_call_path)
+        .env("CLAUDINE_PAUSE_RESET_MARGIN", "0.1s")
         .args([
             "compose",
             "--opencode",
@@ -803,7 +808,6 @@ exit 0
         .timeout(std::time::Duration::from_secs(60))
         .assert()
         .success();
-    let elapsed = start.elapsed();
 
     let calls = fs::read_to_string(&count_path).unwrap();
     assert_eq!(
@@ -812,12 +816,14 @@ exit 0
         "pause policy must let the second iteration run; got {} calls",
         calls.trim()
     );
-    // 3s reset + 1s margin ≈ 4s pause. The floor must stay clearly above the
-    // ~2s no-pause path (two back-to-back subprocess spawns) so a regression
-    // that skips the wait is still caught.
+    let epoch = |path: &std::path::Path| -> u64 {
+        fs::read_to_string(path).unwrap().trim().parse().unwrap()
+    };
+    let (reset, second_call) = (epoch(&reset_path), epoch(&second_call_path));
     assert!(
-        elapsed >= std::time::Duration::from_secs(3),
-        "pause should produce a noticeable delay; elapsed = {elapsed:?}"
+        second_call >= reset,
+        "the second iteration must wait for the advertised reset; \
+         reset at {reset}, second call at {second_call}"
     );
 }
 

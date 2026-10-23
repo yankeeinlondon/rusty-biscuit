@@ -35,44 +35,53 @@ use common::{strip_ansi, write_executable};
 // ============================================================================
 
 #[cfg(unix)]
-#[test]
-fn compose_and_inline_bare_sidecar_advisory_render_once_and_silent_suppresses_it() {
-    let fixture = CliProcessFixture::named("compose-schema-cli");
-    let sidecar = fixture.cwd().join("schema.yaml");
-    fs::write(
-        &sidecar,
-        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
-    )
-    .unwrap();
-    let md_file = fixture.cwd().join("plan.md");
-    fs::write(
-        &md_file,
-        "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nPlan.\n",
-    )
-    .unwrap();
-    let inline_file = fixture.cwd().join("inline.md");
-    let inline_source =
-        "---\n$schema: ./schema.yaml\nprompt: Update the body.\n---\nOriginal body.\n";
-    fs::write(&inline_file, inline_source).unwrap();
-    // `compose` ignores the stub's edit; `inline-compose` requires it, because
-    // the agent is the writer.
-    common::InlineAgentStub::new(&inline_file)
-        .body("Updated body.\n")
-        .install(fixture.bin_dir(), "goose");
+mod compose_and_inline_bare_sidecar_advisory_render_once_and_silent_suppresses_it {
+    use super::*;
 
-    let run = |subcommand: &str, file: &std::path::Path, silent: bool| {
-        let mut command = fixture.command();
-        command.args([subcommand, "--goose"]);
-        if silent {
-            command.arg("--silent");
-        }
-        command.arg(file).assert().success().get_output().stderr.clone()
-    };
+    #[test]
+    fn compose() {
+        assert_advisory_renders_once_and_silent_suppresses_it("compose");
+    }
 
-    for (subcommand, file) in [("compose", &md_file), ("inline-compose", &inline_file)] {
-        if subcommand == "inline-compose" {
-            fs::write(file, inline_source).unwrap();
-        }
+    #[test]
+    fn inline_compose() {
+        assert_advisory_renders_once_and_silent_suppresses_it("inline-compose");
+    }
+
+    fn assert_advisory_renders_once_and_silent_suppresses_it(subcommand: &str) {
+        let fixture = CliProcessFixture::named("compose-schema-cli");
+        let sidecar = fixture.cwd().join("schema.yaml");
+        fs::write(
+            &sidecar,
+            "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+        )
+        .unwrap();
+        let md_file = fixture.cwd().join("plan.md");
+        fs::write(
+            &md_file,
+            "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nPlan.\n",
+        )
+        .unwrap();
+        let inline_file = fixture.cwd().join("inline.md");
+        let inline_source =
+            "---\n$schema: ./schema.yaml\nprompt: Update the body.\n---\nOriginal body.\n";
+        fs::write(&inline_file, inline_source).unwrap();
+        // `compose` ignores the stub's edit; `inline-compose` requires it, because
+        // the agent is the writer.
+        common::InlineAgentStub::new(&inline_file)
+            .body("Updated body.\n")
+            .install(fixture.bin_dir(), "goose");
+
+        let run = |subcommand: &str, file: &std::path::Path, silent: bool| {
+            let mut command = fixture.command();
+            command.args([subcommand, "--goose"]);
+            if silent {
+                command.arg("--silent");
+            }
+            command.arg(file).assert().success().get_output().stderr.clone()
+        };
+
+        let file = if subcommand == "inline-compose" { &inline_file } else { &md_file };
         let stderr = strip_ansi(&String::from_utf8_lossy(&run(subcommand, file, false)));
         assert_eq!(
             stderr
@@ -2136,31 +2145,38 @@ fn caller_file_fixture(label: &str) -> (CliProcessFixture, std::path::PathBuf, s
 /// and the value reaches the late verdict. Darkmatter resolved it in document
 /// context there and reported `…/prompts`.
 #[cfg(unix)]
-#[test]
-fn compose_late_caller_file_verdict_names_the_launch_directory() {
-    let (fixture, count_path, events) = caller_file_fixture("compose-late-caller-file");
-    let prompts = fixture.cwd().join("prompts");
-    fs::create_dir_all(&prompts).unwrap();
-    let md_file = prompts.join("plan.md");
-    fs::write(
-        &md_file,
-        concat!(
-            "---\n",
-            "$schema:\n",
-            "  - kind: 'literal(feature)'\n",
-            "    spec: 'file(required;match(**/*spec*.md);eager)'\n",
-            "  - kind: 'literal(note)'\n",
-            "    spec: 'file(required;match(**/*note*.md);eager)[]'\n",
-            "kind: \"{{ 'feature' }}\"\n",
-            "initialize:\n",
-            "    - {append_line: [\"events.log\", \"initialize\"]}\n",
-            "---\n",
-            "Spec: {{spec}}\n",
-        ),
-    )
-    .unwrap();
+mod compose_late_caller_file_verdict_names_the_launch_directory {
+    use super::*;
 
-    let run = |spec: &str| {
+    /// The fixture, its provider call-count file, and its `initialize`
+    /// events log.
+    fn staged() -> (CliProcessFixture, std::path::PathBuf, std::path::PathBuf) {
+        let (fixture, count_path, events) = caller_file_fixture("compose-late-caller-file");
+        let prompts = fixture.cwd().join("prompts");
+        fs::create_dir_all(&prompts).unwrap();
+        let md_file = prompts.join("plan.md");
+        fs::write(
+            &md_file,
+            concat!(
+                "---\n",
+                "$schema:\n",
+                "  - kind: 'literal(feature)'\n",
+                "    spec: 'file(required;match(**/*spec*.md);eager)'\n",
+                "  - kind: 'literal(note)'\n",
+                "    spec: 'file(required;match(**/*note*.md);eager)[]'\n",
+                "kind: \"{{ 'feature' }}\"\n",
+                "initialize:\n",
+                "    - {append_line: [\"events.log\", \"initialize\"]}\n",
+                "---\n",
+                "Spec: {{spec}}\n",
+            ),
+        )
+        .unwrap();
+        (fixture, count_path, events)
+    }
+
+    /// A `compose` of `prompts/plan.md` with `spec=<value>`.
+    fn run(fixture: &CliProcessFixture, spec: &str) -> (bool, String) {
         let output = fixture
             .command()
             .args(["compose", "--goose", "prompts/plan.md", &format!("spec={spec}")])
@@ -2169,34 +2185,40 @@ fn compose_late_caller_file_verdict_names_the_launch_directory() {
             .output()
             .unwrap();
         (output.status.success(), strip_ansi(&String::from_utf8_lossy(&output.stderr)))
-    };
+    }
 
-    // Control: a spec the launch directory resolves composes and launches.
-    let (ok, plain) = run("features/2026-06-30-style/spec.md");
-    assert!(ok, "a resolvable spec should compose; stderr:\n{plain}");
-    assert!(count_path.exists(), "the provider should launch; stderr:\n{plain}");
-    fs::remove_file(&count_path).unwrap();
-    fs::remove_file(&events).unwrap();
+    /// Control: a spec the launch directory resolves composes and launches.
+    #[test]
+    fn a_resolvable_spec_composes_and_launches() {
+        let (fixture, count_path, _events) = staged();
+        let (ok, plain) = run(&fixture, "features/2026-06-30-style/spec.md");
+        assert!(ok, "a resolvable spec should compose; stderr:\n{plain}");
+        assert!(count_path.exists(), "the provider should launch; stderr:\n{plain}");
+    }
 
-    let (ok, plain) = run("fix");
-    assert!(!ok, "`fix` names no file; stderr:\n{plain}");
-    let launch_dir = fixture.cwd().canonicalize().unwrap();
-    assert!(
-        plain.contains(&format!(
-            "/spec: no existing file matched reference `fix` while resolving from `{}`",
-            launch_dir.display()
-        )),
-        "the verdict should name the launch directory; stderr:\n{plain}"
-    );
-    assert!(
-        !plain.contains(&format!("`{}`", launch_dir.join("prompts").display())),
-        "the verdict must not name the document directory; stderr:\n{plain}"
-    );
-    assert!(
-        fs::read_to_string(&events).is_ok_and(|log| log.contains("initialize")),
-        "the failure must come from the post-initialize verdict; stderr:\n{plain}"
-    );
-    assert!(!count_path.exists(), "no provider should launch; stderr:\n{plain}");
+    #[test]
+    fn an_unresolvable_spec_names_the_launch_directory() {
+        let (fixture, count_path, events) = staged();
+        let (ok, plain) = run(&fixture, "fix");
+        assert!(!ok, "`fix` names no file; stderr:\n{plain}");
+        let launch_dir = fixture.cwd().canonicalize().unwrap();
+        assert!(
+            plain.contains(&format!(
+                "/spec: no existing file matched reference `fix` while resolving from `{}`",
+                launch_dir.display()
+            )),
+            "the verdict should name the launch directory; stderr:\n{plain}"
+        );
+        assert!(
+            !plain.contains(&format!("`{}`", launch_dir.join("prompts").display())),
+            "the verdict must not name the document directory; stderr:\n{plain}"
+        );
+        assert!(
+            fs::read_to_string(&events).is_ok_and(|log| log.contains("initialize")),
+            "the failure must come from the post-initialize verdict; stderr:\n{plain}"
+        );
+        assert!(!count_path.exists(), "no provider should launch; stderr:\n{plain}");
+    }
 }
 
 /// R2: a caller's eager `file(match)` value that names no file fails before
@@ -2204,32 +2226,36 @@ fn compose_late_caller_file_verdict_names_the_launch_directory() {
 /// clear once a templated sibling is ignored (C1), and for the D1 shape, where
 /// both arms declare the property.
 #[cfg(unix)]
-#[test]
-fn compose_unresolved_caller_file_fails_before_initialize_when_non_interactive() {
-    let (fixture, count_path, events) = caller_file_fixture("compose-early-caller-file");
-    let prompts = fixture.cwd().join("prompts");
-    fs::create_dir_all(&prompts).unwrap();
-    let initialize = "initialize:\n    - {append_line: [\"events.log\", \"initialize\"]}\n";
-    for (label, schema) in [
-        (
-            "templated sibling",
-            "$schema:\n  - spec: 'file(required;match(**/*spec*.md);eager)'\n    doc: file\n  \
-             - design: 'file(required;match(**/*design*.md))'\n    doc: file\n\
-             doc: \"{{spec || design}}\"\n",
-        ),
-        (
-            "D1 two-tree union",
-            "$schema:\n  - kind: 'literal(feature)'\n    spec: 'file(required;eager;match(**/features/**/spec.md))'\n  \
-             - kind: 'literal(fix)'\n    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n",
-        ),
-    ] {
-        let md_file = prompts.join("plan.md");
-        fs::write(&md_file, format!("---\n{schema}{initialize}---\nSpec: {{{{spec}}}}\n")).unwrap();
+mod compose_unresolved_caller_file_fails_before_initialize_when_non_interactive {
+    use super::*;
 
-        // Control: a resolvable literal passes the early check and runs
-        // `initialize`, so the check below is the only thing that stops it.
-        // The path is relative to the launch directory, which the document's
-        // `prompts/` directory is not.
+    const INITIALIZE: &str = "initialize:\n    - {append_line: [\"events.log\", \"initialize\"]}\n";
+    const TEMPLATED_SIBLING: &str = "$schema:\n  - spec: 'file(required;match(**/*spec*.md);eager)'\n    doc: file\n  \
+         - design: 'file(required;match(**/*design*.md))'\n    doc: file\n\
+         doc: \"{{spec || design}}\"\n";
+    const D1_TWO_TREE_UNION: &str = "$schema:\n  - kind: 'literal(feature)'\n    spec: 'file(required;eager;match(**/features/**/spec.md))'\n  \
+         - kind: 'literal(fix)'\n    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n";
+
+    /// The fixture with `prompts/plan.md` declaring `schema`, plus the
+    /// provider's call-count file and the `initialize` events log.
+    fn staged(schema: &str) -> (CliProcessFixture, std::path::PathBuf, std::path::PathBuf) {
+        let (fixture, count_path, events) = caller_file_fixture("compose-early-caller-file");
+        let prompts = fixture.cwd().join("prompts");
+        fs::create_dir_all(&prompts).unwrap();
+        fs::write(
+            prompts.join("plan.md"),
+            format!("---\n{schema}{INITIALIZE}---\nSpec: {{{{spec}}}}\n"),
+        )
+        .unwrap();
+        (fixture, count_path, events)
+    }
+
+    /// Control: a resolvable literal passes the early check and runs
+    /// `initialize`, so the check in [`assert_unresolved_fails_early`] is the
+    /// only thing that stops it. The path is relative to the launch
+    /// directory, which the document's `prompts/` directory is not.
+    fn assert_resolvable_value_runs_initialize(label: &str, schema: &str) {
+        let (fixture, _count_path, events) = staged(schema);
         let output = fixture
             .command()
             .args(["compose", "--goose", "prompts/plan.md", "spec=features/2026-06-30-style/spec.md"])
@@ -2238,9 +2264,10 @@ fn compose_unresolved_caller_file_fails_before_initialize_when_non_interactive()
         let plain = strip_ansi(&String::from_utf8_lossy(&output.stderr));
         assert!(output.status.success(), "{label}: control should compose; stderr:\n{plain}");
         assert!(events.exists(), "{label}: control should run initialize; stderr:\n{plain}");
-        fs::remove_file(&events).unwrap();
-        fs::remove_file(&count_path).unwrap();
+    }
 
+    fn assert_unresolved_fails_early(label: &str, schema: &str) {
+        let (fixture, count_path, events) = staged(schema);
         let output = fixture
             .command()
             .args(["compose", "--goose", "prompts/plan.md", "spec=no-such-spec"])
@@ -2258,6 +2285,26 @@ fn compose_unresolved_caller_file_fails_before_initialize_when_non_interactive()
         );
         assert!(!events.exists(), "{label}: initialize must not run; stderr:\n{plain}");
         assert!(!count_path.exists(), "{label}: no provider should launch; stderr:\n{plain}");
+    }
+
+    #[test]
+    fn templated_sibling_control_runs_initialize() {
+        assert_resolvable_value_runs_initialize("templated sibling", TEMPLATED_SIBLING);
+    }
+
+    #[test]
+    fn templated_sibling_unresolved_value_fails_before_initialize() {
+        assert_unresolved_fails_early("templated sibling", TEMPLATED_SIBLING);
+    }
+
+    #[test]
+    fn d1_two_tree_union_control_runs_initialize() {
+        assert_resolvable_value_runs_initialize("D1 two-tree union", D1_TWO_TREE_UNION);
+    }
+
+    #[test]
+    fn d1_two_tree_union_unresolved_value_fails_before_initialize() {
+        assert_unresolved_fails_early("D1 two-tree union", D1_TWO_TREE_UNION);
     }
 }
 

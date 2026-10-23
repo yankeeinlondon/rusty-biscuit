@@ -451,9 +451,33 @@ fn initialize_shells_are_forbidden_even_with_yolo_across_entry_paths() {
     }
 }
 
-#[test]
-fn early_catch_shells_cannot_run_or_enable_another_catch_shell() {
-    for trigger in ["missing", "error", "proxy", "evaluation", "schema", "audit", "adopted"] {
+mod early_catch_shells_cannot_run_or_enable_another_catch_shell {
+    use super::*;
+
+    const TRIGGERS: [&str; 7] = ["missing", "error", "proxy", "evaluation", "schema", "audit", "adopted"];
+
+    macro_rules! trigger_tests {
+        ($($test:ident => $trigger:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_catch_shells_refused($trigger); })*
+
+            #[test]
+            fn every_row_has_a_listed_test() {
+                assert_eq!(TRIGGERS, [$($trigger),*]);
+            }
+        };
+    }
+
+    trigger_tests! {
+        a_missing_include => "missing",
+        an_initialize_error => "error",
+        a_failed_proxy => "proxy",
+        an_evaluation_error => "evaluation",
+        a_schema_failure => "schema",
+        a_refused_audit => "audit",
+        an_adopted_proxy_target => "adopted",
+    }
+
+    fn assert_catch_shells_refused(trigger: &str) {
         for yolo in [false, true] {
             let staged = Staged::new("early-catch-shell-prohibited");
             staged.install_compose_provider();

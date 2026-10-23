@@ -871,7 +871,10 @@ fn the_javascript_publisher_reads_a_fixture_generated_from_this_report() {
 /// earlier build served every end-to-end fixture here and made the suite pass
 /// against code that was no longer there. It cost a confusing failure twice.
 /// On a warm tree Cargo answers in well under a second; the alternative is a
-/// green run that proves nothing.
+/// green run that proves nothing. It runs once per Nextest run rather than
+/// once per call (see [`wrapper_for_run`]), and once per process under
+/// `cargo test`: every Cargo here takes the target directory's lock, so a
+/// build per call queued each test of a parallel suite behind all the others'.
 ///
 /// `pub(crate)` because the archive fixtures drive the same shipped binary; a
 /// second resolver would be a second chance to test something other than what
@@ -886,14 +889,61 @@ fn the_javascript_publisher_reads_a_fixture_generated_from_this_report() {
 /// `<triple>/debug` profile directory, while the rebuild goes to the
 /// checkout's own `target/debug` — a path assumed beside `current_exe()`
 /// named nothing on either environment of run 35405580517.
+///
+/// The manifest is resolved at run time too. Nextest's `--workspace-remap`
+/// points the run-time `CARGO_MANIFEST_DIR` at the consumer's checkout, which
+/// is where the `build-ci-build` setup script (`.config/nextest.toml`) has
+/// just built this binary; the compile-time value names the producer's
+/// checkout, whose target directory holds no build of this feature set, so
+/// every early test compiled `ci-build` from cold while the rest queued on
+/// Cargo's lock behind it (~14 s each in a consumer checkout at another path).
 pub(crate) fn shipped_wrapper() -> PathBuf {
+    static SHIPPED: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    SHIPPED
+        .get_or_init(|| {
+            let links = profile_dir().join(".ci-build-wrappers");
+            match env::var("NEXTEST_RUN_ID") {
+                Ok(run) if !run.is_empty() => wrapper_for_run(&links, &run),
+                _ => build_shipped_wrapper(&links, &std::process::id().to_string()),
+            }
+        })
+        .clone()
+}
+
+fn profile_dir() -> PathBuf {
     let exe = env::current_exe().expect("the test binary has a path");
-    let profile_dir = exe
-        .parent()
+    exe.parent()
         .and_then(Path::parent)
         .expect("…/target/<profile>/deps/<test binary>")
-        .to_path_buf();
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        .to_path_buf()
+}
+
+/// The binary one Nextest run shares: the first of its tests to take the lock
+/// builds it, and every later one reads the handle that test recorded. Sources
+/// cannot change under a run without staling the test binary itself, so one
+/// build per run is as fresh as one per test.
+fn wrapper_for_run(links: &Path, run: &str) -> PathBuf {
+    fs::create_dir_all(links).expect("creating the ci-build handle directory");
+    let lock = fs::File::create(links.join(format!("run-{run}.lock")))
+        .expect("creating the ci-build build lock");
+    lock.lock().expect("locking the ci-build build");
+    let record = links.join(format!("run-{run}.path"));
+    if let Ok(recorded) = fs::read_to_string(&record) {
+        let recorded = PathBuf::from(recorded);
+        if recorded.exists() {
+            return recorded;
+        }
+    }
+    let built = build_shipped_wrapper(links, &format!("run-{run}"));
+    fs::write(&record, built.to_string_lossy().as_bytes()).expect("recording the ci-build handle");
+    built
+}
+
+fn build_shipped_wrapper(links: &Path, handle: &str) -> PathBuf {
+    let manifest = env::var_os("CARGO_MANIFEST_DIR")
+        .filter(|dir| !dir.is_empty())
+        .map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")), PathBuf::from)
+        .join("Cargo.toml");
     let output = Command::new(cargo_bin())
         .arg("build")
         .arg("--message-format=json-render-diagnostics")
@@ -922,13 +972,13 @@ pub(crate) fn shipped_wrapper() -> PathBuf {
         .find_map(|message| message["executable"].as_str().map(PathBuf::from))
         .expect("cargo reports the ci-build executable it built");
     assert!(binary.exists(), "expected {} to exist", binary.display());
-    private_handle(&profile_dir, &binary)
+    private_handle(links, handle, &binary)
 }
 
 /// A private path to `binary` that a concurrent rebuild cannot invalidate.
 ///
-/// Nextest runs one process per test and every fixture here rebuilds the shipped
-/// binary, so a stale tree has several Cargos replacing `ci-build` at once. A
+/// Concurrent Nextest runs, or `cargo test` processes, each rebuild the shipped
+/// binary, so a stale tree can have several Cargos replacing `ci-build` at once. A
 /// test that had already handed that path to Cargo as its `RUSTC_WRAPPER` then
 /// execs into the replacement window and fails with a bare `No such file or
 /// directory` — a flake whose message names neither the wrapper nor the race.
@@ -941,16 +991,11 @@ pub(crate) fn cargo_bin() -> std::ffi::OsString {
     env::var_os("CARGO").unwrap_or_else(|| "cargo".into())
 }
 
-fn private_handle(profile_dir: &Path, binary: &Path) -> PathBuf {
-    let links = profile_dir.join(".ci-build-wrappers");
-    if fs::create_dir_all(&links).is_err() {
+fn private_handle(links: &Path, handle: &str, binary: &Path) -> PathBuf {
+    if fs::create_dir_all(links).is_err() {
         return binary.to_path_buf();
     }
-    let private = links.join(format!(
-        "ci-build-{}{}",
-        std::process::id(),
-        env::consts::EXE_SUFFIX
-    ));
+    let private = links.join(format!("ci-build-{handle}{}", env::consts::EXE_SUFFIX));
     let _ = fs::remove_file(&private);
     // Copy is the fallback rather than the failure: a filesystem without hard
     // links still gets an exec target of its own, just at the cost of the copy.
