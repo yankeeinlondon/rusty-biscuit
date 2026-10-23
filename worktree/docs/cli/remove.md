@@ -133,13 +133,38 @@ Remaining: 6 entries in the moved directory
 Observed: /code/wts/repo/feat-x/.gitnexus/index.db was created (reported at 14:03:07 UTC)
 Git registration: now points to the moved directory
 Branch feat/x: kept (not attempted)
+Only entries you approved before the move were deleted.
+  A file written in the instant before wt deleted its path would have been deleted too; the saved report lists every deleted path.
 Before the move: Discovery is partial; FSEvents subscriptions cannot be listed on this system; open handles were only partly read.
 
-Stop any tasks using either path. Inspect both locations and save new work.
-Retry: wt remove feat-x
-  Run it from the base checkout at /code/repo.
+What to do:
+  1. Move or save what is now at /code/wts/repo/feat-x; wt never deletes it, and the retry refuses until it is gone.
+  2. Retry: wt remove feat-x
+     Run it from anywhere outside the moved directory, such as the base checkout at /code/repo. It lists what is left and asks again about anything new or changed before deleting more.
 Full report: /code/repo/.git/wt-removal/<operation-id>/report.json
 ```
+
+`Only entries you approved before the move were deleted.` is the line to read
+first: everything deleted was in the list the report showed you, so new work
+written after the move is in what is left. The only exception is a file
+written into a path in the instant before `wt` deleted it; the saved report
+names every deleted path so you can check.
+
+`What to do` depends on what stopped the removal:
+
+| What stopped it | Step before the retry |
+| --- | --- |
+| Something new at the original path | Move or save it; `wt` never deletes it, and the retry refuses until it is gone |
+| A Git command in the worktree (see [Git commands stop a removal](#git-commands-stop-a-removal)) | Let that command finish, and run no Git in the moved directory until the removal finishes |
+| Any other change in the checkout or Git's record of it | Stop whatever is writing to the path named on the `Observed:` line |
+| An interrupt, a failed step, or lost watching | None: the retry alone |
+
+You don't need to inspect either location yourself first: the retry lists
+what is left and asks again about anything new or changed before it deletes
+more.
+
+A process check with the same gap before the move and after the stop gets
+one line, `Before the move and after the stop, at <path>: …`.
 
 A removal goes ahead when the usage check found nothing, even if it could
 not see everything, so a stop report says what each check missed:
@@ -210,8 +235,42 @@ overwritten.
 
 For example, a writer may recreate `checkout/.gitnexus/index.db` after the
 checkout has moved to `.wt-remove-checkout-<token>`. The report then tells
-you to stop tasks using either path, inspect both directories, and save new
-work before you [retry](#recovery-records-and-retry).
+you to move or save what is at the original path before you
+[retry](#recovery-records-and-retry).
+
+### Git commands stop a removal
+
+Git's record of the worktree is watched too (see
+[Watching for changes](#watching-for-changes)), and plain `git status`
+writes there: it refreshes the worktree's index file, through `index.lock`.
+So any Git command run in the worktree while it is being deleted stops the
+removal, including one run for you by a shell prompt that shows Git status or
+by an editor's Git integration. A terminal still standing in the old
+directory counts: its working directory follows the move. The report names
+it:
+
+```text
+Removal stopped: a Git command ran in this worktree while it was being removed.
+…
+Observed: /code/repo/.git/worktrees/feat-x/index.lock was modified (reported at 17:49:52 UTC)
+…
+What to do:
+  1. Let that Git command finish. A shell prompt that shows Git status, an editor's Git integration, or a git command in another terminal can start one; don't run Git in the moved directory until the removal finishes.
+  2. Retry: wt remove feat-x
+```
+
+A change to the worktree's `HEAD` reads `a Git command changed this
+worktree's HEAD while it was being removed.` `wt list` never runs Git in a
+worktree being removed ([why](list.md#worktrees-being-removed)), so it is
+safe to run in another terminal meanwhile.
+
+Before the move, something still writing into the checkout refuses the
+removal and changes nothing:
+
+```text
+Nothing was removed. wt stopped before moving worktree feat-x: something is still writing into it (/code/wts/repo/feat-x/target/release/deps/full.rmeta was created while wt was preparing the removal).
+  Let it finish, or stop it, then run wt remove feat-x again.
+```
 
 While the checkout is moved, Git keeps it registered as the same worktree at
 the hidden path: `git worktree list` shows it at the new path with its branch,
@@ -499,9 +558,8 @@ Git registration: now points to the moved directory
 Branch feat/x: kept (not attempted)
 Error: the removal was interrupted
 
-Stop any tasks using either path. Inspect both locations and save new work.
 Retry: wt remove feat-x
-  Run it from the base checkout at /work/repo.
+  Run it from anywhere outside the moved directory, such as the base checkout at /work/repo. It lists what is left and asks again about anything new or changed before deleting more.
 Full report: /work/repo/.git/wt-removal/<operation-id>/report.json
 ```
 

@@ -12,9 +12,11 @@ Observed: /work/fix-path-spelling/.gitnexus/index.db was created (reported at 14
 Git registration: now points to the moved directory
 Branch fix/path-spelling: kept (not attempted)
 Branch origin/fix/path-spelling: kept (not attempted)
-A write that landed just before its entry was deleted was deleted with it; the saved report lists every deleted entry.
+Only entries you approved before the move were deleted.
+  A file written in the instant before wt deleted its path would have been deleted too; the saved report lists every deleted path.
 
-Stop any tasks using either path. Inspect both locations and save new work.
-Retry: wt remove fix/path-spelling
-  Run it from the base checkout at /repo.
+What to do:
+  1. Move or save what is now at /work/fix-path-spelling; wt never deletes it, and the retry refuses until it is gone.
+  2. Retry: wt remove fix/path-spelling
+     Run it from anywhere outside the moved directory, such as the base checkout at /repo. It lists what is left and asks again about anything new or changed before deleting more.
 Full report: /repo/.git/wt-removal/a91c0000000000000000000000000000/report.json

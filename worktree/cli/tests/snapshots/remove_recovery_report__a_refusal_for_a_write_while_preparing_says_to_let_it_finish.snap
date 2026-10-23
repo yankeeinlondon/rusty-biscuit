@@ -1,0 +1,9 @@
+---
+source: worktree/cli/tests/remove_recovery_report.rs
+expression: "rendered.join(\"\\n---\\n\")"
+---
+Nothing was removed. wt stopped before moving worktree fix-path-spelling: something is still writing into it (/work/fix-path-spelling/target/release/deps/full.rmeta was created while wt was preparing the removal).
+  Let it finish, or stop it, then run wt remove fix/path-spelling again.
+---
+Nothing was removed. wt stopped before moving worktree fix-path-spelling: /work/fix-path-spelling/locked cannot be inspected: permission denied.
+  Nothing was moved. Fix what is named above, then run wt remove fix/path-spelling again.

@@ -446,24 +446,34 @@ fn a_held_stream_stalls_the_drain_at_the_session_policy() {
 }
 
 /// Events that keep arriving are progress, but the ceiling spans every
-/// marker round of one drain, so they cannot hold it open. The events are fed
-/// through the callback's own `deliver`, faster than a round completes, so no
-/// round is quiet.
+/// marker round of one drain, so they cannot hold it open. The stream is
+/// held, so only the feeder delivers: for each marker the drain writes, it
+/// delivers a busy event and only then the marker, through the callback's
+/// own `deliver`. Every round therefore sees an event however the threads
+/// are scheduled, and none is quiet.
 #[test]
 fn the_ceiling_spans_every_marker_round_of_a_busy_drain() {
     let fixture = new_fixture();
     let options = ObserverOptions { queue_capacity: usize::MAX, ..ObserverOptions::default() };
     let mut adapter = FsEvents::start(&fixture.targets, options, false, &|| false).unwrap();
+    adapter.shared.held.store(true, Ordering::SeqCst);
     let ceiling = Duration::from_secs(1);
     adapter.policy = WaitPolicy { stall: Duration::from_secs(20), ceiling };
     let stop = Arc::new(AtomicBool::new(false));
     let feeder = {
         let (stop, shared) = (Arc::clone(&stop), Arc::clone(&adapter.shared));
+        let mut next = adapter.marker + 1;
         let path = shared.paths.original.join("sub").join("busy");
         std::thread::spawn(move || {
             while !stop.load(Ordering::SeqCst) {
+                let marker = shared.paths.markers.join(next.to_string());
+                if !marker.exists() {
+                    std::thread::sleep(Duration::from_micros(100));
+                    continue;
+                }
                 shared.deliver(&path, FILE | fs_events::kFSEventStreamEventFlagItemModified, SystemTime::now());
-                std::thread::sleep(Duration::from_micros(100));
+                shared.deliver(&marker, FILE | fs_events::kFSEventStreamEventFlagItemCreated, SystemTime::now());
+                next += 1;
             }
         })
     };

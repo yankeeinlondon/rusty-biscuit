@@ -9,5 +9,4 @@ Branch origin/fix/path-spelling: not deleted (remote: error: cannot lock ref 're
 Error: a branch action failed
 
 Retry: wt remove fix/path-spelling
-  Run it from the base checkout at /repo.
 Full report: /repo/.git/wt-removal/a91c0000000000000000000000000000/report.json

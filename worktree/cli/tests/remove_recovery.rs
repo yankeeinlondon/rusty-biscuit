@@ -316,8 +316,8 @@ fn a_write_into_the_moved_checkout_stops_then_a_retry_needs_fresh_consent() {
     assert!(stderr.contains("Remaining: "), "{stderr}");
     assert!(stderr.contains("Git registration: now points to the moved directory"), "{stderr}");
     assert!(stderr.contains("Branch feat/x: kept"), "{stderr}");
-    assert!(stderr.contains("Stop any tasks using either path."), "{stderr}");
-    assert!(stderr.contains("Retry: wt remove feat-x"), "{stderr}");
+    assert!(stderr.contains("1. Stop whatever is writing to "), "{stderr}");
+    assert!(stderr.contains("2. Retry: wt remove feat-x"), "{stderr}");
     let report = saved_report(&stderr);
     assert_eq!(report["outcome"], "activity_detected", "{report}");
     assert_eq!(report["registration"], "at_quarantine", "{report}");
@@ -373,7 +373,8 @@ fn recreation_at_the_original_path_stops_and_is_never_cleaned_up() {
     assert!(stderr.contains("Moved to: "), "{stderr}");
     assert!(stderr.contains("Branch chore/refilled: kept"), "{stderr}");
     assert!(stderr.contains("Retry: wt remove refilled"), "{stderr}");
-    assert!(stderr.contains("Run it from the base checkout at "), "{stderr}");
+    assert!(stderr.contains("1. Move or save what is now at "), "{stderr}");
+    assert!(stderr.contains("Run it from anywhere outside the moved directory, such as the base checkout at "), "{stderr}");
     let report = saved_report(&stderr);
     assert_eq!(report["original_state"], "recreated", "{report}");
     assert_eq!(fs::read_to_string(leftover.join("x")).unwrap(), "built\n");

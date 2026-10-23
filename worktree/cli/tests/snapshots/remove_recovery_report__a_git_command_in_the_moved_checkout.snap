@@ -1,0 +1,23 @@
+---
+source: worktree/cli/tests/remove_recovery_report.rs
+expression: "stopped(&finished(report), Some(\"fix/path-spelling\"))"
+---
+Removal stopped: a Git command ran in this worktree while it was being removed.
+
+Original: /work/fix-path-spelling
+Moved to: /work/.wt-remove-fix-path-spelling-a91c
+Deleted before stopping: 16137 files and 1863 folders (listed in the saved report)
+Remaining: 817460 entries in the moved directory
+Observed: /repo/.git/worktrees/fix-path-spelling/index.lock was modified (reported at 14:03:07 UTC)
+Git registration: now points to the moved directory
+Branch fix/path-spelling: kept (not attempted)
+Branch origin/fix/path-spelling: kept (not attempted)
+Only entries you approved before the move were deleted.
+  A file written in the instant before wt deleted its path would have been deleted too; the saved report lists every deleted path.
+Before the move and after the stop, at /work/.wt-remove-fix-path-spelling-a91c: Discovery is partial; open handles were only partly read; loaded modules were not checked; the check ran out of time.
+
+What to do:
+  1. Let that Git command finish. A shell prompt that shows Git status, an editor's Git integration, or a git command in another terminal can start one; don't run Git in the moved directory until the removal finishes.
+  2. Retry: wt remove fix/path-spelling
+     Run it from anywhere outside the moved directory, such as the base checkout at /repo. It lists what is left and asks again about anything new or changed before deleting more.
+Full report: /repo/.git/wt-removal/a91c0000000000000000000000000000/report.json

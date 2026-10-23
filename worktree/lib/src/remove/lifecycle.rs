@@ -36,7 +36,7 @@ mod resume;
 #[cfg(test)]
 mod tests;
 
-pub use resolve::{Candidate, PendingTarget, ResolveError, Target, resolve_target, resolve_target_in};
+pub use resolve::{Candidate, PendingRemovals, PendingTarget, ResolveError, Target, resolve_target, resolve_target_in};
 pub use resume::{Inspection, RecordApproval, Resolution, ResumeRequest, inspect, release_unstarted, resume, resume_consent};
 
 use std::cell::RefCell;

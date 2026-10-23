@@ -1659,3 +1659,40 @@ fn native_a_killed_removal_is_found_and_resumed_by_its_original_name() {
 
 mod resume_consent;
 mod startup_warning;
+
+// ---- Other commands leave a checkout under removal alone -------------------
+
+/// `git status` refreshes a checkout's index, which a removal's watcher sees
+/// as activity and stops for. A listing runs it in every other worktree and
+/// in none a pending removal identifies: not in the quarantine Git now
+/// registers, and not in an unmoved checkout whose record is durable.
+#[test]
+#[serial_test::serial]
+fn a_listing_runs_no_git_status_in_a_checkout_under_removal() {
+    for at in [Boundary::Moved, Boundary::Begun] {
+        let fixture = fixture_with_neighbor();
+        let id = crash_at(&fixture, &Observers::default(), at);
+        let under_removal = match at {
+            Boundary::Moved => fixture.quarantine_of(&id),
+            _ => fixture.gone.clone(),
+        };
+        let stores = [crate::cache::cache_path(&fixture.base()).unwrap(), crate::fork_origin::fork_origin_path(&fixture.base()).unwrap()];
+
+        recorder::start_recording();
+        let mut list = crate::worktree::parse_worktree_state_in(&fixture.base()).unwrap();
+        crate::worktree::fill_worktree_statuses(&mut list).unwrap();
+        let calls = recorder::finish_recording();
+        for store in &stores {
+            let _ = fs::remove_file(store);
+        }
+
+        let statuses = calls.iter().filter(|args| args.iter().any(|arg| arg == "status")).count();
+        assert_eq!(statuses, 2, "{at:?}: the base and the neighbor only: {calls:?}");
+        let status = list.statuses.iter().find(|status| same_location(&status.entry.path, &under_removal)).expect("listed");
+        assert_eq!(status.removal.as_deref(), Some(BRANCH), "{at:?}");
+        assert_eq!(status.dirty, crate::worktree::DirtyStatus::Unknown, "{at:?}");
+        let keep = fixture.keep.as_deref().unwrap();
+        assert!(list.statuses.iter().filter(|status| !same_location(&status.entry.path, &under_removal)).all(|status| status.removal.is_none()));
+        assert!(list.statuses.iter().any(|status| same_location(&status.entry.path, keep)));
+    }
+}

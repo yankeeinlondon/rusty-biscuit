@@ -12,7 +12,6 @@ Git registration: now points to the moved directory
 Watching stopped during deletion, 512 entries after the previous check: macOS could not report every change (KernelDropped, UserDropped; flags 0xc).
 Branch fix/path-spelling: kept
 
-Stop any tasks using either path. Inspect both locations and save new work.
 Retry: wt remove fix/path-spelling
-  Run it from the base checkout at /repo.
+  Run it from anywhere outside the moved directory, such as the base checkout at /repo. It lists what is left and asks again about anything new or changed before deleting more.
 Full report: /repo/.git/wt-removal/a91c0000000000000000000000000000/report.json
