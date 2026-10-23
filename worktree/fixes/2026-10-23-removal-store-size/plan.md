@@ -24,6 +24,34 @@ skills_files_updated_during_phase_1:
 packages:
     - worktree
     - worktree-cli
+source_files_during_phase_2:
+    - worktree/lib/Cargo.toml
+    - Cargo.lock
+    - worktree/lib/src/remove/outcome.rs
+    - worktree/lib/src/remove/lifecycle.rs
+    - worktree/lib/src/remove/recovery/mod.rs
+    - worktree/lib/src/remove/recovery/journal.rs
+    - worktree/lib/src/remove/recovery/store.rs
+    - worktree/lib/src/remove/recovery/store/entries.rs
+    - worktree/lib/src/remove/recovery/store/tests.rs
+    - worktree/lib/src/remove/recovery/store/tests/saved_report.rs
+    - worktree/lib/src/remove/lifecycle/tests.rs
+    - worktree/lib/src/remove/observation/deletion/tests.rs
+    - worktree/cli/src/commands/remove/recovery.rs
+    - worktree/cli/tests/remove_recovery.rs
+    - worktree/cli/tests/snapshots/remove_recovery_report__a_git_command_in_the_moved_checkout.snap
+    - worktree/cli/tests/snapshots/remove_recovery_report__a_stop_after_partial_discovery.snap
+    - worktree/cli/tests/snapshots/remove_recovery_report__long_lists_are_counted_and_uncertain_entries_named.snap
+    - worktree/cli/tests/snapshots/remove_recovery_report__the_specs_example.snap
+docs_updated_during_phase_2:
+    - worktree/docs/cli/remove.md
+    - worktree/README.md
+    - docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/worktree/remove.md
+    - .claude/skills/worktree/lifecycle.md
+start_phase: 3
 ---
 
 # Removal store size implementation plan
@@ -90,13 +118,13 @@ Validation checkpoint: inspect the targeted retention and CLI cases through `jus
 
 ### Wave 2
 
-- [ ] **Implement sidecar storage**
+- [x] **Implement sidecar storage**
   - Implement rules 6–9, including version-aware report deserialization, `entries_file`, streaming gzip, durable publication, and lifecycle integration. Own `outcome.rs`, `lifecycle.rs`, `recovery/{mod.rs,store.rs}`, the new entries module, library manifest, lockfile, and persistence/lifecycle tests.
   - Extend existing completion and resume tests to assert actual saved JSON contains no inline list; decompressed lines equal the full expected in-memory entries across attempts, including deleted, externally absent, uncertain, kept, and planned states. Assert counts, first 200 deleted paths, omitted count, activity, observation, timeline, and earlier attempts remain unchanged.
   - Add empty-list and failed-summary cases, repeated stop/report replacement, and deterministic failure injection at gzip finish/flush, entries publication, report publication, and completion persistence. Use a scoped test-only fault seam modeled on `store::fault`/`ReopenStep`. At each stop, verify complete old-or-new files, retained journals, and no premature completed record. Verify that journal deletion occurs only after successful sidecar and report publication and durable completion.
   - Add real version 5 saved metadata fixtures with inline entries and retain the existing version 4 fixture. Read through `RecoveryStore::read_report` and resume through lifecycle APIs, rather than proving only a private deserializer works. Freeze legacy wire bytes in test fixture code; do not generate “legacy” reports using the new serializer.
   - Add the report-loader robustness cases below, sharing validators instead of multiplying the field matrix by report version.
-- [ ] **Update entry presentation**
+- [x] **Update entry presentation**
   - May run concurrently with storage work because it consumes only the existing `ReportNote` and count fields. Own `cli/src/commands/remove/recovery.rs`, `cli/tests/remove_recovery_report.rs`, and only affected snapshots.
   - Apply rule 10 to caveat and deleted-count location text. Cover both successful completion and a stopped removal containing deletions. Preserve activity's reference to `report.json`, because that data remains there.
 
@@ -111,7 +139,7 @@ Default outcome for invalid persisted input is a located returned error, no resu
 
 ### Wave 3
 
-- [ ] **Document report format**
+- [x] **Document report format**
   - After Wave 2, update `docs/cli/remove.md`'s recovery layout, version 6 JSON example, separate decompressed JSONL example, stop/completion writes, null behavior, failure guarantees, and the distinction between bounded activity/deleted previews and full journaled entries. Keep the retention behavior from Phase 1.
   - Update `.claude/skills/worktree/{remove.md,lifecycle.md}`, `recovery/mod.rs`, and affected symbol comments to remove the obsolete claim that `report.json` lists every entry. Record `flate2` and its Rust backend in `docs/dependencies.md`. README receives only the brief overview adjustment needed to mention compressed audit entries.
   - Extend the retention fixture with both legacy and new reports to prove the timestamp rule does not depend on entry representation and never decompresses the sidecar.
