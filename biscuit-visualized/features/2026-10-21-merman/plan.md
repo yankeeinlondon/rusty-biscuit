@@ -215,6 +215,46 @@ skills_files_updated_during_phase_4:
     - .claude/skills/biscuit-visualized/mermaid-rendering.md
     - .claude/skills/worktree/git-graph.md
     - .claude/skills/biscuit-terminal/diagrams.md
+source_files_during_phase_5:
+    - biscuit-terminal/lib/src/discovery/osc_queries/mod.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/query.rs
+    - biscuit-terminal/lib/src/discovery/startup_exchange.rs
+    - biscuit-terminal/lib/tests/level2/level2_windows_console_query.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/components/mermaid.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/mermaid/config.rs
+    - biscuit-visualized/src/src/mermaid/color.rs
+    - biscuit-visualized/src/src/mermaid/palette.rs
+    - biscuit-visualized/src/src/mermaid/design.rs
+    - biscuit-visualized/src/src/mermaid/accents.rs
+    - biscuit-visualized/src/src/mermaid/contrast.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_cache_key_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_tests.rs
+    - biscuit-visualized/src/src/tests/palette_tests.rs
+    - biscuit-visualized/src/src/tests/theme_tests.rs
+    - biscuit-visualized/features/2026-10-21-merman/gallery/Cargo.toml
+    - biscuit-visualized/features/2026-10-21-merman/gallery/Cargo.lock
+    - biscuit-visualized/features/2026-10-21-merman/gallery/src/main.rs
+docs_updated_during_phase_5:
+    - biscuit-visualized/docs/merman.md
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - biscuit-terminal/docs/discovery/terminal-queries.md
+    - biscuit-terminal/docs/discovery/color.md
+    - biscuit-visualized/features/2026-10-21-merman/plan.md
+    - biscuit-visualized/features/2026-10-21-merman/implementation-log.md
+docs_created_during_phase_5:
+    - biscuit-visualized/features/2026-10-21-merman/gallery/themed-gallery-macos.html
+    - biscuit-visualized/features/2026-10-21-merman/gallery/themed-gallery-linux.html
+skills_files_updated_during_phase_5:
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+    - .claude/skills/biscuit-visualized/artifacts-caching.md
+    - .claude/skills/biscuit-visualized/diagram-components.md
+    - .claude/skills/biscuit-terminal/discovery.md
 ---
 
 # Plan: Merman Rendering
@@ -313,11 +353,28 @@ correctly. Eight strands, in dependency order:
 - An implementation log lives at `implementation-log.md` beside the spec;
   rulings, departures from the spec, each D43 rewrite, measured sizes, and
   sign-offs are recorded there.
-- **Evidence that invalidates a decision's premise** is handled under the
-  spec's D72 (pre-authorized item 12): proceed only with an option that meets
-  its three conditions, then amend the spec, log it under "Decided during
-  implementation", and flag it for review; otherwise stop and set
-  `human_review`.
+- **Findings that need a ruling do not stop the run** (the spec's D73,
+  pre-authorized item 13; amends D72's "otherwise stop"). Handle each one in
+  exactly one of three ways:
+    1. **Proceed.** The option meets D72's three conditions (pre-authorized
+       item 12): amend the spec, log it under "Decided during
+       implementation", and flag it for review.
+    2. **Flag and continue (the default).** It needs Ken's ruling, but the
+       remaining work does not depend on the answer: add it to the log's
+       `human_review_items`, set `human_review: true`, mark the affected
+       checkpoint item **open** with a pointer to the finding, and carry on
+       with every task and phase that does not depend on it. Re-run the open
+       item once Ken rules. A red checkpoint item is not by itself a reason
+       to stop.
+    3. **Stop.** Only when continuing would be wasted or harmful: a later
+       task's design or output depends on the answer; the next step is
+       irreversible or outward-facing; or data, security, or a shipped
+       contract on `main` is at risk. Stop at the first dependent task, not
+       before, and say in `message_to_agent` exactly which task is blocked
+       and by what.
+- **Planned human gates are real stops.** Ken's gallery sign-off (AC-T5)
+  before Phase 6 goldens is a stop under rule 3 above, because goldens
+  generated before it would be thrown away.
 
 ### Input robustness (scope note)
 
@@ -877,6 +934,12 @@ Goal: every consumer works on the new backend with tests passing.
 
 - [ ] `just test` and `just lint` pass in `biscuit-visualized`,
   `biscuit-terminal`, `darkmatter`, `sniff`, `worktree` (AC-C3).
+  **Open (flag and continue):** every package passes except `darkmatter`
+  `just test` (45 key-order failures from Merman's serde_json
+  `preserve_order`; see the log's "Blocking finding", "Checkpoint 4
+  re-run", and "Key-order ruling"). Ruled 2026-10-23; the work is the
+  separate fix `2026-10-23-frontmatter-key-order`. No Phase 5–6 task
+  depends on it. Re-run `darkmatter` `just test` once that fix lands.
 - [x] AC-C4, AC-C8, AC-C8a, AC-C8b, AC-S6 verified; the D43 rewrite list is in
   the log.
 
@@ -892,17 +955,17 @@ Depends on Phase 3 (render path) and Phase 2 (OSC 4).
 
 **Wave 10 — parallel.**
 
-- [ ] **Palette type and fixed palettes (R-T1, R-T4, D17, R-T9).**
+- [x] **Palette type and fixed palettes (R-T1, R-T4, D17, R-T9).**
   Backend-neutral `Palette`; `Dark`, `Default`, `Forest`, `Neutral` as fixed
   palettes starting from Mermaid.js's same-named themes, then accent and
   contrast passes. Any font family set ends in `sans-serif`.
-- [ ] **Per-family `ThemeDesignV1` builder (D6, R-T2, R-T3, AC-T1).** One design
+- [x] **Per-family `ThemeDesignV1` builder (D6, R-T2, R-T3, AC-T1).** One design
   per family via `merman::diagram_theme`; emit only facets
   `describe_theme_support` reports `supported`/`conditional`; never set
   `styles.node.fill`; no `design.mermaid.variables` outside gitGraph, which
   uses them only for commit/tag/branch label colors; family id is `gitGraph`.
   Omit stroke widths on gitGraph `edge`/`node`.
-- [ ] **Terminal palette resolution (D7, D8, D46, R-P3–R-P5, AC-P3, AC-P6).**
+- [x] **Terminal palette resolution (D7, D8, D46, R-P3–R-P5, AC-P3, AC-P6).**
   In `biscuit-visualized` (consumes `biscuit-terminal` detection, with injected
   detection results for tests): background + foreground + ANSI → palette; no
   ANSI ⇒ accents from background; nothing ⇒ fixed palette for the color mode;
@@ -910,7 +973,7 @@ Depends on Phase 3 (render path) and Phase 2 (OSC 4).
   follows the same rules, with its ANSI palette from OSC 4 when the terminal
   answers (D71). ANSI 1–6 as rotating accents (S0, Design notes). Palette
   colors enter the cache key (R-P6).
-- [ ] **OSC 4 on native Windows (D46, D71, R-P1, AC-P6).** In
+- [x] **OSC 4 on native Windows (D46, D71, R-P1, AC-P6).** In
   `biscuit-terminal`'s `discovery/osc_queries`, enable the palette query on
   native Windows (today `ASKS_PALETTE = cfg!(unix)`) so it rides the existing
   Windows console query backend
@@ -922,36 +985,38 @@ Depends on Phase 3 (render path) and Phase 2 (OSC 4).
 
 **Wave 11 — after Wave 10.**
 
-- [ ] **Compile and apply designs.** Replace the interim theme mapping (D61)
+- [x] **Compile and apply designs.** Replace the interim theme mapping (D61)
   with `DiagramThemeCompiler` + `RenderRequest::with_theme`; a code search
   shows no built-in theme mapping remains (AC-C15).
-- [ ] **Accent post-process (D6, R-T5, R-T6, AC-T3, AC-T8).** Attribute-rewrite
+- [x] **Accent post-process (D6, R-T5, R-T6, AC-T3, AC-T8).** Attribute-rewrite
   keyed on **our palette colors only**, never Merman class names/ids: rotating
   accent strokes on un-styled flowchart nodes, per-actor sequence accents,
   class accents in document order; verify mindmap accents come from the
   compiled theme. `classDef`/`style` colors are never overridden. `%%{init}%%`
   theme keys win over our compiled theme (D54): test it, and if the compiled
   theme overrides them, make our theme application yield for those keys.
-- [ ] **Contrast-aware text (R-T8, D45).** Choose readable tints or rewrite per
+- [x] **Contrast-aware text (R-T8, D45).** Choose readable tints or rewrite per
   node so every text element meets 4.5:1, whatever its size.
-- [ ] **Scoped CSS (R-T7, AC-T2).** Only for what themes do not set, every
+- [x] **Scoped CSS (R-T7, AC-T2).** Only for what themes do not set, every
   selector prefixed by the diagram's unique id; test with two diagrams in one
   document.
 
 **Wave 12 — after Wave 11.**
 
-- [ ] **Guard tests (R-V4, R-V5, D62, AC-T6, AC-T7).** Per family: evidence
+- [x] **Guard tests (R-V4, R-V5, D62, AC-T6, AC-T7).** Per family: evidence
   status via `theme_evidence().status()` and no `unsupported-*` from
   `theme_diagnostics()`, with the circles' `unsupported-paint` allow-listed per
   family with a comment (D62); three precedence guards from the spec's Risks
   (static node fill beats palettes; unsupported rule erases a supported one;
   variables override ordinal palette and downgrade sequence evidence from
   `Verified`).
-- [ ] **Themed gallery for Ken (D9, AC-T5).** Re-run the HTML gallery with the
+- [ ] **Themed gallery for Ken (D9, AC-T5).** *(Galleries generated on macOS
+  and Linux, 2026-10-23; awaiting Ken's Zed screenshots and sign-off.)*
+  Re-run the HTML gallery with the
   new themes (macOS and Linux). Ken captures Zed screenshots and signs off;
   record sign-off in the log. **Human gate: Phase 6 goldens are generated only
   after this sign-off.**
-- [ ] **Docs (shipped).** Write palettes, OSC 4 use (native Windows included,
+- [x] **Docs (shipped).** Write palettes, OSC 4 use (native Windows included,
   D46, D71), accents, contrast, and scoped CSS into
   `biscuit-visualized/docs/merman.md` and
   `docs/components/mermaid_diagram.md`; remove the **planned** markers they
@@ -959,11 +1024,15 @@ Depends on Phase 3 (render path) and Phase 2 (OSC 4).
 
 ### Validation checkpoint 5
 
-- [ ] `just test` / `just lint` pass in `biscuit-visualized` and
+- [x] `just test` / `just lint` pass in `biscuit-visualized` and
   `biscuit-terminal`.
-- [ ] AC-T1, AC-T2, AC-T3, AC-T6, AC-T7, AC-T8, AC-P3, AC-P4, AC-P6, AC-C15
+- [x] AC-T1, AC-T2, AC-T3, AC-T6, AC-T7, AC-T8, AC-P3, AC-P4, AC-P6, AC-C15
   verified; AC-P6 on the Windows test host.
-- [ ] Ken's gallery sign-off (AC-T5) recorded.
+- [ ] Ken's gallery sign-off (AC-T5) recorded. **Open (2026-10-23):** the
+  galleries are generated (`gallery/themed-gallery-macos.html`,
+  `gallery/themed-gallery-linux.html`); the sign-off and the styling
+  departures in the log's "## Phase 5" / "Needs Ken's ruling" wait on Ken.
+  Phase 6 goldens wait on this item (planned stop).
 
 ---
 
@@ -1050,7 +1119,7 @@ promote the package to gating, and add the local speed guard.
   that the package's L1 cells are planned on each environment, and record the
   plan output in the log. Load `rust-devops` first.
   Pre-authorized: item 6.
-- [ ] **Docs (shipped).** Write the golden corpus, the CI tiers, and the
+- [x] **Docs (shipped).** Write the golden corpus, the CI tiers, and the
   benchmark (limits, reference host, recipe) into
   `biscuit-visualized/docs/merman.md`; remove the matching **planned** markers.
 
@@ -1216,6 +1285,9 @@ flowchart TD
   run concurrently; the phase boundary is a validation checkpoint, not a hard
   barrier, for those two. Within Wave 9, the Darkmatter static-SVG task waits
   for the HTML-static target and sanitizer tasks.
+- An item left **open** at a checkpoint (see "Findings that need a ruling")
+  blocks only the tasks that depend on its answer; every other edge in the
+  graph above still holds.
 - Docs tasks run in every phase (R-D6); Phase 7 completes and audits them.
 
 ## Risks the Plan Manages

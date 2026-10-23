@@ -4,6 +4,7 @@
 [Merman](https://github.com/Latias94/merman), a pure-Rust Mermaid renderer
 that aims for parity with Mermaid.js: it parses the source, lays it out, and
 writes an SVG. Merman does the diagram work; `biscuit-visualized` supplies the fonts and the text measurer,
+styles the diagram with a [palette](#themes) compiled into a Merman theme,
 rewrites a few source constructs Merman mishandles, caches the result, fixes
 two SVG defects, and rasterizes. You call one type,
 `mermaid::MermaidDiagram` (or the terminal component built on it, see
@@ -31,13 +32,15 @@ its own font chain. See [Dependencies](./dependencies.md).
 
 ```mermaid
 flowchart TD
-    IN["Mermaid source, theme, config"] --> FC["1. Font-resolution chain"]
-    TC["Terminal colors → palette"] -.->|planned| IN
+    TC["Terminal colors (terminal component)"] --> PAL["Palette"]
+    TH["MermaidTheme (fixed palette)"] --> PAL
+    IN["Mermaid source, config"] --> FC["1. Font chain, palette → per-family theme"]
+    PAL --> FC
     FC --> RW["2. Source rewrites:<br/>newline rewrite, gitGraph commitSpacing"]
     RW --> CK{"3. Cache hit?"}
     CK -->|yes| OUT["SVG or PNG artifact"]
     CK -->|no| MM["4. Merman: parse, layout with our measurer,<br/>resvg-safe SVG"]
-    MM --> PP["5. Post-process"]
+    MM --> PP["5. Post-process, accents, contrast"]
     PP --> BG["6. Background"]
     PP -->|"SVG, HtmlStatic target"| HS["HTML static edits"]
     HS --> BG
@@ -49,19 +52,17 @@ flowchart TD
 
 | Step | What happens | Owner |
 | ---- | ------------ | ----- |
-| 1 | The process's [font chain](#the-resolution-chain) is built once: installed fonts plus the [bundled fonts](#bundled-fonts). The site config for Merman is assembled from the theme and `MermaidConfig` | `biscuit-visualized` (fontique, ttf-parser) |
+| 1 | The process's [font chain](#the-resolution-chain) is built once: installed fonts plus the [bundled fonts](#bundled-fonts). The diagram's [palette](#themes) becomes a Merman theme for its family, and the site config is assembled from the font stack and `MermaidConfig` | `biscuit-visualized` (fontique, ttf-parser); Merman compiles the theme |
 | 2 | The [`\n` rewrite](#line-breaks-in-labels-n) for four families; for a gitGraph with tags, one Merman layout pass decides whether to write [`commitSpacing`](#gitgraph-tag-spacing) | `biscuit-visualized`, using Merman's layout data |
 | 3 | The [cache](#cache-identity) is checked; a hit skips steps 4 to 7 | `biscuit-visualized` |
 | 4 | Merman parses and lays the diagram out, asking [our measurer](#measuring-label-widths) for label widths and wrapping lines itself, and writes an SVG that keeps `<text>` elements and avoids features resvg cannot draw. All of it runs under the [time budget](#time-budget) | Merman; `biscuit-visualized` (measurer) |
-| 5 | The [post-process](#post-processing) repairs gradient strokes and gives unstyled text `sans-serif`; an SVG for the [HTML static target](#html-static-target) also gets its two edits | `biscuit-visualized` |
-| 6 | `RenderRequest::background` decides what is painted behind the diagram: the theme's color, a solid color, or nothing | `biscuit-visualized` |
+| 5 | The [post-process](#post-processing) repairs gradient strokes and gives unstyled text `sans-serif`, then the [accents](#accents) and the [contrast pass](#readable-text); an SVG for the [HTML static target](#html-static-target) also gets its two edits | `biscuit-visualized` |
+| 6 | `RenderRequest::background` decides what is painted behind the diagram: the palette's background, a solid color, or nothing | `biscuit-visualized` |
 | 7 | For PNG, usvg turns text into outlines through the same font chain and resvg 0.47 draws them | `biscuit-visualized` |
 | 8 | The terminal components size the PNG to whole cells and hand it to `TerminalImage` | `biscuit-visualized` components over `biscuit-terminal` |
 
-One step is **planned** (dotted above): a palette derived from the
-terminal's colors and compiled into the Merman theme, owned by
-`biscuit-terminal` (color detection), `biscuit-visualized`, and Merman (see
-[Themes](#themes)).
+The terminal's colors are detected by `biscuit-terminal` and turned into a
+palette by `biscuit-visualized`'s terminal component; see [Themes](#themes).
 
 Measurement (step 4) and drawing (step 7) ask the same chain for a face, so a
 label is measured in the face it is drawn in and never spills out of its box.
@@ -108,34 +109,167 @@ source as a code block instead:
 
 ## Themes
 
-`MermaidTheme` currently selects one of Merman's built-in themes, which match
-Mermaid.js's named themes:
+Every diagram is styled with a **palette**: a background, a text color, six
+accent colors, and the surface, border, and line colors derived from them.
+`biscuit-visualized` turns the palette into one Merman compiled theme for
+the diagram's family and adds what a compiled theme cannot express. Where
+the palette comes from depends on who the output is for:
 
-| `MermaidTheme` | Merman theme | `Background::Theme` color |
-| -------------- | ------------ | ------------------------- |
-| `Dark` (the default) | `dark` | `#333` |
-| `Default` | `default` | `white` |
-| `Forest` | `forest` | `white` |
-| `Neutral` | `neutral` | `#ffffff` |
+```mermaid
+flowchart TD
+    Q{"Who is the output for?"}
+    Q -->|"a terminal (components::mermaid::MermaidDiagram)"| T{"Did the terminal report its background?"}
+    Q -->|"a file, an HTML page, CI (mermaid::MermaidDiagram)"| F["Fixed palette of the MermaidTheme<br/>(Dark by default)"]
+    T -->|no| M["Fixed palette for the color mode<br/>(Dark or Default)"]
+    T -->|yes| A{"Did it report its ANSI colors?"}
+    A -->|"yes (slots 1–6)"| P1["Terminal palette:<br/>its background, text, and ANSI accents"]
+    A -->|no| P2["Terminal palette:<br/>its background and text,<br/>accents computed from the background"]
+```
 
-Merman leaves the SVG's root unpainted, so `Background::Theme` paints that
-color as a rectangle behind the diagram, and `Background::Transparent` paints
-nothing. `MermaidConfig`'s quadrant settings reach Merman as site config
-(`quadrantChart.pointLabelFontSize` and `pointRadius`, and
-`themeVariables.quadrant1Fill` to `quadrant4Fill`); `point_label_font_size`
-sizes quadrant point labels only. A `%%{init}%%` directive or frontmatter in
-the source is read by Merman as Mermaid.js reads it.
+```rust
+use biscuit_visualized::mermaid::{MermaidDiagram, MermaidTheme, Palette, Rgb, TerminalColors};
 
-> **Planned.** The built-in theme names are an interim mapping. Diagrams will
-> be styled with palettes compiled into Merman themes:
->
-> - in a terminal, a palette **derived from the terminal's own colors**
->   (background, foreground, and its ANSI palette), with accent colors for
->   unstyled nodes and text colors chosen for contrast;
-> - `Dark`, `Default`, `Forest`, and `Neutral` become fixed palettes, used
->   when no terminal colors are available and for output that is not for a
->   terminal;
-> - a small post-process adds the accents compiled themes cannot express.
+// A fixed palette, for any output.
+let fixed = MermaidDiagram::new(source).with_theme(MermaidTheme::Forest);
+
+// A palette from colors a terminal reported (here injected by hand).
+let colors = TerminalColors { background: Rgb::from_hex("#002b36"), ..TerminalColors::default() };
+let solarized = MermaidDiagram::new(source).with_palette(Palette::for_terminal(&colors, true));
+```
+
+### Fixed palettes
+
+`MermaidTheme`'s four values are fixed palettes. Each starts from Mermaid.js
+12.2.0's theme of the same name (its background, text, node, border, and line
+colors, and accents taken from its gitGraph branch colors), then goes through
+the contrast passes below, so they do not reproduce Mermaid.js pixel for
+pixel:
+
+| `MermaidTheme` | Background | Text | Accents from |
+| -------------- | ---------- | ---- | ------------ |
+| `Dark` (the default) | `#333333` | `#cccccc` | Mermaid's dark branch colors, lightened to read on `#333` |
+| `Default` | `#ffffff` | `#333333` | Mermaid's default branch colors, darkened to read on white |
+| `Forest` | `#ffffff` | `#000000` | Mermaid's forest branch colors |
+| `Neutral` | `#ffffff` | `#000000` | grays |
+
+A fixed palette is used for every output that is not for a terminal: files,
+Darkmatter's HTML, and CI. `MermaidTheme::for_color_mode(is_dark)` picks
+`Dark` or `Default`.
+
+### Terminal palettes
+
+The terminal component (`components::mermaid::MermaidDiagram::new`) builds
+its palette from what `biscuit-terminal` detected (`TerminalColors::detect`):
+
+- the **background** and **foreground** from the OSC 11 and OSC 10 queries
+  (or an estimate where the terminal is not queried, such as under tmux);
+- the **ANSI colors** from the OSC 4 query. ANSI 1–6 (red, green, yellow,
+  blue, magenta, cyan) become the six accents. The query is sent at most once
+  per process, with the OSC 10/11 colors, and only where those are sent: a
+  terminal on stdout or stderr, not CI, no multiplexer (tmux, Zellij, GNU
+  Screen), probing not turned off. **Native Windows sends it too**, through
+  the same console query backend as the colors, so Windows Terminal gives
+  diagrams its own ANSI accents.
+
+What the terminal did not report is filled in:
+
+- an ANSI slot it did not answer gets an accent **computed from the
+  background** (light accents on a dark background, darker ones on a light
+  background), so a terminal that answers no OSC 4 query, a multiplexer, or
+  an SSH session that drops the replies still gets accents;
+- no foreground: black or white, whichever reads on the background;
+- no background, stdout not a terminal, or `CI` set: the fixed palette for
+  the terminal's color mode.
+
+`with_theme` on the component replaces the terminal palette with that
+theme's fixed palette, and `with_palette` with any palette.
+
+### Readable text
+
+Every palette, whatever its source, guarantees WCAG AA contrast for text of
+any size:
+
+- the text color reaches 4.5:1 against the background; a terminal foreground
+  that falls short is moved until it does, or replaced by black or white;
+- node fills are accents **tinted** over the background, at most 22% strong
+  (60% for pie slices) and weaker wherever the text would drop below 4.5:1;
+- labels on full-strength accents (gitGraph branch and tag labels) use
+  whichever of the text, the background, black, or white reads on them;
+- accents, borders, and lines reach 3:1 against the background.
+
+A final **contrast pass** over the SVG catches the labels Merman's compiled
+styles do not reach. Each `<text>` is checked against the shape painted
+behind it (the nearest inline-painted shape in its group, following Merman's
+`<use>` label placements, or the diagram background), and a label below
+4.5:1 is recolored to a readable one. It touches only text where the label
+color or the fill behind it is a palette color, so an author's own text color
+on an author's own fill is left as written.
+
+### How a palette reaches Merman
+
+- **One compiled theme per family.** The palette becomes a Merman
+  `ThemeDesignV1` for the diagram's family (flowchart, sequence, class, …),
+  holding only what Merman reports it can apply to that family. Nodes get the
+  accent tints as an ordinal palette (one per node, in order), gitGraph
+  branches the full accents, and gitGraph's commit, tag, and branch label
+  colors are set as Mermaid variables, which its compiled styles do not
+  reach.
+- **The site config** names Mermaid's `base` theme and the font stack, so no
+  `MermaidTheme` maps to a Mermaid built-in theme. For families whose
+  compiled theme does not reach every surface (treemap, quadrant chart, ER,
+  gantt, C4, block, architecture, requirement, packet, …) the palette also
+  goes into the site config as `base` theme variables, so those surfaces
+  follow the palette rather than `base`'s light defaults; packet, which
+  reads its colors from its own `packet` config, gets its block and label
+  colors there (an author's own `packet` keys win). Families with an
+  ordinal palette, and sequence and class diagrams, never get them: Merman
+  lets site variables override a compiled theme, and they would erase it.
+
+### Accents
+
+Three edits add accents compiled themes cannot express. Each matches colors
+the palette itself emitted, never Merman's class names, so a node styled by
+the author is never recolored:
+
+- **Flowchart nodes** get a rotating accent outline matching their tint.
+- **Class boxes** get one accent each, in document order: the box is tinted
+  and its outline and member dividers take the accent.
+- **Sequence participants** get one accent each, left to right, on both the
+  top and the bottom box.
+
+Mindmap nodes are accented by the compiled theme itself. Their labels are
+drawn in Merman's fixed `#333`, so their fills are the accents lightened or
+darkened until `#333` reads on them.
+
+### Author styling wins
+
+- `classDef` and `style` colors are kept: the compiled theme does not
+  override them, and the accent edits only rewrite palette colors.
+- A **color** set in the source's `%%{init}%%` directive or frontmatter
+  `themeVariables` wins: such a diagram gets no compiled theme; the palette is
+  passed as `base` theme variables with the author's on top.
+- A `theme` named in the source wins outright: no compiled theme and no
+  palette variables.
+- Other theme variables (sizes, widths, `darkMode`) keep the compiled theme,
+  since it sets colors only.
+
+```text
+%%{init: {"themeVariables": {"primaryColor": "#ff00ff"}}}%%   → the author's magenta nodes
+```
+
+### Backgrounds and config
+
+Merman leaves the SVG's root unpainted, so `Background::Theme` paints the
+palette's background as a rectangle behind the diagram, and
+`Background::Transparent` paints nothing (the terminal component's default,
+so the terminal's own background shows). `MermaidConfig`'s quadrant settings
+reach Merman as site config (`quadrantChart.pointLabelFontSize` and
+`pointRadius`, and `themeVariables.quadrant1Fill` to `quadrant4Fill`);
+`point_label_font_size` sizes quadrant point labels only.
+
+Two diagrams in one HTML page never restyle each other: each SVG has its own
+id, and every rule in its stylesheet is scoped to that id. No styling is
+injected as CSS.
 
 ## Fonts
 
@@ -360,6 +494,7 @@ rasterization:
   in usvg's serif default, so the root gets `font-family="sans-serif"`.
 
 An SVG that has neither defect is returned unchanged. The
+[accents](#accents) and the [contrast pass](#readable-text) follow. The
 [HTML static target](#html-static-target) adds two more edits, to SVG output
 only.
 
@@ -371,11 +506,15 @@ checked after the source rewrites, so it covers the source Merman would
 actually receive. It changes when any of these change:
 
 - the backend id, `merman@<first 12 characters of the pinned rev>+bv<n>`
-  (currently `merman@6e6b1e6554e8+bv1`). `<n>` versions this crate's own
-  layer (source rewrites, post-process, background) and is bumped whenever
+  (currently `merman@6e6b1e6554e8+bv2`). `<n>` versions this crate's own
+  layer (source rewrites, post-process, accents, contrast pass, background)
+  and is bumped whenever
   that layer changes output, so older artifacts are never served;
 - the rewritten source and the output format;
-- a hash of the site config handed to Merman: the theme and `MermaidConfig`;
+- a hash of the styling: the site config handed to Merman (font stack,
+  `MermaidConfig`, any palette variables), the compiled theme's design, and
+  every color of the palette, so changing a single palette color changes the
+  key;
 - the font identity: the contents of the faces the chain resolves for the
   theme's font stack and the generic families, and of the bundled faces; the
   path, size, modification time, and face index of every other font file the

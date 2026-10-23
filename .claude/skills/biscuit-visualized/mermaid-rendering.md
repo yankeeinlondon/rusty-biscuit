@@ -29,17 +29,17 @@ let artifact = diagram.render(&req)?;
 // artifact.alt_text: String
 ```
 
-`RenderRequest::background` decides what is painted behind the diagram (Merman leaves the root unpainted): `Theme` (default) paints a `viewBox`-sized rect of the built-in theme's background (`Dark` `#333`, `Default`/`Forest` `white`, `Neutral` `#ffffff`), `Solid { r, g, b }` paints that color, and `Transparent` paints nothing. PNG-only fields (`target_width`, `row_height`) are covered in [Rasterization](./rasterization.md).
+`RenderRequest::background` decides what is painted behind the diagram (Merman leaves the root unpainted): `Theme` (default) paints a `viewBox`-sized rect of the palette's background (`Palette::background()`: `Dark` `#333333`, the others `#ffffff`), `Solid { r, g, b }` paints that color, and `Transparent` paints nothing. PNG-only fields (`target_width`, `row_height`) are covered in [Rasterization](./rasterization.md).
 
 `natural_size()` renders (or reads from the cache) the SVG artifact and returns its root `viewBox` size; the terminal component scales from it.
 
 ### Pipeline (`mermaid/render.rs`)
 
-1. `default_chain()` and the site config: `{"theme": MermaidTheme::as_str()}` merged over `MermaidConfig::to_json()`.
+1. `default_chain()`; `source_theme` (Merman's `preprocess_diagram` + `registry().detect_type` → family id and the author's `%%{init}%%`/frontmatter config); the palette (`palette()`: `with_palette` else `Palette::fixed(theme)`) → `design::design_json(palette, family)` unless the author owns the theme; site config `{"theme": "base", "themeVariables": {"fontFamily": stack}}` merged over `MermaidConfig::to_json()`, plus palette `base` variables (`wants_site_palette`) and `family_site_variables` (pie, xychart). See [Themes and palettes](#themes-and-palettes).
 2. `prepare` (source rewrites): ZenUML header → `RenderFailed`; `rewrite_label_newlines`; if the header is `gitGraph` and the source contains `tag:`, one Merman `layout_json` request, then `gitgraph_layout::commit_spacing_for` and `with_commit_spacing` (appends `%%{init: {"gitGraph": {"commitSpacing": N}}}%%`).
 3. `cache_key_for` on the **rewritten** source (see [Artifacts & Caching](./artifacts-caching.md#mermaid-cache-key)); a hit returns before any SVG request.
 4. `render_svg`: Merman `RenderRequest::svg` with `SvgPipeline::resvg_safe()`, a uniform `TextMeasurementPolicy` around `LabelMeasurer` (profile `biscuit-visualized`), `SvgEnvironment::deterministic()`, diagram id `bv-<xxhash of the cache key>`.
-5. `postprocess` (`mermaid/postprocess.rs`); for SVG with `MermaidTarget::HtmlStatic`, `html_static` (see [HTML static target](#html-static-target)); then `with_background`, then `rasterize_svg_for_request` for PNG, then `FileCache::store`.
+5. `design::compile` + `RenderRequest::with_theme` on the Merman request; then `postprocess` (`mermaid/postprocess.rs`), `accents::apply_accents`, `contrast::readable_text` (only when a design applied); for SVG with `MermaidTarget::HtmlStatic`, `html_static` (see [HTML static target](#html-static-target)); then `with_background`, then `rasterize_svg_for_request` for PNG, then `FileCache::store`.
 
 ### Time budget
 
@@ -56,16 +56,24 @@ let code_block = diagram.fallback_code_block();
 
 Render failures (all `MermaidError::RenderFailed`): parse error, unknown diagram type, ZenUML (detected by `header_keyword` == `zenuml`; Merman would draw it, Mermaid.js core does not support it), a math label (`$$…$$`: Merman refuses the diagram because `math` is not compiled in), and an exceeded time budget.
 
-## MermaidTheme
+## Themes and palettes
 
-| Variant | Description | Best For |
-|---------|-------------|----------|
-| `Dark` | Dark background, light elements | Dark terminal themes |
-| `Default` | Standard Mermaid light theme | Light terminals |
-| `Forest` | Green tones | Nature-themed output |
-| `Neutral` | Muted, low-contrast | Formal/documentation |
+`mermaid::Palette` (`mermaid/palette.rs`, backend-neutral; `Rgb` in `mermaid/color.rs`): background, text, surface, surface_alt, border, line, 6 accents (ANSI order red, green, yellow, blue, magenta, cyan), tints (accent over background, ≤22%, weaker until text reaches 4.5:1), `chart_tints()` (≤60%, pie), `text_on(fill)`. Constructors all run the contrast passes (text 4.5:1 on background and every tint/surface; accents/border/line 3:1; D45, no large-text exception):
 
-**Interim:** each variant maps to Merman's built-in theme of the same name (`as_str()`: `dark`, `default`, `forest`, `neutral`). **Planned:** compiled palettes (terminal-derived in a terminal, accents for unstyled nodes, contrast-aware text; the four variants become fixed palettes) replace this mapping. `MermaidTheme::default()` is `Dark`.
+- `Palette::fixed(MermaidTheme)`: from Mermaid.js 12.2.0's same-named theme (bg/text/mainBkg/nodeBorder/lineColor; accents from its `git*` colors). `Dark` bg `#333333` text `#cccccc`; `Default` `#ffffff`/`#333333`; `Forest` `#ffffff`/`#000000`; `Neutral` grays. **No code maps a `MermaidTheme` to a Merman built-in theme** (AC-C15); `as_str()` is only the name.
+- `Palette::new(bg, fg, accents)`; `Palette::for_terminal(&TerminalColors, is_dark)`: ANSI 1–6 → accents, a missing slot → background-derived accent, no fg → black/white, **no bg → `fixed(for_color_mode(is_dark))`**.
+- `TerminalColors { background, foreground, ansi: [Option<Rgb>; 16] }`; `TerminalColors::detect()` (feature `terminal`) is all-`None` when stdout is not a terminal or `CI` is set, else `biscuit_terminal::discovery::osc_queries::{bg_color, text_color, ansi_palette}` (OSC 4 runs on native Windows too).
+- `MermaidDiagram::with_palette(p)` / `palette()`; `with_theme(t)` **resets** the palette to `fixed(t)`. Component: `MermaidDiagram::new` uses `terminal_palette()`; `with_theme` / `with_palette` override.
+
+Designs (`mermaid/design.rs`, D6): one `ThemeDesignV1` per family from a role table, every facet filtered through `describe_theme_support(family, StandaloneSvg, …)` (`Unconditional`/`Conditional`). Rules: no static fill beside a target's ordinal palette (surprise 1); node fill = surface only where the family has no node ordinal palette (class, block, architecture, …); ordinal palettes: tints (flowchart, state, kanban, journey, timeline), chart tints (pie), accents (gitGraph, sankey, chart series), mindmap = accents moved to 4.5:1 against Merman's fixed `#333` label; no widths, no fonts; `design.mermaid` only for gitGraph label colors (`commitLabel*`, `tagLabel*`, `git0..7`, `gitBranchLabel0..7`; evidence `Residual` via `compatibility-unverified`). `REJECTED_DESPITE_SUPPORT`: kanban `task-label`.
+
+Site config: Merman lets **explicit site `themeVariables` win over a compiled theme** (and over the source's own `%%{init}%%` variables, the reverse of Mermaid.js). So `wants_site_palette` adds palette `base` root variables only for families with no ordinal palette that are not sequence/class (treemap, quadrant, ER, gantt, C4, block, …); `family_site_variables` adds pie text colors and `xyChart.*` (measured not to erase the design).
+
+Author wins (D54, AC-T8): author `theme` named → no design, no palette variables; author `themeVariables` with a **color** (`sets_a_color`) → no design, palette root variables with the author's copied on top; non-color variables (widths, `darkMode`) keep the design.
+
+Post-design edits: `accents.rs` (flowchart tint→accent stroke pairs; class boxes in document order keyed on the surface fill; sequence actor `<rect name>` boxes left to right by `x`), all keyed on palette colors only (R-T6). `contrast.rs`: each `<text>` vs the nearest inline-filled shape behind it (closed `<g>` siblings count, `<use href>` placements followed, else the palette background); rewritten to `text_on(fill)` below 4.5:1 only when the text or the fill is a palette color. No CSS is injected; Merman's `<style>` is scoped `#<diagram id>` (AC-T2 test).
+
+`MermaidTheme::for_color_mode(is_dark)` → `Dark`/`Default`; `inverse()`; `MermaidTheme::default()` is `Dark`.
 
 ### Adaptive Theme Selection
 
@@ -89,7 +97,7 @@ flowchart LR
     A --> B
 ```
 
-Merman reads them (and frontmatter) as Mermaid.js does, over the site config this crate passes. Nothing in the source is rewritten for the theme; the only directive this crate adds is gitGraph `commitSpacing`.
+Merman reads them (and frontmatter); a color or a named theme there displaces the compiled theme (see [Themes and palettes](#themes-and-palettes)). Nothing in the source is rewritten for the theme; the only directive this crate adds is gitGraph `commitSpacing`.
 
 ## MermaidConfig (Quadrant Charts)
 
@@ -143,7 +151,7 @@ String-level edits keyed on Merman's output at the pinned rev (guard tests in `s
 1. **Gradient strokes → solid:** every non-default theme's neo look strokes shapes with `stroke:url(#…)` to an `objectBoundingBox` `<linearGradient>`, which paints nothing on zero-height dividers (class/ER). Every such reference becomes the stylesheet's node stroke color (else the gradient's first stop).
 2. **`sans-serif` default:** a root `<svg>` with no font (no `#<id>{font-family:…}` rule, e.g. wardley) gets `font-family="sans-serif"`, so usvg never falls back to serif.
 
-Gone with mermaid-rs-renderer: the legend baseline fix, the pie label-contrast fix, quadrant fill/point-radius string patches (now site config), and forcing gitGraph HIGHLIGHT commits to the branch color. **Planned:** an accent-color rewrite keyed on our palette colors.
+Gone with mermaid-rs-renderer: the legend baseline fix, the pie label-contrast fix, quadrant fill/point-radius string patches (now site config), and forcing gitGraph HIGHLIGHT commits to the branch color. The accent and contrast edits live in `mermaid/accents.rs` and `mermaid/contrast.rs` (see [Themes and palettes](#themes-and-palettes)).
 
 ## HTML static target
 
@@ -182,4 +190,9 @@ pub enum MermaidError {
 | `mermaid/gitgraph.rs` | `GitGraphGeometry` types, `TAG_GAP_EM`, `default_gitgraph_commit_step()` |
 | `mermaid/postprocess.rs` | Gradient-stroke fix, `sans-serif` default, HTML static edits (`html_static`) |
 | `mermaid/config.rs` | `MermaidTheme`, `MermaidConfig`, `QuadrantTheme` |
+| `mermaid/color.rs` | `Rgb`, WCAG contrast, tint/contrast helpers |
+| `mermaid/palette.rs` | `Palette`, `TerminalColors` (`detect()` under `terminal`) |
+| `mermaid/design.rs` | Per-family `ThemeDesignV1`, support filter, site-palette rule, gitGraph label variables |
+| `mermaid/accents.rs` | Flowchart / class / sequence accent edits |
+| `mermaid/contrast.rs` | Text contrast pass, CSS color parser |
 | `mermaid/error.rs` | `MermaidError` |

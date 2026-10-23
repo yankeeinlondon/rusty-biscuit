@@ -29,6 +29,17 @@ resolved (margins included); never re-resolve a percent width against the
 full terminal width. Size is measured on every render, so a resize gets a new
 raster (cache keys differ by geometry).
 
+Palette: `components::mermaid::MermaidDiagram::new` (and the crate-private
+`MermaidRenderer::for_terminal`) style the diagram with `terminal_palette()` =
+`Palette::for_terminal(&TerminalColors::detect(), terminal_is_dark())`: the
+terminal's background/foreground and ANSI 1–6 accents, background-derived
+accents for unanswered slots, the fixed `Dark`/`Default` palette when stdout
+is not a terminal or `CI` is set (so tests are deterministic). `with_theme`
+switches to that theme's fixed palette, `with_palette` to any. `GitGraph`
+renders through the component (terminal palette unless `with_theme`); its
+`plan` measures with `with_theme(terminal_theme())`, which is safe because
+palettes set colors only, never geometry.
+
 Background: `with_background(Background)` on both; `with_transparent_background(bool)`
 remains (`false` = `Background::Theme`). Terminal defaults are
 `Transparent` (Kitty/iTerm2 composite over the terminal); `inverted(..)` uses

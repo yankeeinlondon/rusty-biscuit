@@ -1,0 +1,18 @@
+# The themed gallery for Ken's sign-off (D9, AC-T5): every family of the S1
+# comparison corpus rendered with the fixed palettes and the two synthetic
+# terminal palettes, as one self-contained HTML page.
+#
+# Standalone, NOT a member of the rusty-biscuit workspace (empty
+# `[workspace]`). Run from this directory with the target outside the repo:
+#   CARGO_TARGET_DIR=/tmp/bv-gallery-target cargo run --release -- <out.html>
+[package]
+name = "themed-gallery"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+biscuit-visualized = { path = "../../../src", features = ["image"] }
+base64 = "0.22"

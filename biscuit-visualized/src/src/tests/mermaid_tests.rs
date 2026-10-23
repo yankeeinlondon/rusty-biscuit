@@ -1,10 +1,8 @@
 use std::time::Duration;
 
 use crate::artifact::{Background, OutputFormat, RenderRequest};
-use crate::fonts::{LabelMeasurer, default_chain};
-use crate::mermaid::postprocess::postprocess;
 use crate::mermaid::render::take_merman_calls;
-use crate::mermaid::{MermaidConfig, MermaidDiagram, MermaidError, MermaidTheme, QuadrantTheme};
+use crate::mermaid::{MermaidConfig, MermaidDiagram, MermaidError, MermaidTheme, Palette, QuadrantTheme};
 use crate::tests::{capture_warnings, isolated_cache_dir};
 use serial_test::serial;
 
@@ -321,28 +319,29 @@ fn the_large_diagrams_render_within_the_default_budget() {
 // Themes (AC-C15) and backgrounds
 // ---------------------------------------------------------------------------
 
-/// D61: each theme renders through the Merman built-in theme of its name,
-/// byte for byte what Merman draws for `{"theme": <name>}`.
+/// AC-C15 after the palette phase: no theme maps to a Merman built-in theme.
+/// Every theme hands Merman the `base` theme and its own fixed palette,
+/// compiled; the four render four different SVGs, each carrying its
+/// palette's accent strokes.
 #[test]
 #[serial]
-fn each_theme_renders_through_its_merman_built_in_theme() {
+fn each_theme_renders_through_its_compiled_palette_not_a_built_in_theme() {
     let _cache_dir = isolated_cache_dir();
     let source = "flowchart LR\n    A[Start] --> B{Decide}\n    B --> C[Done]";
-    let names: Vec<&str> = THEMES.iter().map(MermaidTheme::as_str).collect();
-    assert_eq!(names, ["dark", "default", "forest", "neutral"]);
 
     let mut rendered = Vec::new();
     for theme in THEMES {
-        let ours = render_svg(
-            &MermaidDiagram::new(source).with_theme(theme),
-            Background::Transparent,
+        let diagram = MermaidDiagram::new(source).with_theme(theme);
+        assert_eq!(diagram.prepared_site_config()["theme"], "base", "{theme:?}");
+        assert_eq!(diagram.palette(), Palette::fixed(theme));
+
+        let svg = render_svg(&diagram, Background::Transparent);
+        let palette = Palette::fixed(theme);
+        assert!(
+            svg.contains(&format!("stroke:{} !important", palette.accents()[0])),
+            "{theme:?}: the first node's accent stroke"
         );
-        let id = root_attribute(&ours, "id").to_string();
-
-        let built_in = merman_svg(source, theme.as_str(), &id);
-
-        assert_eq!(ours, postprocess(&built_in), "{theme:?}");
-        rendered.push(ours);
+        rendered.push(svg);
     }
     for (index, svg) in rendered.iter().enumerate() {
         for other in &rendered[index + 1..] {
@@ -351,45 +350,7 @@ fn each_theme_renders_through_its_merman_built_in_theme() {
     }
 }
 
-/// Merman's resvg-safe SVG for `source` under the built-in theme `theme`,
-/// with the production measurer and diagram `id`.
-fn merman_svg(source: &str, theme: &str, id: &str) -> String {
-    use merman::svg::{
-        MeasurementProfileId, SvgEnvironment, SvgPipeline, TextMeasurementPolicy,
-        TextMeasurementProfile, TextMeasurementProfileIdentity,
-    };
-    use merman::{Engine, OperationControl, RenderOutput, Renderer, SvgRequest};
-
-    let identity = TextMeasurementProfileIdentity::new(
-        MeasurementProfileId::new("biscuit-visualized").unwrap(),
-        "1",
-    )
-    .unwrap();
-    let mut request = SvgRequest {
-        environment: SvgEnvironment::deterministic().with_text_measurement_policy(
-            TextMeasurementPolicy::uniform(TextMeasurementProfile::new(
-                identity,
-                LabelMeasurer::text_measurer(default_chain()),
-            )),
-        ),
-        ..SvgRequest::default()
-    };
-    request.options.diagram_id = Some(id.to_string());
-    request.pipeline = Some(SvgPipeline::resvg_safe());
-    let renderer = Renderer::new().with_engine(Engine::new().with_site_config(
-        merman::MermaidConfig::from_value(serde_json::json!({ "theme": theme })),
-    ));
-    match renderer.render(merman::RenderRequest::svg(
-        source,
-        OperationControl::new(),
-        request,
-    )) {
-        Ok(RenderOutput::Svg(Some(svg))) => svg.svg().to_string(),
-        other => panic!("Merman renders the flowchart: {other:?}"),
-    }
-}
-
-/// `Theme` paints the built-in theme's background, `Solid` its own color,
+/// `Theme` paints the palette's background, `Solid` its own color,
 /// and `Transparent` nothing, in SVG and in PNG.
 #[test]
 #[serial]
@@ -407,7 +368,7 @@ fn backgrounds_paint_the_theme_a_solid_color_or_nothing() {
     let solid = render_svg(&diagram, Background::Solid { r: 0x12, g: 0x34, b: 0x56 });
     let transparent = render_svg(&diagram, Background::Transparent);
 
-    assert!(backdrop(&theme).unwrap().contains("fill=\"#333\""), "{theme}");
+    assert!(backdrop(&theme).unwrap().contains("fill=\"#333333\""), "{theme}");
     assert!(backdrop(&solid).unwrap().contains("fill=\"#123456\""), "{solid}");
     assert_eq!(backdrop(&transparent), None, "{transparent}");
 
@@ -453,8 +414,8 @@ fn mermaid_theme_changes_svg_output() {
     let light_svg = std::fs::read_to_string(light.path).unwrap();
     let dark_svg = std::fs::read_to_string(dark.path).unwrap();
     assert_ne!(light_svg, dark_svg);
-    // The dark built-in theme's background (Mermaid.js 12.2.0).
-    assert!(dark_svg.contains("fill=\"#333\""));
+    // The Dark palette's background (Mermaid.js 12.2.0's dark theme's).
+    assert!(dark_svg.contains("fill=\"#333333\""));
 }
 
 #[test]
@@ -471,8 +432,8 @@ fn mermaid_transparent_background_changes_svg_output() {
     let opaque_svg = std::fs::read_to_string(opaque.path).unwrap();
     let transparent_svg = std::fs::read_to_string(transparent.path).unwrap();
     assert_ne!(opaque_svg, transparent_svg);
-    assert!(opaque_svg.contains("fill=\"white\""), "{opaque_svg}");
-    assert!(!transparent_svg.contains("fill=\"white\" style=\"fill:white"), "{transparent_svg}");
+    assert!(opaque_svg.contains("fill=\"#ffffff\" style=\"fill:#ffffff"), "{opaque_svg}");
+    assert!(!transparent_svg.contains("fill=\"#ffffff\" style=\"fill:#ffffff"), "{transparent_svg}");
 }
 
 // ---------------------------------------------------------------------------

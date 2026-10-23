@@ -2,19 +2,27 @@
 //!
 //! One diagram goes through these steps (the spec's rendering pipeline):
 //!
-//! 1. The font-resolution chain ([`default_chain`]) and the site config handed
-//!    to Merman: the built-in theme named by [`MermaidTheme`] merged with
-//!    [`MermaidConfig`]'s `quadrantChart` and `themeVariables`.
+//! 1. The font-resolution chain ([`default_chain`]) and the styling: the
+//!    diagram's [`Palette`] compiled into one Merman theme for its family
+//!    ([`design`](super::design)), and the site config handed to Merman
+//!    (Mermaid's `base` theme with the font stack, merged with
+//!    [`MermaidConfig`]'s `quadrantChart` and `themeVariables`). A source
+//!    whose `%%{init}%%` or frontmatter sets theme keys gets no compiled
+//!    theme; the palette reaches Merman as `base` theme variables instead, so
+//!    the author's keys win (D54).
 //! 2. Source rewrites (step 3b): the `\n` → `<br/>` label rewrite, then, for a
 //!    gitGraph whose tags collide, a `commitSpacing` directive. The gitGraph
 //!    measurement is a Merman `layout_json` call, the only Merman call before
 //!    the cache check.
 //! 3. The cache check (step 4), keyed on the backend id, the rewritten source,
-//!    the output format, a hash of the site config, the font chain's cache
+//!    the output format, a hash of the site config and the compiled design
+//!    (so every palette color, R-P6), the font chain's cache
 //!    identity for the theme's font stacks, the request's geometry, and the
 //!    title.
 //! 4. On a miss, Merman's resvg-safe SVG, measured with our measurer, under a
-//!    time budget (steps 5–7); then the post-process, the background, and,
+//!    time budget (steps 5–7); then the post-process, the
+//!    [accents](super::accents), and the [contrast pass](super::contrast),
+//!    the background, and,
 //!    for PNG, rasterization (steps 8–9). An SVG for the
 //!    [`MermaidTarget::HtmlStatic`] target also gets the HTML static edits
 //!    (step 10′); PNG never does.
@@ -23,6 +31,7 @@
 //! [`MermaidError::RenderFailed`]; callers show the source as a code block
 //! ([`MermaidDiagram::fallback_code_block`]).
 
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -38,22 +47,28 @@ use crate::cache::{FileCache, VisualizationKind};
 use crate::fonts::{FontChain, FontQuery, LabelMeasurer, default_chain};
 use crate::raster::png::rasterize_svg_for_request;
 
+use super::accents::apply_accents;
 use super::config::{MermaidConfig, MermaidTheme};
+use super::contrast::{parse_css_color, readable_text};
+use super::design;
 use super::error::MermaidError;
 use super::gitgraph::{GitGraphGeometry, TAG_GAP_EM};
 use super::gitgraph_layout::{self, TagLabels};
 use super::newline::rewrite_label_newlines;
+use super::palette::Palette;
 use super::postprocess::{html_static, postprocess};
 
-/// The font stack every built-in Merman theme sets (`themeVariables.fontFamily`
-/// of Mermaid.js 12.2.0's `default`, `dark`, `forest`, and `neutral`).
+/// The font stack the site config sets: Mermaid.js 12.2.0's themes'
+/// `themeVariables.fontFamily`. It ends in `sans-serif` (R-T9). Setting it
+/// explicitly also keeps Merman from drawing in a family its measurement
+/// does not ask about.
 const THEME_FONT_STACK: &str = r#""trebuchet ms", verdana, arial, sans-serif"#;
 
-/// The built-in themes' `themeVariables.fontSize`, in px: one em of tag gap
-/// unless the source overrides it.
+/// Mermaid's `themeVariables.fontSize`, in px: one em of tag gap unless the
+/// source overrides it.
 const THEME_FONT_SIZE: f32 = 16.0;
 
-/// The built-in themes' `themeVariables.tagLabelFontSize`, in px.
+/// Mermaid's `themeVariables.tagLabelFontSize`, in px.
 const TAG_LABEL_FONT_SIZE: f64 = 10.0;
 
 /// The measurement profile Merman records for our measurer.
@@ -141,16 +156,22 @@ pub struct MermaidDiagram {
     instructions: String,
     title: Option<String>,
     theme: MermaidTheme,
+    palette: Option<Palette>,
     config: MermaidConfig,
     time_budget: Duration,
     target: MermaidTarget,
 }
 
-/// What every Merman call for one diagram shares: the source after step 3b
-/// and the site config.
+/// What every Merman call for one diagram shares: the source after step 3b,
+/// the site config, and the compiled design for the diagram's family.
 struct Prepared {
     source: String,
     site_config: serde_json::Value,
+    /// Merman's family id (`flowchart`, `gitGraph`, …), when it detects one.
+    family: Option<String>,
+    /// The design compiled for this render; `None` when the author's
+    /// `%%{init}%%` or frontmatter owns the theme, or no family was detected.
+    design: Option<serde_json::Value>,
 }
 
 impl MermaidDiagram {
@@ -172,16 +193,43 @@ impl MermaidDiagram {
             instructions: instructions.into(),
             title: None,
             theme: MermaidTheme::default(),
+            palette: None,
             config: MermaidConfig::default(),
             time_budget: Self::DEFAULT_TIME_BUDGET,
             target: MermaidTarget::default(),
         }
     }
 
-    /// Sets the theme for the diagram.
+    /// Styles the diagram with `theme`'s fixed palette ([`Palette::fixed`]),
+    /// replacing a palette set by [`with_palette`](Self::with_palette).
     pub fn with_theme(mut self, theme: MermaidTheme) -> Self {
         self.theme = theme;
+        self.palette = None;
         self
+    }
+
+    /// Styles the diagram with `palette`, for example one built from the
+    /// terminal's colors ([`Palette::for_terminal`]).
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_visualized::mermaid::{MermaidDiagram, Palette, Rgb, TerminalColors};
+    ///
+    /// let colors = TerminalColors { background: Rgb::from_hex("#002b36"), ..TerminalColors::default() };
+    /// let palette = Palette::for_terminal(&colors, true);
+    /// let diagram = MermaidDiagram::new("flowchart LR\n    A --> B").with_palette(palette);
+    /// assert_eq!(diagram.palette(), palette);
+    /// ```
+    pub fn with_palette(mut self, palette: Palette) -> Self {
+        self.palette = Some(palette);
+        self
+    }
+
+    /// The palette the diagram is styled with: the one set by
+    /// [`with_palette`](Self::with_palette), else the theme's fixed palette.
+    pub fn palette(&self) -> Palette {
+        self.palette.unwrap_or_else(|| Palette::fixed(self.theme))
     }
 
     /// Sets the title for the diagram.
@@ -386,9 +434,38 @@ impl MermaidDiagram {
                 "ZenUML diagrams are not rendered; showing the source".to_string(),
             ));
         }
+        let source = rewrite_label_newlines(&self.instructions).into_owned();
+        let source_theme = source_theme(&source);
+        let palette = self.palette();
+        let design = match (&source_theme.family, source_theme.author_theme) {
+            (Some(family), AuthorTheme::None) => Some(design::design_json(&palette, family)),
+            _ => None,
+        };
+        let site_palette = match (&source_theme.family, &design) {
+            (Some(family), Some(design)) => design::wants_site_palette(family, design),
+            _ => source_theme.author_theme == AuthorTheme::Variables,
+        };
+        let mut site_config = self.site_config(&palette, site_palette, source_theme.author_variables.as_ref());
+        if let (Some(family), Some(_)) = (&source_theme.family, &design) {
+            for (key, value) in design::family_site_variables(family, &palette) {
+                site_config["themeVariables"][key] = value;
+            }
+            // Merman lets site config win over the source's own, so a key the
+            // author set in the source is left out.
+            for (section, values) in design::family_site_config(family, &palette) {
+                let serde_json::Value::Object(values) = values else { continue };
+                for (key, value) in values {
+                    if source_theme.author_config.pointer(&format!("/{section}/{key}")).is_none() {
+                        site_config[&section][key] = value;
+                    }
+                }
+            }
+        }
         let mut prepared = Prepared {
-            source: rewrite_label_newlines(&self.instructions).into_owned(),
-            site_config: self.site_config(),
+            site_config,
+            source,
+            family: source_theme.family,
+            design,
         };
         // A source without tags needs no spacing and gets no Merman call.
         if is_gitgraph(&prepared.source) && prepared.source.contains("tag:") {
@@ -409,18 +486,49 @@ impl MermaidDiagram {
         Ok(prepared)
     }
 
-    /// The site config handed to Merman: the built-in theme named by
-    /// [`MermaidTheme`] (an explicit theme also keeps Merman from drawing in a
-    /// family its measurement does not ask about) merged with
-    /// [`MermaidConfig`]'s Mermaid-shaped JSON.
-    fn site_config(&self) -> serde_json::Value {
+    /// The site config handed to Merman: Mermaid's `base` theme with the font
+    /// stack, merged with [`MermaidConfig`]'s Mermaid-shaped JSON, plus the
+    /// palette as `base` theme variables when `with_palette`.
+    ///
+    /// `with_palette` is decided per family ([`design::wants_site_palette`]):
+    /// Merman lets explicit site variables win over compiled styles, so they
+    /// go only where they cannot erase the design. When the author sets theme
+    /// variables, the palette goes there too, beneath the author's keys
+    /// (Merman reads the source's own config over the site's); when the author
+    /// names a theme, it is left to that theme.
+    fn site_config(
+        &self,
+        palette: &Palette,
+        with_palette: bool,
+        author_variables: Option<&serde_json::Value>,
+    ) -> serde_json::Value {
         let mut config = self
             .config
             .to_json()
             .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
             .filter(serde_json::Value::is_object)
             .unwrap_or_else(|| serde_json::json!({}));
-        config["theme"] = serde_json::Value::String(self.theme.as_str().to_string());
+        config["theme"] = serde_json::Value::String("base".to_string());
+        if !config["themeVariables"].is_object() {
+            config["themeVariables"] = serde_json::json!({});
+        }
+        let variables = &mut config["themeVariables"];
+        variables["fontFamily"] = serde_json::Value::String(THEME_FONT_STACK.to_string());
+        if with_palette {
+            for (key, color) in base_theme_variables(palette) {
+                if variables.get(key).is_none() {
+                    variables[key] = serde_json::Value::String(color.to_string());
+                }
+            }
+            variables["darkMode"] = serde_json::Value::Bool(palette.is_dark());
+        }
+        // Merman lets site variables win over the source's own, the reverse
+        // of Mermaid.js; copying the author's on top keeps theirs winning.
+        if let Some(serde_json::Value::Object(author)) = author_variables {
+            for (key, value) in author {
+                variables[key] = value.clone();
+            }
+        }
         config
     }
 
@@ -435,8 +543,11 @@ impl MermaidDiagram {
 
     /// The cache key for `request` (pipeline step 4).
     fn cache_key_for(&self, prepared: &Prepared, chain: &FontChain, request: &RenderRequest) -> String {
+        let design = prepared.design.as_ref().map(serde_json::Value::to_string).unwrap_or_default();
+        // Every palette color, not only the design: the accent post-process
+        // and the contrast pass read colors the design may round away (R-P6).
         let mut options = serde_json::json!({
-            "design": biscuit_hash::xx_hash(&prepared.site_config.to_string()),
+            "design": biscuit_hash::xx_hash(&format!("{}|{design}|{:?}", prepared.site_config, self.palette())),
             "fonts": chain.cache_identity(&theme_font_stacks()),
             "title": self.title,
             "request": request.cache_identity(),
@@ -468,6 +579,52 @@ impl MermaidDiagram {
         Ok(self.cache_key_for(&prepared, chain, request))
     }
 
+    /// The site config [`render`](Self::render) hands Merman.
+    #[cfg(test)]
+    pub(crate) fn prepared_site_config(&self) -> serde_json::Value {
+        self.prepare(default_chain()).map(|prepared| prepared.site_config).unwrap_or_default()
+    }
+
+    /// The compiled design's JSON [`render`](Self::render) applies, `None`
+    /// when the author's theme keys own the styling.
+    #[cfg(test)]
+    pub(crate) fn prepared_design(&self) -> Option<serde_json::Value> {
+        self.prepare(default_chain()).ok().and_then(|prepared| prepared.design)
+    }
+
+    /// Merman's theme evidence for the SVG [`render`](Self::render) draws:
+    /// the evidence status (its `Debug` name) and every diagnostic as
+    /// `code:subject:target`.
+    #[cfg(test)]
+    pub(crate) fn theme_evidence(&self) -> Result<(String, Vec<String>), MermaidError> {
+        let chain = default_chain();
+        let prepared = self.prepare(chain)?;
+        let measurer = LabelMeasurer::text_measurer(chain);
+        let request = svg_request(measurer, "bv-evidence")?;
+        let control = self.control();
+        let theme = prepared.design.as_ref().map(design::compile).transpose()?;
+        let output = self.call_merman(|| {
+            let mut request = merman::RenderRequest::svg(&prepared.source, control.clone(), request);
+            if let Some(theme) = theme {
+                request = request.with_theme(theme);
+            }
+            renderer(&prepared).render(request)
+        })?;
+        let RenderOutput::Svg(Some(svg)) = output else {
+            return Err(MermaidError::RenderFailed("no Mermaid diagram detected".to_string()));
+        };
+        let evidence = svg.evidence();
+        let diagnostics = evidence
+            .theme_diagnostics()
+            .iter()
+            .map(|diagnostic| {
+                let target = diagnostic.target().map_or("-", |target| target.id());
+                format!("{}:{}:{target}", diagnostic.code(), diagnostic.subject())
+            })
+            .collect();
+        Ok((format!("{:?}", evidence.theme_evidence().status()), diagnostics))
+    }
+
     /// The source after pipeline step 3b, as Merman receives it.
     #[cfg(test)]
     pub(crate) fn rewritten_source(&self) -> Result<String, MermaidError> {
@@ -494,12 +651,25 @@ impl MermaidDiagram {
         let diagram_id = format!("bv-{:016x}", biscuit_hash::xx_hash(cache_key));
         let control = self.control();
         let request = svg_request(measurer, &diagram_id)?;
+        let theme = prepared.design.as_ref().map(design::compile).transpose()?;
         let output = self.call_merman(|| {
-            renderer(prepared).render(merman::RenderRequest::svg(&prepared.source, control.clone(), request))
+            let mut request = merman::RenderRequest::svg(&prepared.source, control.clone(), request);
+            if let Some(theme) = theme {
+                request = request.with_theme(theme);
+            }
+            renderer(prepared).render(request)
         })?;
         match output {
             RenderOutput::Svg(Some(svg)) => {
                 let fixed = postprocess(svg.svg());
+                let fixed = match (&prepared.design, &prepared.family) {
+                    (Some(_), Some(family)) => {
+                        let palette = self.palette();
+                        let accented = apply_accents(&fixed, &palette, family);
+                        Cow::Owned(readable_text(&accented, &palette).into_owned())
+                    }
+                    _ => fixed,
+                };
                 Ok(match target {
                     MermaidTarget::RasterSafe => fixed.into_owned(),
                     MermaidTarget::HtmlStatic => html_static(&fixed, &label_measurer).into_owned(),
@@ -569,7 +739,7 @@ impl MermaidDiagram {
     /// The color painted behind the diagram, or `None` for no background.
     fn background_color(&self, background: Background) -> Option<String> {
         match background {
-            Background::Theme => Some(theme_background(self.theme).to_string()),
+            Background::Theme => Some(self.palette().background().to_string()),
             Background::Transparent => None,
             Background::Solid { .. } => background.solid_hex(),
         }
@@ -644,15 +814,97 @@ fn tag_metrics(json: &str) -> (TextStyle, f32) {
     (style, gap)
 }
 
-/// The built-in theme's `themeVariables.background` (Mermaid.js 12.2.0, as
-/// Merman's generated theme table records it). Merman leaves the root
-/// unpainted, so [`Background::Theme`] paints this color itself.
-fn theme_background(theme: MermaidTheme) -> &'static str {
-    match theme {
-        MermaidTheme::Dark => "#333",
-        MermaidTheme::Default | MermaidTheme::Forest => "white",
-        MermaidTheme::Neutral => "#ffffff",
+/// Whether the source's own `%%{init}%%` or frontmatter config styles the
+/// diagram (D54).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthorTheme {
+    /// No theme keys: the compiled design applies.
+    None,
+    /// `themeVariables` with a color but no `theme`: the palette as `base`
+    /// variables, beneath the author's.
+    Variables,
+    /// A named `theme`: the author's theme alone.
+    Named,
+}
+
+/// What the source says about its own styling, read before rendering.
+struct SourceTheme {
+    family: Option<String>,
+    author_theme: AuthorTheme,
+    /// The author's `themeVariables` when they set a color
+    /// ([`AuthorTheme::Variables`]).
+    author_variables: Option<serde_json::Value>,
+    /// The source's whole `%%{init}%%`/frontmatter config.
+    author_config: serde_json::Value,
+}
+
+/// The source's diagram family and author theme keys, from Merman's own
+/// preprocessing (directives and frontmatter) and type detection. A source
+/// Merman cannot preprocess or detect has no family; its render fails later
+/// with Merman's own error.
+fn source_theme(source: &str) -> SourceTheme {
+    let engine = Engine::new();
+    let Ok(preprocessed) = merman::preprocess_diagram(source, engine.registry()) else {
+        return SourceTheme {
+            family: None,
+            author_theme: AuthorTheme::None,
+            author_variables: None,
+            author_config: serde_json::Value::Null,
+        };
+    };
+    let author = preprocessed.config.as_value();
+    let author_theme = if author.get("theme").is_some() {
+        AuthorTheme::Named
+    } else if author.get("themeVariables").is_some_and(sets_a_color) {
+        AuthorTheme::Variables
+    } else {
+        AuthorTheme::None
+    };
+    let mut config = preprocessed.config.clone();
+    let family = engine
+        .registry()
+        .detect_type(preprocessed.source.text(), &mut config)
+        .ok()
+        .and_then(merman::diagram_type_family_id)
+        .map(|family| family.as_str().to_string());
+    let author_variables = (author_theme == AuthorTheme::Variables).then(|| author["themeVariables"].clone());
+    let author_config = author.clone();
+    SourceTheme { family, author_theme, author_variables, author_config }
+}
+
+/// Whether an author's `themeVariables` set a color anywhere (a string, or a
+/// comma-separated list, that parses as one). Our designs set colors only, so
+/// a size or flag (`pieOuterStrokeWidth`, `darkMode`) cannot conflict with
+/// them and keeps the compiled theme.
+fn sets_a_color(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(text) => text.split(',').any(|part| parse_css_color(part).is_some()),
+        serde_json::Value::Object(map) => map.values().any(sets_a_color),
+        serde_json::Value::Array(items) => items.iter().any(sets_a_color),
+        _ => false,
     }
+}
+
+/// The palette as Mermaid `base` theme variables. Only the root variables
+/// the `base` theme derives the rest from: a derived one set here (`mainBkg`,
+/// `nodeBorder`) would beat the author's root key (`primaryColor`) it derives
+/// from.
+fn base_theme_variables(palette: &Palette) -> Vec<(&'static str, super::Rgb)> {
+    let [_, _, yellow, ..] = palette.accents();
+    vec![
+        ("background", palette.background()),
+        ("primaryColor", palette.surface()),
+        ("primaryTextColor", palette.text()),
+        ("primaryBorderColor", palette.border()),
+        ("secondaryColor", palette.surface_alt()),
+        ("tertiaryColor", palette.surface_alt()),
+        ("lineColor", palette.line()),
+        ("textColor", palette.text()),
+        ("titleColor", palette.text()),
+        ("noteBkgColor", palette.tints()[2]),
+        ("noteBorderColor", yellow),
+        ("noteTextColor", palette.text()),
+    ]
 }
 
 fn renderer(prepared: &Prepared) -> Renderer {

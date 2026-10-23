@@ -25,9 +25,13 @@ mod mermaid_tests;
 #[cfg(feature = "image")]
 mod newline_tests;
 #[cfg(feature = "image")]
+mod palette_tests;
+#[cfg(feature = "image")]
 mod postprocess_tests;
 #[cfg(feature = "image")]
 mod raster_tests;
+#[cfg(feature = "image")]
+mod theme_tests;
 
 #[cfg(feature = "image")]
 use tempfile::TempDir;

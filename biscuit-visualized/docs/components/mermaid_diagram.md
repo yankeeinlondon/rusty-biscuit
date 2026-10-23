@@ -185,21 +185,40 @@ Item B: [0.7, 0.4] color: #00ff00
 
 Available properties: `color`, `radius`, `stroke-color`, `stroke-width`
 
-### Themes
+### Themes and palettes
 
-- **`MermaidTheme::Dark`**: Light text on dark background (default for dark terminals)
-- **`MermaidTheme::Default`**: Dark text on light background (default for light terminals)
-- **`MermaidTheme::Forest`**: Green tones
-- **`MermaidTheme::Neutral`**: Grayscale, works well with transparent backgrounds
+`MermaidDiagram::new` styles the diagram with **the terminal's own
+palette**: its background and text colors and, where the terminal answers
+the ANSI palette query (OSC 4, native Windows included), ANSI 1–6 as the six
+accent colors. Where the terminal reports no ANSI colors the accents are
+computed from its background; where it reports no background, or stdout is
+not a terminal, or `CI` is set, the fixed palette for its color mode is used.
+Text always meets 4.5:1 contrast against the fill behind it.
 
-Each theme currently selects the Merman built-in theme of the same name
-(`dark`, `default`, `forest`, `neutral`), which matches Mermaid.js's. The
-`Dark` theme's `Background::Theme` color is Mermaid's `#333`.
+Each `MermaidTheme` is a fixed palette, starting from Mermaid.js's theme of
+the same name:
 
-> **Planned.** Palettes derived from the terminal's own colors, with accent
-> colors for unstyled nodes and contrast-checked text, become the default in
-> a terminal; the four themes become fixed palettes for output that is not
-> for a terminal. See [Themes](../merman.md#themes).
+- **`MermaidTheme::Dark`**: light text on `#333333` (the fallback for dark terminals)
+- **`MermaidTheme::Default`**: dark text on white (the fallback for light terminals)
+- **`MermaidTheme::Forest`**: green surfaces
+- **`MermaidTheme::Neutral`**: grays
+
+`with_theme` replaces the terminal palette with a fixed one, and
+`with_palette` with any `Palette`, for example one built from colors you
+detected yourself:
+
+```rust
+use biscuit_visualized::components::mermaid::{MermaidDiagram, MermaidTheme, Palette, TerminalColors};
+
+let pinned = MermaidDiagram::new("flowchart LR\n    A --> B").with_theme(MermaidTheme::Neutral);
+let palette = Palette::for_terminal(&TerminalColors::detect(), true);
+let detected = MermaidDiagram::new("flowchart LR\n    A --> B").with_palette(palette);
+```
+
+Un-styled nodes get rotating accents in flowchart, class, sequence, and
+mindmap diagrams; `classDef`, `style`, and colors set in `%%{init}%%` keep
+the author's colors. See [Themes](../merman.md#themes) for how a palette is
+built and reaches Merman.
 
 Use `MermaidTheme::for_color_mode()` to automatically select based on terminal:
 

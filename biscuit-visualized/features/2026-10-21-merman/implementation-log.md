@@ -212,57 +212,143 @@ skills_files_updated_during_phase_4:
     - .claude/skills/biscuit-visualized/mermaid-rendering.md
     - .claude/skills/worktree/git-graph.md
     - .claude/skills/biscuit-terminal/diagrams.md
+source_files_during_phase_5:
+    - biscuit-terminal/lib/src/discovery/osc_queries/mod.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/query.rs
+    - biscuit-terminal/lib/src/discovery/startup_exchange.rs
+    - biscuit-terminal/lib/tests/level2/level2_windows_console_query.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/components/mermaid.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/mermaid/config.rs
+    - biscuit-visualized/src/src/mermaid/color.rs
+    - biscuit-visualized/src/src/mermaid/palette.rs
+    - biscuit-visualized/src/src/mermaid/design.rs
+    - biscuit-visualized/src/src/mermaid/accents.rs
+    - biscuit-visualized/src/src/mermaid/contrast.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_cache_key_tests.rs
+    - biscuit-visualized/src/src/tests/mermaid_tests.rs
+    - biscuit-visualized/src/src/tests/palette_tests.rs
+    - biscuit-visualized/src/src/tests/theme_tests.rs
+    - biscuit-visualized/features/2026-10-21-merman/gallery/Cargo.toml
+    - biscuit-visualized/features/2026-10-21-merman/gallery/Cargo.lock
+    - biscuit-visualized/features/2026-10-21-merman/gallery/src/main.rs
+docs_updated_during_phase_5:
+    - biscuit-visualized/docs/merman.md
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - biscuit-terminal/docs/discovery/terminal-queries.md
+    - biscuit-terminal/docs/discovery/color.md
+    - biscuit-visualized/features/2026-10-21-merman/plan.md
+    - biscuit-visualized/features/2026-10-21-merman/implementation-log.md
+docs_created_during_phase_5:
+    - biscuit-visualized/features/2026-10-21-merman/gallery/themed-gallery-macos.html
+    - biscuit-visualized/features/2026-10-21-merman/gallery/themed-gallery-linux.html
+skills_files_updated_during_phase_5:
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+    - .claude/skills/biscuit-visualized/artifacts-caching.md
+    - .claude/skills/biscuit-visualized/diagram-components.md
+    - .claude/skills/biscuit-terminal/discovery.md
 human_review: true
 human_review_items:
     - |-
-      **Adding Merman changed how JSON objects are ordered in about 18 other packages, and Darkmatter's tests fail because of it (45 failures)**
+      **Sign off on the new diagram look (planned stop before Phase 6).**
+      Phase 6 locks the look in with golden snapshot files, so it must not
+      start until you have approved the look; snapshots generated earlier
+      would be thrown away.
 
-      **What happened.** Merman, the new Mermaid renderer, switches on an option in the shared JSON library (`serde_json`'s `preserve_order`). Rust build features are shared across one build, so every program that includes biscuit-visualized now has it too: Darkmatter and `md`, sniff, worktree, claudine, messenger, research, dmls, and others. JSON objects used to be sorted alphabetically by key; now they keep the order keys were inserted.
+      Open `biscuit-visualized/features/2026-10-21-merman/gallery/themed-gallery-macos.html`
+      (and `themed-gallery-linux.html`, the same diagrams drawn on the Linux
+      build host). Each row is one diagram type; the six columns are the four
+      fixed themes (Dark, Default, Forest, Neutral), a terminal that reported
+      its full color set (Tokyo Night), and a terminal that reported only its
+      background. Compare them with Zed screenshots of the same diagrams.
 
-      **Why it matters now.** Darkmatter promises sorted ("canonical") key order in places. With the option on, its frontmatter content hashes change (`md hash` results and anything cached by them), `md schema validate --json` output order changes, `as_json5` output changes, and 40 snapshots break. Phase 4's own gate (Darkmatter's `just test`) cannot pass until this is decided, and every later phase adds more dependents on top of it. Merman itself needs the option (its diagram models rely on insertion order), so it cannot simply be switched off.
+      - **Option A: approve as is.** Phase 6 can generate the goldens. Pro:
+        no further delay. Con: anything you dislike later means regenerating
+        goldens.
+      - **Option B: approve with specific changes** (name the diagram types
+        and what to change). Pro: the goldens capture the look you want.
+        Con: one more styling round before Phase 6.
+      - **Option C: reject the overall direction.** Con: largest rework.
 
-      **Options**
+      Recommendation: **B** if any row looks wrong to you, otherwise **A**.
+      The known weak spots are listed at the end of the log's "## Phase 5"
+      section ("Open"): sequence-diagram symbol participants (database,
+      boundary, …) all share one accent color, and three rarely used diagram
+      types (agentflow, usecase, wardley) cannot be themed by Merman's
+      compiled themes at all.
+    - |-
+      **Approve four styling choices that bend the letter of the spec.**
+      The spec says designs "never set the node base fill", that Mermaid
+      variables appear "only in gitGraph", that an author's `%%{init}%%`
+      keys win "for those keys", and that accents key on "our palette colors
+      only". Following those exactly left many diagrams unreadable on dark
+      backgrounds, because Merman's underlying `base` theme is light. These
+      choices are shipped and tested; each can be reverted independently.
 
-      - **A. Make sorting explicit in the consumers, and keep Merman as is.** Darkmatter (and any other package found to depend on sorted keys) sorts keys itself where order is part of its contract: hashing, canonical JSON output, schema conversion. Snapshot tests that only compare structure use order-independent comparison (already done for sniff).
-          - Pro: removes a hidden dependency on a library default that any future dependency could flip again, and leaves Merman's fork untouched.
-          - Con: real work in Darkmatter (finding every place that relied on sorting), plus running the other dependents' suites to find their sensitive spots.
-      - **B. Patch the Merman fork so it does not need the option** (replace its use of JSON maps with an order-keeping map of its own).
-          - Pro: nothing else in the repo changes behavior.
-          - Con: a deep change across Merman's internals that must be carried through every future upstream update; high risk of subtle diagram differences.
-      - **C. Turn the option on deliberately for the whole repo and accept insertion order everywhere,** then update hashes, baselines, and snapshots.
-          - Pro: one consistent behavior, with the least code.
-          - Con: changes Darkmatter's documented canonical-order contract and its content hashes for everyone; the dependence on a library default stays hidden.
+      1. Diagram types that Merman's compiled themes only partly reach
+         (treemap, quadrant, ER, gantt, C4, block, architecture,
+         requirement, packet, and others) also receive the palette through
+         Merman's ordinary site configuration (the channel `MermaidConfig`
+         already uses). The designs themselves still carry no Mermaid
+         variables outside gitGraph.
+      2. Class, block, and architecture boxes get the palette's surface as
+         their base fill. That is safe there because those types have no
+         rotating per-node palette for a base fill to override, which is the
+         problem the spec's rule exists to prevent.
+      3. When a diagram's source sets a theme *color* in `%%{init}%%` or
+         frontmatter, the compiled theme is dropped entirely and the
+         author's colors win, with the palette underneath. Yielding key by
+         key is not possible: compiled styles are not keyed by Mermaid
+         variable names.
+      4. Sequence-diagram participants get their accent by matching the
+         participant box's `name` attribute, not a palette color, because
+         Merman paints those boxes from a stylesheet.
 
-      **Recommendation: A.** The real defect is that Darkmatter's hashes and canonical output silently depended on a shared library default. Making the sort explicit fixes that whatever any dependency does, keeps the Merman fork small, and does not change outputs users already rely on. Concretely: a short Darkmatter task to canonicalize key order where it hashes or emits canonical JSON, then running the remaining dependents' suites (claudine, messenger, research, dmls, playa, biscuit-icon, biscuit-speaks).
+      - **Option A: accept all four** and amend the spec to match (a short
+        new decision entry). Pro: the spec describes what ships. Con: none
+        beyond the edit.
+      - **Option B: accept some and revert the others.** Con: reverted ones
+        bring back unreadable dark-palette output for those diagram types
+        (visible in the gallery before this phase).
+      - **Option C: revert all and accept the limits.**
+
+      Recommendation: **A**. Each choice is what makes the dark palettes
+      readable, and each is pinned by a test (log "## Phase 5", "Decided
+      during implementation").
 message_to_agent: |-
-  Phase 4's six tasks are implemented, but checkpoint 4 is NOT fully green.
-  Read the log's "## Phase 4" section, especially "Blocking finding".
+  Phase 5 is implemented except the planned human gate: Ken's gallery
+  sign-off (AC-T5) is OPEN, and Phase 6's goldens must wait for it (plan
+  rule 3, D73). Read the log's "## Phase 5" section first, especially
+  "Merman behavior found" and "Decided during implementation".
 
-  - Blocking: Merman (merman-core) enables serde_json `preserve_order`, so
-    every build that reaches biscuit-visualized gets insertion-ordered JSON
-    maps. Darkmatter has 45 L1 failures from it (frontmatter hashes, `md
-    schema validate --json` order, `as_json5`, 40 snapshots). A human ruling
-    is pending (recommended: Darkmatter sorts keys explicitly where order is
-    a contract). Do not "fix" it by accepting snapshots or changing hashes
-    without that ruling. sniff's JSON snapshots now compare with insta
-    `sort_maps`; the four sniff failures earlier phases called pre-existing
-    were this regression.
-  - New API: `mermaid::MermaidTarget { RasterSafe, HtmlStatic }`,
-    `MermaidDiagram::{with_target, target}` (library and component). PNG
-    ignores the target. The HTML-static cache key adds `"target":
-    "html-static"`; default keys are unchanged (no `+bv` bump). If Phase 5
-    changes the post-process, keep `postprocess::html_static` running after
-    the palette edits and bump `+bv<n>` for output changes.
-  - Darkmatter's static-SVG path selects `HtmlStatic`; the sanitizer admits
-    `<filter>` + `<feDropShadow>` under D64 and drops an empty filter. If
-    Phase 5's palettes add other filter primitives or named colors to
-    shadows, the sanitizer will drop them (it accepts hex, rgb(), and hsl()
-    only).
-  - worktree: the D43 rewrite list is in the log. In a real 40-row terminal
-    a three-lane view now loses a lane to the half-height cap.
-  - biscuit-terminal `test-l2` has one failure unrelated to diagrams
-    (`level2_tmux_draws_sixel_itself_at_the_bottom_of_the_viewport`, tmux 3.8
-    row placement).
+  - Galleries: `gallery/themed-gallery-{macos,linux}.html`, generated by the
+    non-member crate `gallery/` (`CARGO_TARGET_DIR=/tmp/... cargo run
+    --release -- <out.html>`). Regenerate them if styling changes.
+  - Styling API: `mermaid::{Rgb, Palette, TerminalColors}`,
+    `MermaidDiagram::{with_palette, palette}`; `with_theme` resets to the
+    fixed palette. Phase 6's goldens should pin palettes explicitly: the
+    four `Palette::fixed`, and D47's two synthetic terminals are exactly
+    the gallery's `tokyo_night()` and background-only `#1a1b26`
+    (`src/tests/palette_tests.rs` has the same constructors).
+  - Merman traps: explicit site-config `themeVariables` beat compiled
+    styles AND the source's own `%%{init}%%` variables; a static fill beats
+    an ordinal palette; an unsupported rule erases a supported one. Guard
+    tests are in `src/tests/theme_tests.rs`.
+  - AC-T4 (Phase 6's contrast test over the golden corpus) can reuse
+    `mermaid::contrast` (crate-private): it already finds the fill behind
+    each `<text>` (inline fills, closed sibling groups, `<use>` placements)
+    and parses Merman's CSS colors.
+  - `MERMAID_BACKEND` is `+bv2`; bump it again for any output change.
+  - Still open from Phase 4: darkmatter's 45 key-order failures (separate
+    fix `2026-10-23-frontmatter-key-order`). Also pre-existing (fail on
+    clean HEAD): worktree-cli L2 Kitty tests
+    `level2_graph_height_cap_elides_lanes_in_a_short_kitty_window` and
+    `level2_graph_restores_lane_density_in_kitty` (lane height cap).
 ---
 
 # Implementation Log for 2026-10-21-merman (7 phases)
@@ -1327,3 +1413,292 @@ still carries Phase 3's uncommitted changes): `packages:
 "test-toolkit", "biscuit-terminal-cli", "sniff"]`, `change_class: package`,
 `source_packages: ["biscuit-visualized", "darkmatter", "sniff-cli",
 "worktree-cli"]`. The gates were run, not skipped.
+
+### Checkpoint 4 re-run (2026-10-23)
+
+The Phase 4 run stopped at this checkpoint for the key-order ruling. Ken
+ruled the same day that a finding the remaining work does not depend on is
+flagged and the run continues; the spec records it as D73 (amending D72)
+and the plan's working rules now say so ("Findings that need a ruling do not
+stop the run"). The checkpoint's first item was
+re-run on the tree after the `main` merge (`d545a6256`), serially, with
+`--no-fail-fast`:
+
+| Package | `just test` | `just lint` |
+| --- | --- | --- |
+| `biscuit-visualized` | 551 passed, 3 skipped | clean |
+| `biscuit-terminal` | 3881 passed, 55 skipped | clean |
+| `sniff` | 3463 passed, 33 skipped | clean |
+| `worktree` | 1598 passed, 15 skipped | clean |
+| `darkmatter` | 10560 passed, **45 failed**, 10 skipped | clean |
+
+The 45 Darkmatter failures are the same set as in "Blocking finding" above
+(`as_json5_uses_the_formatter_object_idiom`,
+`parsed_frontmatter_retains_nested_mapping_order_as_metadata`,
+`schema_validate_legacy_json_output_is_byte_identical`,
+`benchmark_manifest_matches_recorded_identities`,
+`conversion_snapshot_covers_valid_and_invalid_metadata`, and 39
+`schemas_convert_snapshots::*`); nothing new failed. The item stays
+**open**, with `human_review: true`. Phases 5 and 6 do not depend on it:
+Phase 5 gates only biscuit-visualized and biscuit-terminal, and no Phase 6
+task touches Darkmatter's JSON output.
+
+### Key-order ruling (Ken, 2026-10-23)
+
+The review item raised in "Blocking finding" (options A, B, C) is ruled, and
+`human_review` is cleared:
+
+- Author key order is respected at every depth; insertion order is the
+  contract (closest to option C, but Darkmatter will enable
+  `preserve_order` itself rather than inherit it from Merman).
+- Merging keeps the base document's order and appends new keys in the
+  merged document's order.
+- The default frontmatter hash was always meant to be Markdown-aware and
+  order-independent; its dependence on nested key order is a bug. It is
+  defined in Darkmatter (`hash_frontmatter_map`, which sorts only top-level
+  keys); the order-independent JSON hashing moves into `biscuit-hash`.
+
+The work is specified as the separate fix
+`2026-10-23-frontmatter-key-order` (darkmatter area). It restores `main`'s
+frontmatter hash values exactly, because `main`'s nested maps were sorted by
+the same byte order. Checkpoint 4's open item closes when that fix lands and
+darkmatter `just test` is re-run green. The Merman fork is unchanged
+(option B rejected).
+
+## Phase 5
+
+Implemented by one agent without subagents (the work was one tightly coupled
+design loop: probe Merman, render the gallery, fix, repeat). Throwaway probe
+tests (`src/tests/zz_probe_tests.rs`) answered the design questions below and
+were deleted before the gates.
+
+### What shipped
+
+- **`biscuit-terminal`: OSC 4 on native Windows (D46, D71, R-P1, AC-P6).**
+  `ASKS_PALETTE` is gone; `palette_query_wanted()` is `color_query_wanted()`
+  on every platform, so the sixteen OSC 4 queries ride the existing console
+  backend (`tty_query/windows.rs`) with no Windows-specific query code. The
+  unit test `the_palette_query_follows_the_color_gate_on_every_platform`
+  replaces `only_unix_asks_for_the_palette`.
+- **`mermaid::Rgb`, `mermaid::Palette`, `mermaid::TerminalColors`** (new,
+  public; `color.rs`, `palette.rs`). Fixed palettes per `MermaidTheme` from
+  Mermaid.js 12.2.0's themes (`fixed`), `Palette::new(bg, fg, accents)`,
+  `Palette::for_terminal(&TerminalColors, is_dark)` (ANSI 1–6 → accents;
+  unanswered slot → background-derived accent; no foreground → black/white;
+  no background → `fixed(for_color_mode)`), `TerminalColors::detect()`
+  (feature `terminal`; all `None` when stdout is not a terminal or `CI` is
+  set). Every constructor runs the contrast passes (text 4.5:1 on background,
+  surfaces, and tints; accents/border/line 3:1; D45).
+- **`MermaidDiagram::{with_palette, palette}`**; `with_theme` resets the
+  palette to the theme's fixed one. The terminal component's `new` uses the
+  terminal palette (`terminal_palette()`); `with_theme`/`with_palette`
+  override it.
+- **Per-family compiled designs** (`design.rs`): role table filtered through
+  `describe_theme_support(family, StandaloneSvg, …)`; compiled with
+  `DiagramThemeCompiler` and applied with `RenderRequest::with_theme`. The
+  family comes from Merman's own `preprocess_diagram` + `detect_type`, read
+  before the cache check.
+- **Site config** is now `{"theme": "base", "themeVariables": {"fontFamily":
+  …}}` merged with `MermaidConfig`: **no code maps a `MermaidTheme` to a
+  Merman built-in theme** (AC-C15; `each_theme_renders_through_its_compiled_palette_not_a_built_in_theme`
+  replaces the cutover test `each_theme_renders_through_its_merman_built_in_theme`).
+- **Accent post-process** (`accents.rs`) and **contrast pass**
+  (`contrast.rs`), after `postprocess` and before `html_static` (which still
+  runs last, per Phase 4's note).
+- **Cache key:** `design` now hashes site config + design JSON + the
+  palette's `Debug` (every color, R-P6). `MERMAID_BACKEND` →
+  `merman@6e6b1e6554e8+bv2`.
+- **Themed gallery** (`gallery/`, a non-member crate like the spikes):
+  `themed-gallery-macos.html` and `themed-gallery-linux.html` (built on
+  `build-linux` at the tested tree), every S1 corpus family × Dark, Default,
+  Forest, Neutral, Tokyo-Night ANSI terminal, background-only terminal.
+
+### Merman behavior found (the design rests on these)
+
+- `describe_theme_support` reports `Unconditional`/`Conditional`; probes
+  that matched the string `"supported"` would miss `unconditional`.
+- **Explicit site-config `themeVariables` win over compiled styles**: even
+  `darkMode` + `background` alone erased the flowchart node stroke, label
+  fill, and edge stroke; `primaryColor` erased the ordinal palette. Pie,
+  journey, timeline, kanban, radar, and state lost their ordinal palettes
+  the same way. Only `fontFamily` is harmless.
+- **Site-config `themeVariables` also win over the source's own
+  `%%{init}%%`/frontmatter `themeVariables`** (the reverse of Mermaid.js).
+- An author's `%%{init}%%` `primaryColor` is overridden by our compiled
+  palette (D54's check: the compiled theme does override), while an author
+  `lineColor` beats our edge stroke.
+- Merman's `base` theme underneath is light: on a dark palette, every
+  surface a family's compiled styles do not reach (treemap cells, kanban
+  columns, quadrant and XY chart backgrounds, ER label boxes, state
+  transition labels) stays light or keeps `#333` text.
+- Mindmap labels are drawn in a fixed `#333` (`.section-N text`) that no
+  compiled style reaches (`node-label` is rejected for mindmap).
+- Kanban `task-label` fill is reported `conditional` but rejected at render
+  (`unsupported-paint`, evidence `Residual`).
+- Sequence actor paint is a stylesheet rule (`.actor{…}`), not inline;
+  Merman writes the bottom row of actor boxes before the top row.
+- Raster-safe labels are drawn once in a definitions group and placed with
+  `<use href>`, so a label's text is not inside the shape it sits on.
+- gitGraph's design with Mermaid label variables is `Residual` with a single
+  `compatibility-unverified` diagnostic; every other family's design is
+  `Verified` with no diagnostics; the flowchart circle's `unsupported-paint`
+  (D62) is the only `unsupported-*`.
+
+### Decided during implementation (flagged for review)
+
+Each of these is in the log's `human_review_items` because several touch
+the letter of R-T2/R-T3/AC-T1/R-T6 (D72's condition 2), so they are flagged
+rather than taken as D72 "proceed" amendments; the spec is unchanged.
+
+1. **Site palette variables for some families.** Families whose design has
+   no ordinal palette and are not sequence/class (treemap, quadrant, ER,
+   gantt, C4, block, architecture, requirement, packet, cynefin, …) also get
+   the palette as `base` **root** theme variables in the **site config**
+   (`wants_site_palette`); pie gets its three text-color variables and XY
+   chart its `xyChart.*` background/axis colors (`family_site_variables`),
+   each measured not to erase the design; packet, which reads its colors
+   from its own top-level `packet` config (Merman ignores
+   `themeVariables.packet`), gets `packet.blockFillColor` and its label
+   colors (`family_site_config`), skipping any key the author's source sets. No `design.mermaid.variables`
+   outside gitGraph (AC-T1 holds for the designs); this is the site-config
+   channel `MermaidConfig` already used. Without it those families are
+   unreadable on dark palettes.
+2. **Node base fill where no ordinal palette exists.** `styles.node.fill` is
+   the palette surface for families with no node ordinal palette (class,
+   block, architecture); it is never set beside an ordinal palette (the S0
+   surprise R-T2 guards against). Without it class boxes keep `base`'s
+   cream `#fff4dd` under a dark palette.
+3. **D54's yield is whole-theme, by color.** A source whose
+   `%%{init}%%`/frontmatter sets a theme **color** (`sets_a_color`) gets no
+   compiled theme; the palette goes into the site config as `base` root
+   variables and the author's variables are copied on top (Merman's
+   precedence is reversed, above). A named `theme` gets neither. Non-color
+   variables (e.g. the corpus pie's `pieOuterStrokeWidth`) keep the compiled
+   theme, since the designs set colors only. Per-key yielding inside a
+   compiled theme is not possible: compiled styles are not keyed by Mermaid
+   variable.
+4. **Mindmap fills are lightened accents**, not tints: Merman's fixed `#333`
+   label must reach 4.5:1 on them.
+5. **Sequence accents key on the actor box's `name` attribute** (ordered by
+   `x`), not on an inline palette color, because actor paint is stylesheet
+   only. It is neither a class name nor an id (R-T6's letter), and it only
+   runs when the palette's first accent (the design's actor stroke) is in
+   the SVG. The symbol participants (boundary, control, database, …) keep
+   that first accent.
+6. **The contrast pass also recolors palette text on author fills** (the
+   corpus requirement's `style test_entity fill:#f9f`), but never an
+   author's text color on an author's fill.
+7. **No CSS is injected** (R-T7 holds vacuously); AC-T2's test asserts that
+   every selector of every `<style>` in two embedded diagrams is prefixed by
+   its own SVG id (Merman's single stylesheet).
+8. **Neutral's accents** were changed from Mermaid's grays where `#999`
+   collided with the border after the contrast pass.
+9. `MermaidTheme::as_str()` is kept as the theme's name only (the
+   `biscuit-terminal` CLI's quadrant command prints it).
+
+### AC-P6 Windows run (build-win-native)
+
+- `just cross-check biscuit-terminal --os windows --features terminal-tests
+  --test level2 palette measured_colors cell_size` at tree `5417b19ff`
+  (native mode), after building `discovery_probe` in the rig clone at the
+  tested revision (`os` skill: the first narrowed run used the stale probe
+  and failed at the `probe.exists()` assert, as documented):
+  **6 passed** — `the_ansi_palette_reaches_a_windows_program` (OSC 4 queries
+  forwarded verbatim, slots 1–6 answered and read, others `None`, stable),
+  `an_unanswered_palette_query_leaves_every_slot_unknown` (all 16 `None`,
+  first read bounded under 5 s), and the four existing console tests.
+- `cross-check biscuit-visualized --os windows --all-features --lib
+  palette_tests theme_tests` (tree `a81cb0901`): **53 passed**, including
+  `a_background_without_ansi_colors_gives_background_derived_accents`
+  (known background, no ANSI reply). The archive mode refused (no
+  `windows-latest` build for this non-gating package), so native mode.
+- Linux (`build-linux`, tree `08290bead`, the final code): the same filter,
+  **55 passed** (two tests were added after the Windows run:
+  `labels_on_an_author_fill_are_made_readable` and
+  `packet_colors_follow_the_palette_and_the_author_keeps_theirs`). Both
+  galleries were generated from this tree.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) (file) |
+| --- | --- |
+| R-T1, R-T4, D17 | `fixed_palettes_start_from_the_mermaid_themes_of_the_same_name` (palette_tests) |
+| R-T2, R-T3, R-T9, AC-T1 | `each_fixed_palette_design_holds_only_supported_facets`, `the_only_font_stack_set_ends_in_sans_serif`, `site_palette_variables_go_only_where_they_cannot_erase_the_design` (theme_tests) |
+| AC-C15 | `each_theme_renders_through_its_compiled_palette_not_a_built_in_theme` (mermaid_tests) |
+| AC-T6, R-V4, D62 | `evidence_<family>` × 22 + `every_family_has_an_evidence_test` (guard), `the_circles_known_false_unsupported_paint_is_the_only_allowed_diagnostic` (theme_tests) |
+| AC-T7, R-V5 | `guard_a_static_node_fill_beats_the_ordinal_palette`, `guard_an_unsupported_rule_erases_a_supported_one`, `guard_mermaid_variables_override_the_palette_and_downgrade_sequence` |
+| AC-T3, R-T5, R-T6 | `flowchart_nodes_get_rotating_accents_and_author_styles_are_kept` (all four fixed palettes), `classes_take_accents_in_document_order`, `sequence_participants_take_one_accent_each`, `mindmap_accents_come_from_the_compiled_theme`, `the_accent_post_process_touches_no_paint_the_palette_did_not_emit` |
+| AC-T8, D54 | `an_author_init_color_wins_over_the_compiled_theme` (directive and frontmatter), `only_author_colors_or_a_named_theme_displace_the_compiled_theme` (width-only variable, named theme, control) |
+| R-T8, D45 | `every_palette_meets_the_contrast_floors` (9 palettes incl. hostile ones), `text_on_a_known_label_background_is_made_readable`, `a_used_label_is_judged_against_its_placement`, `author_paint_and_unknown_fills_are_left_alone`, `labels_on_an_author_fill_are_made_readable` (the original failing input; it and `a_used_label…` fail with the closed-group propagation removed, verified) |
+| R-T7, AC-T2 | `two_diagrams_in_one_document_keep_their_own_styles` |
+| AC-P3, R-P3–R-P5 | `a_full_terminal_reply_gives_ansi_accents`, `a_background_without_ansi_colors_gives_background_derived_accents`, `a_partial_ansi_reply_fills_only_the_missing_slots_from_the_background`, `no_background_gives_the_fixed_palette_for_the_color_mode`, `an_unreadable_terminal_foreground_is_corrected` |
+| AC-P5, R-P7 (this crate's side) | `detection_reports_nothing_when_stdout_is_not_a_terminal_or_in_ci` |
+| AC-P4, R-P6 | `one_palette_color_changes_the_cache_key` (one accent, one background channel; it failed before the palette joined the key, because a 1-unit accent change rounds to the same tint) |
+| R-P1, AC-P6 | `the_palette_query_follows_the_color_gate_on_every_platform` (biscuit-terminal L1), `the_ansi_palette_reaches_a_windows_program`, `an_unanswered_palette_query_leaves_every_slot_unknown` (biscuit-terminal L2, Windows) |
+| Colors/CSS parsing | `hex_colors_parse_in_both_lengths_and_reject_everything_else`, `contrast_follows_wcag_2`, `css_colors_in_merman_spellings_parse` |
+
+Updated assertions: `backgrounds_paint_the_theme_a_solid_color_or_nothing`,
+`mermaid_theme_changes_svg_output`, `mermaid_transparent_background_changes_svg_output`
+(palette backgrounds are written as 6-digit hex: `#333333`, `#ffffff`),
+`the_key_follows_the_post_process_version` (`+bv3` as the "other" id),
+`cache_tests` and `mermaid_cache_key_tests` backend literal (`+bv2`).
+
+Input robustness: no new loader of a file format or configuration; the
+author-config read uses Merman's own preprocessor (its outcomes are Merman's),
+and `sets_a_color` is covered by the color/width/named-theme cases above.
+
+### Gates
+
+| Package | `just test` | `just lint` | `check-tier-coverage` |
+| --- | --- | --- | --- |
+| `biscuit-visualized` | 606 passed, 3 skipped | clean | 0 stranded |
+| `biscuit-terminal` | 3881 passed, 55 skipped | clean | 0 stranded |
+
+Doctests: `cargo test --doc -p biscuit-visualized --all-features` 36 passed.
+Both packages' `just test` and `just lint` were re-run after the last code
+change (the packet site config, with its test
+`packet_colors_follow_the_palette_and_the_author_keeps_theirs`); the figures
+above are that final run.
+
+Dependents (narrowed, serial):
+
+- `darkmatter`: `-E 'test(/mermaid|svg_sanitizer|diagram/)'` **106
+  passed**. (The 45 key-order failures are the separate fix, not in scope.)
+- `worktree-cli`: `-E 'test(/git_graph|graph/)'` 82 passed, **2 failed**:
+  `level2_graph_height_cap_elides_lanes_in_a_short_kitty_window` and
+  `level2_graph_restores_lane_density_in_kitty` (L2 Kitty tests pulled in by
+  the name filter; `just test` does not run them). **Pre-existing:** both
+  also fail on a clean `HEAD` checkout without this phase's changes
+  (`git worktree add --detach /tmp/wt-head-check HEAD`): there at
+  `level2_graph_in_kitty.rs:727` and `:894`, here at `:836` ("5 hidden lanes
+  of 5") and `:894` ("31 rows exceed half of 60"). This matches Phase 4's
+  note that a three-lane view loses a lane to the half-height cap.
+- `sniff-cli`, `biscuit-terminal-cli`: covered by `biscuit-terminal`'s
+  `just test` (CLI included) / no Mermaid styling asserted.
+
+Load-sensitive: with the host's load average at about 21 (other sessions),
+many Mermaid render tests reported 5–6.5 s in a concurrent run; alone they
+take 0.25–1.1 s, and the serial `just test` run reported 2 slow tests. The
+first run of the 22-family evidence test hit the 2 s budget once
+(`sequence`, "deadline_exceeded" during layout); it was split into one test
+per family with a 60 s budget (the budget is not under test).
+
+### Scope check
+
+`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs
+python3 scripts/ci/affected_scope.py` → `packages`: `biscuit-terminal`,
+`biscuit-visualized`, `test-toolkit`, `darkmatter`; `change_class`:
+`package`. The gates were run. (`darkmatter` comes from the untracked
+`darkmatter/fixes/2026-10-23-frontmatter-key-order/`, which is not this
+phase's; `.claude/skills/worktree/*` and `prompts/plan.md` were already
+modified by other work and are not this phase's either.)
+
+### Open
+
+- **AC-T5 (Ken's gallery sign-off): open, planned stop before Phase 6.**
+- Known gaps for the gallery review: sequence symbol participants
+  (boundary, control, database, …) keep the first accent; agentflow,
+  usecase, and wardley have no compiled-theme support at all (empty designs,
+  `NotApplicable`) and take the palette only through the site variables;
+  the second sequence corpus case's light `rect` band is the author's.
+  Phase 6's automated contrast test (AC-T4) is the full check of R-T8.

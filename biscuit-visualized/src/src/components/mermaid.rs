@@ -38,7 +38,7 @@ use crate::artifact::{Background, OutputFormat, RenderRequest};
 use renderable::tree::{RenderNode, TreeRenderable};
 
 // Re-export types from biscuit-visualized
-pub use crate::mermaid::{MermaidConfig, MermaidTarget, MermaidTheme, QuadrantTheme};
+pub use crate::mermaid::{MermaidConfig, MermaidTarget, MermaidTheme, Palette, QuadrantTheme, TerminalColors};
 
 /// Errors that can occur during terminal rendering of Mermaid diagrams.
 #[derive(Error, Debug)]
@@ -56,12 +56,22 @@ pub enum MermaidRenderError {
 
 /// The theme for the attached terminal's color mode; an unknown mode is dark.
 pub(crate) fn terminal_theme() -> MermaidTheme {
-    let is_dark = matches!(
+    MermaidTheme::for_color_mode(terminal_is_dark())
+}
+
+fn terminal_is_dark() -> bool {
+    matches!(
         biscuit_terminal::discovery::detection::color_mode(),
         biscuit_terminal::discovery::detection::ColorMode::Dark
             | biscuit_terminal::discovery::detection::ColorMode::Unknown
-    );
-    MermaidTheme::for_color_mode(is_dark)
+    )
+}
+
+/// The palette for the attached terminal (R-P3–R-P5): its detected colors,
+/// or the fixed palette for its color mode when stdout is not a terminal, in
+/// CI, or when it reported no background.
+pub(crate) fn terminal_palette() -> Palette {
+    Palette::for_terminal(&TerminalColors::detect(), terminal_is_dark())
 }
 
 /// A Mermaid diagram renderer for terminal output.
@@ -146,7 +156,8 @@ impl MermaidRenderer {
 
     /// Creates a MermaidRenderer configured for the current terminal.
     ///
-    /// Automatically detects color mode and sets appropriate theme.
+    /// Styles the diagram with the terminal's palette ([`terminal_palette`]);
+    /// a later `with_theme` replaces it with that theme's fixed palette.
     ///
     /// ## Examples
     ///
@@ -159,7 +170,8 @@ impl MermaidRenderer {
     pub fn for_terminal<S: Into<String>>(instructions: S) -> Self {
         Self {
             diagram: crate::mermaid::MermaidDiagram::new(instructions)
-                .with_theme(terminal_theme()),
+                .with_theme(terminal_theme())
+                .with_palette(terminal_palette()),
             scale: 2,
             background: Background::Transparent,
         }
@@ -480,8 +492,10 @@ pub struct MermaidDiagram {
 impl MermaidDiagram {
     /// Creates a new `MermaidDiagram` with the given Mermaid instructions.
     ///
-    /// Automatically configures theme based on terminal color mode and
-    /// uses a transparent background. Default width is `ImageWidth::Scale(1.0)`:
+    /// Styles it with the terminal's palette (its background, foreground,
+    /// and ANSI colors; the fixed palette for its color mode when they are
+    /// unknown or the output is not a terminal) and uses a transparent
+    /// background. Default width is `ImageWidth::Scale(1.0)`:
     /// body text is one terminal line tall, so every diagram draws at the same
     /// size, capped at the available columns.
     pub fn new<S: Into<String>>(instructions: S) -> Self {
@@ -498,9 +512,16 @@ impl MermaidDiagram {
         self
     }
 
-    /// Sets the Mermaid theme.
+    /// Styles the diagram with `theme`'s fixed palette instead of the
+    /// terminal's.
     pub fn with_theme(mut self, theme: MermaidTheme) -> Self {
         self.renderer = self.renderer.with_theme(theme);
+        self
+    }
+
+    /// Styles the diagram with `palette` instead of the terminal's.
+    pub fn with_palette(mut self, palette: Palette) -> Self {
+        self.renderer.diagram = self.renderer.diagram.with_palette(palette);
         self
     }
 

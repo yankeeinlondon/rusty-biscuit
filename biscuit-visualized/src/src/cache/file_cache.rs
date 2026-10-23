@@ -18,12 +18,14 @@ pub const CACHE_DIR_ENV: &str = "BISCUIT_VISUALIZED_CACHE_DIR";
 /// Merman rev>+bv<n>`, where `bv<n>` versions biscuit-visualized's own layer
 /// around Merman: the source rewrites before parsing (`mermaid::newline`,
 /// gitGraph `commitSpacing` in `mermaid::gitgraph_layout`), the SVG
-/// post-process (`mermaid::postprocess`), and the painted background. Bump
+/// post-process (`mermaid::postprocess`, `mermaid::accents`), and the painted
+/// background. Palette colors are not versioned here: they reach the key
+/// through the compiled design. Bump
 /// the rev with the Merman pin and `<n>` whenever that layer changes output;
 /// otherwise identical inputs keep serving pre-change artifacts. A change of
 /// backend id also keeps every artifact of an earlier backend from being
 /// served.
-pub const MERMAID_BACKEND: &str = "merman@6e6b1e6554e8+bv1";
+pub const MERMAID_BACKEND: &str = "merman@6e6b1e6554e8+bv2";
 pub const GRAPH_BACKEND: &str = "layout-rs@0.1.x";
 pub const RASTERIZER: &str = "resvg@0.47";
 

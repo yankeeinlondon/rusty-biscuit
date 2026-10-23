@@ -44,20 +44,21 @@ let artifact = graph.render(&RenderRequest::default().with_target_width(1600))?;
 
 ### In-repo docs
 
-- `biscuit-visualized/docs/merman.md`: the Mermaid pipeline with owners, time budget, fallback, themes, fonts (`MERMAID_FONT`, resolution chain, bundled Inter / Noto Emoji), the `\n` rewrite, post-process, the HTML static target, cache identity, and what is **planned** (terminal-derived palettes and accents).
+- `biscuit-visualized/docs/merman.md`: the Mermaid pipeline with owners, time budget, fallback, themes (fixed and terminal palettes, readable text, accents, author precedence), fonts (`MERMAID_FONT`, resolution chain, bundled Inter / Noto Emoji), the `\n` rewrite, post-process, the HTML static target, and cache identity.
 - `biscuit-visualized/docs/mermaid-gitgraph.md`: gitGraph tag spacing (`commitSpacing` written only when tags on different commits collide, to a one-em gap; an author's own value wins) and the `gitgraph_geometry()` test API.
 - `biscuit-visualized/docs/dot-graph.md`: the DOT subset, cluster syntax, and the resolution-tuning case study.
 
 ## Mermaid in one paragraph
 
-`mermaid::MermaidDiagram::render` builds the font chain, rewrites the source (`\n` → `<br/>` labels for class, ER, mindmap, requirement; `commitSpacing` for a tagged LR gitGraph whose tags collide, found with one Merman `layout_json` pass), checks the cache, and on a miss calls Merman (fork `yankeeinlondon/merman` rev `6e6b1e6554e8`) for a resvg-safe SVG measured with our `LabelMeasurer`, then post-processes (solid gradient strokes, `sans-serif` default; for SVG with `with_target(MermaidTarget::HtmlStatic)`, measured face first in every `font-family` and visible label overflow, never in PNG), paints the background, and rasterizes for PNG. Each Merman request has its own deadline (`with_time_budget`, default `DEFAULT_TIME_BUDGET` = 2 s) covering Merman's work only. Failures are `MermaidError::RenderFailed`: parse errors, unknown types, ZenUML (by header), math labels (`$$…$$`, math not compiled in), and an exceeded budget. Themes `Dark`/`Default`/`Forest`/`Neutral` currently map to Merman's built-in themes of the same name; compiled palettes are **planned**. Details: [Mermaid Rendering](./mermaid-rendering.md).
+`mermaid::MermaidDiagram::render` builds the font chain, rewrites the source (`\n` → `<br/>` labels for class, ER, mindmap, requirement; `commitSpacing` for a tagged LR gitGraph whose tags collide, found with one Merman `layout_json` pass), checks the cache, and on a miss calls Merman (fork `yankeeinlondon/merman` rev `6e6b1e6554e8`) for a resvg-safe SVG measured with our `LabelMeasurer`, with the diagram's palette compiled into one Merman theme for its family, then post-processes (solid gradient strokes, `sans-serif` default, palette accents, the 4.5:1 text contrast pass; for SVG with `with_target(MermaidTarget::HtmlStatic)`, measured face first in every `font-family` and visible label overflow, never in PNG), paints the background, and rasterizes for PNG. Each Merman request has its own deadline (`with_time_budget`, default `DEFAULT_TIME_BUDGET` = 2 s) covering Merman's work only. Failures are `MermaidError::RenderFailed`: parse errors, unknown types, ZenUML (by header), math labels (`$$…$$`, math not compiled in), and an exceeded budget. Themes `Dark`/`Default`/`Forest`/`Neutral` are fixed `Palette`s (from Mermaid.js's same-named themes, never Merman built-ins); the terminal component uses `Palette::for_terminal(&TerminalColors::detect(), …)` (ANSI 1–6 accents, background-derived accents when unknown). An author `%%{init}%%` color or named theme displaces the compiled theme. Details: [Mermaid Rendering](./mermaid-rendering.md).
 
 ### Themes and Quadrant Config
 
 ```rust
-use biscuit_visualized::mermaid::{MermaidConfig, MermaidDiagram, MermaidTheme, QuadrantTheme};
+use biscuit_visualized::mermaid::{MermaidConfig, MermaidDiagram, MermaidTheme, Palette, QuadrantTheme, Rgb, TerminalColors};
 
 let theme = MermaidTheme::for_color_mode(true);  // true = Dark, false = Default
+let palette = Palette::for_terminal(&TerminalColors { background: Rgb::from_hex("#1a1b26"), ..TerminalColors::default() }, true);
 let config = QuadrantTheme::MagicQuadrangle.apply(MermaidConfig::default(), true);
 let diagram = MermaidDiagram::new("quadrantChart\n  ...").with_config(config).with_theme(theme);
 ```
@@ -92,7 +93,7 @@ let req = RenderRequest::default().with_target_width(540).with_row_height(18); /
 `target_width` takes precedence over `scale`; `row_height` pads PNG height (ignored for SVG). `Background` is `Theme` (default) | `Transparent` | `Solid { r, g, b }`.
 
 - Cache location: `$TMPDIR/biscuit-visualized/v1/{mermaid|graph}/{svg|png}/` (or `$BISCUIT_VISUALIZED_CACHE_DIR/v1/`)
-- Key: xxHash of `v2 | kind | source | options | backend_id | format`. Mermaid hashes the **rewritten** source, backend `merman@6e6b1e6554e8+bv1`, and options: site-config hash (theme + `MermaidConfig`), font identity, title, and `RenderRequest::cache_identity()`. See [Artifacts & Caching](./artifacts-caching.md)
+- Key: xxHash of `v2 | kind | source | options | backend_id | format`. Mermaid hashes the **rewritten** source, backend `merman@6e6b1e6554e8+bv2`, and options: styling hash (site config + compiled design + every palette color), font identity, title, and `RenderRequest::cache_identity()`. See [Artifacts & Caching](./artifacts-caching.md)
 - `RenderedArtifact.cache_hit` reports a hit; no automatic cleanup
 
 ## Relationship to biscuit-terminal
@@ -128,6 +129,8 @@ RasterError::{SvgParseFailed(String), RenderFailed(String), IoError(io::Error)}
 | `mermaid/gitgraph.rs` | `GitGraphGeometry` types (doc-hidden), `TAG_GAP_EM`, `default_gitgraph_commit_step()` |
 | `mermaid/postprocess.rs` | Gradient-stroke fix, `sans-serif` default |
 | `mermaid/config.rs` | MermaidTheme, MermaidConfig, QuadrantTheme |
+| `mermaid/{color,palette}.rs` | `Rgb`, `Palette`, `TerminalColors` |
+| `mermaid/{design,accents,contrast}.rs` | Per-family compiled designs, accent edits, text contrast pass |
 | `graph/{expression,dot,builder,render}.rs` | Expression parser, DOT, GraphBuilder, GraphDiagram |
 | `cache/file_cache.rs` | `FileCache`, `MERMAID_BACKEND` |
 | `raster/png.rs` | SVG-to-PNG rasterization via resvg |
@@ -158,4 +161,5 @@ just -f biscuit-visualized/justfile lint    # Run clippy
 
 - Graph SVG post-processing trims layout-rs canvas padding and applies custom fonts/colors; layout-rs supports LR and TB
 - Rasterization draws text through `fonts::default_chain()` (lazily built behind `OnceLock`); see [Rasterization](./rasterization.md#font-database-and-resolution)
-- Bump `+bv<n>` in `MERMAID_BACKEND` whenever the rewrites, post-process, or background change output; bump the rev part with the Merman pin
+- Bump `+bv<n>` in `MERMAID_BACKEND` whenever the rewrites, post-process, accents, contrast pass, or background change output; bump the rev part with the Merman pin
+- Merman precedence traps (guarded by `tests/theme_tests.rs`): a static node fill beats an ordinal palette; an unsupported rule erases a supported one; Mermaid variables (design or **site config**) override compiled styles; site `themeVariables` beat the source's own `%%{init}%%`

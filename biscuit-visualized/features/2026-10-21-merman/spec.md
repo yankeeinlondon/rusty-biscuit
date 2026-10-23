@@ -281,7 +281,8 @@ benchmark's placement, the measurer's direct crates, and a clean-room check;
 D67 amends D44 in place. D70–D72 record Ken's rulings of 2026-10-22 after
 Phase 2 (font identity in the cache key, the OSC 4 query on native Windows,
 and bounded implementer autonomy); D70 amends D41 and D63, and D71 amends
-D46, in place.
+D46, in place. D73 records Ken's ruling of 2026-10-23 after Phase 4 (findings
+that need a ruling do not stop the run); it amends D72 in place.
 
 ### D1. Decision rule: Ken decided from a scorecard, Merman favored *(amended 2026-10-21 by D30)*
 
@@ -1453,7 +1454,12 @@ evidence.
 - A terminal that does not answer gets background-derived accents (R-P4),
   as on any terminal.
 
-### D72. Bounded implementer autonomy *(pre-authorization; item 12 of [Pre-authorized preparatory work](#pre-authorized-preparatory-work))*
+### D72. Bounded implementer autonomy *(pre-authorization; item 12 of [Pre-authorized preparatory work](#pre-authorized-preparatory-work); amended 2026-10-23 by D73)*
+
+> **Amended by D73:** "stops" in the last paragraph below is narrowed. A
+> finding that needs Ken's ruling is flagged and the run continues with
+> every task that does not depend on the answer; the implementer stops only
+> under D73's stop conditions.
 
 Ken ruled on 2026-10-22. When implementation evidence invalidates a
 decision's premise, the implementer may proceed with an option that meets
@@ -1474,6 +1480,41 @@ The implementer then:
 If no option meets all three conditions, or the options trade off things
 Ken would weigh, the implementer stops and sets `human_review` in the
 implementation log, as before.
+
+### D73. Findings that need a ruling do not stop the run *(amends D72; pre-authorization; item 13 of [Pre-authorized preparatory work](#pre-authorized-preparatory-work))*
+
+Ken ruled on 2026-10-23, after the Phase 4 run stopped at its checkpoint for
+a ruling (Merman's serde_json `preserve_order` breaking 45 Darkmatter tests)
+that no Phase 5 or Phase 6 task depended on. Stopping a phased implementation
+is reserved for critical issues. Every finding that needs a decision is
+handled in exactly one of three ways:
+
+1. **Proceed.** An option meets D72's three conditions: amend this spec, log
+   it under "Decided during implementation", and flag it for review (D72,
+   unchanged).
+2. **Flag and continue (the default).** The finding needs Ken's ruling, but
+   the remaining work does not depend on the answer. The implementer adds it
+   to the implementation log's `human_review_items` with options and a
+   recommendation, sets `human_review: true`, marks the affected checkpoint
+   item **open** with a pointer to the finding, and continues with every
+   task and phase that does not depend on it. The open item is re-run once
+   Ken rules. A red checkpoint item is not by itself a reason to stop, and
+   the implementer never makes an open item green by accepting snapshots,
+   changing hashes, or loosening a test without the ruling.
+3. **Stop.** Only when continuing would be wasted or harmful:
+    - a later task's design or output depends on the answer;
+    - the next step is irreversible or outward-facing (pushing, posting,
+      filing, publishing);
+    - data, security, or a contract already shipped on `main` is at risk.
+
+   The implementer stops at the first dependent task, not before, and
+   `message_to_agent` names that task and what blocks it.
+
+Ken's gallery sign-off (AC-T5) before Phase 6 goldens is a planned stop
+under rule 3: goldens generated before it would be thrown away. Open items do
+not stop the run, but they do keep it from finishing: Phase 7's final
+verification cannot report "implementation complete, ready for review" while
+any checkpoint item is still open. It reports the open items instead.
 
 ## Rendering pipeline
 
@@ -1600,14 +1641,24 @@ Ken approved the following on 2026-10-22, after Phase 2:
     limit, and adds no new dependency, outward-facing action, or scope; then
     amend this spec, record the evidence and the choice under "Decided
     during implementation" in the implementation log, and flag it for the
-    review cycle. Otherwise stop and set `human_review`.
+    review cycle. Otherwise handle it under item 13 (D73).
+
+Ken approved the following on 2026-10-23, after Phase 4:
+
+13. **Findings that need a ruling do not stop the run (D73).** When a
+    finding needs Ken's ruling but the remaining work does not depend on
+    the answer, record it in `human_review_items`, set `human_review: true`,
+    mark the affected checkpoint item open, and continue. Stop only when a
+    later task depends on the answer, the next step is irreversible or
+    outward-facing, or data, security, or a contract on `main` is at risk;
+    stop at the first dependent task and name it.
 
 ## Phases
 
 The order follows the original draft. Which Merman-path steps can run in
 parallel is a planning question. As of 2026-10-22, S0–S3 and the Windows leg
 are done, Ken has chosen Merman (D30), and the rulings of 2026-10-22
-(D40–D72) are recorded. The gitGraph cutover starts with the `commitSpacing`
+(D40–D72) are recorded; D73 (2026-10-23) narrows when the implementer stops. The gitGraph cutover starts with the `commitSpacing`
 patch on Ken's fork (D56).
 
 ```mermaid
