@@ -4,6 +4,14 @@ created: 2026-10-21
 phase: 1
 agent: "claude/sonnet"
 yolo: "true"
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+    - schematic/features/2026-10-20-type-constraints/spikes/s1-lossless-numbers.md
+    - schematic/features/2026-10-20-type-constraints/spikes/s2-schemars-output.md
+    - schematic/features/2026-10-20-type-constraints/spikes/s3-body-encode-reuse.md
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Type constraints implementation plan
@@ -126,7 +134,7 @@ change a default above, as an adaptation.
 
 ### Wave 1: Dependency and contract check
 
-- [ ] **Confirm prerequisites**
+- [x] **Confirm prerequisites**
   - Read `2026-10-14-schematic-definition-api` and `2026-10-12-schematic-endpoint-methods`
     implementation state. Verify the spec's "current contracts" against code:
     `FieldDef`, `ParamDef`, `SchemaComponent`, `EndpointSpec::into_parts`,
@@ -152,7 +160,7 @@ change a default above, as an adaptation.
   - Create `implementation-log.md` in this directory: spec/plan identifiers,
     implementer, packages touched, per-phase files, adopted defaults, deviations,
     review agenda.
-- [ ] **Inventory touchpoints**
+- [x] **Inventory touchpoints**
   - Locate (do not edit): where `import --definitions-out` emits Rust definitions
     and Schemars attributes; the parameter/body/form builders; where generated
     code is asserted against `ABI`; `just _doctest`, `test-schema`, and
@@ -162,25 +170,25 @@ change a default above, as an adaptation.
 
 ### Wave 2: Spikes (parallel, read-only except scratch fixtures)
 
-- [ ] **Spike S1**
+- [x] **Spike S1**
   - Ownership: scratch crate/fixture directory only, outside package sources.
   - Output: a table of loss points and the chosen carry strategy.
-- [ ] **Spike S2**
+- [x] **Spike S2**
   - Ownership: scratch fixture only. Output: keyword/attribute expressibility
     table and a nullable-shape catalogue that becomes a Phase 5 fixture.
-- [ ] **Spike S3**
+- [x] **Spike S3**
   - Ownership: read-only. Output: one-paragraph body-reuse design for Phase 5.
 
 ### Wave 3: Baselines and decisions
 
-- [ ] **Capture baselines**
+- [x] **Capture baselines**
   - Run `just test` and `just lint` to record the starting state; confirm the
     GitHub `.page_size(500).fetch_page().await` refusal exists today and keep its
     test as the regression anchor.
   - Count existing constraint keywords present across committed OpenAPI
     artifacts and imported definitions (a derived number, not hard-coded) to size
     the preservation fixture and regeneration diff.
-- [ ] **Freeze decisions**
+- [x] **Freeze decisions**
   - Apply S1–S3 to rules 1, 3, and 9; fix the exact-number dependency; amend the
     log with any adaptation. Integrator adds the dependency stanzas later, in the
     phase that first needs them.
