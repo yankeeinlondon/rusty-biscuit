@@ -23,10 +23,11 @@ status: draft-spec
 reviewed: false
 review_iterations: 0
 clarified: false
-implemented: false
+implemented: true
 related:
     - 2026-10-23-remove-stopped-by-list
     - 2026-10-18-remove-observation-under-load
+implemented_by: claude/opus
 ---
 
 # `wt remove` fills `.git` with recovery data it never cleans up

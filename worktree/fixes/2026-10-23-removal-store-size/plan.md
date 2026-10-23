@@ -51,7 +51,56 @@ docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/worktree/remove.md
     - .claude/skills/worktree/lifecycle.md
-start_phase: 3
+start_phase: 4
+source_files_during_phase_3:
+    - Cargo.toml
+    - worktree/lib/src/remove/recovery/journal.rs
+    - worktree/lib/src/remove/recovery/mod.rs
+    - worktree/lib/src/remove/observation/inventory.rs
+    - worktree/lib/src/remove/recovery/store/tests.rs
+    - worktree/lib/src/remove/recovery/store/tests/journal_size.rs
+    - worktree/lib/src/remove/lifecycle/tests.rs
+    - worktree/lib/src/remove/lifecycle/tests/resume_consent.rs
+    - worktree/cli/tests/remove_recovery.rs
+docs_updated_during_phase_3:
+    - worktree/docs/cli/remove.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/remove.md
+    - .claude/skills/worktree/lifecycle.md
+source_code:
+    - Cargo.lock
+    - Cargo.toml
+    - worktree/lib/Cargo.toml
+    - worktree/lib/src/remove/outcome.rs
+    - worktree/lib/src/remove/lifecycle.rs
+    - worktree/lib/src/remove/recovery/mod.rs
+    - worktree/lib/src/remove/recovery/journal.rs
+    - worktree/lib/src/remove/recovery/store.rs
+    - worktree/lib/src/remove/recovery/store/entries.rs
+    - worktree/lib/src/remove/recovery/store/retention.rs
+    - worktree/lib/src/remove/recovery/store/tests.rs
+    - worktree/lib/src/remove/recovery/store/tests/saved_report.rs
+    - worktree/lib/src/remove/recovery/store/tests/journal_size.rs
+    - worktree/lib/src/remove/observation/inventory.rs
+    - worktree/lib/src/remove/observation/deletion/tests.rs
+    - worktree/lib/src/remove/lifecycle/tests.rs
+    - worktree/lib/src/remove/lifecycle/tests/resume_consent.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/commands/remove/recovery.rs
+    - worktree/cli/tests/remove_recovery.rs
+    - worktree/cli/tests/snapshots/remove_recovery_report__a_git_command_in_the_moved_checkout.snap
+    - worktree/cli/tests/snapshots/remove_recovery_report__a_stop_after_partial_discovery.snap
+    - worktree/cli/tests/snapshots/remove_recovery_report__long_lists_are_counted_and_uncertain_entries_named.snap
+    - worktree/cli/tests/snapshots/remove_recovery_report__the_specs_example.snap
+documentation:
+    - worktree/docs/cli/remove.md
+    - worktree/README.md
+    - docs/dependencies.md
+    - .claude/skills/worktree/remove.md
+    - .claude/skills/worktree/lifecycle.md
+completed_phase: 3
+implemented: true
 ---
 
 # Removal store size implementation plan
@@ -150,7 +199,7 @@ Validation checkpoint: `just test` and `just lint` from `worktree/`; inspect cha
 
 ### Wave 4
 
-- [ ] **Implement indexed batches**
+- [x] **Implement indexed batches**
   - Implement rules 11–12 in `recovery/journal.rs`, retaining the deletion engine's public call contract. Keep version-specific wire representations private and normalize before replay.
   - Extend `recovery/store/tests.rs::journal_robustness_matrix` with frozen valid version 2 bytes and version 3 writer output. Retain common inventory checks once through their shared validator, with a control and invalid wiring case in each version branch. Keep all reopen crash-point and generation-deduplication tests.
   - For required version 3 `intent.entries` and `results.states`, cover absent, null, wrong whole-field type, one wrong element, every element wrong, and empty. Both arrays must be nonempty for an actual batch. For indices additionally cover zero, last valid index, first out-of-range, negative, fractional, string, and integer conversion overflow. For states cover all valid enum strings plus unknown, numeric, null, and empty values. Test both too few and too many states, changed batch number, results with no open intent, repeated results, nonconsecutive intents, more than 256 entries, mixed parents, and duplicates within/across batches.
@@ -160,12 +209,12 @@ Validation checkpoint: `just test` and `just lint` from `worktree/`; inspect cha
 
 ### Wave 5
 
-- [ ] **Verify migration size**
+- [x] **Verify migration size**
   - Add an L1 persisted-store fixture in `recovery/store/tests.rs` with exactly 100,000 file paths, each exactly 150 ASCII bytes, using a shared `target/` prefix, padding, and a six-digit unique suffix. Use synthetic `DeletionInventory` and `JournalEntry` data with real temporary store files; do not create or unlink 100,000 real files. Include identical record metadata, bounded deleted preview, and complete entry states in both comparisons.
   - Build the old completed-folder baseline with a test-only frozen version 5 pretty-JSON representation containing the full inline list and the same `record.json`. Old completed journals were already deleted; exclude them from the baseline. Measure actual logical file lengths of the completed new folder, including record, report, and gzip and any accidentally retained journals/temporaries. Exclude the sibling `locks/` directory from both. Assert `new_bytes * 100 < old_bytes * 5`, gzip entry equality, and absence of journals after completion. Report sizes in assertion diagnostics; impose no timing SLA.
   - Add a separate stopped-store comparison for the same synthetic inventory using bounded full batches: produce frozen version 2 and actual version 3 journals, verify identical normalized replay, and assert version 3 batch-line bytes are smaller. Count header/inventory separately to demonstrate that this change preserves the inventory cost. No extra cross-host timing experiment is scheduled.
   - Extend `lifecycle/tests.rs` migration coverage with a pending version 5 report, version 2 archived/current journals, and a fresh version 3 attempt. Stop, resume, and complete through lifecycle APIs; assert generation order, no duplicate accounting, uncertainty preservation, metadata carry-forward, complete gzip entries, and final journal removal.
-- [ ] **Document journal format**
+- [x] **Document journal format**
   - May run concurrently with migration/size verification; owns documentation and skill topic files only. Update `docs/cli/remove.md` with version 3 index/state examples, unchanged inventory approval, mixed-generation reading, and continued version 2 support. Preserve the accessible recovery flow and add a compact Mermaid diagram showing journals → atomic entries/report save → completion → journal removal → retention cleanup.
   - Update `.claude/skills/worktree/remove.md` journal facts and `.claude/skills/worktree/lifecycle.md` completion facts; audit `recovery/mod.rs`, `journal.rs`, `store.rs`, and `outcome.rs` comments against the final implementation. Remove drift introduced by the old “only version” wording and report-inline entry references. Do not link current docs to a feature/fix snapshot.
 
