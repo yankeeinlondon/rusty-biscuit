@@ -172,7 +172,7 @@ paging as `ErrorKind::Declared(GraphQlOperationError::GraphQl(..))`, and
 partial data never joins collected items. Page it with
 `client.send(req).pager().page_size(50).collect_all().await`. REST endpoints
 inherit the default `Paginated::page_root` (the whole body); a custom root
-returns `PageRootError::{Declared, Malformed}`. Runtime `ABI` is 7.
+returns `PageRootError::{Declared, Malformed}`. Runtime `ABI` is 8.
 
 ## Provider notes
 

@@ -33,6 +33,9 @@ and tested once instead of being regenerated into every API module:
 - declared error bodies, chosen by status from each endpoint's error table
 - JSON response hooks
 - metadata that is redacted when it is captured, so it is always safe to log
+- request-side constraint checks (`validate`): string length and pattern,
+  exact numeric bounds and `multipleOf`, array counts and uniqueness, and
+  `enum`/`const`, reported without any submitted value
 
 The runtime never retries, and it cannot be handed an HTTP client: it builds
 every HTTP client itself, with the library's own redirect following turned

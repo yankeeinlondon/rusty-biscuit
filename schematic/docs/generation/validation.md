@@ -144,6 +144,7 @@ The same fields are available to code as
 | `query-parameter`: a query enum declares no values | ✓ | | | error |
 | `websocket-definition`: a shipped WebSocket definition cannot be lowered into its module (see [WebSocket definitions](#websocket-definitions)) | ✓ | | | error, or warning for a repeated base/path segment and other non-blocking findings |
 | `generated-name-collision`: two values of a query or path enum generate one variant, or a generated enum's name is already emitted in the module | ✓ | | | error |
+| `type-constraint`: a value constraint on a parameter, form field, or request body root contradicts itself or its value's type, the same check API build applies (see [value constraints](../value-constraints.md#definition-errors)); the message names the input path and keyword, for example ``query.limit `minimum` leaves no number between the lower and upper bounds`` | ✓ | ✓ | ✓ | error |
 | `pagination-strategy`: a pagination strategy is malformed, alone or on its endpoint (see below) | ✓ | | | error |
 | `pagination-exception`: an endpoint collection has an unusable item selector, item type, item location, or alternates | ✓ | | | error |
 | `pagination-parameter`: a strategy input collides with a declared parameter it cannot adopt, adopts one without the knob that replaces it, or manages a required one without a value to send | ✓ | | | error |
@@ -270,7 +271,9 @@ The rules, by feature id:
   `alternates-on-unpaginated`, `duplicate-label`, `invalid-label`.
 - `pagination-parameter`: `collides-with-endpoint-param`,
   `adoption-without-knob`, `pager-managed-required-without-default`,
-  `pager-managed-default-invalid`.
+  `pager-managed-default-invalid`, `page-size-constraint-conflict` (the
+  adopted page-size parameter declares bounds other than the strategy's, or a
+  rule the pager cannot enforce; see [pagination](../pagination.md)).
 
 An API default's own shape is reported once, with `endpoint=<none>`; each
 endpoint that inherits it is checked only for what depends on the endpoint.
@@ -481,7 +484,9 @@ The message starts with where in the definition the finding is:
     from a non-empty `params.path`, or a path parameter that is not a
     required `simple` scalar
   - a query parameter declared twice, an enum or JSON query value, or a
-    query style the REST rules cannot send; any header or cookie parameter
+    query style the REST rules cannot send; any header or cookie parameter;
+    value constraints on any handshake parameter, which a handshake does not
+    enforce
   - empty correlation field paths, an empty `responds_with`, an empty
     selector field, an empty auth-flow name or indicator, and a zero
     correlation timeout, heartbeat interval, or heartbeat timeout

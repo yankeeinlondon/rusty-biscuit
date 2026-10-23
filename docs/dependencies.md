@@ -7,6 +7,18 @@
 
 ## Recent Dependency Notes
 
+- `schematic-define` adds `regex` 1 and `regex-syntax` 0.8 as production
+  dependencies (2026-10-23) to decide which constraint patterns a generated
+  client can enforce. Both were already in the workspace graph, so the root
+  lockfile and `schematic/schema/Cargo.lock` gain edges and no package. See
+  `schematic/docs/dependencies.md`.
+- `schematic-runtime` adds `num-bigint` 0.4 and `regex` 1 as production
+  dependencies (2026-10-23) for its `validate` module: exact decimal numbers
+  for numeric constraints, and lazily compiled `pattern` rules. Both were
+  already in the workspace graph, so the root lockfile gains edges and no
+  package; `schematic/schema/Cargo.lock` gains `num-bigint` and
+  `num-integer`. See
+  `schematic/docs/dependencies.md`.
 - Generated REST clients send through `schematic-runtime` (2026-10-12):
   the regenerated `schematic-schema` depends on `schematic-runtime` and no
   longer on `reqwest`, and re-exports the runtime, so its dependents need no
@@ -702,7 +714,7 @@ This is a Rust workspace with the following modules:
 
 - [schematic-runtime](./schematic/runtime) _v0.1.0_
 
-    _Request runtime shared by generated REST clients: managed client and typed send, response envelope, errors, redaction, credentials, deadline, codecs._
+    _Request runtime shared by generated REST clients: managed client and typed send, response envelope, errors, redaction, credentials, deadline, codecs, request-side constraint checks._
 
     _Tags: workspace, library, api, http_
 

@@ -109,13 +109,18 @@ Each rule, with the error it produces:
   "base_url"`. Whitespace around the document is fine.
 - **No explicit null for an option.** Write the option or omit it:
   `"docs_url": null` fails with `bundle field /api/docs_url: explicit null`.
-  Two exceptions: values inside `api.schemas[].schema`, and an OAuth2 field the
+  Three exceptions: values inside `api.schemas[].schema`; an OAuth2 field the
   grant does not use (`authorization_url`, `device_authorization_url`, `pkce`),
-  which may be absent or null but never a value.
+  which may be absent or null but never a value; and a value constraint's
+  `allowed_values` and `constant`, where `null` is a value to compare against
+  (see [value constraints](../value-constraints.md)).
 - **Every member is kept.** A key the shape does not define fails as `unknown
   member` (or serde's `unknown field`) instead of being dropped, so a typo such
   as `"deprecatd": true` is an error. An explicit default the writer would omit
-  (`"deprecated": false`, `"path": []`, `"errors": []`) is accepted.
+  (`"deprecated": false`, `"path": []`, `"errors": []`, `"unique_items": false`) is accepted.
+- **Numeric constraint limits are strings.** `"maximum": "100"` keeps a bound
+  such as `"18446744073709551616"` or `"0.1"` exactly; a JSON number there
+  (`"maximum": 100`) is a wrong type, because reading it would narrow it.
 - **The definition is valid.** The checks `RestApi::builder(..).build()`
   applies run again: URLs, header names, rate-limit and retry bounds, OAuth2
   grant requirements, typed path declarations, endpoint authentication, and

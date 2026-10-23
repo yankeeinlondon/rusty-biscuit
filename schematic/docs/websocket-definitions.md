@@ -245,6 +245,8 @@ consumes warn (see [validation](generation/validation.md#websocket-definitions))
   `spaceDelimited`/`pipeDelimited` join with `%20`/`%7C`.
 - **header** and **cookie** parameters are not generated for a handshake and
   are an error; put constant handshake headers on the API's `headers`.
+- value **constraints** (`ParamDef::constraints`) on a handshake parameter are
+  an error: a handshake does not enforce them.
 
 The handshake URL is `base_url` followed by the substituted path, so a base
 path such as `wss://host/proxy` stays a prefix. The endpoint path must start

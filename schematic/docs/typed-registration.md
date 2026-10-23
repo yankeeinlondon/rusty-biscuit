@@ -201,6 +201,100 @@ Endpoint::post("Adopt", "/pets").request_json::<Pet>(&mut ctx) // references Pet
   example), the body is left empty with an `example-value` warning. See
   [Postman example values](io/export-postman.md#example-values).
 
+## Value rules on registered models
+
+A rule such as "a name is 1 to 40 characters" is written as a Schemars
+attribute on the model's field. Registration stores the generated JSON Schema
+keywords in the model's schema component, and that component is the rule's
+only source:
+
+```rust
+use schematic_define::{definition_type, DefinitionContext};
+use schemars::JsonSchema;
+use serde::Deserialize;
+
+definition_type! {
+    #[derive(JsonSchema, Deserialize)]
+    pub struct Signup {
+        #[schemars(length(min = 1, max = 40))]
+        pub name: String,
+        #[serde(rename = "displayName")]
+        #[schemars(regex(pattern = r"^[a-z][a-z0-9-]*$"))]
+        pub display_name: String,
+        #[schemars(length(max = 5), inner(length(max = 12)))]
+        pub tags: Vec<String>,
+        #[schemars(range(min = 1, max = 10))]
+        pub seats: Option<i32>,
+        #[schemars(extend("multipleOf" = 0.5))]
+        pub price: f64,
+    }
+}
+
+let mut context = DefinitionContext::types_in("::my_definitions::models");
+context.register::<Signup>()?;
+let components = context.components()?;
+let properties = &components[0].schema["properties"];
+assert_eq!(properties["name"]["maxLength"], 40);
+assert_eq!(properties["displayName"]["pattern"], "^[a-z][a-z0-9-]*$");
+assert_eq!(properties["tags"]["items"]["maxLength"], 12);
+```
+
+Each rule follows its field's wire name (`displayName` above), and a rule
+on a nested model lives in that model's own component.
+
+| JSON Schema keyword | Attribute |
+| --- | --- |
+| `minLength`, `maxLength` | `length(min = 1, max = 100)`, or `length(equal = 3)` for both, on a string |
+| `minItems`, `maxItems` | the same `length(..)`, on a `Vec` or set |
+| `pattern` | `regex(pattern = r"^[a-z]+$")` or `pattern(r"^[a-z]+$")` |
+| `minimum`, `maximum` | `range(min = 1, max = 100)`, or `range(equal = n)` |
+| `format` | `email`, `url` (writes `uri`), `ip`; otherwise `extend("format" = "uuid")` |
+| `exclusiveMinimum`, `exclusiveMaximum` | `extend("exclusiveMinimum" = 0)` |
+| `multipleOf` | `extend("multipleOf" = 0.1)` |
+| `uniqueItems` | implied by `HashSet`/`BTreeSet`; otherwise `extend("uniqueItems" = true)` |
+| `enum` | a Rust unit enum, or `extend("enum" = ["a", "b"])` |
+| `const` | `extend("const" = "fixed")` |
+| rules on each array item | `inner(length(..))`, `inner(range(..))`, `inner(regex(..))` |
+| rules on each map value | `extend("additionalProperties" = {..})`, which replaces the generated value schema |
+
+`format` is an annotation: nothing rejects a value for its format. Schemars
+also writes a Rust integer width's own bounds (`minimum: 0` on a `u32`,
+`0..=255` on a `u8`); those come from the type, not from an attribute.
+
+**A mismatched attribute vanishes silently.** Schemars writes a native rule
+only when the field's schema has the matching type, and reports nothing
+otherwise: `length` on an `i32`, `range` on a `String`, `length` on an
+`Option<Model>` (a reference has no type), and `inner(..)` on a `HashMap` or
+an `Option<String>` all produce no keyword. Check the stored component when a
+rule matters, and use `extend(..)` or a newtype whose own field carries the
+rule. `extend` is never checked, so it also accepts values that are not valid
+JSON Schema, and it overrides a native rule for the same keyword.
+
+Endpoints reference the component by name and store no copy of its rules. A
+model shared by several endpoints is stored once, and no endpoint can change
+it: `EndpointBuilder::request_constraints` on a JSON body whose root is a
+component fails the build. To constrain one endpoint differently, register a
+different model.
+
+A rule is enforceable only where the value's schema is a plain chain of
+properties, array items, map values, and `Option`s. An `anyOf` counts as an
+`Option` only when it has exactly two members and one admits only `null`; an
+untagged enum is an `anyOf` of its variants and does not. A rule beneath
+`oneOf`, any other `anyOf`, `allOf`, or `not`, or beside a `$ref` that names
+no component, is still stored and exported, but cannot be enforced.
+`schematic_define::constraints::unenforceable_rules(&api, &body)` lists each
+such rule with its component, JSON pointer, keyword, and reason:
+
+```rust,ignore
+let rules = unenforceable_rules(&api, &TypeRef::Named("Order".into()));
+// Order.choice is an untagged `enum Choice { Text(String), Number(i64) }`
+// whose variants carry `length(max = 3)` and `range(min = 1)`:
+// [(Some("Choice"), "/anyOf/0", "maxLength"), (Some("Choice"), "/anyOf/1", "minimum")]
+```
+
+Generated clients checking a registered model's rules before sending a request,
+and reporting the unenforceable ones, is **planned**.
+
 ## References in transferred definitions
 
 `TypeDesc` is an authoring handle only: it has no Serde derives and no public

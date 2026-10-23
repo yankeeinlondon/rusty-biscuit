@@ -27,6 +27,18 @@ and GraphQL: [`responses.md`](./responses.md). Pagination:
   inputs never distinguish two endpoints.
 - New defaulted (`skip_serializing_if`) members must join `OMITTED_DEFAULTS`
   in `define/src/bundle.rs`.
+- Value constraints (`define/src/constraints/`): the fields are
+  `Option<Box<Constraints>>` (an inline one overflowed the debug stack of the
+  imported OpenAI builders); `Constraints` is
+  `#[non_exhaustive]` with `Default` (allow-listed); every `Option` member uses
+  `serde_presence::non_null` so `null` is an error, not absent, except
+  `allowed_values`/`constant` data, which the bundle's `reject_nulls` and
+  `omit_nulls` exempt (`is_constraint_data`). Adding a `ParamDef`,
+  `FormField`, or `Endpoint` field breaks every struct literal in define,
+  gen, and the generated `definitions/src/openai/mod.rs` (emitted by
+  `gen/src/definition_gen.rs` `param_def_tokens`); `import_overlay` pins
+  two deliberate re-import differences, so patch that file to the
+  generator's form rather than adopting the whole re-import.
 
 ## Typed registration
 

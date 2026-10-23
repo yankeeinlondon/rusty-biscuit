@@ -66,7 +66,7 @@ requests use `GraphQl<D>` and `GraphQlOperationError<D, H>` and are sent with
 `client.send(Request::new(vars))` (no endpoint method). Paging uses
 `schematic_define::pagination::Relay::{forward, backward}` (one direction per
 pager; pager-managed variables must be optional) and generates
-`Paginated::page_root = graphql::page_data`. Runtime `ABI` is 7. Detail:
+`Paginated::page_root = graphql::page_data`. Runtime `ABI` is 8. Detail:
 [`responses.md`](./schematic/responses.md#graphql-operations).
 
 ### 4) Request bodies reach the client (all variants)
@@ -105,6 +105,28 @@ API `.default_pagination(strategy)` plus endpoint `.pagination(Collection)`;
 inference applies only to a GET whose sole shape is JSON `Vec<T>`. Every list
 needs a row in `definitions/tests/pagination_coverage/`. Detail:
 [`pagination.md`](./schematic/pagination.md).
+
+### 8) Value constraints have one source each
+
+`schematic_define::constraints::Constraints` (fluent: `min_length`,
+`max_length`, `pattern`, `unenforced_pattern`, `format`, `minimum`, `maximum`,
+`exclusive_minimum`, `exclusive_maximum`, `multiple_of`, `min_items`,
+`max_items`, `unique_items`, `allowed_values`, `constant`, `items`) attaches via
+`ParamDef::constraints`, `FormField::constraints` (text/JSON fields), and
+`EndpointBuilder::request_constraints` (text body or a non-component JSON
+root). Registered models carry rules as Schemars attributes only; a rule on a
+component body, file field, binary/form body, or WebSocket handshake param is
+an error. Numeric limits are decimal text (`"18446744073709551616"`, `"0.1"`;
+serialized as JSON strings). Endpoint/API build, bundle load, and the
+generator's `type-constraint` check all run `constraint_problems`
+(`DefinitionError::InvalidConstraint { api, problem: Box<ConstraintProblem> }`).
+`admit_pattern` decides the enforced ECMAScript subset (table and test:
+`schematic/docs/value-constraints.md`); `format` is annotation-only. A pager-
+adopted page-size param takes `minimum`/`maximum` from the strategy
+(`page_size_constraints`, `adopted_page_size`); its own differing bounds or
+other rules are `page-size-constraint-conflict`. `unenforceable_rules` finds
+model rules beneath unsupported composition or unresolved refs. Generated
+requests do not enforce constraints yet.
 
 ## Generated-Client Contracts To Keep In Sync
 

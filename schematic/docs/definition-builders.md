@@ -67,6 +67,8 @@ For authentication, `no_auth()`, `bearer_env(names)`, and `basic_env(username, p
 
 Headers, query parameters, complete parameter sets, documentation URL, version, module path, request suffix, and API cross-origin policy retain the current stored representation and generator precedence. Endpoint headers override matching API headers through the generator's existing merge. Builders preserve declaration order. Endpoint `cross_origin(policy)` replaces the API policy for that endpoint, including redirects and followed pagination links. `allow_origins` accepts only bare HTTP(S) origins, with an optional port and trailing slash; paths, user information, queries and fragments fail API build. Caller policy settings may only tighten each applicable definition policy. Runtime-only origin and redaction settings are not represented as OpenAPI/Postman transport behavior.
 
+Value rules (`minimum`, `max_length`, `pattern`, `enum`, ...) attach to a parameter with `ParamDef::constraints(Constraints::new()..)`, to a text or JSON form field with `FormField::constraints(..)`, and to a text body or a JSON body whose root is not a schema component with `request_constraints(..)`; a registered model carries its own rules as Schemars attributes. Build fails with `DefinitionError::InvalidConstraint` for a rule that contradicts itself or its value's type. See [value constraints](value-constraints.md).
+
 Declare a parameter location with `query(param)`, `header_param(param)`, or `cookie(param)`. Path parameters are the placeholders in the path template; type them with `path_param(param)` (see [below](#paths-deprecation-rate-limits-and-endpoint-authentication)). Request methods declare the body location. Constant headers still use `header(name, value)`. Location never changes route identity.
 
 ```rust
@@ -233,6 +235,7 @@ The public defaults below remain meaningful; the audit test checks the shipped s
 | `EndpointParams` | Empty parameters describe a valid endpoint. |
 | `AuthStrategy`, `AuthPolicy` | Anonymous auth / no accepted auth or fallback is a valid policy. |
 | `CrossOrigin` | Same-origin is the safe complete policy. |
+| `Constraints` | No value rules, the same as declaring none. |
 | `EnvMapping`, `Headers` | No environment credentials or extra headers is valid. |
 | `SensitiveString` | An empty secret is valid data; it makes no authentication claim. |
 | `PkceRequirement`, `OAuth2ClientAuthMethod` | Required PKCE / client-secret Basic are explicit complete protocol defaults. |

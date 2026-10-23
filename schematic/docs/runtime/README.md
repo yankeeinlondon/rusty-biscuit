@@ -68,6 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | [Codecs and decoding](./codecs.md) | how an endpoint fixes its result type, the `Decode` and `ErrorBody` traits, `LiveBody`, the stream and multi-shape codecs, and what a codec that runs hooks must do |
 | [GraphQL operations](../graphql.md) | the GraphQL address, how a reply's `errors` and `data` are classified, and paging an operation |
 | [Metadata and redaction](./metadata-and-redaction.md) | `RequestMeta`, `ResponseMeta`, request ids, and which values are redacted |
+| [Request validation](./validation.md) | the request-side constraint checks: what each rule means, exact numbers, patterns, the violation report and why it is safe to log |
 | [Pagination](../pagination.md) | `collect_all`, `pages()`, `fetch_page()`, the pager's controls, `Incomplete` and `PagerError`, sessions, and partitions |
 
 How a request struct's fields become a URL, headers, and body is covered by

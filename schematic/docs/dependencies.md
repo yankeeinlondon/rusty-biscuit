@@ -37,6 +37,18 @@
 - `schemars` v1 generates provider-neutral typed registrations with OpenAPI 3.0 settings.
 - `serde_json` v1 is an unconditional production dependency for schema component wire schemas and transfer data.
 
+- [regex-syntax](https://github.com/rust-lang/regex/tree/master/regex-syntax) _v0.8_ [📄](https://docs.rs/regex-syntax)
+
+    _Parses a constraint's `pattern` into an AST so `constraints::admit_pattern` can decide whether the ECMAScript source means the same under Rust's `regex`, and rewrite `\d`/`\w` to their ASCII classes._
+
+    _Tags: regex, validation_
+
+- [regex](https://github.com/rust-lang/regex) _v1_ [📄](https://docs.rs/regex)
+
+    _Proves an admitted pattern compiles within the runtime's default size limits, so a definition never promises a pattern the generated client cannot enforce._
+
+    _Tags: regex, validation_
+
 - [serde](https://github.com/serde-rs/serde) _v1.0_ [📄](https://serde.rs)
 
     _Industry-standard serialization framework providing derive macros for automatic trait implementation._
@@ -204,8 +216,8 @@
 ## schematic-runtime
 
 Every crate below was already in the workspace graph, so adding the runtime
-adds no package to `Cargo.lock`. Every production dependency is also already
-in `schematic/schema/Cargo.lock`, so the generated crate can depend on the
+adds no package to `Cargo.lock`. The generated crate's own
+`schematic/schema/Cargo.lock` records them too, so it builds against the
 runtime offline. The runtime does not depend on `schematic-define`, and it
 keeps HTTP-library types out of its `Decode` boundary: a codec reads a byte
 stream, not a library response.
@@ -241,6 +253,18 @@ stream, not a library response.
     _`Method`, `StatusCode`, and `HeaderMap` for request parts and metadata; repeated headers stay repeated._
 
     _Tags: http, types_
+
+- [num-bigint](https://github.com/rust-num/num-bigint) _v0.4_ [📄](https://docs.rs/num-bigint)
+
+    _The arbitrary-precision mantissa of `validate::Decimal`, so numeric constraints (bounds beyond `u64`, decimal `multipleOf` divisors such as `0.1`, and number equality in `enum`, `const`, and `uniqueItems`) are exact rather than floating point._
+
+    _Tags: numbers, validation_
+
+- [regex](https://github.com/rust-lang/regex) _v1_ [📄](https://docs.rs/regex)
+
+    _Matches `validate::Pattern` rules, each compiled once per process on first use; the generator writes only patterns it has proven equivalent to the definition's._
+
+    _Tags: regex, validation_
 
 - [reqwest](https://github.com/seanmonstar/reqwest) _v0.13_ [📄](https://docs.rs/reqwest)
 

@@ -26,6 +26,12 @@ There are no API exception tables or parameter-level legacy pagination fields.
   The generator writes `ManagedRole::sent_default` into `into_parts` for a
   required adopted param, so an ordinary send still carries it; the pager
   replaces it.
+- The adopted page-size param's effective bounds come from the strategy
+  (`page_size_constraints(&PageSize)`, `adopted_page_size(api, ep)`); a
+  declared param must repeat exactly `minimum = min`/`maximum = max` or
+  declare none, and no other value rule (`format` allowed), else
+  `page-size-constraint-conflict` (`PaginationError::PageSizeConstraintConflict`).
+  The runtime pager keeps its own page-size check.
 - `validate_pagination` feeds `schematic-gen`'s `validate_rust_client` as the
   `pagination-strategy` / `pagination-exception` / `pagination-parameter`
   features.

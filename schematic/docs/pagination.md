@@ -633,6 +633,39 @@ without a `"50"` value. An ordinary `.await` of the endpoint sends
 that value too; an optional adopted parameter is omitted from an ordinary
 send.
 
+#### Page-size bounds on the adopted parameter
+
+The pager sends the page size, so the strategy's `PageSize` is where its
+bounds live: `min` (default 1) and `max` become the adopted parameter's
+`minimum` and `maximum`. `pagination::page_size_constraints(&size)` returns
+those rules, and `pagination::adopted_page_size(&api, &endpoint)` returns
+the adopted page-size parameter (its location, name, and effective rules) so
+exports and generated docs can show the bounds.
+
+Declare the parameter with no rules and the bounds come from the strategy.
+If it declares its own rules, they must agree, or API build and bundle load
+fail with `page-size-constraint-conflict`:
+
+- `minimum` and `maximum`, when either is present, must be exactly the
+  strategy's `min` and `max`. Declare `maximum` exactly when the strategy
+  has a `max`; `maximum` alone, or `minimum` alone while the strategy has a
+  `max`, is rejected.
+- No other value rule is allowed (`exclusiveMinimum`, `multipleOf`, `enum`,
+  `pattern`, and so on), because the pager chooses the value and could not
+  honor it. `format` is only an annotation and is allowed.
+
+```rust
+.default_pagination(Strategy::page_number("page", MoreSignal::NonEmptyPage)
+    .page_size(PageSize::new("per_page").min(5).max(100)).build())
+// on the endpoint:
+.query(ParamDef::new("per_page", QueryParamType::Integer)
+    .constraints(Constraints::new().minimum(5).maximum(50)))
+```
+
+```text
+Items endpoint ListItems: page-size-constraint-conflict: page-size parameter `per_page` declares minimum 5 and maximum 50, but the strategy's page size has min 5 and max 100; declare exactly those bounds or none
+```
+
 Adoption changes only the Rust client. The OpenAPI and Postman exports keep
 every declared parameter. A remaining setter named like a pager control
 gains a `_param` suffix; see

@@ -164,7 +164,7 @@ proven by the `slow_` test `module_features::slow_feature_selections_compile_onl
 
 ```rust
 // lib.rs: the runtime ABI this crate was generated for, checked at compile time
-pub const SCHEMATIC_RUNTIME_ABI: u32 = 7;
+pub const SCHEMATIC_RUNTIME_ABI: u32 = 8;
 const _: () = assert!(schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI, "...; regenerate the crate ...");
 pub use schematic_runtime;
 
