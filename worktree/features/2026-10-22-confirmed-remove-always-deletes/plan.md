@@ -123,6 +123,51 @@ skills_files_updated_during_phase_5:
     - .claude/skills/worktree/SKILL.md
     - .claude/skills/worktree/confirmed.md
     - .claude/skills/os/windows.md
+source_files_during_phase_6:
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/env.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/commands/remove/policy.rs
+    - worktree/cli/src/commands/remove/report.rs
+    - worktree/cli/src/commands/remove/outcome.rs
+    - worktree/cli/src/commands/remove/interrupt.rs
+    - worktree/cli/src/commands/remove/recovery.rs
+    - worktree/cli/src/commands/remove/usage.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/cli/tests/remove_recovery.rs
+    - worktree/cli/tests/wrapper_protocol.rs
+    - worktree/cli/tests/level2_remove.rs
+    - worktree/cli/tests/level2_powershell_remove.rs
+    - worktree/cli/tests/powershell_wrapper_exec.rs
+    - worktree/cli/Cargo.toml
+    - worktree/cli/tests/remove_recovery_report.rs
+    - worktree/cli/tests/remove_usage_refusal.rs
+    - worktree/cli/tests/snapshots/remove_recovery_report__*.snap
+    - worktree/cli/tests/snapshots/remove_usage_refusal__*.snap
+    - worktree/lib/src/remove/confirmed.rs
+    - worktree/lib/src/remove/confirmed/branches.rs
+    - worktree/lib/src/remove/confirmed/resume.rs
+    - worktree/lib/src/remove/confirmed/tests.rs
+    - worktree/lib/src/remove/facts.rs
+    - worktree/lib/src/remove/facts/tests.rs
+    - worktree/lib/src/remove/quarantine/rename.rs
+    - worktree/lib/src/remove/quarantine/rename/tests.rs
+    - worktree/lib/src/remove/remote.rs
+docs_updated_during_phase_6:
+    - worktree/README.md
+    - worktree/docs/cli/remove.md
+    - worktree/docs/cli/list.md
+    - docs/dependencies.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/worktree/confirmed.md
+    - .claude/skills/worktree/warnings.md
+    - .claude/skills/worktree/cli-contracts.md
+    - .claude/skills/worktree/remove.md
+    - .claude/skills/worktree/testing.md
+    - .claude/skills/os/macos.md
 ---
 
 # Plan: a confirmed `wt remove` always deletes
@@ -727,23 +772,23 @@ Goal: one question, one `--force`, quiet success.
 
 #### Wave 10 (parallel)
 
-- [ ] **Args and completions (R28)** — remove `--force-worktree`; usage error
+- [x] **Args and completions (R28)** — remove `--force-worktree`; usage error
   (exit 2) when supplied; update help text, examples, shell completions
   (bash/zsh/fish/PowerShell), and `cli/src/commands/remove/policy.rs` matrix.
-- [ ] **Question rendering** — via `biscuit-terminal` components (`Prose`,
+- [x] **Question rendering** — via `biscuit-terminal` components (`Prose`,
   `UnorderedList`); every process name, lock reason, path and Git message
   escapes terminal controls and renders as literal text; warning order puts the
   lock first; text says what was seen and what deleting will do; unknown counts
   described as unknown; message that files created or changed before deletion
   finishes are included.
-- [ ] **Policy** — `decide`: interactive → one question unless `--force`;
+- [x] **Policy** — `decide`: interactive → one question unless `--force`;
   non-interactive (stdin/stderr not TTY, or `CI` nonempty) → refuse exit 3
   listing what was seen when warnings exist, silent removal when clean;
   `--force` = yes everywhere including waits; branch questions unchanged.
 
 #### Wave 11 (sequential; depends on Wave 10)
 
-- [ ] **Execute and report** — `commands/remove/mod.rs`, `recovery.rs`, `report.rs`,
+- [x] **Execute and report** — `commands/remove/mod.rs`, `recovery.rs`, `report.rs`,
   `usage.rs`: wire the new lifecycle; stderr for human text, stdout only
   `cd:` / `remove-handoff:`; normal success prints no hidden dir, `Retry:`,
   report path or diagnostics; final line `Removed X (N entries)` with "unknown"
