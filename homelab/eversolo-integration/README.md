@@ -155,7 +155,7 @@ eversolo-integration \
 
 ### Authentication
 
-`schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleIntegrationWsHost` only requires the `auth-token` WebSocket header when `UCR_INTEGRATION_TOKEN` is set. If that environment variable is unset, the driver accepts unauthenticated connections and immediately returns a successful `authentication` response to the Remote.
+`schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleIntegrationWsHost` only requires the `auth-token` WebSocket header when `UCR_INTEGRATION_TOKEN` is set. If that environment variable is unset, the driver accepts unauthenticated connections, and its `WsHandler::on_authenticated` hook immediately sends a successful `authentication` response to the Remote.
 
 ```bash
 UCR_INTEGRATION_TOKEN=my-secret eversolo-integration --host 192.168.1.140
