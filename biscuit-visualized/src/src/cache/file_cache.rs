@@ -54,7 +54,7 @@ impl FileCache {
     /// Creates a new file cache.
     ///
     /// The cache directory is `$TMPDIR/biscuit-visualized/v1/`, or
-    /// `$BISCUIT_VISUALIZED_CACHE_DIR/v1/` when [`CACHE_DIR_ENV`] is set.
+    /// `$BISCUIT_VISUALIZED_CACHE_DIR/biscuit-visualized/v1/` when [`CACHE_DIR_ENV`] is set.
     ///
     /// ## Examples
     ///

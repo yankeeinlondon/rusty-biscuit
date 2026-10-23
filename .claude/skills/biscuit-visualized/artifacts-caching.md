@@ -146,7 +146,7 @@ cache.clear()?;  // Remove all cached files
 - `cache.clear()` removes all entries across all kinds and formats
 - Cache keys include the backend ID, so renderer upgrades automatically invalidate stale entries
 - `store` writes to a temp file in the cache directory and renames it into place, so a concurrent render of the same key never reads a half-written file (every writer of a key writes the same bytes, so the last rename wins harmlessly)
-- `$BISCUIT_VISUALIZED_CACHE_DIR` replaces `$TMPDIR` as the cache root (`$BISCUIT_VISUALIZED_CACHE_DIR/v1/`)
+- `$BISCUIT_VISUALIZED_CACHE_DIR` replaces `$TMPDIR` as the cache root (`$BISCUIT_VISUALIZED_CACHE_DIR/biscuit-visualized/v1/`)
 
 ## Rendering Flow
 

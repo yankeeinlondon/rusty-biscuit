@@ -106,7 +106,7 @@ impl MermaidTheme {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum QuadrantTheme {
-    /// Default Mermaid colors (no customization).
+    /// No quadrant overrides: the quadrants take the diagram's palette colors.
     #[default]
     Default,
     /// Magic Quadrangle style (Gartner-inspired): subtle green for top-right (leaders),
