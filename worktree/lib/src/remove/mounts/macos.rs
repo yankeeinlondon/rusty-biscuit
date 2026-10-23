@@ -22,7 +22,15 @@ pub(super) fn mounts() -> io::Result<Vec<Mount>> {
         // A full buffer may have cut the table short.
         if returned < capacity {
             table.truncate(returned);
-            return Ok(table.iter().map(|entry| Mount { mount_point: OsStr::from_bytes(&c_bytes(&entry.f_mntonname)).into(), source: String::from_utf8_lossy(&c_bytes(&entry.f_mntfromname)).into_owned() }).collect());
+            return Ok(table
+                .iter()
+                .map(|entry| Mount {
+                    mount_point: OsStr::from_bytes(&c_bytes(&entry.f_mntonname)).into(),
+                    source: String::from_utf8_lossy(&c_bytes(&entry.f_mntfromname)).into_owned(),
+                    fs_type: String::from_utf8_lossy(&c_bytes(&entry.f_fstypename)).into_owned(),
+                    super_options: String::new(),
+                })
+                .collect());
         }
         capacity *= 2;
     }

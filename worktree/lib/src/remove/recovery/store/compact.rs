@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::super::OperationId;
-use super::super::compact::{self, COMPACT_RECORD_VERSION, CompactRecord, Progress, StepState};
+use super::super::compact::{self, COMPACT_RECORD_VERSION, CompactRecord, DeletionMode, Progress, StepState};
 use super::super::legacy::{self, LegacyApproval};
 use super::super::lock::{self, LOCKS_DIR, LockError, OperationLock};
 use super::super::record::{RECORD_VERSION, RecordInvalid, RepositoryBinding};
@@ -233,6 +233,22 @@ impl PendingRemoval {
         }
         let mut next = self.record.clone();
         next.progress = progress;
+        self.persist(next)
+    }
+
+    /// Persists that the checkout is deleted where it stands instead of
+    /// being moved: its deletion path becomes the original. Only before the
+    /// checkout is placed, and a no-op when already so.
+    pub fn mark_in_place(&mut self) -> Result<(), StoreError> {
+        if self.record.deletion_mode == DeletionMode::InPlace {
+            return Ok(());
+        }
+        if self.record.progress >= Progress::Placed {
+            return Err(StoreError::PhaseOrder);
+        }
+        let mut next = self.record.clone();
+        next.deletion_mode = DeletionMode::InPlace;
+        next.deletion_path = next.original.clone();
         self.persist(next)
     }
 

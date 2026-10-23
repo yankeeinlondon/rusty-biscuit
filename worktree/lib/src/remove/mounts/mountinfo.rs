@@ -7,12 +7,14 @@ use std::io;
 #[cfg(unix)]
 use super::Mount;
 
-/// One mountinfo line's mount point and source, with the kernel's octal
-/// escapes decoded.
+/// One mountinfo line's mount point, source, filesystem type, and superblock
+/// options, with the kernel's octal escapes decoded.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Entry {
     pub(super) mount_point: Vec<u8>,
     pub(super) source: Vec<u8>,
+    pub(super) fs_type: Vec<u8>,
+    pub(super) super_options: Vec<u8>,
 }
 
 impl Entry {
@@ -24,6 +26,8 @@ impl Entry {
         Mount {
             mount_point: OsStr::from_bytes(&self.mount_point).into(),
             source: String::from_utf8_lossy(&self.source).into_owned(),
+            fs_type: String::from_utf8_lossy(&self.fs_type).into_owned(),
+            super_options: String::from_utf8_lossy(&self.super_options).into_owned(),
         }
     }
 }
@@ -59,7 +63,12 @@ fn parse_line(line: &[u8]) -> Option<Entry> {
     if !is_number(fields[0]) || !is_number(fields[1]) || !fields[2].contains(&b':') || !fields[4].starts_with(b"/") {
         return None;
     }
-    Some(Entry { mount_point: unescape(fields[4]), source: unescape(fields[separator + 2]) })
+    Some(Entry {
+        mount_point: unescape(fields[4]),
+        source: unescape(fields[separator + 2]),
+        fs_type: unescape(fields[separator + 1]),
+        super_options: unescape(fields[separator + 3]),
+    })
 }
 
 /// Decodes `\ooo` octal escapes (the kernel writes space, tab, newline, and
@@ -92,36 +101,67 @@ fn octal(digits: &[u8]) -> Option<u8> {
 mod tests {
     use super::*;
 
-    fn entry(mount_point: &[u8], source: &[u8]) -> Entry {
-        Entry { mount_point: mount_point.to_vec(), source: source.to_vec() }
+    /// An entry compared on its mount point and source only.
+    fn entry(mount_point: &[u8], source: &[u8]) -> (Vec<u8>, Vec<u8>) {
+        (mount_point.to_vec(), source.to_vec())
+    }
+
+    fn points(text: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
+        parse(text).unwrap().into_iter().map(|entry| (entry.mount_point, entry.source)).collect()
+    }
+
+    #[test]
+    fn the_filesystem_type_and_superblock_options_are_kept() {
+        let text = b"22 1 8:1 / / rw,relatime - ext4 /dev/sda1 rw,errors=remount-ro\n";
+
+        let parsed = parse(text).unwrap();
+
+        assert_eq!(parsed[0].fs_type, b"ext4");
+        assert_eq!(parsed[0].super_options, b"rw,errors=remount-ro");
+    }
+
+    /// WSL2's `/mnt/c` exactly as the kernel lists it: drvfs is a `9p` mount
+    /// whose superblock options name `aname=drvfs`, and `\134` is an escaped
+    /// backslash.
+    #[cfg(unix)]
+    #[test]
+    fn a_wsl2_drive_mount_parses_as_drvfs() {
+        let text = br"135 82 0:73 / /mnt/c rw,noatime - 9p C:\134 rw,aname=drvfs;path=C:\;uid=1000;gid=1000;symlinkroot=/mnt/,cache=0x5,access=client,msize=65536,trans=fd,rfd=6,wfd=6";
+
+        let mount = parse(text).unwrap().remove(0).into_mount();
+
+        assert_eq!(mount.mount_point, std::path::Path::new("/mnt/c"));
+        assert_eq!(mount.source, "C:\\");
+        assert_eq!(mount.fs_type, "9p");
+        assert!(mount.is_drvfs(), "{mount:?}");
     }
 
     #[test]
     fn a_plain_line_yields_its_mount_point_and_source() {
         let text = b"22 1 8:1 / / rw,relatime - ext4 /dev/sda1 rw,errors=remount-ro\n";
 
-        assert_eq!(parse(text).unwrap(), [entry(b"/", b"/dev/sda1")]);
+        assert_eq!(points(text), [entry(b"/", b"/dev/sda1")]);
     }
 
     #[test]
     fn optional_fields_before_the_separator_are_skipped() {
         let text = b"36 35 98:0 /mnt1 /mnt2 rw,noatime shared:1 master:2 - ext3 /dev/root rw,errors=continue\n";
 
-        assert_eq!(parse(text).unwrap(), [entry(b"/mnt2", b"/dev/root")]);
+        assert_eq!(points(text), [entry(b"/mnt2", b"/dev/root")]);
     }
 
     #[test]
     fn octal_escapes_are_decoded_in_the_mount_point_and_source() {
         let text = b"40 22 0:35 / /mnt/my\\040disk\\011tab\\012nl\\134bs rw - fuse src\\040dir rw\n";
 
-        assert_eq!(parse(text).unwrap(), [entry(b"/mnt/my disk\ttab\nnl\\bs", b"src dir")]);
+        assert_eq!(points(text), [entry(b"/mnt/my disk\ttab\nnl\\bs", b"src dir")]);
     }
 
     #[test]
     fn a_backslash_without_three_octal_digits_is_kept() {
         let text = b"40 22 0:35 / /mnt/a\\9b\\04 rw - tmpfs tmpfs rw\n";
 
-        assert_eq!(parse(text).unwrap(), [entry(b"/mnt/a\\9b\\04", b"tmpfs")]);
+        assert_eq!(points(text), [entry(b"/mnt/a\\9b\\04", b"tmpfs")]);
     }
 
     /// A bind mount shares `/`'s device and source; only its root field
@@ -131,14 +171,14 @@ mod tests {
         let text = b"22 1 8:1 / / rw - ext4 /dev/sda1 rw\n\
                      51 22 8:1 /srv/vendor /home/me/wt/feat/vendor rw shared:1 - ext4 /dev/sda1 rw\n";
 
-        assert_eq!(parse(text).unwrap(), [entry(b"/", b"/dev/sda1"), entry(b"/home/me/wt/feat/vendor", b"/dev/sda1")]);
+        assert_eq!(points(text), [entry(b"/", b"/dev/sda1"), entry(b"/home/me/wt/feat/vendor", b"/dev/sda1")]);
     }
 
     #[test]
     fn blank_lines_and_a_missing_final_newline_are_accepted() {
         let text = b"\n22 1 8:1 / / rw - ext4 /dev/sda1 rw\n\n23 22 0:5 / /dev rw - devtmpfs udev rw";
 
-        assert_eq!(parse(text).unwrap(), [entry(b"/", b"/dev/sda1"), entry(b"/dev", b"udev")]);
+        assert_eq!(points(text), [entry(b"/", b"/dev/sda1"), entry(b"/dev", b"udev")]);
     }
 
     #[test]

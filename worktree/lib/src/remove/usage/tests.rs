@@ -79,6 +79,10 @@ fn process(pid: u32, token: Option<u64>, name: Option<&str>, evidence: Vec<Evide
         name: name.map(NativeString::from),
         executable: name.map(|name| NativeString::from(format!("/usr/bin/{name}").as_str())),
         user: Some("501".to_string()),
+        parent_pid: None,
+        app_name: None,
+        ancestors: Vec::new(),
+        ancestry_end: Default::default(),
         evidence,
     }
 }
@@ -124,7 +128,7 @@ fn every_evidence_kind_from_another_process_refuses() {
         assert_eq!(holder.executable, Some(NativeString::from("/usr/bin/node")));
         assert_eq!(
             holder.evidence,
-            [HolderEvidence { kind, location: EvidenceLocation::Path(NativeString::from(path.as_str())) }]
+            [HolderEvidence { kind, location: EvidenceLocation::Path(NativeString::from(path.as_str())), writing: false }]
         );
     }
 }
@@ -458,9 +462,13 @@ fn holder_running(pid: u32, image: Option<&str>) -> Holder {
         identity_uncertain: false,
         name: image.and_then(|image| image.rsplit('\\').next()).map(NativeString::from),
         executable: image.map(NativeString::from),
+        start_time: None,
+        app_name: None,
+        ancestors: Vec::new(),
         evidence: vec![HolderEvidence {
             kind: EvidenceKind::OpenHandle,
             location: EvidenceLocation::Path(NativeString::from(format!("{TARGET}/notes.txt").as_str())),
+            writing: false,
         }],
     }
 }

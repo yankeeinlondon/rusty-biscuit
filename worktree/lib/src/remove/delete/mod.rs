@@ -90,6 +90,10 @@ pub trait Progress {
     /// Called when a wait starts, and again only when what it reports
     /// changes.
     fn waiting(&mut self, _wait: &Wait) {}
+
+    /// Called once, when deletion ends however it ends, with the number of
+    /// entries it deleted.
+    fn finished(&mut self, _deleted: u64) {}
 }
 
 /// [`Progress`] that ignores everything.
@@ -149,62 +153,74 @@ pub fn delete_tree(target: Target<'_>, env: &Env<'_>, progress: &mut dyn Progres
         deleted: 0,
         cancelled: false,
     };
-    let mut backoff = Backoff::new();
-    let mut explained: Option<(Vec<PathBuf>, HolderReport)> = None;
-    let mut reported: Option<Wait> = None;
-    loop {
-        let left = match run.pass() {
-            Ok(left) => left,
-            Err(RootChanged) => return Deletion::RootReplaced,
-        };
-        if run.cancelled {
-            return Deletion::Cancelled { waiting_on: waiting_on(&reported) };
-        }
-        if left == Left::Gone {
-            return Deletion::Done;
-        }
-        let mut blocked = std::mem::take(&mut run.blocked);
-        let denied = std::mem::take(&mut run.denied);
-        if !denied.is_empty() {
-            // A denial is a wait only when a program is seen holding the
-            // entry (a running program's image on Windows).
-            let paths: Vec<PathBuf> = denied.iter().map(|(path, _)| path.clone()).collect();
-            let report = env.holders.query(target.root, &paths);
-            for (path, cause) in denied {
-                if report.holds(&path) {
-                    blocked.push((path, WaitCause::InUse));
-                } else {
-                    run.fail(path, cause);
-                }
+    let deletion = run.drive(target, env);
+    run.progress.finished(run.deleted);
+    deletion
+}
+
+impl Run<'_, '_> {
+    /// Passes over the tree until nothing is left, only what cannot be
+    /// deleted is, or the user cancels, waiting between passes while
+    /// something is only temporarily blocked.
+    fn drive(&mut self, target: Target<'_>, env: &Env<'_>) -> Deletion {
+        let run = self;
+        let mut backoff = Backoff::new();
+        let mut explained: Option<(Vec<PathBuf>, HolderReport)> = None;
+        let mut reported: Option<Wait> = None;
+        loop {
+            let left = match run.pass() {
+                Ok(left) => left,
+                Err(RootChanged) => return Deletion::RootReplaced,
+            };
+            if run.cancelled {
+                return Deletion::Cancelled { waiting_on: waiting_on(&reported) };
             }
-            let mut held: Vec<PathBuf> = blocked.iter().map(|(path, _)| path.clone()).collect();
-            held.sort();
-            explained = Some((held, report));
-        }
-        if blocked.is_empty() {
-            return run.finish();
-        }
-        blocked.sort_by(|(left, _), (right, _)| left.cmp(right));
-        let paths: Vec<PathBuf> = blocked.iter().map(|(path, _)| path.clone()).collect();
-        let holders = match &explained {
-            Some((known, report)) if *known == paths => report.clone(),
-            _ => {
+            if left == Left::Gone {
+                return Deletion::Done;
+            }
+            let mut blocked = std::mem::take(&mut run.blocked);
+            let denied = std::mem::take(&mut run.denied);
+            if !denied.is_empty() {
+                // A denial is a wait only when a program is seen holding the
+                // entry (a running program's image on Windows).
+                let paths: Vec<PathBuf> = denied.iter().map(|(path, _)| path.clone()).collect();
                 let report = env.holders.query(target.root, &paths);
-                explained = Some((paths.clone(), report.clone()));
-                report
+                for (path, cause) in denied {
+                    if report.holds(&path) {
+                        blocked.push((path, WaitCause::InUse));
+                    } else {
+                        run.fail(path, cause);
+                    }
+                }
+                let mut held: Vec<PathBuf> = blocked.iter().map(|(path, _)| path.clone()).collect();
+                held.sort();
+                explained = Some((held, report));
             }
-        };
-        if reported.as_ref().is_some_and(|wait| wait.paths.len() > paths.len()) {
-            backoff.reset();
-        }
-        let cause = if blocked.iter().all(|(_, cause)| *cause == WaitCause::Refilling) { WaitCause::Refilling } else { WaitCause::InUse };
-        let wait = Wait { cause, paths, holders };
-        if reported.as_ref() != Some(&wait) {
-            run.progress.waiting(&wait);
-            reported = Some(wait);
-        }
-        if backoff.wait(env.clock, env.cancelled) == Slept::Cancelled {
-            return Deletion::Cancelled { waiting_on: waiting_on(&reported) };
+            if blocked.is_empty() {
+                return run.finish();
+            }
+            blocked.sort_by(|(left, _), (right, _)| left.cmp(right));
+            let paths: Vec<PathBuf> = blocked.iter().map(|(path, _)| path.clone()).collect();
+            let holders = match &explained {
+                Some((known, report)) if *known == paths => report.clone(),
+                _ => {
+                    let report = env.holders.query(target.root, &paths);
+                    explained = Some((paths.clone(), report.clone()));
+                    report
+                }
+            };
+            if reported.as_ref().is_some_and(|wait| wait.paths.len() > paths.len()) {
+                backoff.reset();
+            }
+            let cause = if blocked.iter().all(|(_, cause)| *cause == WaitCause::Refilling) { WaitCause::Refilling } else { WaitCause::InUse };
+            let wait = Wait { cause, paths, holders };
+            if reported.as_ref() != Some(&wait) {
+                run.progress.waiting(&wait);
+                reported = Some(wait);
+            }
+            if backoff.wait(env.clock, env.cancelled) == Slept::Cancelled {
+                return Deletion::Cancelled { waiting_on: waiting_on(&reported) };
+            }
         }
     }
 }
@@ -518,7 +534,7 @@ impl Run<'_, '_> {
             .iter()
             .find(|mount| mount.mount_point == full)
             .cloned()
-            .unwrap_or_else(|| Mount { mount_point: full.to_path_buf(), source: "another filesystem".to_string() });
+            .unwrap_or_else(|| Mount { mount_point: full.to_path_buf(), source: "another filesystem".to_string(), fs_type: String::new(), super_options: String::new() });
         if !self.retained.contains(&mount) {
             self.retained.push(mount);
         }
@@ -532,8 +548,8 @@ impl Run<'_, '_> {
         }
     }
 
-    fn finish(self) -> Deletion {
-        let Run { mut failures, retained, root, .. } = self;
+    fn finish(&mut self) -> Deletion {
+        let (mut failures, retained, root) = (std::mem::take(&mut self.failures), std::mem::take(&mut self.retained), self.root);
         if failures.is_empty() && retained.is_empty() {
             // Kept with no recorded reason cannot happen; never report it as
             // done.

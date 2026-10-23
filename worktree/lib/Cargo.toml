@@ -16,6 +16,9 @@ bench = false
 biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"] }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["blake3"] }
 cap-std = "4"
+# The start time of a process using a checkout, shown in local time in
+# `wt remove`'s question (`remove::facts`).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 dirs = "6"
 fs4 = "0.13"
 getrandom = "0.4"

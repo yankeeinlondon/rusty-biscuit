@@ -96,6 +96,10 @@ fn process(pid: u32, name: &str, evidence: Vec<Evidence>) -> ProcessRecord {
         name: Some(NativeString::from(name)),
         executable: Some(NativeString::from(format!("/usr/bin/{name}").as_str())),
         user: Some("501".to_string()),
+        parent_pid: None,
+        app_name: None,
+        ancestors: Vec::new(),
+        ancestry_end: Default::default(),
         evidence,
     }
 }

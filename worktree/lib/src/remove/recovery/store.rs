@@ -630,6 +630,8 @@ pub(crate) mod fault {
 mod compact;
 
 pub use compact::{PendingRemoval, Stored, StoredOperation};
+#[cfg(test)]
+pub(crate) use compact::fault as compact_fault;
 
 #[cfg(test)]
 mod tests;

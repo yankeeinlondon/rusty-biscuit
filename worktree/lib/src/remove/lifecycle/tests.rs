@@ -274,6 +274,10 @@ fn holder(path: &Path) -> ProcessRecord {
         name: Some(NativeString::from("node")),
         executable: Some(NativeString::from("/usr/bin/node")),
         user: None,
+        parent_pid: None,
+        app_name: None,
+        ancestors: Vec::new(),
+        ancestry_end: Default::default(),
         evidence: vec![Evidence {
             kind: EvidenceKind::OpenHandle,
             mechanism: Mechanism::OpenHandles,

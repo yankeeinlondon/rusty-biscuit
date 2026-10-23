@@ -10,8 +10,9 @@
 //! its event queue is never read.
 
 use super::backend::{
-    Enumeration, InspectionContext, InspectionResult, MechanismInspection, MechanismSupport,
-    ProcessCandidate, ProcessDetails, RawEvidence, Tally, UsageBackend,
+    Enumeration, InspectionContext, InspectionResult, LinkError, MechanismInspection,
+    MechanismSupport, ProcessCandidate, ProcessDetails, ProcessLink, RawEvidence, Tally,
+    UsageBackend,
 };
 use super::budget::Budget;
 use super::identity::{self, FileIdentity};
@@ -183,6 +184,21 @@ impl UsageBackend for ProcBackend {
 
     fn creation_token(&mut self, pid: u32) -> Option<u64> {
         read_stat(&self.process_dir(pid)).ok().map(|s| s.start_ticks)
+    }
+
+    /// One `stat` read, so every field describes one lifetime. Linux has no
+    /// application name to report.
+    fn link(&mut self, pid: u32) -> Result<ProcessLink, LinkError> {
+        match read_stat(&self.process_dir(pid)) {
+            Ok(stat) => Ok(ProcessLink {
+                order: stat.start_ticks,
+                parent_pid: stat.parent_pid,
+                name: Some(stat.comm),
+                app_name: None,
+            }),
+            Err(StatError::Gone) => Err(LinkError::Gone),
+            Err(StatError::Unreadable(detail)) => Err(LinkError::Unreadable(detail)),
+        }
     }
 }
 
@@ -532,6 +548,8 @@ fn access_from_flags(flags: u64) -> Access {
 #[derive(Debug)]
 struct Stat {
     comm: OsString,
+    /// Field 4; 0 for a process with no parent.
+    parent_pid: u32,
     /// Field 22, clock ticks after boot: this lifetime's creation token.
     start_ticks: u64,
 }
@@ -560,13 +578,16 @@ fn parse_stat(bytes: &[u8]) -> Result<Stat, String> {
     }
     let comm = OsString::from_vec(bytes[open + 1..close].to_vec());
     let rest = std::str::from_utf8(&bytes[close + 1..]).map_err(|_| "stat is not text")?;
-    // Fields after `comm` start at field 3 (`state`); `starttime` is field 22.
-    let start = rest
-        .split_ascii_whitespace()
-        .nth(22 - 3)
-        .ok_or("stat has no start time")?;
+    // Fields after `comm` start at field 3 (`state`); `ppid` is field 4 and
+    // `starttime` field 22.
+    let fields: Vec<&str> = rest.split_ascii_whitespace().collect();
+    let start = fields.get(22 - 3).ok_or("stat has no start time")?;
     let start_ticks = parse_decimal(start).ok_or_else(|| format!("start time `{start}` is not a number"))?;
-    Ok(Stat { comm, start_ticks })
+    let parent = fields.get(4 - 3).ok_or("stat has no parent PID")?;
+    let parent_pid = parent
+        .parse()
+        .map_err(|_| format!("parent PID `{parent}` is not a number"))?;
+    Ok(Stat { comm, parent_pid, start_ticks })
 }
 
 /// One inotify watch registration from an `fdinfo` line.
@@ -717,4 +738,33 @@ fn parse_octal(value: &str) -> Option<u64> {
         return None;
     }
     u64::from_str_radix(value, 8).ok()
+}
+
+#[cfg(test)]
+mod stat_tests {
+    use super::parse_stat;
+
+    fn line(comm: &str, ppid: &str) -> Vec<u8> {
+        // Fields 5 through 21 are zero; `starttime` (field 22) is 777.
+        format!("42 ({comm}) S {ppid}{} 777 0 0\n", " 0".repeat(17)).into_bytes()
+    }
+
+    #[test]
+    fn the_parent_pid_is_field_four_counted_after_the_last_parenthesis() {
+        let stat = parse_stat(&line("a) b (c) d", "4123")).expect("parsed");
+        assert_eq!(stat.comm, "a) b (c) d");
+        assert_eq!(stat.parent_pid, 4123);
+        assert_eq!(stat.start_ticks, 777);
+    }
+
+    #[test]
+    fn a_process_without_a_parent_reports_parent_pid_zero() {
+        assert_eq!(parse_stat(&line("init", "0")).expect("parsed").parent_pid, 0);
+    }
+
+    #[test]
+    fn a_malformed_parent_pid_is_an_error_not_a_guess() {
+        let error = parse_stat(&line("sh", "x1")).expect_err("not a number");
+        assert!(error.contains("parent PID"), "{error}");
+    }
 }

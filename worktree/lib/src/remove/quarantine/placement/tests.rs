@@ -131,7 +131,7 @@ fn a_nested_mount_deletes_in_place_without_trying_the_move() {
     let plan = planned(&repo, &target);
     fs::create_dir(plan.original.join("vendor")).unwrap();
     let before = snapshot(&repo, &plan);
-    let mount = |point: &Path, source: &str| Mount { mount_point: point.to_path_buf(), source: source.into() };
+    let mount = |point: &Path, source: &str| Mount { mount_point: point.to_path_buf(), source: source.into(), fs_type: String::new(), super_options: String::new() };
     let inside = mount(&plan.original.join("vendor"), "/dev/disk3");
     let table = [mount(plan.original.parent().unwrap(), "/dev/disk1"), mount(&plan.original, "/dev/disk2"), inside.clone()];
     let attempted: fn() -> io::Error = || panic!("the move was attempted");

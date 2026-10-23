@@ -9,6 +9,7 @@
 //!
 //! See `sniff/docs/topics/filesystem-query.md` for the report contract.
 
+mod ancestry;
 mod backend;
 mod budget;
 mod identity;
@@ -47,8 +48,8 @@ pub use identity::FileIdentity;
 pub use native::NativeString;
 pub use options::{DEFAULT_DEADLINE, PathUsageError, PathUsageOptions};
 pub use report::{
-    Access, Coverage, CoverageScope, CoverageStatus, Evidence, EvidenceKind, IndexProvenance,
-    Limitation, LimitationExample, LimitationKind, MatchBasis, Mechanism, Outcome,
+    Access, Ancestor, AncestryEnd, Coverage, CoverageScope, CoverageStatus, Evidence, EvidenceKind, IndexProvenance,
+    Limitation, LimitationExample, LimitationKind, MAX_ANCESTORS, MatchBasis, Mechanism, Outcome,
     PathUsageReport, ProcessRecord, QueryTarget, SCHEMA_VERSION, TargetKind, Truncation,
     WatchInfo,
 };
@@ -78,7 +79,8 @@ pub const MAX_EVIDENCE_TOTAL: u64 = 10_000;
 /// descendants (unless [`PathUsageOptions::target_only`] is set).
 ///
 /// The options' deadline is one shared budget for root resolution, the tree
-/// walk, process enumeration, inspection, and identity enrichment. A caller
+/// walk, process enumeration, inspection, identity enrichment, and each
+/// matching process's context (parent chain and app name). A caller
 /// that already walked the tree can supply its index with
 /// [`PathUsageOptions::with_tree_index`]; the query then skips the walk,
 /// still verifying the root, and spends the budget on processes. When it
@@ -249,7 +251,8 @@ pub(crate) fn run<B: UsageBackend>(
 
     let mut observations = process::merge(observations);
     process::enrich(&mut observations, backend, budget, &mut report_limitations);
-    let processes = process::into_records(observations);
+    let contexts = process::contextualize(&observations, backend, budget, &mut report_limitations);
+    let processes = process::into_records(observations, contexts);
 
     let scope = if root.kind == TargetKind::Directory && options.recursive() {
         CoverageScope::TargetTree

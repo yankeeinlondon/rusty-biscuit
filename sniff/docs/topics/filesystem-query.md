@@ -40,7 +40,8 @@ flowchart LR
     D --> E
     E --> F[recheck root]
     F --> G[enrich identity]
-    G --> H[coverage + outcome]
+    G --> K[read context:<br/>parent chain, app name]
+    K --> H[coverage + outcome]
     B -. budget expired .-> X[root_validation_timeout error]
     C -. budget expired .-> H
     D -. budget expired .-> H
@@ -175,6 +176,67 @@ records. A record without a token (and no retained process handle) is marked
 `identity_uncertain` and is never merged or enriched. Name, executable, and
 user are read only after the creation token is re-read and found unchanged;
 otherwise the evidence is kept without a name and a limitation explains why.
+
+## Process context
+
+Each matching process also says who it is in terms a person recognizes and
+what started it, so a caller can render, for example:
+
+```text
+cargo (pid 4123, started 14:02, run from Code), has a file open in target/debug/
+```
+
+| Field | Meaning |
+| --- | --- |
+| `parent_pid` | The parent PID the OS reports for this lifetime; `0` means no parent. `null` when not read |
+| `app_name` | A recognizable application name, or `null` |
+| `ancestors` | Verified parents, nearest first: `{pid, name, app_name}` each |
+| `ancestry_end` | Why `ancestors` stops (table below) |
+
+```json
+"parent_pid": 4100,
+"app_name": null,
+"ancestors": [
+  {"pid": 4100, "name": {"display": "zsh"}, "app_name": null},
+  {"pid": 812, "name": {"display": "Code Helper"}, "app_name": {"display": "Code Helper"}},
+  {"pid": 790, "name": {"display": "Electron"}, "app_name": {"display": "Code"}}
+],
+"ancestry_end": "root"
+```
+
+| Platform | `parent_pid` | `app_name` |
+| --- | --- | --- |
+| macOS | `proc_bsdshortinfo` | `CFBundleName`, else `CFBundleDisplayName`, of the nearest enclosing `*.app` bundle's `Contents/Info.plist` (XML or binary), else the bundle directory's name; `null` outside a bundle |
+| Linux/WSL2 | field 4 of `/proc/<pid>/stat` | always `null`: Linux has no application name to read |
+| Windows | `InheritedFromUniqueProcessId` (`NtQueryInformationProcess`) | The image's version-resource `FileDescription` (each declared translation, then US English); `null` when the image has none |
+
+The nearest bundle is the one an executable runs from, so a VS Code helper
+reports its helper bundle's name; the chain then reaches the outer
+application.
+
+**How the chain is built.** Starting from the process's own parent, Sniff
+reads one PID at a time; it never lists or refreshes the process table. Each
+read takes every field from one lifetime: macOS rechecks the start time after
+reading, Linux reads one `stat` file, and Windows reads through one process
+handle. A parent never starts after its child, so a process at the parent's
+PID that started later is a successor that reused the PID: the chain stops
+there rather than borrowing its identity. The macOS calls need no same-user
+permission, so a root-owned `login` between a shell and Terminal is still
+read; the start time comes from `sysctl` `kern.proc.pid`.
+
+| `ancestry_end` | Meaning |
+| --- | --- |
+| `root` | The next parent is PID 0 or 1, which root every chain and are never listed |
+| `bound` | `MAX_ANCESTORS` (8) are listed and another parent exists. Eight reaches from a build tool through its shells to the terminal, editor, or agent that started them |
+| `parent_exited` | The next parent is gone, or its PID now names a process that started after its child |
+| `unreadable` | The next process could not be read; a `context_unavailable` limitation carries the PID and reason |
+| `unsupported` | This backend does not read parents |
+| `not_read` | Reading stopped first: the budget expired (`budget_exhausted` limitation), the record is `identity_uncertain` (`context_unavailable`), or the process exited or its PID was reused before its own link was verified (`process_disappeared`). Also what a report older than schema 3 loads as |
+
+Context is read after identity enrichment, per matching process, while the
+budget lasts, and only for a process whose lifetime is known. Its own read is
+accepted only if its creation token is unchanged afterwards. App names are
+read once per bundle or image per query.
 
 ## Coverage and outcome
 
@@ -408,7 +470,9 @@ flowchart LR
   holder becomes `open_handle` evidence matched by the identity read from
   the same file handle. Its `observed_path` is the queried path; Windows does
   not report which spelling the holder used. Replacement after the walk is
-  reported as a gap.
+  reported as a gap. Its `access` is `null`: the call reports holder PIDs
+  only, not the access each handle was granted, so Windows evidence never
+  says whether a holder can write.
   The kernel excludes the calling process from this mechanism. Loaded modules
   can still identify the querying process's own mapped files.
 
@@ -466,7 +530,13 @@ Problems stay visible instead of reading as "no matches":
 
 ## Serialized form
 
-The report serializes with snake_case keys and `schema_version: 2`.
+The report serializes with snake_case keys and `schema_version: 3`.
+
+- Version 3 added the process context fields. A process record from an
+  earlier report has none of them and loads with `parent_pid` and `app_name`
+  `null`, no `ancestors`, and `ancestry_end: not_read`. They are the one
+  exception to "every key is required" below: a current report may omit them
+  too, and reads the same way.
 
 - `index_provenance` is `walked`, `supplied`, or `unknown`. It is required in
   a version 2 report and may not be `null`. A version 1 report, written
@@ -492,8 +562,12 @@ Under a performance collector the query records these
 `performance::counters`: `filesystem.query.tree_walks` (one per recursive
 directory query), `tree_identity_reads`, `process_enumerations`,
 `process_inspections`, `descriptor_inspections`, `watch_registration_reads`,
-`module_inspections`, `path_holder_inspections`, `identity_enrichments`, and `path_lookups`, all under
-`filesystem.query.`.
+`module_inspections`, `path_holder_inspections`, `identity_enrichments`,
+`path_lookups`, and `parent_lookups`, all under `filesystem.query.`.
+`parent_lookups` counts per-PID context reads: one for each matching process
+itself and one per ancestor read, so a query costs at most
+`1 + MAX_ANCESTORS` per matching process. A backend that does not read
+parents records none.
 On Linux, `descriptor_inspections` counts each `/proc/<pid>/fd/<n>` entry and
 `watch_registration_reads` each `fdinfo` read of an anonymous-inode
 descriptor, failures included. On macOS, `descriptor_inspections` counts

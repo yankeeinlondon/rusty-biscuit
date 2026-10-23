@@ -11,8 +11,9 @@
 //! FSEvents subscriptions have no supported systemwide inventory.
 
 use super::backend::{
-    Enumeration, InspectionContext, InspectionResult, MechanismInspection, MechanismSupport,
-    ProcessCandidate, ProcessDetails, RawEvidence, Tally, UsageBackend,
+    Enumeration, InspectionContext, InspectionResult, LinkError, MechanismInspection,
+    MechanismSupport, ProcessCandidate, ProcessDetails, ProcessLink, RawEvidence, Tally,
+    UsageBackend,
 };
 use super::budget::Budget;
 use super::identity::FileIdentity;
@@ -21,9 +22,10 @@ use super::report::{
     Access, EvidenceKind, LimitationExample, LimitationKind, Limitations, Mechanism,
 };
 use crate::performance::{self, counters};
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(crate) const FSEVENTS_UNSUPPORTED: &str =
     "macOS offers no supported systemwide inventory of FSEvents subscriptions";
@@ -88,6 +90,46 @@ pub(crate) struct OpenVnode {
     pub(crate) vnode: Vnode,
 }
 
+/// One process's parent and names, read with calls that need no same-user
+/// permission, so a parent owned by root (such as `login`) is still read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RawLink {
+    /// Start time in microseconds since the epoch, as in [`Task::start_micros`].
+    pub(crate) start_micros: u64,
+    pub(crate) parent_pid: u32,
+    /// The kernel's short name, at most 16 bytes.
+    pub(crate) comm: OsString,
+    pub(crate) executable: Option<PathBuf>,
+}
+
+/// The name keys of a bundle's `Info.plist`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct BundleInfo {
+    pub(crate) name: Option<String>,
+    pub(crate) display_name: Option<String>,
+}
+
+/// The nearest `*.app` directory enclosing `executable`.
+pub(crate) fn enclosing_bundle(executable: &Path) -> Option<&Path> {
+    executable
+        .ancestors()
+        .skip(1)
+        .find(|dir| dir.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("app")))
+}
+
+/// `CFBundleName`, else `CFBundleDisplayName`, else the bundle directory's
+/// stem: Finder's name for an app whose `Info.plist` names none.
+pub(crate) fn bundle_name(bundle: &Path, info: Option<&BundleInfo>) -> Option<OsString> {
+    info.and_then(|info| {
+        [&info.name, &info.display_name]
+            .into_iter()
+            .flatten()
+            .find(|name| !name.trim().is_empty())
+    })
+    .map(OsString::from)
+    .or_else(|| bundle.file_stem().map(ToOwned::to_owned))
+}
+
 /// The `libproc` calls the backend makes.
 pub(crate) trait Source {
     /// Every PID on the host. `Err` names why the list could not be read.
@@ -98,15 +140,40 @@ pub(crate) trait Source {
     fn descriptor_vnode(&mut self, pid: u32, fd: i32) -> Result<OpenVnode, Fault>;
     /// `None` when the process has no current directory (the kernel task).
     fn cwd(&mut self, pid: u32) -> Result<Option<Vnode>, Fault>;
+    /// Every field from one lifetime: a start time that changed during the
+    /// read is [`LinkError::Gone`].
+    fn link(&mut self, _pid: u32) -> Result<RawLink, LinkError> {
+        Err(LinkError::Unsupported)
+    }
+    /// `None` when the bundle has no readable `Info.plist`.
+    fn bundle_info(&mut self, _bundle: &Path) -> Option<BundleInfo> {
+        None
+    }
 }
 
 pub(crate) struct LibprocBackend<S> {
     source: S,
+    /// App names by bundle, read once per query: many processes share one.
+    bundles: HashMap<PathBuf, Option<OsString>>,
 }
 
 impl<S: Source> LibprocBackend<S> {
     pub(crate) fn with_source(source: S) -> Self {
-        Self { source }
+        Self {
+            source,
+            bundles: HashMap::new(),
+        }
+    }
+
+    fn app_name(&mut self, executable: &Path) -> Option<OsString> {
+        let bundle = enclosing_bundle(executable)?;
+        if let Some(name) = self.bundles.get(bundle) {
+            return name.clone();
+        }
+        let info = self.source.bundle_info(bundle);
+        let name = bundle_name(bundle, info.as_ref());
+        self.bundles.insert(bundle.to_path_buf(), name.clone());
+        name
     }
 }
 
@@ -209,6 +276,24 @@ impl<S: Source> UsageBackend for LibprocBackend<S> {
 
     fn creation_token(&mut self, pid: u32) -> Option<u64> {
         self.source.task(pid).ok().map(|task| task.start_micros)
+    }
+
+    fn link(&mut self, pid: u32) -> Result<ProcessLink, LinkError> {
+        let raw = self.source.link(pid)?;
+        let app_name = raw.executable.as_deref().and_then(|exe| self.app_name(exe));
+        // The executable's file name is not truncated to 16 bytes.
+        let name = raw
+            .executable
+            .as_deref()
+            .and_then(Path::file_name)
+            .map(ToOwned::to_owned)
+            .or_else(|| (!raw.comm.is_empty()).then_some(raw.comm));
+        Ok(ProcessLink {
+            order: raw.start_micros,
+            parent_pid: raw.parent_pid,
+            name,
+            app_name,
+        })
     }
 }
 
@@ -354,15 +439,89 @@ fn observed(vnode: Vnode) -> ObservedObject {
 
 #[cfg(target_os = "macos")]
 pub(crate) mod ffi {
-    use super::{Descriptor, Fault, OpenVnode, Source, Task, Vnode};
+    use super::{BundleInfo, Descriptor, Fault, OpenVnode, RawLink, Source, Task, Vnode};
+    use crate::filesystem::query::backend::LinkError;
     use std::ffi::{OsString, c_char, c_int, c_void};
     use std::io;
     use std::mem::{MaybeUninit, size_of};
     use std::os::unix::ffi::OsStringExt;
+    use std::path::{Path, PathBuf};
 
     /// `sys/proc_info.h` items the `libc` crate does not define.
     const PROC_PIDFDVNODEPATHINFO: c_int = 2;
     const PROX_FDTYPE_VNODE: u32 = 1;
+    const PROC_PIDT_SHORTBSDINFO: c_int = 13;
+    const MAXCOMLEN: usize = 16;
+
+    /// `struct proc_bsdshortinfo`. Unlike `proc_bsdinfo`, the kernel serves
+    /// it for another user's process.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct ProcBsdShortInfo {
+        pbsi_pid: u32,
+        pbsi_ppid: u32,
+        pbsi_pgid: u32,
+        pbsi_status: u32,
+        pbsi_comm: [c_char; MAXCOMLEN],
+        pbsi_flags: u32,
+        pbsi_uid: u32,
+        pbsi_gid: u32,
+        pbsi_ruid: u32,
+        pbsi_rgid: u32,
+        pbsi_svuid: u32,
+        pbsi_svgid: u32,
+        pbsi_rfu: u32,
+    }
+
+    /// Start time in microseconds from `sysctl` `kern.proc.pid.<pid>`, which,
+    /// unlike `proc_bsdinfo`, needs no same-user permission. Only the
+    /// leading `p_starttime` timeval of `struct kinfo_proc` is read, so the
+    /// rest of that large structure is never declared here.
+    fn start_micros(pid: u32) -> Result<u64, Fault> {
+        let mut name = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid_arg(pid)?];
+        // `u64` storage keeps the leading timeval aligned.
+        let mut buffer = [0u64; 128];
+        let mut length = size_of::<[u64; 128]>();
+        // SAFETY: `buffer` is `length` writable bytes; `name` has 4 entries.
+        let status = unsafe {
+            libc::sysctl(name.as_mut_ptr(), 4, buffer.as_mut_ptr().cast(), &mut length, std::ptr::null_mut(), 0)
+        };
+        if status != 0 {
+            return Err(Fault::Failed(io::Error::last_os_error().to_string()));
+        }
+        // A PID with no process returns success and no data.
+        if length < 16 {
+            return Err(Fault::Gone);
+        }
+        let seconds = buffer[0];
+        let micros = buffer[1] & 0xFFFF_FFFF;
+        Ok(seconds.saturating_mul(1_000_000).saturating_add(micros))
+    }
+
+    fn executable(pid: u32) -> Option<PathBuf> {
+        let mut buffer = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        // SAFETY: the buffer is `PROC_PIDPATHINFO_MAXSIZE` writable bytes.
+        let written = unsafe {
+            libc::proc_pidpath(pid_arg(pid).ok()?, buffer.as_mut_ptr().cast(), buffer.len() as u32)
+        };
+        if written <= 0 {
+            return None;
+        }
+        buffer.truncate(written as usize);
+        Some(PathBuf::from(OsString::from_vec(buffer)))
+    }
+
+    fn link_error(fault: Fault) -> LinkError {
+        match fault {
+            Fault::Gone => LinkError::Gone,
+            Fault::Denied => LinkError::Unreadable("permission was denied".to_string()),
+            Fault::Failed(detail) => LinkError::Unreadable(detail),
+        }
+    }
+
+    fn info_string(dictionary: &plist::Dictionary, key: &str) -> Option<String> {
+        dictionary.get(key)?.as_string().map(ToOwned::to_owned)
+    }
 
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -538,6 +697,33 @@ pub(crate) mod ffi {
             let info: libc::proc_vnodepathinfo = pidinfo(pid, libc::PROC_PIDVNODEPATHINFO)?;
             let cwd = vnode(&info.pvi_cdir);
             Ok((cwd.inode != 0 || !cwd.path.is_empty()).then_some(cwd))
+        }
+
+        fn link(&mut self, pid: u32) -> Result<RawLink, LinkError> {
+            let start = start_micros(pid).map_err(link_error)?;
+            let info: ProcBsdShortInfo = pidinfo(pid, PROC_PIDT_SHORTBSDINFO).map_err(link_error)?;
+            let executable = executable(pid);
+            // An unchanged start time proves the PID named one lifetime
+            // throughout.
+            if start_micros(pid).map_err(link_error)? != start {
+                return Err(LinkError::Gone);
+            }
+            Ok(RawLink {
+                start_micros: start,
+                parent_pid: info.pbsi_ppid,
+                comm: OsString::from_vec(c_bytes(&info.pbsi_comm)),
+                executable,
+            })
+        }
+
+        fn bundle_info(&mut self, bundle: &Path) -> Option<BundleInfo> {
+            // `plist` reads both the XML and the binary form.
+            let value = plist::Value::from_file(bundle.join("Contents").join("Info.plist")).ok()?;
+            let dictionary = value.as_dictionary()?;
+            Some(BundleInfo {
+                name: info_string(dictionary, "CFBundleName"),
+                display_name: info_string(dictionary, "CFBundleDisplayName"),
+            })
         }
     }
 }

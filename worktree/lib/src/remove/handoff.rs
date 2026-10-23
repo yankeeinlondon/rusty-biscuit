@@ -21,6 +21,7 @@ use crate::cache::{atomic_write, repo_cache_file};
 use crate::error::WorktreeError;
 use crate::git::git_from;
 use super::included::{BaselineBinding, RulesBinding};
+use super::recovery::OperationId;
 
 pub const HANDOFF_FORMAT_VERSION: u32 = 4;
 
@@ -133,6 +134,76 @@ pub fn new_token() -> Result<String, WorktreeError> {
 
 pub(crate) fn is_token(token: &str) -> bool {
     token.len() == 32 && token.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// The [`OperationHandoff::format_version`] this build writes. A record of
+/// any other version (including the content-comparing [`HandoffRecord`])
+/// is [`HandoffError::Missing`] to [`consume_operation`].
+pub const OPERATION_HANDOFF_VERSION: u32 = 5;
+
+/// How long an [`OperationHandoff`] stays valid (R18).
+pub const OPERATION_HANDOFF_TTL: Duration = Duration::from_secs(10 * 60);
+
+/// The handoff of a confirmed removal: the first run saved its approval as
+/// the compact record of `operation` before printing the token, and the
+/// second run finishes that operation. Nothing here is compared with the
+/// checkout's content; the record's own identities bind the checkout and
+/// the repository, and its branch steps keep their protections.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OperationHandoff {
+    pub format_version: u32,
+    pub operation: OperationId,
+    /// The main worktree, canonical.
+    pub repo: PathBuf,
+    /// The worktree being removed, canonical; the caller must have left it.
+    pub target: PathBuf,
+    /// Seconds since the Unix epoch.
+    pub created_at: u64,
+}
+
+impl OperationHandoff {
+    pub fn new(operation: OperationId, repo: PathBuf, target: PathBuf, created_at: u64) -> Self {
+        Self { format_version: OPERATION_HANDOFF_VERSION, operation, repo, target, created_at }
+    }
+}
+
+pub fn write_operation(path: &Path, handoff: &OperationHandoff) -> Result<(), WorktreeError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    atomic_write(path, &serde_json::to_vec_pretty(handoff)?)
+}
+
+/// Reads and deletes the handoff at `path`; `now` is seconds since the Unix
+/// epoch. As [`consume`], the file is deleted before it is judged, so a
+/// token works at most once.
+pub fn consume_operation(path: &Path, now: u64) -> Result<OperationHandoff, HandoffError> {
+    let bytes = fs::read(path).map_err(|_| HandoffError::Missing)?;
+    fs::remove_file(path).map_err(|_| HandoffError::Missing)?;
+    let handoff: OperationHandoff = serde_json::from_slice(&bytes).map_err(|_| HandoffError::Missing)?;
+    if handoff.format_version != OPERATION_HANDOFF_VERSION {
+        return Err(HandoffError::Missing);
+    }
+    let age = now.checked_sub(handoff.created_at).ok_or(HandoffError::Expired)?;
+    if age > OPERATION_HANDOFF_TTL.as_secs() {
+        return Err(HandoffError::Expired);
+    }
+    Ok(handoff)
+}
+
+/// The second run's own checks before it finishes the operation: the
+/// caller is outside the target, and `repo` is the repository the first
+/// run approved in. The checkout's and the worktree record's identities are
+/// checked against the operation's record when it is resumed.
+pub fn verify_operation(handoff: &OperationHandoff, repo: &Path, cwd: &Path) -> Result<(), HandoffRefusal> {
+    if is_within(cwd, &handoff.target) {
+        return Err(HandoffRefusal::InsideTarget);
+    }
+    if !same_path(&handoff.repo, repo) {
+        return Err(HandoffRefusal::Changed(vec!["repository"]));
+    }
+    Ok(())
 }
 
 /// The record file for `token`. A malformed token (which could otherwise
@@ -436,5 +507,91 @@ mod tests {
         fresh.target = link;
         let record = HandoffRecord::new(stored.clone(), approvals(), 0);
         assert_eq!(verify(&record, &fresh, &stored.landing), Ok(()));
+    }
+
+    fn operation_handoff(dir: &Path, created_at: u64) -> OperationHandoff {
+        let target = dir.join("wt");
+        fs::create_dir_all(&target).unwrap();
+        OperationHandoff::new(OperationId::parse(&"c".repeat(32)).unwrap(), dir.join("base"), target, created_at)
+    }
+
+    /// R18 / N9: the token carries the operation id, survives a second
+    /// write and read unchanged, and works once.
+    #[test]
+    fn an_operation_handoff_round_trips_then_replay_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cache").join("h.json");
+        let handoff = operation_handoff(dir.path(), 1_000);
+
+        write_operation(&path, &handoff).unwrap();
+        let first = consume_operation(&path, 1_010).unwrap();
+        write_operation(&path, &first).unwrap();
+        let second = consume_operation(&path, 1_020).unwrap();
+
+        assert_eq!(first, handoff);
+        assert_eq!(second, handoff);
+        assert_eq!(consume_operation(&path, 1_020), Err(HandoffError::Missing));
+        assert!(!path.exists());
+    }
+
+    /// R18: ten minutes, not one; a record from the future is refused too,
+    /// and either way the file is gone.
+    #[test]
+    fn an_operation_handoff_expires_after_ten_minutes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("h.json");
+        let handoff = operation_handoff(dir.path(), 1_000);
+
+        write_operation(&path, &handoff).unwrap();
+        assert!(consume_operation(&path, 1_061).is_ok(), "past the old one-minute limit");
+        write_operation(&path, &handoff).unwrap();
+        assert!(consume_operation(&path, 1_600).is_ok(), "exactly ten minutes is still valid");
+
+        write_operation(&path, &handoff).unwrap();
+        assert_eq!(consume_operation(&path, 1_601), Err(HandoffError::Expired));
+        assert!(!path.exists());
+        write_operation(&path, &handoff).unwrap();
+        assert_eq!(consume_operation(&path, 999), Err(HandoffError::Expired));
+    }
+
+    /// The content-comparing format, another version, a malformed id, or an
+    /// unknown field is never read as an operation handoff.
+    #[test]
+    fn only_the_operation_format_is_an_operation_handoff() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("h.json");
+        write_record(&path, &HandoffRecord::new(state(dir.path()), approvals(), 0)).unwrap();
+        assert_eq!(consume_operation(&path, 0), Err(HandoffError::Missing));
+
+        let mut other = operation_handoff(dir.path(), 0);
+        other.format_version = 4;
+        write_operation(&path, &other).unwrap();
+        assert_eq!(consume_operation(&path, 0), Err(HandoffError::Missing));
+
+        let valid = serde_json::to_value(operation_handoff(dir.path(), 0)).unwrap();
+        for (key, value) in [("operation", serde_json::json!("../../etc")), ("extra", serde_json::json!(1))] {
+            let mut edited = valid.clone();
+            edited[key] = value;
+            fs::write(&path, serde_json::to_vec(&edited).unwrap()).unwrap();
+            assert_eq!(consume_operation(&path, 0), Err(HandoffError::Missing), "{key}");
+        }
+    }
+
+    /// No content is compared: only where the caller stands and which
+    /// repository it runs in.
+    #[test]
+    fn the_second_run_checks_the_caller_and_the_repository_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let handoff = operation_handoff(dir.path(), 0);
+        let repo = dir.path().join("base");
+        fs::create_dir_all(&repo).unwrap();
+
+        let inside = handoff.target.join("src");
+        fs::create_dir_all(&inside).unwrap();
+        assert_eq!(verify_operation(&handoff, &repo, &repo), Ok(()));
+        assert_eq!(verify_operation(&handoff, &repo, &inside), Err(HandoffRefusal::InsideTarget));
+        let other = dir.path().join("other");
+        fs::create_dir_all(&other).unwrap();
+        assert_eq!(verify_operation(&handoff, &other, &repo), Err(HandoffRefusal::Changed(vec!["repository"])));
     }
 }

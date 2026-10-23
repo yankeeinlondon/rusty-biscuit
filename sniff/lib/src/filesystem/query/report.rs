@@ -13,7 +13,12 @@ use serde::{Deserialize, Serialize};
 ///
 /// Version 2 added [`PathUsageReport::index_provenance`]. A version 1 report
 /// still loads, with provenance [`IndexProvenance::Unknown`].
-pub const SCHEMA_VERSION: u32 = 2;
+///
+/// Version 3 added each process's context: [`ProcessRecord::parent_pid`],
+/// [`ProcessRecord::app_name`], [`ProcessRecord::ancestors`], and
+/// [`ProcessRecord::ancestry_end`]. An earlier report has none of them, so they
+/// load as absent, with [`AncestryEnd::NotRead`].
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// One observation of the processes associated with a file or directory tree.
 ///
@@ -187,7 +192,68 @@ pub struct ProcessRecord {
     /// Native user identifier (Unix UID or Windows SID), not a user name.
     #[serde(deserialize_with = "nullable")]
     pub user: Option<String>,
+    /// The parent PID as the OS reported it for this lifetime. `Some(0)` is a
+    /// process with no parent. `None` when it was not read: see
+    /// `ancestry_end`. The PID alone may name a later process; `ancestors`
+    /// lists only verified parents.
+    #[serde(default, deserialize_with = "nullable")]
+    pub parent_pid: Option<u32>,
+    /// A recognizable application name: the enclosing `.app` bundle's name on
+    /// macOS, the executable's `FileDescription` on Windows; always `None` on
+    /// Linux. `None` also when the executable has none or it could not be read.
+    #[serde(default, deserialize_with = "nullable")]
+    pub app_name: Option<NativeString>,
+    /// Verified parent chain, nearest parent first, at most [`MAX_ANCESTORS`]
+    /// long. It never includes PID 0 or 1, which root every chain.
+    #[serde(default)]
+    pub ancestors: Vec<Ancestor>,
+    /// Why `ancestors` ends where it does.
+    #[serde(default)]
+    pub ancestry_end: AncestryEnd,
     pub evidence: Vec<Evidence>,
+}
+
+/// Ancestors listed per process. Eight reaches from a build tool through its
+/// shells and launchers to the terminal, editor, or agent that started them,
+/// while bounding the per-PID reads one holder can cost.
+pub const MAX_ANCESTORS: usize = 8;
+
+/// One verified parent of a process.
+///
+/// Verified means it started before the process it parents, so a reused PID
+/// never lends its identity to a chain.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Ancestor {
+    pub pid: u32,
+    #[serde(deserialize_with = "nullable")]
+    pub name: Option<NativeString>,
+    /// As [`ProcessRecord::app_name`].
+    #[serde(deserialize_with = "nullable")]
+    pub app_name: Option<NativeString>,
+}
+
+/// Why a process's ancestor chain stops.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AncestryEnd {
+    /// The last listed process (or the process itself) has no parent other
+    /// than PID 0 or 1.
+    Root,
+    /// [`MAX_ANCESTORS`] were listed and another parent exists.
+    Bound,
+    /// The next parent has exited: its PID is gone, or names a process that
+    /// started after its child.
+    ParentExited,
+    /// The next process could not be read; a [`LimitationKind::ContextUnavailable`]
+    /// limitation says why.
+    Unreadable,
+    /// This platform's backend does not read parents.
+    Unsupported,
+    /// Not read: the budget expired, the process's lifetime could not be
+    /// verified, or the report predates schema 3.
+    #[default]
+    NotRead,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -386,6 +452,8 @@ pub enum LimitationKind {
     DeviceIdentityUnreliable,
     /// The caller declared its supplied tree index incomplete.
     IncompleteTreeIndex,
+    /// A process's parent chain or app name could not be read.
+    ContextUnavailable,
 }
 
 /// One kind of gap, aggregated with a count and a few representative examples.

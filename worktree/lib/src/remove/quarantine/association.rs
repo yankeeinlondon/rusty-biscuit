@@ -15,8 +15,11 @@
 //!   refuses with [`MoveRefusal::LinkNotMovable`], which the caller may turn
 //!   into deletion in place. `git worktree repair` is never run, since it
 //!   rewrites other worktrees' links.
-//! - Git will not move or remove a locked worktree or one with submodules, and
-//!   this move refuses both too, before any change. A lock is never removed.
+//! - Git will not move or remove a locked worktree or one with submodules.
+//!   [`plan_move`] refuses both too, before any change, and never removes a
+//!   lock. [`plan_confirmed_move`] accepts both for a removal the user
+//!   confirmed: its caller unlocks (the move still refuses a lock), and
+//!   submodules are deleted with the checkout.
 //!
 //! [`plan_move`] checks all of this and fixes the quarantine path, which the
 //! recovery record then binds. [`move_to_quarantine`] checks it again
@@ -64,6 +67,8 @@ pub struct MovePlan {
     rewritten: Vec<u8>,
     /// The checkout's `.git` file, when its link does not survive the move.
     link_rewrite: Option<LinkRewrite>,
+    /// Planned by [`plan_confirmed_move`]: submodules do not refuse.
+    confirmed: bool,
 }
 
 /// The checkout's `.git` file before and after the move.
@@ -195,6 +200,27 @@ impl MoveError {
 /// keep ([`MoveRefusal::LinkNotMovable`] when the link is verified but
 /// cannot be rewritten); or Git's records of it can't be read or disagree.
 pub fn plan_move(base: &Path, entry: &WorktreeEntry, operation: &OperationId) -> Result<MovePlan, MoveRefusal> {
+    let plan = plan_unchecked(base, entry, operation, false)?;
+    plan.check(base, true)?;
+    Ok(plan)
+}
+
+/// [`plan_move`] for a removal the user confirmed: a lock and submodules no
+/// longer refuse. The lock is checked again when the move is made, so the
+/// caller unlocks the worktree in between; submodules are deleted with the
+/// checkout, which Git's own refusal does not allow for.
+///
+/// ## Errors
+///
+/// As [`plan_move`], less [`MoveRefusal::Locked`] and
+/// [`MoveRefusal::Submodules`].
+pub fn plan_confirmed_move(base: &Path, entry: &WorktreeEntry, operation: &OperationId) -> Result<MovePlan, MoveRefusal> {
+    let plan = plan_unchecked(base, entry, operation, true)?;
+    plan.check(base, false)?;
+    Ok(plan)
+}
+
+fn plan_unchecked(base: &Path, entry: &WorktreeEntry, operation: &OperationId, confirmed: bool) -> Result<MovePlan, MoveRefusal> {
     if entry.is_main {
         return Err(MoveRefusal::Unsupported("it is the repository's main checkout".into()));
     }
@@ -221,7 +247,7 @@ pub fn plan_move(base: &Path, entry: &WorktreeEntry, operation: &OperationId) ->
             Some(LinkRewrite { original: bytes, rewritten })
         }
     };
-    let plan = MovePlan {
+    Ok(MovePlan {
         original,
         quarantine,
         identity,
@@ -231,9 +257,8 @@ pub fn plan_move(base: &Path, entry: &WorktreeEntry, operation: &OperationId) ->
         back_reference,
         rewritten,
         link_rewrite,
-    };
-    plan.check(base)?;
-    Ok(plan)
+        confirmed,
+    })
 }
 
 /// Moves the checkout to `plan.quarantine` and points Git's record at it.
@@ -279,7 +304,7 @@ pub(crate) fn move_with(
     activity_observed: &dyn Fn() -> bool,
     faults: &Faults,
 ) -> Result<(), MoveError> {
-    plan.check(base).map_err(MoveError::Refused)?;
+    plan.check(base, true).map_err(MoveError::Refused)?;
     if let Some(make) = faults.rename_instead {
         let source = make();
         return Err(MoveError::Rename(RenameError { kind: rename::classify(Stage::Rename, &source), source }));
@@ -338,8 +363,9 @@ impl MovePlan {
         fs::read(self.admin.dir.join("gitdir")).is_ok_and(|bytes| bytes == self.rewritten)
     }
 
-    /// Every condition the move relies on, read fresh.
-    fn check(&self, base: &Path) -> Result<(), MoveRefusal> {
+    /// Every condition the move relies on, read fresh. `lock` is false only
+    /// while a confirmed removal plans, before it unlocks.
+    fn check(&self, base: &Path, lock: bool) -> Result<(), MoveRefusal> {
         if real_directory_identity(&self.original)? != self.identity {
             return Err(MoveRefusal::Changed("a different directory is now at its path".into()));
         }
@@ -352,13 +378,15 @@ impl MovePlan {
         if read_gitdir_file(&self.admin)? != self.back_reference {
             return Err(MoveRefusal::Changed("Git's record of its location changed".into()));
         }
-        check_unlocked(&self.admin)?;
+        if lock {
+            check_unlocked(&self.admin)?;
+        }
         match (check_forward_link(&self.original, &self.admin.dir)?, &self.link_rewrite) {
             (ForwardLink::Survives, None) => {}
             (ForwardLink::ThroughCheckout { bytes, .. }, Some(rewrite)) if bytes == rewrite.original => {}
             _ => return Err(MoveRefusal::Changed("its .git file changed".into())),
         }
-        check_no_submodules(base, &self.admin)
+        if self.confirmed { Ok(()) } else { check_no_submodules(base, &self.admin) }
     }
 }
 
@@ -429,6 +457,12 @@ enum ForwardLink {
         /// Its trailing line ending, possibly empty.
         ending: Vec<u8>,
     },
+}
+
+/// Whether `checkout/.git` is a file linking to `admin_dir`, outside the
+/// checkout, by the same reading as the move's own check; `Err` says why not.
+pub(crate) fn leads_to_record(checkout: &Path, admin_dir: &Path) -> Result<(), String> {
+    check_forward_link(checkout, admin_dir).map(|_| ()).map_err(|refusal| refusal.to_string())
 }
 
 /// Requires `checkout/.git` to be a file linking to `admin_dir`, which must

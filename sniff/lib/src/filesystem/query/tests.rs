@@ -2,8 +2,8 @@
 //! replays injected observations against real temporary trees.
 
 use super::backend::{
-    Enumeration, InspectionContext, InspectionResult, MechanismInspection, MechanismSupport,
-    ProcessCandidate, ProcessDetails, RawEvidence, UsageBackend,
+    Enumeration, InspectionContext, InspectionResult, LinkError, MechanismInspection,
+    MechanismSupport, ProcessCandidate, ProcessDetails, ProcessLink, RawEvidence, UsageBackend,
 };
 use super::budget::Budget;
 use super::identity::{self, FileIdentity};
@@ -30,6 +30,8 @@ struct Fake {
     inspected: Vec<u32>,
     on_inspect: Option<Hook>,
     on_enumerate: Option<EnumerateHook>,
+    /// Parent links by PID; with none scripted the backend reads no parents.
+    links: HashMap<u32, Result<ProcessLink, LinkError>>,
 }
 
 impl Fake {
@@ -55,6 +57,7 @@ impl Fake {
             inspected: Vec::new(),
             on_inspect: None,
             on_enumerate: None,
+            links: HashMap::new(),
         }
     }
 
@@ -114,6 +117,13 @@ impl UsageBackend for Fake {
             .cloned()
             .unwrap_or_else(|| Ok(named(&format!("proc-{pid}"))))
     }
+
+    fn link(&mut self, pid: u32) -> Result<ProcessLink, LinkError> {
+        if self.links.is_empty() {
+            return Err(LinkError::Unsupported);
+        }
+        self.links.get(&pid).cloned().unwrap_or(Err(LinkError::Gone))
+    }
 }
 
 /// Delegates to a real backend, letting the first process inspection make
@@ -169,6 +179,10 @@ impl<B: UsageBackend> UsageBackend for ExpiringDuringInspection<B> {
 
     fn details(&mut self, pid: u32) -> Result<ProcessDetails, String> {
         self.inner.details(pid)
+    }
+
+    fn link(&mut self, pid: u32) -> Result<ProcessLink, LinkError> {
+        self.inner.link(pid)
     }
 }
 
@@ -665,6 +679,10 @@ fn a_partial_mechanism_with_retained_evidence_is_usable() {
         name: None,
         executable: None,
         user: None,
+        parent_pid: None,
+        app_name: None,
+        ancestors: Vec::new(),
+        ancestry_end: AncestryEnd::NotRead,
         evidence: vec![evidence],
     };
     let coverage = [record(Mechanism::OpenHandles, CoverageStatus::Partial, Some(0))];
@@ -2035,4 +2053,142 @@ fn old_reports_load_with_unknown_provenance_and_round_trip() {
     supplied.index_provenance = IndexProvenance::Supplied;
     let back: PathUsageReport = serde_json::from_str(&serde_json::to_string(&supplied).unwrap()).unwrap();
     assert_eq!(back.index_provenance, IndexProvenance::Supplied);
+}
+
+// ---------------------------------------------------------------------------
+// Process context
+// ---------------------------------------------------------------------------
+
+fn link(order: u64, parent_pid: u32, name: &str, app_name: Option<&str>) -> Result<ProcessLink, LinkError> {
+    Ok(ProcessLink {
+        order,
+        parent_pid,
+        name: Some(name.into()),
+        app_name: app_name.map(Into::into),
+    })
+}
+
+#[test]
+fn a_backend_that_reads_no_parents_reports_unsupported_ancestry_and_no_lookups() {
+    let tree = tree();
+    let a = tree.root.join("a.txt");
+    let mut fake = Fake::new(vec![candidate(7, Some(70), vec![found(Mechanism::OpenHandles, vec![handle(&a, 3)])])]);
+    let (report, counts) = measure(|| query(&tree.root, &PathUsageOptions::default(), &mut fake));
+    let record = &report.processes[0];
+    assert_eq!(record.parent_pid, None);
+    assert_eq!(record.app_name, None);
+    assert!(record.ancestors.is_empty());
+    assert_eq!(record.ancestry_end, AncestryEnd::Unsupported);
+    assert_eq!(counts.get(crate::performance::counters::QUERY_PARENT_LOOKUPS), 0);
+    assert!(report.limitations.is_empty(), "{:#?}", report.limitations);
+}
+
+#[test]
+fn a_holder_reports_its_parent_app_name_and_verified_chain_with_one_lookup_each() {
+    let tree = tree();
+    let a = tree.root.join("a.txt");
+    let mut fake = Fake::new(vec![candidate(7, Some(70), vec![found(Mechanism::OpenHandles, vec![handle(&a, 3)])])]);
+    fake.links = HashMap::from([
+        (7, link(70, 6, "cargo", None)),
+        (6, link(60, 5, "zsh", None)),
+        (5, link(50, 1, "Code Helper", Some("Visual Studio Code"))),
+    ]);
+    let (report, counts) = measure(|| query(&tree.root, &PathUsageOptions::default(), &mut fake));
+    let record = &report.processes[0];
+    assert_eq!(record.parent_pid, Some(6));
+    assert_eq!(
+        record.ancestors,
+        vec![
+            Ancestor { pid: 6, name: Some("zsh".into()), app_name: None },
+            Ancestor {
+                pid: 5,
+                name: Some("Code Helper".into()),
+                app_name: Some("Visual Studio Code".into()),
+            },
+        ]
+    );
+    assert_eq!(record.ancestry_end, AncestryEnd::Root);
+    assert_eq!(counts.get(crate::performance::counters::QUERY_PARENT_LOOKUPS), 3);
+}
+
+#[test]
+fn a_holder_whose_pid_was_reused_before_its_link_was_verified_gets_no_context() {
+    let tree = tree();
+    let a = tree.root.join("a.txt");
+    let mut fake = Fake::new(vec![candidate(7, Some(70), vec![found(Mechanism::OpenHandles, vec![handle(&a, 3)])])]);
+    fake.links = HashMap::from([(7, link(71, 6, "successor", None)), (6, link(60, 1, "zsh", None))]);
+    // The re-read token names a successor.
+    fake.tokens.insert(7, 71);
+    let report = query(&tree.root, &PathUsageOptions::default(), &mut fake);
+    let record = &report.processes[0];
+    assert_eq!(record.parent_pid, None);
+    assert!(record.ancestors.is_empty());
+    assert_eq!(record.ancestry_end, AncestryEnd::NotRead);
+    assert!(has_limitation(&report.limitations, LimitationKind::ProcessDisappeared));
+}
+
+#[test]
+fn an_unreadable_holder_link_is_a_context_limitation() {
+    let tree = tree();
+    let a = tree.root.join("a.txt");
+    let mut fake = Fake::new(vec![candidate(7, Some(70), vec![found(Mechanism::OpenHandles, vec![handle(&a, 3)])])]);
+    fake.links = HashMap::from([(7, Err(LinkError::Unreadable("denied".into())))]);
+    let report = query(&tree.root, &PathUsageOptions::default(), &mut fake);
+    assert_eq!(report.processes[0].ancestry_end, AncestryEnd::Unreadable);
+    assert!(has_limitation(&report.limitations, LimitationKind::ContextUnavailable));
+}
+
+#[test]
+fn a_process_whose_lifetime_is_unverified_gets_no_context() {
+    let tree = tree();
+    let a = tree.root.join("a.txt");
+    let mut fake = Fake::new(vec![candidate(7, None, vec![found(Mechanism::OpenHandles, vec![handle(&a, 3)])])]);
+    fake.links = HashMap::from([(7, link(70, 6, "cargo", None))]);
+    let (report, counts) = measure(|| query(&tree.root, &PathUsageOptions::default(), &mut fake));
+    assert_eq!(report.processes[0].ancestry_end, AncestryEnd::NotRead);
+    assert_eq!(counts.get(crate::performance::counters::QUERY_PARENT_LOOKUPS), 0);
+    assert!(has_limitation(&report.limitations, LimitationKind::ContextUnavailable));
+}
+
+#[test]
+fn process_context_round_trips_and_loads_as_not_read_when_absent() {
+    use serde_json::json;
+    let tree = tree();
+    let a = tree.root.join("a.txt");
+    let mut fake = Fake::new(vec![candidate(7, Some(70), vec![found(Mechanism::OpenHandles, vec![handle(&a, 3)])])]);
+    fake.links = HashMap::from([(7, link(70, 6, "cargo", None)), (6, link(60, 1, "zsh", Some("Shell")))]);
+    let report = query(&tree.root, &PathUsageOptions::default(), &mut fake);
+    let json = serde_json::to_value(&report).unwrap();
+    let process = &json["processes"][0];
+    assert_eq!(process["parent_pid"], 6);
+    assert!(process["app_name"].is_null(), "written as an explicit null");
+    assert_eq!(process["ancestry_end"], "root");
+    assert_eq!(process["ancestors"][0]["app_name"]["display"], "Shell");
+    let read: PathUsageReport = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(read, report);
+
+    // A schema 2 record carries none of the context fields.
+    let mut old = json.clone();
+    old["schema_version"] = json!(2);
+    let record = old["processes"][0].as_object_mut().unwrap();
+    for key in ["parent_pid", "app_name", "ancestors", "ancestry_end"] {
+        record.remove(key);
+    }
+    let loaded: PathUsageReport = serde_json::from_value(old).unwrap();
+    let record = &loaded.processes[0];
+    assert_eq!((record.parent_pid, record.ancestors.len()), (None, 0));
+    assert_eq!(record.ancestry_end, AncestryEnd::NotRead);
+
+    let mut null_parent = json.clone();
+    null_parent["processes"][0]["parent_pid"] = json!(null);
+    let loaded: PathUsageReport = serde_json::from_value(null_parent).unwrap();
+    assert_eq!(loaded.processes[0].parent_pid, None);
+
+    // An ancestor's names are present-but-nullable, like the record's own.
+    let mut nameless = json.clone();
+    nameless["processes"][0]["ancestors"][0].as_object_mut().unwrap().remove("name");
+    assert!(serde_json::from_value::<PathUsageReport>(nameless).is_err());
+    let mut unknown_end = json;
+    unknown_end["processes"][0]["ancestry_end"] = json!("elsewhere");
+    assert!(serde_json::from_value::<PathUsageReport>(unknown_end).is_err());
 }

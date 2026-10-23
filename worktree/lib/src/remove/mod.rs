@@ -15,7 +15,10 @@
 //! engine that replaces that checked deletion: it deletes whatever the
 //! approved checkout holds, never crossing a link or a mount, and waits out
 //! only temporary contention. [`lifecycle`] runs those steps in order as one
-//! removal, and resumes one that stopped.
+//! removal, and resumes one that stopped. [`confirmed`] is the lifecycle that
+//! replaces it: after the user confirms, it saves a compact approval, unlocks,
+//! places the checkout, deletes it with [`delete`], unregisters it, and runs
+//! the branch steps, finishing an interrupted operation without asking again.
 //! Its waits, mount boundaries, and filesystem failures are injected through
 //! [`clock`], [`mounts`], and [`faults`], so tests never sleep, mount, or need
 //! privileges.
@@ -26,7 +29,9 @@
 
 pub mod admin_entry;
 pub mod clock;
+pub mod confirmed;
 pub mod delete;
+pub mod facts;
 pub mod faults;
 pub mod handoff;
 pub mod included;
@@ -41,6 +46,7 @@ pub mod recovery;
 pub mod remote;
 pub mod repair;
 pub mod safety;
+pub mod submodules;
 pub mod usage;
 
 #[cfg(test)]

@@ -367,3 +367,42 @@ impl super::delete::Holders for ScriptedHolders {
         }
     }
 }
+
+/// A [`UsageSource`](super::usage::UsageSource) that sees no other process
+/// and complete coverage.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ClearUsage;
+
+impl super::usage::UsageSource for ClearUsage {
+    fn query(
+        &self,
+        path: &Path,
+        _index: Option<&std::sync::Arc<sniff::filesystem::query::TreeIndex>>,
+    ) -> Result<sniff::filesystem::query::PathUsageReport, sniff::filesystem::query::PathUsageError> {
+        Ok(clear_report(path))
+    }
+}
+
+/// A complete, usable usage report about `path` with no processes.
+pub fn clear_report(path: &Path) -> sniff::filesystem::query::PathUsageReport {
+    serde_json::from_value(serde_json::json!({
+        "schema_version": 1,
+        "target": {
+            "requested": {"display": path},
+            "resolved": {"display": path},
+            "kind": "directory",
+            "identity": {"kind": "unix", "device": "7", "inode": "3"},
+            "recursive": true
+        },
+        "outcome": "usable",
+        "started_at": "2026-10-22T00:00:00Z",
+        "finished_at": "2026-10-22T00:00:01Z",
+        "budget_ms": 2000,
+        "elapsed_us": 1000,
+        "budget_exhausted": false,
+        "processes": [],
+        "coverage": [],
+        "limitations": []
+    }))
+    .expect("a valid usage report")
+}

@@ -34,6 +34,10 @@ is left, so a rerun after a crash just runs it again.
   bind mounts; the device check catches a tree mounted mid-deletion. Native
   tables (`mounts::NativeMounts`) report real paths (`/private/var/…` on
   macOS): the caller must pass a root resolved the same way.
+- **`Mount` carries `fs_type`** (every OS; empty when Windows cannot read
+  it) **and `super_options`** (Linux mountinfo only; empty elsewhere). WSL2 lists `/mnt/c` as `9p` with `aname=drvfs` in the
+  superblock options (`,` and `;` both separate them), so `Mount::is_drvfs`
+  reads both; `mounts::containing` finds the checkout's own mount.
 - **Classification (`classify`)**: Gone / Temporary / Denied / Permanent per
   OS table; unknown → Permanent, never a loop. Unix EBUSY is Permanent.
   Errors with no OS code classify by `ErrorKind`, so tests use raw codes

@@ -341,6 +341,10 @@
   directory Windows Search's processes must run from for its one recheck. `notify` itself is not used: it hides overflow and lost watches on
   Windows, drops the watch on a directory `wt` moves on Linux, and offers no
   flush on macOS, so it cannot report lost coverage.
+- `worktree/lib` uses `chrono` 0.4 (no default features; `clock` and `std`,
+  as `worktree/cli` already builds it) to show a process's start time in local
+  time in `wt remove`'s warnings (`remove::facts`). Sniff reports the time as a
+  `chrono` UTC value; no crate was added to the lockfile.
 - `worktree/lib` uses `gix` (pinned `=0.84.0`, the version `sniff` builds, with
   `sha1`, `revision`, and `parallel`, all of which `sniff` already enables) to
   read repository metadata in-process: `origin`'s URL, the default branch,
@@ -938,7 +942,8 @@ This is a Rust workspace with the following modules:
 - [plist](https://github.com/ebarnard/rust-plist) _v1_ [📄](https://docs.rs/plist)
 
     _Apple property-list (XML and binary) reader/writer. Used by biscuit-terminal's
-    app-metadata value extractor to read iTerm2 / Apple Terminal config settings._
+    app-metadata value extractor to read iTerm2 / Apple Terminal config settings,
+    and (macOS only) by sniff's path-usage query to read an app bundle's name._
 
     _Tags: configuration, plist, macos, parsing_
 

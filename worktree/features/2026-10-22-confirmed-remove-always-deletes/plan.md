@@ -16,6 +16,7 @@ skills_files_updated_during_phase_1:
     - .claude/skills/worktree/testing.md
 packages:
     - worktree
+    - sniff
 source_files_during_phase_2:
     - worktree/lib/src/remove/recovery/compact.rs
     - worktree/lib/src/remove/recovery/compact/tests.rs
@@ -57,6 +58,71 @@ skills_files_updated_during_phase_3:
     - .claude/skills/worktree/remove.md
     - .claude/skills/worktree/deletion.md
     - .claude/skills/os/linux.md
+source_files_during_phase_4:
+    - sniff/lib/Cargo.toml
+    - sniff/lib/src/filesystem/query/ancestry.rs
+    - sniff/lib/src/filesystem/query/backend.rs
+    - sniff/lib/src/filesystem/query/linux.rs
+    - sniff/lib/src/filesystem/query/linux_tests.rs
+    - sniff/lib/src/filesystem/query/macos.rs
+    - sniff/lib/src/filesystem/query/macos_tests.rs
+    - sniff/lib/src/filesystem/query/mod.rs
+    - sniff/lib/src/filesystem/query/process.rs
+    - sniff/lib/src/filesystem/query/report.rs
+    - sniff/lib/src/filesystem/query/tests.rs
+    - sniff/lib/src/filesystem/query/win32.rs
+    - sniff/lib/src/filesystem/query/win32_tests.rs
+    - sniff/lib/src/performance/counters.rs
+    - sniff/cli/tests/l1/filesystem_query.rs
+    - Cargo.lock
+    - worktree/lib/Cargo.toml
+    - worktree/lib/src/git_metadata.rs
+    - worktree/lib/src/remove/facts.rs
+    - worktree/lib/src/remove/facts/tests.rs
+    - worktree/lib/src/remove/submodules.rs
+    - worktree/lib/src/remove/submodules/tests.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/lib/src/remove/usage.rs
+    - worktree/lib/src/remove/usage/tests.rs
+    - worktree/lib/src/remove/lifecycle/tests.rs
+    - worktree/lib/src/remove/mounts.rs
+    - worktree/lib/src/remove/mounts/macos.rs
+    - worktree/lib/src/remove/mounts/mountinfo.rs
+    - worktree/lib/src/remove/mounts/windows.rs
+    - worktree/lib/src/remove/delete/mod.rs
+    - worktree/lib/src/remove/delete/tests.rs
+    - worktree/lib/src/remove/quarantine/association.rs
+    - worktree/lib/src/remove/quarantine/placement/tests.rs
+docs_updated_during_phase_4:
+    - sniff/docs/topics/filesystem-query.md
+    - sniff/docs/dependencies.md
+    - docs/dependencies.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/sniff/SKILL.md
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/worktree/deletion.md
+    - .claude/skills/worktree/warnings.md
+source_files_during_phase_5:
+    - worktree/lib/src/remove/confirmed.rs
+    - worktree/lib/src/remove/confirmed/branches.rs
+    - worktree/lib/src/remove/confirmed/late.rs
+    - worktree/lib/src/remove/confirmed/resolve.rs
+    - worktree/lib/src/remove/confirmed/resume.rs
+    - worktree/lib/src/remove/confirmed/tests.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/lib/src/remove/handoff.rs
+    - worktree/lib/src/remove/quarantine/association.rs
+    - worktree/lib/src/remove/recovery/store.rs
+    - worktree/lib/src/remove/recovery/store/compact.rs
+    - worktree/lib/src/remove/delete/mod.rs
+    - worktree/lib/src/remove/test_support.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/worktree/confirmed.md
+    - .claude/skills/os/windows.md
 ---
 
 # Plan: a confirmed `wt remove` always deletes
@@ -586,17 +652,17 @@ Goal: gather everything that is shown in the confirmation question.
 
 #### Wave 7 (parallel)
 
-- [ ] **Sniff process context (R27)** — add missing fields found in Wave 1
+- [x] **Sniff process context (R27)** — add missing fields found in Wave 1
   (app name/description, start time, bounded parent chain, activity kind) to
   Sniff; explicit "unavailable" values per platform; update
   `sniff/docs/topics/filesystem-query.md` and the Sniff skill in the same change.
   Must not add repeated full-tree walks.
-- [ ] **Submodule inspector (R2)** — recursive over initialized submodules:
+- [x] **Submodule inspector (R2)** — recursive over initialized submodules:
   dirty files, unique commits (N6), failed inspection → "could not be checked"
   warning; uninitialized → no scan; `.git` pointing outside the admin record →
   "external Git data retained," not deleted. Deletes `modules/<name>` only when
   it belongs to this worktree's admin record.
-- [ ] **State classifier (R3, R9–R13, R15, R17)** — one `Facts` pass producing
+- [x] **State classifier (R3, R9–R13, R15, R17)** — one `Facts` pass producing
   warning records: lock + reason; link target (own checkout vs other, via
   forward and backward association); unreadable Git (with Git's message); file
   at the path; missing directory/index (staged changes unknowable); files `wt`
@@ -617,7 +683,7 @@ Goal: run the flowchart; delete the old stops.
 
 #### Wave 8 (sequential)
 
-- [ ] **Lifecycle core** — rewrite `lifecycle.rs`:
+- [x] **Lifecycle core** — rewrite `lifecycle.rs`:
   save approval → unlock if approved → move or mark in-place → delete → (wait or
   retain pending) → remove registration and copy record → branch steps → remove
   record. Drop usage/inventory/observation refusals, the free-space gate and
@@ -629,23 +695,23 @@ Goal: run the flowchart; delete the old stops.
 
 #### Wave 9 (parallel)
 
-- [ ] **Resume and waiter (R16, R17, R19)** — `lifecycle/resume.rs`: finish a
+- [x] **Resume and waiter (R16, R17, R19)** — `lifecycle/resume.rs`: finish a
   pending removal silently with earlier approvals (alias is a lookup key only; a
   name matching a pending and a different live checkout stays ambiguous);
   waiter names the running removal, waits interruptibly on the lock, then
   reports completion or continues; vanished checkout = already removed; never
   resume into a replaced directory or admin record.
-- [ ] **Handoff (R18)** — `handoff.rs`: 10-minute expiry, single-use, carries the
+- [x] **Handoff (R18)** — `handoff.rs`: 10-minute expiry, single-use, carries the
   operation id; second run verifies checkout/repository identities, caller
   outside the target, and all branch/remote protections, without content
   comparison or re-asking.
-- [ ] **Branch steps** — keep tiers, expected tip, push endpoint and lease checks;
+- [x] **Branch steps** — keep tiers, expected tip, push endpoint and lease checks;
   persist per N-record bindings; changed branch/endpoint → kept, exit 1, never a
   new checkout question; already-absent branch succeeds; no branch action added
   because a retry supplied a new flag; unbound legacy remote action stays undone
   with explanation and exit 1; checkout cleanup completes before branch failure
   is shown.
-- [ ] **Final-status check (R14)** — one `git status` immediately before
+- [x] **Final-status check (R14)** — one `git status` immediately before
   deletion; diff against the questioned set; surface `also deleted N file(s)
   changed after you answered: …`; never blocks; never claims to be exhaustive.
 

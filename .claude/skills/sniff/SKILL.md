@@ -148,6 +148,24 @@ cwd and subscription mechanisms stay unsupported (see the `os` skill).
 Every backend shares the per-mechanism `Tally` in `backend.rs`. Contract:
 `sniff/docs/topics/filesystem-query.md`.
 
+Each `ProcessRecord` also carries context (schema 3): `parent_pid`,
+`app_name` (macOS nearest `.app` bundle name, Windows `FileDescription`,
+Linux always `None`), `ancestors` (verified, nearest first, at most
+`MAX_ANCESTORS` = 8, never PID 0/1), and `ancestry_end`, the explicit
+reason the chain stops (`not_read`, `unsupported`, `unreadable`, ... — read
+it before treating a missing parent as "none"). `process::contextualize` runs
+after enrichment and `ancestry::chain` (pure, unit-tested with an injected
+reader) walks parents through `UsageBackend::link`, one PID per read; a parent
+whose start order exceeds its child's is a reused PID and ends the chain.
+Never build the chain from `os::self_and_ancestors`: it refreshes the whole
+process table. macOS ancestors use `proc_bsdshortinfo` plus `sysctl`
+`kern.proc.pid` start time because `proc_bsdinfo` is same-user only and would
+stop at a root-owned `login`. Windows `OpenHandle` evidence keeps
+`access: None`: the file-side holder query returns PIDs only. Each read counts
+`filesystem.query.parent_lookups`. The new fields deserialize with
+`#[serde(default)]` so persisted schema 1/2 reports (`wt` recovery records)
+still load.
+
 **A library that walks a tree before asking who uses it should supply its own
 index** (`TreeIndex::builder(root_identity)` + `entry(relative, kind,
 identity)` → `PathUsageOptions::with_tree_index(Arc)`) instead of letting the

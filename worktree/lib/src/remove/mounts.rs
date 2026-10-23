@@ -24,6 +24,22 @@ pub struct Mount {
     /// What is mounted there, as the platform names it (a device, a volume,
     /// or the source directory of a bind mount); shown in the warning.
     pub source: String,
+    /// The filesystem type as the platform names it (`ext4`, `apfs`, `9p`,
+    /// `NTFS`); empty where it could not be read.
+    pub fs_type: String,
+    /// Linux mountinfo's superblock options, raw; empty on other platforms.
+    /// WSL's drvfs is recognized by them when it is mounted as `9p`.
+    pub super_options: String,
+}
+
+impl Mount {
+    /// A WSL drvfs mount of a Windows drive: filesystem type `drvfs`, or `9p`
+    /// whose superblock options carry `aname=drvfs` (how WSL2 mounts
+    /// `/mnt/<drive>`). The options separate with both `,` and `;`.
+    pub fn is_drvfs(&self) -> bool {
+        self.fs_type == "drvfs"
+            || (self.fs_type == "9p" && self.super_options.split([',', ';']).any(|option| option == "aname=drvfs"))
+    }
 }
 
 /// Where the mount table comes from. Tests inject one, including
@@ -75,13 +91,45 @@ pub fn mounts_within<'m>(mounts: &'m [Mount], root: &Path) -> Vec<&'m Mount> {
     nested
 }
 
+/// The mount `path` lives on: the longest mount point that is `path` or one
+/// of its ancestors. Compare spellings as [`MountInfo::mounts`] describes.
+pub fn containing<'m>(mounts: &'m [Mount], path: &Path) -> Option<&'m Mount> {
+    mounts
+        .iter()
+        .filter(|mount| path.starts_with(&mount.mount_point))
+        .max_by_key(|mount| mount.mount_point.components().count())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::remove::test_support::FixedMounts;
 
     fn mount(point: &Path, source: &str) -> Mount {
-        Mount { mount_point: point.to_path_buf(), source: source.to_string() }
+        Mount { mount_point: point.to_path_buf(), source: source.to_string(), fs_type: String::new(), super_options: String::new() }
+    }
+
+    fn typed(fs_type: &str, super_options: &str) -> Mount {
+        Mount { fs_type: fs_type.to_string(), super_options: super_options.to_string(), ..mount(Path::new("/mnt/c"), "C:\\") }
+    }
+
+    #[test]
+    fn drvfs_is_recognized_by_type_or_by_its_9p_options() {
+        assert!(typed("drvfs", "rw").is_drvfs());
+        assert!(typed("9p", "rw,aname=drvfs;path=C:\\;uid=1000").is_drvfs());
+        assert!(!typed("9p", "rw,aname=other;path=x").is_drvfs(), "a 9p share that is not drvfs");
+        assert!(!typed("ext4", "rw,aname=drvfs").is_drvfs());
+    }
+
+    #[test]
+    fn the_containing_mount_is_the_longest_ancestor_mount_point() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("wts").join("feat");
+        let table = vec![mount(Path::new("/"), "root"), mount(dir.path(), "outer"), mount(&root, "own"), mount(&root.join("target"), "inner")];
+
+        assert_eq!(containing(&table, &root).map(|mount| mount.source.as_str()), Some("own"));
+        assert_eq!(containing(&table, &dir.path().join("wts")).map(|mount| mount.source.as_str()), Some("outer"));
+        assert_eq!(containing(&[mount(&root, "own")], dir.path()), None);
     }
 
     #[test]

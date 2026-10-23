@@ -31,8 +31,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use chrono::{DateTime, Utc};
 use sniff::filesystem::query::{
-    CoverageStatus, Evidence, EvidenceKind, FileIdentity, Mechanism, NativeString, Outcome,
+    Ancestor, CoverageStatus, Evidence, EvidenceKind, FileIdentity, Mechanism, NativeString, Outcome,
     PathUsageError, PathUsageOptions, PathUsageReport, ProcessRecord, TreeIndex, query_path_usage,
 };
 
@@ -244,6 +245,13 @@ pub struct Holder {
     pub identity_uncertain: bool,
     pub name: Option<NativeString>,
     pub executable: Option<NativeString>,
+    /// Presentation only, never an identity key.
+    pub start_time: Option<DateTime<Utc>>,
+    /// Sniff's recognizable name: the enclosing app on macOS, the program's
+    /// description on Windows.
+    pub app_name: Option<NativeString>,
+    /// Verified parents, nearest first, bounded by Sniff.
+    pub ancestors: Vec<Ancestor>,
     pub evidence: Vec<HolderEvidence>,
 }
 
@@ -251,6 +259,9 @@ pub struct Holder {
 pub struct HolderEvidence {
     pub kind: EvidenceKind,
     pub location: EvidenceLocation,
+    /// The handle was observed open for writing. `false` when Sniff could
+    /// not tell, so it never proves the handle is read-only.
+    pub writing: bool,
 }
 
 /// Which object in the checkout the evidence is about.
@@ -403,7 +414,11 @@ pub fn assess(report: PathUsageReport, own: &OwnedHandles) -> Result<UsageCleara
             if own.excludes(record, own_token, item) {
                 excluded += 1;
             } else {
-                evidence.push(HolderEvidence { kind: item.kind, location: location(item) });
+                evidence.push(HolderEvidence {
+                    kind: item.kind,
+                    location: location(item),
+                    writing: item.access.is_some_and(|access| access.write),
+                });
             }
         }
         if !evidence.is_empty() {
@@ -413,6 +428,9 @@ pub fn assess(report: PathUsageReport, own: &OwnedHandles) -> Result<UsageCleara
                 identity_uncertain: record.identity_uncertain,
                 name: record.name.clone(),
                 executable: record.executable.clone(),
+                start_time: record.start_time,
+                app_name: record.app_name.clone(),
+                ancestors: record.ancestors.clone(),
                 evidence,
             });
         }

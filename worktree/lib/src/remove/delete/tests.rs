@@ -515,8 +515,8 @@ fn a_nested_mount_is_never_crossed_and_everything_else_is_deleted() {
     let point = tree.root().join("target").join("cache");
     fs::create_dir(&point).unwrap();
     fs::write(point.join("on-the-mount"), "mounted data").unwrap();
-    let mount = Mount { mount_point: point.clone(), source: "/dev/sdb1".into() };
-    let mounts = [Mount { mount_point: tree.dir.path().to_path_buf(), source: "/dev/sda1".into() }, mount.clone()];
+    let mount = Mount { mount_point: point.clone(), source: "/dev/sdb1".into(), fs_type: String::new(), super_options: String::new() };
+    let mounts = [Mount { mount_point: tree.dir.path().to_path_buf(), source: "/dev/sda1".into(), fs_type: String::new(), super_options: String::new() }, mount.clone()];
 
     let deletion = delete(&tree, &ManualClock::new(), &NoFaults, &mounts, &ScriptedHolders::new(), &mut Told::default());
 
@@ -532,7 +532,7 @@ fn a_permanent_failure_and_a_retained_mount_are_both_reported() {
     let point = tree.root().join("src").join("deep");
     let stuck = tree.root().join("README.md");
     let faults = ScriptedFaults::new().always(FsOp::RemoveFile, &stuck, read_only_error);
-    let mounts = [Mount { mount_point: point.clone(), source: "tmpfs".into() }];
+    let mounts = [Mount { mount_point: point.clone(), source: "tmpfs".into(), fs_type: String::new(), super_options: String::new() }];
 
     let deletion = delete(&tree, &ManualClock::new(), &faults, &mounts, &ScriptedHolders::new(), &mut Told::default());
 

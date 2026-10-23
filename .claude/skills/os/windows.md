@@ -277,6 +277,17 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   replacement, an existing destination gives 183 and a cross-volume move 17;
   `std::fs::rename` instead **replaces** an existing empty directory or file.
 
+## Removing a link without touching its target
+
+- **A junction or directory symlink is not `is_dir()`.** `symlink_metadata`
+  reports it as a symlink, so code that picks `remove_file` versus
+  `remove_dir` from `is_dir()` calls `remove_file`, which fails with
+  `ERROR_ACCESS_DENIED` (5) and looks like a permission problem. Check
+  `MetadataExt::file_attributes() & FILE_ATTRIBUTE_DIRECTORY` (0x10) and use
+  `remove_dir`, which removes the link entry and never its target
+  (`worktree/lib/src/remove/confirmed.rs`, `remove_link`). macOS and Linux
+  pass either way, so only the Windows cross-check catches it.
+
 ## Directory change notifications
 
 Measured with `wt remove`'s own `ReadDirectoryChangesW` adapter
