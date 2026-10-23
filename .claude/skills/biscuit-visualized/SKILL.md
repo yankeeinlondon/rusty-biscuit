@@ -5,179 +5,99 @@ description: Expert knowledge for the biscuit-visualized Rust library - the auth
 
 # biscuit-visualized
 
-Pure-Rust visualization rendering backend for diagrams and graphs. Generates SVG and PNG artifacts with caching and theming. Library-only (no CLI binary) — terminal display is handled by `biscuit-terminal` adapters.
+Pure-Rust visualization rendering backend for diagrams and graphs. Generates SVG and PNG artifacts with caching and theming. Library-only (no CLI binary); behind its `terminal` feature it also owns the diagram components that display through `biscuit-terminal`.
 
 ## Core Principles
 
-1. **Render, don't display**: Produces file artifacts (SVG/PNG); display is the consumer's responsibility
-2. **Cache by content**: xxHash-based content-addressed caching avoids redundant renders
-3. **Theme-aware**: All renderers accept dark/light themes with sensible defaults
-4. **Graceful fallback**: Every diagram type provides `fallback_code_block()` for text-only output
+1. **Render, don't display**: produces file artifacts (SVG/PNG); display is the consumer's (or the `terminal` components') job
+2. **Cache by content**: xxHash content-addressed keys avoid redundant renders
+3. **Measure what you draw**: one font-resolution chain serves Merman's text measurer and the rasterizer
+4. **Graceful fallback**: every diagram type provides `fallback_code_block()`; any Mermaid failure (parse error, unsupported family, time budget) falls back to it
 
 ## Quick Start
 
 ```rust
 use biscuit_visualized::mermaid::{MermaidDiagram, MermaidTheme};
-use biscuit_visualized::graph::{GraphDiagram, GraphInputSyntax};
+use biscuit_visualized::graph::GraphDiagram;
 use biscuit_visualized::artifact::{OutputFormat, RenderRequest};
 
-// Mermaid diagram, vector SVG export
+// Mermaid diagram (rendered by Merman), vector SVG export
 let diagram = MermaidDiagram::new("flowchart LR\n    A --> B --> C")
     .with_theme(MermaidTheme::Dark);
 let svg_req = RenderRequest { format: OutputFormat::Svg, ..RenderRequest::default() };
 let artifact = diagram.render(&svg_req)?;
 
-// Graph from expression syntax, rasterised at a known display width
+// Graph from expression syntax, rasterized at a known display width
 let graph = GraphDiagram::from_expression("a -> b -> c")?;
 let artifact = graph.render(&RenderRequest::default().with_target_width(1600))?;
-// PNG is 1600 px wide; height derived from SVG aspect ratio.
 ```
-
-For the legacy HiDPI multiplier path, omit `target_width` and set `scale: N` directly. See [Rasterization](./rasterization.md) for when each is appropriate.
 
 ## Topics
 
 | Topic | Description |
 |-------|-------------|
-| [Mermaid Rendering](./mermaid-rendering.md) | MermaidDiagram API, themes, config, quadrant charts, gitGraph corrections |
+| [Mermaid Rendering](./mermaid-rendering.md) | Merman pipeline, `MermaidDiagram` API, time budget, fallback, themes (interim), config, post-process, gitGraph `commitSpacing` |
 | [Diagram Components](./diagram-components.md) | Terminal components, `TerminalDiagramRenderer` hook, GitGraph contract, `l1` tests |
 | [Graph Rendering](./graph-rendering.md) | Expression syntax, DOT format, GraphBuilder, orientation, color themes, terminal resolution tuning |
-| [Artifacts & Caching](./artifacts-caching.md) | RenderRequest, RenderedArtifact, FileCache, cache layout |
-| [Rasterization](./rasterization.md) | SVG-to-PNG via resvg, scale factors, font handling, terminal protocol ceiling |
+| [Artifacts & Caching](./artifacts-caching.md) | RenderRequest, RenderedArtifact, FileCache, cache layout, Mermaid cache key |
+| [Rasterization](./rasterization.md) | SVG-to-PNG via resvg, scale factors, font chain, terminal protocol ceiling |
 
-### In-repo deep dive
+### In-repo docs
 
-`biscuit-visualized/docs/dot-graph.md` — full reference for the DOT graph subset accepted by this library, including supported / rejected features, cluster syntax, and the resolution-tuning case study from `sniff repo package-dependencies --ui`.
+- `biscuit-visualized/docs/merman.md`: the Mermaid pipeline with owners, time budget, fallback, themes, fonts (`MERMAID_FONT`, resolution chain, bundled Inter / Noto Emoji), the `\n` rewrite, post-process, the HTML static target, cache identity, and what is **planned** (terminal-derived palettes and accents).
+- `biscuit-visualized/docs/mermaid-gitgraph.md`: gitGraph tag spacing (`commitSpacing` written only when tags on different commits collide, to a one-em gap; an author's own value wins) and the `gitgraph_geometry()` test API.
+- `biscuit-visualized/docs/dot-graph.md`: the DOT subset, cluster syntax, and the resolution-tuning case study.
 
-`biscuit-visualized/docs/mermaid-gitgraph.md` — every gitGraph is corrected before drawing: a labeled `merge` gets back the second parent `mermaid-rs-renderer` 0.3.1 loses, and commits are spaced only as far as colliding tags (different commits, overlapping rows) need for a one-em gap, so tags never overlap and an isolated long label keeps the default step (horizontal graphs with unrotated tags only). Both run in the one layout path that measurement and rendering share.
+## Mermaid in one paragraph
 
-## Mermaid Diagrams
+`mermaid::MermaidDiagram::render` builds the font chain, rewrites the source (`\n` → `<br/>` labels for class, ER, mindmap, requirement; `commitSpacing` for a tagged LR gitGraph whose tags collide, found with one Merman `layout_json` pass), checks the cache, and on a miss calls Merman (fork `yankeeinlondon/merman` rev `6e6b1e6554e8`) for a resvg-safe SVG measured with our `LabelMeasurer`, then post-processes (solid gradient strokes, `sans-serif` default; for SVG with `with_target(MermaidTarget::HtmlStatic)`, measured face first in every `font-family` and visible label overflow, never in PNG), paints the background, and rasterizes for PNG. Each Merman request has its own deadline (`with_time_budget`, default `DEFAULT_TIME_BUDGET` = 2 s) covering Merman's work only. Failures are `MermaidError::RenderFailed`: parse errors, unknown types, ZenUML (by header), math labels (`$$…$$`, math not compiled in), and an exceeded budget. Themes `Dark`/`Default`/`Forest`/`Neutral` currently map to Merman's built-in themes of the same name; compiled palettes are **planned**. Details: [Mermaid Rendering](./mermaid-rendering.md).
 
-### Supported Diagram Types
-
-Flowcharts, Sequence, Class, State, ER, Pie, XY Charts, Quadrant Charts, Gantt, Timeline, Journey, Mindmap, Git Graph
-
-### Themes
+### Themes and Quadrant Config
 
 ```rust
-use biscuit_visualized::mermaid::MermaidTheme;
+use biscuit_visualized::mermaid::{MermaidConfig, MermaidDiagram, MermaidTheme, QuadrantTheme};
 
-let theme = MermaidTheme::Dark;       // Dark background
-let theme = MermaidTheme::Default;    // Light (default Mermaid)
-let theme = MermaidTheme::Forest;     // Green tones
-let theme = MermaidTheme::Neutral;    // Muted/neutral
-let theme = MermaidTheme::for_color_mode(true);  // true = dark
-```
-
-### Quadrant Chart Theming
-
-```rust
-use biscuit_visualized::mermaid::{MermaidDiagram, QuadrantTheme, MermaidConfig};
-
+let theme = MermaidTheme::for_color_mode(true);  // true = Dark, false = Default
 let config = QuadrantTheme::MagicQuadrangle.apply(MermaidConfig::default(), true);
-let diagram = MermaidDiagram::new("quadrant-beta\n  ...")
-    .with_config(config)
-    .with_theme(MermaidTheme::Dark);
+let diagram = MermaidDiagram::new("quadrantChart\n  ...").with_config(config).with_theme(theme);
 ```
 
 ## Graph Diagrams
 
-### Three Input Methods
-
 ```rust
 use biscuit_visualized::graph::*;
 
-// 1. Expression syntax (lightweight)
-let graph = GraphDiagram::from_expression("a -> b -> c; d -> e")?;
-
-// 2. DOT format (full Graphviz)
-let graph = GraphDiagram::from_dot("digraph { A -> B; B -> C; }")?;
-
-// 3. Auto-detect syntax
-let graph = GraphDiagram::parse(input, GraphInputSyntax::Auto)?;
+let graph = GraphDiagram::from_expression("a -> b -> c; d -> e")?;     // expression syntax
+let graph = GraphDiagram::from_dot("digraph { A -> B; B -> C; }")?;     // DOT subset
+let graph = GraphDiagram::parse(input, GraphInputSyntax::Auto)?;        // auto-detect
+let graph = GraphBuilder::directed().add_node("a", "Start").add_edge("a", "b").build()?;
+let graph = graph.with_orientation(GraphOrientation::LeftToRight).with_color_theme(GraphColorTheme::dark());
 ```
 
-### Expression Syntax Rules
-
-- Directed edges: `a -> b -> c`
-- Undirected edges: `a -- b -- c`
-- Quoted identifiers: `"My Node" -> "Other Node"`
-- Statement separator: `;` or newline
-- Mixed `->` and `--` in same graph is rejected
-
-### GraphBuilder (Programmatic)
-
-```rust
-use biscuit_visualized::graph::GraphBuilder;
-
-let graph = GraphBuilder::directed()
-    .add_node("a", "Start")
-    .add_edge("a", "b")
-    .add_node("b", "End")
-    .with_orientation(GraphOrientation::TopToBottom)
-    .build()?;
-```
-
-### Orientation and Color Themes
-
-```rust
-let graph = GraphDiagram::from_expression("a -> b")?
-    .with_orientation(GraphOrientation::LeftToRight)  // or TopToBottom
-    .with_color_theme(GraphColorTheme::dark())        // or light()
-    .with_title("My Graph");
-```
+Expression rules: `->` directed, `--` undirected (never mixed in one graph), quoted identifiers, `;` or newline separators. See [Graph Rendering](./graph-rendering.md).
 
 ## Rendering and Caching
 
-### RenderRequest
-
-`RenderRequest` is a plain struct; use struct literal syntax with `..RenderRequest::default()`, or the builders `with_target_width`, `with_row_height`, and `with_background`:
+`RenderRequest` is a plain struct; use `..RenderRequest::default()` or the builders `with_target_width`, `with_row_height`, `with_background`:
 
 ```rust
 use biscuit_visualized::artifact::{Background, OutputFormat, RenderRequest};
 
-// SVG export
-let req = RenderRequest { format: OutputFormat::Svg, ..RenderRequest::default() };
-
-// PNG at a known display width (preferred for inline display)
-let req = RenderRequest::default().with_target_width(1600);
-
-// PNG at a fixed HiDPI multiplier (no display target)
-let req = RenderRequest {
-    format: OutputFormat::Png,
-    scale: 2,
-    background: Background::Transparent,  // Theme (default) | Transparent | Solid { r, g, b }
-    ..RenderRequest::default()
-};
-
-// Terminal display size: exact width, height padded to whole 18 px cell rows
-let req = RenderRequest::default().with_target_width(540).with_row_height(18);
+let req = RenderRequest::default().with_target_width(1600);            // PNG at display width
+let req = RenderRequest { format: OutputFormat::Png, scale: 2,
+    background: Background::Transparent, ..RenderRequest::default() };  // HiDPI multiplier
+let req = RenderRequest::default().with_target_width(540).with_row_height(18); // whole cell rows
 ```
 
-`target_width: Some(px)` takes precedence over `scale`. `row_height` pads PNG height (ignored for SVG); the padding is transparent unless the background is `Solid`. See [Rasterization](./rasterization.md) for the trade-off.
+`target_width` takes precedence over `scale`; `row_height` pads PNG height (ignored for SVG). `Background` is `Theme` (default) | `Transparent` | `Solid { r, g, b }`.
 
-### Cache Behavior
-
-- Location: `$TMPDIR/biscuit-visualized/v1/{mermaid|graph}/{svg|png}/`
-- Key: xxHash of `v2 + kind + source + options + backend_id + format`; options include scale, target width, row height, background, and the PNG encoder settings (see [Artifacts & Caching](./artifacts-caching.md))
-- `RenderedArtifact.cache_hit` indicates whether the result was cached
-- No automatic cleanup — relies on OS temp directory lifecycle
-
-### Fallback
-
-Every diagram type provides a text fallback for environments without image support:
-
-```rust
-let fallback = diagram.fallback_code_block();
-// Returns a markdown fenced code block with the source
-```
+- Cache location: `$TMPDIR/biscuit-visualized/v1/{mermaid|graph}/{svg|png}/` (or `$BISCUIT_VISUALIZED_CACHE_DIR/v1/`)
+- Key: xxHash of `v2 | kind | source | options | backend_id | format`. Mermaid hashes the **rewritten** source, backend `merman@6e6b1e6554e8+bv1`, and options: site-config hash (theme + `MermaidConfig`), font identity, title, and `RenderRequest::cache_identity()`. See [Artifacts & Caching](./artifacts-caching.md)
+- `RenderedArtifact.cache_hit` reports a hit; no automatic cleanup
 
 ## Relationship to biscuit-terminal
 
-**This crate decides what a diagram shows; `biscuit-terminal` decides how it
-reaches the screen.** The `terminal` feature adds the diagram components,
-which wrap this library's artifact types and display through
-`biscuit-terminal`'s `TerminalImage`:
+**This crate decides what a diagram shows; `biscuit-terminal` decides how it reaches the screen.** The `terminal` feature adds the components, which wrap this library's artifact types and display through `biscuit-terminal`'s `TerminalImage`:
 
 | Artifact type | Component (`terminal` feature) |
 |---|---|
@@ -185,64 +105,46 @@ which wrap this library's artifact types and display through
 | `graph::GraphDiagram` | `components::graph_expression::GraphExpression` |
 | — | `components::git_graph::GitGraph` |
 
-The dependency runs one way (this crate → `biscuit-terminal`). Changes to
-diagram rendering, sizing, and the components go here; changes to image
-protocols and terminal detection go in `biscuit-terminal`. See
-[Diagram Components](./diagram-components.md).
+The dependency runs one way (this crate → `biscuit-terminal`). See [Diagram Components](./diagram-components.md).
 
 ## Error Types
 
 ```rust
-// Mermaid errors
-MermaidError::RenderFailed(String)
-MermaidError::RasterizationFailed(RasterError)
-MermaidError::Io(std::io::Error)
-
-// Graph errors
-GraphError::ExpressionParseFailed(String)
-GraphError::MixedEdgeKinds
-GraphError::DotParseFailed(String)
-GraphError::UnsupportedDotFeature(String)
-GraphError::RenderFailed(String)
-GraphError::RasterizationFailed(RasterError)
-GraphError::Io(std::io::Error)
-
-// Raster errors
-RasterError::SvgParseFailed(String)
-RasterError::RenderFailed(String)
-RasterError::IoError(std::io::Error)
+MermaidError::{RenderFailed(String), RasterizationFailed(RasterError), Io(io::Error)}
+GraphError::{ExpressionParseFailed(String), MixedEdgeKinds, DotParseFailed(String),
+    UnsupportedDotFeature(String), RenderFailed(String), RasterizationFailed(RasterError), Io(io::Error)}
+RasterError::{SvgParseFailed(String), RenderFailed(String), IoError(io::Error)}
 ```
 
 ## Key Files
 
-| Path | Description |
+| Path (under `biscuit-visualized/src/src/`) | Description |
 |------|-------------|
-| `biscuit-visualized/src/lib.rs` | Root module exports |
-| `biscuit-visualized/src/artifact.rs` | OutputFormat, RenderRequest, RenderedArtifact |
-| `biscuit-visualized/src/mermaid/render.rs` | MermaidDiagram rendering, SVG post-processing |
-| `biscuit-visualized/src/mermaid/config.rs` | MermaidTheme, MermaidConfig, QuadrantTheme |
-| `biscuit-visualized/src/graph/expression.rs` | Expression syntax tokenizer/parser |
-| `biscuit-visualized/src/graph/dot.rs` | DOT parsing, validation, expression-to-DOT conversion |
-| `biscuit-visualized/src/graph/builder.rs` | GraphBuilder fluent API |
-| `biscuit-visualized/src/graph/render.rs` | GraphDiagram, GraphColorTheme, orientation |
-| `biscuit-visualized/src/cache/file_cache.rs` | Content-addressed FileCache |
-| `biscuit-visualized/src/raster/png.rs` | SVG-to-PNG rasterization via resvg |
-| `biscuit-visualized/src/fonts/` | Font-resolution chain (`chain.rs`), usvg-mirroring shaper (`shaper.rs`), Merman text measurer (`measure.rs`); crate-private |
+| `lib.rs` | Root module exports |
+| `artifact.rs` | OutputFormat, RenderRequest, RenderedArtifact, Background |
+| `mermaid/render.rs` | `MermaidDiagram`: pipeline, Merman requests, time budget, cache key, background, `natural_size` |
+| `mermaid/newline.rs` | The `\n` → `<br/>` label rewrite (four families) |
+| `mermaid/gitgraph_layout.rs` | Merman layout data → `GitGraphGeometry`; `commitSpacing` computation and directive |
+| `mermaid/gitgraph.rs` | `GitGraphGeometry` types (doc-hidden), `TAG_GAP_EM`, `default_gitgraph_commit_step()` |
+| `mermaid/postprocess.rs` | Gradient-stroke fix, `sans-serif` default |
+| `mermaid/config.rs` | MermaidTheme, MermaidConfig, QuadrantTheme |
+| `graph/{expression,dot,builder,render}.rs` | Expression parser, DOT, GraphBuilder, GraphDiagram |
+| `cache/file_cache.rs` | `FileCache`, `MERMAID_BACKEND` |
+| `raster/png.rs` | SVG-to-PNG rasterization via resvg |
+| `fonts/` | Font chain (`chain.rs`, cache identity), shaper (`shaper.rs`), Merman measurer (`measure.rs`); crate-private |
 
 ## Dependencies
 
 | Crate | Purpose |
 |-------|---------|
-| `mermaid-rs-renderer` 0.3.1 | Mermaid diagram rendering backend (cache backend id `mermaid-rs-renderer@0.3.x+bv3`) |
+| `merman` (git: `yankeeinlondon/merman`, rev `6e6b1e6554e8e75d468c1f991652c1c53a85bace`, branch `gitgraph-commit-spacing`) | Mermaid parse/layout/SVG; features `svg`, `all-diagrams`, `layout-cytoscape` (no `png`, `native-fonts`, ELK, `math`). The fork adds gitGraph `commitSpacing`. **Side effect:** `merman-core` enables serde_json's `preserve_order` (and `float_roundtrip`), and Cargo unifies it into every build that reaches this crate (darkmatter, sniff-cli, worktree-cli, claudine, …): `serde_json::Map` keeps insertion order instead of sorting, so code or tests that relied on sorted keys change. Merman needs it (its models iterate JSON maps in insertion order) |
 | `layout-rs` v0.1 | Graph layout engine and DOT parsing |
 | `resvg` v0.47 | SVG-to-PNG rasterization |
-| `rustybuzz` 0.20.1, `ttf-parser` 0.25.1, `unicode-bidi`, `unicode-script`, `fontique` 0.12.0 | Font resolution (ttf-parser, fontique; used by the rasterizer's font chain) and text measurement (feature `image`: `fonts::shaper` mirrors usvg's layout, `fonts::measure::LabelMeasurer` is Merman's measurer; not yet on the Mermaid render path). rustybuzz and ttf-parser stay on usvg's versions |
-| Bundled fonts (`src/assets/fonts/`) | Inter 4.1 Regular/Bold (every OS) and Noto Emoji (Linux only), compiled in by the private `fonts::bundled` module (`image` feature) and registered in the font-resolution chain's database |
-| `biscuit-hash` | xxHash for cache key generation |
-| `serde` + `serde_json` | Theme config serialization |
-| `thiserror` v2.0 | Error type derivation |
-| `tempfile` v3 | Temporary file operations |
-| `tracing` v0.1 | Structured logging |
+| `rustybuzz` 0.20.1, `ttf-parser` 0.25.1, `unicode-bidi`, `unicode-script`, `fontique` 0.12.0 | Font resolution and text measurement for Merman layout and rasterization (feature `image`); rustybuzz and ttf-parser stay on usvg's versions |
+| Bundled fonts (`src/assets/fonts/`) | Inter 4.1 Regular/Bold (every OS) and Noto Emoji (Linux only), registered in the font chain |
+| `biscuit-hash` | xxHash for cache keys and font identity |
+| `serde` + `serde_json` | Site config and Merman layout data |
+| `thiserror`, `tempfile`, `tracing` | Errors, temp files, logging |
 
 ## Development Commands
 
@@ -254,8 +156,6 @@ just -f biscuit-visualized/justfile lint    # Run clippy
 
 ## Implementation Notes
 
-- Mermaid SVG post-processing fixes legend text alignment (`dominant-baseline="central"`)
-- Pie chart text contrast is adjusted per-slice using WCAG luminance formula
-- Graph SVG post-processing trims layout-rs canvas padding and applies custom fonts/colors
-- layout-rs supports LR and TB orientations; `GraphOrientation` maps to these
-- Rasterization draws text through the crate's one font-resolution chain (`fonts::default_chain()`, lazily built behind `OnceLock`); see [Rasterization](./rasterization.md#font-database-and-resolution)
+- Graph SVG post-processing trims layout-rs canvas padding and applies custom fonts/colors; layout-rs supports LR and TB
+- Rasterization draws text through `fonts::default_chain()` (lazily built behind `OnceLock`); see [Rasterization](./rasterization.md#font-database-and-resolution)
+- Bump `+bv<n>` in `MERMAID_BACKEND` whenever the rewrites, post-process, or background change output; bump the rev part with the Merman pin

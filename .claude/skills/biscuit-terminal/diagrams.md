@@ -40,7 +40,7 @@ it installs none. The library's own tests use fakes
 ## `bt` diagram commands
 
 The CLI depends on `biscuit-visualized` (`clap`, `terminal`) for these
-commands; the library does not. Rendering is pure Rust (`mermaid-rs-renderer`
+commands; the library does not. Rendering is pure Rust (Merman
 and `layout-rs`); no Node.js or `mmdc` is involved. `bt` does not auto-fallback
 to code blocks on render errors; it reports the error and exits non-zero.
 

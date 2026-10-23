@@ -254,7 +254,7 @@ recipes and CI feature policy.
 
     _Rasterizes SVG images for `TerminalImage` and the graphical horizontal
     rules. It is the whole of the `image` feature: diagram rendering
-    (`mermaid-rs-renderer`, the diagram components) lives in
+    (Merman, the diagram components) lives in
     `biscuit-visualized`, which depends on this library and is never one of
     its dependencies._
 

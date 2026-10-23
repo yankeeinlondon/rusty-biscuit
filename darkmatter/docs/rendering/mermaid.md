@@ -16,7 +16,7 @@ prompt: |-
 
     If there are sections you feel should be added to this structure please add them. In addition to the `last_updated` frontmatter of this document, please also set the `blast_radius` property as a list of source code files which are 
     involved in the "mermaid" functionality.
-last_updated: 2026-07-13
+last_updated: 2026-10-22
 blast_radius:
   - darkmatter/lib/src/mermaid/mod.rs
   - darkmatter/lib/src/mermaid/theme.rs
@@ -26,6 +26,8 @@ blast_radius:
   - darkmatter/lib/src/markdown/output/html.rs
   - darkmatter/lib/src/markdown/output/mod.rs
   - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+  - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+  - darkmatter/lib/src/markdown/render_tree/svg_sanitizer.rs
   - darkmatter/lib/src/layout/page.rs
   - darkmatter/cli/src/args/mod.rs
   - darkmatter/cli/src/commands/mod.rs
@@ -42,7 +44,7 @@ Whether a mermaid block is rendered as a diagram or shown as plain code is gover
 | Variant         | Terminal                                                     | Browser (Darkmatter page path)                                       |
 |-----------------|-------------------------------------------------------------|----------------------------------------------------------------------|
 | `Off` (default) | Regular code fence with syntect syntax highlighting.        | **Interactive** `<pre class="mermaid">` + injected ESM bootstrap.    |
-| `Image`         | Inline diagram image (opt-in; may launch a subprocess).     | Rendered static `<svg>` (an explicit static opt-in).                 |
+| `Image`         | Inline diagram image (opt-in; rendered in-process by Merman). | Rendered static `<svg>` (an explicit static opt-in).                 |
 | `Text`          | Diagram source as a fenced code block (fallback format).    | `<pre><code class="language-mermaid">` code block.                   |
 
 `MermaidMode` is wired into both `TerminalOptions` and `HtmlOptions`, so the same configuration knob controls the behaviour of `write_terminal` / `as_html`, as well as the higher-level `DarkmatterPage::with_mermaid_mode` builder method (`darkmatter/lib/src/layout/page.rs`).
@@ -117,6 +119,62 @@ Delivery requires network access at view time and a Content Security Policy that
 permits both CDN origins and inline modules. No diagram source or document
 metadata is sent anywhere except the browser's module fetch; Mermaid runs locally
 in the browser.
+
+### Static SVG (`MermaidMode::Image`)
+
+With `MermaidMode::Image` the page browser path embeds the finished diagram as
+an inline `<svg>` instead of the interactive source, so the page needs no
+script, network, or CSP allowance:
+
+```rust
+let html = DarkmatterPage::new(&terminal)
+    .with_mermaid_mode(MermaidMode::Image)
+    .render_to_browser(&markdown)?;
+```
+
+```mermaid
+flowchart LR
+    F["mermaid fence"] --> R["biscuit-visualized<br/>HTML static target"]
+    R --> S["SVG sanitizer"]
+    S -->|passes| E["inline &lt;svg&gt;"]
+    S -->|unparseable| X["promotion failure<br/>(strictness applies)"]
+```
+
+The SVG is rendered by `biscuit-visualized` (Merman) with its **HTML static**
+target. It differs from the SVG that is rasterized for the terminal in two
+ways, because the reader's browser fonts are unknowable:
+
+- **Measured face first.** Each label's `font-family` starts with the exact
+  face its box was measured with, followed by Merman's original stack, for
+  example `'Trebuchet MS',"trebuchet ms",verdana,arial,sans-serif`. A reader who
+  has that face sees the text fit its box exactly; anyone else falls back to
+  the original stack.
+- **Labels may overflow.** Where Merman clips label text to its box (nested
+  `<svg>` viewports with `overflow:hidden`, used by class, ER, mindmap, and
+  state labels), the overflow is made `visible`, so a wider fallback face
+  spills past its box rather than being cut off.
+
+Before it is emitted, the SVG passes Darkmatter's allow-list SVG sanitizer.
+It keeps everything Merman needs for labels and shapes, including its one
+`<style>` element (scoped by the diagram's id) and its drop shadows, and
+still drops scripts, event handlers, and every external `url(...)` or `href`:
+
+- **Drop shadows.** Only `<filter>` and `<feDropShadow>` are kept. Every
+  attribute except `id` must be a number, a percentage, or a hex or
+  `rgb()`/`hsl()` color; `dx`, `dy`, and `stdDeviation` are limited to 20
+  (by magnitude for the offsets), and `flood-opacity` to 0–1. A shadow that
+  breaks a limit is dropped, and a `<filter>` left with no valid shadow is
+  dropped with it, so the shape it was attached to paints unshadowed rather
+  than invisible.
+- **Every other filter primitive** (`feImage`, `feTurbulence`,
+  `feGaussianBlur`, …) is dropped.
+- **References stay local.** `filter="url(#…)"` survives only when it points
+  inside the same SVG.
+
+A diagram Merman cannot render (a parse error, an unsupported family such as
+ZenUML, or a render over its time budget), or an SVG the sanitizer cannot
+parse, is a promotion failure: the render tree applies its strictness setting
+instead of emitting unsafe or broken markup.
 
 ## Icon Packs
 

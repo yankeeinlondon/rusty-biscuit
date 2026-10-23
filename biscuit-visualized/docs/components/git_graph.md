@@ -1,6 +1,6 @@
 # GitGraph
 
-Draws git branch topology as a Mermaid `gitGraph`, rendered through [MermaidDiagram](./mermaid_diagram.md). The caller gathers the git facts and hands them over typed; the component runs no git commands. It decides which refs get lanes and which become tags, orders the lanes, draws merges, marks elided commits, works around `mermaid-rs-renderer`'s parser, and fits the graph to the terminal by trimming commits and lanes rather than shrinking it. It never draws something at a commit other than the one it was given: what it cannot draw is reported as incomplete history.
+Draws git branch topology as a Mermaid `gitGraph`, rendered through [MermaidDiagram](./mermaid_diagram.md). The caller gathers the git facts and hands them over typed; the component runs no git commands. It decides which refs get lanes and which become tags, orders the lanes, draws merges, marks elided commits, follows Mermaid's gitGraph emission rules, and fits the graph to the terminal by trimming commits and lanes rather than shrinking it. It never draws something at a commit other than the one it was given: what it cannot draw is reported as incomplete history.
 
 Requires the `terminal` feature; import it from `biscuit_visualized::components`. `wt list` is its main caller; [the `wt list` graph](../../../worktree/docs/git-graph.md) shows how a caller gathers the facts.
 
@@ -80,7 +80,7 @@ gitGraph
     commit id: "3333333" tag: "main"
 ```
 
-After `biscuit-visualized`'s repair, `mmmmmmm`'s parents are `2222222` and `bbbbbbb`.
+Merman, like Mermaid.js, gives the labeled merge `mmmmmmm` both parents: `2222222` and `bbbbbbb`.
 
 ### A lane merged from its middle
 
@@ -111,7 +111,7 @@ gitGraph
     commit id: "m2m2m2m"
 ```
 
-`c1c1c1c`'s parents are `p1p1p1p` and `b1b1b1b`, and `n1n1n1n`'s parent is `b1b1b1b`: the renderer leaves a merged lane's head at the commit it merged from, so the resumed commit (or a `+N` square) follows the source.
+`c1c1c1c`'s parents are `p1p1p1p` and `b1b1b1b`, and `n1n1n1n`'s parent is `b1b1b1b`: Mermaid leaves a merged lane's head at the commit it merged from, so the resumed commit (or a `+N` square) follows the source.
 
 ```mermaid
 flowchart TD
@@ -161,9 +161,9 @@ The image is sized with `ImageWidth::Scale` (see [TerminalImage](../../../biscui
 1. **Height (base view only).** Past half the terminal's rows, or the `with_max_rows(rows)` a caller set instead, the graph keeps the default lane and adds the other lanes most recently active first, each with its drawn ancestors (the lanes holding its fork commit and every one of its merge destinations, and its parent's lane), until the next would not fit. Lanes whose tips share a second are equally recent: when one of them does not fit, the others are tried before stopping, so a tie never hides a lane that fits behind one that does not. So a merge between two branch lanes is drawn with both lanes or with neither. A dim line then says `N more worktrees not shown`.
 2. **Width.** While the graph is wider than the available columns, commits move into `+N` squares one at a time. A commit beside an existing square goes first, then the oldest commit on the lane showing the most. Lane tips, fork points, merge sources and destinations, and tagged commits are never trimmed. Only when nothing more can be trimmed does the image shrink to fit.
 
-`biscuit-visualized` keeps neighboring tags from overlapping (see [its gitGraph corrections](../mermaid-gitgraph.md)). It widens the commit spacing only when two tags on different commits would collide, and only as far as a one-em gap needs. A single long label, such as `main` and `origin/main` stacked on one commit, keeps the default spacing, so trimming narrows the image as usual. When tags do collide, the wider spacing applies to every column, so trimming may not narrow the image enough and it shrinks instead. Labels are never shortened.
+`biscuit-visualized` keeps neighboring tags from overlapping (see [Mermaid gitGraph tag spacing](../mermaid-gitgraph.md)). It writes a wider `commitSpacing` only when two tags on different commits would collide, and only as far as a one-em gap needs. A single long label, such as `main` and `origin/main` stacked on one commit, keeps the default spacing, so trimming narrows the image as usual. When tags do collide, the wider spacing applies to every column, so trimming may not narrow the image enough and it shrinks instead. Labels are never shortened.
 
-Text measurement uses the host's fonts, so exact sizes differ slightly by OS.
+Text is measured and drawn in the host's fonts, so exact sizes differ slightly by OS; `MERMAID_FONT=Inter` gives the same layout everywhere (see [Merman rendering](../merman.md#choosing-a-font-mermaid_font)).
 
 ### Rendering
 
@@ -171,12 +171,12 @@ Text measurement uses the host's fonts, so exact sizes differ slightly by OS.
 - **Tree:** the untrimmed graph as `MermaidDiagram` projects it (an image node whose alt text is the Mermaid source).
 - **Browser:** the untrimmed graph's SVG as a raw-HTML island, in the default theme unless one is set. If rendering fails, the Mermaid source in a code block.
 
-### Renderer workarounds
+### Emission rules
 
-`mermaid-rs-renderer` 0.3.1 reads everything after `branch` or `merge` as the branch name, attributes included:
+The emitted Mermaid follows the gitGraph rules Merman and Mermaid.js share:
 
 - `branch` statements carry no attributes.
-- `merge` statements carry their `id:` and `tag:`, which costs the merge its second parent in the parser. `biscuit-visualized` restores it before layout, so the component emits labeled merges and the drawn edge is exact.
-- The parser drops a labeled `merge` into a lane that has no commit yet, so a merge is emitted only where its destination lane already has one. A merge that would be the default lane's first commit is therefore drawn as a plain commit; pass at least one default-lane commit below it (`wt list` passes the merge's first parent).
+- `merge` statements carry their `id:` and `tag:`; the merge keeps both parents, so the drawn edge is exact.
+- Mermaid rejects a merge into a lane that has no commit yet, so a merge is emitted only where its destination lane already has one. A merge that would be the default lane's first commit is therefore drawn as a plain commit; pass at least one default-lane commit below it (`wt list` passes the merge's first parent).
 
-Its parser also always names the first lane `main`: the default branch is that lane, and its real name appears as a tag when you pass its ref. A non-default branch named `main` is drawn as `main~` (`~` cannot occur in a git branch name). Commit IDs are labels, and parents are looked up by ID, so repeated IDs are made unique. Lane order is the order of the `branch` statements.
+The first lane is always Mermaid's default branch, `main`: the default branch is that lane, and its real name appears as a tag when you pass its ref. A non-default branch named `main` is drawn as `main~` (`~` cannot occur in a git branch name). Commit IDs are labels, and parents are looked up by ID, so repeated IDs are made unique. Lane order is the order of the `branch` statements.

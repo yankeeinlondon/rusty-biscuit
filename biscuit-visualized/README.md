@@ -4,7 +4,7 @@
 
 ## Capabilities
 
-1. Mermaid diagram rendering via `mermaid-rs-renderer`
+1. Mermaid diagram rendering via [Merman](docs/merman.md), with labels measured and drawn in the same fonts
 2. Graph rendering via `layout-rs`
 3. SVG and PNG artifact generation
 4. Content-addressed file caching via `biscuit-hash`
@@ -16,7 +16,7 @@ This crate is library-only. It decides what a diagram shows; [`biscuit-terminal`
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `image` | No | SVG rasterization and Mermaid rendering (`resvg`, `mermaid-rs-renderer`) |
+| `image` | No | SVG rasterization and Mermaid rendering (`resvg`, Merman) |
 | `terminal` | No | The diagram components and the render-tree diagram hook; enables `image` and depends on `biscuit-terminal` |
 | `clap` | No | Derive `clap::ValueEnum` on `QuadrantTheme` |
 
@@ -46,7 +46,7 @@ println!("{}", artifact.path.display());
 
 The artifact API only generates the file. Width selection, render metadata, and fallback-to-code-block behavior live in the `components` module's `MermaidDiagram`; terminal image protocols live in `biscuit-terminal`.
 
-For a `gitGraph`, rendering also restores the second parent of labeled merges and spaces commits so tags never overlap. See [Mermaid gitGraph corrections](docs/mermaid-gitgraph.md).
+A diagram that does not parse, uses an unsupported family, or exceeds its time budget (`with_time_budget`, 2 s by default) is a `MermaidError::RenderFailed`; `fallback_code_block()` gives its source as a code block. For a `gitGraph`, commits are spaced so tags never overlap. See [Merman rendering](docs/merman.md) and [Mermaid gitGraph tag spacing](docs/mermaid-gitgraph.md).
 
 ## Graph Example
 

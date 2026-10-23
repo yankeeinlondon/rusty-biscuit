@@ -328,7 +328,7 @@ bt flowchart --json "A --> B"                      # Output as JSON
 - **Aspect ratio preservation**: Images always keep their proportions
 
 **Rendering backend:**
-- Pure Rust rendering via `biscuit-visualized` and `mermaid-rs-renderer`
+- Pure Rust rendering via `biscuit-visualized` and Merman
 - No Node.js, npm, Chromium, or `mmdc` dependency is required
 - Use `--json` to inspect generated Mermaid instructions when image rendering is not available
 
@@ -398,7 +398,7 @@ Available inline properties: `color`, `radius`, `stroke-color`, `stroke-width`
 > **Note:** Multiple properties must be comma-separated. Space-only separation causes parsing errors.
 
 **Rendering backend:**
-- Pure Rust rendering via `biscuit-visualized` and `mermaid-rs-renderer`
+- Pure Rust rendering via `biscuit-visualized` and Merman
 - No external Mermaid CLI is required
 
 ### Git Graph Rendering
@@ -432,7 +432,7 @@ bt git-graph --json "commit" "branch feature"   # Output as JSON
 - **Aspect ratio preservation**: Images always keep their proportions
 
 **Rendering backend:**
-- Pure Rust rendering via `biscuit-visualized` and `mermaid-rs-renderer`
+- Pure Rust rendering via `biscuit-visualized` and Merman
 - No external Mermaid CLI is required
 
 ### Pie Chart Rendering

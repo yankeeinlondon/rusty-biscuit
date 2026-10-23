@@ -1,10 +1,10 @@
 # MermaidDiagram
 
-Renders Mermaid diagrams inline in the terminal as raster images. The diagram is rendered by this crate's Mermaid renderer and displayed through `biscuit-terminal`'s `TerminalImage` using the terminal's image protocol (Kitty, iTerm2, or Sixel). Falls back to a code block on terminals without image support.
+Renders Mermaid diagrams inline in the terminal as raster images. The diagram is rendered by this crate's Mermaid renderer ([Merman](../merman.md)) and displayed through `biscuit-terminal`'s `TerminalImage` using the terminal's image protocol (Kitty, iTerm2, or Sixel). Falls back to a code block on terminals without image support.
 
 Requires the `terminal` feature; import it from `biscuit_visualized::components`.
 
-Supports all Mermaid diagram types: flowcharts, sequence diagrams, class diagrams, state diagrams, ERD, Gantt charts, pie charts, quadrant charts, git graphs, timelines, bar charts, and line charts.
+Supports every diagram family Merman renders, among them flowcharts, sequence, class, state, ER, Gantt, pie, quadrant, XY (bar and line) charts, git graphs, timelines, journeys, mindmaps, requirement, C4, block, kanban, architecture, packet, radar, sankey, and treemap diagrams. ZenUML and diagrams with math labels (`$$…$$`) are not rendered and show their source (see [When a diagram falls back to its source](../merman.md#when-a-diagram-falls-back-to-its-source)).
 
 ## Programmatic Use
 
@@ -46,38 +46,42 @@ let diagram = MermaidDiagram::new("pie\n    \"A\" : 40\n    \"B\" : 60")
 | `.with_config(MermaidConfig)` | Customize rendering config |
 | `.with_width(ImageWidth)` | Display width; the default is `ImageWidth::Scale(1.0)` |
 | `.with_background(Background)` | What paints behind the diagram; the default is `Background::Transparent` |
+| `.with_time_budget(Duration)` | How long Merman may work on each request; the default is `MermaidDiagram::DEFAULT_TIME_BUDGET` (2 s) |
+| `.with_target(MermaidTarget)` | Who `render_to_svg`'s SVG is for; `MermaidTarget::HtmlStatic` for a static SVG in an HTML page (see [Merman rendering](../merman.md#html-static-target)). The terminal's PNG ignores it |
 | `.resolve_dimensions(term_width, cell)` | The columns the image will occupy, measuring the diagram for `Scale` |
 | `.try_render(&Terminal)` | Fallible render returning `MermaidRenderResult` |
 | `.render(&Terminal)` | Infallible render (falls back to code block) |
 
 ### Sizing
 
-The default width is `ImageWidth::Scale(1.0)`: the diagram's 16-unit body text is one terminal line tall, so nodes and text are the same size in every diagram whatever its content. The natural width comes from `mermaid-rs-renderer`'s `measure_svg_dimensions` (the root `viewBox` width), measured with the same theme as the render. The result is clamped to the available columns, so only a terminal too narrow for the diagram shrinks it. `Percent`, `Characters`, and `Fill` still work as before.
+The default width is `ImageWidth::Scale(1.0)`: the diagram's 16-unit body text is one terminal line tall, so nodes and text are the same size in every diagram whatever its content. The natural width is the root `viewBox` width of the SVG the render rasterizes (the library's `natural_size()`, which renders and caches that SVG), so it is measured with the same theme, fonts, and source rewrites as the image. The result is clamped to the available columns, so only a terminal too narrow for the diagram shrinks it. `Percent`, `Characters`, and `Fill` still work as before.
 
 The diagram is rasterized once, at its final display size: the PNG is as many pixels wide as the resolved columns (margins included) times the measured cell width, and its height is padded with blank rows below the drawing up to a whole number of cell rows. When the terminal reports no cell size, the 8x16 fallback is used. Those PNG bytes reach Kitty and iTerm2 unchanged (see [`EncodedPng`](../../../biscuit-terminal/docs/components/terminal_image.md#already-encoded-png-input)), so the terminal shows the raster 1:1 in exactly the rows it reserves, with no stretching or re-encoding. A Sixel route decodes the PNG and encodes it as Sixel at the same size. The size is measured on every render, so after a terminal or font resize the next render produces a new raster.
 
 ### Fonts
 
-The rasterizer already draws each label in the face the library's font
-resolution chain picks, so `MERMAID_FONT` (a family name, case-insensitive;
-`Inter` selects the bundled face) already sets the face labels are drawn in.
-Layout does not use the chain yet, so a label's box is still sized by
-`mermaid-rs-renderer`'s own estimate.
-
-> **Planned.** Once Mermaid rendering moves to Merman, each label's font is
-> chosen by one resolution chain shared by text measurement and drawing, so a
-> label is measured in the face it is drawn in. Set `MERMAID_FONT` to a family
-> name (case-insensitive) to use it for every diagram; `MERMAID_FONT=Inter`
-> selects the Inter face bundled with the library and gives the same layout on
-> every host. A family that is neither installed nor bundled logs one warning
-> per process and is otherwise ignored. Linux builds also bundle a monochrome
-> Noto Emoji face, used only when no installed font has the emoji. See
-> [Merman rendering: fonts and label text](../merman.md) for the full chain,
-> the fallback order, and the `\n` line-break rewrite.
+Each label's font is chosen by one resolution chain shared by text
+measurement and drawing, so a label is measured in the face it is drawn in
+and fits its box. Set `MERMAID_FONT` to a family name (case-insensitive) to
+use it for every diagram; `MERMAID_FONT=Inter` selects the Inter face bundled
+with the library and gives the same layout on every host. A family that is
+neither installed nor bundled logs one warning per process and is otherwise
+ignored. Linux builds also bundle a monochrome Noto Emoji face, used only
+when no installed font has the emoji. See
+[Merman rendering](../merman.md#fonts) for the full chain, the fallback
+order, and the `\n` line-break rewrite.
 
 ### Error Handling
 
-Returns `MermaidRenderError` for visualization errors, unsupported terminals, and image display failures.
+Returns `MermaidRenderError` for visualization errors, unsupported terminals, and image display failures. A visualization error includes a render whose Merman work exceeds the time budget: `try_render` returns the error, `render` shows the fenced source, and a warning is logged.
+
+```rust
+use std::time::Duration;
+
+let diagram = MermaidDiagram::new(source).with_time_budget(Duration::from_millis(500));
+```
+
+The budget applies to each Merman request (a tagged gitGraph makes two) and covers Merman's parsing, layout, and SVG output only, not rasterization. See [Time budget](../merman.md#time-budget).
 
 ## Themes and Configuration
 
@@ -187,6 +191,15 @@ Available properties: `color`, `radius`, `stroke-color`, `stroke-width`
 - **`MermaidTheme::Default`**: Dark text on light background (default for light terminals)
 - **`MermaidTheme::Forest`**: Green tones
 - **`MermaidTheme::Neutral`**: Grayscale, works well with transparent backgrounds
+
+Each theme currently selects the Merman built-in theme of the same name
+(`dark`, `default`, `forest`, `neutral`), which matches Mermaid.js's. The
+`Dark` theme's `Background::Theme` color is Mermaid's `#333`.
+
+> **Planned.** Palettes derived from the terminal's own colors, with accent
+> colors for unstyled nodes and contrast-checked text, become the default in
+> a terminal; the four themes become fixed palettes for output that is not
+> for a terminal. See [Themes](../merman.md#themes).
 
 Use `MermaidTheme::for_color_mode()` to automatically select based on terminal:
 

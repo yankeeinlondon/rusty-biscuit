@@ -7,6 +7,14 @@
 
 ## Recent Dependency Notes
 
+- `biscuit-visualized` drops `mermaid-rs-renderer` (2026-10-22): Merman,
+  already in the graph under its `image` feature, is now its only Mermaid
+  backend. `merman` is a git dependency on Ken's fork
+  (`yankeeinlondon/merman`, rev `6e6b1e6554e8`, branch
+  `gitgraph-commit-spacing`, which adds the gitGraph `commitSpacing` key),
+  with `default-features = false` and features `svg`, `all-diagrams`, and
+  `layout-cytoscape`; `png`, `native-fonts`, ELK, and `math` stay off. The
+  lockfile drops `mermaid-rs-renderer`; no other package used it.
 - `resvg`/`usvg` move from 0.45 to 0.47 repo-wide (2026-10-22), in
   `biscuit-terminal` and `biscuit-visualized` (both feature `image`). With
   them `tiny-skia` moves to 0.12, which encodes with `png` 0.18, so
@@ -1142,13 +1150,13 @@ This is a Rust workspace with the following modules:
 
 - [fontique](https://github.com/linebender/parley) _v0.12.0_ [📄](https://docs.rs/fontique)
 
-    _System font enumeration and generic-family fallback through fontconfig, CoreText, or DirectWrite. Used by `biscuit-visualized` (feature `image`) with `default-features = false` and feature `system`._
+    _System font enumeration and generic-family fallback through fontconfig, CoreText, or DirectWrite. Used by `biscuit-visualized` (feature `image`) with `default-features = false` and features `system` and `fontconfig-dlopen` (loads `libfontconfig` at run time)._
 
     _Tags: fonts, system_
 
-- [mermaid-rs-renderer](https://github.com/1jehuang/mermaid-rs-renderer) _v0.3.1_ [📄](https://docs.rs/mermaid-rs-renderer)
+- [merman](https://github.com/yankeeinlondon/merman) _v0.9.1, git rev `6e6b1e6554e8`_
 
-    _Pure-Rust Mermaid parser, layout engine, and SVG renderer. Used by `biscuit-visualized` with `default-features = false` (SVG only; biscuit rasterizes with its own `resvg`)._
+    _Pure-Rust Mermaid parser, layout engine, and SVG renderer. Used by `biscuit-visualized` (feature `image`) as a git dependency on Ken's fork of [Latias94/merman](https://github.com/Latias94/merman), pinned to rev `6e6b1e6554e8e75d468c1f991652c1c53a85bace` on branch `gitgraph-commit-spacing` (adds the gitGraph `commitSpacing` key), with `default-features = false` and features `svg`, `all-diagrams`, and `layout-cytoscape` (no `png`, `native-fonts`, ELK, or `math`: biscuit rasterizes with its own `resvg` and measures with its own font chain)._
 
     _Tags: image, diagrams, svg_
 

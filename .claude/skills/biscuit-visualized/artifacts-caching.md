@@ -103,6 +103,16 @@ The cache key is an xxHash of a composite string containing:
 
 This ensures that any change to inputs, configuration, geometry, background, encoder, or renderer version produces a different cache key. The key schema prefix is independent of the `v1` directory name: the directory stays `.../biscuit-visualized/v1/`.
 
+### Mermaid cache key
+
+`MermaidDiagram::cache_key_for` (`mermaid/render.rs`) is checked **after** the source rewrites and before any Merman SVG request:
+
+- **Source:** the rewritten source (`\n` rewrite, gitGraph `commitSpacing` directive), so the written spacing is part of the key.
+- **Backend id:** `MERMAID_BACKEND` = `merman@6e6b1e6554e8+bv1` (`merman@<12-char rev>+bv<n>`). Bump the rev with the Merman pin; bump `+bv<n>` whenever the rewrites, post-process, or background change output.
+- **Options JSON:** `design` = xxHash of the site-config JSON (theme name + `MermaidConfig`); `fonts` = `FontChain::cache_identity(&theme_font_stacks())`; `title`; `request` = `RenderRequest::cache_identity()` (scale, target width, row height, background, PNG encoder).
+- **Font identity** (`fonts/chain.rs`, memoized per chain and stack list, so once per process for the default chain): a font-set hash over every reachable face, by **contents** for the faces resolved for the theme stack (`"trebuchet ms", verdana, arial, sans-serif`, regular and bold) and the generic families plus the bundled Inter / Linux Noto Emoji, and by **path + size + mtime + face index** for every other font file; plus, per query, the resolved face's identity and its fallback order. So `MERMAID_FONT`, installed fonts, or fallback order changes miss the cache; a file replaced in place with the same size and mtime is not detected.
+- A tagged gitGraph's `layout_json` pass runs before the check, so its cache hits still cost one Merman layout.
+
 ### FileCache API
 
 ```rust
@@ -142,10 +152,10 @@ cache.clear()?;  // Remove all cached files
 
 The typical render flow for both Mermaid and Graph diagrams:
 
-1. **Compute cache key** from source + options + backend + format
+1. **Compute cache key** from source + options + backend + format (Mermaid: after the source rewrites)
 2. **Check cache** — if hit, return `RenderedArtifact` with `cache_hit: true`
-3. **Render SVG** — via mermaid-rs-renderer or layout-rs
-4. **Post-process SVG** — fix alignment, apply colors, trim padding
+3. **Render SVG** — Mermaid via Merman (under the time budget), graphs via layout-rs
+4. **Post-process SVG** — Mermaid: solid gradient strokes, `sans-serif` default, then the background rect; graphs: apply colors and fonts, trim padding
 5. **If PNG requested**: rasterize SVG via resvg at the target width (or scale), pad to `row_height`, and encode with the `png` crate
 6. **Store in cache** and return `RenderedArtifact` with `cache_hit: false`
 
@@ -153,6 +163,8 @@ The typical render flow for both Mermaid and Graph diagrams:
 
 | File | Contents |
 |------|----------|
-| `biscuit-visualized/src/artifact.rs` | `OutputFormat`, `RenderRequest`, `RenderedArtifact` |
-| `biscuit-visualized/src/cache/mod.rs` | `VisualizationKind` enum |
-| `biscuit-visualized/src/cache/file_cache.rs` | `FileCache` implementation |
+| `biscuit-visualized/src/src/artifact.rs` | `OutputFormat`, `RenderRequest`, `RenderedArtifact` |
+| `biscuit-visualized/src/src/cache/mod.rs` | `VisualizationKind` enum |
+| `biscuit-visualized/src/src/cache/file_cache.rs` | `FileCache` implementation, `MERMAID_BACKEND`, `GRAPH_BACKEND`, `RASTERIZER` |
+| `biscuit-visualized/src/src/mermaid/render.rs` | Mermaid cache key (`cache_key_for`) |
+| `biscuit-visualized/src/src/fonts/chain.rs` | `FontChain::cache_identity`, `FaceIdentity` |

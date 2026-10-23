@@ -183,10 +183,11 @@ A lane's boundary (the first commit below it) is classified too, sharing one
   - a cycle is broken by drawing the later edge as a plain commit (incomplete);
   - the height cap keeps a lane with every merge destination's lane; trimming
     never folds a source or destination.
-- `biscuit-visualized` restores the merge's second parent and widens commit
-  spacing only as far as colliding tags (different commits, overlapping rows)
-  need for a one-em gap, so an isolated long label such as `origin/main` keeps
-  the renderer's default step
+- Merman lays out and draws the emitted `gitGraph` as Mermaid.js does, so a
+  merge keeps both parents with no correction. `biscuit-visualized` writes a
+  `commitSpacing` only when colliding tags (different commits, overlapping
+  rows) need it for a one-em gap, so an isolated long label such as
+  `origin/main` keeps Merman's default step of 50
   (`biscuit_visualized::mermaid::default_gitgraph_commit_step()`).
 
 ## Tests
@@ -195,14 +196,18 @@ A lane's boundary (the first commit below it) is classified too, sharing one
 
 `git_graph::tests::gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags`:
 
-- gathers real-Git fixtures and plans them with the real measurement at 120×40
-  and 56×60;
+- gathers real-Git fixtures and plans them with the real measurement at 120
+  and 56 columns; rows come from the measured whole graph (twice its rows, so
+  the half-height cap hides nothing, or one row short of that when `Evidence`
+  expects hidden lanes), because Merman's lanes are taller than a fixed 40
+  rows allows;
 - checks `biscuit-visualized`'s `gitgraph_geometry` (a dev-dependency) for tag
   overlaps, tags on their SHAs' IDs, exact merge parents, unchanged tag text,
   and each fixture's expected `incomplete` and hidden-lane counts (`Evidence`);
-- the sparse-lanes fixture is complete and loses one lane to the height cap at
-  120×40; `post_merge` checks the commit after each merge source hangs from it;
-- `--width 40` is never trimmed (planned at 120×60 so no lane is hidden).
+- the sparse-lanes fixture is complete and loses one lane to the height cap one
+  row short of the whole graph at 120 columns; `post_merge` checks the commit after each merge source hangs from it;
+- `--width 40` is never trimmed (planned with the whole graph's rows so no lane
+  is hidden).
 
 Other L1 facts:
 
@@ -211,11 +216,12 @@ Other L1 facts:
   and wall-clock `commit-tree` dates tie on a fast host (build-linux hid a
   different lane than macOS).
 - `the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60` is the
-  density proof: at 200×60 the step is `default_gitgraph_commit_step()` and
-  every branch lane keeps at least two commits after its last `+N` square,
-  except `fix/wt-ux`, whose recent run the trimmer folds first (it prefers
-  commits beside a square) because `main` now draws `d6..d12`. In Kitty's real
-  cell size it keeps three.
+  density proof: at 200×60 the step is `default_gitgraph_commit_step()`;
+  `feat/schema-enhancement` and `fix/sniff` keep a second commit after their
+  last `+N` square whenever one more commit step still fits 200 columns
+  (derived from the geometry's width and step). At the 8×16 fallback cell
+  Merman's layout is too wide for that, so each keeps only its tip. `fix/wt-ux`'s
+  recent run is folded first (the trimmer prefers commits beside a square).
 
 ### L2 in a private Kitty (`cli/tests/level2_graph_in_kitty.rs`, macOS only)
 

@@ -78,14 +78,23 @@ flowchart LR
 
     _The OS's own generic font family (fontconfig on Linux, CoreText on
     macOS, DirectWrite on Windows), with `default-features = false` and
-    feature `system`. On Linux it links the system `libfontconfig` at build
-    time, so the fontconfig development package (its pkg-config file) must be
-    installed._
+    features `system` and `fontconfig-dlopen`. On Linux it loads
+    `libfontconfig` at run time, so builds need no fontconfig development
+    package, and a host without the library skips this step instead of
+    failing._
 
-- [mermaid-rs-renderer](https://crates.io/crates/mermaid-rs-renderer) _v0.3.1_ (feature: `image`)
+- [merman](https://github.com/yankeeinlondon/merman) _v0.9.1, git rev `6e6b1e6554e8e75d468c1f991652c1c53a85bace`_ (feature: `image`)
 
-    _Pure-Rust Mermaid parser, layout engine, and SVG renderer, with
-    `default-features = false`: this crate rasterizes with its own `resvg`._
+    _The Mermaid parser, layout engine, and SVG renderer. A git dependency on
+    Ken's fork of [Latias94/merman](https://github.com/Latias94/merman),
+    pinned to an exact commit on its `gitgraph-commit-spacing` branch, which
+    adds the gitGraph `commitSpacing` key that tag spacing writes. With
+    `default-features = false` and features `svg`, `all-diagrams`, and
+    `layout-cytoscape`; `png`, `native-fonts`, ELK, and `math` stay off,
+    because this crate rasterizes with its own `resvg` and measures text with
+    its own font chain. Brings `merman-core`, `merman-render`,
+    `merman-analysis`, `merman-ascii`, and `merman-editor-core` from the same
+    rev._
 
 - [biscuit-terminal](../../biscuit-terminal/lib) _v0.1.0_ (feature: `terminal`, with its `image` feature)
 
