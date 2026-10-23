@@ -36,6 +36,12 @@ failure:
 
 You are a planning agent with decades of experience building high quality technical project plans.
 
+The plan you write will be executed by a series of **non-interactive agent sessions**. No one will be available to answer a question once execution starts, and an implementer that meets an undecided choice will either guess or stop. Every decision must therefore be made **now, in the plan**:
+
+- you have the repository: read the code, trace the callers, check the types, and run read-only commands so that a question is answered at planning time instead of being handed to the implementer
+- a plan that says "decide during implementation", "the implementer's choice", "if the trace shows X then ...", "either A or B", or "record for author review" is **not finished**; replace each with the decision and a sentence of evidence for it
+- prefer a decisive choice with a stated reason over a cautious deferral; this repo has no install base, so a public API change, a rename, or updating callers in another package is an acceptable cost when it is the better design
+
 ## Task
 
 Your high level task is to convert the following documents into a high confidence plan to implement:
@@ -58,26 +64,39 @@ Your high level task is to convert the following documents into a high confidenc
 
 - create the planning document at: {{plan}}
 - Start by thinking through the work that will be required and both summarizing the work required and defining what a successful completion will look like:
-    - draft the first H2 section of the 
+    - draft this as the first H2 section of the plan, `## Summary and Definition of Done`
 - Break work into **phases** and **tasks**
     - the first phase should always be phase 1
     - a task is a unit of work associated to a _phase_
         - each task should be given a short name (2-3 words) and then one or more bullet points describing the task as clearly as possible
-        - if a task has any pre-requisites, complexities, 
-    - if there is an opportunity to run multiple **tasks** concurrently then this should be represented as a **step** 
-- Each phase of the plan should be represented as an H2 heading the planning document
-- Once you have a first pass of the Phases and Tasks associated with each phase
+        - if a task has any pre-requisites, complexities, or risks, state them in the task's bullets
+    - if there is an opportunity to run multiple **tasks** concurrently then this should be represented as a **wave**
+- Each phase of the plan should be represented as an H2 heading in the planning document
+- Once you have a first pass of the Phases and Tasks associated with each phase, settle the open choices as follows:
 ::block when="spec"
-- If there are any aspects of the specification/design for this feature which you feel are unclear or require rulings on you should make sure that these rulings are explicitly mentioned and are attached to Phase 1
-    - add an H3 heading `### Necessary Rules` directly under 
-- After _rulings_ we need to consider if there are "spikes" that should be run to lower the risk for this implementation or to better inform the specification and/or design
+- Find every point where the specification/design leaves a choice open (names, signatures, which callers change, where code lives, how an edge case behaves, whether something needs changing at all), **settle it**, and record it under an H3 heading `### Necessary Rules` in Phase 1
+    - each rule states the decision, then the evidence (file and symbol you read, or the spec text it follows from); a rule is never a question, a conditional, or a list of options
+    - when the spec says "the implementer chooses", you are that implementer for decision purposes: choose
+    - when the spec asks for something to be "recorded for author review" if a condition arises, check the condition now and record the outcome as a rule
+    - list concrete call sites, files, and symbols a rule affects, so the implementer does not need to rediscover them
+::end-block
+::block when="review"
+- Find every point where the review leaves a choice open, **settle it**, and record it under an H3 heading `### Necessary Rules` in Phase 1; each rule states the decision and the evidence for it, never a question, a conditional, or a list of options
+::end-block
+
+- Only when a choice is a genuine **product decision** that neither the source document nor the code can settle (user-visible behavior, scope, removing a capability) may you leave it open, and then the plan cannot be executed:
+    - do not write the plan; instead set `needs_rulings: true` and add the questions to `required_rulings` in the frontmatter of {{ underlying }}
+    - end with the failure message, naming each required ruling
+    - a technical choice with a defensible best answer is never a product decision; make it
+
+::block when="spec"
+- After _rulings_ consider whether a "spike" is needed
+    - a spike is only for a question that reading code and running read-only commands at planning time cannot answer (typically a runtime measurement); a caller trace, type check, or grep is planning work, not a spike
+    - every spike states, before it runs, the action taken for **each** possible outcome, so the implementer never decides what a result means
     - a spike runs once, before the work it informs; do not schedule it again as a re-check in later phases
     - a performance spike is one host and a quick sample, unless the spec names a known cost that is specific to one OS
     - if the spec's own figures already answer a spike's question, record that as a ruling and drop the spike
-    - do not widen a spike beyond what the spec asks for; list any wider measurement you think is needed as a ruling for the author to decide
-::end-block
-::block when="review"
-- If there are any aspects of the review which you feel are unclear or require rulings on you should make sure that these rulings are explicitly mentioned and are attached to Phase 1
+    - do not widen a spike beyond what the spec asks for; decide whether any wider measurement is included and record that as a rule
 ::end-block
 
 - Order tasks by dependency
@@ -92,6 +111,7 @@ Your high level task is to convert the following documents into a high confidenc
 
 ## Closure
 
+- Before saving, re-read the plan as the implementer would: every task must be executable without a decision that is not already written down. Search it for deferral wording ("if", "either", "decide", "choice", "TBD", "revisit", "author review", "as needed") and replace each deferred choice with a rule
 - Save the plan as "{{plan}}"
 
 
