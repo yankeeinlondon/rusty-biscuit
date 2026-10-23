@@ -319,13 +319,287 @@ docs_updated_during_phase_6:
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
   - .claude/skills/schematic-define/SKILL.md
-message_to_agent: |-
-  Phase 6 is complete; read "## Phase 6" in this log (findings and review agenda).
-  - Phase 5 was NOT committed before Phase 6 ran, so the working tree holds both phases; the scope calculator sees both.
-  - `x-schematic` now carries document `cross_origin` (only when not `SameOrigin`), `request_id_header`, and operation `cross_origin` (endpoint override). Struct literals of `SchematicDocExtension`/`SchematicOpExtension` need these members.
-  - Mock-server tests through the regenerated clients live in `schematic/schema/tests/streaming_providers.rs`; its `HeldServer` (raw TCP, holds the body until the test saw the first item) is reusable for any incremental-delivery check. These run via `just test-schema` only (CI does not run the schema crate).
-  - OpenAI `BetaResponseStreamEvent` (importer output, untagged) decodes most events as the audio variants; logged, not fixed. Do not build GraphQL/pagination tests that depend on OpenAI stream event variants.
-  - Shipped-definition export tests are in `gen/tests/l1/response_adapters.rs` (`shipped_*`); building the full OpenAI API costs ~1.2 s, so trim to the endpoints you need.
+source_files_during_phase_7:
+  - schematic/define/src/graphql.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/relay.rs
+  - schematic/define/tests/definition_bundles.rs
+  - schematic/define/tests/graphql_definitions.rs
+  - schematic/gen/Cargo.toml
+  - schematic/gen/src/codegen/graphql.rs
+  - schematic/gen/src/codegen/pagination/mod.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/runtime/src/graphql.rs
+  - schematic/runtime/src/lib.rs
+  - schematic/runtime/src/pager/mod.rs
+  - schematic/runtime/src/pager/pages.rs
+  - schematic/runtime/tests/l1/graphql_pager.rs
+  - schematic/runtime/tests/l1/main.rs
+  - schematic/schema/src/lib.rs
+docs_updated_during_phase_7:
+  - schematic/docs/graphql.md
+  - schematic/docs/pagination.md
+  - schematic/docs/runtime/calling-an-api.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_8:
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/types.rs
+  - schematic/definitions/src/artificial_analysis/types.rs
+  - schematic/gen/src/codegen/pagination/mod.rs
+  - schematic/gen/src/lib.rs
+  - schematic/runtime/src/pager/mod.rs
+  - schematic/runtime/src/response.rs
+docs_updated_during_phase_8:
+  - schematic/README.md
+  - schematic/define/README.md
+  - schematic/definitions/README.md
+  - schematic/runtime/README.md
+  - schematic/schema/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/responses-and-errors.md
+  - schematic/docs/runtime/README.md
+  - schematic/docs/runtime/building-clients.md
+  - schematic/docs/runtime/codecs.md
+  - schematic/docs/runtime/sending-and-responses.md
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/generation/workflow.md
+  - schematic/docs/io/crates-openapi.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/define.md
+  - .claude/skills/schematic-define/schematic/definitions.md
+  - .claude/skills/schematic-define/schematic/gen.md
+  - .claude/skills/schematic-define/schematic/openapi.md
+  - .claude/skills/schematic-define/schematic/pagination.md
+  - .claude/skills/schematic-define/schematic/responses.md
+  - .claude/skills/sniff/remote-and-repository.md
+source_code:
+  - Cargo.lock
+  - schematic/define/src/builders.rs
+  - schematic/define/src/bundle.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/error_table.rs
+  - schematic/define/src/graphql.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/openapi/export/info.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/responses.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/openapi/import.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/classify.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/mappings/responses.rs
+  - schematic/define/src/openapi/import/query_paths.rs
+  - schematic/define/src/openapi/mod.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/relay.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/response.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/bundle_support/mod.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/definition_bundles.rs
+  - schematic/define/tests/fixtures/bundles/fixture.json
+  - schematic/define/tests/graphql_definitions.rs
+  - schematic/define/tests/openapi_tests.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/define/tests/response_import_matrix.rs
+  - schematic/define/tests/response_openapi.rs
+  - schematic/define/tests/response_vocabulary.rs
+  - schematic/definitions/Cargo.toml
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/anthropic/types/mod.rs
+  - schematic/definitions/src/anthropic/types/streaming.rs
+  - schematic/definitions/src/artificial_analysis/types.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/mod.rs
+  - schematic/definitions/src/elevenlabs/types.rs
+  - schematic/definitions/src/elevenlabs/types/common.rs
+  - schematic/definitions/src/elevenlabs/types/speech.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/mod.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/lmstudio/types.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/ollama/types/completion.rs
+  - schematic/definitions/src/ollama/types/models.rs
+  - schematic/definitions/src/ollama/types/openai.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/openai_pagination.rs
+  - schematic/definitions/src/registry/typed.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/definitions/tests/authoring_surface.rs
+  - schematic/gen/Cargo.toml
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/client/helpers.rs
+  - schematic/gen/src/codegen/client/methods.rs
+  - schematic/gen/src/codegen/client/mod.rs
+  - schematic/gen/src/codegen/client/shared_auth.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/names.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/graphql.rs
+  - schematic/gen/src/codegen/mod.rs
+  - schematic/gen/src/codegen/module_docs.rs
+  - schematic/gen/src/codegen/pagination/mod.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/codegen/responses.rs
+  - schematic/gen/src/codegen/variant.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/item.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/export/vocabulary.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/common/components.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/gen/tests/l1/response_adapters.rs
+  - schematic/gen/tests/l1/vocabulary_exports.rs
+  - schematic/openapi/anthropic.json
+  - schematic/openapi/bitbucket.json
+  - schematic/openapi/elevenlabs.json
+  - schematic/openapi/github.json
+  - schematic/openapi/lmstudio.json
+  - schematic/openapi/ollama.json
+  - schematic/openapi/openai.json
+  - schematic/postman/elevenlabs.postman_collection.json
+  - schematic/postman/lmstudio.postman_collection.json
+  - schematic/postman/ollama.postman_collection.json
+  - schematic/postman/openai.postman_collection.json
+  - schematic/runtime/Cargo.toml
+  - schematic/runtime/src/api_client.rs
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/codec.rs
+  - schematic/runtime/src/endpoint.rs
+  - schematic/runtime/src/error.rs
+  - schematic/runtime/src/graphql.rs
+  - schematic/runtime/src/lib.rs
+  - schematic/runtime/src/pager/mod.rs
+  - schematic/runtime/src/pager/pages.rs
+  - schematic/runtime/src/pager/request.rs
+  - schematic/runtime/src/response.rs
+  - schematic/runtime/src/shapes.rs
+  - schematic/runtime/src/stream.rs
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.stderr
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_stream_endpoint.rs
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_stream_endpoint.stderr
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_mixed_alternatives.rs
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_mixed_alternatives.stderr
+  - schematic/runtime/tests/l1/decode_boundary.rs
+  - schematic/runtime/tests/l1/envelope.rs
+  - schematic/runtime/tests/l1/error_routes.rs
+  - schematic/runtime/tests/l1/graphql.rs
+  - schematic/runtime/tests/l1/graphql_address.rs
+  - schematic/runtime/tests/l1/graphql_pager.rs
+  - schematic/runtime/tests/l1/main.rs
+  - schematic/runtime/tests/l1/shapes.rs
+  - schematic/runtime/tests/l1/streams.rs
+  - schematic/runtime/tests/l1/support.rs
+  - schematic/runtime/tests/l1/timing.rs
+  - schematic/runtime/tests/l1/whole_send_elapsed.rs
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/lib.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama.rs
+  - schematic/schema/src/ollama/mod.rs
+  - schematic/schema/src/ollama/requests.rs
+  - schematic/schema/src/ollama/responses.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/schema/tests/non_json_endpoints.rs
+  - schematic/schema/tests/streaming_providers.rs
+  - sniff/lib/src/remote/bitbucket.rs
+  - sniff/lib/src/remote/envelope.rs
+  - sniff/lib/tests/l1/remote_providers.rs
+documentation:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/define.md
+  - .claude/skills/schematic-define/schematic/definitions.md
+  - .claude/skills/schematic-define/schematic/gen.md
+  - .claude/skills/schematic-define/schematic/openapi.md
+  - .claude/skills/schematic-define/schematic/pagination.md
+  - .claude/skills/schematic-define/schematic/responses.md
+  - .claude/skills/sniff/remote-and-repository.md
+  - schematic/README.md
+  - schematic/define/README.md
+  - schematic/definitions/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/dependencies.md
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/generation/workflow.md
+  - schematic/docs/graphql.md
+  - schematic/docs/io/crates-openapi.md
+  - schematic/docs/io/definition-bundles.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/pagination.md
+  - schematic/docs/responses-and-errors.md
+  - schematic/docs/runtime/README.md
+  - schematic/docs/runtime/building-clients.md
+  - schematic/docs/runtime/calling-an-api.md
+  - schematic/docs/runtime/codecs.md
+  - schematic/docs/runtime/deadlines-and-timeouts.md
+  - schematic/docs/runtime/hooks.md
+  - schematic/docs/runtime/sending-and-responses.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/runtime/README.md
+  - schematic/schema/README.md
+completed_phase: 8
+implemented: true
 ---
 
 # Implementation Log for 2026-10-16-schematic-response-model-graphql (8 phases)
@@ -2816,3 +3090,543 @@ schematic-definitions, schematic-gen, sniff, test-toolkit, darkmatter]`,
 uncommitted Phase 5 files dominate it. Both gates were required and ran
 (above). The sniff, test-toolkit, and darkmatter cells come from Phase 5
 files; Phase 6 changed nothing those packages read.
+
+## Phase 7
+
+Run of 2026-10-22. Tree: HEAD `f348d5672` (Phases 5 and 6 committed), so the
+working tree is exactly Phase 7's change. Implementer: `claude/opus`, alone in
+the main session. The waves share one chain (define preset → runtime page
+root → generated pager → fixture crate), so no subagents ran.
+
+### Wave 14 — Relay integration
+
+**Define (`define/src/pagination/relay.rs`, new).** `Relay::forward(root)` and
+`Relay::backward(root)` expand to an ordinary `Strategy::cursor` plus its
+`Collection` (`.collection(item_type)`), so a Relay operation uses the landed
+pagination model and no new strategy variant:
+
+| | forward | backward |
+| --- | --- | --- |
+| cursor input / source | `variables.after` ← `{root}.pageInfo.endCursor` | `variables.before` ← `{root}.pageInfo.startCursor` |
+| size input | `variables.first` | `variables.last` |
+| more signal | `{root}.pageInfo.hasNextPage` | `{root}.pageInfo.hasPreviousPage` |
+| items | `{root}.nodes`, or `{root}.edges[*].node` with `.with_edges()` | same |
+
+Modifiers: `.cursor_variable`, `.size_variable` (overridable names),
+`.max_page_size` (author-declared maximum, D14), `.sent_page_size`,
+`.resumable()`. An empty root reads `pageInfo`/`nodes` at `data` itself.
+
+**Validation (`define/src/graphql.rs`).** A top-level pager-managed variable
+that the registered variables schema lists in `required` fails API build:
+`<API> operation <id>: pager-managed variable `first` must be optional in the
+variables type; the pager supplies it`. This is R40's "optional pager-managed
+fields": the author registers the variables type, so the generator cannot
+generate one; the check holds the type to the rule instead.
+
+**Runtime (`runtime/src/pager/{mod,pages}.rs`, `runtime/src/graphql.rs`).**
+`Paginated` gains a provided method `page_root(body) -> Result<Value,
+PageRootError<Self::Failure>>` (default: the whole body) and the public
+`PageRootError { Declared(E), Malformed }`. The pager applies it to every 2xx
+page after the client-global JSON hook and before items and continuations are
+read. `graphql::page_data::<D, H>` classifies the wrapper with the same code
+the `GraphQl<D>` codec now shares (`classify_wrapper`):
+
+- valid non-empty `errors` → `PagerError::Api` with
+  `ErrorKind::Declared(GraphQlOperationError::GraphQl(..))` and the raw body;
+  partial data stays in the error and never joins the collected items;
+- no errors and non-null data that decodes as `D` → the `data` value, which
+  every item, cursor, and more-signal path reads;
+- anything else (null/absent data, undecodable data, invalid `errors`, a
+  non-object body) → `MalformedSuccess`.
+
+Existing limits, repeated-cursor detection, missing/invalid continuation, and
+the shared deadline apply unchanged. **ABI 6 → 7** (runtime `ABI`, gen
+`RUNTIME_ABI`): generated code now names `page_root`, `PageRootError`, and
+`page_data`. `schematic-schema` regenerated with the pre-authorized
+`cargo run -p schematic-gen -- generate --api all --output schema/src
+--openapi-out openapi --postman-out postman`; the only diff is the two ABI
+lines of `schema/src/lib.rs`. OpenAPI and Postman artifacts are unchanged.
+
+**Generator (`gen/src/codegen/pagination/mod.rs`, `codegen/graphql.rs`).**
+`operation_paginated_impl` emits, beside a paginated operation's request,
+`impl Paginated` (`Kind` from the strategy, `NoSession`, `PATH = ""`, the
+`&'static` strategy and item selector, and `page_root` calling
+`graphql::page_data`) plus one marker impl per authored knob through the
+existing `strategy_knobs`/`marker_impl`. The caller pages with
+`client.send(IssuesRequest::new(vars)).pager()`; no endpoint method is added
+(the Phase 4 decision).
+
+**Deviation (D-12 backward leg): bidirectional Relay paging is not built.**
+D-12 names an optional backward leg (`last`/`before`, `hasPreviousPage`,
+`startCursor`) on the forward preset. The landed cursor model has one
+page-size input and one more-signal per strategy, shared by both legs: a
+backward leg would send its page size as `first` and stop on `hasNextPage`,
+which is wrong for Relay (a server may report `hasNextPage: false` while
+paging backward). Building it needs per-leg size inputs and end signals in
+spec 3's model (define, runtime spec, engine, generator, bundle form), which
+the plan's Phase 1 freeze ruled out ("new preset sugar … a new strategy
+variant" rejected). **Adopted instead:** `Relay::backward(root)` as its own
+one-direction preset, which expresses every named component exactly. Also a
+deviation from D-12's name: `Strategy::relay_forward(root)` cannot carry the
+items selector (a `Strategy` has none), so the preset is `Relay`, yielding a
+`Collection`. **Review agenda.**
+
+### Wave 14 — Check-status parity (R43)
+
+In the fresh-output fixture crate (`gen/tests/l1/fresh_output_compile.rs`),
+`FixtureGraphQl` gains `CheckStatusParity`: sniff's `batch_query(3)` document
+verbatim (`CHECK_STATUS_DOCUMENT`), unnamed, variables `ParityVars {owner,
+name, n0, n1, n2}`, and nullable data models (`ParityData` →
+`Option<ParityRepository>` → `p0..p2: Option<ParityPullRequest>` … →
+`status_check_rollup: Option<ParityRollup>`). It declares no HTTP errors.
+
+Child test `check_status_parity_preserves_every_sniff_fixture` sends all eight
+fixtures through the generated client against wiremock, with explicit status
+and `application/json`:
+
+| Fixture | Mock | Asserted |
+| --- | --- | --- |
+| `success` | 200 | typed success; the request body is exactly `{query: DOCUMENT, variables}` with no `operationName`; `p1` keeps its `FAILURE` count |
+| `passed` | 200 | typed success; absent `p1`/`p2` are `None` |
+| `changed_head` | 200 | typed success; the different head `oid` is domain data |
+| `null_rollup` | 200 | typed success; `status_check_rollup == None` |
+| `partial_errors` | 200 | `GraphQlOperationError::GraphQl`, `type` `NOT_FOUND`, usable partial data (`p0` some, `p1` none), raw body equal to the fixture |
+| `request_wide_errors`, `rate_limit` | 200 | GraphQL failure; message and GitHub `type` preserved; raw body equal |
+| `permission_failure` | 403 | `ErrorKind::Undeclared` (HTTP path, not a wrapper); raw body equal |
+
+No sniff domain decision is replicated. **Fixture reads:** the parent `#[test]`
+`slow_fixture_apis_compile_and_send_offline` reads each fixture with
+`include_str!` and hands it to the child as `CHECK_STATUS_*` environment
+variables (a path inside the child's source string would be invisible to, or
+misread by, the CI input index). Sniff's query source is guarded by the L1
+test `the_parity_document_is_sniffs_check_status_query`, which reads
+`sniff/lib/src/remote/check_status.rs` with `include_str!`, re-renders
+`batch_query(3)` from its `format!` templates (CRLF-normalized), and compares
+it with `CHECK_STATUS_DOCUMENT`. `sniff/lib/src/remote/check_status.rs` is
+declared in gen's `[package.metadata.ci.tests] source-inputs` (rust-devops and
+`docs/cicd/test-inputs.md` consulted); `scripts/ci/test_affected_scope.py`'s
+`RealWorkspaceTestInput*` tests pass (7/7), and a change to that file now
+schedules a `schematic-gen` L1 cell.
+
+**Observation:** the generated-client parity test is `slow_` (it builds the
+fixture crate), so a change to a sniff fixture JSON alone schedules no cell
+that runs it; the runtime's L1 `graphql::sniff_*` tests (Phase 3) read the
+same fixtures and are scheduled. Same tier constraint as every fresh-output
+child test.
+
+### Wave 15 — Operation verification
+
+Through the generated fixture crate (new child tests):
+
+- `a_generated_relay_pager_pages_data_and_stops_at_graphql_errors`: two pages
+  collected; `variables` sent as `{owner, first: 2, after: null}` then
+  `{…, after: "c1"}` (null initial cursor valid; inputs written after
+  serialization); the document unchanged on each page; `page_size(51)` refused
+  before sending (authored maximum 50); a page with GraphQL errors stops
+  collection with only page one's items and the GitHub `type` preserved.
+- `graphql_sends_report_their_credential_and_keep_unparsed_documents_and_transport_failures_apart`:
+  the API now uses bearer auth; with no credential resolving, a mutation is
+  sent without `Authorization` and the envelope reports `AuthMethod::Anonymous`;
+  a per-call credential is `Bearer tok` / `PerCall`; the syntactically invalid
+  document `mutation { draft(title: "unterminated` is sent byte-for-byte; a
+  GraphQL failure comes back inside an `Ok` envelope and `into_result()`
+  returns it, while an unreachable address makes the outer result `Err`
+  (transport only).
+- Compile-fail: `.after(..)` on the non-resumable `IssuesRequest` pager is an
+  `E0277` naming `IssuesRequest`; the control (`.page_size(10)`) compiles.
+
+Already covered and confirmed (not re-added): query/mutation POST bodies and
+headers, unit-variable omission, named operation (`CheckStatus`),
+Enterprise/proxy derivation, override, foreign-origin refusal, REST path
+preservation (`graphql_operations_post_their_document_to_the_address_the_rules_derive`,
+runtime `graphql_address::*`); typed-data mutator vs wrapper hook, malformed
+error entries, errors-before-data precedence (runtime
+`graphql::{the_global_hook_sees_the_wrapper_once_and_the_mutator_only_failure_free_data,
+the_wrapper_is_classified_before_typed_data}`; misuse control types the mutator
+as `&mut ViewerData`).
+
+**Definition bundle.** The committed bundle fixture is the bundle tool's
+output and carries a paginated GraphQL operation; its load-without-registry,
+validation, export, byte-equal re-serialization, and the complete JSON matrix
+(including operation dangling-reference cells with API/operation/type
+context) were already in place (Phase 2) and pass. One cell added:
+`variables require a pager input` (`IssuesVars.required` gains `after`) fails
+with the new message.
+
+### Adopted defaults and decisions (Phase 7)
+
+- **decision: GraphQL paging is a provided `Paginated::page_root` method**,
+  not a new associated type or a GraphQL-specific pager. Alternatives
+  rejected: prefixing every path with `data.` in the generator (GraphQL errors
+  would not stop paging, and partial data would be collected), and a
+  separate pager type (duplicates the engine).
+- **decision: a success page's `data` must decode as the operation's data
+  type** (R37's malformed-success rule), checked with `D::deserialize(&value)`
+  without a copy.
+- **decision: ABI bump to 7**, because `page_root` is observable by
+  generated code (the runtime's own rule).
+- **decision: sniff fixtures reach the child crate through environment
+  variables**, read by `include_str!` in the parent `#[test]`.
+- **adopted default: pager-managed variables are checked against the
+  registered schema's `required`** (source: R40 "Generate a concrete variables
+  type with optional pager-managed fields"; the author, not the generator,
+  owns the variables type).
+
+### Requirement-to-test mapping (Phase 7 scope)
+
+Tiers: everything is L1 except the two `slow_` fresh-output tests, which
+`just test` runs through `just test-fresh-output` (as before). New files are
+declared: `runtime/tests/l1/graphql_pager.rs` (`mod graphql_pager;` in
+`l1/main.rs`); `define/src/pagination/relay.rs` (module). No name carries a
+tier marker by accident; `just check-tier-coverage schematic`: 0 stranded.
+Boundaries: define public builders (F1); the runtime pager against wiremock
+with a spec mirroring the generated one (F2); generator tokens (F1); the real
+generated crate compiled offline and run against wiremock (F2).
+
+| Req | Test |
+| --- | --- |
+| R40 preset | define `graphql_definitions::the_relay_preset_expands_to_a_cursor_strategy_over_data_and_variables`; doctest `pagination::relay::Relay` |
+| R40 optional pager variables | `graphql_definitions::a_relay_operation_builds_and_its_pager_variables_must_be_optional`; bundle cell `variables require a pager input` |
+| R40 runtime | `runtime graphql_pager::{two_pages_are_collected_from_data_with_the_cursor_and_size_written_into_variables, an_omitted_initial_cursor_and_size_stay_omitted_until_the_pager_has_them, a_resumed_cursor_is_written_into_variables_of_the_first_request, a_graphql_error_stops_collection_and_its_partial_data_joins_no_items, a_wrapper_without_data_or_with_undecodable_data_is_a_malformed_page, a_missing_or_invalid_continuation_follows_the_incomplete_rules, a_repeated_cursor_and_the_page_limit_stop_collection, a_page_size_above_the_declared_maximum_is_refused_before_sending, the_shared_deadline_bounds_every_page, page_data_reads_data_and_classifies_the_wrapper_as_one_send_does}` |
+| R40 generated | gen `codegen::graphql::tests::a_relay_operation_implements_paginated_over_data_and_variables`; child `a_generated_relay_pager_pages_data_and_stops_at_graphql_errors`; misuse `an unauthored pager knob on a GraphQL operation` |
+| R43 | child `check_status_parity_preserves_every_sniff_fixture`; L1 `fresh_output_compile::the_parity_document_is_sniffs_check_status_query` |
+| R36 (unchanged invalid document, unnamed, mutation body), D56-1 anonymous, R37 `into_result` vs outer result | child `graphql_sends_report_their_credential_and_keep_unparsed_documents_and_transport_failures_apart` |
+| R44 bundle | existing `definition_bundles::*` (Phase 2) plus the new cell |
+
+**Input robustness:** the only reader touched is the definition-bundle loader,
+through one new validation rule. Its field (`required` inside schema data) is
+read, not deserialized; the rule fires only on a present array containing the
+variable, and an absent, null, non-array, or non-matching `required` leaves
+the definition valid (schema data is preserved as arbitrary JSON, plan rule
+12). The cell covers the positive case; the unedited fixture (`required:
+["owner"]`) is the control. Smell grep over the change: no `#[serde(default)]`,
+`unwrap_or_default()`, `.ok()`, or `filter_map(.. as_str())` on a
+load-bearing parse.
+
+### Review agenda entries raised in Phase 7
+
+1. Bidirectional Relay paging (D-12's backward leg on one pager) needs
+   per-leg size inputs and end signals in the pagination model; Phase 7 ships
+   one-direction `Relay::forward`/`Relay::backward` presets instead.
+2. D-12's `Strategy::relay_forward(root)` became `Relay::forward(root)
+   .collection(item)`, because a strategy cannot carry the items selector.
+3. The generated-client R43 parity test is `slow_`; a sniff fixture edit alone
+   schedules only the runtime's L1 fixture tests.
+
+### Phase 7 gates
+
+Run once, from `schematic/` unless noted, after all edits:
+
+- `just lint`: clean (exit 0).
+- `just test`: **2655 passed, 15 skipped** (Phase 6: 2641; +14 new), fresh
+  output **9/9**, compile-fail **1/1**, exit 0. Before the gate, the two slow
+  fresh-output tests passed alone (91 s and 40 s).
+- `just check-tier-coverage schematic` (repository root): 0 stranded.
+- `just test-schema`: **65/65**; `just lint-schema`: clean.
+- Dependents (all use `schematic-schema` only, whose sole change is the ABI
+  constant; none implements `Paginated`): `cargo check --tests` for `sniff`,
+  `biscuit-speaks`, `homelab`, `arcam-amp-integration`,
+  `unfolded-integration-helper`, `eversolo-integration`,
+  `sony-receiver-integration`, run serially: all compile.
+- CI test-input checks: `python3 -m unittest test_affected_scope -k
+  RealWorkspaceTestInput` from `scripts/ci/`: 7/7.
+- Cross-OS check: not run. No path, process, console, or `#[cfg]` code
+  changed; the new tests use loopback HTTP, and the one source read
+  normalizes CRLF before parsing.
+- Nothing was staged or committed; `cargo fmt` was not run.
+
+Scope calculator, from the repository root after every edit:
+`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs
+python3 scripts/ci/affected_scope.py`. Result: `packages: [schematic-define,
+schematic-gen, schematic-runtime, test-toolkit, darkmatter]`, `change_class:
+package`. Both gates were required and ran (above).
+
+## Phase 8
+
+Run of 2026-10-22. Tree: HEAD `f348d5672`; Phase 7's change is still
+uncommitted, so the working tree is Phases 7 and 8 together. Implementer:
+`claude/opus` (main session) with two parallel subagents for Wave 16 on
+disjoint ownership: one for `schematic/docs/**` and the READMEs, one for
+`.claude/skills/**` and the comment drift pass over Rust sources.
+
+### Wave 16 — Parser-smell search (main session)
+
+`git diff main` over `define/src`, `runtime/src`, and `gen/src`, plus the
+untracked files, was searched for `#[serde(default)]`, `unwrap_or_default()`,
+`.ok()`, and `filter_map(.. as_str())` on added lines:
+
+- every new optional vocabulary member that the definition-bundle loader reads
+  pairs `#[serde(default)]` with `serde_presence::non_null` (absent is `None`,
+  explicit null is rejected); `Vec`/`bool` members with `default` are the
+  frozen "absent means `[]`/false" forms of Phase 1's contract freeze, and
+  serde already rejects `null` for those types;
+- the `unwrap_or_default()` hits are in exporters and code generation
+  (`openapi/export/conversion.rs`, `gen/src/codegen/*`, `gen/src/export/*`,
+  `gen/src/validation.rs`) over already-built definitions, not over input;
+- **observation, not changed:** `SchematicDocExtension::request_id_header`
+  and `SchematicOpExtension::cross_origin` (added in Phase 6) are
+  `Option<T>` with a plain `#[serde(default)]`, so a deserialized `null`
+  reads as absent. No code in the workspace deserializes these extension
+  types (the importer never reads `x-schematic`; `grep` finds only the
+  exporter's writers), so the shape decides nothing today. It matches the
+  older `rate_limit`/`retry_guidance` members beside them. If the importer
+  ever reads `x-schematic`, these need `non_null`.
+
+### Wave 16 — Documentation audit (subagent, `schematic/docs/**` and READMEs)
+
+Every claim on the feature's topic pages was checked against `define/src`,
+`runtime/src`, and `gen/src`. Drift found and resolved (the code was taken as
+right each time):
+
+1. `docs/definition-builders.md` said build stores only a lone plain shape;
+   `EndpointBuilder::build` stores every shape.
+2. `docs/runtime/codecs.md` called stored multi-shape replies and streams
+   **planned** and drew its flow from the removed `ApiResponse::Json`; six
+   shipped APIs declare them.
+3. `docs/runtime/sending-and-responses.md` and `docs/runtime/README.md` said
+   no shipped endpoint declares errors; the imported OpenAI definition does.
+   The 2xx outcome node now includes `UnexpectedContentType` and GraphQL's
+   2xx declared failure.
+4. `docs/runtime/building-clients.md` lacked `max_frame_bytes`,
+   `BuildError::InvalidMaxFrameBytes`, and `InvalidGraphQlUrl`.
+5. `docs/io/import-openapi.md` said one success is selected; import makes
+   every 2xx a shape and every 400–599 an error entry (`2XX` → shapes without
+   a status; an error body under `*/*` dropped with a warning).
+6. `docs/io/openapi-extensions.md` claimed import round-trips `x-schematic`;
+   import reads only `x-schematic-query-rust-names`.
+7. `runtime/README.md` listed four codecs and no `stream`/`shapes`/`graphql`
+   modules.
+8. `docs/generation/generated-clients.md` hard-coded fixture test counts and
+   an ElevenLabs codec list that predates `ByteStream`/`Ndjson`.
+9. `docs/generation/validation.md` omitted the GraphQL id, `{Id}Response` /
+   `{Id}Error` / `{Id}End`, shadowing, and `Success::variant` diagnostics.
+10. `docs/generation/workflow.md`, `schema/README.md`: four codecs only.
+11. `docs/io/crates-openapi.md` named `ApiRequest/ApiResponse`.
+
+Added: the Mermaid error-resolution flow (`docs/responses-and-errors.md`) and
+the per-frame stream flow (`docs/runtime/codecs.md`, checked against
+`runtime/src/stream.rs`); a provider error-event example; fidelity-limit
+sections in `export-openapi.md` ("What standard OpenAPI cannot say"),
+`import-openapi.md` (what import loses), `export-postman.md` ("What a
+Collection Leaves Out"), and `openapi-extensions.md` ("Reading extensions
+back"); README links to `responses-and-errors.md` and `graphql.md`.
+`graphql.md`, `pagination.md`, and `calling-an-api.md` (Phase 7) were
+re-checked and left unchanged. No doc names a spec, feature, or requirement
+id. No crate was added or removed (runtime `serde` gained `derive`, already
+described), so neither dependency doc changed. Mermaid was checked by reading
+only; no renderer ran. `define/tests/authoring_guidance` passed (1/1).
+
+### Wave 16 — Skill audit and comment drift (subagent)
+
+Skill (`.claude/skills/schematic-define/`): `SKILL.md` cut from 564 to 187
+lines and its detail moved to new `schematic/responses.md` (shapes, streams,
+error tables, GraphQL, Relay, `page_root`, ABI 7, provider notes) and
+`schematic/pagination.md`. Drift fixed: `gen.md` said runtime ABI 3 (now 7)
+and named a `Paginated` marker in `shared.rs` and a `codegen/traits.rs` that do
+not exist; `openapi.md`'s `ImportOptions` example lacked four fields and showed
+`response: "User"`; `definitions.md` had wrong Anthropic and Ollama type and
+endpoint names; the nested `SKILL.md` said streams use binary responses with
+caller framing; `define.md` said `.with_models(..)` is infallible.
+`.claude/skills/sniff/remote-and-repository.md` gained `REPLIES.raw(..)` and
+Bitbucket `GetSource`'s `Directory`/`File` handling. Spot-checked by the main
+session: `RestApiBuilder::default_errors` exists; `Relay` is not in the
+prelude.
+
+Comment drift (code assumed right; no behavior changed):
+
+- `runtime/src/response.rs` `ErrorKind::Declared`: also a failure carried in
+  a 2xx body (GraphQL, `PageRootError::Declared`), not only a declared status.
+- `runtime/src/pager/mod.rs` `Paginated`: GraphQL operations implement it;
+  `ITEMS` paths are relative to `page_root`; `PATH` is empty for operations.
+- `define/src/types.rs` `default_pagination`, `define/src/pagination/resolve.rs`
+  `resolve`: inference needs the `Vec<T>` to be the sole, JSON, success shape.
+- `gen/src/lib.rs`: one request struct per endpoint **and per operation**.
+- `gen/src/codegen/pagination/mod.rs`: module doc names
+  `operation_paginated_impl`.
+- `definitions/src/artificial_analysis/types.rs`: referred to the removed
+  `ApiResponse`.
+
+Subagent verification: `just lint` clean; doctests define 168+14, runtime 3,
+gen 19, all passed.
+
+### Wave 16 — Final R1–R44 ledger
+
+Each row points to the phase whose "Requirement-to-test mapping" names the
+passing tests; all of them ran green in this phase's `just test` (below).
+"Deviation" rows are disclosed work that is **not** satisfied until the author
+accepts it; they are not claimed as passing.
+
+| Req | Evidence (phase mapping) | Status |
+| --- | --- | --- |
+| R1, R3, R3a, R3b, R3c, R23 | Phases 2 (define validation), 3 (runtime selection) | pass |
+| R2, R20 | Phase 4 (generated success types, fresh-output crate) | pass |
+| R4, R5 | Phases 4, 5, 6 | pass; R5: no ElevenLabs audio media type is documented, so none is declared (R5's own condition) |
+| R6–R11, R11a, R11b | Phase 3 (`streams`, `timing`, compile checks) | pass |
+| R11c | Phases 3, 6 (SSE error event as typed item; shipped provider clients) | pass |
+| R12 | Phases 3, 4 (trybuild compile-fail, global-hook mock) | pass |
+| R13a | Phases 2, 4, 6 | pass |
+| R16–R19 | Phases 2, 3 | pass (D-7 precedence on the agenda) |
+| R21, R27 | Phases 4, 6 | pass |
+| R22, R24, R25 | Phase 5 (migration-check, artifact drift, per-endpoint public-type comparison); this phase's idempotent regeneration | pass |
+| R26 | Phases 4, 6 | pass |
+| R28 | Phases 4, 6 (JSON + YAML matrices) | pass |
+| R29 | Phases 5, 6 (Postman goldens) | pass |
+| R30 | Phase 5, 6 | pass; Ollama OpenAI-compatible `[DONE]` is unverified provider behavior kept because R30 rules it |
+| R31 | Phase 5 | **deviation:** LM Studio `DownloadModel` is JSON, not SSE (the provider documents a polled job object) |
+| R32, R33 | Phases 5, 6 | pass |
+| R32a | Phase 5 (`GetSource` `Directory`/`File`) | pass as specified, with a **disclosed limitation:** no wire tag separates a JSON file from a listing, and a JSON-object file decodes as an empty `Directory` |
+| R32b | Phases 5, 6 | pass; the OpenAI `BetaResponseStreamEvent` untagged-`oneOf` mis-decoding is an importer defect outside this spec (Phase 6) |
+| R34 | Phase 5 (sniff `get_source` call sites); this phase's dependent runs | pass (see gates) |
+| R35–R39, R41 | Phases 2, 3, 4, 7 | pass |
+| R40 | Phase 7 | pass for one-direction Relay; **deviation:** bidirectional paging (D-12's backward leg on one pager) not built; `Relay::backward` stands in |
+| R42 | Phases 4, 6 (exporters skip GraphQL with a warning) | pass |
+| R43 | Phase 7 (`check_status_parity_preserves_every_sniff_fixture`, `the_parity_document_is_sniffs_check_status_query`) | pass |
+| R44 | Phases 2, 5, 7 (bundle round trip, matrix, byte-identical reserialization) | pass |
+
+Acceptance criterion 10 (D57 stream checks): Phase 3 `timing`/`streams`
+(item every second outlives a 2 s timeout; silence ends with `IdleTimeout`;
+an oversized unterminated SSE event ends with `FrameLimitExceeded`).
+
+### Wave 16 — Human review agenda index
+
+Where the log records each item of the spec's "Human review agenda":
+
+1. **Adopted defaults D-4–D-31** (D-1–D-3 withdrawn): Phase 1 "Adopted
+   defaults" table; later changes in each phase's "Adopted defaults and
+   decisions" (D-12 changed in Phase 7: `Relay` preset, one direction).
+2. **Design choices not dictated by the spec** (final names, where codecs and
+   types live, `StreamError`/`GraphQlFailure`/generated enum shapes): Phase 1
+   "Contract freeze"; Phase 2 "Finalized public names and construction seams";
+   Phases 3–7 "Adopted defaults and decisions"; Phase 4 agenda 1 and 2
+   (`SuccessShape::variant`, `ErrorBody<A>`).
+3. **Deviations with stand-in tests:** R31 `DownloadModel` (Phase 1 agenda 1,
+   Phase 5); D-25 class expansion (Phase 4 agenda 3, Phase 6 agenda 3);
+   bidirectional Relay (Phase 7 agenda 1, 2); `CreateRealtimeCall` `()` →
+   `Bytes` (Phase 5 agenda 2); OpenAI overlay narrowing (Phase 5 agenda 1).
+4. **Open design questions:** `UnexpectedContentType` (Phase 1 contract
+   freeze, Phase 3); the R3a status-less fallback and unmatched-status kind
+   and the frame-limit name `max_frame_bytes` (Phase 1 contract freeze,
+   Phase 3 decisions); importer status mapping R28 (Phase 4 decisions);
+   malformed item continues the stream (Phase 3; also Anthropic unknown events,
+   Phase 1 agenda 7); D-7 level precedence (Phase 1 D-7, specificity adopted);
+   Bitbucket JSON files (Phase 1 agenda 6, Phase 5 agenda 3); R3b tag inference
+   (Phase 2 adopted default; the migrated groups that need an explicit tag,
+   Bitbucket, name variants and declare it, Phase 5); ElevenLabs
+   `output_format` vs audio type (Phase 5 provider section: not declared on
+   any TTS endpoint, new scope); stream `elapsed` is time to headers (spec
+   default, adopted; Phase 1 baseline `timing`); GraphQL batching (D-13, out
+   of scope); `x-schematic` `SameOrigin` omission (Phase 6 agenda 4).
+5. **Phase 1 inventories** (Phase 1 Wave 1) and **the final changed public
+   types list** (Phase 5 Wave 11 "Changed public types (R24)"); dependent call
+   sites edited (Phase 5: `sniff/lib/src/remote/{bitbucket,envelope}.rs`,
+   `sniff/lib/tests/l1/remote_providers.rs`); LM Studio public types removed
+   (Phase 5 agenda 4).
+6. **Unverified provider facts and their sources:** Phase 1 "Provider
+   inventory and evidence"; Phase 5 provider sections (Ollama `[DONE]`,
+   pull-family `status=success`, Ollama chunk statistics not modeled, LM
+   Studio `chat.end`, Anthropic event set, ElevenLabs NDJSON on SDK evidence,
+   Bitbucket, OpenAI `GetResponse` connection close).
+7. **Hooks removed** (D-26): none; the inventory found none to remove.
+8. **Environments exercised:** "Wave 17 — Environment evidence" below.
+9. **Gaps or contradictions in the parent:** Phase 1 agenda 8 and 10 (counts;
+   dead `ResponseKind` code that the parent said was gone); D-7's two
+   readings; Phase 5 agenda 6 (earlier sniff evidence ran without the `remote`
+   feature); Phase 6 agenda 2 (CI never runs `schematic/schema` tests);
+   Phase 7 agenda 3 (`slow_` parity test).
+
+### Wave 17 — Verification evidence (main session, after both subagents finished)
+
+Run once, from `schematic/` unless noted, with no subagent running:
+
+- `just lint`: exit 0. `just lint-schema`: exit 0.
+- `just test`: **2655 passed, 15 skipped** (unchanged from Phase 7: Phase 8
+  changed comments and docs only), fresh output **9/9**, compile-fail
+  **1/1**, exit 0. Nine L1 tests went over 5 s in that run, while other
+  sessions on this host were busy:
+  `import_normalization::shipped_openai_query_schema_gate_and_reimports`,
+  `artifact_drift::generated_rust_artifacts_are_up_to_date`, three
+  `e2e_generation::*`,
+  `fresh_output_compile::generated_rest_code_references_the_runtime_and_defines_none_of_it`,
+  `import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition`,
+  and two runtime `builder::*` TLS tests. Rerun alone, serially
+  (`--test-threads 1`), every one took 1.2–2.2 s. They are recorded as
+  load-sensitive, as Phase 1 recorded seven of the same tests; none failed.
+- `just test-schema`: **65/65**. `just test-l2`: **3/3** (shared harness,
+  no window focus). `just migration-check`: **39/39**. `just check-drift`:
+  **9/9**. `just check-tier-coverage schematic` (root): 0 stranded.
+- Define's OpenAPI feature is covered: `just test` runs `schematic-define
+  --all-features`. The generated fixture crate compiles in the fresh-output
+  tests, and the generated schema compiles via its own manifest
+  (`test-schema`, `lint-schema`).
+- **Idempotent regeneration:** `cargo run -p schematic-gen -- generate --api
+  all --output schema/src --openapi-out openapi --postman-out postman` ran
+  twice. A SHA-1 over every file in `schema/src`, `openapi/`, and `postman/`
+  was identical before, after run 1, and after run 2. The only difference from
+  HEAD is Phase 7's two ABI lines in `schema/src/lib.rs`, so there is no
+  generated-type or docs drift outside the migration set.
+- Doctests after the comment edits (subagent): define 168 + 14, runtime 3,
+  gen 19.
+
+**Dependents**, run serially, each scoped to the code that uses schematic
+(each package has fewer than 200 tests unless a filter is noted):
+
+| Package | Command | Result |
+| --- | --- | --- |
+| `sniff` | `cargo nextest run -p sniff --features remote -E 'test(/remote/)'` | 295/295 |
+| `biscuit-speaks` | `-E 'test(/elevenlabs/)'` | 48/48 |
+| `model-citizen` (reads `schematic-definitions` LM Studio/Ollama types) | `-E 'test(/lmstudio\|ollama/)'` | 48/48 |
+| `homelab` | full | 49/49 |
+| `arcam-amp-integration` | full | 21 passed, 2 skipped |
+| `unfolded-integration-helper` | full | 28/28 |
+| `eversolo-integration` | full | 32 passed, 3 skipped |
+| `sony-receiver-integration` | full | 27 passed, 3 skipped |
+| `schematic-oauth` | part of `just test` | pass |
+| `darkmatter` (reads `.claude/skills/**`) | `--test l1 -E 'test(/shipped_schema_corpus/)'` | 8/8 |
+| `test-toolkit` (suite input from Phase 7's runtime test files) | full | 478 passed, 2 skipped |
+
+`cargo clippy --all-targets -D warnings` over the eight non-schematic
+dependents (sniff with `remote`): clean. Those are the five homelab crates:
+`homelab`, `arcam-amp-integration`, `unfolded-integration-helper`,
+`eversolo-integration`, and `sony-receiver-integration`.
+
+### Wave 17 — Environment evidence
+
+`BUILD_LINUX=build-linux`, `BUILD_WIN=build-win-native`, `BUILD_WSL=build-win`
+were declared. `just cross-check <pkg> --os all` ran the CI-style archive L1
+of each package against this exact working tree (after both subagents
+finished, before only log/plan edits):
+
+| Package | macOS (local) | Linux | native Windows | WSL2 |
+| --- | --- | --- | --- | --- |
+| `schematic-runtime` | pass | pass (451, 1 skipped) | pass | pass |
+| `schematic-define` | pass | pass (801) | pass | pass |
+| `schematic-definitions` | pass | pass (600) | pass | pass |
+| `schematic-gen` | pass | pass (768, 17 skipped) | pass | pass |
+
+Counts are from the Linux leg; each host reported `pass`. The cross-check did
+not publish WSL2 CI observations because the tree is uncommitted ("a patched
+or older tree is not evidence for this head"), so CI must still prove the
+committed head. The `slow_` fresh-output and compile-fail tests (and
+`schematic/schema`'s tests) are not part of the archive L1, so they have macOS
+evidence only. The dependents and L2 were exercised on macOS only. No new OS
+fact was learned, so the `os` skill is unchanged.
+
+### Scope calculator
+
+From the repository root after every edit:
+`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs
+python3 scripts/ci/affected_scope.py`. Result: `packages: [schematic-define,
+schematic-definitions, schematic-gen, schematic-runtime, test-toolkit,
+darkmatter]`, `change_class: package`. Both gates were required and ran.
+Per-file bisection: `darkmatter` comes from the skill files (a test reads
+`.claude/skills/**`), and `test-toolkit` from Phase 7's runtime test files and
+`gen/Cargo.toml`. The narrowed tests of both ran (above).
+
+### Review handoff
+
+Implementation complete, ready for review 1. Every R1–R44 row points to
+passing evidence or to a disclosed deviation that awaits the author's
+acceptance (R31 `DownloadModel`, R40 bidirectional Relay; the R32a
+limitation). Nothing blocks review, so `human_review` is false. Lifecycle
+placement, spec closure, and downstream spec refreshes are left to the author.
+Nothing was staged or committed, and `cargo fmt` was not run.

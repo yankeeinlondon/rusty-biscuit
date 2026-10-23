@@ -319,6 +319,287 @@ docs_updated_during_phase_6:
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
   - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_7:
+  - schematic/define/src/graphql.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/relay.rs
+  - schematic/define/tests/definition_bundles.rs
+  - schematic/define/tests/graphql_definitions.rs
+  - schematic/gen/Cargo.toml
+  - schematic/gen/src/codegen/graphql.rs
+  - schematic/gen/src/codegen/pagination/mod.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/runtime/src/graphql.rs
+  - schematic/runtime/src/lib.rs
+  - schematic/runtime/src/pager/mod.rs
+  - schematic/runtime/src/pager/pages.rs
+  - schematic/runtime/tests/l1/graphql_pager.rs
+  - schematic/runtime/tests/l1/main.rs
+  - schematic/schema/src/lib.rs
+docs_updated_during_phase_7:
+  - schematic/docs/graphql.md
+  - schematic/docs/pagination.md
+  - schematic/docs/runtime/calling-an-api.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_8:
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/types.rs
+  - schematic/definitions/src/artificial_analysis/types.rs
+  - schematic/gen/src/codegen/pagination/mod.rs
+  - schematic/gen/src/lib.rs
+  - schematic/runtime/src/pager/mod.rs
+  - schematic/runtime/src/response.rs
+docs_updated_during_phase_8:
+  - schematic/README.md
+  - schematic/define/README.md
+  - schematic/definitions/README.md
+  - schematic/runtime/README.md
+  - schematic/schema/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/responses-and-errors.md
+  - schematic/docs/runtime/README.md
+  - schematic/docs/runtime/building-clients.md
+  - schematic/docs/runtime/codecs.md
+  - schematic/docs/runtime/sending-and-responses.md
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/generation/workflow.md
+  - schematic/docs/io/crates-openapi.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/define.md
+  - .claude/skills/schematic-define/schematic/definitions.md
+  - .claude/skills/schematic-define/schematic/gen.md
+  - .claude/skills/schematic-define/schematic/openapi.md
+  - .claude/skills/schematic-define/schematic/pagination.md
+  - .claude/skills/schematic-define/schematic/responses.md
+  - .claude/skills/sniff/remote-and-repository.md
+source_code:
+  - Cargo.lock
+  - schematic/define/src/builders.rs
+  - schematic/define/src/bundle.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/error_table.rs
+  - schematic/define/src/graphql.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/openapi/export/info.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/responses.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/openapi/import.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/classify.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/mappings/responses.rs
+  - schematic/define/src/openapi/import/query_paths.rs
+  - schematic/define/src/openapi/mod.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/relay.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/response.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/bundle_support/mod.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/definition_bundles.rs
+  - schematic/define/tests/fixtures/bundles/fixture.json
+  - schematic/define/tests/graphql_definitions.rs
+  - schematic/define/tests/openapi_tests.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/define/tests/response_import_matrix.rs
+  - schematic/define/tests/response_openapi.rs
+  - schematic/define/tests/response_vocabulary.rs
+  - schematic/definitions/Cargo.toml
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/anthropic/types/mod.rs
+  - schematic/definitions/src/anthropic/types/streaming.rs
+  - schematic/definitions/src/artificial_analysis/types.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/mod.rs
+  - schematic/definitions/src/elevenlabs/types.rs
+  - schematic/definitions/src/elevenlabs/types/common.rs
+  - schematic/definitions/src/elevenlabs/types/speech.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/mod.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/lmstudio/types.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/ollama/types/completion.rs
+  - schematic/definitions/src/ollama/types/models.rs
+  - schematic/definitions/src/ollama/types/openai.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/openai_pagination.rs
+  - schematic/definitions/src/registry/typed.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/definitions/tests/authoring_surface.rs
+  - schematic/gen/Cargo.toml
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/client/helpers.rs
+  - schematic/gen/src/codegen/client/methods.rs
+  - schematic/gen/src/codegen/client/mod.rs
+  - schematic/gen/src/codegen/client/shared_auth.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/names.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/graphql.rs
+  - schematic/gen/src/codegen/mod.rs
+  - schematic/gen/src/codegen/module_docs.rs
+  - schematic/gen/src/codegen/pagination/mod.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/codegen/responses.rs
+  - schematic/gen/src/codegen/variant.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/item.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/export/vocabulary.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/common/components.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/gen/tests/l1/response_adapters.rs
+  - schematic/gen/tests/l1/vocabulary_exports.rs
+  - schematic/openapi/anthropic.json
+  - schematic/openapi/bitbucket.json
+  - schematic/openapi/elevenlabs.json
+  - schematic/openapi/github.json
+  - schematic/openapi/lmstudio.json
+  - schematic/openapi/ollama.json
+  - schematic/openapi/openai.json
+  - schematic/postman/elevenlabs.postman_collection.json
+  - schematic/postman/lmstudio.postman_collection.json
+  - schematic/postman/ollama.postman_collection.json
+  - schematic/postman/openai.postman_collection.json
+  - schematic/runtime/Cargo.toml
+  - schematic/runtime/src/api_client.rs
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/codec.rs
+  - schematic/runtime/src/endpoint.rs
+  - schematic/runtime/src/error.rs
+  - schematic/runtime/src/graphql.rs
+  - schematic/runtime/src/lib.rs
+  - schematic/runtime/src/pager/mod.rs
+  - schematic/runtime/src/pager/pages.rs
+  - schematic/runtime/src/pager/request.rs
+  - schematic/runtime/src/response.rs
+  - schematic/runtime/src/shapes.rs
+  - schematic/runtime/src/stream.rs
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.stderr
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_stream_endpoint.rs
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_stream_endpoint.stderr
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_mixed_alternatives.rs
+  - schematic/runtime/tests/fixtures/compile_fail/mutator_on_mixed_alternatives.stderr
+  - schematic/runtime/tests/l1/decode_boundary.rs
+  - schematic/runtime/tests/l1/envelope.rs
+  - schematic/runtime/tests/l1/error_routes.rs
+  - schematic/runtime/tests/l1/graphql.rs
+  - schematic/runtime/tests/l1/graphql_address.rs
+  - schematic/runtime/tests/l1/graphql_pager.rs
+  - schematic/runtime/tests/l1/main.rs
+  - schematic/runtime/tests/l1/shapes.rs
+  - schematic/runtime/tests/l1/streams.rs
+  - schematic/runtime/tests/l1/support.rs
+  - schematic/runtime/tests/l1/timing.rs
+  - schematic/runtime/tests/l1/whole_send_elapsed.rs
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/lib.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama.rs
+  - schematic/schema/src/ollama/mod.rs
+  - schematic/schema/src/ollama/requests.rs
+  - schematic/schema/src/ollama/responses.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/schema/tests/non_json_endpoints.rs
+  - schematic/schema/tests/streaming_providers.rs
+  - sniff/lib/src/remote/bitbucket.rs
+  - sniff/lib/src/remote/envelope.rs
+  - sniff/lib/tests/l1/remote_providers.rs
+documentation:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/define.md
+  - .claude/skills/schematic-define/schematic/definitions.md
+  - .claude/skills/schematic-define/schematic/gen.md
+  - .claude/skills/schematic-define/schematic/openapi.md
+  - .claude/skills/schematic-define/schematic/pagination.md
+  - .claude/skills/schematic-define/schematic/responses.md
+  - .claude/skills/sniff/remote-and-repository.md
+  - schematic/README.md
+  - schematic/define/README.md
+  - schematic/definitions/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/dependencies.md
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/generation/workflow.md
+  - schematic/docs/graphql.md
+  - schematic/docs/io/crates-openapi.md
+  - schematic/docs/io/definition-bundles.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/pagination.md
+  - schematic/docs/responses-and-errors.md
+  - schematic/docs/runtime/README.md
+  - schematic/docs/runtime/building-clients.md
+  - schematic/docs/runtime/calling-an-api.md
+  - schematic/docs/runtime/codecs.md
+  - schematic/docs/runtime/deadlines-and-timeouts.md
+  - schematic/docs/runtime/hooks.md
+  - schematic/docs/runtime/sending-and-responses.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/implementation-log.md
+  - schematic/features/2026-10-16-schematic-response-model-graphql/plan.md
+  - schematic/runtime/README.md
+  - schematic/schema/README.md
+completed_phase: 8
+implemented: true
 ---
 
 # Schematic response model v2 and GraphQL implementation plan
@@ -571,17 +852,17 @@ Address-rule tag and required `suffix`, replacement, and append-path payloads, p
 
 ### Wave 14 — Pagination and parity (parallel)
 
-- [ ] **Relay integration**
+- [x] **Relay integration**
   - Complete existing cursor-strategy presets/body-path wiring: forward nodes/edges, optional backward leg, overridable variable names, author-declared size maximum, optional pager-managed variables, and decoded-data-relative paths.
   - Test two-page completion, null/omitted initial cursors, missing/invalid continuation, repeated cursors, limits/shared deadline, and GraphQL failure stopping collection without adding partial data. Compile-fail an unauthored pager knob.
-- [ ] **Check-status parity**
+- [x] **Check-status parity**
   - Generate a test-only operation from sniff's actual document/variables with nullable data models. Use all eight frozen fixtures with explicitly assigned HTTP status and JSON content type as R43 prescribes.
   - Assert typed success for success/passed/changed_head/null_rollup; usable partial failure for partial_errors; preserved errors and GitHub type for request_wide_errors/rate_limit; and raw HTTP failure for permission_failure at 403. Do not replicate sniff's domain decisions.
   - Declare cross-package fixture and source reads with `include_str!` or runtime manifest/repo-root joins recognized by the CI input index. Add only the required test `source-inputs` declaration for sniff's query source if needed; use the rust-testing rules and load rust-devops before changing CI metadata.
 
 ### Wave 15 — GraphQL contract checks (sequential)
 
-- [ ] **Operation verification**
+- [x] **Operation verification**
   - Prove query and mutation POST bodies/headers, unit variables omission, unchanged invalid document strings, named/unnamed operations, anonymous credential reporting, same-origin overrides, Enterprise/proxy URL derivation, and REST path preservation through generated mocks.
   - Prove public `into_result()` fails on GraphQL and HTTP failures, while outer `?` handles transport errors only. Verify typed-data hooks versus wrapper hooks, malformed error structures, and server-errors precedence over undecodable data.
   - Load a generated definition bundle without Rust registry access, validate schemas/bindings/models, export it, and prove deterministic reserialization. Run the complete supported-format bundle matrix walkers and resolve dangling reference diagnostics with API/operation/type context.
@@ -592,21 +873,21 @@ Address-rule tag and required `suffix`, replacement, and append-path payloads, p
 
 ### Wave 16 — Docs and contract audit (parallel, disjoint ownership)
 
-- [ ] **Documentation audit**
+- [x] **Documentation audit**
   - Update READMEs and current topic docs for authoring success/error sets, several shapes at one address (wire tags, fallback, notes), incremental streams, timeouts/limits, provider-error item variants, GraphQL addresses/failures/hooks, and Relay pagination. Use compact examples and Mermaid stream/error-resolution flows for readers new to the repository.
   - Update `schematic/docs/io/import-openapi.md`, `export-openapi.md`, `export-postman.md`, and `openapi-extensions.md` with actual fidelity limits. Docs never name this feature or another spec by date/path. Update root/area dependency docs for any crate changes.
-- [ ] **Skill audit**
+- [x] **Skill audit**
   - Update `.claude/skills/schematic-define/` and its Schematic generator/runtime guidance, plus other skills affected by actual architecture changes. Review comments/docs on every changed behavior-bearing symbol; fix drift and record it without unrelated cleanup.
   - Audit R1–R44 ledger, matrix rows/columns and parser-smell searches, public type changes, dependent call sites, and every human-review agenda entry. Disclosed deviations remain unmet criteria until accepted; log them without claiming passing evidence.
 
 ### Wave 17 — Final verification (sequential coordinator)
 
-- [ ] **Verification evidence**
+- [x] **Verification evidence**
   - Run `just test`, `just lint`, `just test-schema`, and `just lint-schema` from `schematic/`, ensuring runtime checks are included with its landed recipes. Use define's OpenAPI feature coverage; compile the generated fixture crate and generated schema via its own manifest because schema is currently excluded from the workspace.
   - Run root `just test {pkg}` and the applicable lint recipe for each affected dependent, including the five named homelab crates after confirming their package names. Run required L2 through `just test-l2` for affected areas using the shared harness without window focus. Do not use legacy recipes that invoke consolidated `cargo test`; use their nextest-backed equivalent.
   - Regenerate all owned outputs twice; the second run must produce no additional diff. Check definition source preservation, field-specific baselines, scoped artifact drift, and generated public-type differences. Explain any generated docs/type drift outside the migration set.
   - Load the `os` skill, reuse qualifying evidence per package/environment/tier, and obtain missing required evidence on macOS, Linux, native Windows, and WSL2 using authorized non-interactive hosts. Record platform-specific failures and any newly learned platform facts in the OS skill. Never turn inaccessible coverage into a pass or an execution ban.
-- [ ] **Review handoff**
+- [x] **Review handoff**
   - Finalize `implementation-log.md` with all D-4–D-31 dispositions (D-1–D-3 withdrawn), names/locations, deviations and alternative choices, open proposed details, inventories, public type changes, removed hooks, provider sources/uncertainties, dependent edits, and environment evidence.
   - Report actual verified behavior and remaining blockers. When required checks pass, mark implementation complete and ready for review 1. Leave feature lifecycle placement and spec closure to the author; do not refresh downstream specs before review 1 supplies its outcomes.
 
