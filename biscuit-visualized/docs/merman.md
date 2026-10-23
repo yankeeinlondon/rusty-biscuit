@@ -195,12 +195,18 @@ any size:
   (60% for pie slices) and weaker wherever the text would drop below 4.5:1;
 - labels on full-strength accents (gitGraph branch and tag labels) use
   whichever of the text, the background, black, or white reads on them;
+- labels Merman draws over half-transparent paint read through it: gitGraph's
+  commit label background is darkened (or lightened) until its label reads
+  over the background and every branch line, and sankey node colors are moved
+  toward the background until the text reads on their links;
 - accents, borders, and lines reach 3:1 against the background.
 
 A final **contrast pass** over the SVG catches the labels Merman's compiled
 styles do not reach. Each `<text>` is checked against the shape painted
-behind it (the nearest inline-painted shape in its group, following Merman's
-`<use>` label placements, or the diagram background), and a label below
+behind it (the nearest inline-painted shape in its group or the node group
+just before it, following Merman's `<use>` label placements, mixed with what
+it covers when the shape is translucent, or the diagram background), and a
+label below
 4.5:1 is recolored to a readable one. It touches only text where the label
 color or the fill behind it is a palette color, so an author's own text color
 on an author's own fill is left as written.
@@ -221,9 +227,21 @@ on an author's own fill is left as written.
   goes into the site config as `base` theme variables, so those surfaces
   follow the palette rather than `base`'s light defaults; packet, which
   reads its colors from its own `packet` config, gets its block and label
-  colors there (an author's own `packet` keys win). Families with an
-  ordinal palette, and sequence and class diagrams, never get them: Merman
-  lets site variables override a compiled theme, and they would erase it.
+  colors there (an author's own `packet` keys win), and C4 gets its boundary
+  and relationship text colors, and a readable text color on its gray
+  external elements, in its `c4` config. Families with an ordinal palette,
+  and sequence and class diagrams, never get the root variables: Merman lets
+  site variables override a compiled theme, and they would erase it.
+- **Family variables** reach the surfaces behind labels that neither the
+  compiled theme nor the root variables color, each checked not to erase the
+  design: gantt's alternate sections, cynefin's domains, event modeling's
+  lanes and boxes, venn's sets, treemap's sections, and kanban's columns (the
+  second surface; Merman lightens its `cScale` colors by ten points first, so
+  they are written ten points darker), and treeView's description text.
+- C4 boundaries keep Mermaid's unfilled boundary: Merman draws a boundary
+  after the shapes inside it, so a filled one would hide them. Timeline
+  events, like mindmap nodes, are accents lightened or darkened until
+  `base`'s fixed `#333` label reads on them.
 
 ### Accents
 
@@ -506,7 +524,7 @@ checked after the source rewrites, so it covers the source Merman would
 actually receive. It changes when any of these change:
 
 - the backend id, `merman@<first 12 characters of the pinned rev>+bv<n>`
-  (currently `merman@6e6b1e6554e8+bv2`). `<n>` versions this crate's own
+  (currently `merman@6e6b1e6554e8+bv3`). `<n>` versions this crate's own
   layer (source rewrites, post-process, accents, contrast pass, background)
   and is bumped whenever
   that layer changes output, so older artifacts are never served;
@@ -585,3 +603,32 @@ overflow change.
 
 Darkmatter's static-SVG HTML output selects this target and passes the SVG
 through its own sanitizer, which admits Merman's drop shadows.
+
+## Benchmark
+
+`just bench` (in `biscuit-visualized/`) times a render of every golden-corpus
+family, through `MermaidDiagram::render` to PNG with the default request, in
+the release profile. It is a separate Cargo project at
+`biscuit-visualized/bench/`, outside the workspace, so CI never builds or runs
+it. Run `just bench --families flowchart,pie --iterations 3` for a quick look.
+
+It reports the median and p95 per family of:
+
+- a **warm** render: measure, layout, SVG, post-process, and raster, in a
+  process that has already rendered once;
+- a **cold** render: a fresh process doing one render, timed from start to
+  exit.
+
+Every iteration uses its own empty render cache, so no timing is a cache hit.
+
+On the **reference host**, the Linux build host, a run flags any family whose
+warm median is over 50 ms, whose cold median is 500 ms or more, or that is more
+than 25% slower than the baseline stored in `bench/baseline.json`; a family
+with no baseline entry also flags. A flagged run exits 1 and names the family
+and rule. Elsewhere the same findings are printed as information and the run
+exits 0. The rules, flags, and the strict baseline format are described in
+`bench/README.md`.
+
+On the reference host today, sequence (about 56 ms) and timeline (about
+84 ms) are over the 50 ms warm limit, so `just bench` there flags them; every
+cold render is under 100 ms.

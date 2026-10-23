@@ -93,7 +93,7 @@ let req = RenderRequest::default().with_target_width(540).with_row_height(18); /
 `target_width` takes precedence over `scale`; `row_height` pads PNG height (ignored for SVG). `Background` is `Theme` (default) | `Transparent` | `Solid { r, g, b }`.
 
 - Cache location: `$TMPDIR/biscuit-visualized/v1/{mermaid|graph}/{svg|png}/` (or `$BISCUIT_VISUALIZED_CACHE_DIR/v1/`)
-- Key: xxHash of `v2 | kind | source | options | backend_id | format`. Mermaid hashes the **rewritten** source, backend `merman@6e6b1e6554e8+bv2`, and options: styling hash (site config + compiled design + every palette color), font identity, title, and `RenderRequest::cache_identity()`. See [Artifacts & Caching](./artifacts-caching.md)
+- Key: xxHash of `v2 | kind | source | options | backend_id | format`. Mermaid hashes the **rewritten** source, backend `merman@6e6b1e6554e8+bv3`, and options: styling hash (site config + compiled design + every palette color), font identity, title, and `RenderRequest::cache_identity()`. See [Artifacts & Caching](./artifacts-caching.md)
 - `RenderedArtifact.cache_hit` reports a hit; no automatic cleanup
 
 ## Relationship to biscuit-terminal
@@ -159,7 +159,10 @@ just -f biscuit-visualized/justfile lint    # Run clippy
 
 ## Implementation Notes
 
+- **Golden corpus** (`src/tests/golden_tests.rs`): every family fixture × 4 fixed palettes as `insta` SVG snapshots (`src/tests/goldens/svg/`), `Dark`/`Default` PNGs within AE share ≤ 0.1% and RMSE ≤ 0.005 (`src/tests/goldens/png/`), plus six derived-palette SVGs. Goldens render through `MermaidDiagram::render_in(chain, …)` with a bundled-Inter-only chain and normalize the `bv-<16 hex>` diagram id. Any output change shows as a golden diff: regenerate with `INSTA_UPDATE=always BISCUIT_VISUALIZED_UPDATE_GOLDENS=1` over `-E 'test(/golden_tests::/)'` and review it. A new family needs a fixture (smoke guard) and goldens (golden guard)
+- The package is **gating** in CI (`gates = true`); `just bench` runs the non-member crate `biscuit-visualized/bench/` (never in CI)
 - Graph SVG post-processing trims layout-rs canvas padding and applies custom fonts/colors; layout-rs supports LR and TB
 - Rasterization draws text through `fonts::default_chain()` (lazily built behind `OnceLock`); see [Rasterization](./rasterization.md#font-database-and-resolution)
+- `tests/contrast_corpus_tests.rs` (AC-T4) checks every text of every stored SVG golden at 4.5:1 with an oracle independent of `contrast.rs` (usvg resolves the text color and box; the fill behind is the dominant pixel of the text-free raster). A golden regenerated after a palette, design, or contrast-pass change is re-checked; fix failures in production, and allow-list only author-chosen colors
 - Bump `+bv<n>` in `MERMAID_BACKEND` whenever the rewrites, post-process, accents, contrast pass, or background change output; bump the rev part with the Merman pin
 - Merman precedence traps (guarded by `tests/theme_tests.rs`): a static node fill beats an ordinal palette; an unsupported rule erases a supported one; Mermaid variables (design or **site config**) override compiled styles; site `themeVariables` beat the source's own `%%{init}%%`
