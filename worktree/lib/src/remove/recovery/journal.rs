@@ -184,7 +184,8 @@ pub enum EntryState {
 }
 
 /// One planned entry with its recovered state; listed in full in the
-/// operation report, so it outlives the journal it was read from.
+/// operation's entries file, one JSON line each, so it outlives the journal
+/// it was read from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JournalEntry {

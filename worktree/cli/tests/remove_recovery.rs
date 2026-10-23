@@ -226,6 +226,8 @@ fn an_interrupt_after_the_move_stops_with_a_report_and_a_retry_finishes() {
     assert!(stderr.contains("Retry: wt remove feat-x"), "{stderr}");
     let report = saved_report(&stderr);
     assert_eq!(report["outcome"], "cleanup_failed", "{report}");
+    assert_eq!(report["report_version"], 6, "{report}");
+    assert!(report.get("journal_entries").is_none(), "no inline entries: {report}");
     let quarantine = fixture.quarantine().expect("the moved checkout is kept");
     assert_eq!(fs::read_to_string(quarantine.join("README.md")).unwrap(), "readme\n", "remaining content is kept");
     assert!(!wt.exists());
@@ -237,9 +239,45 @@ fn an_interrupt_after_the_move_stops_with_a_report_and_a_retry_finishes() {
     assert_eq!(finished.status.code(), Some(0), "{stderr}");
     assert!(stderr.contains("Continuing an earlier removal of feat-x"), "{stderr}");
     assert!(stderr.contains("Removed worktree feat-x"), "{stderr}");
+    assert!(!stderr.contains("Warning:"), "{stderr}");
     assert!(!quarantine.exists());
     assert!(!fixture.branch_exists("feat/x"));
     assert_eq!(fixture.pending(), 0);
+    assert_completed_with_entries(&fixture);
+}
+
+/// The completed operation's folder: a report naming `entries.jsonl.gz`,
+/// which exists, and no journal left.
+fn assert_completed_with_entries(fixture: &Fixture) {
+    let [dir] = operation_dirs(&fixture.repo().join(".git").join("wt-removal")).try_into().expect("one operation");
+    let report: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("report.json")).unwrap()).unwrap();
+    assert_eq!(report["entries_file"], "entries.jsonl.gz", "{report}");
+    assert!(report.get("journal_entries").is_none(), "{report}");
+    assert!(dir.join("entries.jsonl.gz").is_file());
+    assert!(!dir.join("journal.jsonl").exists() && !dir.join("journal-1.jsonl").exists());
+}
+
+/// A retry whose earlier saved report cannot be read warns, naming that
+/// file, and still finishes the removal from its journal.
+#[test]
+fn a_retry_past_an_unreadable_saved_report_warns_with_its_path_and_finishes() {
+    let (fixture, wt) = Fixture::new("feat/x", "feat-x");
+    let path = fixture.interrupter("bin", &moved_condition(&fixture.wts()));
+    let (status, stderr) = fixture.remove_to_file(&["feat-x"], &path);
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    let report_path = PathBuf::from(stderr.lines().find_map(|line| line.strip_prefix("Full report: ")).expect("named").trim());
+    // Overwriting keeps the file owner-only.
+    fs::write(&report_path, b"{\"report_version\":6,").unwrap();
+
+    let finished = fixture.remove(&["feat-x"], None);
+    let stderr = stderr_of(&finished);
+    assert_eq!(finished.status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains("Removed worktree feat-x"), "{stderr}");
+    let warning = stderr.lines().find(|line| line.contains("the earlier attempt's report could not be read")).unwrap_or_else(|| panic!("{stderr}"));
+    assert!(warning.starts_with("Warning: ") && warning.contains(&report_path.display().to_string()), "{warning}");
+    assert!(!wt.exists() && fixture.quarantine().is_none());
+    assert_eq!(fixture.pending(), 0);
+    assert_completed_with_entries(&fixture);
 }
 
 /// Ctrl-C during a retry of a moved checkout stops it the same way, and the

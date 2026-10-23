@@ -315,6 +315,16 @@ fn saved_reports_of_versions_4_5_and_6_read_back() {
     null["entries_file"] = Value::Null;
     assert_eq!(read_value(&f, &saved, &null).unwrap().unwrap().entries_file, None);
 
+    // `operation_id` and `quarantine` may be `null` but not absent.
+    for member in ["operation_id", "quarantine"] {
+        let mut null = version_6_report(&saved);
+        null[member] = Value::Null;
+        let read = read_value(&f, &saved, &null).unwrap().unwrap();
+        assert_eq!((read.operation_id.is_none(), read.quarantine.is_none()), (member == "operation_id", true), "{member}");
+        null.as_object_mut().unwrap().remove(member);
+        assert_refused(&f, &saved, read_value(&f, &saved, &null), &format!("{member} absent"));
+    }
+
     // What this `wt` writes reads back as written, twice over.
     let mut report = v6;
     report.set_entries(Vec::new());
@@ -479,6 +489,51 @@ fn a_report_document_that_is_not_one_strict_object_is_refused() {
         assert_ne!(text, valid, "{case}");
         assert_refused(&f, &saved, read_saved(&f, &saved, text.as_bytes()), case);
     }
-    let StoreError::Report { reason, .. } = read_saved(&f, &saved, valid[..valid.len() / 2].as_bytes()).unwrap_err() else { unreachable!() };
+    let StoreError::Report { reason, .. } = read_saved(&f, &saved, &valid.as_bytes()[..valid.len() / 2]).unwrap_err() else { unreachable!() };
     assert!(reason.contains("line 1 column"), "a parse error keeps its location: {reason}");
+}
+
+/// Retention dates a finished removal by its report's last timeline event
+/// whatever the report version, and never opens the entries file: a
+/// version 6 report beside an entries file that is not even gzip, and a
+/// version 5 report listing its entries inline, both expire after 15 days
+/// and are kept at 13.
+#[test]
+fn retention_dates_reports_of_either_shape_without_reading_the_entries() {
+    let f = fixture();
+    let mut cases = Vec::new();
+    for (age_days, kept) in [(15, false), (13, true)] {
+        let finished = NOW_MS - age_days * DAY_MS;
+        // Version 6, saved through completion with its entries.
+        let (saved, op, entries) = every_state(&f);
+        let dir = op.dir().to_path_buf();
+        let mut report = report_for(&saved, entries);
+        report.timeline.push(crate::remove::outcome::TimelineEvent {
+            at_ms: finished,
+            step: crate::remove::outcome::Step::Completed,
+            result: crate::remove::outcome::StepResult::Succeeded,
+            detail: None,
+        });
+        assert_eq!(op.complete(&report, true).unwrap(), Vec::new());
+        storage::write_durable(&dir.join(ENTRIES_FILE), b"not gzip").unwrap();
+        backdate(&dir, 0);
+        cases.push((format!("version 6, {age_days} days"), dir, kept));
+
+        // Version 5, its report replaced by the frozen bytes.
+        let saved = record(&f, &format!("legacy-{age_days}"));
+        let op = begin(&f, saved.clone());
+        let dir = op.dir().to_path_buf();
+        assert_eq!(op.complete(&report_for(&saved, Vec::new()), true).unwrap(), Vec::new());
+        let mut legacy = version_5_report(&saved);
+        legacy["timeline"][0]["at_ms"] = json!(finished);
+        storage::write_durable(&dir.join(REPORT_FILE), &serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
+        backdate(&dir, 0);
+        cases.push((format!("version 5, {age_days} days"), dir, kept));
+    }
+
+    f.store.prune_completed(now());
+
+    for (case, dir, kept) in cases {
+        assert_eq!(dir.exists(), kept, "{case}");
+    }
 }

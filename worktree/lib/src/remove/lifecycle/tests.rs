@@ -472,7 +472,7 @@ fn a_clean_removal_starts_only_its_deliberate_git_processes() {
 }
 
 /// More deletions than the report names: the named list is capped, and the
-/// saved report still lists every entry after the journal is deleted.
+/// saved entries file still lists every entry after the journal is deleted.
 #[test]
 fn a_completed_report_lists_every_entry_past_the_deleted_cap() {
     let fixture = fixture();

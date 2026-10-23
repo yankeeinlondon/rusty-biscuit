@@ -661,6 +661,14 @@ impl Writer {
         self.stdout.read_line(&mut line).unwrap();
         assert_eq!(line.trim(), "done", "the writer acted");
     }
+
+    /// Ends the writer once it has acted. Windows refuses to delete a
+    /// directory that is any process's working directory.
+    #[cfg(windows)]
+    fn exit(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 impl Drop for Writer {
@@ -702,6 +710,8 @@ fn native_a_writer_in_the_moved_checkout_is_reported_and_its_file_deleted() {
     let (deletion, log) = run(&fixture, &mut observation, DeletionOptions::default(), &mut |batch| {
         if batch == 1 {
             writer.act();
+            #[cfg(windows)]
+            writer.exit();
         }
     });
 

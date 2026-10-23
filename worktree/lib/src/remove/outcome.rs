@@ -457,10 +457,12 @@ impl<'de> Deserialize<'de> for OperationReport {
 #[serde(deny_unknown_fields)]
 struct SharedMembers {
     report_version: u32,
+    #[serde(deserialize_with = "present")]
     operation_id: Option<OperationId>,
     outcome: RemovalOutcome,
     original: NativeString,
     original_state: OriginalState,
+    #[serde(deserialize_with = "present")]
     quarantine: Option<QuarantineReport>,
     registration: RegistrationState,
     timeline: Vec<TimelineEvent>,
@@ -475,6 +477,12 @@ struct SharedMembers {
     earlier_attempts: Vec<EarlierAttempt>,
     /// Absent before version 5; see [`OperationReport::observation`].
     observation: Option<ObservationDiagnostics>,
+}
+
+/// A member that must be present, though it may be `null`: serde reads an
+/// absent `Option` as `None` unless the field names its deserializer.
+fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(deserializer: D) -> Result<T, D::Error> {
+    T::deserialize(deserializer)
 }
 
 fn from_wire(value: Value) -> Result<OperationReport, String> {
